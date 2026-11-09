@@ -5,7 +5,7 @@
 // bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Avatar, Button, Empty, LargeTitle, List, ListRow, ListSkeleton, Problem } from "@one/ui"
+import { AppIcon, Avatar, Button, Empty, LargeTitle, List, ListRow, ListSkeleton, LoadFailure, Problem } from "@one/ui"
 import { appNamed, asking } from "./agents.js"
 
 const api = one.api
@@ -53,7 +53,7 @@ function Requests() {
 
   let body
   if (!data) {
-    body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
+    body = problem ? <LoadFailure problem={problem} retry={load} />
       : <ListSkeleton />
   } else {
     const { state, apps, asked } = data

@@ -6,9 +6,9 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { AppIcon as a, Button as o, Empty as s, Grid as c, Icon as l, LargeTitle as u, List as d, ListRow as f, Problem as p, Skeleton as m, arranged as h } from "@one/ui";
-import { jsx as g, jsxs as _ } from "react/jsx-runtime";
-var v = (() => {
+import { AppIcon as a, Button as o, Empty as s, Grid as c, Icon as l, LargeTitle as u, List as d, ListRow as f, LoadFailure as p, Problem as m, Skeleton as h, arranged as g } from "@one/ui";
+import { jsx as _, jsxs as v } from "react/jsx-runtime";
+var y = (() => {
 	let e = {
 		state: null,
 		apps: [],
@@ -21,7 +21,7 @@ var v = (() => {
 	function p(e) {
 		return e === "user" ? !0 : e === "global" ? r() : (n()?.groups.find((t) => `group:${t.id}` === e))?.members.some((e) => e.user === t()?.id && e.role === "admin") || !1;
 	}
-	let m = (t) => e.apps.filter((e) => s(e) && l(e).includes(t.scope)), g = (t) => e.apps.filter((e) => !s(e) && l(e).includes(t.scope)), _ = (t) => e.apps.filter((e) => c(e) && l(e).includes(t.scope)).sort((e, t) => i(e).localeCompare(i(t))), v = (t, n) => Math.max(0, e.badges[n.scope]?.[t] || 0);
+	let m = (t) => e.apps.filter((e) => s(e) && l(e).includes(t.scope)), h = (t) => e.apps.filter((e) => !s(e) && l(e).includes(t.scope)), _ = (t) => e.apps.filter((e) => c(e) && l(e).includes(t.scope)).sort((e, t) => i(e).localeCompare(i(t))), v = (t, n) => Math.max(0, e.badges[n.scope]?.[t] || 0);
 	function y(t) {
 		let n = new Set(e.apps.filter((e) => l(e).includes(t.scope)).map((e) => e.name));
 		return (e.widgets[t.scope] || []).filter((e) => n.has(e.app));
@@ -44,7 +44,7 @@ var v = (() => {
 	}
 	function T(t) {
 		let n = y(t), r = /* @__PURE__ */ new Set();
-		return h(m(t), e.state?.arrangements?.[t.scope], (i) => {
+		return g(m(t), e.state?.arrangements?.[t.scope], (i) => {
 			let a = n.find((e) => e.app === i.app && e.widget === i.widget);
 			return !i.id || r.has(i.id) || !a && !((b(t) || e.late.has(w(t.scope, i))) && e.apps.some((e) => e.name === i.app && l(e).includes(t.scope))) ? null : (r.add(i.id), a ? {
 				widget: ee(a, i, t.scope),
@@ -188,7 +188,7 @@ var v = (() => {
 		page: f,
 		canArrange: p,
 		appsOn: m,
-		forAiOn: g,
+		forAiOn: h,
 		accountsOn: _,
 		accountsTool: c,
 		badge: v,
@@ -214,24 +214,24 @@ var v = (() => {
 		watch: V
 	};
 })();
-async function y() {
-	[v.data.state, v.data.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]);
+async function b() {
+	[y.data.state, y.data.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]);
 }
-function b() {
-	let e = v.pages(), t = /* @__PURE__ */ new Set(), n = [];
-	for (let r of e) for (let e of v.accountsOn(r)) t.has(e.name) || (t.add(e.name), n.push({
+function x() {
+	let e = y.pages(), t = /* @__PURE__ */ new Set(), n = [];
+	for (let r of e) for (let e of y.accountsOn(r)) t.has(e.name) || (t.add(e.name), n.push({
 		a: e,
 		p: r,
-		signIn: v.settings(e, r, !0),
-		store: v.inStore(e)
+		signIn: y.settings(e, r, !0),
+		store: y.inStore(e)
 	}));
-	return n.sort((e, t) => v.label(e.a).localeCompare(v.label(t.a))), {
-		may: e.some((e) => v.canArrange(e.scope)) && !!v.addAccountApp(),
+	return n.sort((e, t) => y.label(e.a).localeCompare(y.label(t.a))), {
+		may: e.some((e) => y.canArrange(e.scope)) && !!y.addAccountApp(),
 		withAccounts: n
 	};
 }
-async function x(e, t, n, r, i) {
-	let a = v.settings(e, t, !0), o = Object.values(e.vault || {}).filter((e) => e.accounts).map((e) => e.type), s = (o.length ? await one.api("GET", "/v1/vault").catch(() => []) : []).filter((t) => o.includes(t.type) && (t.wanted_by || []).includes(e.name) && !(t.apps || []).includes(e.name));
+async function S(e, t, n, r, i) {
+	let a = y.settings(e, t, !0), o = Object.values(e.vault || {}).filter((e) => e.accounts).map((e) => e.type), s = (o.length ? await one.api("GET", "/v1/vault").catch(() => []) : []).filter((t) => o.includes(t.type) && (t.wanted_by || []).includes(e.name) && !(t.apps || []).includes(e.name));
 	if (!s.length) return a();
 	let c = s.map((t) => ({
 		title: t.title,
@@ -243,20 +243,20 @@ async function x(e, t, n, r, i) {
 					apps: [...t.apps, e.name]
 				}), r.add(e.name), await i();
 			} catch (e) {
-				v.failed(e);
+				y.failed(e);
 			}
 		}
 	}));
-	v.menu([...c, {
+	y.menu([...c, {
 		title: "Add Account",
 		run: a
 	}], n);
 }
-function S(t) {
+function C(t) {
 	let n = e(16), { item: r, list: i } = t, { a, signIn: s, store: c } = r;
 	if (i === void 0) {
 		let e;
-		return n[0] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ g(m, {
+		return n[0] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ _(h, {
 			role: "status",
 			"aria-label": "Loading",
 			className: "h-14 w-full max-w-2xl rounded-xl"
@@ -266,14 +266,14 @@ function S(t) {
 		let e;
 		n[1] === i ? e = n[2] : (e = one.plain(i), n[1] = i, n[2] = e);
 		let t;
-		return n[3] === e.title ? t = n[4] : (t = /* @__PURE__ */ g(p, {
+		return n[3] === e.title ? t = n[4] : (t = /* @__PURE__ */ _(m, {
 			warn: !0,
 			title: e.title
 		}), n[3] = e.title, n[4] = t), t;
 	}
 	if (!i.length) {
 		let e;
-		return n[5] !== a || n[6] !== s || n[7] !== c ? (e = !s && a.needs && c ? /* @__PURE__ */ g(d, { children: /* @__PURE__ */ g(f, {
+		return n[5] !== a || n[6] !== s || n[7] !== c ? (e = !s && a.needs && c ? /* @__PURE__ */ _(d, { children: /* @__PURE__ */ _(f, {
 			title: a.needs,
 			onClick: c
 		}) }) : null, n[5] = a, n[6] = s, n[7] = c, n[8] = e) : e = n[8], e;
@@ -281,13 +281,13 @@ function S(t) {
 	let u;
 	if (n[9] !== i || n[10] !== s) {
 		let e;
-		n[12] === s ? e = n[13] : (e = (e) => /* @__PURE__ */ g(f, {
+		n[12] === s ? e = n[13] : (e = (e) => /* @__PURE__ */ _(f, {
 			title: e.account,
-			sub: e.ok ? void 0 : /* @__PURE__ */ _("span", {
+			sub: e.ok ? void 0 : /* @__PURE__ */ v("span", {
 				className: "inline-flex items-center gap-1 text-warning",
-				children: [/* @__PURE__ */ g(l, { name: "warning-circle-fill" }), one.plain(e.why || "Needs signing in again").title]
+				children: [/* @__PURE__ */ _(l, { name: "warning-circle-fill" }), one.plain(e.why || "Needs signing in again").title]
 			}),
-			trailing: e.ok || !s ? void 0 : /* @__PURE__ */ g(o, {
+			trailing: e.ok || !s ? void 0 : /* @__PURE__ */ _(o, {
 				variant: "outline",
 				size: "sm",
 				onClick: () => s(),
@@ -295,11 +295,11 @@ function S(t) {
 			})
 		}, e.account), n[12] = s, n[13] = e), u = i.map(e), n[9] = i, n[10] = s, n[11] = u;
 	} else u = n[11];
-	let h;
-	return n[14] === u ? h = n[15] : (h = /* @__PURE__ */ g(d, { children: u }), n[14] = u, n[15] = h), h;
+	let p;
+	return n[14] === u ? p = n[15] : (p = /* @__PURE__ */ _(d, { children: u }), n[14] = u, n[15] = p), p;
 }
-function C() {
-	let i = e(30), [d, f] = r("loading"), [h, C] = r(null), [k, A] = r(null), [j, te] = r(!1), M;
+function w() {
+	let i = e(29), [d, f] = r("loading"), [m, g] = r(null), [w, A] = r(null), [j, te] = r(!1), M;
 	i[0] === Symbol.for("react.memo_cache_sentinel") ? (M = {}, i[0] = M) : M = i[0];
 	let [N, P] = r(M), F;
 	i[1] === Symbol.for("react.memo_cache_sentinel") ? (F = /* @__PURE__ */ new Set(), i[1] = F) : F = i[1];
@@ -310,20 +310,20 @@ function C() {
 	let B = n(z), V;
 	if (i[4] === Symbol.for("react.memo_cache_sentinel")) {
 		let e = function(e) {
-			B.current = e.map(O);
-			for (let { a: t } of e) (!R.current.has(t.name) || I.current.has(t.name)) && (I.current.delete(t.name), R.current.add(t.name), v.call(t.name, v.accountsTool(t)).then(D).catch(E).then((e) => P((n) => ({
+			B.current = e.map(k);
+			for (let { a: t } of e) (!R.current.has(t.name) || I.current.has(t.name)) && (I.current.delete(t.name), R.current.add(t.name), y.call(t.name, y.accountsTool(t)).then(O).catch(D).then((e) => P((n) => ({
 				...n,
 				[t.name]: e
 			}))));
 		};
 		V = async function() {
-			await y();
-			let t = b();
+			await b();
+			let t = x();
 			A(t), f("ready"), t.missing || e(t.withAccounts);
 		}, i[4] = V;
 	} else V = i[4];
 	let H = V, U;
-	i[5] === Symbol.for("react.memo_cache_sentinel") ? (U = () => H().catch((e) => (C(one.plain(e)), f("error"))), i[5] = U) : U = i[5];
+	i[5] === Symbol.for("react.memo_cache_sentinel") ? (U = () => H().catch((e) => (g(one.plain(e)), f("error"))), i[5] = U) : U = i[5];
 	let ne = U, W, G;
 	if (i[6] === Symbol.for("react.memo_cache_sentinel") ? (W = () => {
 		let e = setTimeout(() => te(!0), 100);
@@ -334,100 +334,96 @@ function C() {
 				"changed",
 				"devices",
 				"network"
-			].includes(e.type) && (clearTimeout(t), t = setTimeout(() => H().catch(T), 250));
+			].includes(e.type) && (clearTimeout(t), t = setTimeout(() => H().catch(E), 250));
 		}), () => (clearTimeout(e), clearTimeout(t));
 	}, G = [], i[6] = W, i[7] = G) : (W = i[6], G = i[7]), t(W, G), d === "error") {
 		let e;
-		i[8] === Symbol.for("react.memo_cache_sentinel") ? (e = {
-			label: "Try Again",
-			run: () => (f("loading"), ne())
-		}, i[8] = e) : e = i[8];
+		i[8] === Symbol.for("react.memo_cache_sentinel") ? (e = () => (f("loading"), ne()), i[8] = e) : e = i[8];
 		let t;
-		return i[9] !== h.next || i[10] !== h.title ? (t = /* @__PURE__ */ g(p, {
-			title: h.title,
-			text: h.next,
-			action: e
-		}), i[9] = h.next, i[10] = h.title, i[11] = t) : t = i[11], t;
+		return i[9] === m ? t = i[10] : (t = /* @__PURE__ */ _(p, {
+			problem: m,
+			retry: e
+		}), i[9] = m, i[10] = t), t;
 	}
 	if (d !== "ready") {
 		let e;
-		return i[12] === j ? e = i[13] : (e = j ? /* @__PURE__ */ _("div", {
+		return i[11] === j ? e = i[12] : (e = j ? /* @__PURE__ */ v("div", {
 			role: "status",
 			"aria-label": "Loading",
 			className: "flex max-w-2xl flex-col gap-3",
 			children: [
-				/* @__PURE__ */ g(m, { className: "h-9 w-40" }),
-				/* @__PURE__ */ g(m, { className: "h-14 w-full rounded-xl" }),
-				/* @__PURE__ */ g(m, { className: "h-14 w-full rounded-xl" })
+				/* @__PURE__ */ _(h, { className: "h-9 w-40" }),
+				/* @__PURE__ */ _(h, { className: "h-14 w-full rounded-xl" }),
+				/* @__PURE__ */ _(h, { className: "h-14 w-full rounded-xl" })
 			]
-		}) : null, i[12] = j, i[13] = e), e;
+		}) : null, i[11] = j, i[12] = e), e;
 	}
-	let { withAccounts: K, may: q } = k, J;
-	i[14] === Symbol.for("react.memo_cache_sentinel") ? (J = /* @__PURE__ */ g(u, { children: "Accounts" }), i[14] = J) : J = i[14];
+	let { withAccounts: K, may: q } = w, J;
+	i[13] === Symbol.for("react.memo_cache_sentinel") ? (J = /* @__PURE__ */ _(u, { children: "Accounts" }), i[13] = J) : J = i[13];
 	let Y;
-	i[15] !== N || i[16] !== K ? (Y = K.map((e) => {
+	i[14] !== N || i[15] !== K ? (Y = K.map((e) => {
 		let { a: t, p: n, signIn: r } = e;
-		return /* @__PURE__ */ _("section", {
+		return /* @__PURE__ */ v("section", {
 			className: "flex min-w-0 flex-col gap-2",
-			children: [/* @__PURE__ */ _("div", {
+			children: [/* @__PURE__ */ v("div", {
 				className: "flex items-center gap-3",
 				children: [
-					/* @__PURE__ */ g(a, {
+					/* @__PURE__ */ _(a, {
 						app: t,
 						size: 32
 					}),
-					/* @__PURE__ */ g("h2", {
+					/* @__PURE__ */ _("h2", {
 						className: "min-w-0 flex-1 truncate text-base font-semibold",
-						children: v.label(t)
+						children: y.label(t)
 					}),
-					r && N[t.name] !== void 0 && !(N[t.name] instanceof Error) && /* @__PURE__ */ g(o, {
+					r && N[t.name] !== void 0 && !(N[t.name] instanceof Error) && /* @__PURE__ */ _(o, {
 						variant: "secondary",
 						size: "sm",
-						onClick: (e) => x(t, n, e.currentTarget, I.current, async () => await H()),
+						onClick: (e) => S(t, n, e.currentTarget, I.current, async () => await H()),
 						children: "Add Account"
 					}),
-					/* @__PURE__ */ g(o, {
+					/* @__PURE__ */ _(o, {
 						variant: "ghost",
 						size: "icon-sm",
-						"aria-label": `More for ${v.label(t)}`,
-						onClick: (e) => v.menu(v.actions(t, n), e.currentTarget),
-						children: /* @__PURE__ */ g(l, {
+						"aria-label": `More for ${y.label(t)}`,
+						onClick: (e) => y.menu(y.actions(t, n), e.currentTarget),
+						children: /* @__PURE__ */ _(l, {
 							name: "dots-three-outline-fill",
 							className: "size-[18px]"
 						})
 					})
 				]
-			}), /* @__PURE__ */ g(S, {
+			}), /* @__PURE__ */ _(C, {
 				item: e,
 				list: N[t.name]
 			})]
 		}, t.name);
-	}), i[15] = N, i[16] = K, i[17] = Y) : Y = i[17];
+	}), i[14] = N, i[15] = K, i[16] = Y) : Y = i[16];
 	let X;
-	i[18] === Y ? X = i[19] : (X = /* @__PURE__ */ g(c, {
+	i[17] === Y ? X = i[18] : (X = /* @__PURE__ */ _(c, {
 		min: "20rem",
 		max: 3,
 		gap: "2rem",
 		className: "items-start",
 		children: Y
-	}), i[18] = Y, i[19] = X);
+	}), i[17] = Y, i[18] = X);
 	let Z;
-	i[20] !== q || i[21] !== K.length ? (Z = !K.length && /* @__PURE__ */ g(s, {
+	i[19] !== q || i[20] !== K.length ? (Z = !K.length && /* @__PURE__ */ _(s, {
 		action: q ? {
 			label: "Add Account",
-			run: ee
+			run: T
 		} : void 0,
 		children: "No accounts yet."
-	}), i[20] = q, i[21] = K.length, i[22] = Z) : Z = i[22];
+	}), i[19] = q, i[20] = K.length, i[21] = Z) : Z = i[21];
 	let Q;
-	i[23] !== q || i[24] !== K.length ? (Q = q && K.length > 0 && /* @__PURE__ */ g(o, {
+	i[22] !== q || i[23] !== K.length ? (Q = q && K.length > 0 && /* @__PURE__ */ _(o, {
 		variant: "outline",
 		className: "self-start",
-		onClick: w,
+		onClick: ee,
 		children: "Add Account for Another App"
-	}), i[23] = q, i[24] = K.length, i[25] = Q) : Q = i[25];
+	}), i[22] = q, i[23] = K.length, i[24] = Q) : Q = i[24];
 	let $;
-	return i[26] !== X || i[27] !== Z || i[28] !== Q ? ($ = /* @__PURE__ */ _("div", {
+	return i[25] !== X || i[26] !== Z || i[27] !== Q ? ($ = /* @__PURE__ */ v("div", {
 		className: "flex flex-col gap-8",
 		children: [
 			J,
@@ -435,24 +431,24 @@ function C() {
 			Z,
 			Q
 		]
-	}), i[26] = X, i[27] = Z, i[28] = Q, i[29] = $) : $ = i[29], $;
-}
-function w() {
-	return v.addAccountApp()?.();
+	}), i[25] = X, i[26] = Z, i[27] = Q, i[28] = $) : $ = i[28], $;
 }
 function ee() {
-	return v.addAccountApp()?.();
+	return y.addAccountApp()?.();
 }
-function T() {}
-function E(e) {
+function T() {
+	return y.addAccountApp()?.();
+}
+function E() {}
+function D(e) {
 	return e;
 }
-function D(e) {
+function O(e) {
 	return Array.isArray(e) ? e : [];
 }
-function O(e) {
+function k(e) {
 	let { a: t } = e;
 	return t.name;
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ g(C, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ _(w, {}));
 </script>

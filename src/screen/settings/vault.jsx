@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
-  AppIcon, Button, Empty, Grid, GridRow, Icon, Input, Label, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Split, Switch,
+  AppIcon, Button, Empty, Grid, GridRow, Icon, Input, Label, List, ListAdd, ListRow, ListSkeleton, LoadFailure, Problem, ResponsiveDialog, SearchInput, Split, Switch,
   Tabs, TabsList, TabsTrigger, LargeTitle, Section,
 } from "@one/ui"
 import { appNamed } from "./agents.js"
@@ -176,7 +176,7 @@ function Vault() {
   const found = (items?.filter((i) => k.matches(i, query.trim().toLowerCase())) || []).sort((a, b) => a.title.localeCompare(b.title))
   let body
   if (!items) {
-    body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => load() }} />
+    body = problem ? <LoadFailure problem={problem} retry={() => load()} />
       : <ListSkeleton rows={4} />
   } else if (found.length) {
     body = (
@@ -206,7 +206,7 @@ function Vault() {
           <div className="flex flex-col gap-4">
             <LargeTitle action={<Button onClick={startNew}>New Item</Button>}>Vault</LargeTitle>
             {pages.length > 1 && <Pages pages={pages} value={scope} onChange={show} />}
-            {!!items?.length && <div className="max-w-md"><Search value={query} onChange={setQuery} /></div>}
+            {!!items?.length && <SearchInput className="max-w-md" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" enterKeyHint="search" autoComplete="off" autoCapitalize="off" spellCheck={false} />}
             {body}
           </div>
         }
@@ -236,31 +236,6 @@ function Pages({ pages, value, onChange }) {
         {pages.map((p) => <TabsTrigger key={p.scope} value={p.scope}>{p.title}</TabsTrigger>)}
       </TabsList>
     </Tabs>
-  )
-}
-
-function Search({ value, onChange }) {
-  return (
-    <label className="relative block">
-      <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
-      <Input
-        type="search"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Search"
-        aria-label="Search"
-        enterKeyHint="search"
-        autoComplete="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        className="pl-9 [&::-webkit-search-cancel-button]:hidden"
-      />
-      {value && (
-        <Button variant="ghost" size="icon-xs" aria-label="Clear" className="absolute top-1/2 right-2 -translate-y-1/2" onClick={() => onChange("")}>
-          <Icon name="x" />
-        </Button>
-      )}
-    </label>
   )
 }
 

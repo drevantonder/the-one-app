@@ -3,7 +3,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/connect-ai.html.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { CopyButton, Hint, LargeTitle, Problem, Skeleton } from "@one/ui"
+import { CopyButton, Hint, LargeTitle, LoadFailure, Skeleton } from "@one/ui"
 
 function ConnectAI() {
   const [text, setText] = useState(null)
@@ -26,7 +26,7 @@ function ConnectAI() {
       <LargeTitle>Connect Your AI</LargeTitle>
       <Hint>Send this to Claude, ChatGPT or any other AI.</Hint>
       {problem && text === null ? (
-        <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
+        <LoadFailure problem={problem} retry={load} />
       ) : (
         <>
           <div aria-busy={text === null || undefined} className="min-h-[4.25rem] rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed text-pretty select-text [overflow-wrap:anywhere]">

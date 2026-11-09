@@ -143,7 +143,7 @@ function Body() {
   }, [devices])
 
   // Tried again every few seconds, so no button.
-  if (problem) return <Problem title={problem.title} text={problem.next} />
+  if (problem) return <Problem quiet={problem.mends} title={problem.title} text={problem.next} />
   if (!devices) return <Grid min="16rem" max={4}>{[0, 1].map((i) => <Skeleton key={i} className="aspect-[16/10] rounded-xl" />)}</Grid>
   if (!devices.length) return <Empty>None yet. Agents make one when they need a browser.</Empty>
   const hosts = new Set(devices.map((c) => c.on)).size

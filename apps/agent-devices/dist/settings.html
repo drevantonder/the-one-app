@@ -6,138 +6,138 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
-import { Empty as i, Hint as a, List as o, ListSkeleton as s, Problem as c, Switch as l } from "@one/ui";
-import { Fragment as u, jsx as d, jsxs as f } from "react/jsx-runtime";
-var p = () => {
+import { Empty as i, Hint as a, List as o, ListSkeleton as s, LoadFailure as c, Problem as l, Switch as u } from "@one/ui";
+import { Fragment as d, jsx as f, jsxs as p } from "react/jsx-runtime";
+var m = () => {
 	let t = e(3), n;
-	t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ f("linearGradient", {
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ p("linearGradient", {
 		id: "a",
 		x1: "3.2173",
 		y1: "15",
 		x2: "44.7812",
 		y2: "15",
 		gradientUnits: "userSpaceOnUse",
-		children: [/* @__PURE__ */ d("stop", {
+		children: [/* @__PURE__ */ f("stop", {
 			offset: "0",
 			stopColor: "#d93025"
-		}), /* @__PURE__ */ d("stop", {
+		}), /* @__PURE__ */ f("stop", {
 			offset: "1",
 			stopColor: "#ea4335"
 		})]
 	}), t[0] = n) : n = t[0];
 	let r;
-	t[1] === Symbol.for("react.memo_cache_sentinel") ? (r = /* @__PURE__ */ f("linearGradient", {
+	t[1] === Symbol.for("react.memo_cache_sentinel") ? (r = /* @__PURE__ */ p("linearGradient", {
 		id: "b",
 		x1: "20.7219",
 		y1: "47.6791",
 		x2: "41.5039",
 		y2: "11.6837",
 		gradientUnits: "userSpaceOnUse",
-		children: [/* @__PURE__ */ d("stop", {
+		children: [/* @__PURE__ */ f("stop", {
 			offset: "0",
 			stopColor: "#fcc934"
-		}), /* @__PURE__ */ d("stop", {
+		}), /* @__PURE__ */ f("stop", {
 			offset: "1",
 			stopColor: "#fbbc04"
 		})]
 	}), t[1] = r) : r = t[1];
 	let i;
-	return t[2] === Symbol.for("react.memo_cache_sentinel") ? (i = /* @__PURE__ */ f("svg", {
+	return t[2] === Symbol.for("react.memo_cache_sentinel") ? (i = /* @__PURE__ */ p("svg", {
 		xmlns: "http://www.w3.org/2000/svg",
 		viewBox: "0 0 48 48",
 		width: "28",
 		height: "28",
 		"aria-hidden": "true",
 		children: [
-			/* @__PURE__ */ f("defs", { children: [
+			/* @__PURE__ */ p("defs", { children: [
 				n,
 				r,
-				/* @__PURE__ */ f("linearGradient", {
+				/* @__PURE__ */ p("linearGradient", {
 					id: "c",
 					x1: "26.5981",
 					y1: "46.5015",
 					x2: "5.8161",
 					y2: "10.506",
 					gradientUnits: "userSpaceOnUse",
-					children: [/* @__PURE__ */ d("stop", {
+					children: [/* @__PURE__ */ f("stop", {
 						offset: "0",
 						stopColor: "#1e8e3e"
-					}), /* @__PURE__ */ d("stop", {
+					}), /* @__PURE__ */ f("stop", {
 						offset: "1",
 						stopColor: "#34a853"
 					})]
 				})
 			] }),
-			/* @__PURE__ */ d("circle", {
+			/* @__PURE__ */ f("circle", {
 				cx: "24",
 				cy: "23.9947",
 				r: "12",
 				fill: "#fff"
 			}),
-			/* @__PURE__ */ d("path", {
+			/* @__PURE__ */ f("path", {
 				d: "M24,12H44.7812a23.9939,23.9939,0,0,0-41.5639.0029L13.6079,30l.0093-.0024A11.9852,11.9852,0,0,1,24,12Z",
 				fill: "url(#a)"
 			}),
-			/* @__PURE__ */ d("circle", {
+			/* @__PURE__ */ f("circle", {
 				cx: "24",
 				cy: "24",
 				r: "9.5",
 				fill: "#1a73e8"
 			}),
-			/* @__PURE__ */ d("path", {
+			/* @__PURE__ */ f("path", {
 				d: "M34.3913,30.0029,24.0007,48A23.994,23.994,0,0,0,44.78,12.0031H23.9989l-.0025.0093A11.985,11.985,0,0,1,34.3913,30.0029Z",
 				fill: "url(#b)"
 			}),
-			/* @__PURE__ */ d("path", {
+			/* @__PURE__ */ f("path", {
 				d: "M13.6086,30.0031,3.218,12.006A23.994,23.994,0,0,0,24.0025,48L34.3931,30.0029l-.0067-.0068a11.9852,11.9852,0,0,1-20.7778.007Z",
 				fill: "url(#c)"
 			})
 		]
 	}), t[2] = i) : i = t[2], i;
 };
-function m(t) {
+function h(t) {
 	let n = e(17), { d: r, set: i } = t, a;
-	n[0] === r.on ? a = n[1] : (a = /* @__PURE__ */ d("span", {
+	n[0] === r.on ? a = n[1] : (a = /* @__PURE__ */ f("span", {
 		className: "block truncate font-medium",
 		children: r.on
 	}), n[0] = r.on, n[1] = a);
 	let o;
-	n[2] === r.can ? o = n[3] : (o = r.can && /* @__PURE__ */ d("span", {
+	n[2] === r.can ? o = n[3] : (o = r.can && /* @__PURE__ */ f("span", {
 		className: "block text-muted-foreground",
 		children: r.can
 	}), n[2] = r.can, n[3] = o);
 	let s;
-	n[4] !== a || n[5] !== o ? (s = /* @__PURE__ */ f("span", {
+	n[4] !== a || n[5] !== o ? (s = /* @__PURE__ */ p("span", {
 		className: "min-w-0 flex-1",
 		children: [a, o]
 	}), n[4] = a, n[5] = o, n[6] = s) : s = n[6];
-	let c = !!r.allowed, u = !!r.can, p;
-	n[7] !== r.on || n[8] !== i ? (p = (e) => i(r.on, e), n[7] = r.on, n[8] = i, n[9] = p) : p = n[9];
+	let c = !!r.allowed, l = !!r.can, d;
+	n[7] !== r.on || n[8] !== i ? (d = (e) => i(r.on, e), n[7] = r.on, n[8] = i, n[9] = d) : d = n[9];
 	let m;
-	n[10] !== c || n[11] !== u || n[12] !== p ? (m = /* @__PURE__ */ d(l, {
+	n[10] !== c || n[11] !== l || n[12] !== d ? (m = /* @__PURE__ */ f(u, {
 		checked: c,
-		disabled: u,
-		onCheckedChange: p
-	}), n[10] = c, n[11] = u, n[12] = p, n[13] = m) : m = n[13];
+		disabled: l,
+		onCheckedChange: d
+	}), n[10] = c, n[11] = l, n[12] = d, n[13] = m) : m = n[13];
 	let h;
-	return n[14] !== s || n[15] !== m ? (h = /* @__PURE__ */ f("label", {
+	return n[14] !== s || n[15] !== m ? (h = /* @__PURE__ */ p("label", {
 		className: "flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm has-[button:disabled]:cursor-default",
 		children: [s, m]
 	}), n[14] = s, n[15] = m, n[16] = h) : h = n[16], h;
 }
-function h() {
-	let r = e(20), [l, h] = n(null), [g, _] = n(null), [v, y] = n(""), b;
-	r[0] === Symbol.for("react.memo_cache_sentinel") ? (b = async function() {
+function g() {
+	let r = e(20), [u, g] = n(null), [_, v] = n(null), [y, b] = n(""), x;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (x = async function() {
 		try {
-			h((await one.call("_chrome", {})).devices), _(null);
+			g((await one.call("_chrome", {})).devices), v(null);
 		} catch (e) {
 			let t = e;
-			_(one.plain(t));
+			v(one.plain(t));
 		}
-	}, r[0] = b) : b = r[0];
-	let x = b, S;
-	r[1] === Symbol.for("react.memo_cache_sentinel") ? (S = async function(e, t) {
-		y("");
+	}, r[0] = x) : x = r[0];
+	let S = x, C;
+	r[1] === Symbol.for("react.memo_cache_sentinel") ? (C = async function(e, t) {
+		b("");
 		try {
 			await one.call("_set_chrome", {
 				on: e,
@@ -145,57 +145,53 @@ function h() {
 			});
 		} catch (e) {
 			let t = e;
-			y(one.plain(t).title);
+			b(one.plain(t).title);
 		}
-		x();
-	}, r[1] = S) : S = r[1];
-	let C = S, w, T;
-	r[2] === Symbol.for("react.memo_cache_sentinel") ? (w = () => {
-		x();
-	}, T = [], r[2] = w, r[3] = T) : (w = r[2], T = r[3]), t(w, T);
-	let E;
-	if (!l) {
+		S();
+	}, r[1] = C) : C = r[1];
+	let w = C, T, E;
+	r[2] === Symbol.for("react.memo_cache_sentinel") ? (T = () => {
+		S();
+	}, E = [], r[2] = T, r[3] = E) : (T = r[2], E = r[3]), t(T, E);
+	let D;
+	if (!u) {
 		let e;
-		r[4] === g ? e = r[5] : (e = g ? /* @__PURE__ */ d(c, {
-			title: g.title,
-			text: g.next,
-			action: {
-				label: "Try Again",
-				run: x
-			}
-		}) : /* @__PURE__ */ d(s, {}), r[4] = g, r[5] = e), E = e;
-	} else if (l.length) {
+		r[4] === _ ? e = r[5] : (e = _ ? /* @__PURE__ */ f(c, {
+			problem: _,
+			retry: S
+		}) : /* @__PURE__ */ f(s, {}), r[4] = _, r[5] = e), D = e;
+	} else if (u.length) {
 		let e;
-		if (r[7] !== l) {
+		if (r[7] !== u) {
 			let t;
-			r[9] === Symbol.for("react.memo_cache_sentinel") ? (t = (e) => /* @__PURE__ */ d(m, {
+			r[9] === Symbol.for("react.memo_cache_sentinel") ? (t = (e) => /* @__PURE__ */ f(h, {
 				d: e,
-				set: C
-			}, e.on), r[9] = t) : t = r[9], e = l.map(t), r[7] = l, r[8] = e;
+				set: w
+			}, e.on), r[9] = t) : t = r[9], e = u.map(t), r[7] = u, r[8] = e;
 		} else e = r[8];
 		let t;
-		r[10] === e ? t = r[11] : (t = /* @__PURE__ */ d(o, { children: e }), r[10] = e, r[11] = t);
+		r[10] === e ? t = r[11] : (t = /* @__PURE__ */ f(o, { children: e }), r[10] = e, r[11] = t);
 		let n;
-		r[12] === v ? n = r[13] : (n = v && /* @__PURE__ */ d(c, { title: v }), r[12] = v, r[13] = n);
+		r[12] === y ? n = r[13] : (n = y && /* @__PURE__ */ f(l, { title: y }), r[12] = y, r[13] = n);
 		let i;
-		r[14] !== t || r[15] !== n ? (i = /* @__PURE__ */ f(u, { children: [t, n] }), r[14] = t, r[15] = n, r[16] = i) : i = r[16], E = i;
+		r[14] !== t || r[15] !== n ? (i = /* @__PURE__ */ p(d, { children: [t, n] }), r[14] = t, r[15] = n, r[16] = i) : i = r[16], D = i;
 	} else {
 		let e;
-		r[6] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d(i, { children: "None of your devices runs Agent Devices." }), r[6] = e) : e = r[6], E = e;
+		r[6] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ f(i, { children: "None of your devices runs Agent Devices." }), r[6] = e) : e = r[6], D = e;
 	}
-	let D;
-	r[17] === Symbol.for("react.memo_cache_sentinel") ? (D = /* @__PURE__ */ f("div", {
-		className: "flex flex-col gap-1",
-		children: [/* @__PURE__ */ f("h2", {
-			className: "flex items-center gap-2.5 text-xl font-semibold",
-			children: [/* @__PURE__ */ d(p, {}), "Google Chrome"]
-		}), /* @__PURE__ */ d(a, { children: "Chrome isn’t kept apart from the device it runs on. Turn it on only for agents you trust." })]
-	}), r[17] = D) : D = r[17];
 	let O;
-	return r[18] === E ? O = r[19] : (O = /* @__PURE__ */ f("div", {
+	r[17] === Symbol.for("react.memo_cache_sentinel") ? (O = /* @__PURE__ */ p("div", {
+		className: "flex flex-col gap-1",
+		children: [/* @__PURE__ */ p("h2", {
+			className: "flex items-center gap-2.5 text-xl font-semibold",
+			children: [/* @__PURE__ */ f(m, {}), "Google Chrome"]
+		}), /* @__PURE__ */ f(a, { children: "Chrome isn’t kept apart from the device it runs on. Turn it on only for agents you trust." })]
+	}), r[17] = O) : O = r[17];
+	let k;
+	return r[18] === D ? k = r[19] : (k = /* @__PURE__ */ p("div", {
 		className: "flex flex-col gap-4",
-		children: [D, E]
-	}), r[18] = E, r[19] = O), O;
+		children: [O, D]
+	}), r[18] = D, r[19] = k), k;
 }
-r(document.getElementById("root")).render(/* @__PURE__ */ d(h, {}));
+r(document.getElementById("root")).render(/* @__PURE__ */ f(g, {}));
 </script>

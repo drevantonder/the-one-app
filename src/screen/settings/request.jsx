@@ -7,7 +7,7 @@
 // A client's own screen written in React (see vault.jsx): built by @one/ui's build into dist/request.html.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, CopyButton, Hint, Input, Label, ListSkeleton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner } from "@one/ui"
+import { Button, CopyButton, Hint, Input, Label, ListSkeleton, LoadFailure, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner } from "@one/ui"
 import { AGENTS, appNamed, asking } from "./agents.js"
 
 const api = one.api
@@ -93,7 +93,7 @@ function Request() {
   }
 
   if (!request) {
-    return problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => (one.tap(), setProblem(null), load()) }} /> : <ListSkeleton rows={3} />
+    return problem ? <LoadFailure problem={problem} retry={() => (one.tap(), setProblem(null), load())} /> : <ListSkeleton rows={3} />
   }
 
   const matches = request.matches || []

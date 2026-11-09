@@ -7,7 +7,7 @@
 // dist/accounts.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, Icon, LargeTitle, List, ListRow, Problem, Skeleton } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, Icon, LargeTitle, List, ListRow, LoadFailure, Problem, Skeleton } from "@one/ui"
 import { home } from "./lib/model.js"
 
 /// Only what this screen shows: the user's pages and the apps on them, not the widgets Home draws.
@@ -128,7 +128,7 @@ function Accounts() {
     return () => (clearTimeout(wait), clearTimeout(soon))
   }, [])
 
-  if (phase === "error") return <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => (setPhase("loading"), reload()) }} />
+  if (phase === "error") return <LoadFailure problem={problem} retry={() => (setPhase("loading"), reload())} />
   if (phase !== "ready") {
     return slow ? (
       <div role="status" aria-label="Loading" className="flex max-w-2xl flex-col gap-3">

@@ -6,131 +6,127 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { Button as a, CopyButton as o, Hint as s, Input as c, Label as l, ListSkeleton as u, Problem as d, Select as f, SelectContent as p, SelectItem as m, SelectTrigger as h, SelectValue as g, Spinner as _ } from "@one/ui";
-import { Fragment as v, jsx as y, jsxs as b } from "react/jsx-runtime";
-var x = {
+import { Button as a, CopyButton as o, Hint as s, Input as c, Label as l, ListSkeleton as u, LoadFailure as d, Problem as f, Select as p, SelectContent as m, SelectItem as h, SelectTrigger as g, SelectValue as _, Spinner as v } from "@one/ui";
+import { Fragment as y, jsx as b, jsxs as x } from "react/jsx-runtime";
+var S = {
 	name: "ai-agents",
 	title: "Agents",
 	icon: "robot",
 	color: "#8e8e93"
-}, S = (e, t) => t === x.name ? x : e.find((e) => e.name === t), C = (e, t) => e.app !== x.name && S(t, e.app)?.title || e.agent || e.by, w = one.api, { scope: T, id: E } = one.params || {}, D = () => w("GET", `/v1/vault/requests?scope=${encodeURIComponent(T || "")}&id=${encodeURIComponent(E || "")}`).then((e) => e[0]);
-function O(e) {
+}, C = (e, t) => t === S.name ? S : e.find((e) => e.name === t), w = (e, t) => e.app !== S.name && C(t, e.app)?.title || e.agent || e.by, T = one.api, { scope: E, id: D } = one.params || {}, O = () => T("GET", `/v1/vault/requests?scope=${encodeURIComponent(E || "")}&id=${encodeURIComponent(D || "")}`).then((e) => e[0]);
+function k(e) {
 	return String(e).replace(/[_-]+/g, " ").trim().split(/\s+/).map((e, t) => /^(api|url|id|ssh|pem|aws|s3|ip)$/i.test(e) ? e.toUpperCase() : t ? e.toLowerCase() : e[0].toUpperCase() + e.slice(1).toLowerCase()).join(" ");
 }
-var k = ({ why: e }) => String(e).split(/(https?:\/\/[^\s]+)/).map((e, t) => t % 2 ? /* @__PURE__ */ b("span", { children: [/* @__PURE__ */ y("span", {
+var A = ({ why: e }) => String(e).split(/(https?:\/\/[^\s]+)/).map((e, t) => t % 2 ? /* @__PURE__ */ x("span", { children: [/* @__PURE__ */ b("span", {
 	className: "break-all text-foreground",
 	children: e
-}), /* @__PURE__ */ y(o, {
+}), /* @__PURE__ */ b(o, {
 	text: e,
 	label: "",
 	className: "-my-1 align-middle"
-})] }, t) : e), A = "new", j = (e) => (e.need ? e.matches?.[0] : e.matches?.find((t) => t.title.toLowerCase() === e.title.toLowerCase()))?.id ?? A;
-function M() {
-	let [e, i] = r(null), [o, c] = r([]), [l, x] = r(null), [S, T] = r(A), [E, M] = r({}), [F, I] = r(""), [L, R] = r(!1), z = n({
-		busy: L,
+})] }, t) : e), j = "new", M = (e) => (e.need ? e.matches?.[0] : e.matches?.find((t) => t.title.toLowerCase() === e.title.toLowerCase()))?.id ?? j;
+function N() {
+	let [e, i] = r(null), [o, c] = r([]), [l, S] = r(null), [C, E] = r(j), [D, N] = r({}), [I, L] = r(""), [R, z] = r(!1), B = n({
+		busy: R,
 		request: e
 	});
-	z.current = {
-		busy: L,
+	B.current = {
+		busy: R,
 		request: e
 	};
-	async function B() {
+	async function V() {
 		try {
-			let [e, t] = await Promise.all([D(), w("GET", "/v1/apps").catch(() => [])]);
+			let [e, t] = await Promise.all([O(), T("GET", "/v1/apps").catch(() => [])]);
 			if (!e) throw Error("Can’t find this request: it may be for someone else.");
-			i(e), c(t), T(j(e)), x(null), one.title(`${C(e, t)} needs a key`);
+			i(e), c(t), E(M(e)), S(null), one.title(`${w(e, t)} needs a key`);
 		} catch (e) {
-			x(one.plain(e));
+			S(one.plain(e));
 		}
 	}
 	t(() => {
-		one.title("Vault"), B();
+		one.title("Vault"), V();
 		let e = setInterval(async () => {
-			let { busy: e, request: t } = z.current;
+			let { busy: e, request: t } = B.current;
 			if (e || t?.state !== "waiting") return;
-			let n = await D().catch(() => null);
+			let n = await O().catch(() => null);
 			n && n.state !== "waiting" && one.close(n.state === "set");
 		}, 2100);
 		return () => clearInterval(e);
 	}, []);
-	async function V(t) {
-		if (t.preventDefault(), L || !W) return;
-		R(!0), I("");
+	async function H(t) {
+		if (t.preventDefault(), R || !G) return;
+		z(!0), L("");
 		let n = {
 			scope: e.scope,
 			id: e.id
 		};
-		S === A ? n.fields = E : n.item = S;
+		C === j ? n.fields = D : n.item = C;
 		try {
-			await w("POST", "/v1/vault/answer", n), M({}), one.tap("success"), one.close(!0);
+			await T("POST", "/v1/vault/answer", n), N({}), one.tap("success"), one.close(!0);
 		} catch (e) {
-			I(one.plain(e).title), R(!1);
+			L(one.plain(e).title), z(!1);
 		}
 	}
-	if (!e) return l ? /* @__PURE__ */ y(d, {
-		title: l.title,
-		text: l.next,
-		action: {
-			label: "Try Again",
-			run: () => (one.tap(), x(null), B())
-		}
-	}) : /* @__PURE__ */ y(u, { rows: 3 });
-	let H = e.matches || [], U = e.fields || [], W = !L && (S !== A || U.every((e) => E[e.name])), G = (e, t) => M((n) => ({
+	if (!e) return l ? /* @__PURE__ */ b(d, {
+		problem: l,
+		retry: () => (one.tap(), S(null), V())
+	}) : /* @__PURE__ */ b(u, { rows: 3 });
+	let U = e.matches || [], W = e.fields || [], G = !R && (C !== j || W.every((e) => D[e.name])), K = (e, t) => N((n) => ({
 		...n,
 		[e]: t
 	}));
-	return e.state === "waiting" ? /* @__PURE__ */ b("form", {
+	return e.state === "waiting" ? /* @__PURE__ */ x("form", {
 		className: "flex max-w-lg flex-col gap-4",
-		onSubmit: V,
+		onSubmit: H,
 		children: [
-			/* @__PURE__ */ b(s, { children: [e.why && /* @__PURE__ */ b(v, { children: [/* @__PURE__ */ y(k, { why: e.why }), " "] }), N(e, o, H.find((e) => e.id === S))] }),
-			H.length > 0 && /* @__PURE__ */ b(f, {
-				value: S,
-				onValueChange: T,
-				children: [/* @__PURE__ */ y(h, {
+			/* @__PURE__ */ x(s, { children: [e.why && /* @__PURE__ */ x(y, { children: [/* @__PURE__ */ b(A, { why: e.why }), " "] }), P(e, o, U.find((e) => e.id === C))] }),
+			U.length > 0 && /* @__PURE__ */ x(p, {
+				value: C,
+				onValueChange: E,
+				children: [/* @__PURE__ */ b(g, {
 					className: "w-full",
 					"aria-label": "Which item",
-					children: /* @__PURE__ */ y(g, {})
-				}), /* @__PURE__ */ b(p, { children: [H.map((e) => /* @__PURE__ */ y(m, {
+					children: /* @__PURE__ */ b(_, {})
+				}), /* @__PURE__ */ x(m, { children: [U.map((e) => /* @__PURE__ */ b(h, {
 					value: e.id,
 					children: e.title
-				}, e.id)), /* @__PURE__ */ y(m, {
-					value: A,
+				}, e.id)), /* @__PURE__ */ b(h, {
+					value: j,
 					children: "New Item"
 				})] })]
 			}),
-			S === A && U.map((e, t) => /* @__PURE__ */ y(P, {
+			C === j && W.map((e, t) => /* @__PURE__ */ b(F, {
 				first: t === 0,
-				label: O(e.name),
+				label: k(e.name),
 				secret: e.secret,
-				value: E[e.name] || "",
-				onChange: (t) => G(e.name, t)
+				value: D[e.name] || "",
+				onChange: (t) => K(e.name, t)
 			}, e.name)),
-			F && /* @__PURE__ */ y(d, { title: F }),
-			/* @__PURE__ */ y(a, {
+			I && /* @__PURE__ */ b(f, { title: I }),
+			/* @__PURE__ */ b(a, {
 				type: "submit",
 				size: "lg",
 				className: "w-full",
-				disabled: !W,
-				children: L ? /* @__PURE__ */ b(v, { children: [/* @__PURE__ */ y(_, {}), "Allowing…"] }) : "Allow"
+				disabled: !G,
+				children: R ? /* @__PURE__ */ x(y, { children: [/* @__PURE__ */ b(v, {}), "Allowing…"] }) : "Allow"
 			})
 		]
-	}) : /* @__PURE__ */ y(s, { children: e.state === "set" ? "Allowed." : e.state === "declined" ? "Declined." : `This request expired. Ask ${e.agent || e.by} to ask again.` });
+	}) : /* @__PURE__ */ b(s, { children: e.state === "set" ? "Allowed." : e.state === "declined" ? "Declined." : `This request expired. Ask ${e.agent || e.by} to ask again.` });
 }
-function N(e, t, n) {
-	let r = e.app === x.name ? "Your agents" : S(t, e.app)?.title || e.app, i = e.scope.startsWith("user:") ? "" : ` for ${e.scope_name}`, a = !n && e.hosts?.length ? `, sent only to ${e.hosts.join(", ")}` : "";
+function P(e, t, n) {
+	let r = e.app === S.name ? "Your agents" : C(t, e.app)?.title || e.app, i = e.scope.startsWith("user:") ? "" : ` for ${e.scope_name}`, a = !n && e.hosts?.length ? `, sent only to ${e.hosts.join(", ")}` : "";
 	return `${r} can use ${n?.title || e.title}${i}${a}.`;
 }
-function P(t) {
+function F(t) {
 	let n = e(15), { label: r, value: i, onChange: a, secret: o, first: s } = t, u = `field-${r}`, d;
-	n[0] !== r || n[1] !== u ? (d = /* @__PURE__ */ y(l, {
+	n[0] !== r || n[1] !== u ? (d = /* @__PURE__ */ b(l, {
 		htmlFor: u,
 		children: r
 	}), n[0] = r, n[1] = u, n[2] = d) : d = n[2];
 	let f = o ? "password" : "text", p = o ? "new-password" : "off", m;
 	n[3] === a ? m = n[4] : (m = (e) => a(e.target.value), n[3] = a, n[4] = m);
 	let h;
-	n[5] !== s || n[6] !== u || n[7] !== f || n[8] !== p || n[9] !== m || n[10] !== i ? (h = /* @__PURE__ */ y(c, {
+	n[5] !== s || n[6] !== u || n[7] !== f || n[8] !== p || n[9] !== m || n[10] !== i ? (h = /* @__PURE__ */ b(c, {
 		id: u,
 		type: f,
 		autoComplete: p,
@@ -140,10 +136,10 @@ function P(t) {
 		onChange: m
 	}), n[5] = s, n[6] = u, n[7] = f, n[8] = p, n[9] = m, n[10] = i, n[11] = h) : h = n[11];
 	let g;
-	return n[12] !== d || n[13] !== h ? (g = /* @__PURE__ */ b("div", {
+	return n[12] !== d || n[13] !== h ? (g = /* @__PURE__ */ x("div", {
 		className: "flex flex-col gap-2",
 		children: [d, h]
 	}), n[12] = d, n[13] = h, n[14] = g) : g = n[14], g;
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ y(M, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ b(N, {}));
 </script>

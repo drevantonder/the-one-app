@@ -7,7 +7,7 @@
 import { useEffect as t, useLayoutEffect as n, useRef as r, useState as i } from "react";
 import { flushSync as a } from "react-dom";
 import { createRoot as o } from "react-dom/client";
-import { AppIcon as s, Badge as c, Button as l, Empty as u, Hint as d, Icon as f, Label as p, Problem as m, ResponsiveDialog as h, Select as g, SelectContent as _, SelectItem as v, SelectTrigger as y, SelectValue as b, Skeleton as x, Switch as S, WidgetCard as C, arranged as w, cn as T, useWidth as E } from "@one/ui";
+import { AppIcon as s, Badge as c, Button as l, Empty as u, Hint as d, Icon as f, Label as p, LoadFailure as m, ResponsiveDialog as h, Select as g, SelectContent as _, SelectItem as v, SelectTrigger as y, SelectValue as b, Skeleton as x, Switch as S, WidgetCard as C, arranged as w, cn as T, useWidth as E } from "@one/ui";
 import { Fragment as D, jsx as O, jsxs as k } from "react/jsx-runtime";
 var A = (() => {
 	let e = {
@@ -574,6 +574,9 @@ function Q(e) {
 		H.leaving = !1, H.render();
 	}, z)), H.render());
 }
+one.on("left", () => {
+	H.editing = H.leaving = !1, H.undo = [], H.dialog = null, H.render();
+});
 function ke(e) {
 	H.at = e, H.editing = H.leaving = !1, H.undo = [], H.render();
 }
@@ -1432,7 +1435,7 @@ var pt = () => {
 	}), t[0] = n) : n = t[0], n;
 };
 function mt() {
-	let o = e(46), s;
+	let o = e(44), s;
 	o[0] === Symbol.for("react.memo_cache_sentinel") ? (s = {
 		phase: "loading",
 		view: [],
@@ -1461,61 +1464,55 @@ function mt() {
 	let F;
 	if (o[9] === N ? F = o[10] : (F = [N], o[9] = N, o[10] = F), n(P, F), h === "error") {
 		let e;
-		o[11] === Symbol.for("react.memo_cache_sentinel") ? (e = {
-			label: "Try Again",
-			run: H.retry
-		}, o[11] = e) : e = o[11];
-		let t;
-		return o[12] !== c.problem.next || o[13] !== c.problem.title ? (t = /* @__PURE__ */ O("div", {
+		return o[11] === c.problem ? e = o[12] : (e = /* @__PURE__ */ O("div", {
 			className: "p-5",
 			children: /* @__PURE__ */ O(m, {
-				title: c.problem.title,
-				text: c.problem.next,
-				action: e
+				problem: c.problem,
+				retry: H.retry
 			})
-		}), o[12] = c.problem.next, o[13] = c.problem.title, o[14] = t) : t = o[14], t;
+		}), o[11] = c.problem, o[12] = e), e;
 	}
 	if (h !== "ready") {
 		let e;
-		return o[15] === u ? e = o[16] : (e = u ? /* @__PURE__ */ O(pt, {}) : null, o[15] = u, o[16] = e), e;
+		return o[13] === u ? e = o[14] : (e = u ? /* @__PURE__ */ O(pt, {}) : null, o[13] = u, o[14] = e), e;
 	}
 	let I;
-	o[17] === Symbol.for("react.memo_cache_sentinel") ? (I = /* @__PURE__ */ O("style", { children: "@property --wobble { syntax: '<angle>'; inherits: true; initial-value: 0deg; } @keyframes jiggle { 0% { rotate: calc(var(--wobble) * -1); } 50% { rotate: var(--wobble); } 100% { rotate: calc(var(--wobble) * -1); } } @keyframes comes { from { opacity: 0; scale: 0.9; } } @keyframes goes { to { opacity: 0; scale: 0.9; } } @keyframes appears { from { opacity: 0; } }" }), o[17] = I) : I = o[17];
+	o[15] === Symbol.for("react.memo_cache_sentinel") ? (I = /* @__PURE__ */ O("style", { children: "@property --wobble { syntax: '<angle>'; inherits: true; initial-value: 0deg; } @keyframes jiggle { 0% { rotate: calc(var(--wobble) * -1); } 50% { rotate: var(--wobble); } 100% { rotate: calc(var(--wobble) * -1); } } @keyframes comes { from { opacity: 0; scale: 0.9; } } @keyframes goes { to { opacity: 0; scale: 0.9; } } @keyframes appears { from { opacity: 0; } }" }), o[15] = I) : I = o[15];
 	let L;
-	o[18] === C ? L = o[19] : (L = M ? (e) => {
+	o[16] === C ? L = o[17] : (L = M ? (e) => {
 		let t = Math.round(e.currentTarget.scrollLeft / Math.max(1, e.currentTarget.clientWidth));
 		C[t] && C[t] !== H.at && ke(C[t]);
-	} : void 0, o[18] = C, o[19] = L);
+	} : void 0, o[16] = C, o[17] = L);
 	let R;
-	if (o[20] !== y || o[21] !== g || o[22] !== _ || o[23] !== x || o[24] !== v || o[25] !== p) {
+	if (o[18] !== y || o[19] !== g || o[20] !== _ || o[21] !== x || o[22] !== v || o[23] !== p) {
 		let e;
-		o[27] !== y || o[28] !== g || o[29] !== _ || o[30] !== x || o[31] !== v ? (e = (e) => /* @__PURE__ */ O(Ye, {
+		o[25] !== y || o[26] !== g || o[27] !== _ || o[28] !== x || o[29] !== v ? (e = (e) => /* @__PURE__ */ O(Ye, {
 			page: e,
 			editing: g && e.scope === y && !e.empty,
 			leaving: _ && e.scope === y,
 			undone: v && e.scope === y,
 			refreshing: x,
 			bottom: M ? "calc(88px + env(safe-area-inset-bottom))" : 20
-		}, e.scope), o[27] = y, o[28] = g, o[29] = _, o[30] = x, o[31] = v, o[32] = e) : e = o[32], R = p.map(e), o[20] = y, o[21] = g, o[22] = _, o[23] = x, o[24] = v, o[25] = p, o[26] = R;
-	} else R = o[26];
+		}, e.scope), o[25] = y, o[26] = g, o[27] = _, o[28] = x, o[29] = v, o[30] = e) : e = o[30], R = p.map(e), o[18] = y, o[19] = g, o[20] = _, o[21] = x, o[22] = v, o[23] = p, o[24] = R;
+	} else R = o[24];
 	let z;
-	o[33] !== L || o[34] !== R ? (z = /* @__PURE__ */ O("div", {
+	o[31] !== L || o[32] !== R ? (z = /* @__PURE__ */ O("div", {
 		ref: f,
 		className: "flex h-full snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
 		onScroll: L,
 		children: R
-	}), o[33] = L, o[34] = R, o[35] = z) : z = o[35];
+	}), o[31] = L, o[32] = R, o[33] = z) : z = o[33];
 	let B;
-	o[36] !== y || o[37] !== S || o[38] !== C ? (B = M && /* @__PURE__ */ O(Xe, {
+	o[34] !== y || o[35] !== S || o[36] !== C ? (B = M && /* @__PURE__ */ O(Xe, {
 		scopes: C,
 		at: y,
 		strip: f,
 		attention: S
-	}), o[36] = y, o[37] = S, o[38] = C, o[39] = B) : B = o[39];
+	}), o[34] = y, o[35] = S, o[36] = C, o[37] = B) : B = o[37];
 	let V;
-	o[40] === b ? V = o[41] : (V = /* @__PURE__ */ O(dt, { dialog: b }), o[40] = b, o[41] = V);
+	o[38] === b ? V = o[39] : (V = /* @__PURE__ */ O(dt, { dialog: b }), o[38] = b, o[39] = V);
 	let U;
-	return o[42] !== z || o[43] !== B || o[44] !== V ? (U = /* @__PURE__ */ k("div", {
+	return o[40] !== z || o[41] !== B || o[42] !== V ? (U = /* @__PURE__ */ k("div", {
 		className: "fixed inset-0 select-none overflow-hidden [-webkit-touch-callout:none] [-webkit-user-select:none]",
 		children: [
 			I,
@@ -1523,7 +1520,7 @@ function mt() {
 			B,
 			V
 		]
-	}), o[42] = z, o[43] = B, o[44] = V, o[45] = U) : U = o[45], U;
+	}), o[40] = z, o[41] = B, o[42] = V, o[43] = U) : U = o[43], U;
 }
 function ht() {
 	let e = gt;

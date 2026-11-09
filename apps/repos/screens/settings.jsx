@@ -81,11 +81,12 @@ function Settings() {
     redraw()
   }
   useEffect(() => {
-    if (started.current) return
+    if (started.current || (P.add && !d)) return
     started.current = true
     if (P.back) finish(P.back)
-    else if (P.add) start()
-  }, [])
+    // With no GitHub App yet there's nothing to sign in to, which the screen says.
+    else if (P.add && d.app) start()
+  }, [d])
 
   const signOut = async (account) => {
     setOut(account)

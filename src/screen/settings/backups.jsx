@@ -4,7 +4,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/backups.html.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Icon, Input, Label, LargeTitle, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Spinner, Split, Tabs, TabsList, TabsTrigger } from "@one/ui"
+import { AppIcon, Button, Empty, Icon, Input, Label, LargeTitle, List, ListAdd, ListRow, ListSkeleton, LoadFailure, Problem, ResponsiveDialog, Section, Spinner, Split, Tabs, TabsList, TabsTrigger } from "@one/ui"
 
 const api = one.api
 const name = (device) => String(device || "").replace(/\.local$/, "")
@@ -99,7 +99,7 @@ function Backups() {
     return (
       <div className="flex max-w-2xl flex-col gap-4">
         <LargeTitle>Backups</LargeTitle>
-        {problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} /> : <ListSkeleton rows={2} />}
+        {problem ? <LoadFailure problem={problem} retry={load} /> : <ListSkeleton rows={2} />}
       </div>
     )
   }

@@ -12,8 +12,8 @@ function failureSentence(err: unknown): string {
 }
 
 /// What a failed first load says (`problem` is `one.plain`'s answer), with Try Again where trying again can work.
-function LoadFailure({ problem, retry }: { problem: { title: string; next?: string; final?: boolean }; retry: () => unknown }) {
-  return <Problem title={problem.title} text={problem.next} action={problem.final ? undefined : { label: "Try Again", run: retry }} />
+function LoadFailure({ problem, retry }: { problem: { title: string; next?: string; final?: boolean; mends?: boolean }; retry: () => unknown }) {
+  return <Problem quiet={problem.mends} title={problem.title} text={problem.next} action={problem.final ? undefined : { label: "Try Again", run: retry }} />
 }
 
 /// Grey shapes the shape of what's coming, once it's taken longer than a blink, so a quick load shows nothing between:

@@ -96,8 +96,8 @@ function k() {
 		T(!1), j();
 	};
 	n(() => {
-		N.current || (N.current = !0, D.back ? L(D.back) : D.add && F());
-	}, []);
+		N.current || D.add && !A || (N.current = !0, D.back ? L(D.back) : D.add && A.app && F());
+	}, [A]);
 	let R = async (e) => {
 		k(e);
 		try {

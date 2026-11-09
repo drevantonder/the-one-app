@@ -4,7 +4,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/labs.html.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Empty, Hint, LargeTitle, List, ListSkeleton, Problem, Section, Switch } from "@one/ui"
+import { AppIcon, Empty, Hint, LargeTitle, List, ListSkeleton, LoadFailure, Problem, Section, Switch } from "@one/ui"
 
 // Labs under each app's (or service's) name, in the order they come.
 function groups(labs, kind) {
@@ -61,7 +61,7 @@ function Labs() {
 
   let body
   if (!labs) {
-    body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
+    body = problem ? <LoadFailure problem={problem} retry={load} />
       : <ListSkeleton rows={3} />
   } else if (!labs.length) {
     body = <Empty>Nothing to try right now.</Empty>

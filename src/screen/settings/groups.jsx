@@ -6,7 +6,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Empty, Grid, GridRow, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Split, Tabs, TabsList, TabsTrigger, useDialog } from "@one/ui"
+import { AppIcon, Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Empty, Grid, GridRow, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, LoadFailure, Problem, ResponsiveDialog, SearchInput, Section, Split, Tabs, TabsList, TabsTrigger, useDialog } from "@one/ui"
 
 const api = one.api
 const said = (err) => one.plain(err).title
@@ -111,7 +111,7 @@ function Groups() {
   const empty = state && !mine.length && !invited.length
   let body
   if (!state) {
-    body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
+    body = problem ? <LoadFailure problem={problem} retry={load} />
       : <ListSkeleton rows={3} />
   } else if (empty) {
     body = <Empty action={{ label: "New Group", run: () => startCreate() }}>A group shares its apps and data.</Empty>
@@ -323,22 +323,17 @@ function Invite({ g, state, sent, open, setOpen, send }) {
                 </TabsList>
               </Tabs>
             </div>
-            <label className="relative block">
-              <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                autoFocus
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && matches[0] && pick(matches[0].id)}
-                placeholder="Search"
-                aria-label="Search"
-                enterKeyHint="search"
-                autoComplete="off"
-                {...quiet}
-                className="pl-9 [&::-webkit-search-cancel-button]:hidden"
-              />
-            </label>
+            <SearchInput
+              autoFocus
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && matches[0] && pick(matches[0].id)}
+              placeholder="Search"
+              enterKeyHint="search"
+              autoComplete="off"
+              {...quiet}
+            />
             {matches.length ? (
               <List className="max-w-none">
                 {matches.map((u) => (

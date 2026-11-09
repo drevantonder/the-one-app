@@ -3,7 +3,7 @@
 // owner's calls).
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Empty, Hint, List, ListSkeleton, Problem, Switch } from "@one/ui"
+import { Empty, Hint, List, ListSkeleton, LoadFailure, Problem, Switch } from "@one/ui"
 
 const ChromeLogo = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="28" height="28" aria-hidden="true">
@@ -59,7 +59,7 @@ function Settings() {
   }, [])
 
   let body
-  if (!devices) body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} /> : <ListSkeleton />
+  if (!devices) body = problem ? <LoadFailure problem={problem} retry={load} /> : <ListSkeleton />
   else if (!devices.length) body = <Empty>None of your devices runs Agent Devices.</Empty>
   else body = (
     <>

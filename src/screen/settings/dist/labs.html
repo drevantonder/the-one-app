@@ -6,30 +6,30 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { AppIcon as a, Empty as o, Hint as s, LargeTitle as c, List as l, ListSkeleton as u, Problem as d, Section as f, Switch as p } from "@one/ui";
-import { Fragment as m, jsx as h, jsxs as g } from "react/jsx-runtime";
-function _(e, t) {
+import { AppIcon as a, Empty as o, Hint as s, LargeTitle as c, List as l, ListSkeleton as u, LoadFailure as d, Problem as f, Section as p, Switch as m } from "@one/ui";
+import { Fragment as h, jsx as g, jsxs as _ } from "react/jsx-runtime";
+function v(e, t) {
 	let n = /* @__PURE__ */ new Map();
 	for (let r of e.filter((e) => e[t])) n.set(r[t].name, [...n.get(r[t].name) || [], r]);
 	return [...n.values()];
 }
-function v() {
-	let [e, i] = r(null), [p, v] = r(null), [b, x] = r(""), [S, C] = r({}), w = n(0);
-	async function T() {
-		let e = ++w.current;
+function y() {
+	let [e, i] = r(null), [m, y] = r(null), [x, S] = r(""), [C, w] = r({}), T = n(0);
+	async function E() {
+		let e = ++T.current;
 		try {
 			let t = await one.api("GET", "/v1/labs");
-			if (e !== w.current) return;
-			i(t), v(null);
+			if (e !== T.current) return;
+			i(t), y(null);
 		} catch (t) {
-			e === w.current && v(one.plain(t));
+			e === T.current && y(one.plain(t));
 		}
 	}
 	t(() => {
-		one.on("changed", T), T();
+		one.on("changed", E), E();
 	}, []);
-	async function E(e, t) {
-		x(""), C((n) => ({
+	async function D(e, t) {
+		S(""), w((n) => ({
 			...n,
 			[e.setting]: t
 		}));
@@ -39,77 +39,73 @@ function v() {
 				value: t ? "on" : null
 			});
 		} catch (e) {
-			x(one.plain(e).title);
+			S(one.plain(e).title);
 		}
-		await T(), C((t) => {
+		await E(), w((t) => {
 			let { [e.setting]: n, ...r } = t;
 			return r;
 		});
 	}
-	let D = (e) => /* @__PURE__ */ h(y, {
+	let O = (e) => /* @__PURE__ */ g(b, {
 		lab: e,
-		on: S[e.setting] ?? e.on,
-		busy: e.setting in S,
-		set: (t) => E(e, t)
-	}, e.setting), O = (e) => /* @__PURE__ */ h(f, {
-		title: /* @__PURE__ */ g(m, { children: [/* @__PURE__ */ h(a, {
+		on: C[e.setting] ?? e.on,
+		busy: e.setting in C,
+		set: (t) => D(e, t)
+	}, e.setting), k = (e) => /* @__PURE__ */ g(p, {
+		title: /* @__PURE__ */ _(h, { children: [/* @__PURE__ */ g(a, {
 			app: e[0].app || e[0].service,
 			size: 18
 		}), (e[0].app || e[0].service).title] }),
-		children: /* @__PURE__ */ h(l, { children: e.map(D) })
-	}, e[0].app?.name ?? e[0].service?.name), k;
-	if (!e) k = p ? /* @__PURE__ */ h(d, {
-		title: p.title,
-		text: p.next,
-		action: {
-			label: "Try Again",
-			run: T
-		}
-	}) : /* @__PURE__ */ h(u, { rows: 3 });
-	else if (!e.length) k = /* @__PURE__ */ h(o, { children: "Nothing to try right now." });
+		children: /* @__PURE__ */ g(l, { children: e.map(O) })
+	}, e[0].app?.name ?? e[0].service?.name), A;
+	if (!e) A = m ? /* @__PURE__ */ g(d, {
+		problem: m,
+		retry: E
+	}) : /* @__PURE__ */ g(u, { rows: 3 });
+	else if (!e.length) A = /* @__PURE__ */ g(o, { children: "Nothing to try right now." });
 	else {
 		let t = e.filter((e) => !e.app && !e.service);
-		k = /* @__PURE__ */ g(m, { children: [
-			!!t.length && /* @__PURE__ */ h(l, { children: t.map(D) }),
-			[..._(e, "app"), ..._(e, "service")].map(O),
-			b && /* @__PURE__ */ h(d, { title: b })
+		A = /* @__PURE__ */ _(h, { children: [
+			!!t.length && /* @__PURE__ */ g(l, { children: t.map(O) }),
+			[...v(e, "app"), ...v(e, "service")].map(k),
+			x && /* @__PURE__ */ g(f, { title: x })
 		] });
 	}
-	return /* @__PURE__ */ g("div", {
+	return /* @__PURE__ */ _("div", {
 		className: "flex max-w-2xl flex-col gap-6",
-		children: [/* @__PURE__ */ g("div", {
+		children: [/* @__PURE__ */ _("div", {
 			className: "flex flex-col gap-2",
-			children: [/* @__PURE__ */ h(c, { children: "Labs" }), /* @__PURE__ */ h(s, { children: "What you turn on here is on for everyone." })]
-		}), k]
+			children: [/* @__PURE__ */ g(c, { children: "Labs" }), /* @__PURE__ */ g(s, { children: "What you turn on here is on for everyone." })]
+		}), A]
 	});
 }
-function y(t) {
+function b(t) {
 	let n = e(14), { lab: r, on: i, busy: a, set: o } = t, s;
-	n[0] === r.title ? s = n[1] : (s = /* @__PURE__ */ h("span", {
+	n[0] === r.title ? s = n[1] : (s = /* @__PURE__ */ g("span", {
 		className: "block font-medium",
 		children: r.title
 	}), n[0] = r.title, n[1] = s);
 	let c;
-	n[2] === r.description ? c = n[3] : (c = r.description && /* @__PURE__ */ h("span", {
+	n[2] === r.description ? c = n[3] : (c = r.description && /* @__PURE__ */ g("span", {
 		className: "block text-muted-foreground",
 		children: r.description
 	}), n[2] = r.description, n[3] = c);
 	let l;
-	n[4] !== s || n[5] !== c ? (l = /* @__PURE__ */ g("span", {
+	n[4] !== s || n[5] !== c ? (l = /* @__PURE__ */ _("span", {
 		className: "min-w-0 flex-1",
 		children: [s, c]
 	}), n[4] = s, n[5] = c, n[6] = l) : l = n[6];
 	let u = a || void 0, d;
-	n[7] !== i || n[8] !== o || n[9] !== u ? (d = /* @__PURE__ */ h(p, {
+	n[7] !== i || n[8] !== o || n[9] !== u ? (d = /* @__PURE__ */ g(m, {
 		checked: i,
 		"aria-busy": u,
 		onCheckedChange: o
 	}), n[7] = i, n[8] = o, n[9] = u, n[10] = d) : d = n[10];
 	let f;
-	return n[11] !== l || n[12] !== d ? (f = /* @__PURE__ */ g("label", {
+	return n[11] !== l || n[12] !== d ? (f = /* @__PURE__ */ _("label", {
 		className: "flex cursor-pointer items-center gap-3 px-3 py-3 text-sm",
 		children: [l, d]
 	}), n[11] = l, n[12] = d, n[13] = f) : f = n[13], f;
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ h(v, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ g(y, {}));
 </script>

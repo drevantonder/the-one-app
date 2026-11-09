@@ -6,7 +6,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Grid, GridRow, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, useDialog } from "@one/ui"
+import { Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Grid, GridRow, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, LoadFailure, Problem, ResponsiveDialog, Section, useDialog } from "@one/ui"
 
 const api = one.api
 const yours = one.config.yours
@@ -74,7 +74,7 @@ function Users() {
 
   let body
   if (!state) {
-    body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
+    body = problem ? <LoadFailure problem={problem} retry={load} />
       : <ListSkeleton rows={3} />
   } else {
     body = (

@@ -8,7 +8,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, cn, Empty, Hint, Icon, Input, Label, LargeTitle, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Spinner, Switch, Tabs, TabsList, TabsTrigger, useDialog } from "@one/ui"
+import { AppIcon, Button, Empty, Hint, Icon, Input, Label, LargeTitle, List, ListAdd, ListRow, ListSkeleton, LoadFailure, Problem, ResponsiveDialog, Section, Spinner, Switch, Tabs, TabsList, TabsTrigger, cn, useDialog } from "@one/ui"
 
 const api = one.api
 const said = (err) => one.plain(err).title
@@ -448,7 +448,7 @@ function Devices() {
   )
   let body
   if (!data) {
-    body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => load() }} />
+    body = problem ? <LoadFailure problem={problem} retry={() => load()} />
       : <>{tabs}<ListSkeleton rows={3} /></>
   } else {
     const { waiting, device } = data

@@ -6,7 +6,7 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
-import { CopyButton as i, Hint as a, LargeTitle as o, Problem as s, Skeleton as c } from "@one/ui";
+import { CopyButton as i, Hint as a, LargeTitle as o, LoadFailure as s, Skeleton as c } from "@one/ui";
 import { Fragment as l, jsx as u, jsxs as d } from "react/jsx-runtime";
 function f() {
 	let r = e(8), [f, p] = n(null), [m, h] = n(null), g;
@@ -31,12 +31,8 @@ function f() {
 			b,
 			x,
 			m && f === null ? /* @__PURE__ */ u(s, {
-				title: m.title,
-				text: m.next,
-				action: {
-					label: "Try Again",
-					run: _
-				}
+				problem: m,
+				retry: _
 			}) : /* @__PURE__ */ d(l, { children: [/* @__PURE__ */ u("div", {
 				"aria-busy": f === null || void 0,
 				className: "min-h-[4.25rem] rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed text-pretty select-text [overflow-wrap:anywhere]",

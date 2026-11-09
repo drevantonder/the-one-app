@@ -6,126 +6,122 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
-import { AppIcon as i, Avatar as a, Button as o, Empty as s, LargeTitle as c, List as l, ListRow as u, ListSkeleton as d, Problem as f } from "@one/ui";
-import { Fragment as p, jsx as m, jsxs as h } from "react/jsx-runtime";
-var g = {
+import { AppIcon as i, Avatar as a, Button as o, Empty as s, LargeTitle as c, List as l, ListRow as u, ListSkeleton as d, LoadFailure as f, Problem as p } from "@one/ui";
+import { Fragment as m, jsx as h, jsxs as g } from "react/jsx-runtime";
+var _ = {
 	name: "ai-agents",
 	title: "Agents",
 	icon: "robot",
 	color: "#8e8e93"
-}, _ = (e, t) => t === g.name ? g : e.find((e) => e.name === t), v = (e, t) => e.app !== g.name && _(t, e.app)?.title || e.agent || e.by, y = one.api, b = (e) => new Intl.ListFormat(void 0, { type: "conjunction" }).format(e);
-function x() {
-	let r = e(35), [g, x] = n(null), [S, C] = n(null), [w, T] = n(""), E;
-	r[0] === Symbol.for("react.memo_cache_sentinel") ? (E = [], r[0] = E) : E = r[0];
-	let [D, O] = n(E), [k, A] = n(null), j;
-	r[1] === Symbol.for("react.memo_cache_sentinel") ? (j = async function() {
+}, v = (e, t) => t === _.name ? _ : e.find((e) => e.name === t), y = (e, t) => e.app !== _.name && v(t, e.app)?.title || e.agent || e.by, b = one.api, x = (e) => new Intl.ListFormat(void 0, { type: "conjunction" }).format(e);
+function S() {
+	let r = e(35), [_, S] = n(null), [C, w] = n(null), [T, E] = n(""), D;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (D = [], r[0] = D) : D = r[0];
+	let [O, k] = n(D), [A, j] = n(null), M;
+	r[1] === Symbol.for("react.memo_cache_sentinel") ? (M = async function() {
 		try {
 			let [e, t, n] = await Promise.all([
-				y("GET", "/v1/state"),
-				y("GET", "/v1/apps"),
-				y("GET", "/v1/vault/requests")
+				b("GET", "/v1/state"),
+				b("GET", "/v1/apps"),
+				b("GET", "/v1/vault/requests")
 			]);
-			x({
+			S({
 				state: e,
 				apps: t,
 				asked: n
-			}), C(null);
+			}), w(null);
 		} catch (e) {
 			let t = e;
-			C(one.plain(t));
+			w(one.plain(t));
 		}
-	}, r[1] = j) : j = r[1];
-	let M = j, N, P;
-	r[2] === Symbol.for("react.memo_cache_sentinel") ? (N = () => {
-		M(), one.on("changed", M);
-	}, P = [], r[2] = N, r[3] = P) : (N = r[2], P = r[3]), t(N, P);
-	let F;
-	r[4] === k ? F = r[5] : (F = async function(e, t, n) {
-		if (!k) {
-			A(e), T("");
+	}, r[1] = M) : M = r[1];
+	let N = M, P, F;
+	r[2] === Symbol.for("react.memo_cache_sentinel") ? (P = () => {
+		N(), one.on("changed", N);
+	}, F = [], r[2] = P, r[3] = F) : (P = r[2], F = r[3]), t(P, F);
+	let I;
+	r[4] === A ? I = r[5] : (I = async function(e, t, n) {
+		if (!A) {
+			j(e), E("");
 			try {
-				n && O((t) => [...t, e]), await t() && O((t) => [...t, e]);
+				n && k((t) => [...t, e]), await t() && k((t) => [...t, e]);
 			} catch (t) {
 				let n = t;
-				O((t) => t.filter((t) => t !== e)), T(one.plain(n).title);
+				k((t) => t.filter((t) => t !== e)), E(one.plain(n).title);
 			}
-			A(null), await M(), O((t) => t.filter((t) => t !== e));
+			j(null), await N(), k((t) => t.filter((t) => t !== e));
 		}
-	}, r[4] = k, r[5] = F);
-	let I = F, L;
-	if (g) {
-		let { state: e, apps: t, asked: n } = g, c;
+	}, r[4] = A, r[5] = I);
+	let L = I, R;
+	if (_) {
+		let { state: e, apps: t, asked: n } = _, c;
 		r[8] === e.network ? c = r[9] : (c = e.network || {}, r[8] = e.network, r[9] = c);
-		let d = c, x = e.user?.id, S;
-		r[10] === t ? S = r[11] : (S = (e) => _(t, e) || { name: e }, r[10] = t, r[11] = S);
-		let C = S, T;
-		r[12] === d.users ? T = r[13] : (T = (e) => (d.users || []).find((t) => t.id === e)?.name || "Someone", r[12] = d.users, r[13] = T);
-		let E = T, O;
-		if (r[14] !== I || r[15] !== C || r[16] !== t || r[17] !== n || r[18] !== k || r[19] !== w || r[20] !== D || r[21] !== d.groups || r[22] !== x || r[23] !== E) {
+		let d = c, f = e.user?.id, S;
+		r[10] === t ? S = r[11] : (S = (e) => v(t, e) || { name: e }, r[10] = t, r[11] = S);
+		let C = S, w;
+		r[12] === d.users ? w = r[13] : (w = (e) => (d.users || []).find((t) => t.id === e)?.name || "Someone", r[12] = d.users, r[13] = w);
+		let E = w, D;
+		if (r[14] !== L || r[15] !== C || r[16] !== t || r[17] !== n || r[18] !== A || r[19] !== T || r[20] !== O || r[21] !== d.groups || r[22] !== f || r[23] !== E) {
 			let e;
-			r[25] === D ? e = r[26] : (e = (e) => e.state === "waiting" && !D.includes(`request:${e.id}`), r[25] = D, r[26] = e);
-			let c = n.filter(e), g;
-			r[27] === d.groups ? g = r[28] : (g = d.groups || [], r[27] = d.groups, r[28] = g);
-			let _;
-			r[29] !== D || r[30] !== x ? (_ = (e) => e.invited.some((e) => e.user === x) && !D.includes(`join:${e.id}`), r[29] = D, r[30] = x, r[31] = _) : _ = r[31];
-			let S = g.filter(_);
-			O = !c.length && !S.length ? /* @__PURE__ */ m(s, { children: "No requests." }) : /* @__PURE__ */ h(p, { children: [/* @__PURE__ */ h(l, { children: [c.map((e) => /* @__PURE__ */ m(u, {
-				leading: /* @__PURE__ */ m(i, {
+			r[25] === O ? e = r[26] : (e = (e) => e.state === "waiting" && !O.includes(`request:${e.id}`), r[25] = O, r[26] = e);
+			let c = n.filter(e), _;
+			r[27] === d.groups ? _ = r[28] : (_ = d.groups || [], r[27] = d.groups, r[28] = _);
+			let v;
+			r[29] !== O || r[30] !== f ? (v = (e) => e.invited.some((e) => e.user === f) && !O.includes(`join:${e.id}`), r[29] = O, r[30] = f, r[31] = v) : v = r[31];
+			let S = _.filter(v);
+			D = !c.length && !S.length ? /* @__PURE__ */ h(s, { children: "No requests." }) : /* @__PURE__ */ g(m, { children: [/* @__PURE__ */ g(l, { children: [c.map((e) => /* @__PURE__ */ h(u, {
+				leading: /* @__PURE__ */ h(i, {
 					app: C(e.app),
 					size: 32
 				}),
-				title: `${v(e, t)} wants ${e.title || "a key"}`,
+				title: `${y(e, t)} wants ${e.title || "a key"}`,
 				sub: e.why || void 0,
-				onClick: () => I(`request:${e.id}`, () => one.request(e.scope, e.id), !1)
-			}, e.id)), S.map((e) => /* @__PURE__ */ m(u, {
+				onClick: () => L(`request:${e.id}`, () => one.request(e.scope, e.id), !1)
+			}, e.id)), S.map((e) => /* @__PURE__ */ h(u, {
 				wrap: !0,
-				leading: /* @__PURE__ */ m(a, {
+				leading: /* @__PURE__ */ h(a, {
 					id: e.id,
 					name: e.name
 				}),
 				title: e.name,
-				sub: b(e.members.map((e) => E(e.user))),
-				trailing: /* @__PURE__ */ h("div", {
+				sub: x(e.members.map((e) => E(e.user))),
+				trailing: /* @__PURE__ */ g("div", {
 					className: "flex gap-1",
-					children: [/* @__PURE__ */ m(o, {
+					children: [/* @__PURE__ */ h(o, {
 						variant: "ghost",
 						size: "sm",
-						disabled: !!k,
-						onClick: () => I(`join:${e.id}`, async () => (await y("POST", "/v1/member", {
+						disabled: !!A,
+						onClick: () => L(`join:${e.id}`, async () => (await b("POST", "/v1/member", {
 							group: e.id,
-							user: x,
+							user: f,
 							role: null
 						}), !1), !0),
 						children: "Decline"
-					}), /* @__PURE__ */ m(o, {
+					}), /* @__PURE__ */ h(o, {
 						variant: "secondary",
 						size: "sm",
-						disabled: !!k,
-						onClick: () => I(`join:${e.id}`, async () => (one.tap(), await y("POST", "/v1/accept", { group: e.id }), !1), !0),
+						disabled: !!A,
+						onClick: () => L(`join:${e.id}`, async () => (one.tap(), await b("POST", "/v1/accept", { group: e.id }), !1), !0),
 						children: "Join"
 					})]
 				})
-			}, e.id))] }), w && /* @__PURE__ */ m(f, { title: w })] }), r[14] = I, r[15] = C, r[16] = t, r[17] = n, r[18] = k, r[19] = w, r[20] = D, r[21] = d.groups, r[22] = x, r[23] = E, r[24] = O;
-		} else O = r[24];
-		L = O;
+			}, e.id))] }), T && /* @__PURE__ */ h(p, { title: T })] }), r[14] = L, r[15] = C, r[16] = t, r[17] = n, r[18] = A, r[19] = T, r[20] = O, r[21] = d.groups, r[22] = f, r[23] = E, r[24] = D;
+		} else D = r[24];
+		R = D;
 	} else {
 		let e;
-		r[6] === S ? e = r[7] : (e = S ? /* @__PURE__ */ m(f, {
-			title: S.title,
-			text: S.next,
-			action: {
-				label: "Try Again",
-				run: M
-			}
-		}) : /* @__PURE__ */ m(d, {}), r[6] = S, r[7] = e), L = e;
+		r[6] === C ? e = r[7] : (e = C ? /* @__PURE__ */ h(f, {
+			problem: C,
+			retry: N
+		}) : /* @__PURE__ */ h(d, {}), r[6] = C, r[7] = e), R = e;
 	}
-	let R;
-	r[32] === Symbol.for("react.memo_cache_sentinel") ? (R = /* @__PURE__ */ m(c, { children: "Requests" }), r[32] = R) : R = r[32];
 	let z;
-	return r[33] === L ? z = r[34] : (z = /* @__PURE__ */ h("div", {
+	r[32] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ h(c, { children: "Requests" }), r[32] = z) : z = r[32];
+	let B;
+	return r[33] === R ? B = r[34] : (B = /* @__PURE__ */ g("div", {
 		className: "flex max-w-2xl flex-col gap-4",
-		children: [R, L]
-	}), r[33] = L, r[34] = z), z;
+		children: [z, R]
+	}), r[33] = R, r[34] = B), B;
 }
-r(document.getElementById("root")).render(/* @__PURE__ */ m(x, {}));
+r(document.getElementById("root")).render(/* @__PURE__ */ h(S, {}));
 </script>
