@@ -1131,12 +1131,12 @@ function AddDevice({ data, open, setOpen }) {
     <ResponsiveDialog open={open} onOpenChange={setOpen} title="Add Device" action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Done</Button>}>
       <div className="overflow-y-auto p-4">
         <List>
+          {address && way("browser", "A browser", "Open this and sign in. It shows up here to approve.", <Line text={address} />)}
           {way("device-mobile", "Phone, tablet or computer", `Install ${state.config?.name || "the app"} and sign in. It shows up here to approve.`)}
           {line && way("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.",
             line.loading ? <div className="mt-2 flex items-center gap-2 text-muted-foreground"><Spinner />Making a code</div>
               : line.error ? <div className="mt-2"><Problem title={line.error} /></div>
               : <Line text={line.text} />)}
-          {address && way("browser", "A browser", "Open this and sign in. It shows up here to approve.", <Line text={address} />)}
         </List>
       </div>
     </ResponsiveDialog>

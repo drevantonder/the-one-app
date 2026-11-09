@@ -1575,27 +1575,27 @@ function ke(n) {
 		onClick: () => c(!1),
 		children: "Done"
 	}), i[5] = c, i[6] = x);
-	let S = `Install ${l.config?.name || "the app"} and sign in. It shows up here to approve.`, C;
-	i[7] === S ? C = i[8] : (C = y("device-mobile", "Phone, tablet or computer", S), i[7] = S, i[8] = C);
-	let w;
-	i[9] === f ? w = i[10] : (w = f && y("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.", f.loading ? /* @__PURE__ */ k("div", {
+	let S;
+	i[7] === u ? S = i[8] : (S = u && y("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ O(Oe, { text: u })), i[7] = u, i[8] = S);
+	let C = `Install ${l.config?.name || "the app"} and sign in. It shows up here to approve.`, w;
+	i[9] === C ? w = i[10] : (w = y("device-mobile", "Phone, tablet or computer", C), i[9] = C, i[10] = w);
+	let T;
+	i[11] === f ? T = i[12] : (T = f && y("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.", f.loading ? /* @__PURE__ */ k("div", {
 		className: "mt-2 flex items-center gap-2 text-muted-foreground",
 		children: [/* @__PURE__ */ O(b, {}), "Making a code"]
 	}) : f.error ? /* @__PURE__ */ O("div", {
 		className: "mt-2",
 		children: /* @__PURE__ */ O(_, { title: f.error })
-	}) : /* @__PURE__ */ O(Oe, { text: f.text })), i[9] = f, i[10] = w);
-	let T;
-	i[11] === u ? T = i[12] : (T = u && y("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ O(Oe, { text: u })), i[11] = u, i[12] = T);
+	}) : /* @__PURE__ */ O(Oe, { text: f.text })), i[11] = f, i[12] = T);
 	let E;
-	i[13] !== C || i[14] !== w || i[15] !== T ? (E = /* @__PURE__ */ O("div", {
+	i[13] !== S || i[14] !== w || i[15] !== T ? (E = /* @__PURE__ */ O("div", {
 		className: "overflow-y-auto p-4",
 		children: /* @__PURE__ */ k(p, { children: [
-			C,
+			S,
 			w,
 			T
 		] })
-	}), i[13] = C, i[14] = w, i[15] = T, i[16] = E) : E = i[16];
+	}), i[13] = S, i[14] = w, i[15] = T, i[16] = E) : E = i[16];
 	let D;
 	return i[17] !== s || i[18] !== c || i[19] !== x || i[20] !== E ? (D = /* @__PURE__ */ O(v, {
 		open: s,
