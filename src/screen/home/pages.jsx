@@ -713,6 +713,13 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
   const changing = editing || leaving
   // Arranging, the title keeps the lines it had, cut short rather than wrapping again, so the grid under it stays still.
   const heading = useRef(null), lines = useRef(1)
+  // Edit Home Page and Done replace each other, so the one pressed is gone and focus would fall to the page's start.
+  const doneButton = useRef(null), editButton = useRef(null), was = useRef(changing)
+  useEffect(() => {
+    if (was.current === changing) return
+    was.current = changing
+    if (document.activeElement === document.body) (changing ? doneButton : editButton).current?.focus()
+  }, [changing])
   useLayoutEffect(() => {
     if (!changing && heading.current) lines.current = Math.max(1, Math.round(heading.current.offsetHeight / parseFloat(getComputedStyle(heading.current).lineHeight)))
   })
@@ -733,10 +740,10 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
             {changing ? (
               <>
                 {page.addable && <Button variant="outline" size="sm" className={editing ? COMES : GOES} onClick={() => (S.dialog = { kind: "add", p: home.page(scope) }, S.render())}>Add</Button>}
-                <Button size="sm" className={editing ? COMES : GOES} onClick={() => edit(false)}>Done</Button>
+                <Button ref={doneButton} size="sm" className={editing ? COMES : GOES} onClick={() => edit(false)}>Done</Button>
               </>
             ) : (
-              <Button variant="ghost" size="icon-sm" className={COMES} aria-label={editHomePage.title} onClick={() => edit(true)}><Icon name={editHomePage.icon} /></Button>
+              <Button ref={editButton} variant="ghost" size="icon-sm" className={COMES} aria-label={editHomePage.title} onClick={() => edit(true)}><Icon name={editHomePage.icon} /></Button>
             )}
           </div>
         )}
