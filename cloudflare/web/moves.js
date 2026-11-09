@@ -36,7 +36,7 @@ function tileFor({ tile, rect: [x, y, w] }) {
   return { back, front, remove: () => (root.unmount(), back.remove(), front.remove()) };
 }
 
-/// A layer's clip-path that shows only `rect`, the home screen's icon, with its corners.
+/// A layer's clip-path that shows only `rect`, with an icon's corners.
 function clipTo(el, [x, y, w, h]) {
   const b = el.getBoundingClientRect();
   return `inset(${y - b.top}px ${b.right - x - w}px ${b.bottom - y - h}px ${x - b.left}px round ${w * 0.225}px)`;
@@ -51,13 +51,16 @@ function zoom(from, to, { tile, rect }, shrink, clean) {
   app.style.background = "var(--background)";
   if (shrink) (from.style.zIndex = "1"), (to.style.zIndex = "0");
   const bar = $('[data-slot="shell-bar"]');
-  const clip = (el) => (shrink ? [WHOLE, clipTo(el, rect)] : [clipTo(el, rect), WHOLE]);
-  const times = { duration: GROWS, ease: GROW };
+  // Going back it's the icon's shape first, a square the window's width, near where the icon is, and then only smaller.
+  const square = [0, Math.max(0, Math.min(innerHeight - innerWidth, rect[1] - innerWidth / 2)), innerWidth, innerWidth];
+  const clip = (el) => (shrink ? [WHOLE, clipTo(el, square), clipTo(el, rect)] : [clipTo(el, rect), WHOLE]);
+  const times = { duration: GROWS, ease: GROW, ...(shrink ? { times: [0, 0.3, 1] } : {}) };
   play([
     animate(app, { clipPath: clip(app) }, times),
     animate(icon.back, { clipPath: clip(icon.back) }, times),
-    animate(icon.back, { opacity: shrink ? [0, 1, 1] : [1, 1, 0] }, { duration: GROWS, ease: "linear", times: shrink ? [0, 0.7, 1] : [0, 0.3, 1] }),
-    animate(icon.front, { opacity: shrink ? [0, 1] : [1, 0] }, shrink ? { duration: 0.1, delay: GROWS - 0.1 } : { duration: 0.1 }),
+    // The tile's colour is the icon's, there only while it's about the icon's size.
+    animate(icon.back, { opacity: shrink ? [0, 0, 1, 1] : [1, 0.2, 0, 0] }, { duration: GROWS, ease: "linear", times: shrink ? [0, 0.22, 0.45, 1] : [0, 0.16, 0.32, 1] }),
+    animate(icon.front, { opacity: shrink ? [0, 1] : [1, 0] }, shrink ? { duration: 0.1, delay: 0.13 } : { duration: 0.1 }),
     ...(bar ? [animate(bar, { opacity: shrink ? [1, 0] : [0, 1] }, shrink ? { duration: 0.1 } : { duration: 0.2, delay: 0.1 })] : []),
   ], () => (icon.remove(), clean()));
 }
