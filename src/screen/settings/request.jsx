@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { Button, CopyButton, Input, Label, ListSkeleton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner } from "@one/ui"
-import { AGENTS, appNamed } from "./agents.js"
+import { AGENTS, appNamed, asking } from "./agents.js"
 
 const api = one.api
 const { scope, id } = one.params || {}
@@ -31,6 +31,10 @@ const Why = ({ why }) =>
 
 const NEW = "new"
 
+// What a request starts on. An app's declared need has fields only its own kind of item has, so the first that fits; an
+// agent's can be any `token`, so only the item of the name it asked for. Otherwise a new one.
+const startsOn = (r) => (r.need ? r.matches?.[0] : r.matches?.find((m) => m.title.toLowerCase() === r.title.toLowerCase()))?.id ?? NEW
+
 function Request() {
   const [request, setRequest] = useState(null)
   const [apps, setApps] = useState([])
@@ -48,7 +52,7 @@ function Request() {
       if (!r) throw new Error("Can’t find this request: it may be for someone else.")
       setRequest(r)
       setApps(a)
-      setPicked(r.matches?.[0]?.id ?? NEW)
+      setPicked(startsOn(r))
       setProblem(null)
       one.title(`${asking(r, a)} needs a key`)
     } catch (e) {
@@ -109,7 +113,7 @@ function Request() {
           <SelectTrigger className="w-full" aria-label="Which item"><SelectValue /></SelectTrigger>
           <SelectContent>
             {matches.map((m) => <SelectItem key={m.id} value={m.id}>{m.title}</SelectItem>)}
-            <SelectItem value={NEW}>New</SelectItem>
+            <SelectItem value={NEW}>New Item</SelectItem>
           </SelectContent>
         </Select>
       )}
@@ -119,9 +123,6 @@ function Request() {
     </form>
   )
 }
-
-/// Who a request is for, as its title says: the app, or the agent that asked for an item of its own.
-const asking = (r, apps) => (r.app !== AGENTS.name && appNamed(apps, r.app)?.title) || r.agent || r.by
 
 /// What Allow gives, to what, in a sentence: the item, for its page if that isn't the user's own, and for a new one the
 /// only sites it can go to.

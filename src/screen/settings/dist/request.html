@@ -13,58 +13,58 @@ var b = {
 	title: "Agents",
 	icon: "robot",
 	color: "#8e8e93"
-}, x = (e, t) => t === b.name ? b : e.find((e) => e.name === t), S = one.api, { scope: C, id: w } = one.params || {}, T = () => S("GET", `/v1/vault/requests?scope=${encodeURIComponent(C || "")}&id=${encodeURIComponent(w || "")}`).then((e) => e[0]);
-function E(e) {
+}, x = (e, t) => t === b.name ? b : e.find((e) => e.name === t), S = (e, t) => e.app !== b.name && x(t, e.app)?.title || e.agent || e.by, C = one.api, { scope: w, id: T } = one.params || {}, E = () => C("GET", `/v1/vault/requests?scope=${encodeURIComponent(w || "")}&id=${encodeURIComponent(T || "")}`).then((e) => e[0]);
+function D(e) {
 	return String(e).replace(/[_-]+/g, " ").trim().split(/\s+/).map((e, t) => /^(api|url|id|ssh|pem|aws|s3|ip)$/i.test(e) ? e.toUpperCase() : t ? e.toLowerCase() : e[0].toUpperCase() + e.slice(1).toLowerCase()).join(" ");
 }
-var D = ({ why: e }) => String(e).split(/(https?:\/\/[^\s]+)/).map((e, t) => t % 2 ? /* @__PURE__ */ y("span", { children: [/* @__PURE__ */ v("span", {
+var O = ({ why: e }) => String(e).split(/(https?:\/\/[^\s]+)/).map((e, t) => t % 2 ? /* @__PURE__ */ y("span", { children: [/* @__PURE__ */ v("span", {
 	className: "break-all text-foreground",
 	children: e
 }), /* @__PURE__ */ v(o, {
 	text: e,
 	label: "",
 	className: "-my-1 align-middle"
-})] }, t) : e), O = "new";
-function k() {
-	let [e, i] = r(null), [o, s] = r([]), [c, b] = r(null), [x, C] = r(O), [w, k] = r({}), [N, P] = r(""), [F, I] = r(!1), L = n({
-		busy: F,
+})] }, t) : e), k = "new", A = (e) => (e.need ? e.matches?.[0] : e.matches?.find((t) => t.title.toLowerCase() === e.title.toLowerCase()))?.id ?? k;
+function j() {
+	let [e, i] = r(null), [o, s] = r([]), [c, b] = r(null), [x, w] = r(k), [T, j] = r({}), [P, F] = r(""), [I, L] = r(!1), R = n({
+		busy: I,
 		request: e
 	});
-	L.current = {
-		busy: F,
+	R.current = {
+		busy: I,
 		request: e
 	};
-	async function R() {
+	async function z() {
 		try {
-			let [e, t] = await Promise.all([T(), S("GET", "/v1/apps").catch(() => [])]);
+			let [e, t] = await Promise.all([E(), C("GET", "/v1/apps").catch(() => [])]);
 			if (!e) throw Error("Can’t find this request: it may be for someone else.");
-			i(e), s(t), C(e.matches?.[0]?.id ?? O), b(null), one.title(`${A(e, t)} needs a key`);
+			i(e), s(t), w(A(e)), b(null), one.title(`${S(e, t)} needs a key`);
 		} catch (e) {
 			b(one.plain(e));
 		}
 	}
 	t(() => {
-		one.title("Vault"), R();
+		one.title("Vault"), z();
 		let e = setInterval(async () => {
-			let { busy: e, request: t } = L.current;
+			let { busy: e, request: t } = R.current;
 			if (e || t?.state !== "waiting") return;
-			let n = await T().catch(() => null);
+			let n = await E().catch(() => null);
 			n && n.state !== "waiting" && one.close(n.state === "set");
 		}, 2100);
 		return () => clearInterval(e);
 	}, []);
-	async function z(t) {
-		if (t.preventDefault(), F || !H) return;
-		I(!0), P("");
+	async function B(t) {
+		if (t.preventDefault(), I || !U) return;
+		L(!0), F("");
 		let n = {
 			scope: e.scope,
 			id: e.id
 		};
-		x === O ? n.fields = w : n.item = x;
+		x === k ? n.fields = T : n.item = x;
 		try {
-			await S("POST", "/v1/vault/answer", n), k({}), one.tap("success"), one.close(!0);
+			await C("POST", "/v1/vault/answer", n), j({}), one.tap("success"), one.close(!0);
 		} catch (e) {
-			P(one.plain(e).title), I(!1);
+			F(one.plain(e).title), L(!1);
 		}
 	}
 	if (!e) return c ? /* @__PURE__ */ v(u, {
@@ -72,50 +72,50 @@ function k() {
 		text: c.next,
 		action: {
 			label: "Try Again",
-			run: () => (one.tap(), b(null), R())
+			run: () => (one.tap(), b(null), z())
 		}
 	}) : /* @__PURE__ */ v(l, { rows: 3 });
-	let B = e.matches || [], V = e.fields || [], H = !F && (x !== O || V.every((e) => w[e.name])), U = (e, t) => k((n) => ({
+	let V = e.matches || [], H = e.fields || [], U = !I && (x !== k || H.every((e) => T[e.name])), W = (e, t) => j((n) => ({
 		...n,
 		[e]: t
 	}));
 	return e.state === "waiting" ? /* @__PURE__ */ y("form", {
 		className: "flex max-w-lg flex-col gap-4",
-		onSubmit: z,
+		onSubmit: B,
 		children: [
 			/* @__PURE__ */ y("p", {
 				className: "text-sm text-muted-foreground",
-				children: [e.why && /* @__PURE__ */ y(_, { children: [/* @__PURE__ */ v(D, { why: e.why }), " "] }), j(e, o, B.find((e) => e.id === x))]
+				children: [e.why && /* @__PURE__ */ y(_, { children: [/* @__PURE__ */ v(O, { why: e.why }), " "] }), M(e, o, V.find((e) => e.id === x))]
 			}),
-			B.length > 0 && /* @__PURE__ */ y(d, {
+			V.length > 0 && /* @__PURE__ */ y(d, {
 				value: x,
-				onValueChange: C,
+				onValueChange: w,
 				children: [/* @__PURE__ */ v(m, {
 					className: "w-full",
 					"aria-label": "Which item",
 					children: /* @__PURE__ */ v(h, {})
-				}), /* @__PURE__ */ y(f, { children: [B.map((e) => /* @__PURE__ */ v(p, {
+				}), /* @__PURE__ */ y(f, { children: [V.map((e) => /* @__PURE__ */ v(p, {
 					value: e.id,
 					children: e.title
 				}, e.id)), /* @__PURE__ */ v(p, {
-					value: O,
-					children: "New"
+					value: k,
+					children: "New Item"
 				})] })]
 			}),
-			x === O && V.map((e, t) => /* @__PURE__ */ v(M, {
+			x === k && H.map((e, t) => /* @__PURE__ */ v(N, {
 				first: t === 0,
-				label: E(e.name),
+				label: D(e.name),
 				secret: e.secret,
-				value: w[e.name] || "",
-				onChange: (t) => U(e.name, t)
+				value: T[e.name] || "",
+				onChange: (t) => W(e.name, t)
 			}, e.name)),
-			N && /* @__PURE__ */ v(u, { title: N }),
+			P && /* @__PURE__ */ v(u, { title: P }),
 			/* @__PURE__ */ v(a, {
 				type: "submit",
 				size: "lg",
 				className: "w-full",
-				disabled: !H,
-				children: F ? /* @__PURE__ */ y(_, { children: [/* @__PURE__ */ v(g, {}), "Allowing…"] }) : "Allow"
+				disabled: !U,
+				children: I ? /* @__PURE__ */ y(_, { children: [/* @__PURE__ */ v(g, {}), "Allowing…"] }) : "Allow"
 			})
 		]
 	}) : /* @__PURE__ */ v("p", {
@@ -123,12 +123,11 @@ function k() {
 		children: e.state === "set" ? "Allowed." : e.state === "declined" ? "Declined." : `This request expired. Ask ${e.agent || e.by} to ask again.`
 	});
 }
-var A = (e, t) => e.app !== b.name && x(t, e.app)?.title || e.agent || e.by;
-function j(e, t, n) {
+function M(e, t, n) {
 	let r = e.app === b.name ? "Your agents" : x(t, e.app)?.title || e.app, i = e.scope.startsWith("user:") ? "" : ` for ${e.scope_name}`, a = !n && e.hosts?.length ? `, sent only to ${e.hosts.join(", ")}` : "";
 	return `${r} can use ${n?.title || e.title}${i}${a}.`;
 }
-function M(t) {
+function N(t) {
 	let n = e(15), { label: r, value: i, onChange: a, secret: o, first: l } = t, u = `field-${r}`, d;
 	n[0] !== r || n[1] !== u ? (d = /* @__PURE__ */ v(c, {
 		htmlFor: u,
@@ -152,5 +151,5 @@ function M(t) {
 		children: [d, h]
 	}), n[12] = d, n[13] = h, n[14] = g) : g = n[14], g;
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ v(k, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ v(j, {}));
 </script>

@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { Avatar, AppIcon, Button, Empty, List, ListRow, ListSkeleton, Problem } from "@one/ui"
-import { appNamed } from "./agents.js"
+import { appNamed, asking } from "./agents.js"
 
 const api = one.api
 const names = (list) => new Intl.ListFormat(undefined, { type: "conjunction" }).format(list)
@@ -34,8 +34,8 @@ function Requests() {
     one.on("changed", load)
   }, [])
 
-  // Each button does its one thing, and its row goes at once: Join as it's tapped, put back with why if it fails;
-  // Choose once the item's chosen.
+  // Each does its one thing, and its row goes at once: Join as it's tapped, put back with why if it fails; a request once
+  // it's answered in its sheet.
   async function answer(key, run, early) {
     if (busy) return
     setBusy(key)
@@ -65,39 +65,32 @@ function Requests() {
     const invites = (i.groups || []).filter((g) => g.invited.some((x) => x.user === me) && !gone.includes(`join:${g.id}`))
     body = !vault.length && !invites.length ? <Empty>No requests.</Empty> : (
       <>
-        {!!vault.length && (
-          <Section title="Vault">
-            {vault.map((r) => (
-              <ListRow
-                key={r.id}
-                wrap
-                leading={<AppIcon app={app(r.app)} size={32} />}
-                title={`${app(r.app).title || r.app} wants ${r.title || ""}`}
-                sub={[r.agent || r.by, r.why].filter(Boolean).join(" · ")}
-                trailing={<Button variant="secondary" size="sm" disabled={!!busy} onClick={() => answer(`request:${r.id}`, () => one.request(r.scope, r.id), false)}>Choose</Button>}
-              />
-            ))}
-          </Section>
-        )}
-        {!!invites.length && (
-          <Section title="Invites">
-            {invites.map((g) => (
-              <ListRow
-                key={g.id}
-                wrap
-                leading={<Avatar id={g.id} name={g.name} />}
-                title={g.name}
-                sub={names(g.members.map((m) => userName(m.user)))}
-                trailing={
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => answer(`join:${g.id}`, async () => (await api("POST", "/v1/member", { group: g.id, user: me, role: null }), false), true)}>Decline</Button>
-                    <Button variant="secondary" size="sm" disabled={!!busy} onClick={() => answer(`join:${g.id}`, async () => (one.tap(), await api("POST", "/v1/accept", { group: g.id }), false), true)}>Join</Button>
-                  </div>
-                }
-              />
-            ))}
-          </Section>
-        )}
+        <List>
+          {vault.map((r) => (
+            <ListRow
+              key={r.id}
+              leading={<AppIcon app={app(r.app)} size={32} />}
+              title={`${asking(r, apps)} wants ${r.title || "a key"}`}
+              sub={r.why || undefined}
+              onClick={() => answer(`request:${r.id}`, () => one.request(r.scope, r.id), false)}
+            />
+          ))}
+          {invites.map((g) => (
+            <ListRow
+              key={g.id}
+              wrap
+              leading={<Avatar id={g.id} name={g.name} />}
+              title={g.name}
+              sub={names(g.members.map((m) => userName(m.user)))}
+              trailing={
+                <div className="flex gap-1">
+                  <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => answer(`join:${g.id}`, async () => (await api("POST", "/v1/member", { group: g.id, user: me, role: null }), false), true)}>Decline</Button>
+                  <Button variant="secondary" size="sm" disabled={!!busy} onClick={() => answer(`join:${g.id}`, async () => (one.tap(), await api("POST", "/v1/accept", { group: g.id }), false), true)}>Join</Button>
+                </div>
+              }
+            />
+          ))}
+        </List>
         {error && <Problem title={error} />}
       </>
     )
@@ -110,13 +103,5 @@ function Requests() {
     </div>
   )
 }
-
-// A heading over a group of rows.
-const Section = ({ title, children }) => (
-  <section className="flex flex-col gap-2">
-    <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-    <List>{children}</List>
-  </section>
-)
 
 createRoot(document.getElementById("root")).render(<Requests />)
