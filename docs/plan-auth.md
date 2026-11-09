@@ -50,3 +50,13 @@ The recovery key's holders, named by an admin, can read everything and restore a
 9. **Test passkey PRF on real devices,** only if Andre still wants that shortcut.
 
 Steps 1 to 7 land before PTC's staff are onboarded.
+
+## Where it stands (2026-11-10)
+
+Steps 1, 3, 4, 6 and 7 are built and shipped; step 2 went with each. Step 5's holders are built, and the rest of it wasn't:
+
+- **User keys were left out.** Nothing can hold one under the rules above: a browser's code comes from a Worker, a native app's page gets only what its shell hands it, a remote MCP client and an app-schedule machine would be widened by one, and a computer's CLI opens keys as its node. Every device would still need its seal per scope, so it added a powerful secret and saved nothing. `ARCHITECTURE.md` says why.
+- **An invited device can't add itself,** having no key to write to who's-who with. An admin's device that's online writes it with no tap, so an invite waits for one to be on.
+- **Placeholder emails remain,** never shown or matched, because Better Auth requires a unique email and passkey-only users exist.
+- **Passkeys prove who you are and never open anything.** The PRF device path is gone. Step 9 hasn't been asked for.
+- Step 8's deploy tokens are narrowed. Retiring the old tokens, audit logs and enforcing 2FA are Andre's.
