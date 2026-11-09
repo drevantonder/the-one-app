@@ -399,7 +399,7 @@ fn the_domain_is_read_from_the_providers_signed_token() {
 }
 
 #[test]
-fn an_admin_signs_in_only_with_a_passkey() {
+fn an_admin_signs_in_like_anyone_else() {
     let (admin, admin_hex) = endpoint();
     let k = Workers::google(vec![admin_hex]);
     let (secret, andre) = invited(&k, &admin, "Andre", Some("andre@test.example"));
@@ -415,24 +415,15 @@ fn an_admin_signs_in_only_with_a_passkey() {
     assert_eq!(signed_in_as(&mut andres).as_deref(), Some(andre.as_str()));
     let mut again = k.browser();
     google_callback(&mut again, "/", "/", "andre@test.example");
-    assert_eq!(signed_in_as(&mut again).as_deref(), Some(andre.as_str()), "he signs in with Google again");
+    assert_eq!(signed_in_as(&mut again).as_deref(), Some(andre.as_str()), "they sign in with Google again");
 
-    // With no passkey yet, he isn't made an admin, or he couldn't sign in. Just signed in, he adds one.
-    let admin_route = format!("{}/api/auth/users/admin", k.address);
-    let made_admin = || post(&admin_route, &[], signed(&admin, "POST /api/auth/users/admin", json!({ "user": andre, "admin": true }))).0;
-    assert_eq!(made_admin(), 409);
+    // Having added a passkey, the same user signs in with either.
     let passkey = k.passkey();
     let (status, options, _) = andres.get("/api/auth/passkey/generate-register-options");
     assert_eq!(status, 200, "{options}");
     let (status, out) = andres.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options) }));
     assert_eq!(status, 200, "{out}");
-    assert_eq!(made_admin(), 200);
-
-    // An admin, Google signs him in no more; his passkey does.
     let mut elsewhere = k.browser();
-    let back = google_callback(&mut elsewhere, "/", "/sign-in", "andre@test.example");
-    assert!(back.is_some_and(|to| to.contains("error=ADMIN_SIGNS_IN_WITH_A_PASSKEY")), "the page isn't told why");
-    assert_eq!(signed_in_as(&mut elsewhere), None, "an admin signed in with Google");
     assert_eq!(signs_in_with_passkey(&mut elsewhere, &passkey), 200);
     assert_eq!(signed_in_as(&mut elsewhere).as_deref(), Some(andre.as_str()));
 }

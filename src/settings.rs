@@ -1039,11 +1039,6 @@ pub async fn approve(m: &impl Me, r: &Asked, invite: Option<&Invited>) -> Result
         m.write(content::remove_device(&old)).await?;
     }
     if m.address().is_some() {
-        if invite.is_some_and(|i| i.role == Role::Admin)
-            && let Err(err) = ask_auth(m, "POST", "/api/auth/users/admin", json!({ "user": r.user, "admin": true })).await
-        {
-            tracing::warn!("telling auth {} is an admin: {err:#}", r.name);
-        }
         mark_approved(m, &e.key).await?;
     }
     if invite.is_some() {

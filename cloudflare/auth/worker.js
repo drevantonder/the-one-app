@@ -112,8 +112,6 @@ const FRESH = 5 * 60_000;
 const STARTED = 15 * 60_000;
 /// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
 const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
-/// Where Better Auth makes a session with a passkey: the only places an admin's is made.
-const BY_PASSKEY = ["/passkey/verify-authentication", "/passkey/verify-registration"];
 const USER = /^[0-9a-f]{16}$/;
 /// A device a sign-in is for: its key and seal key, hex.
 const JOIN = /^[0-9a-f]{128}$/;
@@ -221,8 +219,9 @@ export class Auth extends DurableObject {
     sql.exec("create table if not exists devices (key text primary key, user text not null, at integer not null)");
     // Devices whose request was turned down, whose user isn't pushed again when they ask again.
     sql.exec("create table if not exists refused (key text primary key, at integer not null)");
-    // The users who sign in only with a passkey: admins.
-    sql.exec("create table if not exists passkey_only (user text primary key)");
+    // A Durable Object keeps this from when an admin signed in only with a passkey, which the scope database's roles
+    // still say.
+    sql.exec("drop table if exists passkey_only");
     // Signed requests taken, until they're too old to take again.
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
     sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
@@ -280,16 +279,6 @@ export class Auth extends DurableObject {
               if (!invite || invite.used || invite.until <= Date.now() || !user.emailVerified || invite.email !== email) return false;
               sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
               return { data: { ...user, id: invite.user, name: invite.name } };
-            },
-          },
-        },
-        session: {
-          create: {
-            // An admin signs in only with a passkey, which resists phishing.
-            async before(session, ctx) {
-              if (throwaway || BY_PASSKEY.includes(ctx?.path)) return;
-              // With a code, Better Auth sends the browser back to its page with the reason, not a bare 403.
-              if (sql.exec("select 1 from passkey_only where user = ?", session.userId).toArray().length) throw new APIError("FORBIDDEN", { code: "ADMIN_SIGNS_IN_WITH_A_PASSKEY", message: "You're an admin, so you sign in with your passkey." });
             },
           },
         },
@@ -412,7 +401,6 @@ export class Auth extends DurableObject {
       return json({});
     }
     if (path === "/api/auth/invites" && method === "POST") return json(await this.invite(request));
-    if (path === "/api/auth/users/admin" && method === "POST") return json(await this.setAdmin(request));
     if (path === "/api/auth/devices/requests" && method === "POST") return json(await this.ask(request));
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
     const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
@@ -486,20 +474,6 @@ export class Auth extends DurableObject {
     sql.exec("delete from invites where until <= ? and used is null", Date.now());
     sql.exec("insert or replace into invites (id, name, user, email, until, by, used) values (?, ?, ?, ?, ?, ?, null)", id, name.trim(), user, email ? email.toLowerCase() : null, until, signed.by);
     return { until };
-  }
-
-  /// Whether someone signs in only with a passkey, as an admin does: `{ user, admin }`, from an admin's device, as it
-  /// writes their role. Someone with no passkey yet isn't made one, or they couldn't sign in.
-  async setAdmin(request) {
-    const signed = await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")));
-    if (!signed?.admin) refuse(403, "Only an admin's device says who's an admin.");
-    const { user, admin } = signed.fields;
-    if (!USER.test(user || "") || typeof admin !== "boolean") refuse(400, "give user, and admin as true or false");
-    const sql = this.ctx.storage.sql;
-    if (admin && this.env.SIGN_IN !== "throwaway" && !sql.exec("select 1 from passkey where userId = ?", user).toArray().length) refuse(409, "They have no passkey yet, which an admin signs in with: they add one on their Passkeys page first.");
-    if (admin) sql.exec("insert or ignore into passkey_only (user) values (?)", user);
-    else sql.exec("delete from passkey_only where user = ?", user);
-    return {};
   }
 
   expire() {

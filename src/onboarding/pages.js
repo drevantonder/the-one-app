@@ -178,7 +178,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
       // Why its answer didn't sign them in: no user with that account is no one invited, or an account made by a
       // passkey, which isn't linked to it.
       const why = new URLSearchParams(raw);
-      if (failed) say(why.get("error") === "ADMIN_SIGNS_IN_WITH_A_PASSKEY" ? "You're an admin, so you sign in with your passkey." : ["unable_to_create_user", "account_not_linked"].includes(why.get("error")) ? "No one in " + network + " has that account. Ask an admin to invite you, or sign in with your passkey." : "That didn't sign you in." + (domain ? " Use your account at " + domain + "." : ""));
+      if (failed) say(["unable_to_create_user", "account_not_linked"].includes(why.get("error")) ? "No one in " + network + " has that account. Ask an admin to invite you, or sign in with your passkey." : "That didn't sign you in." + (domain ? " Use your account at " + domain + "." : ""));
       const button = slot("action");
       // Back from a provider, which this tab went to a moment ago: it says so while it goes on, not offering to start again.
       const returning = !failed && Date.now() - Number(sessionStorage.getItem("provider") || 0) < 600000;
