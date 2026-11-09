@@ -118,7 +118,12 @@ export default {
       description: "Give back a device you borrowed: a Linux or throwaway one is deleted with everything in it, its browser's changes to the profile too; a lasting one stays as it is, for the next agent. A device signing in to a profile saves it first.",
       input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the name agent-devices_borrow gave" } } },
       output: { type: "string", description: "that it's given back, in words" },
-      run: (ctx, input) => service(ctx, "give_back", input),
+      run: async (ctx, input) => {
+        const r = await service(ctx, "give_back", input);
+        // The service lost the key of the profile being signed in to; saving it with the key given gives the device back.
+        if (r.save) return service(ctx, "save_profile", { profile: given(await profile(ctx, r.save)), device: input.device });
+        return r;
+      },
     },
     profiles: {
       title: "Browser profiles",

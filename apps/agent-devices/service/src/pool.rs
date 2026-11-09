@@ -6,9 +6,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use super::linux::{Device, HOME, SIZES};
 use super::profiles::Profile;
@@ -55,6 +54,18 @@ pub struct Loan {
     pub state: LoanState,
     #[serde(skip)]
     pub key: Option<Profile>,
+}
+
+impl Loan {
+    /// Whether it's a sign-in that lost its profile's key (this program restarted) with time left to save it: only the
+    /// app can give the key again, in a call of its own, so giving it back waits for the app's save_profile.
+    pub(super) fn waits_for_key(&self) -> bool {
+        self.state == LoanState::Lent && self.signing_in && self.key.is_none() && !self.late()
+    }
+
+    fn late(&self) -> bool {
+        self.until.is_none_or(|u| super::now() > u + jiff::SignedDuration::try_from(SIGN_IN_GRACE).unwrap_or_default())
+    }
 }
 
 impl Default for Loan {
@@ -360,12 +371,9 @@ impl Devices {
     /// Deletes a borrowed device; a sign-in's profile is saved first.
     pub(super) fn give_back(&self, name: &str, why: &str) -> Result<()> {
         let Some(l) = self.loans().get(name).cloned() else { bail!("device {name} isn't borrowed") };
-        let late = l.until.is_some_and(|u| super::now() > u + jiff::SignedDuration::try_from(SIGN_IN_GRACE).unwrap_or_default()) || l.until.is_none();
-        if l.state == LoanState::Lent && l.signing_in && l.key.is_none() && !late {
-            // Its key went when this program restarted: the app's save_profile gives it again, and gives the device
-            // back once it's saved.
-            self.call_app("save_profile", &json!({ "item": l.item })).map_err(|err| anyhow!("not given back: saving the {} profile failed: {err:#}", l.profile))?;
-            return Ok(());
+        let late = l.late();
+        if l.waits_for_key() {
+            bail!("not given back: the {} profile's key went when this program restarted, so it's saved by save_profile", l.profile);
         }
         let mut l = self.returning(name)?;
         if let Ok(d) = self.find(name) {

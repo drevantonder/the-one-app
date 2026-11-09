@@ -456,6 +456,10 @@ impl Devices {
                     bail!("which device? pass the one you borrowed");
                 }
                 let l = self.loans().get(name).cloned();
+                if let Some(l) = l.as_ref().filter(|l| l.waits_for_key()) {
+                    // The app saves it, with the key it gives: a service's call of its app can't call back.
+                    return ok(json!({ "save": l.item }));
+                }
                 self.give_back(name, &format!("given back by {}", caller.name()))?;
                 if let Some(l) = l.filter(|l| l.signing_in) {
                     return ok(json!(format!("Saved the {} profile and closed device {name}.", l.profile)));
