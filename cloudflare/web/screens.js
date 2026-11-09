@@ -122,7 +122,7 @@ function sandboxed(r) {
   frame.setAttribute("sandbox", "allow-scripts allow-forms");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.src = asset("frame.html");
-  frame.title = titleOf(r);
+  frame.setAttribute("aria-label", titleOf(r));
   return frame;
 }
 
@@ -221,7 +221,8 @@ export const screen = {
     // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the gateway's, not a node's.
     const item = r.kind === "own" && settingsItems().find((i) => i.name === r.name && i.url && here(i.url));
     if (item) {
-      const frame = Object.assign(document.createElement("iframe"), { className: "screen-frame", src: item.url, title });
+      const frame = Object.assign(document.createElement("iframe"), { className: "screen-frame", src: item.url });
+      frame.setAttribute("aria-label", title);
       frame.setAttribute("allow", "publickey-credentials-get; publickey-credentials-create");
       return void $(".screen", detail).append(frame);
     }
