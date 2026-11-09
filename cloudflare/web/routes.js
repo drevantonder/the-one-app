@@ -42,7 +42,8 @@ export function href(r) {
 /// that page, Settings' screens and apps under Settings.
 function under(r) {
   if (r.kind === "own") return own("pages", { scope: ["accounts", "request"].includes(r.name) ? "user" : "settings" });
-  return own("pages", { scope: r.scope || (settingsItems().some((i) => i.app === r.app) ? "settings" : "user") });
+  const page = settingsItems().some((i) => i.app === r.app) ? "settings" : pages().find((p) => !p.hidden && appsOn(p).some((a) => a.name === r.app))?.scope;
+  return own("pages", { scope: r.scope || page || "user" });
 }
 
 /// What's over the window (a sheet, a dialog, a menu) holds a history entry, so Back closes the top one and the page
@@ -72,7 +73,8 @@ function unwind(then, steps = history.state?.over) {
   }
   if (then) unwinding.push(then);
 }
-if (history.state?.over) history.replaceState((({ over, ...rest }) => rest)(history.state), "");
+// Reloaded with something held open: what it held is gone, so its entries are too, or Back would seem to do nothing.
+if (history.state?.over) history.go(-history.state.over);
 
 /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens deeper than the sidebar is pushed
 /// on top, so Back returns to it.
