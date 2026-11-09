@@ -139,7 +139,7 @@ export default {
   icon: "squares-four",
   color: "#007aff",
   description: "Every app you can add, and its code",
-  instructions: "The App Store lists every app in this network, where each is added and its code. the core's add adds one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
+  instructions: "The App Store lists every app in this network, where each is added and its code. add adds one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
 
   // The apps whose schedule, where you may switch it, failed its last run.
   async badge(ctx) {
@@ -168,7 +168,7 @@ export default {
     _add: {
       title: "Add an app in a place (for the screens)",
       reads: false,
-      description: "For the screens: add an app in a place, as the core's add does, on the node it already runs on or else the first it can.",
+      description: "For the screens: add an app in a place, as add does, on the node it already runs on or else the first it can.",
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       output: { type: "null" },
       async run(ctx, { app, scope }) {
@@ -194,7 +194,7 @@ export default {
     _remove: {
       title: "Remove an app from a place (for the screens)",
       reads: false,
-      description: "For the screens: remove an app from a place, as the core's remove does.",
+      description: "For the screens: remove an app from a place, as remove does.",
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       output: { type: "null" },
       async run(ctx, { app, scope }) {

@@ -76,12 +76,12 @@ pub fn me() -> Option<(String, String)> {
 }
 
 pub fn not_here() -> String {
-    format!("{NAME} isn't running on this computer, and it isn't one of your devices yet: {CLI} sign-in --address <{YOURS}'s address> makes it one, or installing it runs {CLI}d, this device, here")
+    format!("{NAME} isn't running on this computer, and it isn't one of your devices yet: {CLI} sign-in --address <{YOURS}'s address> makes it one, or install {NAME} here to run apps on it")
 }
 
 /// What a request only this machine's own node answers says, asked from a computer that's only a device.
 fn needs_node(path: &str) -> String {
-    format!("this computer is one of your devices, not one that runs {NAME} ({path} is for {NAME} running here, as {CLI}d): do it on a computer that runs it")
+    format!("this computer is one of your devices, not one that runs {NAME}, which {path} needs: do it on a computer that runs it")
 }
 
 /// Makes this computer one of its user's devices, at the network at `address`, where it's signed in: at once if it

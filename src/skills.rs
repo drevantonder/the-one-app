@@ -49,7 +49,7 @@ pub fn server_name() -> String {
 pub fn mcp_entries() -> String {
     let server = server_name();
     format!(
-        "On a device where `{CLI}` runs, MCP is a command there, one of two entries:\n\n- `{CLI} mcp`: every tool, two hundred or so, and `search`. For agents that already find tools themselves or run code with them: Claude Code, OpenCode, Codex, Cursor. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`\n- `{CLI} mcp --code`: a few tools. `search` finds what's possible, `execute` runs a short script with it, and {} stay tools of their own. For every other agent.\n\nPick the one that fits you, or tell the user in one line which you're adding and why. On their devices, {NAME} adds the right one to Claude Code, Codex, OpenCode and Amp by itself.",
+        "On a device where `{CLI}` runs, MCP is a command there, one of two entries:\n\n- `{CLI} mcp`: every tool, and `search`. For agents that already find tools themselves or run code with them: Claude Code, OpenCode, Codex, Cursor. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`\n- `{CLI} mcp --code`: a few tools. `search` finds what's possible, `execute` runs a short script with it, and {} stay tools of their own. For every other agent.\n\nPick the one that fits you, or tell the user in one line which you're adding and why. On their devices, {NAME} adds the right one to Claude Code, Codex, OpenCode and Amp by itself.",
         crate::config::ALWAYS_ON.iter().map(|a| format!("{a}'s tools")).chain(crate::code::DIRECT.iter().map(|t| format!("`{t}`"))).collect::<Vec<_>>().join(", ")
     )
 }
@@ -324,7 +324,7 @@ pub fn instructions(mode: Mode, apps: &[Value], user: Option<&str>) -> String {
         })
         .collect();
     if !lines.is_empty() {
-        text.push_str("\n\n## Tools\n\nTools start with the name of what they're for: the core's own features first, then apps.");
+        text.push_str(&format!("\n\n## Tools\n\nTools start with the name of what they're for: {NAME}'s own first, then apps."));
         let more = "\n- and more: search finds them";
         for (i, line) in lines.iter().enumerate() {
             let last = i + 1 == lines.len();
@@ -358,7 +358,7 @@ pub fn commands() -> crate::cli::Command {
                 }
                 ["skills", name, path @ ..] => {
                     let skill = crate::mcp::skills(g.node).into_iter().find(|s| s.name == *name || s.name.strip_prefix(&format!("{}-", server_name())) == Some(*name));
-                    let skill = anyhow::Context::with_context(skill, || format!("no skill {name}: {CLI} skills lists them"))?;
+                    let skill = skill.ok_or_else(|| crate::cli::Failed::Typed(format!("no skill {name}: {CLI} skills lists them")))?;
                     let path = path.first().copied().unwrap_or("SKILL.md");
                     print!("{}", anyhow::Context::with_context(skill.file(path), || format!("{} has no {path}: it has {}", skill.name, skill.all_files().iter().map(|f| f.0.as_str()).collect::<Vec<_>>().join(", ")))?);
                 }

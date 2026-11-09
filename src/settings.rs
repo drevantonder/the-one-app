@@ -613,7 +613,7 @@ pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, sco
         // A node that was removed still has its records, which who added the app may switch off.
         _ => match unhex(device).ok() {
             Some(k) if managed(&k)? => k,
-            _ => bail!("no one device called {device}"),
+            _ => bail!("no device is called {device}, or more than one is"),
         },
     };
     ensure!(managed(&key)? || db.may(user, "switch", &scopes::device(&key)), "only {device}'s user switches what it runs");

@@ -111,8 +111,8 @@ impl Node {
 
     /// Joins the network a pairing code is for, as a device.
     pub async fn join(&self, code: &str) -> Result<()> {
-        let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).map_err(|err| Coded::error(code::BAD_PAIRING_CODE, format!("that isn't a pairing code: {err}")))?;
-        let code: PairingCode = ciborium::from_reader(bytes.as_slice()).map_err(|err| Coded::error(code::BAD_PAIRING_CODE, format!("that isn't a pairing code: {err}")))?;
+        let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).map_err(|_| Coded::error(code::BAD_PAIRING_CODE, "that isn't a pairing code: copy it again, or ask for a new one"))?;
+        let code: PairingCode = ciborium::from_reader(bytes.as_slice()).map_err(|_| Coded::error(code::BAD_PAIRING_CODE, "that isn't a pairing code: copy it again, or ask for a new one"))?;
         self.ensure_no_network()?;
         let request = JoinRequest { secret: code.secret, name: self.device_name(), as_: "device".into() };
         let reply = self.ask_to_join(&code.address, &net::pairing_ticket(&code.secret), code.from, serde_json::to_value(&request)?).await.map_err(|err| Coded::error(code::UNREACHABLE, format!("couldn't reach the device that made the pairing code: {err:#}")))?;

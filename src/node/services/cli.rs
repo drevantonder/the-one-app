@@ -9,7 +9,7 @@ pub fn commands() -> Command {
     Command {
         help: vec![
             ("services".into(), "what each of your devices can run, each on or off, and what it's doing".into()),
-            ("services on|off <name> [--device <name>]".into(), "switch a service on or off on a device of yours (here by default), which its oned starts or stops, fetching its program as it's published (a Mac app carries its own); apps is its app service. An admin's --device cloudflare switches a service built for Cloudflare on the Cloudflare node (Models: Workers AI)".into()),
+            ("services on|off <name> [--device <name>]".into(), "switch a service on or off on a device of yours (here by default), which starts or stops it, fetching its program as it's published (a Mac app carries its own); apps is the app runtime. An admin's --device cloudflare switches a service built for Cloudflare on the Cloudflare node (Models: Workers AI)".into()),
             ("services sandbox | sudo sh".into(), "let this machine run services in their sandbox, each as its own user (Linux; the installer does it)".into()),
         ],
         run: |g| {
@@ -69,8 +69,8 @@ pub fn commands() -> Command {
                         _ if device.is_some_and(|d| d.eq_ignore_ascii_case(crate::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),
                         ("off", true) => println!("Apps' calls no longer run {there}."),
                         (_, true) => println!("Apps' calls run {there} again."),
-                        ("off", _) => println!("{name} is switched off {there}: its oned stops it."),
-                        _ => println!("{name} is switched on {there}: its oned sets it up and starts it; {CLI} services says when it's running."),
+                        ("off", _) => println!("{name} is switched off {there}."),
+                        _ => println!("{name} is switched on {there}: {CLI} services says when it's running."),
                     }
                 }
                 _ => return Ok(false),

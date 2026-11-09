@@ -340,7 +340,7 @@ impl ScopeDb {
     pub fn find_group(&self, name: &str) -> Result<String> {
         match self.groups()?.into_iter().filter(|g| g.id == name || g.name.eq_ignore_ascii_case(name)).collect::<Vec<_>>().as_slice() {
             [one] => Ok(one.id.clone()),
-            [] => bail!("no group called {name}"),
+            [] => bail!("no group called {name}: give user (you), global (everyone) or a group's name"),
             _ => bail!("several groups are called {name}; give its id"),
         }
     }

@@ -456,7 +456,7 @@ impl Rule<'_> {
     }
 
     fn setting(&self) -> Result<()> {
-        ensure!(self.may("change-settings", NETWORK), "admins only");
+        ensure!(self.may("change-settings", NETWORK), "only admins change the network's settings");
         let name = self.text("name")?;
         ensure!(crate::labs::valid_setting(&name), "setting names are lowercase words joined by _, or a lab's (lab.…)");
         match &self.data["value"] {
@@ -596,7 +596,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             // An item the node itself uses (a backup place's) is asked for as the node's, and one agents use
             // (vault_fetch) as theirs.
             ensure!(who.app(app)?.is_some() || app == APP || app == AGENTS, "no such app");
-            let fields: Vec<(String, bool)> = data["fields"].as_object().context("no fields")?.iter().map(|(n, f)| (n.clone(), f["secret"] == true)).collect();
+            let fields: Vec<(String, bool)> = data["fields"].as_object().context("no fields: give the item's fields and hosts, or need")?.iter().map(|(n, f)| (n.clone(), f["secret"] == true)).collect();
             let title = data["title"].as_str().unwrap_or("").trim();
             ensure!(!title.is_empty(), "a request has a title");
             ensure!(!fields.is_empty(), "a request asks for one field or more");

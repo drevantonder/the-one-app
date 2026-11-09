@@ -358,7 +358,7 @@ impl Node {
             let here = i.views.get(&scope.to_string()).map(|s| s.added.clone()).unwrap_or_default();
             let mut out = Vec::new();
             for (n, name) in wanted.iter().enumerate().rev() {
-                ensure!(m.app(name)?.is_some(), "no app named {name}{}", if n > 0 { format!(", which {app} uses") } else { String::new() });
+                ensure!(m.app(name)?.is_some(), "no app named {name}{}: apps_list lists them", if n > 0 { format!(", which {app} uses") } else { String::new() });
                 if n == 0 || !here.contains(name) {
                     out.push((scope.clone(), content::added(name, added)));
                 }

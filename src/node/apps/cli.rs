@@ -8,6 +8,15 @@ use crate::cli::{Command, Given, ago};
 use crate::config::CLI;
 use crate::{build, tools};
 
+/// A place an app is added for, as `--scope` gives it, as a user says it.
+fn place_said(scope: &str) -> &str {
+    match scope {
+        "user" => "you",
+        "global" => "everyone",
+        group => group,
+    }
+}
+
 pub fn commands() -> Command {
     Command {
         help: vec![
@@ -17,7 +26,7 @@ pub fn commands() -> Command {
             ("deploys <app>".into(), "an app's deploys, newest last".into()),
             ("source <app> [path] [--version <hash>]".into(), "an app's code as deployed: its files, or one of them".into()),
             ("add <app> [--scope user|global|<group>] [--node <device>]".into(), "add an app, and the apps it uses, for you, a group you admin or everyone; --node is the device that runs its service, when it has one and you have more than one".into()),
-            ("remove <app> [--scope s]".into(), "".into()),
+            ("remove <app> [--scope user|global|<group>]".into(), "remove an app from a place: what it keeps there goes with it".into()),
             ("fork <app> <name> [--owner <owner>]".into(), "a new app from <app>'s code, with data of its own".into()),
             ("schedules".into(), "every schedule of the apps added for you: when, as whom, and how it last went".into()),
             ("schedule on|off <app> <name> [--scope user|global|<group>]".into(), "switch an app's schedule on (it then runs as you) or off".into()),
@@ -48,7 +57,7 @@ pub fn commands() -> Command {
                 ["deploy", dir] => deploy(g, std::path::Path::new(dir))?,
                 ["deploys", app] => {
                     let apps = g.node.apps()?;
-                    let found = apps.iter().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}"))?;
+                    let found = apps.iter().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}: {CLI} apps lists them"))?;
                     for d in found["history"].as_array().into_iter().flatten() {
                         let current = if d["bundle"] == found["bundle"] { "  (running)" } else { "" };
                         println!("{}  {}{current}", &d["bundle"].as_str().unwrap_or("")[..12], ago(d["time"].as_u64().unwrap_or(0)));
@@ -72,7 +81,7 @@ pub fn commands() -> Command {
                 ["remove", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
                     g.node.post("/v1/remove/remove", json!({ "app": app, "scope": scope }))?;
-                    println!("{app} is no longer added to {scope}.");
+                    println!("{app} is no longer added for {}.", place_said(scope));
                 }
                 ["fork", app, name] => {
                     g.node.post("/v1/fork", json!({ "app": app, "name": name, "owner": g.flag("owner") }))?;
@@ -81,7 +90,7 @@ pub fn commands() -> Command {
                 ["add", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
                     g.node.post("/v1/add/add", json!({ "app": app, "scope": scope, "node": g.flag("node") }))?;
-                    println!("{app} is added to {scope}.");
+                    println!("{app} is added for {}.", place_said(scope));
                 }
                 ["schedules"] => {
                     for app in &g.node.apps()? {

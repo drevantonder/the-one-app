@@ -10,9 +10,9 @@ pub fn commands() -> Command {
     Command {
         help: vec![
             ("group create <name>".into(), "a group, with you as its admin".into()),
-            ("group invite <group> <user> [--admin]".into(), "".into()),
-            ("group accept <group>".into(), "".into()),
-            ("group remove <group> <user>".into(), "or leave it, giving yourself".into()),
+            ("group invite <group> <user> [--admin]".into(), "invite someone to a group, as a member or an admin".into()),
+            ("group accept <group>".into(), "join a group you've been invited to".into()),
+            ("group remove <group> <user>".into(), "take someone out of a group, or give your own name to leave it".into()),
         ],
         run: cli,
     }
