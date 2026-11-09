@@ -411,6 +411,14 @@ impl Node {
 
     pub async fn add(&self, caller: &Caller, app: &str, scope: &Scope, added: bool, node: Option<&str>) -> Result<()> {
         self.read_callers_scopes(caller).await?;
+        if added {
+            self.with(|i| {
+                let a = i.r.db().app(app)?;
+                ensure!(a.as_ref().is_none_or(|a| !a.erased), "no app named {app}: its name is free again");
+                ensure!(a.is_none_or(|a| a.deleted.is_none()), "{app} is in Recently Deleted: apps_restore {app} brings it back");
+                Ok(())
+            })?;
+        }
         let entries = self.add_entries(caller, app, scope, added, node).await?;
         for (scope, content) in entries {
             self.append_as(&scope, &caller.user, content).await?;
