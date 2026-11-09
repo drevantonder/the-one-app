@@ -7,7 +7,7 @@ export const useList = () => useCall("_list", {})
 export const said = (error) => one.plain(error)
 
 /// The list, and `add(a, place)`: to You unless given a place, drawn as added at once and put back if it fails, which
-/// it throws for the caller to say.
+/// it throws for the caller to say. It gives back the line to say of the apps it added with it (those it uses), or "".
 export function useApps() {
   const list = useList()
   const [adding, setAdding] = useState([])
@@ -20,11 +20,13 @@ export function useApps() {
   }
   const add = async (a, place = data.places[0]) => {
     const entry = { app: a.name, place: place.id }
+    const also = a.uses.apps.map((n) => data.apps.find((x) => x.name === n)).filter((u) => u && !u.added.includes(place.id)).map((u) => u.title)
     setAdding((all) => [...all, entry])
     try {
       await one.call("_add", { app: a.name, scope: place.scope })
       one.tap("success")
       await list.reload()
+      return also.length ? `Also added ${also.join(" and ")}.` : ""
     } finally {
       setAdding((all) => all.filter((x) => x !== entry))
     }

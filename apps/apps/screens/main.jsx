@@ -2,7 +2,7 @@
 // room, the app opened beside them.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, LargeTitle, LoadingButton, Pending, Problem, SearchInput, Section, Split, useWidth } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, Hint, LargeTitle, LoadingButton, Pending, Problem, SearchInput, Section, Split, useWidth } from "@one/ui"
 import { AppPage } from "../lib/app-page.jsx"
 import { addAccount, onAPage, openApp, said, useApps } from "../lib/store.jsx"
 
@@ -51,13 +51,15 @@ function Main() {
   const [shown, setShown] = useState(null)
   const [restored, setRestored] = useState([])
   const [error, setError] = useState("")
+  const [note, setNote] = useState("")
   const [ref, width] = useWidth()
   const beside = width >= WIDE
 
   const add = (a) => {
     setError("")
+    setNote("")
     // Nothing of it appears to open: its own page says what comes next (an account, or the device it needs).
-    apps.add(a).then(() => a.opens || (beside ? setShown(a.name) : one.open("app", { app: a.name }))).catch((err) => setError(said(err).title))
+    apps.add(a).then((also) => (setNote(also), a.opens) || (beside ? setShown(a.name) : one.open("app", { app: a.name }))).catch((err) => setError(said(err).title))
   }
   const restore = (a) => {
     setError("")
@@ -101,7 +103,7 @@ function Main() {
     <div ref={ref}>
       <Split
         wide={WIDE}
-        list={<div className="flex flex-col gap-6"><LargeTitle>App Store</LargeTitle>{top}{error && <Problem title={error} />}{tiles}</div>}
+        list={<div className="flex flex-col gap-6"><LargeTitle>App Store</LargeTitle>{top}{error && <Problem title={error} />}{note && <Hint>{note}</Hint>}{tiles}</div>}
         detail={beside && shown && apps.data && (
           <AppPage key={shown} name={shown} apps={apps} onOpen={setShown} onGone={() => setShown(null)} />
         )}

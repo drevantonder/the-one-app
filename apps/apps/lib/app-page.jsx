@@ -22,6 +22,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
   const health = useCall("_health", { app: name })
   const where = useCall("devices", { app: name })
   const [error, setError] = useState("")
+  const [note, setNote] = useState("")
   const [busy, setBusy] = useState("")
   const [flipped, setFlipped] = useState({})
   const heading = useRef(null)
@@ -34,6 +35,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
   }
   const run = async (key, go) => {
     setError("")
+    setNote("")
     setBusy(key)
     try {
       await go()
@@ -110,9 +112,10 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
 
   const on = onAPage(a, places)
   const offered = places.filter((p) => p.may && !a.added.includes(p.id) && (on || p !== places[0]))
+  const addIt = (place) => run("add", async () => setNote(await store.add(a, place)))
   const addTo = async (e) => {
     const i = await one.menu(offered.map((p) => ({ title: p.name })), e.currentTarget)
-    if (i != null) run("add", () => store.add(a, offered[i]))
+    if (i != null) addIt(offered[i])
   }
   const more = [
     ...(owner ? [{ title: a.source ? "Edit Source Link" : "Add Source Link", run: editSource }] : []),
@@ -141,7 +144,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
                 ? a.mine && <Button size="sm" disabled={busy === "restore"} onClick={() => retire("restore")}>Restore</Button>
                 : on
                   ? a.opens ? <Button size="sm" onClick={() => openApp(a, places)}>Open</Button> : a.signs_in ? <Button size="sm" onClick={() => addAccount(a, places)}>Add Account</Button> : <span className="text-sm text-muted-foreground">Added</span>
-                  : adds ? <Button size="sm" onClick={() => run("add", () => store.add(a))}>Add</Button> : <span className="text-sm text-muted-foreground">Ask an admin to add it first</span>}
+                  : adds ? <Button size="sm" onClick={() => addIt()}>Add</Button> : <span className="text-sm text-muted-foreground">Ask an admin to add it first</span>}
               {!a.deleted && adds && offered.length > 0 && <Button variant="secondary" size="sm" onClick={addTo}>Add to…</Button>}
               {more.length > 0 && <Button variant="ghost" size="icon-sm" aria-label="More" onClick={showMore}><Icon name="dots-three" className="size-5" /></Button>}
             </div>
@@ -151,6 +154,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
       </div>
 
       {error && <Problem title={error} />}
+      {note && <Hint>{note}</Hint>}
 
       {answered ? <>
       {w?.problem && <Problem warn title={w.problem.title} text={w.problem.text} action={w.problem.move ? { label: "Move", run: () => move() } : undefined} />}
