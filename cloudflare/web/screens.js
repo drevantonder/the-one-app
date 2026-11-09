@@ -8,7 +8,7 @@ import { CODES } from "../shared/protocol.js";
 import { UNANSWERED, api, call, developer } from "./request.js";
 import { back, go, hold, home, listed, own, route } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
-import { KEPT_SCREENS, app, config, here, joined, keeping, reads, settingAt, settingsItems, tabTitle, titleOf } from "./store.js";
+import { KEPT_SCREENS, app, config, here, joined, keeping, reads, refreshState, settingAt, settingsItems, tabTitle, titleOf } from "./store.js";
 import { $, h, reveal, ui } from "./view.js";
 
 let frames = [];
@@ -566,10 +566,12 @@ export function openSheet(r) {
 }
 
 /// A request for an item, in a sheet → whether it was allowed. Closed without an answer, it's declined; if that can't
-/// reach a node the request just waits in Requests until it expires.
+/// reach a node the request just waits in Requests until it expires. However it closed, Settings' badge counts it
+/// answered at once.
 export async function openRequest(scope, id) {
   const answer = await openSheet(own("request", { scope, id }));
   if (answer === null) await api("/v1/vault/answer", { method: "POST", body: { scope, id, declined: true } }).catch(() => {});
+  refreshState().catch(() => {});
   return answer === true;
 }
 
