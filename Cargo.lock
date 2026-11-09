@@ -2955,6 +2955,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "one-dev"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "data-encoding",
+ "libc",
+ "one",
+ "serde_json",
+ "sha2 0.11.1",
+ "ssh-key",
+ "ureq",
+]
+
+[[package]]
 name = "one-models"
 version = "0.1.0"
 dependencies = [

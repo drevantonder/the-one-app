@@ -15,9 +15,9 @@ use super::super::devices::{approve_code, is_code};
 pub(crate) fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[String]) -> Result<()> {
     let (program, command) = match command {
         [flag, program, rest @ ..] if flag == "--build" => (PathBuf::from(program).canonicalize().with_context(|| format!("no program {program}"))?, rest),
-        _ => (std::env::current_exe()?, command),
+        _ => (crate::program()?, command),
     };
-    let home = match program == std::env::current_exe()? {
+    let home = match program == crate::program()? {
         true => dir.join("cli"),
         false => dir.join(format!("cli-{}", program.file_name().unwrap_or_default().to_string_lossy())),
     };
@@ -38,7 +38,7 @@ pub(crate) fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[S
             let said = line.trim();
             eprintln!("{line}");
             if said.starts_with(&settings.address) && said.contains("/sign-in") {
-                crate::sign_in::approve_on_throwaway(&settings.address, said, None)?;
+                crate::throwaway::sign_in::approve_on_throwaway(&settings.address, said, None)?;
             } else if is_code(said) {
                 approve_code(dir, said)?;
             }
@@ -47,7 +47,7 @@ pub(crate) fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[S
         std::fs::write(&joined, "")?;
     }
     if command.is_empty() {
-        println!("A CLI that's only a device of the throwaway network's user is signed in: {CLI} throwaway client cli <command> runs one as it.");
+        println!("A CLI that's only a device of the throwaway network's user is signed in: {CLI}-dev throwaway client cli <command> runs one as it.");
         return Ok(());
     }
     let status = as_device(command).status()?;

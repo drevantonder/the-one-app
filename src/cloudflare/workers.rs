@@ -153,7 +153,7 @@ pub struct Settings {
     #[serde(default, skip)]
     pub push: std::collections::BTreeMap<String, String>,
     /// A throwaway network's one user, `(id, name)`, whom its auth lets in with no passkey and no Google, so clients
-    /// are tested with nobody there. Only `one throwaway` sets it, on the Workers it runs beside its throwaway network, listening
+    /// are tested with nobody there. Only `one-dev throwaway` sets it, on the Workers it runs beside its throwaway network, listening
     /// only on this machine; `deploy` refuses settings with it, so no Workers users use ever have it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub throwaway_user: Option<(String, String)>,
@@ -335,7 +335,7 @@ impl Settings {
         Settings::load_in(&crate::home())
     }
 
-    /// The settings kept in `home`'s folder: a throwaway network's, read from `one throwaway` with its own home passed
+    /// The settings kept in `home`'s folder: a throwaway network's, read from `one-dev throwaway` with its own home passed
     /// rather than this process told it's there.
     pub fn load_in(home: &Path) -> Result<Settings> {
         let path = Settings::path_in(home);
@@ -415,7 +415,7 @@ impl Settings {
         }
     }
 
-    /// A throwaway network's Workers (`one throwaway`): on free ports here, its address its gateway's at 127.0.0.1, which `one throwaway`
+    /// A throwaway network's Workers (`one-dev throwaway`): on free ports here, its address its gateway's at 127.0.0.1, which `one-dev throwaway`
     /// lets each device it borrows reach at the same address; its bucket where its node serves its data (`bucket`), and
     /// `user` signed in with nothing to show.
     pub fn for_throwaway(home: &Path, bucket: &str, user: (String, String)) -> Result<Settings> {

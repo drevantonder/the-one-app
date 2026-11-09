@@ -83,7 +83,7 @@ fn main() {
         println!("cargo:rerun-if-changed={}", dir.display());
         let mut files = Vec::new();
         collect(dir, dir, &mut files);
-        // Its service's source is built apart (`one update`), and its tests run with ours: neither ships in its bundle.
+        // Its service's source is built apart (`one-dev update`), and its tests run with ours: neither ships in its bundle.
         files.retain(|(rel, _)| !rel.starts_with("service/") && !rel.starts_with("tests/"));
         files.sort();
         let name = dir.file_name().unwrap().to_string_lossy().to_string();

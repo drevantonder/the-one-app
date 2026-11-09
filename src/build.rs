@@ -381,10 +381,10 @@ pub fn bun() -> Result<PathBuf> {
     crate::app::runtime::pinned(&format!("bun-{BUN}"), "bun", &url, integrity)
 }
 
-/// A browser with no window on this machine, for drawing screens (one throwaway's web client, the tests), started as lean as
+/// A browser with no window on this machine, for drawing screens (one-dev throwaway's web client, the tests), started as lean as
 /// it still works: CHROME's, Playwright's headless shell (a third of Chrome's memory), the usual Chromes, or
 /// Playwright's Chromium. Each app's frame keeps a process of its own, as in users' browsers, which the headless shell
-/// doesn't do by itself and one throwaway's script needs to reach the frames.
+/// doesn't do by itself and one-dev throwaway's script needs to reach the frames.
 pub fn chrome() -> Option<std::process::Command> {
     let playwright = |prefix: &str, names: &[&str]| -> Option<PathBuf> {
         let dir = PathBuf::from(std::env::var_os("HOME")?).join(".cache/ms-playwright");
@@ -418,4 +418,35 @@ pub fn chrome() -> Option<std::process::Command> {
         "--no-default-browser-check",
     ]);
     Some(command)
+}
+
+/// The release key's private half, from the publisher's password manager by way of the config's release_signer, kept
+/// only in memory. It must be the key every build checks releases against.
+pub fn release_key() -> Result<ssh_key::PrivateKey> {
+    use crate::config::{RELEASE_KEY, RELEASE_SIGNER};
+    anyhow::ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this custom build has no release key, so nothing it builds can be released");
+    let out = Command::new("sh").args(["-c", RELEASE_SIGNER]).stdin(std::process::Stdio::null()).output().context("run release_signer")?;
+    anyhow::ensure!(
+        out.status.success(),
+        "couldn't get the release key with `{RELEASE_SIGNER}`: {}\nIs the password manager it reads reachable, and unlocked?",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+    let key = ssh_key::PrivateKey::from_openssh(&out.stdout).map_err(|_| anyhow::anyhow!("`{RELEASE_SIGNER}` didn't give an OpenSSH private key"))?;
+    anyhow::ensure!(key.public_key().key_data() == ssh_key::PublicKey::from_openssh(RELEASE_KEY)?.key_data(), "`{RELEASE_SIGNER}` gave a key, but not the release key in config.toml");
+    Ok(key)
+}
+
+/// The command a Mac's update job runs after building its app (client/native/mac/pull.sh), on a Mac with the release key.
+pub fn commands() -> crate::cli::Command {
+    crate::cli::Command {
+        help: vec![("publish-app --zip <zip> [--config <commit>]".into(), "publish this Mac's built app, so every Mac downloads it instead of building it".into())],
+        run: |g| {
+            if g.words().as_slice() != ["publish-app"] {
+                return Ok(false);
+            }
+            let zip = g.flag("zip").context("give the app with --zip")?;
+            publish_latest(g.node, &release_key()?, &[(crate::latest::Thing::app_name(TARGET), Some(PathBuf::from(zip)), Version::this(), g.flag("config").unwrap_or("-").to_string())])?;
+            Ok(true)
+        },
+    }
 }

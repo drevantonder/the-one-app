@@ -62,7 +62,7 @@ pub fn challenge(root: &[u8; 32], device: &Endpoint, at: u64) -> Vec<u8> {
 
 /// The setting naming the OIDC clients a network's users sign in with, "<issuer> <client id>", one a line: an ID
 /// token for any other counts for nothing, however it's signed. The device that deploys to Cloudflare writes it, as an
-/// admin's (`cloudflare deploy`, and `one throwaway` for its own).
+/// admin's (`cloudflare deploy`, and `one-dev throwaway` for its own).
 pub const CLIENTS: &str = "sign_in_clients";
 
 /// How many days an invite link works.
@@ -140,7 +140,7 @@ impl Proof {
 }
 
 /// Where an issuer publishes the keys it signs ID tokens with, for the issuers a user's devices take: Google,
-/// Apple, Microsoft (any tenant), and, for a throwaway network (`one throwaway`) at `address`, a loopback address only it has, its
+/// Apple, Microsoft (any tenant), and, for a throwaway network (`one-dev throwaway`) at `address`, a loopback address only it has, its
 /// own sign-in. None for any other.
 pub fn keys_at(issuer: &str, address: &str) -> Option<String> {
     match issuer {

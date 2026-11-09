@@ -22,7 +22,7 @@ fn main() {
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         std::fs::write(to, bytes).unwrap();
     }
-    // A test's build (`one throwaway client mac`) is another app beside the real one: its own id, so its own folder,
+    // A test's build (`one-dev throwaway client mac`) is another app beside the real one: its own id, so its own folder,
     // instance and Keychain items, never the user's.
     println!("cargo:rerun-if-env-changed=THROWAWAY");
     let throwaway = std::env::var("THROWAWAY").is_ok_and(|v| !v.is_empty());

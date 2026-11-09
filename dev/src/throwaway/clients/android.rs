@@ -70,7 +70,7 @@ pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one:
         match said.iter().rev().find_map(|l| l.strip_prefix("Sign in: ")) {
             // Approved as the user, then back to the app by its own link, which opens it on the device.
             Some(url) if !signed => {
-                let back = crate::sign_in::approved_on_throwaway(address, url, user)?;
+                let back = crate::throwaway::sign_in::approved_on_throwaway(address, url, user)?;
                 on_device(device, &format!("am start -a android.intent.action.VIEW -n {package}/app.client.MainActivity -d '{back}'"))?;
                 signed = true;
             }
@@ -86,7 +86,7 @@ pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one:
                 Err(err) if user.is_some() && format!("{err:#}").contains("one of their own devices approves it") => {
                     println!(
                         "The Android app of this build is signed in to the throwaway network as {who}, on the device {device}, and waits for one of {who}'s own devices to let it in.
-  Approve it as {who}: in their browser (`{CLI} throwaway client web --as {who}` makes it), open {address}/approve#{}, or {CLI} computer screen --device {device} for the code",
+  Approve it as {who}: in their browser (`{CLI}-dev throwaway client web --as {who}` makes it), open {address}/approve#{}, or {CLI} computer screen --device {device} for the code",
                         code.replace(' ', "")
                     );
                     return Ok(());

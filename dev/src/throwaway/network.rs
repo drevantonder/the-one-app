@@ -25,7 +25,7 @@ pub(crate) fn running(dir: &Path) -> Option<String> {
 /// included, so a new build (`cargo build`) is picked up by starting it again, which keeps its data.
 pub(crate) fn older_build(dir: &Path) -> bool {
     let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
-    match (std::env::current_exe().ok().and_then(|exe| modified(&exe)), modified(&dir.join("pid"))) {
+    match (crate::program().ok().and_then(|exe| modified(&exe)), modified(&dir.join("pid"))) {
         (Some(built), Some(started)) => built > started,
         _ => false,
     }
@@ -159,7 +159,8 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
         Some(addr) => addr.to_string(),
         None => std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string(),
     };
-    let mut command = one::oned::command(&[])?;
+    let mut command = std::process::Command::new(crate::program()?);
+    std::os::unix::process::CommandExt::arg0(&mut command, one::oned::name());
     Throwaway::tell(&mut command, dir, &addr);
     let node_program = spawn(dir, &mut command, "node.log", false)?;
     std::fs::write(dir.join("pid"), node_program.to_string())?;
@@ -203,10 +204,10 @@ impl Via for Direct {
 /// Starts the throwaway network's Workers, beside its node at `node`, and waits for its address to answer.
 pub(crate) fn spawn_cloudflare(dir: &Path, settings: &Settings, node: &str) -> Result<()> {
     for port in settings.ports {
-        anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's Workers' port {port} was taken by another program while it was stopped: {CLI} throwaway stop, then {CLI} throwaway for a new one on free ports");
+        anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's Workers' port {port} was taken by another program while it was stopped: {CLI}-dev throwaway stop, then {CLI}-dev throwaway for a new one on free ports");
     }
     // Beside its node, which it asks for the network's devices, for its relay to take only them.
-    let mut workers = std::process::Command::new(one::this_program()?);
+    let mut workers = std::process::Command::new(crate::program()?);
     Throwaway::tell(workers.args(["cloudflare", "serve"]), dir, node);
     let program = spawn(dir, &mut workers, "cloudflare.log", false)?;
     let url = format!("{}/.well-known/oauth-authorization-server", settings.address);

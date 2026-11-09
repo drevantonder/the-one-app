@@ -48,7 +48,7 @@ fn label() -> &'static str {
 }
 
 /// A setting for a test from its environment, named by the CLI's name (`ONE_ADDRESS`): `ADDRESS`, the network's;
-/// `SIGN_IN_PRINT`, sign in by printing the link rather than opening a browser (`one throwaway client linux` signs in
+/// `SIGN_IN_PRINT`, sign in by printing the link rather than opening a browser (`one-dev throwaway client linux` signs in
 /// there); `CONTROL`, in a debug build, a loopback port an agent drives the window by.
 fn env(name: &str) -> Option<String> {
     std::env::var(format!("{}_{name}", one::config::CLI.to_uppercase())).ok().filter(|v| !v.is_empty())

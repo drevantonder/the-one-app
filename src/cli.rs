@@ -84,9 +84,14 @@ const WIDTH: usize = 118;
 
 /// Commands' forms (`Command.help`) as `help all` lays them out.
 pub fn help<'a>(forms: impl IntoIterator<Item = &'a (String, String)>) -> String {
+    help_as(CLI, forms)
+}
+
+/// `help`, for another program than the CLI: `one-dev`'s.
+pub fn help_as<'a>(program: &str, forms: impl IntoIterator<Item = &'a (String, String)>) -> String {
     let mut out = String::new();
     for (usage, about) in forms {
-        let mut line = format!("  {CLI} {usage}");
+        let mut line = format!("  {program} {usage}");
         if line.chars().count() + 1 >= ABOUT_AT {
             out.push_str(&line);
             out.push('\n');

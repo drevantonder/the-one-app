@@ -109,5 +109,4 @@ fi
 case :$PATH: in *:"$HOME/.local/bin":*) ;; *) echo "Add ~/.local/bin to your PATH." ;; esac
 echo "
 Next, on your first device:  $cli create <name> --as <your name>
-Or, to join a network:       $cli join <pairing code>   ($cli pair on a device in it gives one)
-Or, to look around first:    $cli throwaway             (a throwaway network to try things in; $cli throwaway stop deletes it)"
+Or, to join a network:       $cli join <pairing code>   ($cli pair on a device in it gives one)"

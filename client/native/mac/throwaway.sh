@@ -1,5 +1,5 @@
 #!/bin/bash
-# `one throwaway client mac`'s half on the Mac: builds this checkout's app as a throwaway's (THROWAWAY: its own id,
+# `one-dev throwaway client mac`'s half on the Mac: builds this checkout's app as a throwaway's (THROWAWAY: its own id,
 # folder and Keychain items, beside the user's own app), signs it as the Mac app is signed, so the Keychain knows it
 # from one build to the next, and starts it in the logged-in session, signed in to ADDRESS, with what it says in
 # target/throwaway.log here. Started again each time.

@@ -215,7 +215,7 @@ impl Kind for Android {
             None => avd_dir(avds().first().ok_or_else(|| anyhow!("there's no Android Virtual Device here to start from"))?)?,
         };
         let dst = avd_home().join(format!("{}.avd", v.id));
-        // The machine's AVDs are every network's (a `one throwaway` beside the real one): never another's.
+        // The machine's AVDs are every network's (a `one-dev throwaway` beside the real one): never another's.
         if dst.exists() || avd_home().join(format!("{}.ini", v.id)).exists() {
             bail!("there's an Android device called {} on this machine already: pick another name", v.name);
         }

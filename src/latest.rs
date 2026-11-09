@@ -1,5 +1,5 @@
 //! The signed "latest" record: one small file, `<address>/updates/newest`, that says what's newest of everything a device
-//! takes from `one update`, so a device takes its own updates with nothing else of the network working: not the protocol,
+//! takes from `one-dev update`, so a device takes its own updates with nothing else of the network working: not the protocol,
 //! READS, the relay or a node. Each thing it names has its file beside it, `<address>/updates/<sha256>`, unsealed.
 //!
 //! THIS FORMAT MUST NEVER BREAK. A device too old to speak anything else still reads it, and only by reading it does it

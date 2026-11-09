@@ -39,7 +39,7 @@ pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Se
             // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it would test the address.
             anyhow::ensure!(
                 one::web::client_version().is_some(),
-                "this build has no web client's WebAssembly: run this checkout's own build, target/debug/{CLI} throwaway client web, which builds it"
+                "this build has no web client's WebAssembly: run this checkout's own build, target/debug/{CLI}-dev throwaway client web, which builds it"
             );
             web::web(dir, settings, user.as_deref())?
         }
@@ -61,7 +61,7 @@ pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Se
             }
             device_client(dir, checkout, settings, kind, user.as_deref())?
         }
-        _ => bail!("which client? {CLI} throwaway client web, linux, mac, iphone, android, windows or cli, with --as <name> for someone else"),
+        _ => bail!("which client? {CLI}-dev throwaway client web, linux, mac, iphone, android, windows or cli, with --as <name> for someone else"),
     }
     println!("Ready in {}s.", started.elapsed().as_secs());
     Ok(())
@@ -135,7 +135,7 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settin
     println!(
         "The {kind} client of this build is signed in to the throwaway network{}, on the device {device}, a throwaway copy borrowed for it.
   See it: {CLI} computer screen --device {device} (computer_screen), or {CLI} computer view --device {device} for a link
-  Use it: computer_use with device {device} (computer_tools lists what it takes); {CLI} throwaway stop gives it back",
+  Use it: computer_use with device {device} (computer_tools lists what it takes); {CLI}-dev throwaway stop gives it back",
         user.map(|name| format!(" as {name}")).unwrap_or_default()
     );
     Ok(())

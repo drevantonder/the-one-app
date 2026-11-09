@@ -141,7 +141,7 @@ impl Devices {
     }
 }
 
-/// Serves, or given `delete-all <folder>` (`one throwaway stop`), deletes the Linux devices a folder of its kept.
+/// Serves, or given `delete-all <folder>` (`one-dev throwaway stop`), deletes the Linux devices a folder of its kept.
 fn main() -> Result<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
     tracing_subscriber::fmt().with_writer(std::io::stderr).with_env_filter(filter).init();

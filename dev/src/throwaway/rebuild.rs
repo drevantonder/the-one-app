@@ -6,7 +6,7 @@ use anyhow::Result;
 use one::config::CLI;
 
 /// For `throwaway client web` from this checkout's own debug build: the web client's WebAssembly built, and this build made
-/// again with it embedded from target/client, as every build of this checkout does from then on (the gateway serves what its build holds), as `{CLI} update` does for a release but at dev
+/// again with it embedded from target/client, as every build of this checkout does from then on (the gateway serves what its build holds), as `{CLI}-dev update` does for a release but at dev
 /// speed: no release build, and cargo keeps what hasn't changed, so a run with nothing changed does nothing here. The
 /// throwaway network's programs run the old build, so the command is run again as the new build, which starts it again (when
 /// no client session is running).
@@ -16,7 +16,7 @@ pub(crate) fn web_client_built(checkout: &Path, rest: &[String]) -> Result<()> {
         return Ok(());
     }
     eprintln!("Building the web client's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
-    let built = crate::build::client(checkout, &checkout.join(one::config::CONFIG_FILE))?;
+    let built = one::build::client(checkout, &checkout.join(one::config::CONFIG_FILE))?;
     let held = |name: &str, bytes: &[u8]| std::fs::read(built.join(name)).is_ok_and(|file| file == bytes);
     if !one::config::CLIENT.is_empty() && one::config::CLIENT.iter().all(|(name, bytes)| held(name, bytes)) {
         return Ok(());
@@ -35,7 +35,7 @@ pub(crate) fn cloudflare_node_built(checkout: &Path, rest: &[String]) -> Result<
         return Ok(());
     }
     eprintln!("Building the Cloudflare node's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
-    let built = crate::build::cloudflare_node(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
+    let built = one::build::cloudflare_node(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
     let held = |name: &str, bytes: &[u8]| std::fs::read(built.join(name)).is_ok_and(|file| file == bytes);
     if !one::config::CLOUDFLARE_NODE.is_empty() && one::config::CLOUDFLARE_NODE.iter().all(|(name, bytes)| held(name, bytes)) {
         return Ok(());
@@ -53,7 +53,7 @@ pub(crate) fn rebuilt(checkout: &Path, rest: &[String], what: &str) -> Result<()
     anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again and doesn't hold what it was built with: {what}");
     eprintln!("Building {what} (dev profile, not release)…");
     std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
-    crate::build::quietly(crate::build::nice_cargo().current_dir(checkout).env_remove("CLIENT").env_remove("CLOUDFLARE_NODE").arg("build"))?;
+    one::build::quietly(one::build::nice_cargo().current_dir(checkout).env_remove("CLIENT").env_remove("CLOUDFLARE_NODE").arg("build"))?;
     use std::os::unix::process::CommandExt;
     Err(std::process::Command::new(&own).arg("throwaway").args(rest).env(&again, "1").exec().into())
 }

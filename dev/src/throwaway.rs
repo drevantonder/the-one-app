@@ -12,15 +12,19 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use one::config::CLI;
-use one::mode::{Mode, Throwaway};
+use one::mode::Throwaway;
+
+use crate::dev;
 use serde_json::json;
 
 mod clients;
 mod devices;
 mod network;
 mod rebuild;
+pub(crate) mod sign_in;
 
-use network::{node_at, older_build, no_client_running, running, start, stop, stop_some};
+pub(crate) use network::node_at;
+use network::{ older_build, no_client_running, running, start, stop, stop_some};
 
 /// The throwaway network for the checkout this build is from (`<checkout>/target/<profile>/`), else for the checkout the
 /// current folder is in, wherever in it, as git finds it, beside the downloads every throwaway network shares: → its folder,
@@ -38,33 +42,23 @@ fn folder() -> Option<(PathBuf, PathBuf)> {
     Some((base.join(format!("{name}-{}", &hash[..6])), checkout))
 }
 
-/// A command typed after `throwaway`. The first time, in the real network's CLI, it makes sure the throwaway network runs and, but for
-/// the commands that manage it, runs the command again as one of its programs (`Throwaway::tell`), where `run` takes it from `inside`.
+/// A command typed after `throwaway`: it makes sure the throwaway network runs and, but for the commands that manage it, runs
+/// the command as one of its programs, by the `one` program built with this one (`Throwaway::tell`).
 pub fn run(rest: &[String]) -> Result<()> {
-    if let Mode::Throwaway(network) = one::mode::here() {
-        return inside(network, rest);
-    }
-    // Help, and nothing started: throwaway's own, or a built-in command's. An app's tool's needs the throwaway network's apps.
-    let help = rest.iter().any(|a| a == "--help" || a == "-h");
-    match rest.first().map(String::as_str) {
-        Some("--help" | "-h" | "help") | Some("stop" | "client" | "sign-in") if help || rest[0] == "help" => {
-            println!("{}", usage());
-            return Ok(());
-        }
-        Some(cmd) if help && crate::command_words().iter().any(|c| c == cmd) => return crate::run(rest.to_vec()),
-        _ => {}
+    if matches!(rest.first().map(String::as_str), Some("--help" | "-h" | "help")) || (rest.len() > 1 && matches!(rest[0].as_str(), "stop" | "client" | "sign-in") && rest.iter().any(|a| a == "--help" || a == "-h")) {
+        println!("{}", usage());
+        return Ok(());
     }
     let Some((dir, checkout)) = folder() else {
-        bail!("{CLI} throwaway is for a checkout of The One App, and this folder isn't in one: run it in the checkout, or any folder in it")
+        bail!("{} throwaway is for a checkout of The One App, and this folder isn't in one: run it in the checkout, or any folder in it", dev())
     };
     match rest.first().map(String::as_str) {
         Some("stop") => {
             devices::give_back(&dir, &checkout);
             stop(&dir, true)?;
-            println!("Stopped and deleted this checkout's throwaway network, and gave back its devices. {CLI} throwaway starts a new one.");
+            println!("Stopped and deleted this checkout's throwaway network, and gave back its devices. {} throwaway starts a new one.", dev());
             return Ok(());
         }
-        Some(cmd @ ("update" | "release" | "publish" | "throwaway")) => bail!("{CLI} {cmd} isn't for the throwaway network"),
         Some("cloudflare") if rest.get(1).map(String::as_str) == Some("serve") => bail!("the throwaway network runs its own Workers"),
         _ => {}
     }
@@ -90,39 +84,42 @@ pub fn run(rest: &[String]) -> Result<()> {
     if rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"]) {
         return cloudflare_node(&dir);
     }
-    if rest.first().map(String::as_str) == Some("client") {
-        let settings = one::cloudflare::Settings::load_in(&dir)?;
-        return clients::client(&dir, &checkout, &settings, &rest[1..]);
-    }
-    if rest.is_empty() {
-        return say_where(&dir, &addr);
+    match rest.first().map(String::as_str) {
+        None => return say_where(&dir, &addr),
+        Some("client") => {
+            let settings = one::cloudflare::Settings::load_in(&dir)?;
+            return clients::client(&dir, &checkout, &settings, &rest[1..]);
+        }
+        Some("sign-in") => return sign_in(&dir, &addr),
+        Some("git") => return git(&dir, &addr, &rest[1..]),
+        _ => {}
     }
     // As one of its programs: its home, so the CLI asks its node with its token, as nobody signed in, and its Cloudflare
     // settings are its own Workers'; and its mode, so nothing of this machine's own network's is touched.
     use std::os::unix::process::CommandExt;
-    let mut again = std::process::Command::new(one::this_program()?);
-    Throwaway::tell(&mut again, &dir, &addr);
-    Err(anyhow::Error::from(again.arg("throwaway").args(rest).exec()).context("running the command in the throwaway network"))
+    let mut command = std::process::Command::new(crate::program()?);
+    Throwaway::tell(&mut command, &dir, &addr);
+    Err(anyhow::Error::from(command.args(rest).exec()).context("running the command in the throwaway network"))
 }
 
-/// A command, run as a program of the throwaway network: `sign-in` and `git`, which are its own, or any other command, which
-/// this program's other code runs against the network it's a program of.
-fn inside(network: &Throwaway, rest: &[String]) -> Result<()> {
-    match rest.first().map(String::as_str) {
-        Some("sign-in") => sign_in(),
-        Some("git") => git(network.home(), &rest[1..]),
-        _ => crate::run(rest.to_vec()),
+/// `sign-in`, as the throwaway network's user, with no passkey: its CLI signs in as any does, with its own git config and
+/// no screen, and the link it gives is approved here, as its auth lets a throwaway network's first user in with none.
+fn sign_in(dir: &Path, addr: &str) -> Result<()> {
+    use std::io::BufRead;
+    let address = node_at(dir, addr).state()?.address().context("the throwaway network has no address")?.to_string();
+    let mut command = std::process::Command::new(crate::program()?);
+    Throwaway::tell(&mut command, dir, addr);
+    let mut child = command.arg("sign-in").env("GIT_CONFIG_GLOBAL", dir.join("gitconfig")).env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY").stdout(std::process::Stdio::piped()).spawn()?;
+    for line in std::io::BufReader::new(child.stdout.take().context("no output from signing in")?).lines() {
+        let line = line?;
+        let said = line.trim();
+        if said.starts_with(&address) && said.contains("/sign-in") {
+            sign_in::approve_on_throwaway(&address, said, None)?;
+        }
     }
-}
-
-/// `sign-in`, as the throwaway network's user, with no passkey: its auth asks for none.
-fn sign_in() -> Result<()> {
-    let address = crate::node().state()?.address().context("the throwaway network has no address")?.to_string();
-    let started = crate::sign_in::start(&address, None)?;
-    crate::sign_in::approve_on_throwaway(&address, &started.url, None)?;
-    crate::sign_in::finish(started)?;
-    let me = crate::node().state()?.user.map_or("you".into(), |u| u.name);
-    println!("Signed in as {me}. {CLI} throwaway and {CLI} throwaway mcp act as them until {CLI} throwaway sign-out.");
+    anyhow::ensure!(child.wait()?.success(), "its CLI didn't sign in");
+    let me = node_at(dir, addr).state()?.user.map_or("you".into(), |u| u.name);
+    println!("Signed in as {me}. {} throwaway and {} throwaway mcp act as them until {} throwaway sign-out.", dev(), dev(), dev());
     Ok(())
 }
 
@@ -134,7 +131,7 @@ fn say_where(dir: &Path, addr: &str) -> Result<()> {
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
 recovery key; its Workers' settings are in {}.
 
-{CLI} throwaway --help lists its commands.",
+{CLI}-dev throwaway --help lists its commands.",
         dir.display(),
         dir.join("cloudflare").join("settings.json").display()
     );
@@ -144,15 +141,19 @@ recovery key; its Workers' settings are in {}.
 /// `git`, told that the throwaway network's repos (`<its address>/repos/…`) are reached through this build's remote helper, as
 /// git is on a computer signed in to any network: this build's helper is linked in a folder of the throwaway network's, put
 /// first on git's PATH (the one the real network's CLI links is another build, reaching another node).
-fn git(dir: &Path, args: &[String]) -> Result<()> {
-    let address = crate::node().state()?.address().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
+fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
+    let address = node_at(dir, addr).state()?.address().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
-    one::git_wire::link_in(&bin)?;
+    let helper = bin.join(one::git_wire::helper());
+    let _ = std::fs::remove_file(&helper);
+    std::os::unix::fs::symlink(crate::program()?, &helper)?;
     let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())))?;
     let config: usize = std::env::var("GIT_CONFIG_COUNT").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
     let (key, value) = one::git_wire::instead_of(&address);
-    let status = std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    Throwaway::tell(&mut command, dir, addr);
+    let status = command
         .args(args)
         .env("PATH", path)
         .env("GIT_CONFIG_COUNT", (config + 1).to_string())
@@ -169,7 +170,7 @@ fn git(dir: &Path, args: &[String]) -> Result<()> {
 /// Runs the throwaway network's Cloudflare node beside its Workers, in their workerd, as `cloudflare node deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
 fn cloudflare_node(dir: &Path) -> Result<()> {
-    anyhow::ensure!(one::cloudflare::node::modules().is_ok(), "this build has no Cloudflare node: run this checkout's own build, target/debug/{CLI} throwaway cloudflare node deploy, which builds it");
+    anyhow::ensure!(one::cloudflare::node::modules().is_ok(), "this build has no Cloudflare node: run this checkout's own build, target/debug/{CLI}-dev throwaway cloudflare node deploy, which builds it");
     let mut settings = one::cloudflare::Settings::load_in(dir)?;
     if !settings.cloudflare_node {
         settings.cloudflare_node = true;
@@ -190,7 +191,7 @@ fn usage() -> String {
     let mcp = match folder() {
         Some((_, checkout)) => match std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).filter(|e| e.starts_with(&checkout)) {
             Some(exe) => format!("{} throwaway mcp", exe.display()),
-            None => format!("sh -c 'cd {} && exec {CLI} throwaway mcp'", checkout.display()),
+            None => format!("sh -c 'cd {} && exec {CLI}-dev throwaway mcp'", checkout.display()),
         },
         None => mcp_anywhere(),
     };
@@ -198,7 +199,7 @@ fn usage() -> String {
 }
 
 fn mcp_anywhere() -> String {
-    format!("sh -c 'cd <checkout> && exec {CLI} throwaway mcp'")
+    format!("sh -c 'cd <checkout> && exec {CLI}-dev throwaway mcp'")
 }
 
 /// `throwaway`'s help, in `help all`: it runs before the words after it are read, as their own command (`run`).
@@ -211,15 +212,15 @@ fn commands(mcp: &str) -> one::cli::Command {
     one::cli::Command {
         help: vec![
             form("throwaway", "start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is: on this machine beside yours, with only what every new one starts with, to look around and test in".into()),
-            form("throwaway <command>", format!("any command, in it: {CLI} throwaway status, {CLI} throwaway apps, {CLI} throwaway repos list")),
+            form("throwaway <command>", format!("any command, in it: {CLI}-dev throwaway status, {CLI}-dev throwaway apps, {CLI}-dev throwaway repos list")),
             form("throwaway mcp", format!("its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}")),
             form("throwaway sign-in", "sign its CLI in as its user, with no browser".into()),
-            form("throwaway git <args>", format!("git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone")),
+            form("throwaway git <args>", format!("git, reaching its repos at its address: {CLI}-dev throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI}-dev throwaway git push in the clone")),
             form("throwaway cloudflare node deploy", "run its Cloudflare node beside its Workers, as Cloudflare would".into()),
             form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows".into()),
             form("throwaway client <kind> --as sam", "the same, as someone else, invited by you with Add Someone's link".into()),
             form("throwaway client cli <command>", format!("a command from a computer that's only a device of its user's (no node), asking their nodes over iroh in run priority's order, as every client does: --device cloudflare asks the Cloudflare node, once deployed; --build <program> first runs another build of {CLI} (an older release's) as that device")),
-            form("throwaway stop", format!("stop and delete it, and give back its devices; {CLI} throwaway then starts a new one")),
+            form("throwaway stop", format!("stop and delete it, and give back its devices; {CLI}-dev throwaway then starts a new one")),
         ],
         run: |_| Ok(false),
     }

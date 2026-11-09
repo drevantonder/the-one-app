@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds the Android app (client/native: Tauri's window, in the Gradle project here, with its Kotlin) as an APK, from
 # config.toml's custom build or $CONFIG's: CONFIG=path/to/config.toml build.sh [debug | release] → the APK's path.
-#   debug    (the default) the app's Rust in the dev profile, for `one throwaway client android`
+#   debug    (the default) the app's Rust in the dev profile, for `one-dev throwaway client android`
 #   release  the app's Rust optimized and the APK shrunk, signed with the debug key until the app has a release key of
 #            its own: the key the Kotlin app was signed with, so it installs over it, keeping its sign-in
 # ABIS (some of arm64-v8a x86_64) picks the processors: both, or for a debug build the one it's for. Links to the custom

@@ -6,24 +6,22 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use one::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
+use one::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, REPO, TARGET};
 use one::latest::{Latest, Thing};
 use one::release::Version;
 use one::{cache, release};
 use serde_json::{Value, json};
 
-use crate::build::{self, PLATFORMS, Platform, cargo, git, quietly, show, succeeds};
+use one::build::{self, release_key, PLATFORMS, Platform, cargo, git, quietly, show, succeeds};
 
 mod apps;
 mod cloudflare;
-mod mac;
 mod parts;
 mod services;
 mod wait;
 
 use apps::*;
 use cloudflare::*;
-use mac::*;
 use parts::*;
 use services::*;
 pub use wait::wait;
@@ -38,8 +36,8 @@ pub fn commands() -> one::cli::Command {
             ("release <vX.Y.Z>".into(), "the same, signed off and published on GitHub for the installer".into()),
             ("publish [binary]".into(), "sign and publish a build you made; every device on its platform updates".into()),
             ("web bundle [--out <folder>]".into(), "write this build's web client as a bundle for the native apps, ready to sign".into()),
-            ("update mac-job".into(), format!("the shell that sets up a Mac to take its own updates: {CLI} update mac-job | ssh <mac> sh, once, for a Mac too old to have the job its app starts")),
-            ("publish-app --zip <zip> [--config <commit>]".into(), "publish this Mac's built app, so every Mac downloads it instead of building it".into()),
+            ("update mac-job".into(), format!("the shell that sets up a Mac to take its own updates: {CLI}-dev update mac-job | ssh <mac> sh, once, for a Mac too old to have the job its app starts")),
+            ("status --until <commit> [--device <name>[,<name>…]] [--timeout <10m>]".into(), format!("wait until every device online now, or those named (online or not), runs that commit, or a later build, and its services answer, or a build fails; prints as it goes, names offline devices and how far behind they are without waiting for them (each updates itself when it's back), and fails unless all it waited for made it; --device mac waits for an offline Mac to be back on it. After {CLI}-dev update: {CLI}-dev status --until $(git rev-parse HEAD)")),
             ("services try apps/<name> [--device <name>]".into(), "put your checkout's build of an app's service on a device of yours (here by default, else over ssh by its name) and switch it on, until a newer one is published".into()),
         ],
         run: |g| {
@@ -49,14 +47,14 @@ pub fn commands() -> one::cli::Command {
                 ["publish", rest @ ..] => {
                     let path = match rest {
                         [path] => std::fs::canonicalize(path)?,
-                        _ => std::env::current_exe()?,
+                        _ => crate::program()?,
                     };
                     publish(g, &path, &release_key()?)?;
                 }
+                ["status"] if g.has("until") => wait(g)?,
                 ["services", "try", dir] => try_service(Path::new(dir), g.flag("device"))?,
                 ["web", "bundle"] => println!("{}", web_bundle(Path::new(g.flag("out").unwrap_or(".")))?.display()),
                 ["update", "mac-job"] => print!("{}", one::latest::mac_job(&crate::node().state()?.address().context("this network has no address yet")?)),
-                ["publish-app"] => publish_app(Path::new(g.flag("zip").context("give the app with --zip")?), g.flag("config").unwrap_or("-"))?,
                 _ => return Ok(false),
             }
             Ok(true)
@@ -79,7 +77,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     std::env::set_current_dir(cache())?;
     if let Some(tag) = tag {
         ensure!(version_tag(tag), "a release is named like v1.2.3");
-        ensure!(build::installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub; {CLI} update runs main on its devices");
+        ensure!(build::installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub; {CLI}-dev update runs main on its devices");
         ensure!(succeeds(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
     // Updates here take turns: they share one checkout, and each would test one commit and send out another.
@@ -114,7 +112,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         }
     }
     parts.services.retain(|n| services(&src).contains(n));
-    let sends = parts.node || parts.mac || !parts.apps.is_empty() || !parts.services.is_empty();
+    let sends = parts.node || parts.mac || parts.dev || !parts.apps.is_empty() || !parts.services.is_empty();
     let after = if sends && tag.is_none() { after_update()? } else { None };
     let mut missed = false;
     let moved = retire_gone(&src, &parts.renamed)?;
@@ -122,6 +120,10 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         publish_source(&src, &commit, config_commit.as_deref().unwrap_or("-"), tag.is_some(), &release_key()?)?;
     }
     if !parts.node {
+        if parts.dev {
+            timed("built this program", || quietly(cargo().current_dir(&src).env("CONFIG", &config).args(["build", "--release", "-p", "one-dev"])))?;
+            replace_this(&src)?;
+        }
         deploy_apps(&src, &parts.apps)?;
         add_where(&moved);
         if !parts.services.is_empty() {
@@ -146,8 +148,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     // And the web client's way to nodes: one without it couldn't reach them.
     node.env("CLIENT", timed("built the web client", || build::client(&src, &config)).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
     timed("built the node", || quietly(&mut node))?;
+    replace_this(&src)?;
 
-    let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
+    let binary = src.join("target/release/one");
     let version = Version::of(&binary).context("ask the new build what it is")?;
     let short = version.commit.as_str();
     // This device's own node takes it too, and the built-in apps are deployed from its build; the Workers' home has to
@@ -169,7 +172,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         println!("  couldn't publish the web client for the native apps: {err:#}");
     }
 
-    println!("Published {short}: every device takes it itself. {CLI} status --until {short} waits for the online ones, and says about the rest.");
+    println!("Published {short}: every device takes it itself. {CLI}-dev status --until {short} waits for the online ones, and says about the rest.");
     let Some(tag) = tag else {
         let after = finish(after);
         ensure!(!failed, "this device isn't running {short} with its services answering: what it runs, and why, is above");
@@ -185,7 +188,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     std::fs::copy(&binary, dir.join(&name))?;
     assets.push(name);
     // state::install_line() fetches it from the latest release.
-    std::fs::write(dir.join("install.sh"), include_str!("../install.sh"))?;
+    std::fs::write(dir.join("install.sh"), include_str!("../../install.sh"))?;
     assets.push("install.sh".into());
     // The native app for this platform (client/native, its own workspace), which install.sh puts on a desktop.
     if cfg!(target_os = "linux") {
@@ -303,6 +306,15 @@ fn after_update() -> Result<Option<After>> {
     Ok(Some(After { child: Some(child), log }))
 }
 
+/// This program, replaced by the one the update built beside the node: no device takes it, so the next update here runs
+/// main's.
+fn replace_this(src: &Path) -> Result<()> {
+    let me = one::this_program()?;
+    let new = me.with_extension("new");
+    std::fs::copy(src.join("target/release/one-dev"), &new)?;
+    std::fs::rename(&new, &me).with_context(|| format!("couldn't replace {}", me.display()))
+}
+
 fn finish(after: Option<After>) -> Result<()> {
     ensure!(timed("waited for after-update", || after.is_none_or(|mut after| after.wait())), "after-update failed");
     Ok(())
@@ -337,21 +349,6 @@ fn await_app(commit: &str, address: &str, limit: Duration) -> Result<Option<(Thi
 /// What the Mac app is published as.
 fn app_zip() -> String {
     format!("{CLI}-macos.zip")
-}
-
-/// The release key's private half, from the publisher's password manager by way of the config's release_signer, kept
-/// only in memory. It must be the key every build checks releases against.
-pub fn release_key() -> Result<ssh_key::PrivateKey> {
-    ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this custom build has no release key, so nothing it builds can be released");
-    let out = Command::new("sh").args(["-c", RELEASE_SIGNER]).stdin(std::process::Stdio::null()).output().context("run release_signer")?;
-    ensure!(
-        out.status.success(),
-        "couldn't get the release key with `{RELEASE_SIGNER}`: {}\nIs the password manager it reads reachable, and unlocked?",
-        String::from_utf8_lossy(&out.stderr).trim()
-    );
-    let key = ssh_key::PrivateKey::from_openssh(&out.stdout).map_err(|_| anyhow::anyhow!("`{RELEASE_SIGNER}` didn't give an OpenSSH private key"))?;
-    ensure!(key.public_key().key_data() == ssh_key::PublicKey::from_openssh(RELEASE_KEY)?.key_data(), "`{RELEASE_SIGNER}` gave a key, but not the release key in config.toml");
-    Ok(key)
 }
 
 /// Says in the record that this commit is the one to build: every Mac takes the app published for it, or builds it itself

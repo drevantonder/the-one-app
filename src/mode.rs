@@ -1,10 +1,10 @@
-//! What this process is for: the user's own network (`Own`), or a throwaway network's (`one throwaway`), which has a home
+//! What this process is for: the user's own network (`Own`), or a throwaway network's (`one-dev throwaway`), which has a home
 //! and address of its own and must touch nothing of the real one's (`~/.local/bin`, the harnesses' configs, git's config).
-//! `one throwaway` tells every program it starts, by `Throwaway::tell`, and it's read here once, as the program starts: no code
+//! `one-dev throwaway` tells every program it starts, by `Throwaway::tell`, and it's read here once, as the program starts: no code
 //! asks the environment, settings or a flag whether this is one.
 //!
 //! A throwaway network's node also serves its bucket (an S3 stand-in, the folder its node made the network in) and
-//! stops itself when nobody has asked it anything for an hour; `one throwaway` starts it again as it was.
+//! stops itself when nobody has asked it anything for an hour; `one-dev throwaway` starts it again as it was.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;

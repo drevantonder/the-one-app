@@ -10,7 +10,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   Users see "your One App network", or a custom build's, "the PTC App network". Avoid: install.
 - **Custom build**: this code built with its own `config.toml`, the only place the product is named (The One App, The
   PTC App). It usually serves one workplace's network, but can serve many. Avoid: white label.
-- **Throwaway network**: what `one throwaway` makes from your checkout's build: a network on your machine, with its own
+- **Throwaway network**: what `one-dev throwaway` makes from your checkout's build: a network on your machine, with its own
   pieces at its own address, where you're a new user signing in with no passkey. For testing. Avoid: try install.
 - **User**: someone in the network. An **admin** is a user who may change what's everyone's. Avoid: person.
 - **Group**: users who share apps and data.

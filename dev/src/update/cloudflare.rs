@@ -72,14 +72,14 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             }
             Err(err) => {
                 failed = true;
-                let hint = if one::protocol::Coded::is(&err, one::protocol::code::NOT_ADDED) { " (add Shell in the App Store, or run one update on the device with the Cloudflare settings)" } else { "" };
+                let hint = if one::protocol::Coded::is(&err, one::protocol::code::NOT_ADDED) { " (add Shell in the App Store, or run one-dev update on the device with the Cloudflare settings)" } else { "" };
                 println!("  {name}: couldn't deploy to Cloudflare: {err:#}{hint}");
             }
         }
     }
     if !deployed && !failed {
         let away: Vec<&str> = offline.iter().filter_map(|d| d["name"].as_str()).collect();
-        let away = if away.is_empty() { String::new() } else { format!(" ({} offline: run {CLI} update again when it's back)", away.join(", ")) };
+        let away = if away.is_empty() { String::new() } else { format!(" ({} offline: run {CLI}-dev update again when it's back)", away.join(", ")) };
         println!("  no device deployed to Cloudflare: none of the online ones has the settings{away}");
     }
     failed || !deployed

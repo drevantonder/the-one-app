@@ -2,7 +2,7 @@
 
 Your devices, and your team's, as one place for apps and agents. A network is one user's or one workplace's: its users, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; at its address, a few small Workers on Cloudflare, each named by its job, route, sign in, relay, carry pushes and sign bucket URLs. Two Workers are not like those: the remote MCP server is a client, and the Cloudflare node is a node. Each app's database for a scope is the truth, kept as signed steps in the bucket, and who can do what is the scope database's rows.
 
-It's held to targets measured in `one throwaway`, from a phone on mobile data where it matters: the web client usable within 1.5 s of a cold open; a remote MCP call adding at most 100 ms to a local one; a write seen on another device within 1 s; a call one round trip; no data rewritten when someone adds a device.
+It's held to targets measured in `one-dev throwaway`, from a phone on mobile data where it matters: the web client usable within 1.5 s of a cold open; a remote MCP call adding at most 100 ms to a local one; a write seen on another device within 1 s; a call one round trip; no data rewritten when someone adds a device.
 
 This page holds only what the code can't say. How each part works is its folder's doc: `cargo test map -- --nocapture` prints them all, as a map. `tests/contracts.rs` is where two languages must agree.
 

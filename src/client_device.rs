@@ -33,7 +33,7 @@ fn dir() -> PathBuf {
 }
 
 /// Whether this machine's node answers: then everything goes to it, as it always has. `<CLI>_NO_NODE` says to take
-/// none as there, for a CLI tried as a device on a computer that has one (`one throwaway client cli`).
+/// none as there, for a CLI tried as a device on a computer that has one (`one-dev throwaway client cli`).
 pub fn node_here() -> bool {
     static HERE: OnceLock<bool> = OnceLock::new();
     *HERE.get_or_init(|| {

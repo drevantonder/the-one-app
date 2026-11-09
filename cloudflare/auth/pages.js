@@ -224,7 +224,7 @@ export function pages(drawn) {
     return page("sign-in-google", look, script);
   }
 
-  /// Signing in on a throwaway network (`one throwaway`), with no passkey, straight on, so a client being tested signs in with nobody
+  /// Signing in on a throwaway network (`one-dev throwaway`), with no passkey, straight on, so a client being tested signs in with nobody
   /// there: as whoever this browser is signed in as here (its first user, or someone who joined in it), or, with
   /// `?as=<name>` and no client, as someone who joined, for a device's browser before its app signs in. The button is for
   /// a browser that won't go on to an app by itself.

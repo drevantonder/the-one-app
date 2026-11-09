@@ -1,8 +1,8 @@
 [workspace]
-members = [".", "cli", "cloudflare/node", "client", "client/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service"]
+members = [".", "cli", "dev", "cloudflare/node", "client", "client/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service"]
 # `cargo build` and `cargo test` here build the program too (cli/), as target/debug/one, and the services in Rust
-# (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one throwaway`'s) runs.
-default-members = [".", "cli", "client", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service"]
+# (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
+default-members = [".", "cli", "dev", "client", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service"]
 
 [package]
 name = "one"
@@ -82,7 +82,7 @@ libc = { version = "0.2", optional = true }
 # makes and checks the signatures.
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"], optional = true }
 # test-util is tests/sim.rs's paused clock, so links that wait seconds take none. It's here, not a dev-dependency, so
-# `cargo test` and `cargo build` build the same target/debug/one, which `one throwaway` runs: as a dev-dependency it was a
+# `cargo test` and `cargo build` build the same target/debug/one, which `one-dev throwaway` runs: as a dev-dependency it was a
 # second tokio, and every switch between them compiled this crate again. Unused, it does nothing.
 tokio = { version = "1", features = ["full", "test-util"], optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }

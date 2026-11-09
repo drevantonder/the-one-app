@@ -17,11 +17,13 @@ pub(super) struct Parts {
     pub(super) services: Vec<String>,
     /// The `service` crate, which every service in Rust is built on, so each is published again.
     pub(super) service: bool,
+    /// This program (dev/), which no device takes: only the one running the update is built again.
+    pub(super) dev: bool,
 }
 
 impl Parts {
     pub(super) fn everything() -> Parts {
-        Parts { node: true, mac: true, ..Default::default() }
+        Parts { node: true, mac: true, dev: true, ..Default::default() }
     }
 
     /// What changed from the commit `last` says (and its config's) to `this`'s.
@@ -78,6 +80,7 @@ impl Parts {
                 // What the Mac's services in Swift are built on, which the Mac app builds (service/mac-helpers.sh).
                 Some("service") if file.starts_with("service/swift/") || file == "service/mac-helpers.sh" => parts.mac = true,
                 Some("service") => parts.service = true,
+                Some("dev") => parts.dev = true,
                 // The Workers' sources and the Cloudflare node's are in the node, which deploys them; the Mac's needn't.
                 Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
                 // The native app (client/native) is its own workspace, not in the node: the Mac app, but for Windows' and
@@ -123,5 +126,6 @@ mod tests {
         assert_eq!(of(&["client/native/windows/build.sh"]), Parts::default());
         let client = of(&["client/src/lib.rs"]);
         assert!(client.node && client.mac, "the client's WebAssembly is in the node");
+        assert_eq!(of(&["dev/src/update.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
     }
 }

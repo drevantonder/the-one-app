@@ -77,7 +77,7 @@ Start-ScheduledTask -TaskName one-throwaway-app"#
         match said.lines().rev().find_map(|l| l.trim().strip_prefix("Sign in: ")) {
             // Approved as the user, then back to the app at its loopback port, which only the device reaches.
             Some(url) if !signed => {
-                let back = crate::sign_in::approved_on_throwaway(address, url, user)?;
+                let back = crate::throwaway::sign_in::approved_on_throwaway(address, url, user)?;
                 on_device(device, &format!("Invoke-WebRequest -UseBasicParsing '{}' | Out-Null", back.replace('\'', "''")))?;
                 signed = true;
             }

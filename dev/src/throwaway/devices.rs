@@ -16,7 +16,7 @@ pub(crate) fn devices(dir: &Path) -> serde_json::Map<String, Value> {
 /// One of this machine's network's Agent Devices tools (not the throwaway network's, which has none). When the node
 /// restarts during it (an update), or its service is still coming back, it's asked again once they answer.
 pub(crate) fn agent_devices(tool: &str, input: Value) -> Result<Value> {
-    Ok(again(|| crate::node().post("/v1/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one throwaway" })))?["ok"].clone())
+    Ok(again(|| crate::node().post("/v1/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one-dev throwaway" })))?["ok"].clone())
 }
 
 /// What `ask` gives, asking again for up to 3 minutes while this machine's node or a service of its restarts.
@@ -44,9 +44,9 @@ pub(crate) fn listed_devices() -> Value {
     agent_devices("_list", json!({})).map(|l| l["devices"].clone()).unwrap_or_default()
 }
 
-/// What a device borrowed for this checkout's throwaway network says it's for: `one throwaway client <kind>, for <checkout>`.
+/// What a device borrowed for this checkout's throwaway network says it's for: `one-dev throwaway client <kind>, for <checkout>`.
 pub(crate) fn borrowed_for(checkout: &Path, kind: &str) -> String {
-    format!("one throwaway client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+    format!("one-dev throwaway client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
 }
 
 /// Gives back every device borrowed for the throwaway network: those devices.json names, and any Agent Devices lists as
@@ -56,11 +56,11 @@ pub(crate) fn give_back(dir: &Path, checkout: &Path) {
     let ours = format!(", for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
     for d in listed_devices().as_array().into_iter().flatten() {
         if let (Some(name), Some(what)) = (d["name"].as_str(), d["borrowed"]["for"].as_str())
-            && what.starts_with("one throwaway client ")
+            && what.starts_with("one-dev throwaway client ")
             && what.ends_with(&ours)
             && !all.iter().any(|(_, n)| n == name)
         {
-            all.push((what["one throwaway client ".len()..what.len() - ours.len()].to_string(), name.to_string()));
+            all.push((what["one-dev throwaway client ".len()..what.len() - ours.len()].to_string(), name.to_string()));
         }
     }
     for (kind, device) in all {

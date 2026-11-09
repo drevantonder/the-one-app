@@ -20,7 +20,7 @@ what was 85 hand-written checks, plus 35 admin checks elsewhere and each app's o
 
 Spiked on 2026-11-05, since today's API gives it nothing to do; it waits for the node to give write positions.
 
-- What was tried: Settings › Users (it writes, and has a hand-written optimistic layer) read and wrote through a TanStack DB collection, in `one throwaway client web` and `android`: optimistic at once, rolled back with the problem box on a failed write, kept on a good one.
+- What was tried: Settings › Users (it writes, and has a hand-written optimistic layer) read and wrote through a TanStack DB collection, in `one-dev throwaway client web` and `android`: optimistic at once, rolled back with the problem box on a failed write, kept on a good one.
 - Size: the collection alone is 121 KB minified, 36 KB gzipped (`@tanstack/db` 1.0.0-rc.1.3, still a release candidate, whose transaction API changed under the spike: `isPersisted` became `when("settled")`). Settings' whole screen kit is 86 KB, 29 KB gzipped, so it'd be more than the kit, on every screen that used it. `@tanstack/offline-transactions` adds 32 KB (8 KB gzipped).
 - Speed: no difference you can measure. The click on Users to its list showing took 60–80 ms either way, also at 4× slower CPU; running the bundle takes about 2 ms.
 - Code: Users' own optimistic layer is about a dozen lines. The collection saved 3 lines of the screen and cost an adapter of about 35.

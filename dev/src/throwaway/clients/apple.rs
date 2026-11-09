@@ -85,7 +85,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         match said.lines().rev().find_map(|l| l.trim().strip_prefix("Sign in: ")) {
             // Approved as the user, then back to the app at its loopback port, which only the Mac reaches.
             Some(url) if !signed => {
-                let back = crate::sign_in::approved_on_throwaway(address, url, None)?;
+                let back = crate::throwaway::sign_in::approved_on_throwaway(address, url, None)?;
                 ssh(&format!("curl -s -m 30 -o /dev/null {}", shell_quote(&back)))?;
                 signed = true;
             }
@@ -105,7 +105,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
             "The iPhone app of this build is signed in to the throwaway network, on a simulator of its own on {host} ({sim}), in dark with the text a size smaller, as a phone's settings are.
   See it: ssh {host} xcrun simctl io {sim} screenshot /tmp/shot.png
   Use it: in its page there: ssh {host} curl -d '<js>' http://127.0.0.1:{control}/eval runs JavaScript, and /value gives an expression's value, as JSON; open a link: ssh {host} xcrun simctl openurl {sim} '{CLI}://…'
-  What it said: {host}:{log}; {CLI} throwaway stop shuts the simulator down and deletes it"
+  What it said: {host}:{log}; {CLI}-dev throwaway stop shuts the simulator down and deletes it"
         );
         return Ok(());
     }
@@ -113,7 +113,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         "The Mac app of this build is signed in to the throwaway network, on {host} beside the app there (its menu bar item, its window).
   See it: ssh {host} screencapture -x /tmp/shot.png
   Use it: in its page there: ssh {host} curl -d '<js>' http://127.0.0.1:{control}/eval runs JavaScript, and /value gives an expression's value, as JSON (/eval/panel and /value/panel, the panel's)
-  What it said: {host}:{log}; {CLI} throwaway stop stops it"
+  What it said: {host}:{log}; {CLI}-dev throwaway stop stops it"
     );
     Ok(())
 }
@@ -132,6 +132,6 @@ pub(crate) fn stop(dir: &Path, delete: bool) {
         let _ = std::fs::remove_file(dir.join(file));
     };
     on("mac", format!("launchctl bootout gui/$(id -u)/app.{CLI}.mac.throwaway"));
-    let sim = format!("'{CLI} throwaway'");
+    let sim = format!("'{CLI}-dev throwaway'");
     on("iphone", format!("xcrun simctl shutdown {sim}; xcrun simctl delete {sim}"));
 }

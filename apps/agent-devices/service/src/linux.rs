@@ -2,7 +2,7 @@
 //! folder on a volume of its own, so its sign-ins survive restarts and image updates. Its server's port and token are
 //! labels on the container. The container runtime is Podman on Linux and Apple's container on a Mac.
 //!
-//! The runtime is the machine's, shared by every network on it (a `one throwaway` beside the real one), so each container
+//! The runtime is the machine's, shared by every network on it (a `one-dev throwaway` beside the real one), so each container
 //! carries its network's data folder as a label (`one.home`), and a network lists and touches only its own.
 
 use std::collections::HashMap;
@@ -258,7 +258,7 @@ pub trait Containers: Send + Sync {
     }
 }
 
-/// Deletes the containers of the network whose data folder is `dir`, as when a `one throwaway` is deleted.
+/// Deletes the containers of the network whose data folder is `dir`, as when a `one-dev throwaway` is deleted.
 pub fn delete_all(dir: &Path) -> Result<()> {
     let rt: Box<dyn Containers> = if cfg!(target_os = "macos") { Box::new(Apple::new(dir)?) } else { Box::new(Podman::new()?) };
     let home = dir.to_string_lossy();

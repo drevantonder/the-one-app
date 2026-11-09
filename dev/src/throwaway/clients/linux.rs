@@ -21,7 +21,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     let home = dir.join(&name);
     std::fs::create_dir_all(&home)?;
     eprintln!("Building client/native (dev profile; the first time takes minutes)…");
-    crate::build::quietly(crate::build::nice_cargo().arg("build").current_dir(checkout.join("client/native")))?;
+    one::build::quietly(one::build::nice_cargo().arg("build").current_dir(checkout.join("client/native")))?;
     // Its own display and control port, the same each time for this throwaway network and user.
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(home.to_string_lossy().as_bytes()).into();
     let display = format!(":{}", 200 + u16::from_le_bytes([hash[0], hash[1]]) % 600);
@@ -75,7 +75,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         }
         match said.lines().rev().find_map(|l| l.strip_prefix("Sign in: ")) {
             Some(url) if !signed => {
-                crate::sign_in::approve_on_throwaway(address, url, user)?;
+                crate::throwaway::sign_in::approve_on_throwaway(address, url, user)?;
                 signed = true;
             }
             Some(_) => {}
@@ -93,7 +93,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         "The Linux app of this build is signed in to the throwaway network{}, on this machine in the display {display}.
   See it: DISPLAY={display} import -window root shot.png
   Use it: DISPLAY={display} xdotool …, or in its page: curl -d '<js>' http://127.0.0.1:{control}/eval runs JavaScript, and /value gives an expression's value, as JSON
-  What it said: {}; {CLI} throwaway stop stops it",
+  What it said: {}; {CLI}-dev throwaway stop stops it",
         user.map(|name| format!(" as {name}")).unwrap_or_default(),
         dir.join(&log).display()
     );

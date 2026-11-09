@@ -9,11 +9,9 @@ mod client_device;
 mod git_remote;
 mod network;
 mod sign_in;
-mod throwaway;
-mod update;
 
 use one::api::Client;
-use one::{build, tools};
+use one::tools;
 use one::core_tools::SENDS;
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
@@ -29,13 +27,12 @@ fn commands() -> Vec<Command> {
         storage::cli::commands(),
         services::cli::commands(),
         one::logs::commands(),
-        update::commands(),
+        one::build::commands(),
         blobs::cli::commands(),
         own(),
         one::skills::commands(),
         one::code::commands(),
         one::mcp::commands(),
-        throwaway::command(),
         one::tools::commands(),
     ]
 }
@@ -120,10 +117,6 @@ fn main() {
 }
 
 fn run(args: Vec<String>) -> Result<()> {
-    // A throwaway's command is run again as a program of its network, which reads what follows itself.
-    if args.first().map(String::as_str) == Some("throwaway") {
-        return throwaway::run(&args[1..]);
-    }
     // --json is everyone's, wherever it's typed: what a tool gives back, as JSON.
     let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
     let json = args[..end].iter().any(|a| a == "--json");

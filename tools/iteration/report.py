@@ -55,7 +55,7 @@ def phase(name, inp):
         return "waiting"
     if re.search(r"cargo (test|build|check|clippy)|xcodebuild|gradle|go test|build\.sh", c):
         return "building and testing"
-    if re.search(r"one update|git (push|pull|rebase|commit)|one deploy|one release|cloudflare deploy", c):
+    if re.search(r"one(-dev)? update|git (push|pull|rebase|commit)|one deploy|one(-dev)? release|cloudflare deploy", c):
         return "shipping"
     if re.search(r"one (try|throwaway)|ssh mac|simctl|idb |screencapture|curl|adb |one (status|version)", c):
         return "checking it works"
@@ -65,9 +65,9 @@ def phase(name, inp):
 
 
 def waited_for(c):
-    for kind, p in [("the Mac", r"ssh mac|xcode|simctl|idb"), ("an update", r"one update|after-update"),
+    for kind, p in [("the Mac", r"ssh mac|xcode|simctl|idb"), ("an update", r"one(-dev)? update|after-update"),
                     ("a node or the Workers", r"curl|healthz|one status|cloudflare|/v1/"),
-                    ("an agent device", r"adb|vnc|agent-devices|emulator|qemu|VM ready"), ("one throwaway", r"one (try|throwaway)"),
+                    ("an agent device", r"adb|vnc|agent-devices|emulator|qemu|VM ready"), ("one-dev throwaway", r"one(-dev)? (try|throwaway)"),
                     ("tests or builds", r"cargo|gradle|build")]:
         if re.search(p, c, re.I):
             return kind

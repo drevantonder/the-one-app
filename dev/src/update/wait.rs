@@ -23,7 +23,7 @@ pub fn wait(g: &one::cli::Given) -> Result<()> {
         }
     };
     let commit = g.flag("until").unwrap_or_default().to_lowercase();
-    ensure!(commit.len() >= 7 && commit.chars().all(|c| c.is_ascii_hexdigit()), "give the commit: {CLI} status --until $(git rev-parse HEAD)");
+    ensure!(commit.len() >= 7 && commit.chars().all(|c| c.is_ascii_hexdigit()), "give the commit: {CLI}-dev status --until $(git rev-parse HEAD)");
     wait_until(&commit, &names, limit)
 }
 

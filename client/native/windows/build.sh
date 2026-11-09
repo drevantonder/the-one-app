@@ -3,7 +3,7 @@
 # mingw-w64, beside the WebView2 loader it starts its window with), then packaged with its helper (Helper.csproj: the
 # Windows App SDK's, which builds only on Windows) in the Windows VM on this machine (Agent Devices' windows, or
 # DEVICE=<name>), installed there and started. CONFIG=path/to/config.toml builds another custom build; PROFILE=dev
-# builds the program as `cargo build` does (what `one throwaway client windows` runs: quicker, and drivable by its
+# builds the program as `cargo build` does (what `one-dev throwaway client windows` runs: quicker, and drivable by its
 # CONTROL port), release otherwise; NO_START=1 installs it without starting it.
 #   --ssh <ssh's arguments>   builds on a Windows machine ssh reaches instead (`--ssh surface`): its user needs to be
 #                             signed in at its desktop. It's built in a folder of its own there, which goes after, and

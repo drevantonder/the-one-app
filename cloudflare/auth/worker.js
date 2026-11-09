@@ -50,7 +50,7 @@
 //
 // A throwaway network's auth (`SIGN_IN` is "throwaway") lets in its first user (`THROWAWAY_USER`, `THROWAWAY_NAME`) with no passkey and
 // no Google: its sign-in page goes straight on. Someone it invites joins by opening their link, again with no passkey,
-// and is then who that browser signs in as. It's for testing clients without a user: only `one throwaway` turns it on
+// and is then who that browser signs in as. It's for testing clients without a user: only `one-dev throwaway` turns it on
 // (cloudflare::Settings::throwaway_user), on Workers that listen only on their own machine, and `cloudflare deploy` refuses it,
 // so no real network's auth ever does this.
 
@@ -698,7 +698,7 @@ export class Auth extends DurableObject {
   signsInHere(client) {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const origin = new URL(this.env.ADDRESS).origin;
-    // The network's own address is on loopback too where it's tried (`one throwaway`), so its pages are told apart first.
+    // The network's own address is on loopback too where it's tried (`one-dev throwaway`), so its pages are told apart first.
     const here = (u) => (URL.canParse(u) && new URL(u).origin === origin ? u === `${origin}/callback` : goesTo(u, origin) === ON_DEVICE);
     return uris.length > 0 && uris.every(here);
   }
