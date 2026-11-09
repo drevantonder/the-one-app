@@ -170,15 +170,15 @@ export function pages(drawn) {
       const network = ${json(look.name)};
       const domain = ${json(look.google)};
       const back = client_id ? "/sign-in?" + oauth_query : "/";
-      if (failed) say("That didn't sign you in. Use your Google account at " + domain + ".");
+      // Why Google's answer didn't sign them in: an admin signs in with a passkey; no user with that
+      // account is no one invited, or an account made by a passkey, which has no Google email.
+      const why = new URLSearchParams(raw);
+      if (failed) say(why.get("error") === "ADMIN_SIGNS_IN_WITH_A_PASSKEY" ? "You're an admin, so you sign in with your passkey, not Google." : why.get("error") === "unable_to_create_user" ? "No one in " + network + " has that Google account. Ask an admin to invite you, or sign in with your passkey." : "That didn't sign you in. Use your Google account at " + domain + ".");
       const button = slot("action");
       // Back from Google, which this tab went to a moment ago: it says so while it goes on, not offering to start again.
       const returning = !failed && Date.now() - Number(sessionStorage.getItem("google") || 0) < 600000;
       sessionStorage.removeItem("google");
       let waiting = returning ? busy(button, "Signing You In…") : null;
-      // Google said no because they're an admin: the way in is the passkey, which is why it's the other button.
-      const admins = (about) => about.admin && !about.fresh && say("You're an admin, so you sign in with your passkey, not Google.");
-      if (!client_id && failed) api("/sign-in/about?").then(admins, () => {});
       if (client_id) (async () => {
         try {
           const about = await api("/sign-in/about?" + oauth_query);
@@ -186,7 +186,6 @@ export function pages(drawn) {
           document.title = title;
           slot("title").textContent = title;
           if (!about.web) acts(about);
-          admins(about);
           // Back from the Google sign-in started here for this client, just now: on to it.
           if (about.fresh && !failed) {
             waiting ||= busy(button, "Signing You In…");

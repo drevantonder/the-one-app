@@ -392,7 +392,8 @@ fn an_admin_signs_in_only_with_a_passkey() {
 
     // An admin, Google signs him in no more; his passkey does.
     let mut elsewhere = k.browser();
-    google_callback(&mut elsewhere, "/", "/", "andre@test.example");
+    let back = google_callback(&mut elsewhere, "/", "/sign-in", "andre@test.example");
+    assert!(back.is_some_and(|to| to.contains("error=ADMIN_SIGNS_IN_WITH_A_PASSKEY")), "the page isn't told why");
     assert_eq!(signed_in_as(&mut elsewhere), None, "an admin signed in with Google");
     assert_eq!(signs_in_with_passkey(&mut elsewhere, &passkey), 200);
     assert_eq!(signed_in_as(&mut elsewhere).as_deref(), Some(andre.as_str()));
