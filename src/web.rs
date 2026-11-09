@@ -54,17 +54,10 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
             *bytes = rewritten;
         }
     }
-    let names: Vec<(String, String)> = files.iter().filter(|(path, _)| !["index.html", "sw.js"].contains(&path.as_str())).map(|(path, bytes)| (path.clone(), named(path, bytes))).collect();
+    let names: Vec<(String, String)> = files.iter().filter(|(path, _)| !["index.html", "sw.js", "start.js"].contains(&path.as_str())).map(|(path, bytes)| (path.clone(), named(path, bytes))).collect();
     let start = files.iter().find(|(path, _)| path == "start.js").map(|(_, bytes)| String::from_utf8_lossy(bytes).into_owned());
     if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
         let mut text = String::from_utf8_lossy(page).into_owned();
-        // start.js runs inline, as the page arrives, before its styles and scripts are in: its hash is in the
-        // page's policy, so it's the one inline script that may.
-        if let Some(start) = start {
-            use sha2::Digest;
-            let hash = data_encoding::BASE64.encode(&sha2::Sha256::digest(start.as_bytes()));
-            text = text.replacen("<script src=\"/start.js\"></script>", &format!("<script>{start}</script>"), 1).replacen("script-src 'self'", &format!("script-src 'self' 'sha256-{hash}'"), 1);
-        }
         for (path, name) in &names {
             text = text.replace(&format!("=\"/{path}\""), &format!("=\"{name}\""));
         }
@@ -78,7 +71,15 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
             attr(crate::config::NAME),
             attr(crate::config::CLI)
         );
-        *page = text.replacen("<title></title>", &label, 1).into_bytes();
+        text = text.replacen("<title></title>", &label, 1);
+        // start.js runs inline, as the page arrives, before its styles and scripts are in: its hash is in the
+        // page's policy, so it's the one inline script that may. It goes in last, so what's hashed is what's served.
+        if let Some(start) = start {
+            use sha2::Digest;
+            let hash = data_encoding::BASE64.encode(&sha2::Sha256::digest(start.as_bytes()));
+            text = text.replacen("<script src=\"/start.js\"></script>", &format!("<script>{start}</script>"), 1).replacen("script-src 'self'", &format!("script-src 'self' 'sha256-{hash}'"), 1);
+        }
+        *page = text.into_bytes();
     }
     files
 }

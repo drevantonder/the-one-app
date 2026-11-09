@@ -107,6 +107,18 @@ fn the_web_clients_scripts_parse() {
     one::cloudflare::parses(&one::web::files()).unwrap();
 }
 
+/// The page's policy allows its one inline script (start.js) by its hash: of the text the page serves, whatever that
+/// script says, so a path in it isn't renamed after hashing and refused by the browser.
+#[test]
+fn the_pages_inline_script_is_the_one_its_policy_allows() {
+    use sha2::Digest;
+    let files = one::web::files();
+    let page = String::from_utf8(files.iter().find(|(p, _)| p == "index.html").unwrap().1.clone()).unwrap();
+    let body = page.split("<script>").nth(1).unwrap().split("</script>").next().unwrap();
+    let hash = data_encoding::BASE64.encode(&sha2::Sha256::digest(body.as_bytes()));
+    assert!(page.contains(&format!("'sha256-{hash}'")), "inline script hash {hash} not in policy");
+}
+
 #[test]
 fn the_workers_own_tests_pass() {
     let dir = crate::temp("workers-tests");

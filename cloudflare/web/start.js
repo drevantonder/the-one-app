@@ -17,7 +17,7 @@
   // after it starts (web.js never ran, or a frame was laid out at no size), it says so, with the way out, and the app's log
   // (`one logs`) gets a line. This is the page's first script and needs nothing else of it.
   // Arriving from another of a network's own pages with its logo (a View Transition, onboarding.css): the logo stays where
-  // it was until web.js draws what's under it. In single quotes, as Settings::web renames the page's ="/file"s after hashing this.
+  // it was until web.js draws what's under it.
   addEventListener("pagereveal", (e) => {
     const root = document.getElementById("root");
     if (e.viewTransition && root && !root.children.length) root.innerHTML = "<div id='one-arriving' data-slot='welcome'><img data-slot='welcome-logo' src='/logo.png' alt=''></div>";
