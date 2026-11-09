@@ -1064,7 +1064,8 @@ function Pages() {
     document.addEventListener("touchmove", touchMove, { passive: false })
     document.addEventListener("touchend", touchEnd)
     document.addEventListener("touchcancel", touchEnd)
-    addEventListener("keydown", key)
+    // First in line: a dialog closing on this Escape is gone by the time a later listener would look for it.
+    addEventListener("keydown", key, true)
     document.oncontextmenu = contextMenu
     return () => {
       document.removeEventListener("pointerdown", pointerDown)
@@ -1074,7 +1075,7 @@ function Pages() {
       document.removeEventListener("touchmove", touchMove)
       document.removeEventListener("touchend", touchEnd)
       document.removeEventListener("touchcancel", touchEnd)
-      removeEventListener("keydown", key)
+      removeEventListener("keydown", key, true)
       document.oncontextmenu = null
     }
   }, [])

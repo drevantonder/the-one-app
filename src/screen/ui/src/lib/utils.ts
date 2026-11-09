@@ -10,12 +10,16 @@ import { twMerge } from "tailwind-merge";
 /// back on what had it as the dialog opened (with none, Radix does what it does).
 export function useDialogFocus() {
   const opener = React.useRef<Element | null>(null)
+  // Read as it draws: a control with autoFocus has taken focus by the time Radix says the dialog opened.
+  const active = globalThis.document?.activeElement
+  if (!active?.closest('[role="dialog"],[role="alertdialog"]')) opener.current = active ?? null
   return {
     onOpenAutoFocus(event: Event) {
-      opener.current = document.activeElement
       event.preventDefault()
       const dialog = event.target as HTMLElement
-      if (!dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true })
+      if (dialog.contains(document.activeElement)) return
+      opener.current = document.activeElement
+      dialog.focus({ preventScroll: true })
     },
     onCloseAutoFocus: (event: Event) => focusBack(opener.current, event),
   }

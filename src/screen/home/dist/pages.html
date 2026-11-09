@@ -1526,8 +1526,8 @@ function bt() {
 }
 function xt() {
 	let e = Dt, t = Et, n = Tt, r = wt, i = Ct, a = St;
-	return document.addEventListener("pointerdown", Ge), addEventListener("pointermove", t), addEventListener("pointerup", e), addEventListener("pointercancel", n), document.addEventListener("touchmove", r, { passive: !1 }), document.addEventListener("touchend", i), document.addEventListener("touchcancel", i), addEventListener("keydown", a), document.oncontextmenu = Ke, () => {
-		document.removeEventListener("pointerdown", Ge), removeEventListener("pointermove", t), removeEventListener("pointerup", e), removeEventListener("pointercancel", n), document.removeEventListener("touchmove", r), document.removeEventListener("touchend", i), document.removeEventListener("touchcancel", i), removeEventListener("keydown", a), document.oncontextmenu = null;
+	return document.addEventListener("pointerdown", Ge), addEventListener("pointermove", t), addEventListener("pointerup", e), addEventListener("pointercancel", n), document.addEventListener("touchmove", r, { passive: !1 }), document.addEventListener("touchend", i), document.addEventListener("touchcancel", i), addEventListener("keydown", a, !0), document.oncontextmenu = Ke, () => {
+		document.removeEventListener("pointerdown", Ge), removeEventListener("pointermove", t), removeEventListener("pointerup", e), removeEventListener("pointercancel", n), document.removeEventListener("touchmove", r), document.removeEventListener("touchend", i), document.removeEventListener("touchcancel", i), removeEventListener("keydown", a, !0), document.oncontextmenu = null;
 	};
 }
 function St(e) {
