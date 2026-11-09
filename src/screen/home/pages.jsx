@@ -81,12 +81,17 @@ const widgetHost = (p) => ({
 /// A widget on a page: where it opens (its own link, else its app), and what its menu offers.
 function widgetItem(w, kept, p) {
   const a = home.app(w.app), key = `widget:${kept.id}`
-  const size = S.sizes[key] || w.size || "medium"
+  const picked = S.sizes[key] || w.size || "medium"
+  // Nothing to show is one grey line (a muted text, or a list with nothing in it), which needs no more than the smallest
+  // card; the size chosen is kept for when there's something.
+  const tree = home.tree(w, picked)
+  const bare = !w.error && ((tree?.t === "text" && tree.tone === "muted") || (tree?.t === "list" && !tree.c?.length))
+  const size = bare ? "small" : picked
   const name = w.title || home.label(a) || w.widget
   return {
-    slot: key, key, kind: "widget", w: { ...w, title: name }, kept, size, name, host: widgetHost(p), p,
+    slot: key, key, kind: "widget", w: { ...w, title: name }, kept, size, bare, name, host: widgetHost(p), p,
     open: !home.tree(w, size)?.link && a && home.hasScreens(a) ? home.open(a, p) : null,
-    menu: (e) => home.menu(widgetActions(w, kept, p, effective(size, columnsOf(p.scope)), columnsOf(p.scope)), e),
+    menu: (e) => home.menu(widgetActions(w, kept, p, effective(size, columnsOf(p.scope)), columnsOf(p.scope), bare), e),
   }
 }
 
@@ -258,10 +263,10 @@ function hereIn(p, kept) {
 
 /// What touching and holding a widget offers, as the Home Screen's: its sizes in a row, then Edit Widget (its
 /// options) and Copy What Went Wrong if it broke, then Edit Home Page, then Remove Widget.
-function widgetActions(w, kept, p, size, columns) {
+function widgetActions(w, kept, p, size, columns, bare) {
   // On a page they can't arrange, only what's there: no sizes, options or removing.
   const arrange = home.canArrange(p.scope)
-  const sizes = arrange ? home.supported(w).filter((s) => CELLS[s][0] <= columns) : []
+  const sizes = arrange && !bare ? home.supported(w).filter((s) => CELLS[s][0] <= columns) : []
   const out = sizes.length > 1 ? sizes.map((s) => ({ title: NAMES[s], icon: SHAPES[s], row: true, checked: s === size, run: () => s !== size && resize(p, kept, s) })) : []
   if (arrange && (w.options || []).length) out.push({ title: "Edit Widget", icon: "info", section: out.length > 0, run: () => (S.dialog = { kind: "options", w, kept, p }, S.render()) })
   if (w.error) out.push({ title: "Copy What Went Wrong", icon: "copy", section: out.at(-1)?.row, run: () => one.copy(w.error) })
@@ -574,7 +579,7 @@ function Cell({ page, at, editing, leaving, refreshing, nth, icon }) {
   // What can't move stays still and sits back, while all else jiggles.
   const movable = !!item.key
   const arrange = (editing || leaving) && movable
-  const resizable = arrange && item.kind === "widget" && home.supported(item.w).length > 1
+  const resizable = arrange && item.kind === "widget" && !item.bare && home.supported(item.w).length > 1
   let body
   if (item.kind === "widget") {
     body = (
@@ -642,15 +647,16 @@ function Cell({ page, at, editing, leaving, refreshing, nth, icon }) {
   )
 }
 
-/// How many columns a grid of `width` has: four across a phone's width, more where there's room, each cell at least
-/// 92 wide. Widgets are 2, 4 or 8 columns wide, so the columns are a multiple of 4 (a strip of 2 beside a row of them
-/// is a hole), unless that makes the cells larger than 132: then the most even ones.
+/// How many columns a grid of `width` has: four across a phone's width, more where there's room, each cell about a
+/// phone's, so a widget is the size it was drawn for on every screen. Widgets are 2, 4 or 8 columns wide, so the columns
+/// are a multiple of 4 (a strip of 2 beside a row of them is a hole), unless that makes the cells larger than 104: then
+/// the most even ones.
 function columnsFor(width, gap) {
   const cellOf = (columns) => (width - gap * (columns - 1)) / columns
   let columns = 4
-  while (cellOf(columns + 2) >= 92) columns += 2
+  while (cellOf(columns + 2) >= 76) columns += 2
   const four = columns - (columns % 4)
-  return cellOf(four) <= 132 ? four : columns
+  return cellOf(four) <= 104 ? four : columns
 }
 
 /// A grid as a home screen's: cells as many as the room has, their size filling it, four across a phone's width; each

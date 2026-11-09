@@ -3,6 +3,9 @@
 // tree is the app's, so nothing in it is ever markup: what's drawn is text, a number (`num`), or one of the names here.
 // `host` is what buttons, toggles and links act through: `run(app, tool, input, widget)` → the error's text for users if
 // it failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`.
+// A size is what fits in it, the same on every client: small is one fact, medium a few rows, large those rows with a
+// detail each and a chart, xl the list beside the chart. A tree that's one muted text or an empty list has nothing to
+// show yet, and a page gives it the smallest card.
 import * as React from "react"
 import { useLayoutEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -55,14 +58,14 @@ function WidgetCard({ w, host, tree = w.root, className, style, ...props }: { w:
       onClick={tree?.link && !w.error ? (e) => !e.defaultPrevented && host.follow(tree.link, w) : undefined}
       {...props}
     >
-      {(tree?.header !== false || w.error) && <div className="truncate text-[13px] font-medium text-muted-foreground">{w.title || w.widget}</div>}
+      {(tree?.header !== false || w.error) && <div className="shrink-0 truncate text-[13px] font-medium text-muted-foreground">{w.title || w.widget}</div>}
       {w.error ? (
-        <>
-          <div className="text-[15px] font-medium text-warning">This widget stopped working.</div>
-          {why && why !== "That didn't work." && <div className="select-text break-words text-[13px] text-muted-foreground">{why}</div>}
-        </>
+        <div className="flex min-h-0 flex-col gap-1">
+          <div className="flex items-center gap-1.5 font-medium text-warning"><Icon name="warning-fill" className="size-4 shrink-0" />Not working</div>
+          {why && why !== "That didn't work." && <div className="line-clamp-4 select-text break-words text-[13px] text-muted-foreground">{why}</div>}
+        </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col [&>[data-w=col]]:flex-1">
+        <div className="flex min-h-0 flex-1 flex-col [&>[data-w=col]]:flex-1 [&>.contents>[data-w=col]]:flex-1">
           <Node n={tree} w={w} host={host} />
         </div>
       )}

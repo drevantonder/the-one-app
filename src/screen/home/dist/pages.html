@@ -259,22 +259,23 @@ var ne = () => ({
 	}
 });
 function ce(e, t, n) {
-	let r = k.app(e.app), i = `widget:${t.id}`, a = B.sizes[i] || e.size || "medium", o = e.title || k.label(r) || e.widget;
+	let r = k.app(e.app), i = `widget:${t.id}`, a = B.sizes[i] || e.size || "medium", o = k.tree(e, a), s = !e.error && (o?.t === "text" && o.tone === "muted" || o?.t === "list" && !o.c?.length), c = s ? "small" : a, l = e.title || k.label(r) || e.widget;
 	return {
 		slot: i,
 		key: i,
 		kind: "widget",
 		w: {
 			...e,
-			title: o
+			title: l
 		},
 		kept: t,
-		size: a,
-		name: o,
+		size: c,
+		bare: s,
+		name: l,
 		host: se(n),
 		p: n,
-		open: !k.tree(e, a)?.link && r && k.hasScreens(r) ? k.open(r, n) : null,
-		menu: (r) => k.menu(we(e, t, n, ee(a, te(n.scope)), te(n.scope)), r)
+		open: !k.tree(e, c)?.link && r && k.hasScreens(r) ? k.open(r, n) : null,
+		menu: (r) => k.menu(we(e, t, n, ee(c, te(n.scope)), te(n.scope), s), r)
 	};
 }
 function le(e, t) {
@@ -475,39 +476,39 @@ function Ce(e, t) {
 	let n = document.querySelector(`[data-page="${CSS.escape(e.scope)}"]`).getBoundingClientRect().top, r = Ae(e.scope).find((e) => e.dataset.cell !== "accounts" && e.getBoundingClientRect().top >= n), i = r ? t.findIndex((e) => J(e) === r.dataset.cell) : -1;
 	return i < 0 ? t.length : i;
 }
-function we(e, t, n, r, i) {
-	let a = k.canArrange(n.scope), o = a ? k.supported(e).filter((e) => N[e][0] <= i) : [], s = o.length > 1 ? o.map((e) => ({
+function we(e, t, n, r, i, a) {
+	let o = k.canArrange(n.scope), s = o && !a ? k.supported(e).filter((e) => N[e][0] <= i) : [], c = s.length > 1 ? s.map((e) => ({
 		title: P[e],
 		icon: F[e],
 		row: !0,
 		checked: e === r,
 		run: () => e !== r && _e(n, t, e)
 	})) : [];
-	return a && (e.options || []).length && s.push({
+	return o && (e.options || []).length && c.push({
 		title: "Edit Widget",
 		icon: "info",
-		section: s.length > 0,
+		section: c.length > 0,
 		run: () => (B.dialog = {
 			kind: "options",
 			w: e,
 			kept: t,
 			p: n
 		}, B.render())
-	}), e.error && s.push({
+	}), e.error && c.push({
 		title: "Copy What Went Wrong",
 		icon: "copy",
-		section: s.at(-1)?.row,
+		section: c.at(-1)?.row,
 		run: () => one.copy(e.error)
-	}), a && s.push({
+	}), o && c.push({
 		...z,
 		section: !0
-	}), a && s.push({
+	}), o && c.push({
 		title: "Remove Widget",
 		icon: "minus-circle",
 		danger: !0,
 		section: !0,
 		run: () => be(n, { key: `widget:${t.id}` })
-	}), s;
+	}), c;
 }
 function Te() {
 	B.dialog = {
@@ -752,7 +753,7 @@ function Ue(t) {
 function We({ page: e, at: t, editing: n, leaving: i, refreshing: a, nth: o, icon: s }) {
 	let { item: c, size: u, col: f, row: p, w: m, h } = t, g = r(null), _ = r(!1), v = _.current || c.kind === "pending";
 	_.current = v;
-	let y = c.kind === "widget" || c.kind === "pending", b = !!c.key, x = (n || i) && b, C = x && c.kind === "widget" && k.supported(c.w).length > 1, T;
+	let y = c.kind === "widget" || c.kind === "pending", b = !!c.key, x = (n || i) && b, C = x && c.kind === "widget" && !c.bare && k.supported(c.w).length > 1, T;
 	return T = c.kind === "widget" ? /* @__PURE__ */ D(S, {
 		w: c.w,
 		host: c.host,
@@ -814,9 +815,9 @@ function We({ page: e, at: t, editing: n, leaving: i, refreshing: a, nth: o, ico
 }
 function Ge(e, t) {
 	let n = (n) => (e - t * (n - 1)) / n, r = 4;
-	for (; n(r + 2) >= 92;) r += 2;
+	for (; n(r + 2) >= 76;) r += 2;
 	let i = r - r % 4;
-	return n(i) <= 132 ? i : r;
+	return n(i) <= 104 ? i : r;
 }
 function Ke({ page: e, editing: t, leaving: i, refreshing: a }) {
 	let [o, s] = T(), c = s < 500, l = c ? 14 : 18, u = c ? 4 : Ge(s, l), d = (s - l * (u - 1)) / u, f = Math.round(Math.max(32, Math.min(68, d - 24))), p = s ? pe(e.list, u) : [];
