@@ -120,6 +120,12 @@ fn shown(node: &Client, input: &Value) -> anyhow::Result<Value> {
 fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     let app = input["app"].as_str().unwrap_or_default();
     let screen = input["screen"].as_str().unwrap_or("main");
+    // A node shows a page for what isn't there, with the way home: from a chat, the agent should hear it.
+    let apps = node.apps().unwrap_or_default();
+    let found = apps.iter().find(|a| a["name"] == app);
+    let screens = found.map(|a| a["screens"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
+    anyhow::ensure!(found.is_some(), "no app named {app}: apps_list lists them");
+    anyhow::ensure!(screens.iter().any(|s| s["name"] == screen), "no screen {screen} in {app}: it has {}", screens.iter().filter_map(|s| s["name"].as_str()).collect::<Vec<_>>().join(", "));
     let mut url = format!("/v1/screens/{app}/{screen}");
     let params = if input["params"].is_object() { input["params"].to_string() } else { "{}".into() };
     let mut query = vec![("params", params)];
@@ -133,8 +139,6 @@ fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     std::io::Read::read_to_string(&mut { page.body }, &mut html)?;
     anyhow::ensure!(page.status == 200, "{}", html.trim());
     // Its title, as the web client names it; and where the web client shows it, for what a chat can't do (give files).
-    let apps = node.apps().unwrap_or_default();
-    let found = apps.iter().find(|a| a["name"] == app);
     let title = found
         .and_then(|a| a["screens"].as_array().into_iter().flatten().find(|s| s["name"] == screen)?["title"].as_str())
         .or_else(|| found.and_then(|a| a["title"].as_str().or(a["name"].as_str())))

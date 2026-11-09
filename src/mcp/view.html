@@ -10,13 +10,15 @@
 <style>/*ui.css*/</style>
 <style>
   html, body { background: transparent; }
-  body { padding: 4px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  /* The chat's frame is the edge: and Radix's scroll lock, while a sheet's open, mustn't give the page @one/ui's padding. */
+  body, html body[data-scroll-locked] { padding: 0; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; padding: 8px; }
   .cards > .wait { opacity: .5; }
   iframe { border: 0; width: 100%; display: block; min-height: 120px; }
   .empty { color: var(--muted-foreground); padding: 12px; font-size: 14px; }
+  .problem { padding: 8px; }
   /* What's coming: a grey card where it will be. A screen shows it until it says how tall it is, then grows to it. */
-  .ph { height: 160px; border-radius: 1.5rem; background: var(--muted); animation: breathe 1.6s ease-in-out infinite; }
+  .ph { height: 160px; background: var(--muted); animation: breathe 1.6s ease-in-out infinite; }
   @keyframes breathe { 50% { opacity: .55; } }
   @media (prefers-reduced-motion: reduce) { .ph { animation: none; } }
   .frame { position: relative; }
@@ -25,11 +27,11 @@
   .frame.ready > iframe { opacity: 1; }
   /* Back, over what was opened from what's under it, with its title. */
   .nav[hidden], [hidden] { display: none !important; }
-  .nav { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 32px; margin-bottom: 4px; font-size: 14px; }
+  .nav { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 32px; padding: 4px 8px 0; font-size: 14px; }
   .nav > :first-child { justify-self: start; }
   .nav .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* A sheet or menu needs room: the view is tall enough for one while it's open. */
-  body.over { min-height: 560px; }
+  body.over { min-height: min(560px, var(--room, 560px)); }
 </style>
 </head>
 <body>
@@ -40,7 +42,7 @@
 <script>/*ui.js*/</script>
 <script>
 (() => {
-  let next = 1, appearance = "automatic", torn = false;
+  let next = 1, appearance = "automatic", torn = false, room = 640;
   const pending = new Map(), out = document.getElementById("out");
   const post = (msg) => parent.postMessage({ jsonrpc: "2.0", ...msg }, "*");
   const request = (method, params) => new Promise((resolve, reject) => { const id = next++; pending.set(id, { resolve, reject }); post({ id, method, params }); });
@@ -82,9 +84,27 @@
     }
     if (m.method === "ui/notifications/tool-input") args = m.params?.arguments || {};
     if (m.method === "ui/notifications/tool-result") show(m.params, true);
-    if (m.method === "ui/notifications/host-context-changed") theme(m.params);
+    if (m.method === "ui/notifications/tool-cancelled") nothing("Stopped.");
+    if (m.method === "ui/notifications/host-context-changed") context(m.params);
     if (m.method === "ui/resource-teardown" && m.id !== undefined) (torn = true), post({ id: m.id, result: {} });
   });
+
+  // What the chat says about where this view is: how tall it may be, and its light or dark.
+  function context(ctx) {
+    if (ctx?.containerDimensions) fit(ctx.containerDimensions);
+    theme(ctx);
+  }
+
+  // A screen scrolls in its own frame rather than growing past what shows, so its sheets and dialogs land in view and
+  // its sticky parts stick. Where a chat sets no limit, a long screen still shouldn't push the conversation away.
+  function fit({ height, maxHeight }) {
+    room = height ?? Math.min(maxHeight ?? 640, 640);
+    document.documentElement.style.setProperty("--room", room + "px");
+    document.querySelectorAll(".frame > iframe").forEach((f) => f.__tall && tall(f));
+  }
+  function tall(frame) {
+    frame.style.height = (frame.__screen.sheet ? frame.__tall : Math.min(frame.__tall, room - (nav.hidden ? 0 : nav.offsetHeight))) + "px";
+  }
 
   // The chat's light or dark, here and in every screen's frame.
   function theme(ctx) {
@@ -98,12 +118,7 @@
   function show(result, fresh) {
     const s = result?.structuredContent;
     if (fresh) stack.length = 0;
-    if (!s) {
-      stack.length = 0;
-      out.className = "empty";
-      out.textContent = (result?.content || []).map((c) => c.text || "").join("\n");
-      return size();
-    }
+    if (!s) return nothing((result?.content || []).map((c) => c.text || "").join("\n"), result?.isError);
     const el = s.html !== undefined ? mount(s) : widgets(s);
     if (!stack.length) out.className = "", out.replaceChildren(nav);
     if (top()) top().el.hidden = true;
@@ -111,6 +126,15 @@
     out.append(el);
     bar();
     watch();
+  }
+
+  // In place of everything: a grey line, or what went wrong as a problem box.
+  function nothing(text, failed) {
+    stack.length = 0;
+    out.className = failed ? "problem" : "empty";
+    out.textContent = failed ? "" : text;
+    if (failed) createRoot(out.appendChild(document.createElement("div"))).render(h(ui.Problem, { title: one.plain(text).title }));
+    size();
   }
 
   function widgets(s) {
@@ -136,12 +160,16 @@
     bar();
   }
 
-  // A widget's card, drawn by @one/ui as the pages draw it, in an element of its own to replace when it's drawn again.
+  // A widget's card, drawn by @one/ui as the pages draw it, in an element of its own that's drawn again in place.
   function card(w) {
-    const el = Object.assign(document.createElement("div"), { __w: w });
+    const el = document.createElement("div");
     el.__root = createRoot(el);
-    el.__root.render(h(ui.WidgetCard, { w, host: { run: act, follow }, className: "h-full" }));
+    draw(el, w);
     return el;
+  }
+  function draw(el, w) {
+    el.__w = w;
+    el.__root.render(h(ui.WidgetCard, { w, host: { run: act, follow }, className: "h-full" }));
   }
   const cardOf = (w) => [...(top()?.el.children || [])].find((el) => el.__w === w);
 
@@ -167,8 +195,7 @@
       const el = [...layer.el.children].find((c) => c.__w === w);
       if (!now || !el || i < 0) continue;
       s.widgets[i] = now;
-      el.replaceWith(card(now));
-      el.__root.unmount();
+      draw(el, now);
     }
     size();
   }
@@ -249,7 +276,7 @@
     if (!screen) return;
     const { s, frame } = screen;
     if (m?.oneHeight !== undefined) {
-      if (m.oneHeight > 40) frame.style.height = m.oneHeight + "px", ready(frame.parentElement);
+      if (m.oneHeight > 40) (frame.__tall = m.oneHeight), tall(frame), ready(frame.parentElement);
       return size();
     }
     if (!m?.one) return;
@@ -269,7 +296,7 @@
         },
         close: (value) => (screen.sheet ? screen.sheet.close(value) : back(), null),
         title: (title) => {
-          s.title = title || s.title;
+          s.title = title;
           if (screen.sheet) screen.sheet.setTitle(s.title);
           else if (top()?.s === s) bar();
           return null;
@@ -330,7 +357,7 @@
   new ResizeObserver(size).observe(document.body);
 
   request("ui/initialize", { appInfo: { name: "view", version: "1" }, appCapabilities: {}, protocolVersion: "2026-01-26" })
-    .then((init) => { theme(init?.hostContext); notify("ui/notifications/initialized"); })
+    .then((init) => { context(init?.hostContext); notify("ui/notifications/initialized"); })
     .catch(() => {});
 })();
 </script>
