@@ -16,6 +16,8 @@ import { home } from "./lib/model.js"
 
 const { scope: chosen, swipe } = one.params || {}
 const SETTINGS = "settings"
+// What an icon's name needs under it: the space above the icon and between them, two lines, and clear of what's below.
+const NAME = 52
 const CELLS = { small: [2, 2], medium: [4, 2], large: [4, 4], xl: [8, 4] }
 const NAMES = { small: "Small", medium: "Medium", large: "Large", xl: "Extra Large" }
 const SHAPES = { small: "square", medium: "rectangle", large: "squares-four", xl: "columns" }
@@ -548,7 +550,7 @@ function Tile({ name, icon, size, badge, onClick, children }) {
         {children || <AppIcon app={icon} size={size} />}
         {badge > 0 && <Badge variant="destructive" className="absolute -right-2 -top-2 h-6 min-w-6 px-1.5 text-sm font-semibold tabular-nums dark:bg-destructive">{badge > 99 ? "99+" : badge}</Badge>}
       </span>
-      <span className="line-clamp-2 max-w-full text-center text-[13px] leading-tight">{name}</span>
+      <span className="line-clamp-2 max-w-full text-center text-[13px] leading-tight [overflow-wrap:anywhere]">{name}</span>
     </button>
   )
 }
@@ -568,7 +570,7 @@ function Folder({ apps, size }) {
 }
 
 /// One place on a grid: its item, and while arranging its − badge, and a widget's corner to resize it.
-function Cell({ page, at, editing, leaving, refreshing, nth, icon }) {
+function Cell({ page, at, tall, editing, leaving, refreshing, nth, icon }) {
   const { item, size, col, row, w, h } = at
   const el = useRef(null)
   // A widget that was a grey card a moment ago fades in over where the card was.
@@ -614,6 +616,7 @@ function Cell({ page, at, editing, leaving, refreshing, nth, icon }) {
       style={{
         gridColumn: `${col} / span ${w}`,
         gridRow: `${row} / span ${h}`,
+        ...(wide ? { alignSelf: "start", height: tall } : {}),
         "--wobble": !editing ? "0deg" : wide ? "0.5deg" : "1.6deg",
         ...(arrange ? { animationDuration: nth % 3 === 0 ? "0.26s" : nth % 2 === 0 ? "0.31s" : "0.28s", animationDelay: nth % 2 === 0 ? "-0.12s" : "0s" } : {}),
       }}
@@ -671,6 +674,10 @@ function Grid({ page, editing, leaving, refreshing }) {
   const icon = Math.round(Math.max(32, Math.min(68, cell - 24)))
   const placed = width ? pack(page.list, columns) : []
   useLayoutEffect(() => { S.geometry[page.scope] = { columns, cell, gap } })
+  // A row with an icon in it is as tall as a two-line name needs; a widget beside one keeps its own size.
+  const named = Math.max(cell, Math.ceil(icon + NAME - gap))
+  const rows = Array.from({ length: placed.reduce((n, a) => Math.max(n, a.row + a.h - 1), 0) }, (_, r) =>
+    placed.some((a) => a.size === null && a.row === r + 1) ? named : cell)
   // Each item glides from where it was to where it goes, once what moves them has said so.
   const was = useRef(new Map())
   useLayoutEffect(() => {
@@ -693,8 +700,8 @@ function Grid({ page, editing, leaving, refreshing }) {
     flipNext = false
   })
   return (
-    <div ref={ref} className="relative grid" style={{ gap, gridAutoRows: cell > 0 ? cell : undefined, gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, "--icon": `${icon}px` }}>
-      {placed.map((at, nth) => <Cell key={at.item.slot} page={page} at={at} editing={editing} leaving={leaving} nth={nth} icon={icon} refreshing={refreshing.includes(at.item.kept?.id)} />)}
+    <div ref={ref} className="relative grid" style={{ gap, gridTemplateRows: rows.map((h) => `${h}px`).join(" ") || undefined, gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, "--icon": `${icon}px` }}>
+      {placed.map((at, nth) => <Cell key={at.item.slot} page={page} at={at} tall={at.h * cell + (at.h - 1) * gap} editing={editing} leaving={leaving} nth={nth} icon={icon} refreshing={refreshing.includes(at.item.kept?.id)} />)}
     </div>
   )
 }
@@ -703,19 +710,24 @@ function Grid({ page, editing, leaving, refreshing }) {
 function Page({ page, editing, leaving, undone, refreshing, bottom }) {
   const { scope, title, subtitle, arrange } = page
   const changing = editing || leaving
+  // Arranging, the title keeps the lines it had, cut short rather than wrapping again, so the grid under it stays still.
+  const heading = useRef(null), lines = useRef(1)
+  useLayoutEffect(() => {
+    if (!changing && heading.current) lines.current = Math.max(1, Math.round(heading.current.offsetHeight / parseFloat(getComputedStyle(heading.current).lineHeight)))
+  })
   return (
     <section
       data-page={scope}
       className={cn("h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-5 [scroll-snap-stop:always]", swipe ? "pt-[calc(1.25rem+env(safe-area-inset-top))]" : "pt-4")}
       style={{ paddingBottom: bottom }}
     >
-      <div className="flex items-start gap-3 px-1 pb-5">
+      <div className="flex items-start gap-3 pb-5">
         <div className="min-w-0 flex-1">
-          <h1 className="large-title text-3xl font-bold tracking-tight">{title}</h1>
+          <h1 ref={heading} className={cn("large-title text-3xl font-bold tracking-tight [overflow-wrap:anywhere]", changing && "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:var(--lines)]")} style={{ "--lines": lines.current }}>{title}</h1>
           {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
         </div>
         {arrange && !page.empty && (
-          <div data-ctl className="mt-1.5 flex shrink-0 gap-2">
+          <div data-ctl className="mt-0.5 flex shrink-0 gap-2">
             {undone && <Button data-undo variant="ghost" size="sm" className={COMES} onClick={undo}>Undo</Button>}
             {changing ? (
               <>
@@ -733,10 +745,10 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
       ) : (
         <>
           <Grid page={page} editing={editing && !!arrange} leaving={leaving && !!arrange} refreshing={refreshing} />
-          {page.empty && <Empty className="py-6" action={page.arrange && page.store ? { label: "Open the App Store", run: home.openStore } : undefined}>{page.said}</Empty>}
+          {page.empty && <Empty className={cn("items-start px-0 pb-6 text-left", page.list.length ? "pt-6" : "pt-0")} action={page.arrange && page.store ? { label: "Open the App Store", run: home.openStore } : undefined}>{page.said}</Empty>}
           {changing && page.groups && (
-            <div data-ctl className="flex justify-center pt-8">
-              <Button variant="ghost" size="sm" className={editing ? COMES : GOES} onClick={editPages}>Edit Pages</Button>
+            <div data-ctl className="pt-8">
+              <Button variant="ghost" size="sm" className={cn("-ml-3", editing ? COMES : GOES)} onClick={editPages}>Edit Pages</Button>
             </div>
           )}
         </>

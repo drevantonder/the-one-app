@@ -51,7 +51,7 @@ function showMenu(items: MenuItem[], rect: number[]): Promise<number | null> {
       <DropdownMenuTrigger asChild>
         <span aria-hidden className="pointer-events-none fixed" style={{ left: x, top: y, width: w, height: h }} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={w ? "center" : "start"} collisionPadding={8} className="min-w-48" onCloseAutoFocus={(e) => e.preventDefault()}>
+      <DropdownMenuContent align={w ? "center" : "start"} collisionPadding={8} className="max-w-[min(20rem,calc(100vw-1rem))] min-w-48" onCloseAutoFocus={(e) => e.preventDefault()}>
         {!!row.length && (
           <>
             <div className="flex gap-1">
@@ -73,7 +73,7 @@ function showMenu(items: MenuItem[], rect: number[]): Promise<number | null> {
         {items.map((item, i) => {
           if (item.row) return null
           const line = item.section && i > row.length && <DropdownMenuSeparator />
-          const face = <><span className="flex-1">{item.title}</span>{item.icon && <Icon name={item.icon} />}</>
+          const face = <><span className="min-w-0 flex-1 truncate">{item.title}</span>{item.icon && <Icon name={item.icon} />}</>
           return (
             <React.Fragment key={i}>
               {line}
