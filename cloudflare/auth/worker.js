@@ -184,6 +184,8 @@ export class Auth extends DurableObject {
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
     sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
     sql.exec("create table if not exists google_starts (id text primary key, query text not null, made integer not null, join_for text)");
+    // The Google sign-ins (by their start's id) that said no because the user is an admin, for the page to say so.
+    sql.exec("create table if not exists google_admins (id text primary key, made integer not null)");
     // What a user's sign-in for a device showed (`{ id_token }` or `{ passkey }`), by that device's key and the user,
     // for its request to join to carry.
     sql.exec("create table if not exists proofs (key text not null, user text not null, proof text not null, made integer not null, primary key (key, user))");
@@ -238,7 +240,12 @@ export class Auth extends DurableObject {
             // An admin signs in only with a passkey, which resists phishing.
             async before(session, ctx) {
               if (throwaway || BY_PASSKEY.includes(ctx?.path)) return;
-              if (sql.exec("select 1 from passkey_only where user = ?", session.userId).toArray().length) refuse(403, "You're an admin, so you sign in with your passkey.");
+              if (sql.exec("select 1 from passkey_only where user = ?", session.userId).toArray().length) {
+                // Google's way back to the page carries no reason: the page asks for it, by the start this browser made.
+                const secret = cookieOf(ctx?.headers, cookieName(env, "one-google-start"));
+                if (secret) sql.exec("insert or replace into google_admins (id, made) values (?, ?)", await hash(secret), Date.now());
+                refuse(403, "You're an admin, so you sign in with your passkey.");
+              }
             },
           },
         },
@@ -726,7 +733,9 @@ export class Auth extends DurableObject {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
     const goes = web ? null : goesTo(uris.includes(redirect) ? redirect : uris[0], origin);
-    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, user: session?.user.name || null, fresh: !!(await this.started(request, session, query)) };
+    const secret = cookieOf(request.headers, cookieName(this.env, "one-google-start"));
+    const admin = !!secret && this.ctx.storage.sql.exec("select 1 from google_admins where id = ? and made > ?", await hash(secret), Date.now() - STARTED).toArray().length;
+    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, user: session?.user.name || null, fresh: !!(await this.started(request, session, query)), admin };
   }
 
   // Signing in to a client with Google goes straight on once Google says yes, with no second tap, but only for the
@@ -741,6 +750,7 @@ export class Auth extends DurableObject {
     const secret = b64u.encode(crypto.getRandomValues(new Uint8Array(32)));
     const sql = this.ctx.storage.sql;
     sql.exec("delete from google_starts where made <= ?", Date.now() - STARTED);
+    sql.exec("delete from google_admins where made <= ?", Date.now() - STARTED);
     sql.exec("insert into google_starts (id, query, made, join_for) values (?, ?, ?, ?)", await hash(secret), await hash(query.toString()), Date.now(), joinOf(query.toString()));
     return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-google-start", secret, STARTED / 1000) } });
   }

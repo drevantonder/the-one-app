@@ -203,6 +203,8 @@ function googlePage(look) {
         document.title = title;
         document.getElementById("title").textContent = title;
         if (!about.web) acts(about);
+        // Google said no because they're an admin: the way in is the passkey, which is why it's the other button.
+        if (about.admin && !about.fresh) say("You're an admin, so you sign in with your passkey, not Google.");
         // Back from the Google sign-in started here for this client, just now: on to it.
         if (about.fresh && !failed) {
           waiting ||= busy(button, "Signing You In…");
