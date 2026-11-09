@@ -6,7 +6,7 @@
 //!
 //! - `call` `{ app, tool, input }`: runs a tool as the user, then keeps the widgets again → `{ "ok": … }`
 //! - `widgets` `{}`: the pages' widgets kept again where the platform's own read them (`crate::widgets_dir`) → `{ "dir" }`
-//! - `open-note` `{ n }`: a pushed note opened with this device's key → `{ id, title, body, app, badge, link, join }`,
+//! - `open-note` `{ n }`: a pushed note opened with this device's key → `{ id, title, body, app, link, join }`,
 //!   `link` what a tap opens and `join` the code of a device asking to join, if it does
 //! - `join` `{ code, approve }`: a device asking to join, let in or turned down → `{ "ok": null }`
 //! - `register-push` `{ via, address }`: this device's push address registered with the push Worker → `{ "ok": null }`
@@ -146,7 +146,7 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<one_client::Device>>) -
         "open-note" => {
             let (_, _, key) = signed_in(&data())?;
             let (note, _) = one_client::open_note(key, &text("n")?).map_err(|e| e.to_string())?;
-            let mut out = json!({ "id": note.id, "title": note.title, "body": note.body, "app": note.app, "badge": note.badge, "link": note.link(), "join": note.join() });
+            let mut out = json!({ "id": note.id, "title": note.title, "body": note.body, "app": note.app, "link": note.link(), "join": note.join() });
             // Absent, not null: Kotlin's optString reads a null as "null".
             out.as_object_mut().unwrap().retain(|_, v| !v.is_null());
             Ok(out)

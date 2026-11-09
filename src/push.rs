@@ -41,9 +41,6 @@ pub struct Note {
     pub screen: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Map<String, Value>>,
-    /// The number on the app's icon; 0 clears it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub badge: Option<i64>,
     /// Something its device does, checking it first itself: `{ "join": "<code>" }`, a device asking to join, which the
     /// Apple apps show with Approve and Not Me (`client/native/iphone/Notifications/Notes.swift`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -164,7 +161,6 @@ pub struct Send {
     pub app: String,
     pub screen: String,
     pub params: Option<Map<String, Value>>,
-    pub badge: Option<i64>,
 }
 
 #[cfg(feature = "node")]
@@ -178,7 +174,7 @@ impl Send {
         let screen = if app.is_empty() { String::new() } else { first(&self.screen, "main") };
         let title: String = self.title.trim().chars().take(200).collect();
         let body: String = self.body.chars().take(2000).collect();
-        Ok(Note { id: HEXLOWER.encode(&rand::random::<[u8; 8]>()), title, body, params: params.filter(|p| !p.is_empty() && !app.is_empty()), app, screen, badge: self.badge, action: None })
+        Ok(Note { id: HEXLOWER.encode(&rand::random::<[u8; 8]>()), title, body, params: params.filter(|p| !p.is_empty() && !app.is_empty()), app, screen, action: None })
     }
 }
 

@@ -29,7 +29,6 @@ fn tools() -> Vec<Tool> {
                     "app": { "type": "string", "description": "the app it opens, when no app sends it" },
                     "screen": { "type": "string", "description": "the screen it opens" },
                     "params": { "type": "object", "description": "that screen's params" },
-                    "badge": { "type": "integer", "description": "the number on the app's icon; 0 clears it" },
                 } },
                 "output": { "type": "object", "required": ["sent", "devices"], "properties": {
                     "sent": { "type": "integer", "description": "how many devices it went to" }, "devices": { "type": "integer", "description": "how many of yours get notifications" },

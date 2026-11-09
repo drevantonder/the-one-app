@@ -108,7 +108,7 @@ pub fn update_refusal(yours: &str) -> String {
 
 /// What a push of a note whose text the phone can't open shows, as Apple's service shows it for the app that can't
 /// (and the browser's, which can't open it either).
-pub const NOTE_FALLBACK: &str = "You have a new notification.";
+pub const NOTE_FALLBACK: &str = "New notification";
 
 /// How long a widget may take to draw beside the rest of its page. One that takes longer comes as `late`, showing
 /// `LATE_WIDGET`, so the others aren't held back; asked for alone (`kind=<app>.<widget>`), it takes what it takes.

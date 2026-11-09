@@ -28,15 +28,13 @@ fn failed(message: &str) -> OneError {
     OneError::Failed { reason: message.into() }
 }
 
-/// A note pushed to this device, opened: what to show, its app (the notifications it's grouped with), the number for
-/// the app's icon, what a tap opens (`link`, as every platform's), and the code of a device asking to join, which its
+/// A note pushed to this device, opened: what to show, its app (the notifications it's grouped with), what a tap opens (`link`, as every platform's), and the code of a device asking to join, which its
 /// notification answers with Approve and Not Me.
 #[derive(uniffi::Record)]
 pub struct Note {
     pub title: String,
     pub body: String,
     pub app: String,
-    pub badge: Option<i64>,
     pub link: Option<String>,
     pub join: Option<String>,
 }
@@ -48,5 +46,5 @@ pub fn open_note(secret: Vec<u8>, pushed: String) -> Result<Note, OneError> {
     let secret: [u8; 32] = secret.try_into().map_err(|_| failed("a device's key is 32 bytes"))?;
     let (n, _) = one_client::open_note(secret, &pushed)?;
     let (link, join) = (n.link(), n.join().map(str::to_string));
-    Ok(Note { title: n.title, body: n.body, app: n.app, badge: n.badge, link, join })
+    Ok(Note { title: n.title, body: n.body, app: n.app, link, join })
 }
