@@ -50,24 +50,6 @@ line() { awk -v n="$1" '$1 == n && NF == 6' newest.body | head -n 1; }
 # Whether two commits are the same one: a build's short form is its first twelve, a custom build's followed by its config.
 same() { [ "${1:0:12}" = "${2:0:12}" ]; }
 
-# Runs a build in its own process group, stopped for a newer record; `stopped` says if it was.
-run() {
-	stopped=
-	set -m
-	"$@" > "$c/update.log" 2>&1 &
-	local pid=$! n=0
-	set +m
-	while kill -0 "$pid" 2>/dev/null; do
-		sleep 2
-		if [ $((++n % 30)) = 0 ] && record && ! same "$(line source | cut -d' ' -f2)" "$want_commit"; then
-			stopped=1
-			kill -TERM -- "-$pid" 2>/dev/null
-			break
-		fi
-	done
-	wait "$pid"
-}
-
 # The clean clone at a commit, with `config` the config to build with.
 checkout() {
 	[ -d "$c/src/.git" ] || git clone -q "https://github.com/$repo.git" "$c/src" || return 1
@@ -100,9 +82,10 @@ build_here() {
 	fi
 	say "building ${want_commit:0:12}"
 	local notarize=""; if same "$(line source-release | cut -d' ' -f2)" "$want_commit"; then notarize=--release; fi
-	run yielding bash -c "cd '$c/src' && CONFIG='$config' client/native/disk.sh retry client/native/mac/build.sh $notarize"
+	# Never stopped for a newer record: main moves faster than a build ends, so one that restarted each time would never end.
+	# It ends having built the commit it began with, and the next run takes the record's newest.
+	yielding bash -c "cd '$c/src' && CONFIG='$config' client/native/disk.sh retry client/native/mac/build.sh $notarize" > "$c/update.log" 2>&1
 	local status=$?
-	[ -z "$stopped" ] || exit 0
 	echo "$want" > tried; echo "$with" > tried.job
 	if [ $status != 0 ]; then
 		tail -n 25 update.log > failed.log; touch failed
