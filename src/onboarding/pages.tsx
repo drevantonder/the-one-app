@@ -12,10 +12,9 @@ const ANOTHER = "Add a second one, so losing one doesn't lock you out."
 
 export const pages = {
   "sign-in": <Welcome logo={logo} title="{{name}}" action={{ label: "Sign In" }} />,
-  "sign-in-google": <Welcome logo={logo} title="{{name}}" action={{ label: "Sign In with Google" }} other={{ label: "Use a Passkey" }} />,
+  "sign-in-provider": <Welcome logo={logo} title="{{name}}" action={{ label: "Sign In with {{provider}}" }} other={{ label: "Use a Passkey" }} />,
   "sign-in-throwaway": <Welcome logo={logo} title="{{name}}" action={{ label: "Sign In as {{user}}" }} />,
   "invite": <Welcome logo={logo} title="Join {{name}}" action={{ label: "Join" }} />,
-  "invite-google": <Welcome logo={logo} title="Join {{name}}" action={{ label: "Sign In with Google" }} />,
   "joined": <Welcome logo={logo} title="You've joined {{yours}}" action={{ label: "Open {{name}}", href: "/" }} />,
   "passkeys": (
     <Welcome logo={logo} title="Passkeys" text="Each one signs you in to {{name}}." callout={ANOTHER} action={{ label: "Add a Passkey" }}>
@@ -33,4 +32,5 @@ export const parts = {
   problem: <Problem title="-" text="-" />,
   spinner: <Spinner className="text-current" />,
   passkey: <ListRow title="-" sub="-" trailing={<Button variant="ghost" size="sm">Remove</Button>} />,
+  provider: <Button variant="secondary" size="lg" className="mt-2 min-w-56">-</Button>,
 }

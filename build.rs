@@ -49,11 +49,7 @@ fn main() {
     let out = format!("{out}pub const CONFIG_FILE: &str = {:?};\npub const CONFIG_REPO: &str = {repo:?};\n", file.to_string_lossy());
     let out = format!("{out}pub const MADE_HERE: &str = {:?};\n", config.get("made_here").and_then(|v| v.as_str()).unwrap_or("Made here"));
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
-    let sign_in = config.get("sign_in").and_then(|v| v.as_str()).unwrap_or("passkey");
-    assert!(["passkey", "google"].contains(&sign_in), "sign_in is passkey or google");
-    assert!(sign_in != "google" || !optional("join_domain").is_empty(), "signing in with Google needs join_domain");
-    let variant = if sign_in == "google" { "Google" } else { "Passkey" };
-    let out = format!("{out}pub const SIGN_IN: SignIn = SignIn::{variant};\npub const JOIN_DOMAIN: &str = {:?};\n", optional("join_domain"));
+    let out = format!("{out}pub const JOIN_DOMAIN: &str = {:?};\n", optional("join_domain"));
     let relay_location = optional("relay_location");
     assert!(["", "wnam", "enam", "sam", "weur", "eeur", "apac", "oc", "afr", "me"].contains(&relay_location.as_str()), "relay_location is one of Cloudflare's location hints");
     let out = format!("{out}pub const RELAY_LOCATION: &str = {relay_location:?};\n");

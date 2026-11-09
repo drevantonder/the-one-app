@@ -20,11 +20,9 @@ apps = ["repos", "apps"]
 # The apps every agent needs from the start: MCP's instructions carry their guide in full (the rest come with search),
 # and `one mcp --code` keeps their tools as tools, beside search and execute.
 always_on = []
-# How users sign in, which says who they are and opens no key (cloudflare/auth/worker.js): keys are only on their devices,
-# and a new device gets in only when one of theirs approves it. "passkey": a passkey, whose PRF output, kept in the
-# browser, makes it a device of its own there. "google": for a workplace whose users sign in with their Google account
-# at join_domain, joining with an invite for its email; admins still sign in with a passkey.
-sign_in = "passkey"
+# A workplace's domain: where its users sign in with a provider's account, whose signed token must say it's at this
+# domain (cloudflare/auth/worker.js). Empty for a network with no domain. Which providers a network has is its own
+# (`providers` in its Workers' settings, each one's client beside their secrets).
 join_domain = ""
 # Where the network's relay is made (a Cloudflare location hint: wnam, enam, sam, weur, eeur, apac, oc, afr or me), near
 # its users, since every packet between devices that can't reach each other directly goes through it; empty for

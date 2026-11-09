@@ -112,7 +112,7 @@ const json = (value) => JSON.stringify(value).replaceAll("<", "\\u003c");
 export function pages(drawn) {
   const { css, pages, parts, motion } = drawn;
 
-  /// The page `name` draws, filled in with `look` (the network's `name`, `yours` and `logo`, the domain of `google`, a
+  /// The page `name` draws, filled in with `look` (the network's `name`, `yours` and `logo`, the first `provider`'s name, a
   /// throwaway's `user`), and `script`, with the parts it copies in (pages.tsx's `parts`, and the pages named in `more`).
   /// Its title is its heading.
   const page = (name, look, script = "", more = []) => {
@@ -129,10 +129,11 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
   };
 
   /// Signing in, to the network or, sent here by a client's authorization (\`oauth_query\`), to that client: the client
-  /// is the user, with everything they can use, so it's asked each time. With Google (`google`, the network's
-  /// domain), it's signing in with Google, or with a passkey for an admin.
+  /// is the user, with everything they can use, so it's asked each time. With `providers` the network has registered
+  /// with, it's a button for each and a passkey; with none, a passkey. `back` is where a sign-in with no client goes on to.
   function signInPage(look) {
-    if (look.google) return googlePage(look);
+    const { providers = [], domain = "", back = "/" } = look;
+    if (providers.length) return providersPage(look, providers, domain, back);
     const script = `${acts}
       const oauth_query = location.search.slice(1);
       const client_id = new URLSearchParams(oauth_query).get("client_id");
@@ -152,7 +153,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
         const back = busy(e.currentTarget, "Signing In…");
         try {
           await withPasskey();
-          location.href = client_id ? (await api("/sign-in/accept", { oauth_query, passkey: true })).url : "/";
+          location.href = client_id ? (await api("/sign-in/accept", { oauth_query, passkey: true })).url : ${json(back)};
         } catch (err) {
           back();
           ready(ASK.in);
@@ -162,24 +163,26 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
     return page("sign-in", look, script);
   }
 
-  function googlePage(look) {
+  function providersPage(look, providers, domain, signedIn) {
     const script = `${acts}
-      // Google's answer comes back here, with an error added to the query if it said no.
+      // A provider's answer comes back here, with an error added to the query if it said no.
       const raw = location.search.slice(1);
       const failed = /(^|&)error=/.test(raw);
       const oauth_query = raw.replace(/(^|&)error(_description)?=[^&]*/g, "").replace(/^&/, "");
       const client_id = new URLSearchParams(oauth_query).get("client_id");
       const network = ${json(look.name)};
-      const domain = ${json(look.google)};
-      const back = client_id ? "/sign-in?" + oauth_query : "/";
-      // Why Google's answer didn't sign them in: an admin signs in with a passkey; no user with that
-      // account is no one invited, or an account made by a passkey, which has no Google email.
+      const domain = ${json(domain)};
+      const providers = ${json(providers)};
+      const here = location.pathname + (oauth_query ? "?" + oauth_query : "");
+      const back = client_id ? here : ${json(signedIn)};
+      // Why its answer didn't sign them in: no user with that account is no one invited, or an account made by a
+      // passkey, which isn't linked to it.
       const why = new URLSearchParams(raw);
-      if (failed) say(why.get("error") === "ADMIN_SIGNS_IN_WITH_A_PASSKEY" ? "You're an admin, so you sign in with your passkey, not Google." : why.get("error") === "unable_to_create_user" ? "No one in " + network + " has that Google account. Ask an admin to invite you, or sign in with your passkey." : "That didn't sign you in. Use your Google account at " + domain + ".");
+      if (failed) say(why.get("error") === "ADMIN_SIGNS_IN_WITH_A_PASSKEY" ? "You're an admin, so you sign in with your passkey." : ["unable_to_create_user", "account_not_linked"].includes(why.get("error")) ? "No one in " + network + " has that account. Ask an admin to invite you, or sign in with your passkey." : "That didn't sign you in." + (domain ? " Use your account at " + domain + "." : ""));
       const button = slot("action");
-      // Back from Google, which this tab went to a moment ago: it says so while it goes on, not offering to start again.
-      const returning = !failed && Date.now() - Number(sessionStorage.getItem("google") || 0) < 600000;
-      sessionStorage.removeItem("google");
+      // Back from a provider, which this tab went to a moment ago: it says so while it goes on, not offering to start again.
+      const returning = !failed && Date.now() - Number(sessionStorage.getItem("provider") || 0) < 600000;
+      sessionStorage.removeItem("provider");
       let waiting = returning ? busy(button, "Signing You In…") : null;
       if (client_id) (async () => {
         try {
@@ -188,7 +191,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
           document.title = title;
           slot("title").textContent = title;
           if (!about.web) acts(about);
-          // Back from the Google sign-in started here for this client, just now: on to it.
+          // Back from the sign-in started here for this client, just now: on to it.
           if (about.fresh && !failed) {
             waiting ||= busy(button, "Signing You In…");
             return location.replace((await api("/sign-in/accept", { oauth_query })).url);
@@ -197,32 +200,39 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
         waiting?.();
       })();
       else waiting?.();
-      button.onclick = async () => {
+      const start = (provider) => async (e) => {
         say();
-        const undo = busy(button, "Opening Google…");
+        const undo = busy(e.currentTarget, "Opening " + provider.name + "…");
         try {
-          await api("/sign-in/google", { oauth_query });
-          // Back to this page, with Google's no, also for the web client, whose sign-in goes on to its own page.
-          const out = await api("/api/auth/sign-in/social", { provider: "google", callbackURL: back, errorCallbackURL: client_id ? back : "/sign-in" });
-          sessionStorage.setItem("google", String(Date.now()));
+          await api("/sign-in/provider", { oauth_query, provider: provider.id });
+          // Back to this page, with its no, also for the web client, whose sign-in goes on to its own page.
+          const out = await api("/api/auth/sign-in/social", { provider: provider.id, callbackURL: back, errorCallbackURL: here });
+          sessionStorage.setItem("provider", String(Date.now()));
           location.href = out.url;
         } catch (err) {
           undo();
           say(err.message);
         }
       };
+      button.onclick = start(providers[0]);
+      for (const provider of providers.slice(1)) {
+        const another = part("provider");
+        another.textContent = "Sign In with " + provider.name;
+        another.onclick = start(provider);
+        slot("other").before(another);
+      }
       slot("other").onclick = async (e) => {
         say();
-        const back = busy(e.currentTarget, "Signing In…");
+        const back_ = busy(e.currentTarget, "Signing In…");
         try {
           await withPasskey();
-          location.href = client_id ? (await api("/sign-in/accept", { oauth_query, passkey: true })).url : "/";
+          location.href = client_id ? (await api("/sign-in/accept", { oauth_query, passkey: true })).url : back;
         } catch (err) {
-          back();
+          back_();
           quietly(err);
         }
       };`;
-    return page("sign-in-google", look, script);
+    return page("sign-in-provider", look, script);
   }
 
   /// Signing in on a throwaway network (`one-dev throwaway`), with no passkey, straight on, so a client being tested signs in with nobody
@@ -256,43 +266,64 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
   }
 
   /// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up: making a first passkey,
-  /// or signing in with Google (`google`) as the email it's for, or on a throwaway network (`throwaway`), with nothing to make. With
-  /// `?code=`, the CLI's (`sign-in --invite`), it goes on to sign that in, as the user who just joined.
+  /// or signing in with a provider (`providers`, for an invite that names the account), or on a throwaway network
+  /// (`throwaway`), with nothing to make. With `?code=`, the CLI's (`sign-in --invite`), it goes on to sign that in, as the
+  /// user who just joined.
   function invitePage(look) {
-    const { throwaway, google } = look;
+    const { throwaway, providers = [] } = look;
     const script = `
       const secret = location.hash.slice(1);
-      const throwaway = ${throwaway ? "true" : "false"}, google = ${google ? "true" : "false"};
+      const throwaway = ${throwaway ? "true" : "false"}, providers = ${json(providers)};
       const code = new URLSearchParams(location.search).get("code");
       const button = slot("action");
+      let provider = null;
       button.disabled = true;
-      // Google's answer comes back here with an error if it didn't sign them up.
-      if (/(^|&)error=/.test(location.search.slice(1))) say("That Google account isn't the one this invite is for.");
+      // A provider's answer comes back here with an error if it didn't sign them up.
+      if (/(^|&)error=/.test(location.search.slice(1))) say("That account isn't the one this invite is for.");
       // Whoever was signed in here before, the invite is for its user: signed out as the page opens, beside asking
       // whose invite it is, and then the passkey's options, so the prompt comes the moment Join is tapped.
       const out = api("/api/auth/sign-out", {}).catch(() => {});
-      if (!throwaway && !google) out.then(() => ready(register(secret)));
+      if (!throwaway && !providers.length) out.then(() => ready(register(secret)));
+      const withProvider = async (p, e) => {
+        const undo = busy(e.currentTarget, "Opening " + p.name + "…");
+        try {
+          sessionStorage.setItem("one.invite", secret);
+          await out;
+          await api("/invite/provider", { secret });
+          const back = "/invite" + location.search + "#" + secret;
+          location.href = (await api("/api/auth/sign-in/social", { provider: p.id, callbackURL: code ? "/sign-in/code?c=" + encodeURIComponent(code) : "/", errorCallbackURL: back })).url;
+        } catch (err) {
+          undo();
+          say(err.message);
+        }
+      };
       (async () => {
         try {
           const about = await api("/invite/about", { secret });
           slot("title").textContent = "Welcome, " + about.user;
-          if (google && about.email) slot("text").textContent = "With your Google account, " + about.email + ".";
+          // An invite that names an account is taken up with it; another with a first passkey.
+          if (about.email && providers.length) {
+            provider = providers[0];
+            slot("text").textContent = "With your account, " + about.email + ".";
+            button.textContent = "Sign In with " + provider.name;
+            for (const p of providers.slice(1)) {
+              const another = part("provider");
+              another.textContent = "Sign In with " + p.name;
+              another.onclick = (e) => { say(); withProvider(p, e); };
+              button.after(another);
+            }
+          }
           button.disabled = false;
         } catch (err) { say(err.message); }
       })();
-      button.onclick = async () => {
+      button.onclick = async (e) => {
         say();
-        const undo = busy(button, throwaway ? "Joining…" : google ? "Opening Google…" : "Making a Passkey…");
+        if (provider) return withProvider(provider, e);
+        const undo = busy(button, throwaway ? "Joining…" : "Making a Passkey…");
         try {
           // Kept in this tab for the web client, whose request to let in this user's first device proves it.
           sessionStorage.setItem("one.invite", secret);
           await out;
-          if (google) {
-            await api("/invite/google", { secret });
-            const back = "/invite" + location.search + "#" + secret;
-            location.href = (await api("/api/auth/sign-in/social", { provider: "google", callbackURL: code ? "/sign-in/code?c=" + encodeURIComponent(code) : "/", errorCallbackURL: back })).url;
-            return;
-          }
           if (throwaway) await api("/api/auth/throwaway/join", { secret });
           else await newPasskey(secret);
           if (code) return void (location.href = "/sign-in/code?c=" + encodeURIComponent(code));
@@ -304,11 +335,11 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
           });
         } catch (err) {
           undo();
-          if (!throwaway && !google) ready(register(secret));
+          if (!throwaway) ready(register(secret));
           quietly(err);
         }
       };`;
-    return page(google ? "invite-google" : "invite", look, script, google ? [] : ["joined"]);
+    return page("invite", look, script, ["joined"]);
   }
 
   /// A user's passkeys: each one, with Remove while there's another, and Add a Passkey; or, signed out, signing in.
@@ -382,7 +413,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
   }
 
   /// Signing in with a code another device shows (the CLI on one with no screen): typing it here goes on to signing in with a
-  /// passkey (or Google); `done` says how that went, once it's back.
+  /// passkey (or a provider); `done` says how that went, once it's back.
   function codePage(look) {
     const { error = "", done } = look;
     if (done !== undefined) return page(done ? "code-signed-in" : "code-not-signed-in", look);

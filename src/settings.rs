@@ -339,7 +339,7 @@ mod body {
         pub key: String,
     }
 
-    /// `user` invites someone in the network already; `email` is the Google account a newcomer signs up with.
+    /// `user` invites someone in the network already; `email` is the account a newcomer signs up with.
     #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct InviteLink {
@@ -843,7 +843,7 @@ async fn keep_invites(m: &impl Me, invites: &BTreeMap<String, Invited>) -> Resul
 async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: Option<&str>) -> Result<Value> {
     let name = name.trim();
     ensure!(!name.is_empty(), "Give their name.");
-    ensure!(crate::config::SIGN_IN != crate::config::SignIn::Google || email.is_some(), "Users here sign in with Google: give the Google account they sign up with.");
+    ensure!(crate::config::JOIN_DOMAIN.is_empty() || email.is_some(), "Users here sign in with an account: give the one they sign up with.");
     let secret = B64U.encode(&rand::random::<[u8; 32]>());
     let new = user.is_none();
     let user = user.map(str::to_string).unwrap_or_else(scopes::new_id);
@@ -949,8 +949,8 @@ async fn signed_in_with(m: &impl Me, r: &Asked, accounts: Option<&[crate::onboar
     let address = m.address()?;
     let (root, clients) = m.who(|who| Ok((who.root()?, who.setting(crate::onboarding::sign_in_proof::CLIENTS)?))).ok()?;
     let network = crate::onboarding::sign_in_proof::Network::new(&address, *root?.as_bytes(), clients.as_deref());
-    let jwks = match proof.issuer().and_then(|i| crate::onboarding::sign_in_proof::keys_at(&i, &address)) {
-        Some(at) => Some(m.issuer_keys(&at).await?),
+    let jwks = match proof.issuer().and_then(|i| crate::onboarding::sign_in_proof::discovery(&i, &network)) {
+        Some(at) => Some(m.issuer_keys(m.issuer_keys(&at).await?["jwks_uri"].as_str()?).await?),
         None => None,
     };
     match accounts {
@@ -1217,6 +1217,6 @@ fn said_removed(r: &Value) -> String {
 
 fn said_invited(name: &str, r: &Value) -> String {
     let days = crate::onboarding::sign_in_proof::INVITE_DAYS;
-    let how = if crate::config::SIGN_IN == crate::config::SignIn::Google { "they sign in with Google and join" } else { "they join" };
+    let how = if crate::config::JOIN_DOMAIN.is_empty() { "they join" } else { "they sign in and join" };
     format!("Send {name} this link. It works once, for {days} days: opening it, {how}. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
 }

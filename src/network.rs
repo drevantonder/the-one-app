@@ -118,13 +118,13 @@ fn sign_in(g: &Given) -> Result<()> {
     };
     let join = (!client_device::node_here()).then(|| client_device::signing_in_for(&address)).transpose()?;
     let started = crate::sign_in::start(&address, join.as_deref())?;
-    let with = if one::config::SIGN_IN == one::config::SignIn::Google { "Google" } else { "your passkey" };
+    let with = if one::config::JOIN_DOMAIN.is_empty() { "your passkey" } else { "your work account" };
     // Someone new joins first, in a browser, which then signs this in as them.
     let link = match &invite {
         Some((_, secret)) => {
             let code = started.url.rsplit_once("c=").map_or("", |(_, c)| c);
             let link = format!("{}/invite?code={code}#{secret}", address.trim_end_matches('/'));
-            let how = if one::config::SIGN_IN == one::config::SignIn::Google { "sign in with the Google account it's for" } else { "make your passkey" };
+            let how = if one::config::JOIN_DOMAIN.is_empty() { "make your passkey" } else { "sign in with the account it's for" };
             println!("To join, open this link in a browser on any device, phone or computer, and {how}:\n\n  {link}\n");
             link
         }

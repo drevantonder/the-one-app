@@ -9,13 +9,6 @@ pub mod config {
     pub fn env(suffix: &str) -> String {
         format!("{}_{suffix}", CLI.to_uppercase().replace('-', "_"))
     }
-
-    /// How this build's users sign in (`sign_in` in the config): with a passkey, or with their workplace's Google account.
-    #[derive(PartialEq, Eq)]
-    pub enum SignIn {
-        Passkey,
-        Google,
-    }
 }
 
 use std::path::PathBuf;

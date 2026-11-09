@@ -1,21 +1,39 @@
 // Stand-in sites for tests. The bucket (https://s3.test/network/…, and /network/… asked directly) keeps objects in
 // memory, each with an ETag that changes as it does, creating one only if it isn't there when asked with
-// If-None-Match: *, and replacing one only while it's the version If-Match names. Google's token endpoint, given an
-// authorization code, signs in whoever it names: the code is its ID token's claims. Anything else answers with what it
+// If-None-Match: *, and replacing one only while it's the version If-Match names. A provider (Google's addresses, as any
+// OIDC provider's) publishes its discovery document and keys, and its token endpoint, given an authorization code, signs
+// in whoever it names with an ID token signed by those keys: the code is its claims. Anything else answers with what it
 // was sent, except to a browser's push service (`/fcm/send/…`), which keeps what it's sent for `GET /pushes` to give.
 const objects = new Map();
 const pushes = [];
 const tags = new Map();
 let written = 0;
 
+const ISSUER = "https://accounts.google.com";
+const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+const text = (s) => b64u(new TextEncoder().encode(s));
+let signing;
+const signingKey = () => (signing ||= crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]));
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.href === `${ISSUER}/.well-known/openid-configuration`) {
+      return Response.json({ issuer: ISSUER, authorization_endpoint: `${ISSUER}/o/oauth2/v2/auth`, token_endpoint: "https://oauth2.googleapis.com/token", userinfo_endpoint: "https://openidconnect.googleapis.com/v1/userinfo", jwks_uri: "https://www.googleapis.com/oauth2/v3/certs", id_token_signing_alg_values_supported: ["RS256"] });
+    }
+    if (url.href === "https://www.googleapis.com/oauth2/v3/certs") {
+      const { publicKey } = await signingKey();
+      return Response.json({ keys: [{ ...(await crypto.subtle.exportKey("jwk", publicKey)), kid: "k1", alg: "RS256", use: "sig" }] });
+    }
     const form = url.host === "oauth2.googleapis.com" && new URLSearchParams(await request.clone().text());
     if (form && form.get("grant_type") === "authorization_code") {
-      const claims = form.get("code");
-      const header = btoa(JSON.stringify({ alg: "RS256", typ: "JWT" })).replaceAll("=", "");
-      return Response.json({ access_token: "a Google access token", token_type: "Bearer", expires_in: 3600, id_token: `${header}.${claims}.c2lnbmVk` });
+      const now = Math.floor(Date.now() / 1000);
+      const claims = { iss: ISSUER, aud: form.get("client_id"), iat: now, exp: now + 3600, ...JSON.parse(atob(form.get("code").replaceAll("-", "+").replaceAll("_", "/"))) };
+      const signed = `${text(JSON.stringify({ alg: "RS256", typ: "JWT", kid: "k1" }))}.${text(JSON.stringify(claims))}`;
+      // A token some other key signed, as a tampered answer would be.
+      const { privateKey } = claims.forged ? await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]) : await signingKey();
+      const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", privateKey, new TextEncoder().encode(signed));
+      return Response.json({ access_token: "a provider's access token", token_type: "Bearer", expires_in: 3600, id_token: `${signed}.${b64u(signature)}` });
     }
     if (url.pathname === "/pushes") return Response.json(pushes.splice(0));
     if (url.pathname.startsWith("/fcm/send/")) {

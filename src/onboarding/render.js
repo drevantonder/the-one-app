@@ -20,7 +20,7 @@ const { page } = pages({ css: readFileSync(path.join(built, "auth.css"), "utf8")
 const { name, logo, join_domain = "" } = Bun.TOML.parse(readFileSync(config, "utf8"));
 // What its users see their network called, as build.rs names it (config::YOURS).
 const yours = join_domain ? `${name.replace("The ", "the ")} network` : `your ${name.replace(/^The /, "")} network`;
-const look = { name, yours, logo: pathToFileURL(path.resolve(path.dirname(config), logo)).href, google: join_domain || "example.com", user: "Sam" };
+const look = { name, yours, logo: pathToFileURL(path.resolve(path.dirname(config), logo)).href, provider: "Google", providers: [{ id: "google", name: "Google" }], user: "Sam" };
 
 const folder = out || path.join(tmpdir(), `auth-pages-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
 mkdirSync(folder, { recursive: true });

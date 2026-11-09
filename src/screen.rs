@@ -63,8 +63,8 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
     let mut context = context.clone();
     // What a user joins, in their words: "your One App network", or a workplace's, "the PTC App network".
     context["config"]["yours"] = crate::config::YOURS.into();
-    // The domain whose users join by signing in with Google, for Users to say so.
-    if crate::config::SIGN_IN == crate::config::SignIn::Google {
+    // The domain whose users join by signing in with a provider's account, for Users to say so.
+    if !crate::config::JOIN_DOMAIN.is_empty() {
         context["config"]["join_domain"] = crate::config::JOIN_DOMAIN.into();
     }
     // `</` can't appear inside the inline script, so it can't end it early.

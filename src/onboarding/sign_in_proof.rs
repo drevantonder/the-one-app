@@ -4,9 +4,8 @@
 //! assertion signs `challenge(device, time)`, which sign-in makes the passkey prompt's challenge. Sign-in passes the token or
 //! the assertion on with the device's request to join, unchanged (`Proof`), and a device of the user's checks it:
 //!
-//! - an ID token: signed by a key its issuer publishes (`keys_at`, only issuers named here), for one of the OIDC
-//!   clients the network's admins said its users sign in with (`CLIENTS`, a setting their device signs, never auth's
-//!   word), issued just now (`FRESH`), and naming this device in this network;
+//! - an ID token: signed by a key its issuer publishes (`discovery`), for one of the OIDC clients the network's admins
+//!   said its users sign in with (`CLIENTS`, a setting their device signs, never auth's word), issued just now (`FRESH`), and naming this device in this network;
 //! - a passkey's assertion: of this network's address, the user present, naming this device in this network just now,
 //!   and signed by the passkey's public key.
 //!
@@ -139,21 +138,13 @@ impl Proof {
     }
 }
 
-/// Where an issuer publishes the keys it signs ID tokens with, for the issuers a user's devices take: Google,
-/// Apple, Microsoft (any tenant), and, for a throwaway network (`one-dev throwaway`) at `address`, a loopback address only it has, its
-/// own sign-in. None for any other.
-pub fn keys_at(issuer: &str, address: &str) -> Option<String> {
-    match issuer {
-        "https://accounts.google.com" => Some("https://www.googleapis.com/oauth2/v3/certs".into()),
-        "https://appleid.apple.com" => Some("https://appleid.apple.com/auth/keys".into()),
-        _ => {
-            if let Some(tenant) = issuer.strip_prefix("https://login.microsoftonline.com/").and_then(|t| t.strip_suffix("/v2.0")) {
-                return (!tenant.is_empty() && tenant.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')).then(|| format!("https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys"));
-            }
-            let own = format!("{}/api/auth", address.trim_end_matches('/'));
-            (address.starts_with("http://127.0.0.1:") && issuer == own).then(|| format!("{issuer}/jwks"))
-        }
-    }
+/// Where `issuer` says which keys it signs ID tokens with (its OIDC discovery document): only for an issuer the
+/// network's admins named (`CLIENTS`), over https or, for a throwaway network (`one-dev throwaway`), at the loopback
+/// address only it has. None for any other.
+pub fn discovery(issuer: &str, network: &Network) -> Option<String> {
+    let own = format!("{}/api/auth", network.address);
+    let reachable = issuer.starts_with("https://") || (network.address.starts_with("http://127.0.0.1:") && issuer == own);
+    (reachable && network.clients.iter().any(|(i, _)| i == issuer)).then(|| format!("{}/.well-known/openid-configuration", issuer.trim_end_matches('/')))
 }
 
 /// What `proof` shows `device` signed in with, checked: an ID token against its issuer's keys `jwks` and the network's
@@ -229,7 +220,7 @@ fn id_token(token: &str, device: &Endpoint, network: &Network, jwks: &Value, now
     let header: Value = serde_json::from_slice(&b64(head)?).context("its header isn't JSON")?;
     let claims: Value = serde_json::from_slice(&b64(body)?).context("its claims aren't JSON")?;
     let issuer = claims["iss"].as_str().context("it names no issuer")?;
-    ensure!(keys_at(issuer, &network.address).is_some(), "{issuer} isn't a provider a device takes sign-ins from");
+    ensure!(discovery(issuer, network).is_some(), "{issuer} isn't a provider a device takes sign-ins from");
     let kid = header["kid"].as_str();
     let alg = header["alg"].as_str().unwrap_or("");
     let keys = jwks["keys"].as_array().context("those aren't its issuer's keys")?;
@@ -450,8 +441,11 @@ mod tests {
         assert!(throwaway(issuer, ADDRESS).is_err(), "a real network takes no loopback issuer");
         assert!(throwaway(issuer, "http://127.0.0.1:9999").is_err(), "nor another throwaway network's");
         assert!(throwaway("http://one.example.com:8787/api/auth", "http://one.example.com:8787").is_err());
-        assert_eq!(keys_at("https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0", ADDRESS).as_deref(), Some("https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/discovery/v2.0/keys"));
-        assert_eq!(keys_at("https://login.microsoftonline.com/../v2.0", ADDRESS), None);
+        // Any issuer the network's admins named, however new, and no other.
+        let named = Network::new(ADDRESS, ROOT, Some("https://login.example/tenant/v2.0 ours"));
+        assert_eq!(discovery("https://login.example/tenant/v2.0", &named).as_deref(), Some("https://login.example/tenant/v2.0/.well-known/openid-configuration"));
+        assert_eq!(discovery("https://login.example/other/v2.0", &named), None);
+        assert_eq!(discovery("http://login.example", &Network::new(ADDRESS, ROOT, Some("http://login.example ours"))), None);
     }
 
     /// A passkey as a browser makes an assertion with it, for the site at `address`.

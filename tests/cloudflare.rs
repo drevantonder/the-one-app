@@ -289,7 +289,8 @@ impl Workers {
         if google {
             let sign_in = served.iter_mut().find(|s| s.name == "auth").unwrap();
             sign_in.outbound = Some("sites".into());
-            sign_in.bindings.extend([("SIGN_IN", "google"), ("JOIN_DOMAIN", "test.example"), ("GOOGLE_CLIENT_ID", "a client id"), ("GOOGLE_CLIENT_SECRET", "a client secret")].map(|(n, v)| (n.into(), v.into())));
+            let providers = json!([{ "id": "google", "name": "Google", "issuer": "https://accounts.google.com", "domain_claim": "hd", "domain_hint": "hd", "client_id": "a client id", "client_secret": "a client secret" }]);
+            sign_in.bindings.extend([("JOIN_DOMAIN".to_string(), "test.example".to_string()), ("PROVIDERS".to_string(), providers.to_string())]);
         }
         served.push(Served { name: "sites".into(), module: module("test/sites.js"), modules: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
         let running = run(served);
@@ -357,19 +358,44 @@ fn signed_in_as(browser: &mut Browser) -> Option<String> {
 /// Joining with Google, as the invite page does: its secret kept for Google's answer, as `email`. → where the
 /// callback goes on to.
 fn joins_with_google(browser: &mut Browser, secret: &str, email: &str) -> Option<String> {
-    let (status, out) = browser.post("/invite/google", json!({ "secret": secret }));
+    let (status, out) = browser.post("/invite/provider", json!({ "secret": secret }));
     assert_eq!(status, 200, "{out}");
     google_callback(browser, "/", &format!("/invite#{secret}"), email)
 }
 
 /// Signs in with Google as `email`, coming back to `back` (or `failed`): → where Google's callback goes on to.
 fn google_callback(browser: &mut Browser, back: &str, failed: &str, email: &str) -> Option<String> {
+    provider_callback(browser, back, failed, json!({ "sub": email, "email": email, "email_verified": true, "hd": "test.example", "name": email }))
+}
+
+/// Signs in with the stand-in provider, its ID token saying `claims`: → where its callback goes on to.
+fn provider_callback(browser: &mut Browser, back: &str, failed: &str, claims: Value) -> Option<String> {
     let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": back, "errorCallbackURL": failed }));
     assert_eq!(status, 200, "{out}");
     let state = url_query(out["url"].as_str().unwrap())["state"].clone();
-    let claims = json!({ "iss": "https://accounts.google.com", "sub": email, "email": email, "email_verified": true, "hd": "test.example", "name": email });
     let (_, _, to) = browser.get(&format!("/api/auth/callback/google?code={}&state={state}", B64U.encode(claims.to_string().as_bytes())));
     to
+}
+
+/// The network's domain is read from the provider's signed token: a token saying another domain, or one the provider
+/// didn't sign, signs no one in, whatever the page was steered to.
+#[test]
+fn the_domain_is_read_from_the_providers_signed_token() {
+    let (admin, admin_hex) = endpoint();
+    let k = Workers::google(vec![admin_hex]);
+    let (secret, sam) = invited(&k, &admin, "Sam", Some("sam@test.example"));
+    let claims = |hd: &str, forged: bool| json!({ "sub": "sam", "email": "sam@test.example", "email_verified": true, "hd": hd, "name": "Sam", "forged": forged });
+    let mut browser = k.browser();
+    assert_eq!(browser.post("/invite/provider", json!({ "secret": secret })).0, 200);
+    let (_, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": "/", "errorCallbackURL": "/x" }));
+    assert_eq!(url_query(out["url"].as_str().unwrap()).get("hd").map(String::as_str), Some("test.example"), "the provider's page is steered to the domain");
+    let back = provider_callback(&mut browser, "/", "/x", claims("elsewhere.example", false));
+    assert!(back.is_some_and(|to| to.contains("error=")), "an account at another domain was let through");
+    assert_eq!(signed_in_as(&mut browser), None);
+    provider_callback(&mut browser, "/", "/x", claims("test.example", true));
+    assert_eq!(signed_in_as(&mut browser), None, "a token its provider didn't sign counted");
+    assert_eq!(provider_callback(&mut browser, "/", "/x", claims("test.example", false)).as_deref(), Some("/"));
+    assert_eq!(signed_in_as(&mut browser).as_deref(), Some(sam.as_str()));
 }
 
 #[test]
@@ -468,7 +494,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     let (status, client) = browser.post("/api/auth/oauth2/register", json!({ "client_name": "Chrome on Mac", "redirect_uris": [format!("{}/callback", g.address)], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }));
     assert_eq!(status, 201, "{client}");
     let query = format!("response_type=code&client_id={}&redirect_uri={}/callback&scope=openid&state=s&join={join}", client["client_id"].as_str().unwrap(), g.address);
-    assert_eq!(browser.post("/sign-in/google", json!({ "oauth_query": query })).0, 200);
+    assert_eq!(browser.post("/sign-in/provider", json!({ "oauth_query": query, "provider": "google" })).0, 200);
     let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": "/", "errorCallbackURL": "/" }));
     assert_eq!(status, 200, "{out}");
     assert_eq!(url_query(out["url"].as_str().unwrap()).get("nonce"), Some(&sign_in_proof::nonce(&ROOT, &device)), "Google is asked for an ID token naming the device in this network");

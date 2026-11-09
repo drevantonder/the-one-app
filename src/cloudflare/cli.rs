@@ -123,11 +123,8 @@ pub fn commands() -> Command {
                             settings.auth_url = at("auth");
                             settings.save()?;
                             println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave a 1Password reference (op://…) in its place.\n", crate::cloudflare::Settings::path().with_file_name(".env.local").display());
-                            // Users signing in with Google need its OAuth client, which is put beside the secrets first.
-                            match crate::config::SIGN_IN {
-                                crate::config::SignIn::Google => crate::cloudflare::Settings::load()?,
-                                crate::config::SignIn::Passkey => settings,
-                            }
+                            // A network with a domain needs a provider's client, which is put beside the secrets first.
+                            if crate::config::JOIN_DOMAIN.is_empty() { settings } else { crate::cloudflare::Settings::load()? }
                         }
                     };
                     let mut settings = settings;
@@ -142,10 +139,9 @@ pub fn commands() -> Command {
                     if settings.cloudflare_node {
                         crate::cloudflare::node::deploy(&cf, &settings, &newest.workers)?;
                     }
-                    // The Google client its users sign in with, signed by this admin's device: a new device's sign-in counts
-                    // only for it (`sign_in_proof::CLIENTS`), whatever auth says.
-                    if let Some((id, _)) = &settings.google {
-                        let clients = format!("https://accounts.google.com {id}");
+                    // The clients its users sign in with, signed by this admin's device: a new device's sign-in counts
+                    // only for one of them (`sign_in_proof::CLIENTS`), whatever auth says.
+                    if let Some(clients) = settings.sign_in_clients() {
                         let had = node.state().ok().and_then(|s| s.network?.settings.get(crate::onboarding::sign_in_proof::CLIENTS).cloned());
                         if had.as_deref() != Some(clients.as_str())
                             && let Err(err) = node.post("/v1/settings", json!({ "name": crate::onboarding::sign_in_proof::CLIENTS, "value": clients }))

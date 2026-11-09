@@ -1,6 +1,6 @@
-// Auth: who you are, and nothing more. Better Auth, in a Durable Object: signing in by passkey, or, on a
-// network whose users sign in with their work Google account (`SIGN_IN`), by Google at the network's domain
-// (`JOIN_DOMAIN`) too, though never for an admin (`passkey_only`), who signs in with a passkey; and an OAuth server (per
+// Auth: who you are, and nothing more. Better Auth, in a Durable Object: signing in by passkey, or with any OIDC provider
+// the network has registered with (`PROVIDERS`, its settings: Google is one like any other), at the network's domain if it
+// has one (`JOIN_DOMAIN`, read from the provider's signed token); and an OAuth server (per
 // MCP's authorization spec) that every client signs in through: the iPhone and Mac apps, and MCP clients like Claude
 // Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at /api/auth/jwks, so nodes check them
 // offline. It opens nothing: keys are only on users' devices, so faking a sign-in opens nothing either. A passkey's
@@ -9,7 +9,7 @@
 // Nobody signs up uninvited, the network's first user too: an admin's device makes a secret, and tells auth its hash,
 // who it's for and until when, signed with its endpoint key (`POST /api/auth/invites`); opening `<address>/invite#
 // <secret>` lets that user sign up once, as the id and name the invite gives them. At a workplace too: signing in
-// with Google makes someone only with an invite for that Google account's email.
+// with a provider's account makes someone only with an invite for that account's email.
 //
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
 // its user (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
@@ -22,8 +22,8 @@
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
 // hex), so a device of the user's can check it themselves (src/onboarding/sign_in_proof.rs) and let the device in with no one
-// tapping: with Google, auth asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
-// and keeps the token Google gave; with a passkey, the prompt's challenge names it, the network and when
+// tapping: with a provider, auth asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
+// and keeps the token it gave; with a passkey, the prompt's challenge names it, the network and when
 // (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
 // request to join (`sign_in`), never checked here: only the user's devices count it, and only for an account their
 // own devices recorded. Refusing a request forgets its proof too. A throwaway network's auth signs its own ID token, with
@@ -49,7 +49,7 @@
 // is in `x-one-request`, as base64url of its JSON.
 //
 // A throwaway network's auth (`SIGN_IN` is "throwaway") lets in its first user (`THROWAWAY_USER`, `THROWAWAY_NAME`) with no passkey and
-// no Google: its sign-in page goes straight on. Someone it invites joins by opening their link, again with no passkey,
+// no provider: its sign-in page goes straight on. Someone it invites joins by opening their link, again with no passkey,
 // and is then who that browser signs in as. It's for testing clients without a user: only `one-dev throwaway` turns it on
 // (cloudflare::Settings::throwaway_user), on Workers that listen only on their own machine, and `cloudflare deploy` refuses it,
 // so no real network's auth ever does this.
@@ -61,7 +61,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
-import { jwt } from "better-auth/plugins";
+import { genericOAuth, jwt } from "better-auth/plugins";
 import { b64u, behind, checkRequest, hex, isKey, joinChallenge, joinCode, joinNonce, random, sha256 } from "../shared/crypto.js";
 import { json } from "../shared/http.js";
 import { AUTH_DOMAIN, HEADER, updateRefusal } from "../shared/protocol.js";
@@ -108,7 +108,7 @@ const PUSHED_TO = 20;
 const CODE = 10 * 60_000;
 /// How lately someone signed in for a client to be added as them, or a passkey added.
 const FRESH = 5 * 60_000;
-/// How long a Google sign-in started for a client's authorization, or to join, goes on to it once it's back.
+/// How long a provider's sign-in started for a client's authorization, or to join, goes on to it once it's back.
 const STARTED = 15 * 60_000;
 /// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
 const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
@@ -129,6 +129,43 @@ const endpointOf = (join) => [hex.decode(join.slice(0, 64)), hex.decode(join.sli
 /// The network's root (`ROOT`, hex, as the device deploying to Cloudflare holds it), which a sign-in for a device
 /// names beside it: without it, a sign-in names no device, and its device is approved by its code.
 const rootOf = (env) => (isKey(env.ROOT) ? hex.decode(env.ROOT) : null);
+
+/// The OIDC providers the network has registered with: `{ id, name, issuer, client_id, client_secret, domain_claim?,
+/// domain_hint? }`, and only these show a button.
+const providersOf = (env) => JSON.parse(env.PROVIDERS || "[]");
+
+/// Whether an ID token, which Better Auth has checked against its provider's keys, says its account is at `domain`: by
+/// the claim the provider says that with, or else a verified email there. The hint a provider's page is given decides
+/// nothing, as the page is the user's to change.
+function atDomain(domain, provider, claims) {
+  if (!domain) return true;
+  if (provider.domain_claim) return claims[provider.domain_claim] === domain;
+  return claims.email_verified === true && String(claims.email || "").toLowerCase().endsWith(`@${domain}`);
+}
+
+/// A provider, for Better Auth's generic OAuth: found by its issuer, its ID tokens checked against the keys it publishes.
+function oidcProvider(provider, domain) {
+  return {
+    providerId: provider.id,
+    name: provider.name,
+    clientId: provider.client_id,
+    clientSecret: provider.client_secret,
+    discoveryUrl: `${provider.issuer}/.well-known/openid-configuration`,
+    requireIdTokenVerification: true,
+    // A sign-in for a device sends a `nonce` naming it (`withNonce`), which only the user's devices check.
+    disableIdTokenNonceBinding: true,
+    scopes: ["openid", "email", "profile"],
+    prompt: "select_account",
+    authorizationUrlParams: domain && provider.domain_hint ? { [provider.domain_hint]: domain } : {},
+    // From the ID token itself: what its userinfo says isn't signed.
+    getUserInfo: async ({ idToken }) => {
+      if (!idToken) return null;
+      const claims = JSON.parse(new TextDecoder().decode(b64u.decode(idToken.split(".")[1])));
+      if (!claims.sub || !atDomain(domain, provider, claims)) return null;
+      return { ...claims, id: claims.sub, emailVerified: claims.email_verified === true, image: claims.picture };
+    },
+  };
+}
 
 const asB64u = (s) => String(s || "").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 
@@ -189,7 +226,12 @@ export class Auth extends DurableObject {
     // Signed requests taken, until they're too old to take again.
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
     sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
-    sql.exec("create table if not exists google_starts (id text primary key, query text not null, made integer not null, join_for text)");
+    // A Durable Object keeps its table from before it was every provider's.
+    if (sql.exec("select 1 from sqlite_master where name = 'google_starts'").toArray().length) {
+      sql.exec("alter table google_starts rename to provider_starts");
+      sql.exec("alter table provider_starts add column provider text not null default 'google'");
+    }
+    sql.exec("create table if not exists provider_starts (id text primary key, query text not null, made integer not null, join_for text, provider text not null)");
     // What a user's sign-in for a device showed (`{ id_token }` or `{ passkey }`), by that device's key and the user,
     // for its request to join to carry.
     sql.exec("create table if not exists proofs (key text not null, user text not null, proof text not null, made integer not null, primary key (key, user))");
@@ -208,7 +250,7 @@ export class Auth extends DurableObject {
     const resources = JSON.parse(env.RESOURCES || "[]").flatMap((r) => [r, `${r}/mcp`]);
     const sql = this.ctx.storage.sql;
     const self = this;
-    const google = env.SIGN_IN === "google";
+    const providers = providersOf(env);
     const throwaway = env.SIGN_IN === "throwaway";
     return {
       appName: env.NAME || "The One App",
@@ -219,17 +261,19 @@ export class Auth extends DurableObject {
       trustedOrigins: [url.origin],
       telemetry: { enabled: false },
       advanced: { database: { generateId: hex16 } },
-      socialProviders: google ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET, hd: env.JOIN_DOMAIN, prompt: "select_account" } } : {},
+      // Someone's next identity is linked only from a device already signed in: an email a provider says is theirs
+      // never joins it to a user by itself, and it needn't be the email of the identity they're signed in with.
+      account: { accountLinking: { enabled: true, disableImplicitLinking: true, allowDifferentEmails: true, trustedProviders: providers.map((p) => p.id) } },
       databaseHooks: {
         user: {
           create: {
             // Only someone invited signs up, as who the invite says they are in the network, so devices know them by
-            // the same id: with a passkey, as it's registered, or a throwaway network's link (`admit`); with Google, as
-            // Google says the email is theirs, with the invite this browser opened to join.
+            // the same id: with a passkey, as it's registered, or a throwaway network's link (`admit`); with a provider, as
+            // it says the email is theirs, with the invite this browser opened to join.
             async before(user, ctx) {
               if (self.admitting && user.id === self.admitting) return;
               if (throwaway) return user.id === env.THROWAWAY_USER ? undefined : false;
-              if (!google) return false;
+              if (!providers.length) return false;
               const secret = cookieOf(ctx?.headers, cookieName(env, "one-invite"));
               const invite = secret && sql.exec("select * from invites where id = ?", await hash(secret)).toArray()[0];
               const email = String(user.email || "").toLowerCase();
@@ -261,6 +305,7 @@ export class Auth extends DurableObject {
         }),
       },
       plugins: [
+        ...(providers.length ? [genericOAuth({ config: providers.map((p) => oidcProvider(p, env.JOIN_DOMAIN)) })] : []),
         jwt({ jwks: { keyPairConfig: { alg: "EdDSA", crv: "Ed25519" } }, jwt: { issuer: `${url.origin}/api/auth`, expirationTime: "1h" } }),
         ...(throwaway ? [throwawayNetwork(self, env.THROWAWAY_USER, env.THROWAWAY_NAME)] : [passkey({
           rpID: url.hostname,
@@ -288,7 +333,7 @@ export class Auth extends DurableObject {
           },
         })]),
         oauthProvider({
-          // Signed in or not, a client's authorization is the sign-in page, which asks for the passkey (or Google)
+          // Signed in or not, a client's authorization is the sign-in page, which asks for the passkey (or a provider)
           // each time.
           loginPage: "/sign-in",
           consentPage: "/sign-in",
@@ -331,19 +376,20 @@ export class Auth extends DurableObject {
       const name = this.auth.options.appName;
       // What its pages say: the custom build's name, and what a user joins ("your One App network").
       const look = { name, yours: this.env.YOURS, logo: "/logo.png" };
-      const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
+      const providers = providersOf(this.env).map(({ id, name }) => ({ id, name }));
+      const signIn = { ...look, providers, provider: providers[0]?.name, domain: this.env.JOIN_DOMAIN };
       const throwaway = this.env.SIGN_IN === "throwaway";
-      if (path === "/sign-in" && request.method === "GET") return html(throwaway ? throwawayPage({ ...look, user: this.env.THROWAWAY_NAME }) : signInPage({ ...look, google }));
+      if (path === "/sign-in" && request.method === "GET") return html(throwaway ? throwawayPage({ ...look, user: this.env.THROWAWAY_NAME }) : signInPage(signIn));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams));
-      if (path === "/sign-in/google" && request.method === "POST" && google) return await this.startGoogle(request, await request.json());
+      if (path === "/sign-in/provider" && request.method === "POST" && providers.length) return await this.startProvider(request, await request.json());
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
-      if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), look, google);
-      if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ ...look, google, done: await this.codeDone(url.searchParams) }));
+      if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), look);
+      if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ ...look, done: await this.codeDone(url.searchParams) }));
       if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
       if (path === "/sign-in/accept" && request.method === "POST") return json(await this.accept(request, await request.json()));
-      if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, throwaway, google }));
+      if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, throwaway, providers }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
-      if (path === "/invite/google" && request.method === "POST" && google) return await this.joinWithGoogle(request, await request.json());
+      if (path === "/invite/provider" && request.method === "POST" && providers.length) return await this.joinWithProvider(request, await request.json());
       if (path === "/passkeys" && request.method === "GET" && !throwaway) return html(passkeysPage(look), { framed: true });
       return new Response("not found", { status: 404 });
     } catch (err) {
@@ -424,8 +470,7 @@ export class Auth extends DurableObject {
   }
 
   /// An invite, made by an admin's device: `{ id, name, user, email?, until }`, `id` the sha256 (hex) of the secret
-  /// its link carries, `user` the id they'll have. On a network whose users sign in with Google, `email` is the
-  /// Google account they sign up with. Another invite for the same user, not yet used, replaces it.
+  /// its link carries, `user` the id they'll have. `email` is the account they sign up with, on a provider. Another invite for the same user, not yet used, replaces it.
   async invite(request) {
     const signed = await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")));
     if (!signed?.admin) refuse(403, "Only an admin's device invites someone.");
@@ -435,7 +480,7 @@ export class Auth extends DurableObject {
     if (!USER.test(user || "")) refuse(400, "a user id is 16 hex characters");
     if (!(Number.isSafeInteger(until) && until > Date.now() && until <= Date.now() + INVITE)) refuse(400, "an invite works for up to 30 days");
     if (email != null && (typeof email !== "string" || !/^[^@\s]+@[^@\s]+$/.test(email))) refuse(400, `${email} isn't an email`);
-    if (this.env.SIGN_IN === "google" && !String(email || "").toLowerCase().endsWith(`@${this.env.JOIN_DOMAIN}`)) refuse(400, `Users here sign in with Google: give their email at ${this.env.JOIN_DOMAIN}.`);
+    if (this.env.JOIN_DOMAIN && !String(email || "").toLowerCase().endsWith(`@${this.env.JOIN_DOMAIN}`)) refuse(400, `Give their email at ${this.env.JOIN_DOMAIN}.`);
     const sql = this.ctx.storage.sql;
     if (sql.exec("select 1 from user where id = ?", user).toArray().length) refuse(409, `${name.trim()} has joined already.`);
     sql.exec("delete from invites where until <= ? and used is null", Date.now());
@@ -511,11 +556,11 @@ export class Auth extends DurableObject {
     this.keepProof(join, row.userId, { passkey: { credential: resp.id, authenticator_data: r.authenticatorData, client_data: r.clientDataJSON, signature: r.signature, public_key: asB64u(row.publicKey) } });
   }
 
-  /// Google's sign-in started for a client's sign-in for a device (`startGoogle`): asks Google for an ID token whose
+  /// A provider's sign-in started for a client's sign-in for a device (`startProvider`): asks it for an ID token whose
   /// nonce names that device.
   async withNonce(request, resp) {
-    const secret = cookieOf(request.headers, cookieName(this.env, "one-google-start"));
-    const [row] = secret ? this.ctx.storage.sql.exec("select join_for from google_starts where id = ?", await hash(secret)).toArray() : [];
+    const secret = cookieOf(request.headers, cookieName(this.env, "one-provider-start"));
+    const [row] = secret ? this.ctx.storage.sql.exec("select join_for from provider_starts where id = ?", await hash(secret)).toArray() : [];
     const root = rootOf(this.env);
     if (!row?.join_for || !resp.ok || !root) return resp;
     const out = await resp.clone().json().catch(() => null);
@@ -725,7 +770,7 @@ export class Auth extends DurableObject {
   /// What signing in to a client (its authorization's `query`) says: its name (the network's, for the web client, which
   /// is at its address), where its sign-in goes (its redirect_uri, if it's one of the client's, else its first), since
   /// the name is only what it calls itself, the user's, if they're signed in here already, and whether they're back
-  /// from the Google sign-in this browser started for it, which goes straight on.
+  /// from the provider's sign-in this browser started for it, which goes straight on.
   async about(request, query) {
     const session = await this.auth.api.getSession({ headers: request.headers });
     const client = await this.client(query.get("client_id"));
@@ -737,35 +782,37 @@ export class Auth extends DurableObject {
     return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, user: session?.user.name || null, fresh: !!(await this.started(request, session, query)) };
   }
 
-  // Signing in to a client with Google goes straight on once Google says yes, with no second tap, but only for the
-  // authorization this browser started it for: a sign-in with Google made for another client (the web client's, a
+  // Signing in to a client with a provider goes straight on once it says yes, with no second tap, but only for the
+  // authorization this browser started it for: a sign-in with a provider made for another client (the web client's, a
   // minute ago) gives nothing to a client whose link the user was sent. Starting one keeps a secret in a cookie only
   // this address sets, with a hash of the authorization's query; coming back, the two must match, once.
 
-  async startGoogle(request, { oauth_query }) {
+  async startProvider(request, { oauth_query, provider }) {
     this.fromOurPages(request);
+    if (!providersOf(this.env).some((p) => p.id === provider)) refuse(400, "No such provider.");
     const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
     if (query.get("client_id")) await this.client(query.get("client_id"));
     const secret = b64u.encode(crypto.getRandomValues(new Uint8Array(32)));
     const sql = this.ctx.storage.sql;
-    sql.exec("delete from google_starts where made <= ?", Date.now() - STARTED);
-    sql.exec("insert into google_starts (id, query, made, join_for) values (?, ?, ?, ?)", await hash(secret), await hash(query.toString()), Date.now(), joinOf(query.toString()));
-    return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-google-start", secret, STARTED / 1000) } });
+    sql.exec("delete from provider_starts where made <= ?", Date.now() - STARTED);
+    sql.exec("insert into provider_starts (id, query, made, join_for, provider) values (?, ?, ?, ?, ?)", await hash(secret), await hash(query.toString()), Date.now(), joinOf(query.toString()), provider);
+    return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-provider-start", secret, STARTED / 1000) } });
   }
 
   fromOurPages(request) {
     if (request.headers.get("origin") !== new URL(this.env.ADDRESS).origin) refuse(403, "only the sign-in page asks that");
   }
 
-  /// The Google sign-in this browser started for the authorization `query`, if it's back from it just now: → its id.
+  /// The provider's sign-in this browser started for the authorization `query`, if it's back from it just now: →
+  /// `{ id, provider }`.
   async started(request, session, query) {
     if (!session || !fresh(session)) return null;
-    const secret = cookieOf(request.headers, cookieName(this.env, "one-google-start"));
+    const secret = cookieOf(request.headers, cookieName(this.env, "one-provider-start"));
     if (!secret) return null;
     const id = await hash(secret);
-    const [row] = this.ctx.storage.sql.exec("select query, made from google_starts where id = ? and made > ?", id, Date.now() - STARTED).toArray();
+    const [row] = this.ctx.storage.sql.exec("select query, made, provider from provider_starts where id = ? and made > ?", id, Date.now() - STARTED).toArray();
     const signedIn = new Date(session.session.createdAt).getTime();
-    return row && row.query === (await hash(query.toString())) && row.made <= signedIn ? id : null;
+    return row && row.query === (await hash(query.toString())) && row.made <= signedIn ? { id, provider: row.provider } : null;
   }
 
   // Signing in with a code, for a client with no browser of its own (the CLI on a device with no screen): it makes an authorization
@@ -791,11 +838,11 @@ export class Auth extends DurableObject {
     }
   }
 
-  codeOpened(typed, look, google) {
-    if (typed == null) return html(codePage({ ...look, google }));
+  codeOpened(typed, look) {
+    if (typed == null) return html(codePage(look));
     const code = String(typed).toUpperCase().replace(/[^A-Z]/g, "");
     const [row] = this.ctx.storage.sql.exec("select query from codes where code = ? and until > ? and back is null", code, Date.now()).toArray();
-    if (!row) return html(codePage({ ...look, google, error: "That code doesn't work: it may have expired. Start signing in again where you got it." }));
+    if (!row) return html(codePage({ ...look, error: "That code doesn't work: it may have expired. Start signing in again where you got it." }));
     return Response.redirect(`${new URL(this.env.ADDRESS).origin}/api/auth/oauth2/authorize?${row.query}`, 302);
   }
 
@@ -850,15 +897,15 @@ export class Auth extends DurableObject {
     return { user: invite.name, until: invite.until, email: invite.email };
   }
 
-  /// Joining with Google: the invite's secret kept in a cookie for Google's answer, whose email must be the invite's.
-  async joinWithGoogle(request, { secret }) {
+  /// Joining with a provider: the invite's secret kept in a cookie for its answer, whose email must be the invite's.
+  async joinWithProvider(request, { secret }) {
     this.fromOurPages(request);
     await this.openInvite(secret);
     return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-invite", secret, STARTED / 1000) } });
   }
 
   /// Signing in to a client (`oauth_query`) as whoever just signed in here: by tapping their passkey on its page
-  /// (`passkey`), or back from the Google sign-in started for it; on a throwaway network, whoever is signed in. → where the
+  /// (`passkey`), or back from the provider's sign-in started for it; on a throwaway network, whoever is signed in. → where the
   /// client goes on to.
   async accept(request, { oauth_query, passkey }) {
     this.fromOurPages(request);
@@ -866,12 +913,12 @@ export class Auth extends DurableObject {
     const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
     if (this.env.SIGN_IN !== "throwaway") {
       const started = await this.started(request, signedIn, query);
-      if (!started && (!fresh(signedIn) || (this.env.SIGN_IN === "google" && passkey !== true))) refuse(403, "Sign in again.");
-      if (started) this.ctx.storage.sql.exec("delete from google_starts where id = ?", started);
-      // Back from Google for a device: the ID token Google just gave, its nonce that device's, is kept for its request.
+      if (!started && (!fresh(signedIn) || passkey !== true)) refuse(403, "Sign in again.");
+      if (started) this.ctx.storage.sql.exec("delete from provider_starts where id = ?", started.id);
+      // Back from a provider for a device: the ID token it just gave, its nonce that device's, is kept for its request.
       const join = joinOf(oauth_query);
       if (started && join) {
-        const [account] = this.ctx.storage.sql.exec("select idToken from account where userId = ? and providerId = 'google'", signedIn.user.id).toArray();
+        const [account] = this.ctx.storage.sql.exec("select idToken from account where userId = ? and providerId = ?", signedIn.user.id, started.provider).toArray();
         if (account?.idToken) this.keepProof(join, signedIn.user.id, { id_token: account.idToken });
       }
     }

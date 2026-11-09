@@ -98,6 +98,51 @@ pub type Files = Vec<(String, Vec<u8>)>;
 
 pub type Modules = Vec<(String, &'static str, Vec<u8>)>;
 
+/// An OIDC provider a network's users can sign in with, and link. Its client is what the network registered with it:
+/// `<ID>_CLIENT_ID` and `<ID>_CLIENT_SECRET` beside the Workers' secrets, its redirect URI `<address>/api/auth/callback/<id>`.
+#[derive(Clone, Debug, serde::Serialize, Deserialize)]
+pub struct Provider {
+    pub id: String,
+    pub name: String,
+    pub issuer: String,
+    /// The claim of its signed token that says which domain an account is at. None: the domain of a verified email.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_claim: Option<String>,
+    /// The parameter that steers its page to the network's domain, if it has one. Only a hint: nothing is decided by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_hint: Option<String>,
+    /// Its client, `(id, secret)`, if the network has registered with it.
+    #[serde(skip)]
+    pub client: Option<(String, String)>,
+}
+
+impl Provider {
+    /// The name, beside the Workers' secrets, of one of its client's values.
+    fn secret(&self, what: &str) -> String {
+        format!("{}_{what}", self.id.to_uppercase().replace('-', "_"))
+    }
+
+    /// What auth is told of it, if the network has registered with it.
+    fn binding(&self) -> Option<Value> {
+        let (id, secret) = self.client.as_ref()?;
+        Some(json!({ "id": self.id, "name": self.name, "issuer": self.issuer, "domain_claim": self.domain_claim, "domain_hint": self.domain_hint, "client_id": id, "client_secret": secret }))
+    }
+}
+
+/// The providers a network starts with: none registered until their client is set.
+fn providers() -> Vec<Provider> {
+    vec![Provider { id: "google".into(), name: "Google".into(), issuer: "https://accounts.google.com".into(), domain_claim: Some("hd".into()), domain_hint: Some("hd".into()), client: None }]
+}
+
+/// The Workers' secrets' schema, with a client for each of the network's providers.
+fn schema(settings: &Settings) -> String {
+    let mut out = SCHEMA.to_string();
+    for p in &settings.providers {
+        out += &format!("# The client this network registered with {}, whose redirect URI is {}/api/auth/callback/{}.\n# @optional\n{}=\n# @optional\n{}=\n", p.name, settings.address, p.id, p.secret("CLIENT_ID"), p.secret("CLIENT_SECRET"));
+    }
+    out
+}
+
 /// How a network's Workers are set up, wherever they run: kept in `<home>/cloudflare/settings.json`, with its secrets in
 /// `.env.local` beside it, which Varlock reads (see `SCHEMA`): their values, for Workers tried here, or
 /// `op(op://…)` references to 1Password, for a real network, so no file here holds them.
@@ -143,10 +188,9 @@ pub struct Settings {
     /// in the app (App Links) only if the address lists the app's package and one of them.
     #[serde(default)]
     pub android: Vec<String>,
-    /// For a network whose users sign in with Google (`config::SIGN_IN`): the Google OAuth client they sign in
-    /// with, `(id, secret)`.
-    #[serde(default, skip_serializing)]
-    pub google: Option<(String, String)>,
+    /// The OIDC providers its users can sign in with: a button shows only for one whose client is registered.
+    #[serde(default = "providers")]
+    pub providers: Vec<Provider>,
     /// The API token `cloudflare deploy` and `cloudflare node deploy` edit the Cloudflare account's Workers with, where
     /// CLOUDFLARE_API_TOKEN isn't set.
     #[serde(default, skip_serializing)]
@@ -170,10 +214,6 @@ pub struct Settings {
     pub(super) dir: PathBuf,
 }
 
-fn google() -> bool {
-    crate::config::SIGN_IN == crate::config::SignIn::Google
-}
-
 /// What Varlock reads the Workers' secrets by, each named as the Workers' binding is; `.env.local` gives their values.
 const SCHEMA: &str = "\
 # The Workers' secrets, read with Varlock: their values are in .env.local, as written for Workers tried on this
@@ -185,11 +225,6 @@ AUTH_SECRET=
 # The network's bucket's credentials, which only the URL signer holds.
 # @optional
 BUCKET=
-# For a network whose users sign in with Google: their Google OAuth client.
-# @optional
-GOOGLE_CLIENT_ID=
-# @optional
-GOOGLE_CLIENT_SECRET=
 # The API token cloudflare deploy edits the Cloudflare account's Workers with, where CLOUDFLARE_API_TOKEN isn't set.
 # @optional
 CLOUDFLARE_API_TOKEN=
@@ -346,7 +381,7 @@ impl Settings {
         let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't the Workers' settings", path.display()))?;
         settings.dir = home.to_path_buf();
         let dir = path.parent().unwrap();
-        std::fs::write(dir.join(".env.schema"), SCHEMA)?;
+        std::fs::write(dir.join(".env.schema"), schema(&settings))?;
         let out = std::process::Command::new(varlock()?)
             .args(["load", "--format", "json"])
             .current_dir(dir)
@@ -362,11 +397,20 @@ impl Settings {
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
         settings.cloudflare_node_key = get("CLOUDFLARE_NODE_KEY").unwrap_or_default();
         settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
-        if settings.throwaway_user.is_none() && google() {
-            settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
-            ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client users sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
+        if settings.throwaway_user.is_none() {
+            for provider in &mut settings.providers {
+                provider.client = get(&provider.secret("CLIENT_ID")).zip(get(&provider.secret("CLIENT_SECRET")));
+            }
+            // A network with a domain has no other way in for its users, so it's never deployed without one.
+            ensure!(crate::config::JOIN_DOMAIN.is_empty() || settings.providers.iter().any(|p| p.client.is_some()), "this network's users sign in with a provider's account, and no provider has its client here: set {} (its redirect URI is {}/api/auth/callback/{})", settings.providers.first().map_or(String::new(), |p| format!("{} and {}", p.secret("CLIENT_ID"), p.secret("CLIENT_SECRET"))), settings.address, settings.providers.first().map_or("", |p| &p.id));
         }
         Ok(settings)
+    }
+
+    /// What `sign_in_proof::CLIENTS` says of the clients this network registered, if it has any.
+    pub fn sign_in_clients(&self) -> Option<String> {
+        let clients: Vec<String> = self.providers.iter().filter_map(|p| Some(format!("{} {}", p.issuer, p.client.as_ref()?.0))).collect();
+        (!clients.is_empty()).then(|| clients.join("\n"))
     }
 
     /// Makes this device the Workers' home if they have none yet, and refuses on any other: they're deployed from one
@@ -407,7 +451,7 @@ impl Settings {
             resources: vec![],
             bucket: None,
             android: vec![],
-            google: None,
+            providers: providers(),
             cloudflare_token: None,
             devices: vec![],
             push: [("VAPID_KEY".to_string(), vapid_key())].into(),
@@ -585,17 +629,20 @@ fn auth_bindings(settings: &Settings) -> Vec<Binding> {
     ];
     if let Some((id, name)) = &settings.throwaway_user {
         out.extend([plain("SIGN_IN", "throwaway"), plain("THROWAWAY_USER", id.clone()), plain("THROWAWAY_NAME", name.clone())]);
-    } else if google() {
-        out.extend([plain("SIGN_IN", "google"), plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN)]);
+    } else {
+        if !crate::config::JOIN_DOMAIN.is_empty() {
+            out.push(plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN));
+        }
+        let registered: Vec<Value> = settings.providers.iter().filter_map(Provider::binding).collect();
+        if !registered.is_empty() {
+            out.push(secret("PROVIDERS", json!(registered).to_string()));
+        }
     }
     out.extend(settings.root.clone().map(|root| plain("ROOT", root)));
     // Tokens are for the network's address unless a client asks for a node's own.
     let resources: Vec<&String> = std::iter::once(&settings.address).chain(&settings.resources).collect();
     out.push(plain("RESOURCES", json!(resources).to_string()));
     out.push(secret("AUTH_SECRET", settings.auth_secret.clone()));
-    if let Some((id, client_secret)) = settings.google.clone().filter(|_| google()) {
-        out.extend([plain("GOOGLE_CLIENT_ID", id), secret("GOOGLE_CLIENT_SECRET", client_secret)]);
-    }
     out
 }
 
