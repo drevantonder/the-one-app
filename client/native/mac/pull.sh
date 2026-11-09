@@ -16,6 +16,25 @@ mkdir -p "$c"; cd "$c" || exit 1
 say() { printf '%s\n' "$*" > "$c/why"; }
 fail() { say "$*"; exit 0; }
 
+# One build at a time on this Mac, whichever network's job runs it: a build takes the lock (a link to its pid, made in one
+# step), and a job that finds it held leaves its build for its next run. A dead job's lock is taken over.
+lock="$HOME/Library/Caches/app-build.lock"
+building() {
+	local holder
+	[ "$(readlink "$lock" 2>/dev/null)" != "$$" ] || return 0
+	ln -s "$$" "$lock" 2>/dev/null || {
+		holder=$(readlink "$lock" 2>/dev/null)
+		if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then rm -f "$lock"; ln -s "$$" "$lock" 2>/dev/null || return 1; else return 1; fi
+	}
+	trap 'rm -f "$lock"' EXIT
+}
+
+# A build yields to whatever the Mac is otherwise doing: lowest priority, and half its cores.
+yielding() {
+	local cores; cores=$(sysctl -n hw.ncpu 2>/dev/null || echo 2)
+	CARGO_BUILD_JOBS=$((cores / 2 > 0 ? cores / 2 : 1)) nice -n 19 "$@"
+}
+
 # Reads and checks the record; fails, having said why, if it isn't one signed by this build's release key.
 record() {
 	curl -fsSL -m 30 "$address/updates/newest" -o newest.new 2>/dev/null || { say "couldn't reach $address"; return 1; }
@@ -72,6 +91,7 @@ build_here() {
 		[ ! -e failed ] || say "Failed: its build of ${want_commit:0:12} failed: $(tail -n 8 failed.log | tr '\n' ' ')"
 		exit 0
 	fi
+	building || { say "another build is running on this Mac: ${want_commit:0:12} is built when it's done"; exit 0; }
 	checkout "$want_commit" "$want_config" > "$c/update.log" 2>&1; status=$?
 	cd "$c" || exit 1
 	if [ $status != 0 ]; then
@@ -80,7 +100,7 @@ build_here() {
 	fi
 	say "building ${want_commit:0:12}"
 	local notarize=""; if same "$(line source-release | cut -d' ' -f2)" "$want_commit"; then notarize=--release; fi
-	run bash -c "cd '$c/src' && CONFIG='$config' client/native/disk.sh retry client/native/mac/build.sh $notarize"
+	run yielding bash -c "cd '$c/src' && CONFIG='$config' client/native/disk.sh retry client/native/mac/build.sh $notarize"
 	local status=$?
 	[ -z "$stopped" ] || exit 0
 	echo "$want" > tried; echo "$with" > tried.job
@@ -120,12 +140,12 @@ install_phone() {
 phone() {
 	local want="$want_commit $want_config" last
 	last=$(cat phone.built 2>/dev/null || true)
-	if [ "$want" != "$last" ] && [ "$want" != "$(cat phone.tried 2>/dev/null)" ]; then
+	if [ "$want" != "$last" ] && [ "$want" != "$(cat phone.tried 2>/dev/null)" ] && building; then
 		echo "$want" > phone.tried
 		if checkout "$want_commit" "$want_config" > phone.log 2>&1; then
 			if [ "${last#* }" = "$want_config" ] && git diff --quiet "${last%% *}" "$want_commit" -- . ':!client/native/mac' ':!client/native/windows' ':!client/native/android' ':!service' ':!apps' ':!docs' ':!tests' ':!*.md' 2>/dev/null; then
 				:
-			elif CONFIG="$config" client/native/disk.sh retry client/native/iphone/build.sh device "$c/phone" >> "$c/phone.log" 2>&1; then
+			elif CONFIG="$config" yielding client/native/disk.sh retry client/native/iphone/build.sh device "$c/phone" >> "$c/phone.log" 2>&1; then
 				echo "$want" > "$c/phone.built"
 			else
 				say "iPhone: its build of ${want_commit:0:12} failed: $(tail -n 4 "$c/phone.log" | tr '\n' ' ')"

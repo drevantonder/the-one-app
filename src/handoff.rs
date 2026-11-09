@@ -110,33 +110,36 @@ pub fn supervised() -> bool {
     !cfg!(target_os = "linux") || unit().is_some()
 }
 
-/// Asks the node, as its own machine's programs do, every 20 seconds; when it hasn't answered three times running, it
-/// says so and exits, for its supervisor to start it again. A node whose every thread is stuck still listens, and what's
-/// asked of it would otherwise wait unanswered, every agent and the CLI with it, until someone restarts it by hand.
+/// A node whose runtime has made no progress for a minute says so and exits, for its supervisor to start it again. A node
+/// whose every thread is stuck still listens, and what's asked of it would otherwise wait unanswered, every agent and the
+/// CLI with it, until someone restarts it by hand. Progress is a task on the runtime that ticks every few seconds, not a
+/// request answered in time: a busy node (an update building on its machine) answers slowly, and is not stuck.
 pub fn watch() {
     if !supervised() {
         return;
     }
-    std::thread::spawn(|| {
-        let url = format!("http://{}/v1/state", crate::api::addr());
-        let config = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(10)));
-        let agent: ureq::Agent = config.middleware(crate::api::as_this_machine).build().into();
-        let mut missed = 0;
+    const STUCK_FOR: u64 = 60;
+    let beat = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let up = || STARTED.get().map_or(0, |s| s.elapsed().as_secs());
+    tokio::spawn({
+        let beat = beat.clone();
+        async move {
+            loop {
+                beat.store(up(), std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    });
+    std::thread::spawn(move || {
         loop {
-            std::thread::sleep(Duration::from_secs(20));
+            std::thread::sleep(Duration::from_secs(10));
             if stopped() {
                 return;
             }
-            match agent.get(&url).call() {
-                Ok(_) => missed = 0,
-                Err(err) => {
-                    missed += 1;
-                    tracing::warn!("this node didn't answer itself ({err})");
-                    if missed == 3 {
-                        tracing::error!("this node stopped answering: exiting, to be started again");
-                        std::process::exit(1);
-                    }
-                }
+            let silent = up().saturating_sub(beat.load(std::sync::atomic::Ordering::SeqCst));
+            if silent >= STUCK_FOR {
+                tracing::error!("this node's runtime has done nothing for {silent} seconds: exiting, to be started again");
+                std::process::exit(1);
             }
         }
     });
