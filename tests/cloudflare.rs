@@ -960,7 +960,11 @@ mod relay {
             assert!(reaches(&address, &brief, &a).await, "a session's endpoint doesn't reach the network's devices");
             assert!(!cut_off(&k, &d).await && !cut_off(&k, &brief).await);
 
+            assert_eq!(testing(&k, json!({ "online": [id_of(&a)] })).await, json!([id_of(&a)]));
             testing(&k, json!({ "advance": 600_001 })).await;
+            // A socket nothing's come from for that long, as a laptop whose lid closed leaves, isn't online.
+            assert_eq!(testing(&k, json!({ "online": [id_of(&a)] })).await, json!([]));
+            assert!(!cut_off(&k, &a).await, "a quiet socket was closed");
             assert!(cut_off(&k, &d).await, "an expired pairing code's computer is still let in");
             assert!(cut_off(&k, &brief).await, "an ended session is still let in");
             assert_eq!(upgrade_status(&address, &code), 403, "an expired pairing code let its computer in again");

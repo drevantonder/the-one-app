@@ -27,7 +27,7 @@
 // `POST /relay/computes` answers a request signed by a key on the list, or by a session's key with its certificate
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
 // endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; and `online`, those
-// of them connected here now, which a client races first. 403 is only for a key that isn't let in; a request
+// of them connected here now and heard from lately, which a client races first and every node shows as online. 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows. A device's own request
 // that says it reads less of who's who than this build (`reads`, protocol.js's `READS`; an older build's says
 // nothing) is 426, telling it to update. A browser's session runs the code the address serves, the newest, so it isn't
@@ -77,6 +77,9 @@ const is = (it, role) => !!it && rolesOf(it.role).includes(role);
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
 const FOR_NODE_MOST = 1024;
+// Every iroh endpoint pings the relay each 15 seconds, and a laptop whose lid closes ends no socket.
+const SILENT_AFTER = 45_000;
+const HEARD_EVERY = 5_000;
 
 const replayed = (what) => ({ error: `that ${what} was taken already`, code: CODES.replayed });
 
@@ -271,14 +274,15 @@ export class Relay extends DurableObject {
 
   /// A test's way in (`/relay/test`): `{ advance: ms }` moves the clock on and ends what it ended; `{ count: [key, what] }`
   /// is how often `note` said it; `{ wait: [key, what, after] }` answers once it has said it more than `after` times;
-  /// `{ connected: [key] }` is which of those are connected.
+  /// `{ connected: [key] }` is which of those still have a socket; `{ online: [key] }`, which count as online.
   async testing(told) {
     if (told.advance !== undefined) {
       this.skew += told.advance;
       await this.alarm();
     }
     if (told.count) return this.count(...told.count);
-    if (told.connected) return this.connected(told.connected);
+    if (told.connected) return told.connected.filter((k) => this.sockets.has(k));
+    if (told.online) return this.connected(told.online);
     if (told.wait) {
       const [key, what, after] = told.wait;
       if (this.count(key, what) <= after) await new Promise((resolve) => this.waiting.push({ key, what, after, resolve }));
@@ -403,6 +407,7 @@ export class Relay extends DurableObject {
     if (said?.challenge) return this.prove(ws, said, bytes);
     if (!said?.id) return;
     const now = this.now();
+    if (!(now - said.heard < HEARD_EVERY)) ws.serializeAttachment({ ...said, heard: now });
     // A pairing code's computer, until it's added: only while its code works, and only to the device that made it. A
     // session's endpoint, only until its certificate's `until`.
     if (said.pairing && now > said.until) return this.end(said.id, "its pairing code expired");
@@ -473,8 +478,10 @@ export class Relay extends DurableObject {
     return [...gone];
   }
 
+  /// Which of `keys` are connected: a socket that has said something lately. The network's one answer to who's online.
   connected(keys) {
-    return keys.filter((k) => this.sockets.has(k));
+    const now = this.now();
+    return keys.filter((k) => now - this.sockets.get(k)?.deserializeAttachment().heard < SILENT_AFTER);
   }
 
   boundTo(key) {
@@ -606,7 +613,7 @@ export class Relay extends DurableObject {
         } catch {} // already closed
       }
     }
-    ws.serializeAttachment(attachment);
+    ws.serializeAttachment({ ...attachment, heard: this.now() });
     this.sockets.set(id, ws);
     ws.send(confirm());
     const device = attachment.by || id, now = Date.now();

@@ -73,7 +73,7 @@ impl Node {
             }
             let mut services: Vec<Service> = session.map(|s| s.services.clone()).unwrap_or_default();
             // What its services with endpoints of their own run there, as each says: they're part of it.
-            for (k, p) in i.peers.iter().filter(|(k, _)| i.online(k)) {
+            for (k, p) in i.peers.iter().filter(|(k, _)| i.heard(k)) {
                 if m.machine(k)?.is_some_and(|p| p.is(scopes::Kind::Service) && p.device == Some(s.key)) {
                     for d in p.services.iter() {
                         if !services.iter().any(|h| h.0 == d.0) {
@@ -87,7 +87,7 @@ impl Node {
                 kind: load.as_ref().map(|l| l.kind.clone()),
                 far: i.far.get(&s.key).is_some_and(|d| *d > FAR),
                 here: s.key == self.0.id,
-                online: s.key == self.0.id || session.is_some(),
+                online: s.key == self.0.id || i.online(&s.key),
                 build: build.map(|r| r.commit.clone()),
                 target: build.map(|r| r.target.clone()),
                 services: services.iter().map(|d| d.0.clone()).collect(),

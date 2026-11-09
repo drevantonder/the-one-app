@@ -642,7 +642,7 @@ impl Node {
             return Ok(conn.clone());
         }
         // One that hasn't said hello lately is mostly off: it isn't waited for as long, nor tried again for a while.
-        let seen = self.with(|i| Ok(i.online(to))).unwrap_or(true);
+        let seen = self.with(|i| Ok(i.heard(to))).unwrap_or(true);
         if !seen && self.0.net.down.lock().unwrap().get(to).is_some_and(|at| at.elapsed() < DOWN_FOR) {
             bail!(NotThere(format!("{} isn't connected", short(to))));
         }
@@ -845,6 +845,26 @@ impl Node {
         }
     }
 
+    /// Reads which of the network's devices are connected to the relay. What it last said stands until it answers.
+    pub(super) fn read_connected(&self) {
+        let Some(address) = self.with_or(None, |i| Ok(i.r.db().setting("address")?)) else { return };
+        let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());
+        let url = format!("{}/relay/computes", address.trim_end_matches('/'));
+        let node = self.clone();
+        tokio::spawn(async move {
+            let body = crate::keys::signed_request(&key, crate::protocol::RELAY, json!({ "computes": true, "reads": crate::database::READS }), crate::keys::next_at(now_ms()));
+            let said = match post_relay(url, body).await {
+                Ok((200, said)) => said,
+                Ok((code, _)) => return tracing::debug!("reading who's connected: the relay answered {code}"),
+                Err(err) => return tracing::debug!("reading who's connected: {err:#}"),
+            };
+            let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| crate::keys::unhex(k.as_str()?).ok()).collect();
+            if node.with_or(false, |i| Ok(std::mem::replace(&mut i.connected, connected.clone()) != connected)) {
+                node.emit(Event::Devices);
+            }
+        });
+    }
+
     /// Tells the relay at the network's address something, signed by this device: a device it admitted (`add`), or a
     /// pairing code it made (`pairing`, the hash of its ticket, and `until`). Tried a few times, in the background.
     pub(super) fn tell_relay(&self, fields: Value) {
@@ -858,25 +878,16 @@ impl Node {
             for _ in 0..5 {
                 let at = crate::keys::next_at(now_ms());
                 let body = crate::keys::signed_request(&key, crate::protocol::RELAY, fields.clone(), at);
-                let url = url.clone();
-                let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-                let sent = tokio::task::spawn_blocking(move || {
-                    let mut resp = agent.post(&url).send_json(&body)?;
-                    let said: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-                    anyhow::Ok((resp.status().as_u16(), said["code"].as_str().unwrap_or("").to_string()))
-                })
-                .await;
-                match sent {
-                    Ok(Ok((code, _))) if code < 300 => return,
+                match post_relay(url.clone(), body).await {
+                    Ok((code, _)) if code < 300 => return,
                     // Another process of this device signed in the same millisecond: again at once, with a new `at`.
-                    Ok(Ok((_, said))) if said == crate::protocol::code::REPLAYED => {
+                    Ok((_, said)) if said["code"] == crate::protocol::code::REPLAYED => {
                         tokio::time::sleep(crate::keys::again_in(at)).await;
                         continue;
                     }
-                    Ok(Ok((code, _))) if code < 500 => return tracing::debug!("the relay refused what this device told it ({code})"),
-                    Ok(Ok(_)) => tracing::debug!("telling the relay: it had a problem"),
-                    Ok(Err(err)) => tracing::debug!("telling the relay: {err}"),
-                    Err(err) => tracing::debug!("telling the relay: {err}"),
+                    Ok((code, _)) if code < 500 => return tracing::debug!("the relay refused what this device told it ({code})"),
+                    Ok(_) => tracing::debug!("telling the relay: it had a problem"),
+                    Err(err) => tracing::debug!("telling the relay: {err:#}"),
                 }
                 tokio::time::sleep(wait).await;
                 wait *= 2;
@@ -921,6 +932,17 @@ impl tokio::io::AsyncWrite for Stream {
     fn poll_shutdown(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
         tokio::io::AsyncWrite::poll_shutdown(std::pin::Pin::new(&mut self.send), cx)
     }
+}
+
+/// Posts to the relay: → what it answered. A slow relay gives up before the next ask.
+async fn post_relay(url: String, body: Value) -> Result<(u16, Value)> {
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(PRESENCE_EVERY)).build().into();
+    tokio::task::spawn_blocking(move || {
+        let mut resp = agent.post(&url).send_json(&body)?;
+        let said: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
+        anyhow::Ok((resp.status().as_u16(), said))
+    })
+    .await?
 }
 
 #[cfg(test)]

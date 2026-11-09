@@ -109,6 +109,8 @@ struct Network {
     /// The network's bucket, and its fields, which a device joining is given.
     bucket: Option<(Place, BTreeMap<String, String>)>,
     peers: HashMap<Key, Peer>,
+    /// The devices connected to the relay, as it last said: `Network::online`.
+    connected: std::collections::HashSet<Key>,
     builds: HashMap<Key, release::Running>,
     /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
     /// last position read, and the database, once its anchor checked out here.
@@ -132,7 +134,13 @@ struct Network {
 }
 
 impl Network {
+    /// Whether a device is on, the same answer every node gives: what the relay says.
     fn online(&self, device: &Key) -> bool {
+        self.connected.contains(device)
+    }
+
+    /// Whether this device can count on reaching that device or service endpoint: it said hello here lately.
+    fn heard(&self, device: &Key) -> bool {
         self.peers.get(device).is_some_and(|p| p.seen.elapsed() < 3 * PRESENCE_EVERY)
     }
 }

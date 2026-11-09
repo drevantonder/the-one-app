@@ -481,7 +481,7 @@ impl Node {
             }
             // A client's log is read through a node it's connected to, which only that node knows: each is tried.
             if req.app == scopes::APP && self.with(|i| Ok(i.r.db().find_machine(device).and_then(|k| Ok(i.r.db().client(&k)?.is_some())).unwrap_or(false)))? {
-                let mut nodes = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|m| m.key).filter(|k| *k == self.0.id || i.online(k)).collect::<Vec<_>>()))?;
+                let mut nodes = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|m| m.key).filter(|k| *k == self.0.id || i.heard(k)).collect::<Vec<_>>()))?;
                 nodes.sort_by_key(|k| *k != self.0.id);
                 return Ok(nodes);
             }
@@ -497,7 +497,7 @@ impl Node {
             && self.with(|i| {
                 let mut part = false;
                 for (k, p) in i.peers.iter() {
-                    if ours(i, k)? && i.online(k) && p.services.iter().any(|d| d.0 == req.app && about_here(&d.2)) {
+                    if ours(i, k)? && i.heard(k) && p.services.iter().any(|d| d.0 == req.app && about_here(&d.2)) {
                         part = true;
                     }
                 }
@@ -515,7 +515,7 @@ impl Node {
                 }
                 on
             } else {
-                i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.services.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect()
+                i.peers.iter().filter(|(k, _)| i.heard(k)).filter(|(_, s)| s.services.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect()
             };
             let set = rank::set(&i.r.db().settings()?);
             let here_load = crate::load::current();
@@ -532,7 +532,7 @@ impl Node {
                 let here = *k == self.0.id;
                 let load = if here { Some(&here_load) } else { i.peers.get(k).and_then(|p| p.load.as_ref()) };
                 let far = !here && i.far.get(k).is_some_and(|d| *d > FAR);
-                (!here && !i.online(k), here_first && !ours_now[k], load.is_some_and(full), far, rank::priority(&set, &hex(&at[k])), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
+                (!here && !i.heard(k), here_first && !ours_now[k], load.is_some_and(full), far, rank::priority(&set, &hex(&at[k])), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
             };
             devices.sort_by_cached_key(rank);
             Ok(devices)
