@@ -41,7 +41,7 @@
 //! A step that doesn't count is passed over, its position taken, as a database's are: nothing it says happens. What a
 //! counted one changes is its kind's rule's (`rules`), applied to a fresh copy of the database (`scope::fresh`).
 //!
-//! Its steps are sealed with the key the frozen log had in each epoch (`CoreDb::key_name`, `seal`), under their own names. A
+//! Its steps are sealed with the key the frozen log had in each epoch (`keys::permanent`, `seal`), under their own names. A
 //! reader opens them itself: a node passes them on sealed. The frozen logs (`<prefix>/../log/`) are history, kept in the
 //! bucket and read by nothing.
 //!

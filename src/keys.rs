@@ -105,27 +105,70 @@ pub fn seal_secret(key: &SigningKey) -> [u8; 32] {
 pub fn seal_app_key(epoch_key: &[u8; 32], app: &str, app_key: &[u8; 32]) -> Vec<u8> {
     let nonce: [u8; 12] = rand::random();
     let mut out = nonce.to_vec();
-    out.extend(cipher(&hkdf(epoch_key, format!("one/app\0{app}").as_bytes())).encrypt(&nonce.into(), &app_key[..]).expect("encrypting in memory"));
+    out.extend(cipher(&hkdf(epoch_key, &app_key_info(app))).encrypt(&nonce.into(), &app_key[..]).expect("encrypting in memory"));
     out
 }
 
 pub fn open_app_key(epoch_key: &[u8; 32], app: &str, sealed: &[u8]) -> Result<[u8; 32]> {
-    let key = cipher(&hkdf(epoch_key, format!("one/app\0{app}").as_bytes()));
+    let key = cipher(&hkdf(epoch_key, &app_key_info(app)));
     let mut forms = forms(sealed).filter(|(_, body)| body.len() == 60).peekable();
     ensure!(forms.peek().is_some(), "not a sealed app key");
     let plain = forms.find_map(|(aad, body)| key.decrypt(body[..12].into(), Payload { msg: &body[12..], aad }).ok()).ok_or_else(|| anyhow!("that epoch's key doesn't open {app}'s"))?;
     plain.try_into().map_err(|_| anyhow!("an app's key is 32 bytes"))
 }
 
-/// A database's key in an app, from the app's key: HKDF(app key, "one/database\0" ‖ the name its key goes by,
-/// `key_name`).
+/// A database's key in an app, from the app's key: HKDF(app key, "one/database\0" ‖ what it's made from, `permanent`).
 pub fn database_key(app_key: &[u8; 32], app: &str, database: &str) -> [u8; 32] {
-    hkdf(app_key, format!("one/database\0{}", key_name(app, database)).as_bytes())
+    hkdf(app_key, format!("one/database\0{}", permanent(app, database).key).as_bytes())
 }
 
-/// The name a database's key goes by: its own, but the core's (`CoreDb::key_name`).
-fn key_name<'a>(app: &str, database: &'a str) -> &'a str {
-    crate::database::scopes::CoreDb::of(app, database).map_or(database, |c| c.key_name())
+/// What an app's or a database's keys, seals and place in the bucket are made from, which nothing changes afterwards:
+/// the name it was first sealed under. A scope needs none of this: it's named by an id that's never changed, and its
+/// name and handle are only who's who's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Permanent<'a> {
+    /// Its app's folder in a scope's, which its app's key is made from too.
+    pub app: &'a str,
+    /// Its folder in its app's.
+    pub database: &'a str,
+    /// What its key is made from.
+    pub key: &'a str,
+}
+
+/// Something now called `app` (`database` in it, or the whole app for none), first sealed as `first_app` and
+/// `first_database`. `key_only` is a database that moved in the bucket and kept its old key.
+struct Renamed {
+    app: &'static str,
+    database: Option<&'static str>,
+    first_app: &'static str,
+    first_database: Option<&'static str>,
+    key_only: bool,
+}
+
+/// Every rename since something was first sealed: a rename adds a row here and changes nothing sealed, and a row is
+/// never taken away, nor its old name given to anything else. The scope database's steps are sealed with the frozen
+/// log's key, as every bucket's are.
+const RENAMED: &[Renamed] = {
+    use crate::database::scopes::{APP, CoreDb};
+    &[Renamed { app: APP, database: Some(CoreDb::Scope.name()), first_app: APP, first_database: Some(CoreDb::Log.name()), key_only: true }]
+};
+
+/// What `app`'s `database` is made from. Pass an empty `database` for the app alone.
+pub fn permanent<'a>(app: &'a str, database: &'a str) -> Permanent<'a> {
+    permanent_in(RENAMED, app, database)
+}
+
+fn permanent_in<'a>(renamed: &[Renamed], app: &'a str, database: &'a str) -> Permanent<'a> {
+    let Some(row) = renamed.iter().find(|r| r.app == app && r.database.is_none_or(|d| d == database)) else {
+        return Permanent { app, database, key: database };
+    };
+    let first = row.first_database.unwrap_or(database);
+    if row.key_only { Permanent { app, database, key: first } } else { Permanent { app: row.first_app, database: first, key: first } }
+}
+
+/// What an app's key in an epoch is sealed under is derived with: its permanent name.
+fn app_key_info(app: &str) -> Vec<u8> {
+    format!("one/app\0{}", permanent(app, "").app).into_bytes()
 }
 
 /// A database's key in an epoch, from its app's key `sealed` under the epoch's key (`app_key_name`).
@@ -437,7 +480,7 @@ pub fn epoch_hash(key: &[u8; 32]) -> String {
 
 /// The folder of an app's keys in a scope, one by epoch (`app_key_name`).
 pub fn app_keys_folder(scope: &str, app: &str) -> String {
-    format!("{}/{app}/_key", crate::bucket::folder(scope))
+    format!("{}/{}/_key", crate::bucket::folder(scope), permanent(app, "").app)
 }
 
 /// Where an app's key in epoch `n` of a scope is kept, sealed under that epoch's key.
@@ -448,12 +491,12 @@ pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
 /// Where an app's key in epoch `n` of a scope is kept sealed to an endpoint that runs the app's schedules there: its
 /// key in hex.
 pub fn app_schedules_key_name(scope: &str, app: &str, endpoint: &str, n: u32) -> String {
-    format!("{}/{app}/_app_schedules/{endpoint}/{n}", crate::bucket::folder(scope))
+    format!("{}/{}/_app_schedules/{endpoint}/{n}", crate::bucket::folder(scope), permanent(app, "").app)
 }
 
 /// Where a build from before app schedules had their name sealed it: read when it isn't under its own name.
 pub fn app_schedules_key_name_before(scope: &str, app: &str, endpoint: &str, n: u32) -> String {
-    format!("{}/{app}/_grants/{endpoint}/{n}", crate::bucket::folder(scope))
+    format!("{}/{}/_grants/{endpoint}/{n}", crate::bucket::folder(scope), permanent(app, "").app)
 }
 
 /// Where a scope's Vault secret key `n` is kept sealed to `to`: a machine's key granted it, or `recovery`. Its public
@@ -870,10 +913,6 @@ mod tests {
         cipher(key).encrypt(nonce.into(), Payload { msg, aad }).unwrap()
     }
 
-    fn app_key_label(app: &str) -> Vec<u8> {
-        format!("one/app\0{app}").into_bytes()
-    }
-
     /// Sealed to `to` by hand, in `format`, from a share whose first byte is `first`, if any.
     fn sealed_to(to: &[u8; 32], format: &[u8], first: Option<u8>, plain: &[u8]) -> Vec<u8> {
         loop {
@@ -915,10 +954,24 @@ mod tests {
         assert_eq!(open_under(b"a token", &[NUMBERED, &nonce, &gcm(&under, &nonce, b"copy", NUMBERED)].concat()).unwrap(), b"copy");
         assert_eq!(open_under(b"a token", &[&unlucky_nonce[..], &gcm(&under, &unlucky_nonce, b"copy", UNNUMBERED)].concat()).unwrap(), b"copy");
 
-        let app = hkdf(&key, &app_key_label("tally"));
+        let app = hkdf(&key, &app_key_info("tally"));
         let made: [u8; 32] = rand::random();
         assert_eq!(open_app_key(&key, "tally", &[NUMBERED, &nonce, &gcm(&app, &nonce, &made, NUMBERED)].concat()).unwrap(), made);
         assert_eq!(open_app_key(&key, "tally", &[&unlucky_nonce[..], &gcm(&app, &unlucky_nonce, &made, UNNUMBERED)].concat()).unwrap(), made);
+    }
+
+    #[test]
+    fn a_rename_changes_nothing_a_thing_was_sealed_under() {
+        let plain = |app, database| Permanent { app, database, key: database };
+        assert_eq!(permanent("tally", "main"), plain("tally", "main"), "what was never renamed is its own name");
+        let core = permanent(crate::database::scopes::APP, crate::database::scopes::CoreDb::Scope.name());
+        assert_eq!((core.database, core.key), ("scope", "log"), "the scope database is where it was, under the log's key");
+        let renamed = [Renamed { app: "counter", database: None, first_app: "tally", first_database: None, key_only: false }, Renamed { app: "notes", database: Some("pages"), first_app: "notes", first_database: Some("main"), key_only: false }];
+        assert_eq!(permanent_in(&renamed, "counter", "main"), plain("tally", "main"), "an app renamed stays where it was sealed");
+        assert_eq!(permanent_in(&renamed, "counter", ""), plain("tally", ""), "as does its key");
+        assert_eq!(permanent_in(&renamed, "notes", "pages"), plain("notes", "main"), "a database renamed");
+        assert_eq!(permanent_in(&renamed, "notes", "other"), plain("notes", "other"), "and not its neighbour");
+        assert_eq!(permanent_in(&renamed, "tally", "main"), plain("tally", "main"), "its first name is still that name");
     }
 
     #[test]

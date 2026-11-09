@@ -821,15 +821,6 @@ impl CoreDb {
         crate::bucket::database_prefix(scope, APP, self.name())
     }
 
-    /// The name its key goes by in each epoch (`keys::database_key`), and is asked for and handed by: the scope
-    /// database's steps are sealed with the frozen log's, as every bucket's are, so its own would open none of them.
-    pub fn key_name(self) -> &'static str {
-        match self {
-            CoreDb::Scope => CoreDb::Log.name(),
-            c => c.name(),
-        }
-    }
-
     /// What a user calls it.
     pub fn said(self) -> &'static str {
         match self {

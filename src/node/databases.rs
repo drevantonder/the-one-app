@@ -501,7 +501,7 @@ impl Node {
         self.close_dbs(|_, db| db.split('/').next() == Some(app));
         self.0.databases.database_keys.lock().unwrap().retain(|(_, db), _| db.split('/').next() != Some(app));
         for folder in bucket.folders()? {
-            bucket.forget(&format!("{folder}/{app}"))?;
+            bucket.forget(&format!("{folder}/{}", crate::keys::permanent(app, "").app))?;
         }
         let (bucket, app) = (bucket.place, app.to_string());
         tokio::task::spawn_blocking(move || {

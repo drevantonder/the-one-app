@@ -102,7 +102,8 @@ pub fn folder(scope: &str) -> String {
 
 /// Where a database of an app's in a scope keeps its steps, copies and hint (`database::stored`).
 pub fn database_prefix(scope: &str, app: &str, database: &str) -> String {
-    format!("{}/{app}/{database}", folder(scope))
+    let permanent = crate::keys::permanent(app, database);
+    format!("{}/{}/{}", folder(scope), permanent.app, permanent.database)
 }
 
 /// Where a blob named in `scope` is kept in the bucket, by its hash: under the scope's node folder, sealed with the key
