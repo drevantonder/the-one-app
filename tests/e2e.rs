@@ -265,8 +265,8 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     assert!(format!("{refused:#}").contains("only their own devices"), "{refused:#}");
 
     // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the notes go on.
-    let laptop_key = json!({ "key": one::keys::hex(&laptop.verifying_key().to_bytes()) });
-    let removed = one::settings::answer(&a, "POST", "/v1/remove", laptop_key.to_string().as_bytes()).await.unwrap().unwrap();
+    let laptop_key = json!({ "device": one::keys::hex(&laptop.verifying_key().to_bytes()) });
+    let removed = one::settings::answer(&a, "POST", "/v1/devices/remove", laptop_key.to_string().as_bytes()).await.unwrap().unwrap();
     assert_eq!(removed["not_renewed"], json!([]), "{removed}");
     assert_eq!(opens(&laptop, &global).await, vec![1]);
     for f in walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_epochs/2/")) {
@@ -298,7 +298,7 @@ async fn a_settings_change_that_doesnt_read_is_refused() {
     assert_eq!(role, Some(one::database::scopes::Role::Admin), "still the group's admin");
 
     std::fs::write(dir.join("invites.json"), b"{ not json").unwrap();
-    let refused = ask("/v1/invite-link", json!({ "name": "Sam" })).await.unwrap_err();
+    let refused = ask("/v1/devices/invite", json!({ "name": "Sam" })).await.unwrap_err();
     assert!(format!("{refused:#}").contains("can't be read"), "{refused:#}");
     assert_eq!(std::fs::read(dir.join("invites.json")).unwrap(), b"{ not json");
 }

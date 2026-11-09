@@ -9,7 +9,7 @@ use crate::core_tools::{Feature, Tool, serves};
 
 pub fn feature() -> Feature {
     let guide = format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the users who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined. Each user and group has a handle, like andre or family, unique among them, which apps call them by (Repos' addresses are <handle>/<repo>); groups_handle changes yours, or a group's you're an admin of.");
-    Feature { name: "groups", title: "Groups", description: format!("Who's in {YOURS}, and in each of its groups"), guide, tools: tools(), #[cfg(feature = "node")] steps: crate::core_tools::no_steps }
+    Feature { name: "groups", title: "Groups", description: format!("Who's in {YOURS}, and in each of its groups"), guide, tools: tools(), }
 }
 
 fn tools() -> Vec<Tool> {

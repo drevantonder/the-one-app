@@ -1,6 +1,6 @@
 //! The core's tools as the command line, MCP, search and skills list them, and running one on a client that asks a node.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use serde_json::{Map, Value};
 
 use super::{Asked, Feature, all};
@@ -15,23 +15,9 @@ impl Feature {
 
     /// Runs its tool at `at` (`super::find`) as the user, asking `node`.
     pub fn run(&self, at: usize, input: &Map<String, Value>, asked: &Asked, node: &Client) -> Result<Value> {
-        match self.request(at, input, asked) {
-            Some(request) => {
-                let r = request?;
-                let answer = match r.body {
-                    None => node.get(&r.path)?,
-                    Some(body) => node.post_for(asked.agent, &r.path, body)?,
-                };
-                self.said(at, input, answer)
-            }
-            None => (self.steps)(self.tools[at].spec["name"].as_str().unwrap_or(""), input, asked, node),
-        }
+        let request = self.request(at, input, asked);
+        Ok(super::said(node.post_for(asked.agent, &request.path, request.body)?))
     }
-}
-
-/// The steps of a feature whose every tool is one request.
-pub fn no_steps(tool: &str, _: &Map<String, Value>, _: &Asked, _: &Client) -> Result<Value> {
-    bail!("{tool} is one request, not steps")
 }
 
 /// Every feature's tools, as the command line, search and skills read a set of tools (`Feature::listed`), each feature

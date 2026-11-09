@@ -15,8 +15,6 @@ pub fn feature() -> Feature {
         description: "Keys, sign-ins and accounts, used without being seen".into(),
         guide: GUIDE.into(),
         tools: tools(),
-        #[cfg(feature = "node")]
-        steps: crate::core_tools::no_steps,
     }
 }
 

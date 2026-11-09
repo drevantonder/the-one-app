@@ -172,7 +172,7 @@ export function browser() {
     /// replaces it, then its key goes. One that can't get out in a few seconds (no node answering) goes anyway, and
     /// stays listed, last seen when it signed out, until it's removed in Settings › Devices.
     async leave(api) {
-      if (device) await Promise.race([api("/v1/remove", { method: "POST", body: { key: device.key } }), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));
+      if (device) await Promise.race([api("/v1/devices/remove", { method: "POST", body: { device: device.key } }), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));
       await navigator.serviceWorker?.getRegistration().then((r) => r?.pushManager.getSubscription()).then((s) => s?.unsubscribe()).catch(() => {});
       localStorage.removeItem(PUSHED);
       await forgetDevice();

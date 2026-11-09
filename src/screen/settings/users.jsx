@@ -50,7 +50,7 @@ function Users() {
     }
     setPending((p) => ({ ...p, [u.id]: role }))
     try {
-      await (role === null ? api("POST", "/v1/remove", { user: u.id }) : api("POST", "/v1/role", { user: u.id, role }))
+      await (role === null ? api("POST", "/v1/devices/remove", { user: u.id }) : api("POST", "/v1/role", { user: u.id, role }))
     } catch (e) {
       setError(said(e))
     }
@@ -152,7 +152,7 @@ function AddSomeone({ open, setOpen }) {
     setBusy(true)
     setError("")
     try {
-      const { link, until } = await api("POST", "/v1/invite-link", { name: who })
+      const { link, until } = await api("POST", "/v1/devices/invite", { name: who })
       one.tap("success")
       setMade({ who, link, days: Math.max(1, Math.round((until - Date.now()) / 86_400_000)) })
     } catch (e) {

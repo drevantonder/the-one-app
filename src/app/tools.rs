@@ -14,8 +14,6 @@ fn feature(name: &'static str, title: &'static str, description: &str, tool: Too
         description: description.into(),
         guide: GUIDE.into(),
         tools: vec![tool],
-        #[cfg(feature = "node")]
-        steps: crate::core_tools::no_steps,
     }
 }
 

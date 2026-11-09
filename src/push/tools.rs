@@ -13,8 +13,6 @@ pub fn feature() -> Feature {
         description: "Sends notifications to your devices".into(),
         guide: "Push sends a notification to every device of yours that gets them: push_send with a title and a body. An app pushes with ctx.notify, and tapping its push opens its screen. Each one is sealed to the device it's for, so nothing on the way reads it. It says how many devices it went to, never whether anyone saw it.".into(),
         tools: tools(),
-        #[cfg(feature = "node")]
-        steps: crate::core_tools::no_steps,
     }
 }
 

@@ -15,8 +15,6 @@ pub fn feature() -> Feature {
         description: "Encrypted copies of everything, to a disk or S3-compatible storage".into(),
         guide: GUIDE.into(),
         tools: tools(),
-        #[cfg(feature = "node")]
-        steps: crate::core_tools::no_steps,
     }
 }
 

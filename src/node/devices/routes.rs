@@ -1,5 +1,4 @@
-//! Devices' routes this node serves itself: pairing a machine, its own name, erasing what one keeps, and letting one in
-//! with the network's recovery key.
+//! Devices' routes this node serves itself: pairing a machine, its own name, and erasing what one keeps.
 
 use axum::Json;
 use axum::extract::State;
@@ -15,7 +14,6 @@ pub fn routes() -> Routes {
         .route("/v1/pair", Who::SignedIn, post(pair))
         .route("/v1/name", Who::ThisMachine, post(name))
         .route("/v1/erase", Who::SignedIn, post(erase))
-        .route("/v1/devices/approve-with-recovery", Who::ThisMachine, post(approve_with_recovery))
 }
 
 #[derive(Deserialize)]
@@ -52,22 +50,4 @@ struct Device {
 /// Erases what a device keeps, asked of it directly (`Node::erase`), before it's removed.
 async fn erase(State(node): State<Node>, me: Me, Body(body): Body<Device>) -> Reply {
     Ok(Json(node.erase(&me.caller, given(&body.key, "key")?).await?))
-}
-
-/// Lets in the device showing `code` with `recovery`, the network's recovery key (hex), read from a file here by the
-/// CLI and never kept.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Approve {
-    code: String,
-    #[serde(default)]
-    confirm: bool,
-    recovery: String,
-}
-
-async fn approve_with_recovery(State(node): State<Node>, Body(body): Body<Approve>) -> Reply {
-    let (code, recovery) = (given(&body.code, "code")?, &body.recovery);
-    let secret: [u8; 32] = crate::keys::unhex(recovery.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
-    let key = ed25519_dalek::SigningKey::from_bytes(&secret);
-    Ok(Json(node.approve_with_recovery(code, &key, body.confirm).await?))
 }

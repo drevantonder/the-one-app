@@ -237,7 +237,7 @@ function G() {
 	].includes(one.params?.tab) ? one.params.tab : "devices"), [d, f] = r({}), [h, g] = r(""), [_, x] = r(null), [k, A, M] = S(), [N, P] = r(""), [, F] = r(0), I = n([]), L = n(!1);
 	async function R() {
 		try {
-			let [e, t] = await Promise.all([E("GET", "/v1/state"), one.device()]), n = [], r = !1, a = null, s = [I.current.length ? null : E("GET", "/v1/apps").then((e) => I.current = e, () => {}), E("GET", "/v1/devices/requests").then((e) => n = e.filter((e) => e.code), () => {})];
+			let [e, t] = await Promise.all([E("GET", "/v1/state"), one.device()]), n = [], r = !1, a = null, s = [I.current.length ? null : E("GET", "/v1/apps").then((e) => I.current = e, () => {}), E("POST", "/v1/devices/requests", {}).then((e) => n = e.filter((e) => e.code), () => {})];
 			return t.keys && s.push(E("GET", "/v1/devices/passkey").then((e) => r = e.passkey === !0, () => {}), E("GET", "/v1/devices/seen").then((e) => a = e || {}, () => {})), await Promise.all(s), L.current ? void 0 : (i({
 				state: e,
 				device: t,
@@ -405,7 +405,7 @@ function G() {
 			action: "Remove",
 			danger: !0
 		}) && (one.tap("medium"), z(async () => {
-			for (let e of t) await E("POST", "/v1/remove", { key: e });
+			for (let e of t) await E("POST", "/v1/devices/remove", { device: e });
 		}));
 	}
 	async function X(e) {
@@ -415,7 +415,7 @@ function G() {
 			action: "Remove",
 			danger: !0
 		}) && z(async () => {
-			for (let t of e.old) await E("POST", "/v1/remove", { key: t.key });
+			for (let t of e.old) await E("POST", "/v1/devices/remove", { device: t.key });
 		});
 	}
 	async function Z() {
@@ -965,11 +965,10 @@ function se(t) {
 									variant: "ghost",
 									size: "sm",
 									className: "text-destructive",
-									onClick: () => h(() => E("POST", "/v1/app-schedules", {
+									onClick: () => h(() => E("POST", "/v1/devices/stop_schedules", {
 										device: e.endpoint,
 										app: e.app,
-										scope: e.scope,
-										days: 0
+										scope: e.scope
 									})),
 									children: "Stop"
 								})]
@@ -1397,7 +1396,7 @@ function Ce(t) {
 		v(!0), b("");
 		try {
 			f && await E("POST", "/v1/erase", { key: o });
-			for (let e of a) await E("POST", "/v1/remove", { key: e });
+			for (let e of a) await E("POST", "/v1/devices/remove", { device: e });
 			one.tap("success"), l();
 		} catch (e) {
 			b(D(e)), v(!1);
@@ -1611,7 +1610,7 @@ function Oe(t) {
 	n[2] !== p || n[3] !== l || n[4] !== u ? (x = async function(e) {
 		v("");
 		try {
-			await E("POST", "/v1/app-schedules", {
+			await E("POST", "/v1/devices/run_schedules", {
 				device: e.key,
 				app: p,
 				scope: u

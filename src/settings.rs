@@ -83,7 +83,8 @@ enum Route {
     Retire,
     ForgetSignIn,
     InviteLink,
-    AppSchedules,
+    RunSchedules,
+    StopSchedules,
     Requests,
     Approve,
     Refuse,
@@ -98,7 +99,7 @@ enum Route {
 /// more than its own programs, and a tool that is a route (`core_tools::Runs::Route`), which asks `answer_as_mine` itself.
 const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/role", Route::Role, true),
-    ("POST", "/v1/remove", Route::Remove, true),
+    ("POST", "/v1/devices/remove", Route::Remove, false),
     ("POST", "/v1/settings", Route::Settings, true),
     ("POST", "/v1/group", Route::Group, true),
     ("POST", "/v1/invite", Route::Invite, true),
@@ -109,10 +110,11 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/service", Route::Service, false),
     ("POST", "/v1/retire", Route::Retire, true),
     ("POST", "/v1/devices/forget-sign-in", Route::ForgetSignIn, true),
-    ("POST", "/v1/invite-link", Route::InviteLink, true),
-    ("POST", "/v1/app-schedules", Route::AppSchedules, true),
-    ("GET", "/v1/devices/requests", Route::Requests, true),
-    ("POST", "/v1/devices/approve", Route::Approve, true),
+    ("POST", "/v1/devices/invite", Route::InviteLink, false),
+    ("POST", "/v1/devices/run_schedules", Route::RunSchedules, false),
+    ("POST", "/v1/devices/stop_schedules", Route::StopSchedules, false),
+    ("POST", "/v1/devices/requests", Route::Requests, false),
+    ("POST", "/v1/devices/approve", Route::Approve, false),
     ("POST", "/v1/devices/refuse", Route::Refuse, true),
     ("POST", "/v1/devices/passkey", Route::Passkey, true),
     ("GET", "/v1/devices/seen", Route::Seen, true),
@@ -217,11 +219,11 @@ mod body {
         pub role: scopes::Role,
     }
 
-    /// A device by its key or name, or a user by their id or name, with all their devices.
+    /// A device by its name or key, or a user by their id or name, with all their devices.
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     pub struct Remove {
-        pub key: Option<String>,
+        pub device: Option<String>,
         pub user: Option<String>,
     }
 
@@ -311,15 +313,23 @@ mod body {
         pub email: Option<String>,
     }
 
-    /// `device` by its name or key; `scope` user (theirs, the default), global, or a group by its name or id; `days`,
-    /// 30 at most, 0 to stop.
+    /// `device` by its name or key; `scope` user (theirs, the default), global, or a group by its name or id; `days`, 30
+    /// at most.
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
-    pub struct AppSchedules {
+    pub struct RunSchedules {
         pub app: String,
         pub device: String,
         pub scope: Option<String>,
         pub days: Option<u64>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct StopSchedules {
+        pub app: String,
+        pub device: String,
+        pub scope: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -335,6 +345,8 @@ mod body {
         pub code: String,
         #[serde(default)]
         pub confirm: bool,
+        /// A file with the network's recovery key, on a machine with a node, which lets in someone who lost every device.
+        pub recovery_key: Option<String>,
     }
 
     /// The passkey's PRF output (base64url), which only the page it signed in on has, and its credential's id.
@@ -373,11 +385,15 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             m.write(content::role(&m.who(|db| db.find_user(&body.user))?, body.role)).await?;
             done
         }
-        Route::Remove => match read(path, raw)? {
-            body::Remove { key: Some(key), user: None } => remove(m, &key).await?,
-            body::Remove { key: None, user: Some(user) } => remove_user(m, &user).await?,
-            _ => bail!("Give a device's key or a user, not both."),
-        },
+        Route::Remove => {
+            let mut removed = match read(path, raw)? {
+                body::Remove { device: Some(device), user: None } => remove(m, &device).await?,
+                body::Remove { device: None, user: Some(user) } => remove_user(m, &user).await?,
+                _ => bail!("Give a device or a user, not both."),
+            };
+            removed["said"] = json!(said_removed(&removed));
+            removed
+        }
         Route::Settings => {
             let body: body::Setting = read(path, raw)?;
             m.write(content::setting(&body.name, body.value.as_deref())).await?;
@@ -444,16 +460,28 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
         }
         Route::InviteLink => {
             let body: body::InviteLink = read(path, raw)?;
-            invite(m, &body.name, if body.admin { Role::Admin } else { Role::Member }, body.user.as_deref(), body.email.as_deref()).await?
+            let mut invited = invite(m, &body.name, if body.admin { Role::Admin } else { Role::Member }, body.user.as_deref(), body.email.as_deref()).await?;
+            invited["said"] = json!(said_invited(body.name.trim(), &invited));
+            invited
         }
-        Route::AppSchedules => app_schedules_asked(m, read(path, raw)?).await?,
+        Route::RunSchedules => {
+            let body: body::RunSchedules = read(path, raw)?;
+            app_schedules_asked(m, body.app, &body.device, body.scope.as_deref(), body.days.unwrap_or(APP_SCHEDULES_DAYS)).await?
+        }
+        Route::StopSchedules => {
+            let body: body::StopSchedules = read(path, raw)?;
+            app_schedules_asked(m, body.app, &body.device, body.scope.as_deref(), 0).await?
+        }
         Route::Requests => {
             read::<body::Nothing>(path, raw)?;
             requests(m).await?
         }
         Route::Approve => {
             let body: body::Approve = read(path, raw)?;
-            approve_code(m, &body.code, body.confirm).await?
+            ensure!(body.recovery_key.is_none(), "Letting someone back in with the recovery key is done on a computer with the key's file, by its command line.");
+            let mut approved = approve_code(m, &body.code, body.confirm).await?;
+            approved["said"] = json!(said_approved(&approved));
+            approved
         }
         Route::Refuse => refuse(m, &read::<body::Code>(path, raw)?.code).await?,
         Route::Passkey => {
@@ -1030,17 +1058,16 @@ async fn list_passkey(m: &impl Me, prf: &[u8], credential: &str) -> Result<()> {
     tell(m, m, json!({ "add": hex(&pk.key), "role": "client", "admin": admin })).await
 }
 
-/// `/v1/app-schedules`.
-async fn app_schedules_asked(m: &impl Me, body: body::AppSchedules) -> Result<Value> {
+/// Runs an app's schedules on a device for `days`, or with 0, stops them.
+async fn app_schedules_asked(m: &impl Me, app: String, device: &str, scope: Option<&str>, days: u64) -> Result<Value> {
     let user = m.user()?;
-    let (app, given) = (body.app, body.scope.as_deref().unwrap_or("user"));
+    let given = scope.unwrap_or("user");
     let (endpoint, scope, name) = m.who(|who| {
-        let endpoint = who.find_node(&body.device)?;
+        let endpoint = who.find_node(device)?;
         let scope = Scope::parse_for(given, &user).or_else(|_| who.find_group(given).map(Scope::Group))?;
         ensure!(who.app(&app)?.is_some(), "no app called {app}");
         Ok((endpoint, scope, who.machine(&endpoint)?.map(|d| d.name).unwrap_or_default()))
     })?;
-    let days = body.days.unwrap_or(APP_SCHEDULES_DAYS);
     let until = set_app_schedules(m, &endpoint, &app, &scope, days).await?;
     Ok(match until {
         0 => json!({ "said": format!("{name} no longer runs {app}'s schedules, and what's written from now on is under new keys it doesn't have.") }),
@@ -1114,4 +1141,48 @@ fn whose(who: &ScopeDb, scope: &Scope) -> Result<String> {
 /// What a JSON answer says went wrong, if it does.
 pub fn error(out: &Value) -> Option<String> {
     out["error"].as_str().map(str::to_string)
+}
+
+/// What letting a device in, or asking whose it is, says to a user (an approval's answer).
+pub fn said_approved(r: &Value) -> String {
+    let s = |k: &str| r[k].as_str().unwrap_or("").to_string();
+    if let Some(service) = r["service"].as_str() {
+        return match r.get("approved") {
+            Some(_) => format!("{service} on {} is in: it answers your devices' calls.", s("device")),
+            None => format!("{service} on {} wants to be yours. Approve it only if that's the code it shows.", s("device")),
+        };
+    }
+    if r.get("sealed").is_none() && r["recovery"] == true {
+        return format!("{} is {}'s device. Approve it with the recovery key only if they lost all their devices and say it's theirs.", s("device"), s("user"));
+    }
+    if r.get("sealed").is_none() {
+        let new = if r["new"] == true { ", who you invited" } else { "" };
+        return format!("{} is {}'s device{new}. Approve it only if they say it's theirs.", s("device"), s("user"));
+    }
+    let mut out = format!("{} is in.", s("device"));
+    if r["recovery"] == true {
+        out = format!("{} is in, let in with the recovery key: {} can open what they could before.", s("device"), s("user"));
+    }
+    if let Some(relay) = r["relay"].as_str() {
+        out.push_str(&format!(" The network didn't take it yet: {relay}."));
+    }
+    for n in r["not_sealed"].as_array().into_iter().flatten() {
+        out.push_str(&format!(" It wasn't given {}'s keys: {}.", n["scope"].as_str().unwrap_or(""), n["why"].as_str().unwrap_or("")));
+    }
+    out
+}
+
+fn said_removed(r: &Value) -> String {
+    let mut out = format!("Removed {}.", r["removed"].as_str().unwrap_or("it"));
+    let left: Vec<&str> = r["not_renewed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if !left.is_empty() {
+        out.push_str(&format!(" New keys for {} come from one of their own devices, or their admins'.", left.join(", ")));
+    }
+    out
+}
+
+fn said_invited(name: &str, r: &Value) -> String {
+    let days = crate::onboarding::sign_in_proof::INVITE_DAYS;
+    let how = if crate::config::SIGN_IN == crate::config::SignIn::Google { "they sign in with Google and join" } else { "they join" };
+    format!("Send {name} this link. It works once, for {days} days: opening it, {how}. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
 }

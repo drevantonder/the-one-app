@@ -81,6 +81,7 @@ pub mod mcp;
 #[cfg(feature = "node")]
 pub mod tools;
 pub mod core_tools;
+pub mod devices;
 pub mod groups;
 pub mod widgets;
 pub mod app;

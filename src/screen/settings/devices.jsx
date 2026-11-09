@@ -242,7 +242,7 @@ function Devices() {
       let waiting = [], passkey = false, seen = null
       const asks = [
         !apps.current.length ? api("GET", "/v1/apps").then((a) => (apps.current = a), () => {}) : null,
-        api("GET", "/v1/devices/requests").then((w) => (waiting = w.filter((r) => r.code)), () => {}),
+        api("POST", "/v1/devices/requests", {}).then((w) => (waiting = w.filter((r) => r.code)), () => {}),
       ]
       if (device.keys) {
         asks.push(
@@ -404,7 +404,7 @@ function Devices() {
     if (!(await one.alert({ title: `Remove ${name}?`, action: "Remove", danger: true }))) return
     one.tap("medium")
     act(async () => {
-      for (const key of keys) await api("POST", "/v1/remove", { key })
+      for (const key of keys) await api("POST", "/v1/devices/remove", { device: key })
     })
   }
   async function removeOld(card) {
@@ -412,7 +412,7 @@ function Devices() {
     const of = card.name ? ` of ${card.name}` : ""
     if (!(await one.alert({ title: `Remove ${n} old sign-in${n > 1 ? "s" : ""}${of}?`, action: "Remove", danger: true }))) return
     act(async () => {
-      for (const c of card.old) await api("POST", "/v1/remove", { key: c.key })
+      for (const c of card.old) await api("POST", "/v1/devices/remove", { device: c.key })
     })
   }
   async function signOut() {
@@ -699,7 +699,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
                         <span className="block font-medium">{(on && shown(on.name)) || "A device"} runs {m.appTitle(g.app)}’s schedules for {m.forWhom(g.scope)}</span>
                         <span className="block text-muted-foreground">Until {until}, and longer as {g.scope === `user:${m.me}` ? "you use it" : "it’s used"}</span>
                       </span>
-                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => act(() => api("POST", "/v1/app-schedules", { device: g.endpoint, app: g.app, scope: g.scope, days: 0 }))}>Stop</Button>
+                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => act(() => api("POST", "/v1/devices/stop_schedules", { device: g.endpoint, app: g.app, scope: g.scope }))}>Stop</Button>
                     </div>
                   )
                 })}
@@ -1008,7 +1008,7 @@ function RemoveDevice({ name, keys, erasable, open, setOpen, done }) {
     setError("")
     try {
       if (erase) await api("POST", "/v1/erase", { key: erasable })
-      for (const key of keys) await api("POST", "/v1/remove", { key })
+      for (const key of keys) await api("POST", "/v1/devices/remove", { device: key })
       one.tap("success")
       done()
     } catch (e) {
@@ -1134,7 +1134,7 @@ function AppSchedules({ m, asked, open, setOpen, done }) {
   async function choose(d) {
     setError("")
     try {
-      await api("POST", "/v1/app-schedules", { device: d.key, app, scope })
+      await api("POST", "/v1/devices/run_schedules", { device: d.key, app, scope })
       done()
     } catch (err) {
       setError(said(err))

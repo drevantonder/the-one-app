@@ -1,4 +1,4 @@
-//! The core's tools that are routes of their own (`core_tools::Runs::Route`), each at `POST /v1/<feature>/<tool>`: its
+//! The core's tools, each their own route (`core_tools::Tool`), each at `POST /v1/<feature>/<tool>`: its
 //! body is held to the tool's input schema before it runs, and its answer to its output schema before it goes.
 
 use axum::Json;
@@ -7,7 +7,7 @@ use axum::http::HeaderMap;
 use axum::routing::post;
 use serde_json::{Map, Value};
 
-use crate::core_tools::{Runs, Serves};
+use crate::core_tools::Serves;
 use crate::node::{Caller, Node};
 
 use super::guard::Me;
@@ -20,7 +20,7 @@ pub(super) fn routes() -> Routes {
     let mut routes = Routes::default();
     for feature in crate::core_tools::all() {
         for tool in &feature.tools {
-            let Runs::Route { serves } = tool.runs else { continue };
+            let serves = tool.serves;
             let path = feature.path(&tool.spec);
             let who = if crate::settings::answered(&path) { Who::ThisMachine } else { Who::SignedIn };
             let (spec, name) = (tool.spec.clone(), feature.mcp_name(&tool.spec));
@@ -41,14 +41,14 @@ async fn serve(State(node): State<Node>, me: Me, headers: HeaderMap, Json(input)
 
 #[cfg(test)]
 mod tests {
-    use crate::core_tools::{Runs, all};
+    use crate::core_tools::all;
 
-    /// What's generated from a tool that is its own route (the CLI, MCP, later OpenAPI) has only its definition to go
+    /// What's generated from a tool (the CLI, MCP, later OpenAPI) has only its definition to go
     /// by, and a schema left out holds its body or answer to nothing.
     #[test]
     fn a_tool_that_is_a_route_says_what_it_takes_and_answers() {
         for feature in all() {
-            for tool in feature.tools.iter().filter(|t| matches!(t.runs, Runs::Route { .. })) {
+            for tool in feature.tools.iter() {
                 let name = feature.mcp_name(&tool.spec);
                 assert!(tool.spec["input"]["type"] == "object", "{name} says what it takes");
                 assert!(tool.spec["output"]["type"].is_string(), "{name} says what it answers");

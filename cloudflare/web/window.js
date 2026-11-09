@@ -155,7 +155,7 @@ export async function watchWaiting() {
   }
 }
 async function waitingNow() {
-  const now = (await api("/v1/devices/requests")).map((r) => ({ ...r, key: r.code.replace(" ", "") })).filter((r) => !notMine.has(r.key));
+  const now = (await api("/v1/devices/requests", { method: "POST", body: {} })).map((r) => ({ ...r, key: r.code.replace(" ", "") })).filter((r) => !notMine.has(r.key));
   if (setWaiting(now)) tell({ oneEvent: { type: "devices" } });
   const fresh = now.filter((r) => !seen.has(r.key));
   fresh.forEach((r) => seen.add(r.key));

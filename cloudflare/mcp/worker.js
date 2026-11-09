@@ -458,7 +458,7 @@ export class Client extends DurableObject {
     const left = [];
     for (const key of replaced) {
       try {
-        const r = await device_fetch(me.key, "POST", "/v1/remove", ["content-type", "application/json"], new TextEncoder().encode(JSON.stringify({ key })), me.until, this.on(me));
+        const r = await device_fetch(me.key, "POST", "/v1/devices/remove", ["content-type", "application/json"], new TextEncoder().encode(JSON.stringify({ device: key })), me.until, this.on(me));
         if (r.status !== 200 && codeOf(r.body) !== CODES.notListed) throw new Error(`the node said ${r.status}: ${new TextDecoder().decode(r.body).slice(0, 200)}`);
       } catch (err) {
         console.warn(`removing the device ${key.slice(0, 8)} this one replaced: ${err.message}`);

@@ -26,8 +26,6 @@ pub fn feature() -> Feature {
             }),
             serves!(serve::logs),
         )],
-        #[cfg(feature = "node")]
-        steps: crate::core_tools::no_steps,
     }
 }
 

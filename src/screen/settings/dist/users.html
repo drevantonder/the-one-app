@@ -37,7 +37,7 @@ function k() {
 				[e.id]: t
 			}));
 			try {
-				await (t === null ? w("POST", "/v1/remove", { user: e.id }) : w("POST", "/v1/role", {
+				await (t === null ? w("POST", "/v1/devices/remove", { user: e.id }) : w("POST", "/v1/role", {
 					user: e.id,
 					role: t
 				}));
@@ -180,7 +180,7 @@ function j(t) {
 		if (e && !p) {
 			h(!0), f("");
 			try {
-				let { link: t, until: n } = await w("POST", "/v1/invite-link", { name: e });
+				let { link: t, until: n } = await w("POST", "/v1/devices/invite", { name: e });
 				one.tap("success"), u({
 					who: e,
 					link: t,

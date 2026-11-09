@@ -1,18 +1,15 @@
 //! The core's own tools: add's and remove's, the Vault's, Backups', Groups', Devices', Widgets', Push's and logs', each defined beside its
 //! feature's others and listed here, the one list. Agents use them as they use apps' tools, by the same kind of name
 //! (`vault_list`, `logs`), on the command line and over MCP; but they're not apps, so no list of apps has them. Every
-//! client lists and runs the same ones: who may do what is the user's rules, and the device's keys. Most are one
-//! request, which a client asks its node as its user, or answers itself when it changes who can do what
-//! (`settings::answered`), signing that as its user's device; so the remote MCP server's devices answer those
-//! themselves (cloudflare/node/src/clients.rs). A tool that is its own route (`Runs::Route`) is defined once, beside
-//! what serves it: `POST /v1/<feature>/<tool>` takes its input as its body and answers its output, and `api::tools`
-//! mounts every one. The rest still wrap a route defined elsewhere (`Runs::Asks`), or take several requests, or what's
-//! on the machine the command line runs on (`Runs::Steps`).
+//! client lists and runs the same ones: who may do what is the user's rules, and the device's keys. Each is its own
+//! route, defined once, beside what serves it: `POST /v1/<feature>/<tool>` takes its input as its body and answers its
+//! output, and `api::tools` mounts every one. A client asks its node as its user; one that changes who can do what is
+//! answered by the client itself (`settings::answered`), signing that as its user's device, so the remote MCP server's
+//! devices answer those themselves (cloudflare/node/src/clients.rs).
 
 use anyhow::Result;
 use serde_json::{Map, Value, json};
 
-pub mod devices;
 
 /// What a tool that needs the user's yes does, wherever it's said.
 pub const SENDS: &str = "sends or can't be undone";
@@ -63,35 +60,10 @@ pub struct Asked<'a> {
     pub confirmed: bool,
 }
 
-/// A request of a node's API.
+/// A request of a node's API: a tool's route, with its input as the body.
 pub struct Request {
-    pub method: &'static str,
-    /// With its query, if any.
     pub path: String,
-    pub body: Option<Value>,
-}
-
-impl Request {
-    pub fn get(path: impl Into<String>) -> Request {
-        Request { method: "GET", path: path.into(), body: None }
-    }
-
-    pub fn post(path: impl Into<String>, body: Value) -> Request {
-        Request { method: "POST", path: path.into(), body: Some(body) }
-    }
-}
-
-/// How a tool runs.
-pub enum Runs {
-    /// One request, made from its input, and what it says once that's answered.
-    Asks { request: fn(&Map<String, Value>, &Asked) -> Result<Request>, said: fn(&Map<String, Value>, Value) -> Result<Value> },
-    /// Several, or what's on the machine the command line runs on: its feature's `steps`.
-    Steps,
-    /// Its own route, `Feature::path`: its input is the request's body, its output the answer.
-    Route {
-        #[cfg(feature = "node")]
-        serves: Serves,
-    },
+    pub body: Value,
 }
 
 /// What serves a tool that is its own route, on a node: as the caller, with the input its schema let through. Its answer
@@ -119,37 +91,17 @@ pub(crate) use serves;
 
 pub struct Tool {
     /// As an app lists a tool (`GET /v1/apps`): named after `<feature>_`, or as the feature, for its one tool with a
-    /// command of its own (`logs`).
+    /// command of its own (`logs`). `name`, `title`, `description`, `input`, `reads`, `confirm`, `words`, and `output`,
+    /// JSON Schema of its answer.
     pub spec: Value,
-    pub runs: Runs,
+    pub serves: Serves,
 }
 
 impl Tool {
-    pub fn asks(spec: Value, request: fn(&Map<String, Value>, &Asked) -> Result<Request>, said: fn(&Map<String, Value>, Value) -> Result<Value>) -> Tool {
-        Tool { spec, runs: Runs::Asks { request, said } }
-    }
-
-    pub fn steps(spec: Value) -> Tool {
-        Tool { spec, runs: Runs::Steps }
-    }
-
-    /// A tool that is its own route: `spec` is everything the command line, MCP and search read of it (`name`, `title`,
-    /// `description`, `input`, `reads`, `confirm`, `words`), and `output`, JSON Schema of its answer.
-    #[cfg(feature = "node")]
     pub fn route(spec: Value, serves: Serves) -> Tool {
-        Tool { spec, runs: Runs::Route { serves } }
-    }
-
-    #[cfg(not(feature = "node"))]
-    pub fn route(spec: Value, _: Serves) -> Tool {
-        Tool { spec, runs: Runs::Route {} }
+        Tool { spec, serves }
     }
 }
-
-/// Runs a feature's tool that takes several steps (`Runs::Steps`), by its name in the feature, on a client that asks a
-/// node.
-#[cfg(feature = "node")]
-pub type Steps = fn(tool: &str, input: &Map<String, Value>, asked: &Asked, node: &crate::api::Client) -> Result<Value>;
 
 /// One feature of the core, and its tools.
 pub struct Feature {
@@ -158,8 +110,6 @@ pub struct Feature {
     pub description: String,
     pub guide: String,
     pub tools: Vec<Tool>,
-    #[cfg(feature = "node")]
-    pub steps: Steps,
 }
 
 impl Feature {
@@ -171,31 +121,20 @@ impl Feature {
         json!({ "name": self.name, "title": self.title, "description": self.description, "instructions": self.guide, "tools": tools, "runs": "client" })
     }
 
-    /// The route of a tool that is one (`Runs::Route`).
+    /// The route of a tool.
     pub fn path(&self, tool: &Value) -> String {
         format!("/v1/{}/{}", self.name, tool["name"].as_str().unwrap_or(""))
     }
 
-    /// The one request its tool at `at` makes of this input, if it's one: asked by a client of its node, or answered by the client itself.
-    pub fn request(&self, at: usize, input: &Map<String, Value>, asked: &Asked) -> Option<Result<Request>> {
+    /// The request its tool at `at` makes of this input: asked by a client of its node, or answered by the client itself.
+    pub fn request(&self, at: usize, input: &Map<String, Value>, asked: &Asked) -> Request {
         let tool = &self.tools[at];
-        match tool.runs {
-            Runs::Asks { request, .. } => Some(request(input, asked)),
-            Runs::Route { .. } => Some(Ok(Request::post(self.path(&tool.spec), Value::Object(input.clone())))),
-            Runs::Steps => None,
+        let mut body = input.clone();
+        // A tool that takes `confirm` as an input (approve: without it, it says whose device it is) gets what the reader said.
+        if tool.spec["input"]["properties"].get("confirm").is_some() {
+            body.insert("confirm".into(), json!(asked.confirmed));
         }
-    }
-
-    /// What its tool at `at` says, from the answer to its one request: a route's `said`, the words it has for whoever
-    /// reads it, or else all it answered.
-    pub fn said(&self, at: usize, input: &Map<String, Value>, mut answer: Value) -> Result<Value> {
-        match self.tools[at].runs {
-            Runs::Asks { said, .. } => said(input, answer),
-            _ => Ok(match answer.get_mut("said") {
-                Some(said) => said.take(),
-                None => answer,
-            }),
-        }
+        Request { path: self.path(&tool.spec), body: Value::Object(body) }
     }
 
     /// A tool of its as MCP names it: `vault_list`, or `logs` for the one named as the feature.
@@ -209,7 +148,7 @@ impl Feature {
 
 /// Every feature's, in the order they're listed.
 pub fn all() -> Vec<Feature> {
-    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), crate::vault::tools::feature(), crate::backups::tools::feature(), crate::groups::tools::feature(), devices::feature(), crate::widgets::tools::feature(), crate::push::tools::feature(), crate::logs::tools::feature()]
+    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), crate::vault::tools::feature(), crate::backups::tools::feature(), crate::groups::tools::feature(), crate::devices::tools::feature(), crate::widgets::tools::feature(), crate::push::tools::feature(), crate::logs::tools::feature()]
 }
 
 /// The feature with the tool `name` (as MCP names it), and the tool's place in it.
@@ -225,17 +164,15 @@ pub fn text<'a>(input: &'a Map<String, Value>, key: &str) -> Result<&'a str> {
     input.get(key).and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("give {key}"))
 }
 
-/// What an answer gives, as it is.
-pub fn as_given(_: &Map<String, Value>, answer: Value) -> Result<Value> {
-    Ok(answer)
-}
-
-/// What an answer's `said` field says.
-pub fn its_said(_: &Map<String, Value>, answer: Value) -> Result<Value> {
-    Ok(answer["said"].clone())
+/// What a tool says: the words of its answer if it has them (`said`), else all it answered.
+pub fn said(mut answer: Value) -> Value {
+    match answer.get_mut("said") {
+        Some(said) => said.take(),
+        None => answer,
+    }
 }
 
 #[cfg(feature = "node")]
 mod run;
 #[cfg(feature = "node")]
-pub use run::{and_apps, listed, mcp_tools, no_steps, say_time};
+pub use run::{and_apps, listed, mcp_tools, say_time};
