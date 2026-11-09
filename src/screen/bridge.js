@@ -6,6 +6,8 @@
   const handlers = { changed: [] };
   // A page that answers its own (`__one.host`: the web client's, a chat's view) isn't framed, even in a chat's frame.
   const framed = !ctx.host && window.parent !== window;
+  // The language a screen reader reads it in; the page this is in (screen.rs) names none.
+  document.documentElement.lang ||= "en";
 
   // These are the page's, not @one/ui's, which may have run before this page was written (frame.html's `oneKit`).
   // iOS only shows :active (ui.css's press) where a touch is being listened for.
@@ -23,11 +25,16 @@
   // error, code? }`; node events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
   let asked = 0;
   const waiting = {};
+  // What had focus here, for the page holding the frame to give it back after a menu, alert or sheet it opened for this
+  // screen: a frame's own focus goes when another element of that page takes it.
+  let lastFocus = null;
+  addEventListener("focusin", (e) => (lastFocus = e.target));
   if (framed) {
     addEventListener("message", (e) => {
       const m = e.source === window.parent && e.data;
       if (!m) return;
       if (m.oneEvent) one.__event(m.oneEvent);
+      if (m.oneFocus && lastFocus?.isConnected) lastFocus.focus({ preventScroll: true });
       if (m.oneBar !== undefined) ((barStart = m.oneBar), placeLargeTitle("margin-inline-start 200ms linear"));
       const w = waiting[m.oneReply];
       if (!w) return;

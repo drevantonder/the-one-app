@@ -1,4 +1,5 @@
 import * as React from "react"
+import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
@@ -11,23 +12,27 @@ import {
 import { Icon } from "@/components/icon"
 import { Kept } from "@/components/kept"
 import { ResponsiveDialog } from "@/components/responsive-dialog"
-import { cn } from "@/lib/utils"
+import { cn, focusBack } from "@/lib/utils"
 
 // What a page that holds screens shows over them when a screen asks (bridge.js's one.menu, one.alert, and a screen
 // opened in a sheet): each drawn in a root of its own on the page, gone once it's closed. The web client answers with
 // these; a native shell, until it shows its screens in the web's window, with its own.
 
-/// Draws `draw(close)` over the page until it calls `close`, then takes it away once it has animated out.
+/// Draws `draw(close)` over the page until it calls `close`, then takes it away once it has animated out. Focus goes back
+/// to what had it (a screen's frame, and in it its button) as it closes, before `close`'s value reaches whoever asked,
+/// who may open the next thing from it.
 function over<T>(draw: (close: (value: T) => void, open: boolean) => React.ReactNode): Promise<T> {
   return new Promise((done) => {
     const el = document.createElement("div")
     document.body.append(el)
     const root = createRoot(el)
+    const opener = document.activeElement
     let closed = false
     const close = (value: T) => {
       if (closed) return
       closed = true
-      root.render(draw(close, false))
+      flushSync(() => root.render(draw(close, false)))
+      focusBack(opener)
       done(value)
       setTimeout(() => (root.unmount(), el.remove()), 300)
     }

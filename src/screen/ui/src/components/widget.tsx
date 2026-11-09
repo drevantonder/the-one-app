@@ -145,7 +145,7 @@ function Node({ n, w, host }: { n?: Tree; w: Widget; host: WidgetHost }): React.
       el = (
         <div className="flex min-w-0 flex-col gap-1" style={num(n.w) ? { width: num(n.w) } : undefined}>
           {n.label && <span className="text-[13px] text-muted-foreground">{n.label}</span>}
-          <div className="h-1.5 overflow-hidden rounded-full bg-foreground/15">
+          <div role="progressbar" aria-label={n.label || undefined} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(f * 100)} className="h-1.5 overflow-hidden rounded-full bg-foreground/15">
             <i className="block h-full" style={{ width: `${f * 100}%`, background: color || "var(--foreground)" }} />
           </div>
         </div>

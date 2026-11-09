@@ -64,10 +64,10 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onPress, onBar
         <div className="relative flex min-h-0 flex-1 flex-col">
           {back && (
             <header data-slot="shell-bar" className="absolute inset-x-0 top-0 z-10 grid h-11 grid-cols-[1fr_auto_1fr] items-center bg-background px-1">
-              <Button variant="ghost" className="justify-self-start px-2" onClick={onBack} aria-label="Back">
+              <Button variant="ghost" className="justify-self-start px-2 pointer-coarse:px-3" onClick={onBack} aria-label="Back">
                 <CaretLeftIcon />
               </Button>
-              <h1 className="min-w-0 truncate text-[15px] font-semibold">{title}</h1>
+              {title && <h1 className="min-w-0 truncate text-[15px] font-semibold">{title}</h1>}
             </header>
           )}
           {body}
@@ -88,7 +88,7 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onPress, onBar
       </div>
       <Sidebar>
         <div className="h-(--shell-bar) shrink-0" />
-        <SidebarContent className="relative">
+        <SidebarContent role="navigation" aria-label="Pages" className="relative">
           <Selected rows={pages} />
           <SidebarGroup>
             <SidebarMenu>
@@ -126,7 +126,7 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onPress, onBar
               <CaretLeftIcon />
             </Button>
           )}
-          <h1 className="min-w-0 truncate text-sm font-semibold">{title}</h1>
+          {title && <h1 className="min-w-0 truncate text-sm font-semibold">{title}</h1>}
         </header>
         {banner}
         {body}

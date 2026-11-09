@@ -1,5 +1,5 @@
 import * as React from "react"
-import { cn, focusDialog } from "@/lib/utils"
+import { cn, useDialogFocus } from "@/lib/utils"
 import { XIcon } from "@phosphor-icons/react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
@@ -51,6 +51,7 @@ function SheetContent({
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
 }) {
+  const focus = useDialogFocus()
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -68,7 +69,7 @@ function SheetContent({
             "inset-x-0 bottom-0 h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
           className
         )}
-        onOpenAutoFocus={focusDialog}
+        {...focus}
         {...props}
       >
         {children}
