@@ -17,9 +17,12 @@ pub fn dev() -> String {
     format!("{CLI}-dev")
 }
 
-/// The `one` program built with this one, beside it (cli/), which is the node, the Workers and every command of a network.
+/// The program beside this one that is the node, the Workers and every command of a network: the custom build's own
+/// where it's installed (`ptc` beside `ptc-dev`), else the `one` Cargo builds beside it in a checkout (cli/).
 pub fn program() -> Result<PathBuf> {
-    Ok(one::this_program()?.with_file_name("one"))
+    let me = one::this_program()?;
+    let installed = me.with_file_name(CLI);
+    Ok(if installed.is_file() { installed } else { me.with_file_name("one") })
 }
 
 /// This machine's node, asked as one of its programs.
