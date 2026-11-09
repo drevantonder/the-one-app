@@ -84,7 +84,7 @@ class Network:
             (self.home / d).mkdir(parents=True)
         (self.home / ".gitconfig").write_text("[user]\n\tname = Andre van Tonder\n\temail = andre@example.com\n[init]\n\tdefaultBranch = main\n")
         log = open(self.home / "node.log", "w")
-        self.proc = subprocess.Popen([self.one, "serve"], env=self.env(), stdout=log, stderr=log, start_new_session=True)
+        self.proc = subprocess.Popen([f"{CLI}d"], executable=self.one, env=self.env(), stdout=log, stderr=log, start_new_session=True)
         for _ in range(240):
             if self.run("status", check=False).strip():
                 break
