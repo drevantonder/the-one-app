@@ -720,13 +720,20 @@ class Run {
     }
   }
 
-  async call(req, from = null, depth = 0) {
+  /// Says with 428, all at once, the keys these apps' databases lack (each `{ app, scopes }`): a scope's current epoch,
+  /// unless handed.
+  async askKeys(pages) {
     const p = this.user;
+    const have = (app, h) => p.keysOf(this.who, h.id, app.name, "main") || {};
+    const lacking = pages.flatMap(({ app, scopes }) => scopes.filter((h) => !Object.hasOwn(have(app, h), this.view.epochs[h.id] ?? 1)).map((h) => ({ scope: h.id, app: app.name, database: "main", have: Object.keys(have(app, h)).map(Number) })));
+    if (lacking.length) await p.needs(lacking, this.who);
+  }
+
+  async call(req, from = null, depth = 0) {
     const app = deployed(this.view, req.app) || refuse(404, `no app named ${req.app}`);
     const scopes = this.scopes(app, req.scopes);
     // The keys of every database it may open, asked for at once, before it runs, unless each has its scope's current.
-    const lacking = scopes.filter((h) => !Object.hasOwn(p.keysOf(this.who, h.id, app.name, "main") || {}, this.view.epochs[h.id] ?? 1));
-    if (lacking.length) await p.needs(lacking.map((h) => ({ scope: h.id, app: app.name, database: "main", have: Object.keys(p.keysOf(this.who, h.id, app.name, "main") || {}).map(Number) })), this.who);
+    await this.askKeys([{ app, scopes }]);
     return { ok: await this.run(app, "call", { tool: req.tool, input: req.input ?? {} }, scopes, from, depth) };
   }
 
@@ -749,7 +756,9 @@ class Run {
     const only = kind ? { app: kind.slice(0, at), widget: kind.slice(at + 1) } : null;
     const key = page === `user:${this.who.user}` ? "user" : page;
     const placed = (this.view.state.arrangements?.[key]?.items || []).filter((i) => typeof i.widget === "string" && i.options && Object.keys(i.options).length);
-    const each = await Promise.all(this.pages(page).filter(({ app }) => !only || app.name === only.app).map(async ({ app, scopes }) => {
+    const shown = this.pages(page).filter(({ app }) => !only || app.name === only.app);
+    await this.askKeys(shown);
+    const each = await Promise.all(shown.map(async ({ app, scopes }) => {
       const d = await this.user.describe(this.who, app).catch(keysFirst);
       return Promise.all((d?.widgets || []).filter((w) => !only || w.name === only.widget).map((w) => {
         const size = w.size || "medium";
@@ -774,6 +783,7 @@ class Run {
             }));
             if (Object.keys(mine).length) one.placed = mine;
           } catch (err) {
+            if (err.status === 428) throw err;
             one.error = err.message;
             one.root = { t: "text", text: err.status === 503 ? err.message : "This widget stopped working.", tone: "muted" };
           }
@@ -810,7 +820,8 @@ class Run {
       const mine = reach.length > 0;
       const shown = ["title", "icon", "color", "domain", "tagline", "description", "uses", "needs"];
       for (const [k, v] of Object.entries(d || {})) if (k !== "name" && k !== "schedules" && (mine || shown.includes(k))) info[k] = v;
-      if (d) info.offers = { screens: !!d.screens?.some((s) => s.name === "main") || !!d.widgets?.length, accounts: !!d.tools?.some((o) => o.accounts) };
+      const opens = !!d?.screens?.some((s) => s.name === "main");
+      if (d) info.offers = { opens, screens: opens || !!d.widgets?.length, accounts: !!d.tools?.some((o) => o.accounts) };
       return info;
     }));
   }
