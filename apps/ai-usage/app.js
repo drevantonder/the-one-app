@@ -434,21 +434,32 @@ export default {
             ],
           };
         }
-        const fit = { medium: 4, large: 6 }[ctx.size] || 4;
+        const fit = { medium: 4, large: 4 }[ctx.size] || 4;
         const top = new Set([...plans].sort((a, b) => worst(b) - worst(a)).slice(0, fit));
         const show = plans.filter((p) => top.has(p));
         const cell = (n) => ({ t: "col", w: 56, align: "center", c: [n] });
         const label = (text) => ({ t: "text", text, size: "sm", tone: "muted", lines: 1 });
         const percent = (u) => ({ t: "text", text: u == null ? "–" : `${Math.round(u)}%`, weight: "medium", tone: u == null ? "muted" : level(u), lines: 1 });
+        // Large is each plan with a line for each limit, and when it resets, spread down the card.
+        if (ctx.size === "large") {
+          const limit = (name, used, at) => ({ t: "row", gap: 8, c: [{ t: "col", w: 28, c: [] }, { t: "col", grow: true, gap: 0, c: [label(name)] }, ...(at != null ? [label(countdown(at, now))] : []), cell(percent(used))] });
+          const block = (p) => ({
+            t: "col", gap: 2,
+            c: [
+              { t: "row", gap: 8, c: [{ t: "image", url: p.mark, w: 20, h: 20 }, { t: "text", text: p.name, lines: 1 }] },
+              limit("Session", p.session, p.sessionResets),
+              limit("Week", p.week, p.weekResets),
+            ],
+          });
+          return { t: "col", header: false, next, c: show.flatMap((p, i) => (i ? [spacer, block(p)] : [block(p)])) };
+        }
         const header = { t: "row", gap: 8, c: [{ t: "col", grow: true, gap: 0, c: [] }, cell(label("Session")), cell(label("Week"))] };
         const row = (p) => {
-          const at = p.sessionResets ?? p.weekResets;
-          const sub = ctx.size === "large" && at != null ? `Resets ${countdown(at, now)}` : null;
           return {
             t: "row", gap: 8,
             c: [
               { t: "image", url: p.mark, w: 20, h: 20 },
-              { t: "col", grow: true, gap: 1, c: [{ t: "text", text: p.name, lines: 1 }, ...(sub ? [{ t: "text", text: sub, size: "sm", tone: "muted", lines: 1 }] : [])] },
+              { t: "col", grow: true, gap: 1, c: [{ t: "text", text: p.name, lines: 1 }] },
               cell(percent(p.session)),
               cell(percent(p.week)),
             ],
