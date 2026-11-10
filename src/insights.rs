@@ -80,8 +80,9 @@ impl Ended {
 /// nearest is a write seen elsewhere within 1 s.
 pub const SLOW_MS: u64 = 1_000;
 
-/// One trace in this many that went well is kept whole, to see what normal looks like.
-const SAMPLED_ONE_IN: u64 = 20;
+/// One trace in this many that went well is kept whole, to see what normal looks like. A client's (`shared/protocol.js`'s
+/// `KEPT_SPANS`) the same.
+pub const SAMPLED_ONE_IN: u64 = 20;
 
 /// Whether `trace` is one of those. By its id, so every span of a trace agrees, on any device.
 pub fn sampled(trace: &str) -> bool {

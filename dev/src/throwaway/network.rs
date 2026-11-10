@@ -229,7 +229,7 @@ pub(crate) fn shares_native_build(dir: &Path, cargo: &mut std::process::Command)
 
 /// The throwaway network's node, asked at `addr` as one of this machine's programs: with the token in its home.
 pub(crate) fn node_at(dir: &Path, addr: &str) -> Client {
-    Client::new(Direct { dir: dir.to_path_buf(), addr: addr.to_string() }, false)
+    Client::new(Direct { dir: dir.to_path_buf(), addr: addr.to_string() }, false, one::core_tools::Reader::Cli.client())
 }
 
 /// The throwaway network's node, at the address its folder says.

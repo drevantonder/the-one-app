@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::node::Node;
 
@@ -34,6 +34,8 @@ pub trait Via: Send + Sync {
 pub struct Client {
     via: std::sync::Arc<dyn Via>,
     elsewhere: bool,
+    /// What it is, as a call names its client (`Reader::client`).
+    client: &'static str,
     needed: Mutex<Option<Value>>,
     apps: Mutex<Option<Vec<Value>>>,
     sets: Mutex<Option<Vec<Value>>>,
@@ -45,16 +47,22 @@ pub struct Called {
     pub trace: Option<Vec<String>>,
 }
 
+/// A request's client span while it's answered: `client.call`, as `cloudflare/web/insights.js` makes one.
+struct Asked {
+    call: Value,
+    began: std::time::Instant,
+}
+
 impl Client {
     /// `elsewhere`: it asks for someone who isn't this machine's own user, a device of theirs, whose MCP
-    /// request the node answers.
-    pub fn new(via: impl Via + 'static, elsewhere: bool) -> Client {
-        Client { via: std::sync::Arc::new(via), elsewhere, needed: Mutex::new(None), apps: Mutex::new(None), sets: Mutex::new(None) }
+    /// request the node answers. `client`: what it is, as a call names it (`Reader::client`).
+    pub fn new(via: impl Via + 'static, elsewhere: bool, client: &'static str) -> Client {
+        Client { via: std::sync::Arc::new(via), elsewhere, client, needed: Mutex::new(None), apps: Mutex::new(None), sets: Mutex::new(None) }
     }
 
     /// Another, asking the same way, for the next MCP message of a session that serves many.
     pub fn again(&self) -> Client {
-        Client { via: self.via.clone(), elsewhere: self.elsewhere, needed: Mutex::new(None), apps: Mutex::new(None), sets: Mutex::new(None) }
+        Client { via: self.via.clone(), elsewhere: self.elsewhere, client: self.client, needed: Mutex::new(None), apps: Mutex::new(None), sets: Mutex::new(None) }
     }
 
     /// Every app, the node's own among them, as `GET /api/apps` gives them: asked once, the first time.
@@ -81,7 +89,7 @@ impl Client {
     }
 
     pub fn get(&self, path: &str) -> Result<Value> {
-        self.json(self.via.send("GET", path, &[], None, None)?)
+        self.answered(self.send("GET", path, &[], None, None, None)?)
     }
 
     /// The network as this node says it (`GET /api/state`).
@@ -90,7 +98,7 @@ impl Client {
     }
 
     pub fn post(&self, path: &str, body: Value) -> Result<Value> {
-        self.json(self.via.send("POST", path, &[("content-type", "application/json")], Some(serde_json::to_vec(&body)?), None)?)
+        self.answered(self.send("POST", path, &[("content-type", "application/json")], Some(serde_json::to_vec(&body)?), None, None)?)
     }
 
     /// `post`, crediting `agent` (`header::AGENT`).
@@ -98,17 +106,19 @@ impl Client {
         let named = agent.map(|a| data_encoding::BASE64URL_NOPAD.encode(a.as_bytes()));
         let mut headers = vec![("content-type", "application/json")];
         headers.extend(named.as_deref().map(|n| (crate::protocol::header::AGENT, n)));
-        self.json(self.via.send("POST", path, &headers, Some(serde_json::to_vec(&body)?), None)?)
+        self.answered(self.send("POST", path, &headers, Some(serde_json::to_vec(&body)?), None, None)?)
     }
 
     /// Keeps `bytes` as a blob on the node: → its hash.
     pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
-        Ok(self.json(self.via.send("POST", "/api/blobs", &[], Some(bytes.to_vec()), None)?)?["blob"].as_str().unwrap_or("").to_string())
+        Ok(self.answered(self.send("POST", "/api/blobs", &[], Some(bytes.to_vec()), None, None)?)?["blob"].as_str().unwrap_or("").to_string())
     }
 
     /// What `path` answers, as it comes, whatever its status: a screen's page, a blob, the node's events.
     pub fn open(&self, path: &str, wait: Option<Duration>) -> Result<Answer> {
-        self.via.send("GET", path, &[], None, wait)
+        let (answer, asked) = self.send("GET", path, &[], None, wait, None)?;
+        self.ended(asked, if answer.status < 400 { json!({}) } else { json!({ "failed": true }) });
+        Ok(answer)
     }
 
     /// `post_for`, with what it did when `trace` asks, as a call says it.
@@ -116,22 +126,22 @@ impl Client {
         let named = agent.map(|a| data_encoding::BASE64URL_NOPAD.encode(a.as_bytes()));
         let mut headers = vec![("content-type", "application/json")];
         headers.extend(named.as_deref().map(|n| (crate::protocol::header::AGENT, n)));
-        self.traced(path, headers, body, trace, |r| r)
+        self.traced(path, headers, body, trace, None, |r| r)
     }
 
     /// Runs a call (`/api/call`'s body), with what it did when `trace` asks: after its answer, or the reason it failed.
     pub fn call(&self, body: &Value, trace: bool) -> Called {
-        self.traced("/api/call", vec![("content-type", "application/json")], body, trace, |mut r| r["ok"].take())
+        self.traced("/api/call", vec![("content-type", "application/json")], body, trace, Some(json!({ "app": body["app"], "tool": body["tool"] })), |mut r| r["ok"].take())
     }
 
-    fn traced(&self, path: &str, mut headers: Vec<(&str, &str)>, body: &Value, trace: bool, answered: impl FnOnce(Value) -> Value) -> Called {
+    fn traced(&self, path: &str, mut headers: Vec<(&str, &str)>, body: &Value, trace: bool, what: Option<Value>, answered: impl FnOnce(Value) -> Value) -> Called {
         if trace {
             headers.push((crate::protocol::header::TRACE, "1"));
         }
-        let (ok, node) = match self.via.send("POST", path, &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None) {
-            Ok(mut answer) => {
+        let (ok, node) = match self.send("POST", path, &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None, what) {
+            Ok((mut answer, asked)) => {
                 let node = answer.trace.take().and_then(|h| data_encoding::BASE64.decode(h.as_bytes()).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-                (self.json(answer), node)
+                (self.answered((answer, asked)), node)
             }
             Err(err) => (Err(err), None),
         };
@@ -140,6 +150,63 @@ impl Client {
             None => vec!["no trace came back".to_string()],
         });
         Called { ok: ok.map(answered), trace }
+    }
+
+    /// Asks the node as the client span of a trace of its own (W3C's `traceparent`), named by `what` it asked (a call's
+    /// app and tool), or else its path: → its answer, and the span, to end once the answer's read. One no node answered
+    /// has ended here.
+    fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<Duration>, what: Option<Value>) -> Result<(Answer, Asked)> {
+        let traceparent = format!("00-{}-{}-01", crate::insights::new_trace(), crate::insights::new_span());
+        let mut call = what.unwrap_or_else(|| json!({ "path": path.split('?').next().unwrap_or(path) }));
+        call["traceparent"] = json!(traceparent);
+        let asked = Asked { call, began: std::time::Instant::now() };
+        let mut headers = headers.to_vec();
+        headers.push((crate::protocol::header::TRACEPARENT, &traceparent));
+        match self.via.send(method, path, &headers, body, wait) {
+            Ok(answer) => Ok((answer, asked)),
+            Err(err) => {
+                self.ended(asked, json!({ "error": unreached(&err), "message": format!("{err:#}") }));
+                Err(err)
+            }
+        }
+    }
+
+    /// What the node answered, read, and the span that asked it ended.
+    fn answered(&self, (answer, asked): (Answer, Asked)) -> Result<Value> {
+        let read = self.json(answer);
+        // A call that needs keys it wasn't handed is answered so, and asked again: it hasn't failed.
+        if self.needed.lock().unwrap().is_none() {
+            self.ended(asked, read.as_ref().err().map_or(json!({}), |err| json!({ "failed": true, "code": code_of(err) })));
+        }
+        read
+    }
+
+    /// Ends a request's span with how it went, and records it if it's kept: only what failed, was slow or is one trace in
+    /// 20 (`insights::sampled`). It's sent to the node at once, with what wasn't sent before, or kept for the next to send
+    /// once a node answers, for as long as a node takes them back (a day).
+    fn ended(&self, Asked { mut call, began }: Asked, how: Value) {
+        let ms = began.elapsed().as_millis() as u64;
+        call.as_object_mut().unwrap().extend(how.as_object().cloned().unwrap_or_default().into_iter().filter(|(_, v)| !v.is_null()));
+        (call["name"], call["time"], call["ms"]) = (json!("client.call"), json!(now_ms().saturating_sub(ms)), json!(ms));
+        let kept = call["failed"] == true || call["error"].is_string() || ms >= crate::insights::SLOW_MS || call["traceparent"].as_str().and_then(crate::insights::parent_of).is_some_and(|(trace, _)| crate::insights::sampled(&trace));
+        let unsent = crate::cache().join(format!("unsent-{}.json", self.client));
+        let mut events: Vec<Value> = std::fs::read(&unsent).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        if kept {
+            events.push(call);
+        }
+        if events.is_empty() {
+            return;
+        }
+        let from = now_ms().saturating_sub(UNSENT_FOR);
+        events.retain(|e| e["time"].as_u64() >= Some(from));
+        let report = serde_json::to_vec(&json!({ "platform": self.client, "events": events })).unwrap_or_default();
+        let sent = self.via.send("POST", "/api/insights/report", &[("content-type", "application/json")], Some(report), Some(REPORT_WAIT)).is_ok_and(|a| a.status < 300);
+        if sent {
+            let _ = std::fs::remove_file(&unsent);
+        } else {
+            let keep = &events[events.len().saturating_sub(MOST_UNSENT)..];
+            let _ = std::fs::create_dir_all(crate::cache()).and_then(|_| std::fs::write(&unsent, serde_json::to_vec(keep).unwrap_or_default()));
+        }
     }
 
     /// What a call it made needed and wasn't handed, since this was last asked (`{ error, need, to, seal }`): the node's
@@ -155,6 +222,28 @@ impl Client {
         }
         answered(answer.status, body, &self.via.home())
     }
+}
+
+/// How long what a client recorded is kept while no node takes it, as long as a node takes it back; the most kept; and
+/// how long sending it may hold up the command that made it.
+const UNSENT_FOR: u64 = 86_400_000;
+const MOST_UNSENT: usize = 300;
+const REPORT_WAIT: Duration = Duration::from_secs(2);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+/// Why no node answered a request, as insights names it: it timed out, or none could be reached.
+fn unreached(err: &anyhow::Error) -> &'static str {
+    let said = format!("{err:#}").to_lowercase();
+    if said.contains("timeout") || said.contains("timed out") { crate::insights::TIMEOUT } else { crate::insights::UNREACHABLE }
+}
+
+/// The code of what a node answered failed, as `answered` read it: a refusal's is `refused`.
+fn code_of(err: &anyhow::Error) -> Option<String> {
+    let refused = matches!(err.downcast_ref::<crate::cli::Failed>(), Some(crate::cli::Failed::Refused(_)));
+    crate::protocol::Coded::of(err).or_else(|| refused.then(|| crate::protocol::code::REFUSED.to_string()))
 }
 
 /// What the node answered, or what it says failed: refused (401, 403 or `code::REFUSED`) as `cli::Failed::Refused`, the

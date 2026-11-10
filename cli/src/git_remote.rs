@@ -60,7 +60,7 @@ pub fn run(args: &[String]) -> Result<i32> {
 
 /// The address of the network this computer's node is in.
 fn here() -> Result<String> {
-    let state = crate::node().state()?;
+    let state = crate::node(one::core_tools::Reader::Cli.client()).state()?;
     let address = state.address().with_context(|| format!("this computer's {NAME} has no address yet: an admin sets it with {CLI} cloudflare use"))?;
     Ok(address.trim_end_matches('/').to_string())
 }
@@ -134,7 +134,7 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
                 Some(one::protocol::code::NOT_THIS_MACHINE) => one::api::token_refused(&one::home()),
                 _ => said["error"].as_str().unwrap_or("that didn't work").to_string(),
             };
-            return drop(head.send((status, "text/plain".into(), Some(one::tools::in_cli_words(&crate::node(), &error)))));
+            return drop(head.send((status, "text/plain".into(), Some(one::tools::in_cli_words(&crate::node(one::core_tools::Reader::Cli.client()), &error)))));
         }
         if head.send((status, kind, None)).is_err() {
             return;

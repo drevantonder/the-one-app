@@ -204,9 +204,9 @@ impl Node {
     }
 
     pub(super) fn name_of(&self, key: &Key) -> String {
-        // A service with an endpoint of its own, by the device it's part of.
+        // What's part of a device (a service with an endpoint of its own, a native app's sign-in), by that device.
         let of = |m: &ScopeDb| -> Result<Option<scopes::Machine>> {
-            if let Some(d) = m.service(key)?.and_then(|s| s.device)
+            if let Some(d) = m.machine_ever(key)?.and_then(|s| s.device)
                 && let Some(machine) = m.machine_ever(&d)?
             {
                 return Ok(Some(machine));

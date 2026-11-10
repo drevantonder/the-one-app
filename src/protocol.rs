@@ -282,6 +282,7 @@ pub fn javascript() -> String {
          export const WIDGET_LIMIT_MS = {widget_limit};\n\
          export const LATE_WIDGET = {late_widget};\n\
          export const CODES = {codes};\n\
+         export const KEPT_SPANS = {kept_spans};\n\
          export const YOURS = {yours};\n\
          export const Yours = YOURS[0].toUpperCase() + YOURS.slice(1);\n\
          \n\
@@ -295,6 +296,7 @@ pub fn javascript() -> String {
          export const updateRefusal = (yours) => {update}.replace(\"{{yours}}\", yours);\n\
          {call}",
         header = json!({ "keys": header::KEYS, "endpoint": header::ENDPOINT, "elsewhere": header::ELSEWHERE, "trace": header::TRACE, "traceparent": header::TRACEPARENT, "user": header::USER, "request": header::REQUEST, "code": header::CODE }),
+        kept_spans = json!({ "slow": crate::insights::SLOW_MS, "sampledOneIn": crate::insights::SAMPLED_ONE_IN }),
         urls = json!(URLS),
         relay = json!(RELAY),
         telemetry = json!(TELEMETRY),

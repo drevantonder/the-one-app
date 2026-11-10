@@ -67,7 +67,7 @@ pub async fn http(
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     let elsewhere = client.is_some() || headers.contains_key(axum::http::header::AUTHORIZATION);
-    let asks = Client::new(crate::api::client::InProcess::new(node, client.map(|c| c.0), peer.map(|p| p.0), &headers), elsewhere);
+    let asks = Client::new(crate::api::client::InProcess::new(node, client.map(|c| c.0), peer.map(|p| p.0), &headers), elsewhere, crate::core_tools::Reader::Mcp.client());
     let agent = headers.get("mcp-session-id").and_then(|s| s.to_str().ok()).and_then(|s| s.split_once('.')).and_then(|(_, name)| data_encoding::BASE64URL_NOPAD.decode(name.as_bytes()).ok()).and_then(|n| String::from_utf8(n).ok());
     let Ok(msg) = serde_json::from_str::<Value>(&body) else {
         let error = json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "the body isn't JSON" } });

@@ -4,7 +4,7 @@
 import { CODES, HEADER } from "../shared/protocol.js";
 import { platform } from "./platform.js";
 import { recording } from "./demo.js";
-import { tried } from "./insights.js";
+import { called, tried } from "./insights.js";
 
 export class NodeError extends Error {}
 
@@ -35,12 +35,20 @@ export async function api(path, { method = "GET", body, query, raw, signal, sinc
   for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
   if (url.pathname === "/api/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
   const trace = developer.on() ? developer.start(url.pathname, body, since) : null;
+  // Its client span (`insights.called`): what the nodes do of it is under it. Sending what's recorded isn't recorded
+  // itself, as each would be the next thing sent.
+  const call = { traceparent: traceparent(), ...(url.pathname === "/api/call" ? { app: body?.app, tool: body?.tool } : { path: url.pathname }) };
+  const began = performance.now();
+  const ended = (more) => call.sent && url.pathname !== REPORT && called(sendReport, { ...call, sent: undefined, last: undefined, ms: Math.round(performance.now() - began), ...more });
   try {
-    const out = await sending(url, method, body, raw, signal, trace);
+    const out = await sending(url, method, body, raw, signal, trace, call);
     if (trace) trace.status = raw ? out.status : 200;
+    ended({});
     return out;
   } catch (err) {
     if (trace) (trace.failed = true), (trace.id = err.trace);
+    // A node answered what has a status; anything else reached none, and says why as the last try did.
+    if (!signal?.aborted && !err.removed) ended(err.status ? { failed: true, code: err.code } : { error: UNREACHED[call.last] || "unreachable", message: err.message });
     throw err;
   } finally {
     if (trace) developer.keep(trace);
@@ -51,9 +59,17 @@ const hexOf = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b
 /// W3C's `traceparent` for a request made here.
 const traceparent = () => `00-${hexOf(16)}-${hexOf(8)}-01`;
 
-/// `api`'s request, each send's trace kept in `trace` if it has one. The device sends it again with the keys a node
-/// asks for (onet's keyring); a request that doesn't reach a node is asked again here.
-async function sending(url, method, body, raw, signal, trace) {
+const REPORT = "/api/insights/report";
+/// Sends what this client recorded (`insights.js`).
+export const sendReport = (events) => api(REPORT, { method: "POST", body: { platform: platform.client(), events } });
+
+/// Why no node answered, from how the last one tried went (onet's results), as insights names it.
+const UNREACHED = { "no answer": "timeout", lost: "lost" };
+
+/// `api`'s request, each send's trace kept in `trace` if it has one, and in `call` which node answered, or how the last
+/// it tried went. The device sends it again with the keys a node asks for (onet's keyring); a request that doesn't
+/// reach a node is asked again here.
+async function sending(url, method, body, raw, signal, trace, call) {
   const user = platform.user();
   const joining = performance.now();
   if (!user || !(await platform.reaches(user))) throw Object.assign(new NodeError("This device hasn’t been approved yet."), { status: 403 });
@@ -67,10 +83,10 @@ async function sending(url, method, body, raw, signal, trace) {
     }
   };
   const began = performance.now();
-  // The same for each send, so what the nodes do of this one request is one trace.
-  const parent = traceparent();
+  call.sent = true;
   for (let misses = 0; ; ) {
-    const headers = { [HEADER.traceparent]: parent };
+    // The same for each send, so what the nodes do of this one request is one trace.
+    const headers = { [HEADER.traceparent]: call.traceparent };
     if (trace) headers[HEADER.trace] = "1";
     if (body !== undefined) headers["content-type"] = "application/json";
     const sent = body === undefined ? undefined : JSON.stringify(body);
@@ -80,10 +96,10 @@ async function sending(url, method, body, raw, signal, trace) {
       const asked = [method, url.pathname + url.search, headers, sent, signal, platform.until(), !!trace];
       r = await Promise.race([recording.on() ? recording.fetch(platform.fetch, ...asked) : platform.fetch(...asked), watch.out]);
       if (trace) traced(r.trace);
-      tried(r.trace);
+      call.node = tried(r.trace).node;
     } catch (err) {
       if (trace) traced(err.trace);
-      tried(err.trace);
+      call.last = tried(err.trace).last;
       if (err.notLetIn) {
         if (await takenOut()) throw gone();
         throw Object.assign(new NodeError(err.message), { status: 403 });

@@ -5,7 +5,7 @@ import { move, settle } from "./moves.js";
 import { late, offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { CODES } from "../shared/protocol.js";
-import { UNANSWERED, api, call, developer } from "./request.js";
+import { UNANSWERED, api, call, developer, sendReport } from "./request.js";
 import { report } from "./insights.js";
 import { back, go, hold, home, listed, own, route } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
@@ -583,8 +583,6 @@ export async function openRequest(scope, id) {
   refreshState().catch(() => {});
   return answer === true;
 }
-
-export const sendReport = (events) => api("/api/insights/report", { method: "POST", body: { platform: platform.client(), events } });
 
 /// How the page's first screen opened, in ms from the page's start: its window drawn, the screen showing (a still, what
 /// it kept, or itself), and what it asked of the user's devices answered (`fresh`). Said once, as `client.open`, unless

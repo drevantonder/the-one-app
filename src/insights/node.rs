@@ -20,6 +20,9 @@ const ERRORS_SHOWN: u64 = 7 * 86_400_000;
 /// The most reports a client's device may make a minute, and events a report may hold.
 const REPORTS_A_MINUTE: u32 = 10;
 const MOST_REPORTED: usize = 300;
+/// How long ago what a client reports may have happened: a client keeps what no node took while none answers, and
+/// sends it once one does.
+const KEPT_UNSENT: u64 = 86_400_000;
 /// How long a span this device sent stays with it too, and the most that do: a row takes a minute or two to be readable,
 /// and a failure names its trace to be read at once.
 const ARRIVING_FOR: u64 = 180_000;
@@ -419,7 +422,7 @@ impl Node {
 
     async fn reported_event(&self, me: &Caller, platform: &str, e: &Value) {
         let now = now_ms();
-        let time = e["time"].as_u64().filter(|t| *t + 300_000 >= now && *t <= now + 60_000).unwrap_or(now);
+        let time = e["time"].as_u64().filter(|t| *t + KEPT_UNSENT >= now && *t <= now + 60_000).unwrap_or(now);
         let name = e["name"].as_str().unwrap_or("");
         let ms = e["ms"].as_u64().unwrap_or(0);
         let instance = hex(&me.key);
@@ -432,6 +435,9 @@ impl Node {
         }
         if name == "client.open" {
             return self.opened(me, e, time, attrs).await;
+        }
+        if name == "client.call" {
+            return self.client_called(me, e, time, ms, attrs).await;
         }
         let exception = e["exception"].is_object().then(|| Exception::from_json(&e["exception"])).flatten();
         let (destination, app, screen) = match name {
@@ -577,6 +583,51 @@ impl Node {
         }
     }
 
+    /// A request a client made of its nodes (`client.call`), as OTEL's client span, the parent of what the node that took
+    /// it recorded: it sent the trace and span in its `traceparent`. A call by its app's tool, as the node names its own;
+    /// anything else by its route. The client keeps only what failed, was slow or is sampled, and says nothing else of it:
+    /// which node answered and whether what it answered failed, or why none did (`error`). One no node answered has no
+    /// node's span to be found by, so it's in the Errors list itself.
+    async fn client_called(&self, me: &Caller, e: &Value, time: u64, ms: u64, attrs: Attrs) {
+        let Some((trace, span)) = e["traceparent"].as_str().and_then(insights::parent_of) else { return };
+        let (service, name, mut attrs) = match (e["app"].as_str(), e["tool"].as_str(), e["path"].as_str().and_then(crate::api::route_of)) {
+            (Some(app), Some(tool), _) => {
+                let destination = self.destination(app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+                let req = CallRequest { app: app.into(), tool: tool.into(), ..Default::default() };
+                match destination.named {
+                    true => {
+                        let tool = self.tool_named(&req).await;
+                        (app.to_string(), tool.clone(), attrs.scope(destination.kind).rpc(app, &tool))
+                    }
+                    false => (insights::own().to_string(), "call".to_string(), attrs.scope(destination.kind)),
+                }
+            }
+            (_, _, Some(route)) => (insights::own().to_string(), route.replace(['{', '}', '*'], ""), attrs.scope("everyone")),
+            _ => return,
+        };
+        let node = e["node"].as_str().unwrap_or("");
+        if !node.is_empty() {
+            attrs = attrs.tried(node, "answered");
+        }
+        let unanswered = e["error"].as_str();
+        let failure = match (e["failed"] == true, unanswered) {
+            (true, _) => Some(Failure::of(e["code"].as_str(), None, stage::ROUTE)),
+            (false, Some(why)) => Some(Failure::Broke(why.to_string())),
+            _ => None,
+        };
+        let mut message = None;
+        if let Some(failure) = &failure {
+            attrs = attrs.failed(failure).stage(stage::ROUTE);
+            if unanswered.is_some() {
+                attrs = attrs.fingerprint(failure.kind(), &format!("stage:{}", stage::ROUTE), crate::config::BUILD);
+            }
+            message = broke(failure, e["message"].as_str()).as_deref().map(insights::message::cleaned);
+        }
+        let status = failure.as_ref().map_or(Status::Unset, Failure::status);
+        let span = Span { time, trace, span, parent: None, name, service, version: None, instance: hex(&me.key), kind: SpanKind::Client, status, duration: ms, message, attrs };
+        self.0.insights.0.lock().unwrap().span(span, true, &[]);
+    }
+
     /// How a client's first screen opened (`client.open`): an app's under its app, and the client's own under this
     /// program, each by a screen it has.
     async fn opened(&self, me: &Caller, e: &Value, time: u64, attrs: Attrs) {
@@ -648,6 +699,7 @@ impl Node {
         for table in ["errors", "build_errors"] {
             for row in rows.get_mut(table).and_then(Value::as_array_mut).into_iter().flatten() {
                 read_error(row);
+                self.name_device(row);
             }
         }
         if let Some(problem) = self.telemetry_problem().filter(|_| admin) {
@@ -669,6 +721,13 @@ impl Node {
         }
     }
 
+    /// A row's device by name. A Worker's own span says no device, as it's none of them.
+    fn name_device(&self, row: &mut Value) {
+        if let Some(device) = row["instance"].as_str().and_then(|k| unhex(k).ok()).filter(|k| k.iter().any(|b| *b != 0)) {
+            row["device"] = json!(self.name_of(&device));
+        }
+    }
+
     /// What's broken most lately in `app`, for someone who may deploy it, as an app's screens show it: empty if it can't be read.
     pub(super) async fn errors_of(&self, viewer: &Caller, app: &str) -> Vec<Value> {
         let ask = Ask { queries: vec!["errors"], service: Some(app.to_string()), status: Some("error".into()), since: Some(now_ms().saturating_sub(ERRORS_SHOWN)), limit: 50, ..Default::default() };
@@ -685,10 +744,7 @@ impl Node {
     /// A row as a reader gets it: its attributes as JSON, and its device and the devices it names by name.
     fn read_row(&self, row: &mut Value) {
         row["attrs"] = row["attrs"].as_str().and_then(|a| serde_json::from_str(a).ok()).unwrap_or(json!({}));
-        // A Worker's own span says no device, as it's none of them.
-        if let Some(device) = row["instance"].as_str().and_then(|k| unhex(k).ok()).filter(|k| k.iter().any(|b| *b != 0)) {
-            row["device"] = json!(self.name_of(&device));
-        }
+        self.name_device(row);
         if let Some(node) = row["attrs"]["one.node"].as_str().and_then(|k| unhex(k).ok()) {
             row["attrs"]["one.node"] = json!(self.name_of(&node));
         }

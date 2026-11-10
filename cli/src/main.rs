@@ -13,7 +13,7 @@ mod network;
 
 use one::api::Client;
 use one::tools;
-use one::core_tools::SENDS;
+use one::core_tools::{Reader, SENDS};
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
 fn commands() -> Vec<Command> {
@@ -119,7 +119,7 @@ fn main() {
     }
     if let Err(err) = run(args) {
         // What the node says names its tools (apps_restore); the command line names them as commands.
-        eprintln!("{CLI}: {}", tools::in_cli_words(&node(), &format!("{err:#}")));
+        eprintln!("{CLI}: {}", tools::in_cli_words(&node(Reader::Cli.client()), &format!("{err:#}")));
         std::process::exit(tools::exit_code(&err));
     }
 }
@@ -139,7 +139,8 @@ fn run(args: Vec<String>) -> Result<()> {
             libc::signal(libc::SIGPIPE, libc::SIG_DFL)
         };
     }
-    let (agent, node, forms) = (one::mcp::agent_from_env(), node(), commands().into_iter().flat_map(|c| c.help).collect::<Vec<_>>());
+    let client = if positional.first().map(String::as_str) == Some("mcp") { Reader::Mcp } else { Reader::Cli };
+    let (agent, node, forms) = (one::mcp::agent_from_env(), node(client.client()), commands().into_iter().flat_map(|c| c.help).collect::<Vec<_>>());
     let given = Given { words: &positional, flags: &flags, args: &args, node: &node, agent: agent.as_deref(), json, trace, commands: &forms };
     // --help shows help, whatever the command: never runs it. An app's tool's is the app's own, and with no command
     // it's what the bare command says (`own`).
@@ -231,8 +232,9 @@ impl one::api::client::Via for Http {
     }
 }
 
-fn node() -> Client {
-    Client::new(Http, false)
+/// The node, as `client` asks it (`Reader::client`): the CLI, or its MCP server.
+fn node(client: &'static str) -> Client {
+    Client::new(Http, false, client)
 }
 
 /// The one thing to say when nothing answers: what to install or start.

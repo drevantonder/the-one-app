@@ -360,8 +360,8 @@ function where(a, more = []) {
 
 // What a group's newest span said, and its trace: a time in ms is 13 digits for the next two centuries, so the greatest of
 // each time before its text is the newest's, and `newestOf` takes the time back off.
-const NEWEST = `MAX(CAST("time" AS VARCHAR) || message) AS message, MAX(CAST("time" AS VARCHAR) || trace) AS trace`;
-const newestOf = (row) => ({ ...row, message: row.message?.slice(13) ?? null, trace: row.trace?.slice(13) ?? null });
+const NEWEST = `MAX(CAST("time" AS VARCHAR) || message) AS message, MAX(CAST("time" AS VARCHAR) || trace) AS trace, MAX(CAST("time" AS VARCHAR) || instance) AS instance`;
+const newestOf = (row) => ({ ...row, message: row.message?.slice(13) ?? null, trace: row.trace?.slice(13) ?? null, instance: row.instance?.slice(13) ?? null });
 const newest = (table, columns, clause, limit) => `SELECT ${columns} FROM ${NAMESPACE}.${table} ${clause} ORDER BY "time" DESC LIMIT ${limit}`;
 const SPAN = `"time", trace, span, parent, name, service, version, instance, kind, status, "duration", message, attrs`;
 const LOG = `"time", trace, span, severity_number, severity_text, body, service, version, instance, attrs`;
@@ -431,9 +431,9 @@ function summary(rows, counted, a) {
       if (had) {
         had.count += count;
         had.first_seen = Math.min(had.first_seen, row.first_seen);
-        if (row.last_seen >= had.last_seen) Object.assign(had, { last_seen: row.last_seen, message: row.message ?? had.message, trace: row.trace });
+        if (row.last_seen >= had.last_seen) Object.assign(had, { last_seen: row.last_seen, message: row.message ?? had.message, trace: row.trace, instance: row.instance });
       } else {
-        errors.set(key, { service: row.service, name: row.name, status: row.status, fingerprint: row.fingerprint, count, first_seen: row.first_seen, last_seen: row.last_seen, message: row.message, trace: row.trace });
+        errors.set(key, { service: row.service, name: row.name, status: row.status, fingerprint: row.fingerprint, count, first_seen: row.first_seen, last_seen: row.last_seen, message: row.message, trace: row.trace, instance: row.instance });
       }
     }
   }

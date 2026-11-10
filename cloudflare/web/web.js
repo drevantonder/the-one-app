@@ -8,9 +8,9 @@
 // The bridge (src/screen/), loaded after this, gives `one`; this page answers it for its own use (`__one.host`).
 import { late, offline } from "./offline.js";
 import { platform } from "./platform.js";
-import { api, retryWait, sleep } from "./request.js";
+import { api, retryWait, sendReport, sleep } from "./request.js";
 import { go, href, own, route } from "./routes.js";
-import { ask, iconPaths, openRequest, sendReport } from "./screens.js";
+import { ask, iconPaths, openRequest } from "./screens.js";
 import { report } from "./insights.js";
 import { appearance, schemed } from "./settings.js";
 import { config, forgetScreens, joined, lastAt, lastWindow, me, network, refreshApps, refreshState, setJoining, signOut, whySignedOut } from "./store.js";

@@ -70,6 +70,21 @@ impl Routes {
     }
 }
 
+/// The route `path` is asked by, as the API names it (`/api/blobs/{id}`), if it's one of its: a literal route before one
+/// with a parameter, as axum takes them.
+pub fn route_of(path: &str) -> Option<&'static str> {
+    static ROUTES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let routes = ROUTES.get_or_init(|| routes().who.into_iter().map(|(path, _)| path).collect());
+    let asked: Vec<&str> = path.split('/').collect();
+    let fits = |route: &str, literal: bool| {
+        let parts: Vec<&str> = route.split('/').collect();
+        let rest = parts.last().is_some_and(|p| p.starts_with("{*"));
+        (if rest { asked.len() >= parts.len() } else { asked.len() == parts.len() })
+            && parts.iter().zip(&asked).all(|(p, a)| p == a || (!literal && p.starts_with('{') && !a.is_empty()))
+    };
+    [true, false].into_iter().find_map(|literal| routes.iter().find(|r| fits(r, literal))).map(String::as_str)
+}
+
 /// Every route of the local API, unguarded: `guarded` lets in who each says.
 pub fn routes() -> Routes {
     use Who::*;

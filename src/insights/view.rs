@@ -129,7 +129,7 @@ fn errors(rows: &Value, status: &str, since: u64, now: u64, limit: usize) -> Opt
             Some(had) => {
                 had["count"] = json!(had["count"].as_u64().unwrap_or(0) + row["count"].as_u64().unwrap_or(0));
                 if row["last"].as_u64() > had["last"].as_u64() {
-                    (had["last"], had["message"], had["trace"]) = (row["last"].clone(), row["message"].clone(), row["trace"].clone());
+                    (had["last"], had["message"], had["trace"], had["device"]) = (row["last"].clone(), row["message"].clone(), row["trace"].clone(), row["device"].clone());
                 }
             }
         }
@@ -142,7 +142,8 @@ fn errors(rows: &Value, status: &str, since: u64, now: u64, limit: usize) -> Opt
     let lines = listed(&failed, limit, |p| {
         let said = p["message"].as_str().map(|m| format!("\n    {m}")).unwrap_or_default();
         let trace = p["trace"].as_str().map(|t| format!(", trace {t}")).unwrap_or_default();
-        format!("{} {}: {} at {}, {}, last {}{trace}{said}", text(p, "service"), text(p, "name"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)))
+        let device = p["device"].as_str().map(|d| format!(" on {d}")).unwrap_or_default();
+        format!("{} {}: {} at {}, {}, last {}{device}{trace}{said}", text(p, "service"), text(p, "name"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)))
     });
     Some(format!("{}:\n{lines}", if status == ERROR { "Top errors" } else { "Not errors" }))
 }
