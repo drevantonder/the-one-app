@@ -269,10 +269,6 @@ impl Node {
                 ok(json!(self.errors_of(&grant.caller, req["app"].as_str().unwrap_or_default()).await))
             }
             // A push to the caller's devices, from this app, through the network's push Worker.
-            Ask::Insights => {
-                let input: serde_json::Map<String, Value> = serde_json::from_slice(&body)?;
-                ok(crate::insights::tools::read(self.clone(), grant.caller.clone(), input).await?)
-            }
             Ask::Notify => {
                 let send: crate::push::Send = serde_json::from_slice(&body)?;
                 let mut note = send.note(&grant.app)?;

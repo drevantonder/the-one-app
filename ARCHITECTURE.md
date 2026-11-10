@@ -71,7 +71,7 @@ Recorded by the network itself, in OpenTelemetry's data model and names, with no
 
 Andre, 2026-11-05: the dumbest choice that works.
 
-- Telemetry records and has no opinion (Andre, 2026-11-10). What likely needs attention is an ordinary app's call, Tracker's: its items live their own life, in each user's, group's and everyone's own database, tied to anything only by tags, never by a pointer to an app or a repo.
+- Telemetry records and has no opinion (Andre, 2026-11-10). What likely needs attention is an app's call, never the pipeline's.
 - A service's identity is its own OS user on Linux (systemd's `DynamicUser=`), Seatbelt as the user on a Mac. A Windows computer runs the app runtime and no services: AppContainer can't reach its device over loopback without an exemption only an administrator can make, so its sandbox is still to design, and none is published for it.
 - On Windows, `oned` is a task of its user's, started at sign-in and looked at every minute, with no administrator (`install.ps1`): it stops at sign-out, like a Mac's launch agent, because a standard user can't have a task that runs signed out. A running program can be renamed but not overwritten, so an update gives the old file one more name, then renames the new one over each of its names (`os::replace_program`).
 - A service that needs the user (`user: true`: Shell, AGENTS.md, AI Usage, the Mac's Apple-data services) is allowed for any app, said plainly when adding ("Runs as you on mac"), never silently.

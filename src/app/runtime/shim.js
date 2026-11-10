@@ -262,9 +262,6 @@ function context(ask, body, appends, later) {
     failing: async () => (await ask("failing")).json(),
     /// What's broken most lately in `app`, if the caller may deploy it: each { tool, error, build, count, first, last }.
     errors: async (app) => post("errors", { app }),
-    /// How things went, as the `insights` tool answers it, of what the caller may see: with `raw: true`,
-    /// { requests, spans, logs, metrics, errors }.
-    insights: async (input = {}) => post("insights", input),
     /// The network's devices, as `GET /api/state` gives them to the caller: online or not, and each one's load.
     devices: async () => (await ask("devices")).json(),
     /// Run priority (src/rank.rs): `{ order, admin }`, every device and the Cloudflare node (key "cloudflare") in the
