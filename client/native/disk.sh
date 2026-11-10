@@ -35,7 +35,7 @@ clear_incremental() {
 # that port when it's made, so one made in the last few minutes (its forward not up yet) is left alone.
 sweep() {
 	[ -n "$cache" ] || return 0
-	if [ "$(free)" -lt "$NEEDED" ]; then rm -rf "$cache/native-build"; fi
+	if [ "$(free)" -lt "$NEEDED" ]; then rm -rf "$cache/throwaway.noindex"; fi
 	for d in "$cache"/throwaway-*; do
 		[ -d "$d" ] || continue
 		port=$(cat "$d/.throwaway-port" 2>/dev/null)

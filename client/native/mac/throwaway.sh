@@ -6,9 +6,9 @@
 #   throwaway.sh <address> <control port>
 set -euo pipefail
 . "$(dirname "$0")/../apple.sh"
+. "$native/throwaway-build.sh"
 cd "$native"
 address=$1 control=$2
-. "$native/throwaway-build.sh"
 THROWAWAY=1 nice cargo build -q
 identities=$(security find-identity -v -p codesigning)
 identity=$(echo "$identities" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
