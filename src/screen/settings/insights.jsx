@@ -440,7 +440,12 @@ function Trace({ trace, back, colour }) {
                 </div>
                 <div className="relative h-4">
                   <div className="absolute inset-y-1 rounded-sm" style={{ left: `${((s.time - trace.start) / whole) * 100}%`, width: `max(2px, ${(s.duration / whole) * 100}%)`, background: s.status === "error" ? ERROR : colour[s.service] }} />
-                  <span className="absolute inset-y-0 flex items-center px-1 text-xs tabular-nums text-muted-foreground" style={s.time - trace.start + s.duration > whole * 0.8 ? { right: `${100 - ((s.time - trace.start) / whole) * 100}%` } : { left: `${((s.time - trace.start + s.duration) / whole) * 100}%` }}>{took(s.duration)}</span>
+                  {(() => {
+                    const start = ((s.time - trace.start) / whole) * 100, end = ((s.time - trace.start + s.duration) / whole) * 100
+                    if (end <= 80) return <span className="absolute inset-y-0 flex items-center px-1 text-xs tabular-nums text-muted-foreground" style={{ left: `${end}%` }}>{took(s.duration)}</span>
+                    if (start >= 20) return <span className="absolute inset-y-0 flex items-center px-1 text-xs tabular-nums text-muted-foreground" style={{ right: `${100 - start}%` }}>{took(s.duration)}</span>
+                    return <span className="absolute inset-y-0 right-0 flex items-center px-1 text-xs tabular-nums text-primary-foreground">{took(s.duration)}</span>
+                  })()}
                 </div>
               </div>
               {shown && <div className="px-1 pb-3 pt-1"><Fields row={s} skip={SHOWN} /></div>}
@@ -619,8 +624,8 @@ function Errors({ rows, showTraces, query: [query, setQuery] }) {
   }, [rows, service, status, query])
   const chosen = found.find((r) => r.id === open)
   const columns = [
-    { key: "type", label: "Error", value: (p) => p.type, cell: (p) => <span className="break-all"><span className="font-medium">{p.type}</span> <span className="text-muted-foreground">{p.frame}</span>{p.message && <span className="block text-muted-foreground">{p.message}</span>}</span> },
-    { key: "service", label: "Service", value: (p) => p.service, cell: (p) => <span className="break-all">{p.service}</span> },
+    { key: "type", label: "Error", value: (p) => p.type, cell: (p) => <span className="wrap-anywhere"><span className="font-medium">{p.type}</span> <span className="text-muted-foreground">{p.frame}</span>{p.message && <span className="block text-muted-foreground wrap-anywhere">{p.message}</span>}</span> },
+    { key: "service", label: "Service", value: (p) => p.service, cell: (p) => <span className="wrap-anywhere">{p.service}</span> },
     { key: "name", label: "Operation", wide: true, value: (p) => p.name, cell: (p) => <span className="break-all">{p.name}</span> },
     { key: "count", label: "Count", right: true, value: (p) => p.count, cell: (p) => number(p.count) },
     { key: "last", label: "Last", right: true, value: (p) => p.last, cell: (p) => <span className="text-muted-foreground" title={when(p.last)}>{ago(p.last)}</span> },
