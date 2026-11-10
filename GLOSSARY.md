@@ -25,7 +25,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Invite**: an admin's yes, given in advance: a link, or, where the network has providers, an email written in the signed
   log, which that account signs in with and goes straight in. Also asking someone already in the network into a group.
 - **Agent**: an AI acting for a user (Claude Code, Codex, a T3 thread), through one of that user's clients: the CLI,
-  MCP or a browser. It acts as that user, never as itself: it has no permissions of its own.
+  MCP, the API or a browser, on a device or in the cloud. It acts as that user, never as itself: it has their access
+  and no permissions of its own, and nothing narrows it.
 
 ## Machines
 
