@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
-use crate::cli::{Command, Failed, Given};
+use crate::cli::{Command, Given};
 use crate::config::{CLI, NAME, YOURS};
 use crate::database::scopes::Role;
 use crate::api::Client;
@@ -29,15 +29,6 @@ fn devices_here(node: &Client, settings: crate::cloudflare::Settings, needed: bo
     devices.extend(network.as_ref().and_then(|n| n.recovery.as_ref()).map(|k| json!({ "key": k, "role": "client", "admin": false, "recovery": true })));
     let root = network.and_then(|n| n.root).filter(|r| r.len() == 64);
     Ok(crate::cloudflare::Settings { devices, root, ..settings })
-}
-
-
-/// Makes this device the Workers' home, or refuses (exit 3, which `one-dev update workers` passes over) where it isn't.
-fn at_home(settings: &mut crate::cloudflare::Settings) -> Result<()> {
-    settings.at_home().map_err(|err| match err.downcast::<crate::cloudflare::NotHome>() {
-        Ok(not) => Failed::Refused(not.0).into(),
-        Err(err) => err,
-    })
 }
 
 /// Puts `newest` on Cloudflare: each Worker, and the Cloudflare node if the network has one. The relay says what they're on
@@ -105,13 +96,13 @@ fn cloudflare_said(s: &crate::cloudflare::Settings) -> String {
     out
 }
 
-/// The network's Workers on Cloudflare, from the device that's their home.
+/// The network's Workers on Cloudflare, from any admin's device.
 pub fn commands() -> Command {
     Command {
         help: vec![
             ("cloudflare".into(), "the network's Workers on Cloudflare, as this machine has them: their addresses and settings".into()),
             ("cloudflare serve [--address <url>]".into(), "run the network's Workers in workerd (auth, the relay, the URL signer, and the gateway users reach at the network's address) on this machine; the first time, with that address".into()),
-            ("cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]".into(), format!("deploy the network's Workers to Cloudflare, with an API token that may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's domains ({CLI}-<service>.<domain>, the network's address {CLI}.<domain> unless --address says, for good: passkeys belong to it), or at its workers.dev address; and the Cloudflare node with it, once cloudflare node deploy put it there; beside a node of the network, whose devices its relay takes, unless --new")),
+            ("cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]".into(), format!("deploy the network's Workers to Cloudflare, with their settings from 1Password where they're kept there, and an API token that may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's domains ({CLI}-<service>.<domain>, the network's address {CLI}.<domain> unless --address says, for good: passkeys belong to it), or at its workers.dev address; and the Cloudflare node with it, once cloudflare node deploy put it there; beside a node of the network, whose devices its relay takes, unless --new")),
             ("cloudflare node deploy [--account <id>]".into(), "put the network's Cloudflare node in its Workers' Cloudflare account (a node as a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over iroh when none of your machines answers".into()),
             ("cloudflare set <setting> <value>".into(), "change one: auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or android (the SHA-256 fingerprints of the certificates the Android app is signed with, comma-separated, or -: links to the address open the app)".into()),
             ("cloudflare use <address>".into(), "point this network at its Workers: its nodes take sign-ins made at the address".into()),
@@ -136,6 +127,12 @@ pub fn commands() -> Command {
                     crate::cloudflare::serve(&settings)?
                 }
                 ["cloudflare", "deploy"] => {
+                    let kept = crate::cloudflare::Settings::from_1password(g.has("new"));
+                    if let Err(err) = &kept
+                        && crate::cloudflare::Settings::path().exists()
+                    {
+                        eprintln!("Deploying with the Cloudflare settings on this device, which a deploy then keeps in 1Password: {err:#}");
+                    }
                     let loaded = crate::cloudflare::Settings::load();
                     // A throwaway network's Workers run here, not on Cloudflare: they start again on the newest.
                     #[cfg(unix)]
@@ -149,10 +146,14 @@ pub fn commands() -> Command {
                     let settings = match loaded {
                         Ok(settings) => settings,
                         Err(err) => {
-                            crate::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
+                            if let Err(here) = crate::cloudflare::Settings::none_here() {
+                                return Err(err.context(format!("{here:#}")));
+                            }
                             // Workers already in the account were made elsewhere: new settings here would replace their secrets.
                             let made = cf.scripts()?.contains_key(&crate::cloudflare::worker_name("auth"));
-                            anyhow::ensure!(!made || g.has("new"), "the Cloudflare account has this network's Workers already, made on another machine: deploy them there, where their settings are, or bring them here ({} and .env.local). --new replaces them, and everything they hold can't be read again", crate::cloudflare::Settings::path().display());
+                            if made && !g.has("new") {
+                                return Err(kept.err().unwrap_or(err).context("the Cloudflare account has this network's Workers already, and their settings aren't on this device. --new replaces them, and everything they hold can't be read again"));
+                            }
                             let domain = g.flag("domain").map(|d| d.trim_matches('.').to_string());
                             let (domain, address) = match domain {
                                 Some(domain) => (domain.clone(), format!("https://{CLI}.{domain}")),
@@ -171,14 +172,13 @@ pub fn commands() -> Command {
                             if crate::config::JOIN_DOMAIN.is_empty() { settings } else { crate::cloudflare::Settings::load()? }
                         }
                     };
-                    let mut settings = settings;
-                    at_home(&mut settings)?;
                     let settings = devices_here(g.node, settings, !g.has("new"))?;
                     // A first deploy has nothing at its address yet to read.
                     let newest = if first { crate::cloudflare::Newest::built() } else { crate::cloudflare::Newest::read(&settings.address)? };
                     println!("{}", newest.said);
                     let mut settings = settings;
                     put_up(&cf, &mut settings, newest)?;
+                    settings.save()?;
                     // The clients its users sign in with, signed by this admin's device: a new device's sign-in counts
                     // only for one of them (`sign_in_proof::CLIENTS`), whatever auth says.
                     if let Some(clients) = settings.sign_in_clients() {
@@ -192,9 +192,12 @@ pub fn commands() -> Command {
                     print!("Deployed.\n{}", cloudflare_said(&settings));
                 }
                 ["cloudflare", "node", "deploy"] => {
-                    let mut settings = crate::cloudflare::Settings::load()?;
-                    at_home(&mut settings)?;
-                    let mut settings = devices_here(g.node, settings, true)?;
+                    if let Err(err) = crate::cloudflare::Settings::from_1password(false)
+                        && !crate::cloudflare::Settings::path().exists()
+                    {
+                        return Err(err);
+                    }
+                    let mut settings = devices_here(g.node, crate::cloudflare::Settings::load()?, true)?;
                     let cf = cloudflare(g, Some(&settings))?;
                     if settings.cloudflare_node_endpoint().is_none() {
                         settings.cloudflare_node_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());

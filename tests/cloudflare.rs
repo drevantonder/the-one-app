@@ -284,8 +284,8 @@ impl Workers {
         let mut settings = cloudflare::Settings::new(&format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
-        // What a deploy says of the Workers (`Newest::deployed`), from the first of those devices, where they're deployed from.
-        settings.deployed = Some(json!({ "home": devices.first(), "workers": WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null }).to_string());
+        // What a deploy says of the Workers (`Newest::deployed`), from the first of those devices, as the one they were last deployed from.
+        settings.deployed = Some(json!({ "from": devices.first(), "workers": WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null }).to_string());
         // The network's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).chain(recovery.map(|key| json!({ "key": key, "role": "client", "admin": false, "recovery": true }))).collect();
         settings.root = Some(data_encoding::HEXLOWER.encode(&ROOT));
@@ -1534,7 +1534,7 @@ mod relay {
             // And which of them are on the relay's network now, which a client races first.
             for body in [by_session.clone(), asked.clone()] {
                 let (status, said) = computes(body);
-                assert_eq!((status, said), (200, json!({ "computes": [hex(&first)], "online": [hex(&first)], "versions": {}, "workers": { "home": hex(&first), "workers": super::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null } })));
+                assert_eq!((status, said), (200, json!({ "computes": [hex(&first)], "online": [hex(&first)], "versions": {}, "workers": { "from": hex(&first), "workers": super::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null } })));
             }
             // Each request is taken once; a certificate alone, or one signed by a key it doesn't name, gets nothing; a
             // clock that's off isn't told it's out (403), so it keeps the nodes it knows.

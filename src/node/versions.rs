@@ -3,9 +3,9 @@
 //! Someone asking this device to take the newest published build is an ask the asker's device signed and left for this
 //! key (`{ update }`, `POST /relay/tell`). The relay carries it blind, so this checks who signed it and that they may remove
 //! this device, as who's who says, then starts `one update`, and does nothing else: an update that fails leaves this
-//! device as it was, and says why in its log (`one logs <device> --grep update`). The device the Workers are deployed from
-//! is asked the same way to deploy them again (`{ cloudflare }`, which the relay leaves for it), by an admin, and starts
-//! only `cloudflare deploy`.
+//! device as it was, and says why in its log (`one logs <device> --grep update`). The device the Workers were last deployed
+//! from is asked the same way to deploy them again (`{ cloudflare }`, which the relay leaves for it), by an admin, and starts
+//! only `cloudflare deploy`, as any admin's device may.
 
 use std::process::Stdio;
 
@@ -26,7 +26,7 @@ type Find = for<'a> fn(&'a Latest, &'a str) -> Option<&'a Thing>;
 
 impl Node {
     /// What each device told the relay it's on: `{ key: { version, newest, behind } }`, and the Workers as `cloudflare`, with
-    /// the version of the Cloudflare node (`node`) if there is one. `newest` is the build published for what it runs on,
+    /// the version of the Cloudflare node (`node`) if there is one, and the name of the device they were last deployed from (`from`). `newest` is the build published for what it runs on,
     /// from the signed record, which a browser can't read for itself (a redirect to the bucket). The Workers are behind
     /// if their sources or the web client are; the Cloudflare node is on what the device that deploys it is, so it follows that.
     pub async fn versions(&self) -> Result<Value> {
@@ -43,7 +43,9 @@ impl Node {
         let mut out: serde_json::Map<String, Value> = told.as_object().map(|v| v.iter().filter_map(|(key, version)| Some((key.clone(), of(version.as_str()?, Latest::to_update_to)?))).collect()).unwrap_or_default();
         let part = |of_what: &str, find: Find| workers[of_what].as_str().and_then(|v| of(v, find));
         if let (Some(sources), Some(web)) = (part("workers", Latest::get), part("web", Latest::get)) {
-            out.insert(CLOUDFLARE.into(), json!({ "version": sources["version"], "newest": sources["newest"], "behind": sources["behind"] == true || web["behind"] == true, "node": part("node", Latest::to_update_to).map(|n| n["version"].clone()) }));
+            let from = workers["from"].as_str().and_then(|k| crate::keys::unhex(k).ok());
+            let from = from.and_then(|key| self.with_or(None, |i| Ok(i.r.db().machine(&key)?.map(|d| d.name))));
+            out.insert(CLOUDFLARE.into(), json!({ "version": sources["version"], "newest": sources["newest"], "behind": sources["behind"] == true || web["behind"] == true, "node": part("node", Latest::to_update_to).map(|n| n["version"].clone()), "from": from }));
         }
         Ok(Value::Object(out))
     }
@@ -63,7 +65,7 @@ impl Node {
     /// this device: else why not.
     pub fn who_asked_to_update(&self, asked: &Value) -> Result<(String, Ask)> {
         let (by, fields) = crate::keys::check_request(crate::protocol::RELAY, asked, now_ms())?;
-        // The relay leaves the Workers' ask for the device they're deployed from, which the deploy itself checks it is.
+        // The relay leaves the Workers' ask for the device they were last deployed from.
         let ask = if fields["cloudflare"] == true { Ask::Deploy } else { Ask::Update };
         ensure!(ask == Ask::Deploy || fields["update"] == hex(&self.0.id), "it asks another device");
         self.with(|i| {
@@ -84,7 +86,7 @@ impl Node {
 pub enum Ask {
     /// Take the newest published build.
     Update,
-    /// Deploy the Workers again, which are deployed from this device.
+    /// Deploy the Workers again, which were last deployed from this device.
     Deploy,
 }
 

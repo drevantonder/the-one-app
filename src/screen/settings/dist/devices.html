@@ -991,7 +991,11 @@ function de(t) {
 		n[34] !== V || n[35] !== U || n[36] !== v || n[37] !== _ ? (J = V && /* @__PURE__ */ k(p, { children: /* @__PURE__ */ k(ae, {
 			icon: ee,
 			title: "Cloudflare",
-			sub: [`Version ${V.version.slice(0, 7)}`, V.node && V.node !== V.version && `Apps run on ${V.node.slice(0, 7)}`].filter(Boolean).join(" · "),
+			sub: [
+				`Version ${V.version.slice(0, 7)}`,
+				V.from && `Deployed from ${V.from}`,
+				V.node && V.node !== V.version && `Apps run on ${V.node.slice(0, 7)}`
+			].filter(Boolean).join(" · "),
 			children: U && /* @__PURE__ */ A(o, {
 				variant: "outline",
 				size: "sm",

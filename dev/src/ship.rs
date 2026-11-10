@@ -342,17 +342,6 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
     Ok((dir.join(CONFIG_FILE), Some(git(&dir, &["rev-parse", "HEAD"])?)))
 }
 
-/// A command in this machine's own sh, answered as `shell` answers: its exit and what it said.
-fn run_here(command: &str) -> Result<Value> {
-    let out = Command::new("sh").args(["-c", command]).output().context("run sh")?;
-    Ok(json!({ "exit": out.status.code().unwrap_or(-1), "stdout": String::from_utf8_lossy(&out.stdout), "stderr": String::from_utf8_lossy(&out.stderr) }))
-}
-
-fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
-    let r = crate::node().post("/api/call", json!({ "device": device["name"], "service": "shell", "app": "shell", "function": "run", "input": { "command": command, "timeout": timeout } }))?;
-    Ok(r["ok"].clone())
-}
-
 /// This build's web client written to `dir` as `<commit>.bundle`, not yet signed: gzip, for `publish web` to sign and publish.
 fn web_bundle(dir: &Path) -> Result<PathBuf> {
     let bundle = one::web::bundle::Bundle::of_this_build(one::config::BUILD, one::config::COMMITTED);

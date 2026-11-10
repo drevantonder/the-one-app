@@ -208,11 +208,6 @@ pub struct Settings {
     /// only on this machine; `deploy` refuses settings with it, so no Workers users use ever have it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub throwaway_user: Option<(String, String)>,
-    /// The device the Workers are deployed from, `(key in hex, name as it was)`: the first to deploy them, where their
-    /// secrets are. Another device's deploy would upload over its, and make the secrets they make for themselves
-    /// again (`at_home`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub home: Option<(String, String)>,
     /// Where its telemetry is in Basin, once a deploy has set that up (`basin::provision`). Workers that run on one machine
     /// have none, and keep it in a stand-in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -387,17 +382,46 @@ fn quoted(value: &str) -> String {
     format!("'{value}'")
 }
 
-/// This device isn't where the Workers are deployed from (`Settings::at_home`).
-#[derive(Debug)]
-pub struct NotHome(pub String);
-
-impl std::fmt::Display for NotHome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
+/// The vault the `op(op://…)` references in `.env.local`'s `text` are in, if it has any.
+fn vault_of(text: &str) -> Option<&str> {
+    text.split("op(op://").nth(1).and_then(|rest| rest.split('/').next()).filter(|v| !v.is_empty())
 }
 
-impl std::error::Error for NotHome {}
+/// The 1Password item a network's Workers' settings are kept in, beside their secrets, for any admin's device to deploy from.
+fn item_title() -> String {
+    format!("{} Cloudflare settings", crate::config::NAME)
+}
+
+/// `op` with `args`, and `input` on its standard input.
+fn op(args: &[&str], input: Option<&str>) -> Result<std::process::Output> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("op")
+        .args(args)
+        .stdin(if input.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("op (1Password's CLI) isn't on this device: install it, and sign it in with the service account that holds the Workers' secrets")?;
+    if let Some(input) = input {
+        child.stdin.take().unwrap().write_all(input.as_bytes())?;
+    }
+    Ok(child.wait_with_output()?)
+}
+
+/// The item's two files, `(settings.json, .env.local)`, as 1Password's `op item get --format json` says them.
+fn files_of(item: &Value) -> Option<(String, String)> {
+    let field = |id: &str| item["fields"].as_array()?.iter().find(|f| f["id"] == id)?["value"].as_str().map(str::to_string);
+    Some((field("settings")?, field("env")?))
+}
+
+/// `.env.local`'s `text` with no value in it: its comments and what Varlock reads, each secret's 1Password reference, and
+/// the names it reads from where it runs (the service account's token) with nothing after them.
+fn references_only(text: &str) -> String {
+    text.lines()
+        .filter(|l| l.starts_with('#') || l.trim().is_empty() || l.split_once('=').is_some_and(|(_, v)| v.is_empty() || v.starts_with("op(op://")))
+        .map(|l| format!("{l}\n"))
+        .collect()
+}
 
 impl Settings {
     pub fn path() -> PathBuf {
@@ -416,7 +440,7 @@ impl Settings {
     /// rather than this process told it's there.
     pub fn load_in(home: &Path) -> Result<Settings> {
         let path = Settings::path_in(home);
-        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine has no Cloudflare settings yet: {} cloudflare serve --address <url> runs the Workers here, and their settings are on the machine that deployed them", crate::config::CLI))?;
+        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine has no Cloudflare settings yet: {} cloudflare deploy takes a real network's from 1Password, and {} cloudflare serve --address <url> runs Workers here", crate::config::CLI, crate::config::CLI))?;
         let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't the Workers' settings", path.display()))?;
         settings.dir = home.to_path_buf();
         let dir = path.parent().unwrap();
@@ -455,20 +479,52 @@ impl Settings {
         (!clients.is_empty()).then(|| clients.join("\n"))
     }
 
-    /// Makes this device the Workers' home if they have none yet, and refuses on any other: they're deployed from one
-    /// device only, the one with their secrets.
-    pub fn at_home(&mut self) -> Result<()> {
-        let (key, name) = crate::node::device_here(&crate::home())?;
-        match &self.home {
-            Some((home, _)) if *home != key => {
-                let name = &self.home.as_ref().unwrap().1;
-                return Err(NotHome(format!("this network's Cloudflare Workers are deployed from {name}, where their secrets are: run this there")).into());
-            }
-            Some((_, was)) if *was == name => return Ok(()),
-            _ => {}
+    /// Writes this machine's `settings.json` and `.env.local` from the 1Password item they're kept in, where a real
+    /// network's are: unless the settings here are ones that aren't (a throwaway network's, or Workers tried here), or
+    /// `new` ones are to be made. A failure says why, and leaves the files here as they were.
+    pub fn from_1password(new: bool) -> Result<()> {
+        let path = Settings::path();
+        let env = std::fs::read_to_string(local(&crate::home())).unwrap_or_default();
+        if new || path.exists() && vault_of(&env).is_none() {
+            return Ok(());
         }
-        self.home = Some((key, name));
-        self.save()
+        let title = item_title();
+        let out = op(&["item", "get", &title, "--format", "json"], None)?;
+        ensure!(out.status.success(), "1Password has no item {title} this device can read ({}): sign this device in to 1Password with the service account that holds it (OP_SERVICE_ACCOUNT_TOKEN), or deploy once from a device whose Cloudflare settings are here, which keeps them there", String::from_utf8_lossy(&out.stderr).trim());
+        let item: Value = serde_json::from_slice(&out.stdout).context("op said something other than the item")?;
+        let (settings, env) = files_of(&item).with_context(|| format!("{title} in 1Password isn't the Workers' settings: it needs its fields settings and env, as a deploy keeps them"))?;
+        write_private(&path, &settings)?;
+        write_private(&local(&crate::home()), &env)
+    }
+
+    /// Keeps `settings.json` and `.env.local`'s references in their 1Password item, in the vault the references are in,
+    /// so any admin's device signed in to it deploys the Workers (`from_1password`). Settings with no references aren't
+    /// a real network's, and stay here.
+    fn keep_in_1password(&self) -> Result<()> {
+        let env = std::fs::read_to_string(local(&self.dir)).unwrap_or_default();
+        let Some(vault) = vault_of(&env) else { return Ok(()) };
+        let (settings, env) = (std::fs::read_to_string(Settings::path_in(&self.dir))?, references_only(&env));
+        let title = item_title();
+        let there = op(&["item", "get", &title, "--vault", vault, "--format", "json"], None)?;
+        let item: Option<Value> = there.status.success().then(|| serde_json::from_slice(&there.stdout)).transpose().context("op said something other than the item")?;
+        if item.as_ref().and_then(files_of).is_some_and(|f| f == (settings.clone(), env.clone())) {
+            return Ok(());
+        }
+        let field = |id: &str, label: &str, value: &str| json!({ "id": id, "type": "STRING", "label": label, "value": value });
+        let template = json!({ "title": title, "category": "SECURE_NOTE", "fields": [field("settings", "settings.json", &settings), field("env", ".env.local", &env)] }).to_string();
+        let out = match item.as_ref().and_then(|i| i["id"].as_str()) {
+            // op edits an item only from a template in a file; this one holds no secret.
+            Some(id) => {
+                let file = local(&self.dir).with_file_name("1password-item.json");
+                std::fs::write(&file, &template)?;
+                let out = op(&["item", "edit", id, "--vault", vault, &format!("--template={}", file.display())], None);
+                let _ = std::fs::remove_file(&file);
+                out?
+            }
+            None => op(&["item", "create", "--vault", vault, "--format", "json", "-"], Some(&template))?,
+        };
+        ensure!(out.status.success(), "1Password didn't keep the Workers' settings in {title}, so other devices deploy with what it had: {}", String::from_utf8_lossy(&out.stderr).trim());
+        Ok(())
     }
 
     /// Refuses unless this machine has no Workers' settings or secrets, even ones that don't load, for new ones to be
@@ -504,7 +560,6 @@ impl Settings {
             otlp_token: None,
             analytics_token: None,
             usage: None,
-            home: None,
             deployed: None,
             dir: crate::home(),
         }
@@ -520,7 +575,6 @@ impl Settings {
         settings.auth_url = format!("http://127.0.0.1:{}", ports[0]);
         settings.ports = ports;
         settings.throwaway_user = Some(user);
-        settings.home = Some(crate::node::device_here(home)?);
         settings.dir = home.to_path_buf();
         // Its node serves its data there (throwaway::bucket), signatures unchecked: the URL signer holds these.
         settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway", "region": "auto", "key_id": "throwaway", "secret": "throwaway" }));
@@ -546,7 +600,8 @@ impl Settings {
             write_private(&local(&self.dir), &text)?;
         }
         std::fs::write(path.with_file_name(".env.schema"), SCHEMA)?;
-        write_private(&path, &String::from_utf8(serde_json::to_vec_pretty(self)?)?)
+        write_private(&path, &String::from_utf8(serde_json::to_vec_pretty(self)?)?)?;
+        self.keep_in_1password()
     }
 
     /// Sets a secret's value in `.env.local`, unless it's a reference to 1Password, where it changes instead. A new
@@ -557,13 +612,13 @@ impl Settings {
         if let Some(line) = text.lines().find(|l| l.starts_with(&format!("{name}="))) {
             ensure!(!line.contains("op("), "{name} is kept in 1Password: change it there ({})", line.trim_start_matches(&format!("{name}=")));
         }
-        let vault = text.split("op(op://").nth(1).and_then(|rest| rest.split('/').next()).filter(|v| !v.is_empty());
-        let kept = match vault {
+        let kept = match vault_of(&text) {
             Some(vault) => format!("op(op://{vault}/{}/password)", in_1password(vault, &format!("{} Cloudflare {name}", crate::config::NAME), value)?),
             None => quoted(value),
         };
         lines.push(format!("{name}={kept}"));
-        write_private(&local(&self.dir), &(lines.join("\n") + "\n"))
+        write_private(&local(&self.dir), &(lines.join("\n") + "\n"))?;
+        self.keep_in_1password()
     }
 
     /// The Cloudflare node's endpoint (its public key, hex), once it has a key.

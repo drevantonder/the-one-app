@@ -860,8 +860,8 @@ async fn seen(m: &impl Me) -> Result<Value> {
 }
 
 /// Asks a device, through the relay, to take the newest published build. Only its user or an admin may; its own device
-/// checks that too, and only ever starts `one update`. Cloudflare is asked to deploy the Workers again, from the device they're
-/// deployed from, which the relay knows: only an admin may.
+/// checks that too, and only ever starts `one update`. Cloudflare is asked to deploy the Workers again, from the device they were
+/// last deployed from, which the relay knows: only an admin may.
 async fn update_device(m: &impl Me, device: &str) -> Result<Value> {
     let user = m.user()?;
     if device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) {

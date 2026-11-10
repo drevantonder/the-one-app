@@ -29,8 +29,8 @@
 // endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; `online`, those
 // of them connected here now and heard from lately, which a client races first and every node shows as online; and
 // `versions`, each key's that said one, for every client to show; and `workers`, once a deploy has said it, what the
-// Workers are on (`{ home, workers, web, node }`: the device they're deployed from, which an ask to deploy them again is
-// left for, and each part's version in a version's words). 403 is only for a key that isn't let in; a request
+// Workers are on (`{ from, workers, web, node }`: the device they were last deployed from, which an ask to deploy them
+// again is left for, and each part's version in a version's words). 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows. A device's own request
 // that says it reads less of who's who than this build (`reads`, protocol.js's `READS`; an older build's says
 // nothing) is 426, telling it to update. A browser's session runs the code the address serves, the newest, so it isn't
@@ -55,7 +55,7 @@
 // - `{ update }`: a key on the list, whose device this signed ask is left for, whole, until it next asks for the computes:
 //   any key on the list may leave one, the receiver checks who signed it and that they may remove it, and it can only
 //   ever bring the signed record's newest build. Another replaces it.
-// - `{ cloudflare: true }`: the same, to deploy the Workers again, left for the device they're deployed from (`workers.home`),
+// - `{ cloudflare: true }`: the same, to deploy the Workers again, left for the device they were last deployed from (`workers.from`),
 //   which checks that the asker is an admin.
 //
 // One endpoint isn't a socket: the Cloudflare node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
@@ -779,7 +779,7 @@ export class Relay extends DurableObject {
       return null;
     }
     if (told.update !== undefined || told.cloudflare === true) {
-      const key = told.cloudflare === true ? (this.env.DEPLOYED ? JSON.parse(this.env.DEPLOYED).home : null) : told.update;
+      const key = told.cloudflare === true ? (this.env.DEPLOYED ? JSON.parse(this.env.DEPLOYED).from : null) : told.update;
       if (!isKey(key) || !this.key(key)) return { error: "that key isn't on the list", code: CODES.notListed };
       this.sql.exec("INSERT OR REPLACE INTO asks VALUES (?, ?)", key, JSON.stringify(signed));
       return null;

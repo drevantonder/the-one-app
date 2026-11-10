@@ -241,10 +241,10 @@ fn send_node(at: &At) -> Result<()> {
     Ok(())
 }
 
-/// Sends the Workers and the web client, each if asked and anything of it changed, with one deploy from their home device.
+/// Sends the Workers and the web client, each if asked and anything of it changed, with one deploy from this device.
 /// If the node went out at this very commit, they go with its build, which holds both as they are. Otherwise this program
-/// puts them together from the checkout, with no build, and the home device deploys them from the record; Rust in the change
-/// is then in the node last sent, which that device has to run first. Rust the node hasn't gone out with waits for it.
+/// puts them together from the checkout, with no build, and this device deploys them from the record; Rust in the change
+/// is then in the node last sent, which this device has to run first. Rust the node hasn't gone out with waits for it.
 fn front(at: &At, workers: bool, web: bool) -> Result<()> {
     let started = Instant::now();
     let (w, b) = (workers && due(Part::Workers, at).workers, web && due(Part::Web, at).web);
@@ -381,7 +381,7 @@ fn send_dev(at: &At) -> Result<()> {
     Ok(())
 }
 
-/// Packs the Workers' sources from the checkout and names them in the record, for their home device to deploy.
+/// Packs the Workers' sources from the checkout and names them in the record, for a deploy to take.
 fn publish_workers(at: &At, key: &ssh_key::PrivateKey) -> Result<()> {
     let packed = one::web::bundle::Bundle { commit: at.build_name(), committed: at.committed, shell: one::web::SHELL, files: one::ui_folder::cloudflare() }.packed()?;
     let file = cache().join("workers").join(format!("{}.bundle", at.build_name()));

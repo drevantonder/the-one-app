@@ -27,12 +27,12 @@ impl Newest {
         Newest { workers: crate::ui_folder::cloudflare(), web: crate::web::with_client(), said: format!("Workers and web client from this build, {}", crate::config::BUILD), workers_version: of(Thing::WORKERS), web_version: of(Thing::WEB) }
     }
 
-    /// What the relay says of the Workers (`DEPLOYED`, `workers` in its answer to `POST /relay/computes`): the device they're
-    /// deployed from, which an ask to deploy them again is left for, and what each is on. The Cloudflare node is on what the
-    /// program that deploys it is.
+    /// What the relay says of the Workers (`DEPLOYED`, `workers` in its answer to `POST /relay/computes`): the device they
+    /// were last deployed from (this one), which an ask to deploy them again is left for, and what each is on. The Cloudflare
+    /// node is on what the program that deploys it is.
     pub fn deployed(&self, settings: &crate::cloudflare::Settings) -> String {
         serde_json::json!({
-            "home": settings.home.as_ref().map(|(key, _)| key),
+            "from": crate::node::device_here(&settings.dir).ok().map(|(key, _)| key),
             "workers": self.workers_version,
             "web": self.web_version,
             "node": settings.cloudflare_node.then(crate::protocol::version),

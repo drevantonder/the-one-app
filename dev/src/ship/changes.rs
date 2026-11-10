@@ -20,7 +20,7 @@ pub(super) struct Parts {
     /// This program (dev/), which no device takes, and which the Workers and the web client are put together with: what's
     /// in it from the rest of the repo has to be what's sent.
     pub(super) dev: bool,
-    /// The Workers, which their home device deploys: `cloudflare/`'s own, and those the web client goes up with.
+    /// The Workers, which this device deploys: `cloudflare/`'s own, and those the web client goes up with.
     pub(super) workers: bool,
     /// The web client, for the native apps, with the gateway, which serves it to browsers.
     pub(super) web: bool,

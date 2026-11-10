@@ -752,7 +752,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
         )}
         {cloudflare && (
           <List>
-            <DeviceRow icon={CLOUDFLARE} title="Cloudflare" sub={[`Version ${cloudflare.version.slice(0, 7)}`, cloudflare.node && cloudflare.node !== cloudflare.version && `Apps run on ${cloudflare.node.slice(0, 7)}`].filter(Boolean).join(" · ")}>
+            <DeviceRow icon={CLOUDFLARE} title="Cloudflare" sub={[`Version ${cloudflare.version.slice(0, 7)}`, cloudflare.from && `Deployed from ${cloudflare.from}`, cloudflare.node && cloudflare.node !== cloudflare.version && `Apps run on ${cloudflare.node.slice(0, 7)}`].filter(Boolean).join(" · ")}>
               {cloudflareCard && (
                 <Button variant="outline" size="sm" disabled={Object.keys(updating).length > 0} onClick={() => update([cloudflareCard])}>
                   {updating.cloudflare && <Spinner />}Update
