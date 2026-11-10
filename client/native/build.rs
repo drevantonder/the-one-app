@@ -59,7 +59,7 @@ fn main() {
     }
     // Android's Kotlin is one package, `app.client` (android/app/src/main/kotlin), which Tauri's web view's own is made in
     // and its library's functions are named by: so Tauri's identifier there, which says that, isn't the app's
-    // (`app.<cli>.android`, the Gradle project's applicationId).
+    // (config.toml's android, the Gradle project's applicationId).
     let tauri_identifier = if platform == "android" { "app.client".to_string() } else { identifier(platform) };
     let config = serde_json::json!({
         "productName": one::config::NAME,

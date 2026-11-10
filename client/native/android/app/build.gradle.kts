@@ -25,6 +25,8 @@ fun quoted(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "
 val commit = providers.exec { commandLine("git", "-C", repo.path, "rev-parse", "--short=12", "HEAD"); isIgnoreExitValue = true }
     .standardOutput.asText.get().trim().ifEmpty { "unknown" }
 val cli = field("cli")
+// The app's package: config.toml's android, or app.<cli>.android (build.rs says the same).
+val android = field("android").ifEmpty { "app.$cli.android" }
 // What a user calls the network where they read: a workplace's custom build, which its users join with their work
 // email (join_domain), is shared, "the PTC App network"; anyone else's is "your One App network".
 val yours = field("name").let { if (field("join_domain").isNotEmpty()) it.replaceFirst(Regex("^The "), "the ") else "your " + it.removePrefix("The ") } + " network"
@@ -77,7 +79,7 @@ val customBuild = tasks.register("customBuild") {
             @Suppress("UNCHECKED_CAST")
             val services = groovy.json.JsonSlurper().parse(firebase) as Map<String, Any?>
             val project = services["project_info"] as Map<String, Any?>
-            val id = "app.$cli.android"
+            val id = android
             @Suppress("UNCHECKED_CAST")
             val app = (services["client"] as List<Map<String, Any?>>).firstOrNull { c ->
                 ((c["client_info"] as Map<*, *>)["android_client_info"] as Map<*, *>)["package_name"] == id
@@ -130,7 +132,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "app.$cli.android"
+        applicationId = android
         minSdk = 29
         targetSdk = 36
         versionCode = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1

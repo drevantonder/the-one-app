@@ -41,7 +41,7 @@ menubar = "icons/MenuBarIcon.png"
 logo = "icons/Logo.png"
 # Where the native apps' pushes come from, each empty until the custom build has it (and those apps get no notifications
 # till then): Android's, the custom build's Firebase project's google-services.json (relative to this file), with an
-# Android app whose package is app.<cli>.android; Windows', its Microsoft Entra app registration's Application (client) ID
+# Android app whose package is android's (below); Windows', its Microsoft Entra app registration's Application (client) ID
 # and its service principal's Object ID, which WNS knows the Windows app by once Microsoft maps its package to them. The
 # push Worker sends with their secrets (FCM_ACCOUNT, WNS_*).
 firebase = ""
@@ -50,6 +50,8 @@ wns_object = ""
 # The iPhone app's bundle id, for a custom build that already has an app at Apple: its App Store Connect record, TestFlight
 # testers and builds stay bound to the id they began with. Empty, app.<cli>.phone.
 iphone = ""
+# The Android app's package, which Google Play keeps forever once the app is there. Empty, app.<cli>.android.
+android = ""
 
 # A network's settings until its admins change them in Settings (`setting` entries). Every network has store, the app
 # the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.add).

@@ -61,6 +61,12 @@ fn main() {
         id => id,
     };
     let out = format!("{out}pub const IPHONE: &str = {iphone:?};\n");
+    // The Android app's package (its applicationId); client/native/android/app/build.gradle.kts says the same.
+    let android = match optional("android") {
+        id if id.is_empty() => format!("app.{}.android", get("cli").as_str().unwrap()),
+        id => id,
+    };
+    let out = format!("{out}pub const ANDROID: &str = {android:?};\n");
     // What a user joins, in their words: "your One App network"; a workplace's (one with a join_domain) is shared, "the PTC App network".
     // client/native/apple.sh, client/native/android/app/build.gradle.kts and client/native/windows/build.sh say the same.
     let name = get("name").as_str().unwrap().to_string();

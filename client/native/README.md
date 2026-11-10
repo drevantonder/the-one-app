@@ -29,7 +29,7 @@ that connection (so only while it's open); the node checks who may, as for its o
 Each keeps the old app's identity, so it installed over it in place and kept its sign-in: the Mac's `app.<cli>.mac`
 (Developer ID team, same designated requirement, its Keychain items), the
 iPhone's `app.<cli>.phone` (or the build's `iphone`) with `.widgets`, `.notifications` and the App Group `group.<its id>` (also its
-Keychain group), Android's `app.<cli>.android` signed with the debug key it was signed with, Windows'
+Keychain group), Android's `app.<cli>.android` (or the build's `android`) signed with the debug key it was signed with, Windows'
 package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a device would sign in again as a new one.
 
 - Linux: `one-dev release` builds it, install.sh puts it on a desktop. Its tray item shows only its menu (Linux's tray items

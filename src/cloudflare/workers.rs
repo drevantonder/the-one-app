@@ -684,7 +684,7 @@ pub fn served_with(settings: &Settings, web: &Path, cloudflare_node: Option<Modu
 
 /// The Android app's package, as client/native/android/app/build.gradle.kts names it.
 pub fn android_package() -> String {
-    format!("app.{}.android", crate::config::CLI)
+    crate::config::ANDROID.to_string()
 }
 
 impl Settings {
