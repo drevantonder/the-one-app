@@ -987,7 +987,8 @@ impl tokio::io::AsyncWrite for Stream {
 async fn post_relay(url: String, body: Value) -> Result<(u16, Value)> {
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(PRESENCE_EVERY)).build().into();
     tokio::task::spawn_blocking(move || {
-        let mut resp = agent.post(&url).send_json(&body)?;
+        let request = ureq::http::Request::post(&url).header("content-type", "application/json").body(serde_json::to_vec(&body)?)?;
+        let (mut resp, _) = crate::hedge::run(&agent, "relay", request, crate::hedge::Twice::Never)?;
         let said: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         anyhow::Ok((resp.status().as_u16(), said))
     })

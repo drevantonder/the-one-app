@@ -12,6 +12,7 @@ use crate::keys::hex;
 
 use super::signed::pooled;
 use super::{Ask, Bucket, Failed, Object, Trouble};
+use crate::hedge::Twice;
 
 /// How long an ask of the bucket may take before its device's log says so.
 const SLOW_ASK: std::time::Duration = std::time::Duration::from_secs(5);
@@ -497,21 +498,23 @@ impl S3 {
         }
     }
 
-    /// A request by presigned URL: → its status, ETag and body.
+    /// A request by presigned URL: → its status, ETag and body. A create may be sent twice, as its name is bound to its
+    /// bytes: one the bucket refused as taken, after a hedge, is ours if it holds our bytes.
     fn request(&self, method: &str, name: &str, query: &[(&str, &str)], headers: &[(&str, &str)], body: &[u8]) -> Result<(u16, Option<String>, Vec<u8>)> {
         let url = self.url(&Ask { method, name, query, headers })?;
-        let agent = requests();
         let mut builder = ureq::http::Request::builder().method(method).uri(&url);
         for (k, v) in headers {
             builder = builder.header(*k, *v);
         }
+        let creates = method == "PUT" && headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("if-none-match") && *v == "*");
+        let twice = match method {
+            "GET" | "HEAD" => Twice::Safe,
+            _ if creates => Twice::Safe,
+            _ => Twice::Never,
+        };
         let host = self.host();
         let asked = std::time::Instant::now();
-        let mut resp = match method {
-            "PUT" => agent.run(builder.body(body.to_vec())?),
-            _ => agent.run(builder.body(())?),
-        }
-        .map_err(|e| {
+        let (mut resp, hedged) = crate::hedge::run(&requests(), "bucket", builder.body(body.to_vec())?, twice).map_err(|e| {
             tracing::warn!("{method} {name}: {host} failed after {} ms: {e}", asked.elapsed().as_millis());
             Failed(Trouble::Unreachable, format!("couldn't be reached ({host}: {e})"))
         })?;
@@ -521,7 +524,15 @@ impl S3 {
         let tag = resp.headers().get("etag").and_then(|t| t.to_str().ok()).map(str::to_string);
         // An answer cut short says nothing of what the request did.
         let bytes = resp.body_mut().with_config().limit(4 << 30).read_to_vec().map_err(|e| Failed(Trouble::Unreachable, format!("cut its answer short ({host}: {e})")))?;
-        Ok((resp.status().as_u16(), tag, bytes))
+        let status = resp.status().as_u16();
+        if hedged && creates && matches!(status, 409 | 412) {
+            return match self.request("HEAD", name, &[], &[], &[])? {
+                (200, Some(got), _) if got.trim_matches('"') == etag(body).trim_matches('"') => Ok((200, Some(got), Vec::new())),
+                (200, got, _) => Ok((412, got, bytes)),
+                _ => Err(Failed(Trouble::Unreachable, format!("couldn't say whether {name} was written ({host} was asked twice, and is still writing it)")).into()),
+            };
+        }
+        Ok((status, tag, bytes))
     }
 }
 

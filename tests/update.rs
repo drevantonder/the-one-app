@@ -364,7 +364,7 @@ fn updating_imports_nothing_of_the_network() {
         ("src/update.rs", &["cli", "config", "home", "latest", "mode", "oned::name", "os", "release"]),
         ("src/update/mac.rs", &["config", "latest", "release"]),
         ("src/update/cli.rs", &["cli", "config"]),
-        ("src/latest.rs", &["build::Platform", "keys", "protocol"]),
+        ("src/latest.rs", &["build::Platform", "hedge", "keys", "protocol"]),
         ("src/release.rs", &["config", "os"]),
     ];
     for (file, may) in allowed {

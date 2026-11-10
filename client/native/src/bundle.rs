@@ -166,14 +166,17 @@ fn base(address: &str) -> String {
     format!("{address}/updates")
 }
 
-fn agent(secs: u64) -> ureq::Agent {
-    ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(secs))).http_status_as_error(false).build().into()
+/// A GET of the network's address, waiting at most `secs` in all.
+fn get(secs: u64, url: String) -> Result<ureq::http::Response<ureq::Body>, String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(secs))).http_status_as_error(false).build().into();
+    let request = ureq::http::Request::get(url).body(Vec::new()).map_err(|e| e.to_string())?;
+    one::hedge::run(&agent, "updates", request, one::hedge::Twice::Safe).map(|(r, _)| r).map_err(|e| e.to_string())
 }
 
 /// What the place says is newest, of the web client: its `web` line of `updates/newest` (`web <commit> <committed> <sha256> <size> <config>`).
 /// That file is signed, but it's only a pointer: `checked` is what decides, so this reads it as text and nothing rests on it.
 fn latest(address: &str) -> Result<Option<Published>, String> {
-    let mut r = agent(15).get(format!("{}/newest", base(address))).call().map_err(|e| e.to_string())?;
+    let mut r = get(15, format!("{}/newest", base(address)))?;
     if !r.status().is_success() {
         return Ok(None);
     }
@@ -186,7 +189,7 @@ fn latest(address: &str) -> Result<Option<Published>, String> {
 }
 
 fn download(url: &str) -> Result<Vec<u8>, String> {
-    let mut r = agent(120).get(url).call().map_err(|e| e.to_string())?;
+    let mut r = get(120, url.to_string())?;
     if !r.status().is_success() {
         return Err(format!("{url} answered {}", r.status()));
     }

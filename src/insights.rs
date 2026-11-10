@@ -348,6 +348,12 @@ impl Attrs {
         self
     }
 
+    /// What a request reached: `bucket`, or a Worker at the network's address, from a closed set.
+    pub fn reached(mut self, what: &'static str) -> Attrs {
+        self.0.insert("one.reached", json!(what));
+        self
+    }
+
     /// Who says a device is on or off: the relay, or this node.
     pub fn says(mut self, who: &'static str) -> Attrs {
         self.0.insert("one.says", json!(who));
@@ -566,6 +572,8 @@ pub const BUCKET_ASKS: Metric = Metric { name: "bucket.asks", histogram: false, 
 pub const BUCKET_DURATION: Metric = Metric { name: "bucket.duration", histogram: true, unit: "ms" };
 pub const STEPS_BEHIND: Metric = Metric { name: "steps.behind", histogram: false, unit: "{step}" };
 pub const WRITE_SEEN: Metric = Metric { name: "write.seen", histogram: true, unit: "ms" };
+/// Requests to Cloudflare that passed their learned limit with no first byte (`hedge`), by what they reached and how each ended.
+pub const LATE: Metric = Metric { name: "http.client.late", histogram: false, unit: "{request}" };
 pub const SIGNER_FAILURES: Metric = Metric { name: "signer.failures", histogram: false, unit: "{failure}" };
 pub const CANARY: Metric = Metric { name: "telemetry.canary", histogram: false, unit: "{check}" };
 pub const TOKEN_USAGE: Metric = Metric { name: "gen_ai.client.token.usage", histogram: true, unit: "{token}" };

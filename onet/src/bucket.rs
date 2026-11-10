@@ -29,7 +29,8 @@ impl Signed {
 }
 
 fn download(url: &str) -> Result<Option<Object>> {
-    let mut r = AGENT.get(url).call().with_context(|| format!("Couldn't reach {YOURS}'s storage"))?;
+    let request = ureq::http::Request::get(url).body(Vec::new())?;
+    let (mut r, _) = one::hedge::run(&AGENT, "bucket", request, one::hedge::Twice::Safe).with_context(|| format!("Couldn't reach {YOURS}'s storage"))?;
     match r.status().as_u16() {
         404 => Ok(None),
         200 => {

@@ -84,10 +84,12 @@ impl Me for Node {
             if let Some((name, value)) = header {
                 request = request.header(name, value);
             }
-            let mut response = match body {
-                Some(body) => agent.run(request.header("content-type", "application/json").body(crate::keys::canonical(&body))?)?,
-                None => agent.run(request.body(())?)?,
+            let request = match body {
+                Some(body) => request.header("content-type", "application/json").body(crate::keys::canonical(&body))?,
+                None => request.body(Vec::new())?,
             };
+            let twice = if method == "GET" { crate::hedge::Twice::Safe } else { crate::hedge::Twice::Never };
+            let (mut response, _) = crate::hedge::run(&agent, "address", request, twice)?;
             let status = response.status().as_u16();
             Ok((status, response.body_mut().read_json().unwrap_or(Value::Null)))
         })

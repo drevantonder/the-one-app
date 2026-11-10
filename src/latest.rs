@@ -153,8 +153,9 @@ fn updates_url(address: &str, file: &str) -> String {
 
 /// The record's text at `address`; none if nothing has been published there yet.
 pub fn fetch(address: &str) -> Result<Option<String>> {
-    match agent(FETCH).get(updates_url(address, crate::protocol::NEWEST)).call() {
-        Ok(mut r) => Ok(Some(r.body_mut().with_config().limit(1 << 20).read_to_string()?)),
+    let request = ureq::http::Request::get(updates_url(address, crate::protocol::NEWEST)).body(Vec::new())?;
+    match crate::hedge::run(&agent(FETCH), "updates", request, crate::hedge::Twice::Safe) {
+        Ok((mut r, _)) => Ok(Some(r.body_mut().with_config().limit(1 << 20).read_to_string()?)),
         Err(ureq::Error::StatusCode(404)) => Ok(None),
         Err(err) => Err(anyhow!("couldn't reach {address}: {err}")),
     }
@@ -162,7 +163,8 @@ pub fn fetch(address: &str) -> Result<Option<String>> {
 
 /// `thing`'s file, whole and with the hash the record names.
 pub fn download(address: &str, thing: &Thing) -> Result<Vec<u8>> {
-    let mut resp = agent(DOWNLOAD).get(updates_url(address, &thing.sha256)).call().with_context(|| format!("download {} {}", thing.name, thing.commit))?;
+    let request = ureq::http::Request::get(updates_url(address, &thing.sha256)).body(Vec::new())?;
+    let (mut resp, _) = crate::hedge::run(&agent(DOWNLOAD), "updates", request, crate::hedge::Twice::Safe).with_context(|| format!("download {} {}", thing.name, thing.commit))?;
     let bytes = resp.body_mut().with_config().limit(2 << 30).read_to_vec().with_context(|| format!("download {} {}", thing.name, thing.commit))?;
     ensure!(sha256(&bytes) == thing.sha256, "{} {} isn't what the record names (its hash doesn't match)", thing.name, thing.commit);
     Ok(bytes)

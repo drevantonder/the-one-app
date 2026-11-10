@@ -274,11 +274,14 @@ impl Node {
         }
     }
 
-    /// Counts what the URL signer failed at since the last send.
-    fn say_signer(&self) {
+    /// Counts what the URL signer failed at since the last send, and the requests to Cloudflare that passed their limit.
+    fn say_requests(&self) {
         let failures = crate::bucket::signed::take_failures();
         if failures > 0 {
             self.device_metric(insights::SIGNER_FAILURES, Attrs::default(), failures);
+        }
+        for (reached, ended, n) in crate::hedge::take_late() {
+            self.device_metric(insights::LATE, Attrs::default().reached(reached).outcome(ended), n);
         }
     }
 
@@ -302,7 +305,7 @@ impl Node {
     /// Sends what this device has to say to the telemetry Worker, and says whether it went. Telemetry may be lost, so what
     /// doesn't go is dropped.
     pub async fn flush_insights(&self) -> bool {
-        self.say_signer();
+        self.say_requests();
         let batch = self.take_insights();
         if batch.is_empty() {
             return true;

@@ -192,11 +192,11 @@ mod sent {
 
     fn send(r: Request) -> Result<(u16, Value), Failed> {
         let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(30))).http_status_as_error(false).build().into();
-        let mut answer = match r.body {
-            None => agent.get(&r.url).call(),
-            Some((kind, body)) => agent.post(&r.url).header("content-type", kind).send(body),
-        }
-        .map_err(|e| failed(e.to_string()))?;
+        let (request, twice) = match r.body {
+            None => (ureq::http::Request::get(&r.url).body(Vec::new()), one::hedge::Twice::Safe),
+            Some((kind, body)) => (ureq::http::Request::post(&r.url).header("content-type", kind).body(body.into()), one::hedge::Twice::Never),
+        };
+        let (mut answer, _) = one::hedge::run(&agent, "auth", request.map_err(|e| failed(e.to_string()))?, twice).map_err(|e| failed(e.to_string()))?;
         Ok((answer.status().as_u16(), answer.body_mut().read_json().unwrap_or_default()))
     }
 

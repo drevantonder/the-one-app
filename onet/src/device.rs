@@ -561,11 +561,12 @@ async fn http(method: &str, url: &str, header: Option<(&str, String)>, body: Opt
         if let Some((name, value)) = header {
             request = request.header(name, value);
         }
-        let response = match body {
-            Some(body) => crate::bucket::AGENT.run(request.header("content-type", "application/json").body(keys::canonical(&body)).map_err(failed)?),
-            None => crate::bucket::AGENT.run(request.body(()).map_err(failed)?),
+        let request = match body {
+            Some(body) => request.header("content-type", "application/json").body(keys::canonical(&body)).map_err(failed)?,
+            None => request.body(Vec::new()).map_err(failed)?,
         };
-        let mut response = response.map_err(|e| failed(format!("Couldn't reach {YOURS}: {e}")))?;
+        let twice = if method == "GET" { one::hedge::Twice::Safe } else { one::hedge::Twice::Never };
+        let (mut response, _) = one::hedge::run(&crate::bucket::AGENT, "address", request, twice).map_err(|e| failed(format!("Couldn't reach {YOURS}: {e}")))?;
         let status = response.status().as_u16();
         Ok((status, response.body_mut().read_json().unwrap_or(Value::Null)))
     })

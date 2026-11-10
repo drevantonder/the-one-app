@@ -87,7 +87,9 @@ impl Signer {
         let address = (self.address)()?;
         fields["reads"] = serde_json::json!(crate::database::READS);
         let body = crate::keys::signed_request(&self.key, crate::protocol::URLS, fields, now_ms());
-        let mut resp = signer_requests().post(format!("{}/urls", address.trim_end_matches('/'))).send_json(body).map_err(|e| {
+        let request = ureq::http::Request::post(format!("{}/urls", address.trim_end_matches('/'))).header("content-type", "application/json").body(serde_json::to_vec(&body)?)?;
+        // Signing changes nothing at the signer, so a request to it may reach it twice.
+        let (mut resp, _) = crate::hedge::run(&signer_requests(), "signer", request, crate::hedge::Twice::Safe).map_err(|e| {
             FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Failed(Trouble::Unreachable, format!("couldn't be reached ({address}: {e})"))
         })?;

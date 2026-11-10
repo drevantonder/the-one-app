@@ -20,7 +20,7 @@ impl Node {
     /// Which push services the network's push Worker sends through.
     pub async fn push_status(&self) -> Result<Value> {
         let address = self.address()?;
-        let said = tokio::task::spawn_blocking(move || -> Result<Value> { Ok(agent().get(format!("{address}/push/key")).call()?.body_mut().read_json()?) }).await??;
+        let said = tokio::task::spawn_blocking(move || -> Result<Value> { Ok(crate::hedge::run(&agent(), "push", ureq::http::Request::get(format!("{address}/push/key")).body(Vec::new())?, crate::hedge::Twice::Safe)?.0.body_mut().read_json()?) }).await??;
         Ok(json!({ "via": said["via"] }))
     }
 
@@ -58,7 +58,8 @@ impl Node {
         tokio::task::spawn_blocking(move || {
             fields["route"] = json!(format!("POST {path}"));
             let signed = crate::keys::signed_request(&key, push::DOMAIN, fields, crate::keys::next_at(now_ms()));
-            let mut resp = agent().post(format!("{address}{path}")).send_json(&signed)?;
+            let request = ureq::http::Request::post(format!("{address}{path}")).header("content-type", "application/json").body(serde_json::to_vec(&signed)?)?;
+            let (mut resp, _) = crate::hedge::run(&agent(), "push", request, crate::hedge::Twice::Never)?;
             let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
             ensure!(resp.status().is_success(), "{}", out["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("{YOURS}'s push service didn't answer")));
             Ok(out)
