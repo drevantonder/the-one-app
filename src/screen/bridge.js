@@ -24,6 +24,8 @@
   // Framed: each message goes up as `{ one: message, id }`, answered with `{ oneReply: id, ok }` or `{ oneReply: id,
   // error, code?, trace? }`; node events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
   let asked = 0;
+  // What's out to the user's devices, and whether the page holding the frame was told it all came (`answered`).
+  let asking = 0, toldFresh = false;
   const waiting = {};
   // What had focus here, for the page holding the frame to give it back after a menu, alert or sheet it opened for this
   // screen: a frame's own focus goes when another element of that page takes it.
@@ -104,11 +106,15 @@
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
     if (ctx.host) return ctx.host(message);
     if (framed) {
-      return new Promise((ok, fail) => {
+      // What asks the user's devices, counted until it's answered, for `answered`.
+      const toDevices = message.type === "call" || message.type === "api";
+      if (toDevices) asking++;
+      const answer = new Promise((ok, fail) => {
         const id = ++asked;
         waiting[id] = { ok, fail };
         window.parent.postMessage({ one: message, id }, "*");
       });
+      return toDevices ? answer.finally(() => (asking--, answered())) : answer;
     }
     // Nothing else answers: the node refuses browsers, which would run a screen as this machine's own programs.
     throw new Error("Open this in the app.");
@@ -159,7 +165,15 @@
       if (!now || now === told) return;
       told = now;
       window.parent.postMessage({ oneDrawn: true, early: now === "early" }, "*");
+      answered();
     }, out ? 0 : 50);
+  }
+  // Once it has drawn, and nothing it asked the user's devices is still out (what it showed from what was kept is asked
+  // again), the page holding the frame is told, once: how long its newest took to come, for how it opened.
+  function answered() {
+    if (toldFresh || told !== "done" || asking) return;
+    toldFresh = true;
+    window.parent.postMessage({ oneFresh: true }, "*");
   }
 
   // Icons are Phosphor's (vendor/phosphor), the same in every client: each a path on a 256-point grid, filled in the

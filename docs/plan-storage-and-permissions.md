@@ -18,7 +18,7 @@ what was 85 hand-written checks, plus 35 admin checks elsewhere and each app's o
 
 ## Not shipped: clients syncing with TanStack DB
 
-Spiked on 2026-11-05, since today's API gives it nothing to do; it waits for the node to give write positions.
+Spiked on 2026-11-05, since today's API gives it nothing to do; it waits for the node to give write positions, which wait until a screen is seen needing them (ARCHITECTURE.md, Decided).
 
 - What was tried: Settings › Users (it writes, and has a hand-written optimistic layer) read and wrote through a TanStack DB collection, in `one-dev throwaway client web` and `android`: optimistic at once, rolled back with the problem box on a failed write, kept on a good one.
 - Size: the collection alone is 121 KB minified, 36 KB gzipped (`@tanstack/db` 1.0.0-rc.1.3, still a release candidate, whose transaction API changed under the spike: `isPersisted` became `when("settled")`). Settings' whole screen kit is 86 KB, 29 KB gzipped, so it'd be more than the kit, on every screen that used it. `@tanstack/offline-transactions` adds 32 KB (8 KB gzipped).

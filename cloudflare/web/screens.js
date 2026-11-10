@@ -211,6 +211,7 @@ function frameFor(r, into, { sheet, kitted } = {}) {
   const frame = kitted || sandboxed(r);
   const f = { frame, route: r, sheet, into, key: JSON.stringify(r), kitted: !!kitted };
   f.drawn = new Promise((done) => (f.saysDrawn = done));
+  if (!opening.first && !sheet) (opening.first = f), f.drawn.then(() => markOpen("shown"));
   frames.push(f);
   if (r.kind === "screen") f.undrawn = setTimeout(() => f.loaded || document.hidden || report(sendReport, { name: "screen.undrawn", app: r.app, screen: r.screen, ms: NEVER_DREW }), NEVER_DREW);
   // A spinner only for a wait that's long enough to notice.
@@ -585,6 +586,20 @@ export async function openRequest(scope, id) {
 
 export const sendReport = (events) => api("/api/insights/report", { method: "POST", body: { platform: platform.client(), events } });
 
+/// How the page's first screen opened, in ms from the page's start: its window drawn, the screen showing (a still, what
+/// it kept, or itself), and what it asked of the user's devices answered (`fresh`). Said once, as `client.open`, unless
+/// the page was hidden meanwhile, which would time how long it waited unseen.
+const opening = { hidden: document.visibilityState === "hidden" };
+addEventListener("visibilitychange", () => document.visibilityState === "hidden" && (opening.hidden = true));
+export function markOpen(what) {
+  opening[what] ??= Math.round(performance.now());
+  const { first, window, shown, fresh, sent, hidden } = opening;
+  if (sent || hidden || !first || window === undefined || shown === undefined || fresh === undefined) return;
+  opening.sent = true;
+  const r = first.route;
+  sendReport([{ time: Date.now(), name: "client.open", ...(r.kind === "own" ? { screen: r.name } : { app: r.app, screen: r.screen }), window, shown, fresh }]).catch(() => {});
+}
+
 /// The bridge's messages (src/screen/bridge.js), from the screens' frames only, each acting as its screen's app; and
 /// the client's own screens', as the user, which no app's may.
 addEventListener("message", async (e) => {
@@ -608,6 +623,7 @@ addEventListener("message", async (e) => {
   if (e.data?.oneDimmed !== undefined) return void (f.sheet || ((f.dimmed = !!e.data.oneDimmed), showing === f && dimmed()));
   if (typeof e.data?.oneOver === "number") return void holding(f, e.data.oneOver, () => f.frame.contentWindow?.postMessage({ oneEscape: true }, "*"));
   if (e.data?.oneDrawn) return void (e.data.early && f.still ? null : screenDrew(f));
+  if (e.data?.oneFresh) return void (f === opening.first && markOpen("fresh"));
   const { one: m, id } = e.data || {};
   if (!m || typeof m !== "object") return;
   /// Where this screen's `one.open` goes.

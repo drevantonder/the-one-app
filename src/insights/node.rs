@@ -395,8 +395,9 @@ impl Node {
     }
 
     /// What a client says went wrong on it (a screen that threw or never drew, its page's own errors) and what it did
-    /// before that (`client.try`). What it says of itself is believed only as far as closed sets go: the app must exist and
-    /// the screen be one of its, and a report more than `REPORTS_A_MINUTE` a minute is dropped.
+    /// before that (`client.try`), and how its first screen opened (`client.open`). What it says of itself is believed
+    /// only as far as closed sets go: the app must exist and the screen be one of its, and a report more than
+    /// `REPORTS_A_MINUTE` a minute is dropped.
     pub async fn report_insights(&self, me: &Caller, platform: &str, events: &[Value]) {
         let minute = now_ms() / 60_000;
         {
@@ -424,6 +425,9 @@ impl Node {
             let severity = if result == "answered" { Severity::Info } else { Severity::Warn };
             let attrs = attrs.scope("everyone").tried(e["node"].as_str().unwrap_or(""), result).duration(ms);
             return self.0.insights.0.lock().unwrap().log(Log { time, trace: None, span: None, severity, body: name.into(), service: insights::own().into(), version: None, instance, attrs });
+        }
+        if name == "client.open" {
+            return self.opened(me, e, time, attrs).await;
         }
         let exception = e["exception"].is_object().then(|| Exception::from_json(&e["exception"])).flatten();
         let (destination, app, screen) = match name {
@@ -565,6 +569,27 @@ impl Node {
                     batch.span(Span { time, trace, span, parent, name, service: service.clone(), version: version.clone(), instance: instance.clone(), kind, status: Status::of(item.ok), duration: item.ms, message: None, attrs }, kept, &[]);
                 }
                 None => batch.log(Log { time, trace: Some(trace), span: Some(span), severity: if item.ok { Severity::Info } else { Severity::Error }, body: name, service: service.clone(), version: version.clone(), instance: instance.clone(), attrs }),
+            }
+        }
+    }
+
+    /// How a client's first screen opened (`client.open`): an app's under its app, and the client's own under this
+    /// program, each by a screen it has.
+    async fn opened(&self, me: &Caller, e: &Value, time: u64, attrs: Attrs) {
+        let (service, attrs) = match e["app"].as_str() {
+            Some(app) => {
+                let Some(destination) = self.destination(app, me) else { return };
+                (app.to_string(), attrs.scope(destination.kind).screen(&self.screen_named(app, e["screen"].as_str().unwrap_or("")).await))
+            }
+            None => {
+                let screen = e["screen"].as_str().filter(|s| crate::screen::client_screens().any(|c| c == *s)).unwrap_or("_unknown");
+                (insights::own().to_string(), attrs.scope("everyone").screen(screen))
+            }
+        };
+        let mut batch = self.0.insights.0.lock().unwrap();
+        for (metric, key) in [(insights::OPEN_WINDOW, "window"), (insights::OPEN_SHOWN, "shown"), (insights::OPEN_FRESH, "fresh")] {
+            if let Some(ms) = e[key].as_u64().filter(|ms| *ms < 600_000) {
+                batch.metric(time, metric, &service, &hex(&me.key), &attrs, ms);
             }
         }
     }

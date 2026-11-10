@@ -626,6 +626,8 @@ function Logs({ rows, more, query: [query, setQuery] }) {
   )
 }
 
+/// Whether a metric's rows say how long something took: a histogram in ms.
+const timed = (rows) => rows.some((r) => r.type === "histogram" && r.unit === "ms")
 function statOver(rows, stat) {
   const r = red(rows)
   return { sum: r.sum, count: r.count, avg: r.avg, p95: r.p95 }[stat]
@@ -657,6 +659,7 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
     const hours = hoursOf(these, from, to)
     const keys = sorted(rows.filter((r) => r.name === open).flatMap((r) => Object.keys(fields(r)))).filter((k) => !COLUMNS.includes(k))
     const series = seriesOf(these, hours, stat, split)
+    const shownAs = timed(these) && (stat === "avg" || stat === "p95") ? took : number
     return (
       <div className="flex flex-col gap-4">
         <div><Button variant="ghost" onClick={() => (setOpen(null), setSplit(ALL))}><Icon name="caret-left" />Metrics</Button></div>
@@ -671,7 +674,7 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
         </div>
         {these.length ? (
           <>
-            <Lines hours={hours} series={series} height={260} />
+            <Lines hours={hours} series={series} height={260} format={shownAs} />
             <table className="w-full max-w-2xl border-collapse text-sm">
               <thead><tr className="text-left text-muted-foreground"><th className="py-1 font-normal">Series</th><th className="py-1 text-right font-normal">Peak</th><th className="py-1 text-right font-normal">Latest</th></tr></thead>
               <tbody>
@@ -680,8 +683,8 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
                   return (
                     <tr key={s.name} className="border-0 border-t border-solid border-border">
                       <td className="py-1.5"><span className="flex items-center gap-2"><span className="size-2.5 shrink-0 rounded-full" style={{ background: s.colour }} /><span className="break-all">{s.name}</span></span></td>
-                      <td className="py-1.5 text-right tabular-nums">{number(known.length ? Math.max(...known) : null)}</td>
-                      <td className="py-1.5 text-right tabular-nums">{number(known.at(-1))}</td>
+                      <td className="py-1.5 text-right tabular-nums">{shownAs(known.length ? Math.max(...known) : null)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{shownAs(known.at(-1))}</td>
                     </tr>
                   )
                 })}
@@ -701,10 +704,12 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-x-8 gap-y-5">
           {names.map(([name, g]) => {
             const hours = hoursOf(g, from, to)
+            // How long something took reads as its P95; anything else as its sum.
+            const stat = timed(g) ? "p95" : "sum"
             return (
-              <button key={name} type="button" onClick={() => setOpen(name)} className="flex min-w-0 cursor-pointer flex-col gap-1 border-0 bg-transparent p-0 text-left text-foreground">
-                <span className="flex items-baseline justify-between gap-2"><span className="min-w-0 truncate text-sm font-medium">{name}</span><span className="tabular-nums text-sm">{number(statOver(g, "sum"))}</span></span>
-                <Bars hours={hours} axis={false} height={44} stacks={[{ name, colour: hue(0), values: seriesOf(g, hours, "sum", ALL)[0].values }]} />
+              <button key={name} type="button" onClick={() => (setOpen(name), setStat(stat))} className="flex min-w-0 cursor-pointer flex-col gap-1 border-0 bg-transparent p-0 text-left text-foreground">
+                <span className="flex items-baseline justify-between gap-2"><span className="min-w-0 truncate text-sm font-medium">{name}</span><span className="tabular-nums text-sm">{stat === "p95" ? `P95 ${took(statOver(g, stat))}` : number(statOver(g, stat))}</span></span>
+                <Bars hours={hours} axis={false} height={44} stacks={[{ name, colour: hue(0), values: seriesOf(g, hours, stat, ALL)[0].values }]} />
               </button>
             )
           })}

@@ -572,6 +572,11 @@ pub const BUCKET_ASKS: Metric = Metric { name: "bucket.asks", histogram: false, 
 pub const BUCKET_DURATION: Metric = Metric { name: "bucket.duration", histogram: true, unit: "ms" };
 pub const STEPS_BEHIND: Metric = Metric { name: "steps.behind", histogram: false, unit: "{step}" };
 pub const WRITE_SEEN: Metric = Metric { name: "write.seen", histogram: true, unit: "ms" };
+/// How a client's first screen opened, from its page's start: its window drawn, the screen showing (what it kept of it,
+/// or itself), and what it asked of the user's devices answered.
+pub const OPEN_WINDOW: Metric = Metric { name: "client.open.window", histogram: true, unit: "ms" };
+pub const OPEN_SHOWN: Metric = Metric { name: "client.open.shown", histogram: true, unit: "ms" };
+pub const OPEN_FRESH: Metric = Metric { name: "client.open.fresh", histogram: true, unit: "ms" };
 /// Requests to Cloudflare that passed their learned limit with no first byte (`hedge`), by what they reached and how each ended.
 pub const LATE: Metric = Metric { name: "http.client.late", histogram: false, unit: "{request}" };
 pub const SIGNER_FAILURES: Metric = Metric { name: "signer.failures", histogram: false, unit: "{failure}" };

@@ -1745,7 +1745,8 @@ function Et({ rows: e, more: t, query: [r, a] }) {
 		] }) : /* @__PURE__ */ D(s, { children: "No logs match." })]
 	});
 }
-function Dt(e, t) {
+var Dt = (e) => e.some((e) => e.type === "histogram" && e.unit === "ms");
+function Ot(e, t) {
 	let n = me(e);
 	return {
 		sum: n.sum,
@@ -1754,20 +1755,20 @@ function Dt(e, t) {
 		p95: n.p95
 	}[t];
 }
-var Ot = (e) => e === "avg" || e === "p95" ? null : 0;
-function kt(e, t, n, r) {
+var kt = (e) => e === "avg" || e === "p95" ? null : 0;
+function At(e, t, n, r) {
 	let i = Map.groupBy(e, (e) => r === N ? "All" : ie(se(e)[r] ?? "–")), a = (e) => e.reduce((e, t) => e + t.count, 0), o = [...i.entries()].sort((e, t) => a(t[1]) - a(e[1])), s = Z([...i.keys()]), c = (e, r, i) => {
 		let a = Map.groupBy(r, (e) => e.hour);
 		return {
 			name: e,
 			colour: i,
-			values: t.map((e) => a.has(e) ? Dt(a.get(e), n) : Ot(n))
+			values: t.map((e) => a.has(e) ? Ot(a.get(e), n) : kt(n))
 		};
 	}, l = o.slice(0, R).map(([e, t]) => c(e, t, G(s.indexOf(e))));
 	return o.length > R && l.push(c(B, o.slice(R).flatMap(([, e]) => e), q)), l;
 }
-function At(t) {
-	let n = e(58), { rows: r, from: a, to: u, more: d, query: f } = t, [p, m] = f, [_, b] = i(null), [x, S] = i("sum"), [C, w] = i(N), T;
+function jt(t) {
+	let n = e(60), { rows: r, from: a, to: u, more: d, query: f } = t, [p, m] = f, [_, b] = i(null), [x, S] = i("sum"), [C, w] = i(N), T;
 	n[0] !== p || n[1] !== r ? (T = r.filter(ce(p)), n[0] = p, n[1] = r, n[2] = T) : T = n[2];
 	let k = T, A;
 	n[3] === m ? A = n[4] : (A = (e) => m(e.target.value), n[3] = m, n[4] = A);
@@ -1781,63 +1782,64 @@ function At(t) {
 	}), n[5] = p, n[6] = A, n[7] = j) : j = n[7];
 	let M = j;
 	if (_) {
-		let e, t, i, l;
+		let e, t, i, l, d;
 		if (n[8] !== a || n[9] !== _ || n[10] !== r || n[11] !== k || n[12] !== C || n[13] !== x || n[14] !== u) {
 			let o;
-			n[19] === _ ? o = n[20] : (o = (e) => e.name === _, n[19] = _, n[20] = o), l = k.filter(o), e = he(l, a, u);
+			n[20] === _ ? o = n[21] : (o = (e) => e.name === _, n[20] = _, n[21] = o), d = k.filter(o), e = he(d, a, u);
 			let s;
-			if (n[21] !== _ || n[22] !== r) {
+			if (n[22] !== _ || n[23] !== r) {
 				let e;
-				n[24] === _ ? e = n[25] : (e = (e) => e.name === _, n[24] = _, n[25] = e), s = Z(r.filter(e).flatMap(Lt)).filter(It), n[21] = _, n[22] = r, n[23] = s;
-			} else s = n[23];
-			t = s, i = kt(l, e, x, C), n[8] = a, n[9] = _, n[10] = r, n[11] = k, n[12] = C, n[13] = x, n[14] = u, n[15] = e, n[16] = t, n[17] = i, n[18] = l;
-		} else e = n[15], t = n[16], i = n[17], l = n[18];
-		let d = i, f;
-		n[26] === Symbol.for("react.memo_cache_sentinel") ? (f = /* @__PURE__ */ D("div", { children: /* @__PURE__ */ O(o, {
+				n[25] === _ ? e = n[26] : (e = (e) => e.name === _, n[25] = _, n[26] = e), s = Z(r.filter(e).flatMap(Lt)).filter(It), n[22] = _, n[23] = r, n[24] = s;
+			} else s = n[24];
+			t = s, i = At(d, e, x, C), l = Dt(d) && (x === "avg" || x === "p95") ? X : Y, n[8] = a, n[9] = _, n[10] = r, n[11] = k, n[12] = C, n[13] = x, n[14] = u, n[15] = e, n[16] = t, n[17] = i, n[18] = l, n[19] = d;
+		} else e = n[15], t = n[16], i = n[17], l = n[18], d = n[19];
+		let f = l, p;
+		n[27] === Symbol.for("react.memo_cache_sentinel") ? (p = /* @__PURE__ */ D("div", { children: /* @__PURE__ */ O(o, {
 			variant: "ghost",
 			onClick: () => (b(null), w(N)),
 			children: [/* @__PURE__ */ D(c, { name: "caret-left" }), "Metrics"]
-		}) }), n[26] = f) : f = n[26];
-		let p;
-		n[27] === _ ? p = n[28] : (p = /* @__PURE__ */ D("h2", {
+		}) }), n[27] = p) : p = n[27];
+		let m;
+		n[28] === _ ? m = n[29] : (m = /* @__PURE__ */ D("h2", {
 			className: "m-0 break-all text-xl font-semibold",
 			children: _
-		}), n[27] = _, n[28] = p);
-		let m;
-		n[29] === Symbol.for("react.memo_cache_sentinel") ? (m = /* @__PURE__ */ D(v, {
+		}), n[28] = _, n[29] = m);
+		let T;
+		n[30] === Symbol.for("react.memo_cache_sentinel") ? (T = /* @__PURE__ */ D(v, {
 			"aria-label": "Statistic",
 			children: /* @__PURE__ */ D(y, {})
-		}), n[29] = m) : m = n[29];
-		let T;
-		n[30] === Symbol.for("react.memo_cache_sentinel") ? (T = /* @__PURE__ */ D(g, { children: Object.entries(F).map(Ft) }), n[30] = T) : T = n[30];
+		}), n[30] = T) : T = n[30];
 		let A;
-		n[31] === x ? A = n[32] : (A = /* @__PURE__ */ O(h, {
+		n[31] === Symbol.for("react.memo_cache_sentinel") ? (A = /* @__PURE__ */ D(g, { children: Object.entries(F).map(Ft) }), n[31] = A) : A = n[31];
+		let j;
+		n[32] === x ? j = n[33] : (j = /* @__PURE__ */ O(h, {
 			value: x,
 			onValueChange: S,
-			children: [m, T]
-		}), n[31] = x, n[32] = A);
-		let j;
-		n[33] !== t || n[34] !== C ? (j = /* @__PURE__ */ D(it, {
+			children: [T, A]
+		}), n[32] = x, n[33] = j);
+		let P;
+		n[34] !== t || n[35] !== C ? (P = /* @__PURE__ */ D(it, {
 			label: "Group by",
 			value: C,
 			set: w,
 			all: "No Grouping",
 			options: t
-		}), n[33] = t, n[34] = C, n[35] = j) : j = n[35];
-		let P;
-		n[36] !== M || n[37] !== A || n[38] !== j ? (P = /* @__PURE__ */ O("div", {
+		}), n[34] = t, n[35] = C, n[36] = P) : P = n[36];
+		let I;
+		n[37] !== M || n[38] !== j || n[39] !== P ? (I = /* @__PURE__ */ O("div", {
 			className: "flex flex-wrap items-center gap-2",
 			children: [
-				A,
 				j,
+				P,
 				M
 			]
-		}), n[36] = M, n[37] = A, n[38] = j, n[39] = P) : P = n[39];
-		let I;
-		n[40] !== e || n[41] !== d || n[42] !== l.length ? (I = l.length ? /* @__PURE__ */ O(E, { children: [/* @__PURE__ */ D(Ce, {
+		}), n[37] = M, n[38] = j, n[39] = P, n[40] = I) : I = n[40];
+		let L;
+		n[41] !== e || n[42] !== i || n[43] !== f || n[44] !== d.length ? (L = d.length ? /* @__PURE__ */ O(E, { children: [/* @__PURE__ */ D(Ce, {
 			hours: e,
-			series: d,
-			height: 260
+			series: i,
+			height: 260,
+			format: f
 		}), /* @__PURE__ */ O("table", {
 			className: "w-full max-w-2xl border-collapse text-sm",
 			children: [/* @__PURE__ */ D("thead", { children: /* @__PURE__ */ O("tr", {
@@ -1856,31 +1858,59 @@ function At(t) {
 						children: "Latest"
 					})
 				]
-			}) }), /* @__PURE__ */ D("tbody", { children: d.map(Nt) })]
-		})] }) : /* @__PURE__ */ D(s, { children: "No data in this range." }), n[40] = e, n[41] = d, n[42] = l.length, n[43] = I) : I = n[43];
-		let L;
-		return n[44] !== P || n[45] !== I || n[46] !== p ? (L = /* @__PURE__ */ O("div", {
+			}) }), /* @__PURE__ */ D("tbody", { children: i.map((e) => {
+				let t = e.values.filter(Pt);
+				return /* @__PURE__ */ O("tr", {
+					className: "border-0 border-t border-solid border-border",
+					children: [
+						/* @__PURE__ */ D("td", {
+							className: "py-1.5",
+							children: /* @__PURE__ */ O("span", {
+								className: "flex items-center gap-2",
+								children: [/* @__PURE__ */ D("span", {
+									className: "size-2.5 shrink-0 rounded-full",
+									style: { background: e.colour }
+								}), /* @__PURE__ */ D("span", {
+									className: "break-all",
+									children: e.name
+								})]
+							})
+						}),
+						/* @__PURE__ */ D("td", {
+							className: "py-1.5 text-right tabular-nums",
+							children: f(t.length ? Math.max(...t) : null)
+						}),
+						/* @__PURE__ */ D("td", {
+							className: "py-1.5 text-right tabular-nums",
+							children: f(t.at(-1))
+						})
+					]
+				}, e.name);
+			}) })]
+		})] }) : /* @__PURE__ */ D(s, { children: "No data in this range." }), n[41] = e, n[42] = i, n[43] = f, n[44] = d.length, n[45] = L) : L = n[45];
+		let R;
+		return n[46] !== I || n[47] !== L || n[48] !== m ? (R = /* @__PURE__ */ O("div", {
 			className: "flex flex-col gap-4",
 			children: [
-				f,
 				p,
-				P,
-				I
+				m,
+				I,
+				L
 			]
-		}), n[44] = P, n[45] = I, n[46] = p, n[47] = L) : L = n[47], L;
+		}), n[46] = I, n[47] = L, n[48] = m, n[49] = R) : R = n[49], R;
 	}
 	let P;
-	if (n[48] !== a || n[49] !== d || n[50] !== M || n[51] !== k || n[52] !== u) {
-		let e = [...Map.groupBy(k, Mt).entries()].sort(jt), t;
-		n[54] === M ? t = n[55] : (t = /* @__PURE__ */ D("div", {
+	if (n[50] !== a || n[51] !== d || n[52] !== M || n[53] !== k || n[54] !== u) {
+		let e = [...Map.groupBy(k, Nt).entries()].sort(Mt), t;
+		n[56] === M ? t = n[57] : (t = /* @__PURE__ */ D("div", {
 			className: "flex flex-wrap items-center gap-2",
 			children: M
-		}), n[54] = M, n[55] = t);
+		}), n[56] = M, n[57] = t);
 		let r;
-		n[56] === d ? r = n[57] : (r = d && /* @__PURE__ */ D("p", {
+		n[58] === d ? r = n[59] : (r = d && /* @__PURE__ */ D("p", {
 			className: "m-0 text-sm text-muted-foreground",
 			children: "The newest only."
-		}), n[56] = d, n[57] = r), P = /* @__PURE__ */ O("div", {
+		}), n[58] = d, n[59] = r), P = /* @__PURE__ */ O("div", {
 			className: "flex flex-col gap-4",
 			children: [
 				t,
@@ -1888,10 +1918,10 @@ function At(t) {
 				e.length ? /* @__PURE__ */ D("div", {
 					className: "grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-x-8 gap-y-5",
 					children: e.map((e) => {
-						let [t, n] = e, r = he(n, a, u);
+						let [t, n] = e, r = he(n, a, u), i = Dt(n) ? "p95" : "sum";
 						return /* @__PURE__ */ O("button", {
 							type: "button",
-							onClick: () => b(t),
+							onClick: () => (b(t), S(i)),
 							className: "flex min-w-0 cursor-pointer flex-col gap-1 border-0 bg-transparent p-0 text-left text-foreground",
 							children: [/* @__PURE__ */ O("span", {
 								className: "flex items-baseline justify-between gap-2",
@@ -1900,7 +1930,7 @@ function At(t) {
 									children: t
 								}), /* @__PURE__ */ D("span", {
 									className: "tabular-nums text-sm",
-									children: Y(Dt(n, "sum"))
+									children: i === "p95" ? `P95 ${X(Ot(n, i))}` : Y(Ot(n, i))
 								})]
 							}), /* @__PURE__ */ D(xe, {
 								hours: r,
@@ -1909,51 +1939,22 @@ function At(t) {
 								stacks: [{
 									name: t,
 									colour: G(0),
-									values: kt(n, r, "sum", N)[0].values
+									values: At(n, r, i, N)[0].values
 								}]
 							})]
 						}, t);
 					})
 				}) : /* @__PURE__ */ D(s, { children: "No metrics match." })
 			]
-		}), n[48] = a, n[49] = d, n[50] = M, n[51] = k, n[52] = u, n[53] = P;
-	} else P = n[53];
+		}), n[50] = a, n[51] = d, n[52] = M, n[53] = k, n[54] = u, n[55] = P;
+	} else P = n[55];
 	return P;
 }
-function jt(e, t) {
+function Mt(e, t) {
 	return e[0].localeCompare(t[0]);
 }
-function Mt(e) {
-	return e.name;
-}
 function Nt(e) {
-	let t = e.values.filter(Pt);
-	return /* @__PURE__ */ O("tr", {
-		className: "border-0 border-t border-solid border-border",
-		children: [
-			/* @__PURE__ */ D("td", {
-				className: "py-1.5",
-				children: /* @__PURE__ */ O("span", {
-					className: "flex items-center gap-2",
-					children: [/* @__PURE__ */ D("span", {
-						className: "size-2.5 shrink-0 rounded-full",
-						style: { background: e.colour }
-					}), /* @__PURE__ */ D("span", {
-						className: "break-all",
-						children: e.name
-					})]
-				})
-			}),
-			/* @__PURE__ */ D("td", {
-				className: "py-1.5 text-right tabular-nums",
-				children: Y(t.length ? Math.max(...t) : null)
-			}),
-			/* @__PURE__ */ D("td", {
-				className: "py-1.5 text-right tabular-nums",
-				children: Y(t.at(-1))
-			})
-		]
-	}, e.name);
+	return e.name;
 }
 function Pt(e) {
 	return e != null;
@@ -2210,7 +2211,7 @@ function Ht() {
 				more: G(e.logs),
 				query: R.Logs
 			}),
-			l === "Metrics" && e.metrics && /* @__PURE__ */ D(At, {
+			l === "Metrics" && e.metrics && /* @__PURE__ */ D(jt, {
 				rows: e.metrics,
 				from: H,
 				to: V,

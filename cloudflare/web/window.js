@@ -7,7 +7,7 @@ import { platform } from "./platform.js";
 import { qrSvg } from "./qr.js";
 import { api, developer, fresh, retryWait, sleep, tooOld } from "./request.js";
 import { back, closeTop, go, home, linked, own, route, setSection, sidebar, whenMoved } from "./routes.js";
-import { detail, devtools, hasScreen, openSheet, replacing, screen, setBarStart, tabWaiting, tell, whenTitled } from "./screens.js";
+import { detail, devtools, hasScreen, markOpen, openSheet, replacing, screen, setBarStart, tabWaiting, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
 import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, signOut, store, titleOf, whenChanged } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
@@ -30,6 +30,7 @@ export function render(opened) {
   if (fresh) shown = key;
   else if (!replacing()) barBack = barBackAt(r);
   drawWindow();
+  markOpen("window");
   if (fresh) screen.show(detail, r, () => ((barTitle = home(r) ? "" : titleOf(r)), (barBack = barBackAt(r)), drawWindow()), opened);
 }
 whenChanged(render);
