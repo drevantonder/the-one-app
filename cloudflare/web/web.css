@@ -15,6 +15,10 @@ html { overscroll-behavior: none; touch-action: manipulation; }
 .screen { flex: 1; position: relative; min-height: 0; }
 .screen-layer { position: absolute; inset: 0; }
 .screen-layer.coming { opacity: 0; pointer-events: none; }
+/* The spare frame waiting above the screen (screens.js `warmSpare`) takes no touch: WebKit sends a pan to the frame on top
+   of the others even where it's transparent and has pointer-events: none, so an opacity: 0 spare there stopped every
+   swipe and scroll on a phone's Safari and its app. Hidden, it still loads. */
+.screen-layer.spare { visibility: hidden; pointer-events: none; }
 .screen-layer[data-parked] { visibility: hidden; pointer-events: none; }
 .screen-layer[data-bar] { top: 2.75rem; }
 /* A dialog in a screen's frame darkens only that frame, by the overlay's black at 50%; these match it around the frame. */

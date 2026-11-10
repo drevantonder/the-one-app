@@ -178,7 +178,7 @@ function warmSpare() {
   if (spare?.into.isConnected || spareRefused || platform.panel || !box) return;
   const src = $(`script[src^="${KIT}"]`)?.getAttribute("src");
   if (!src) return;
-  const into = Object.assign(document.createElement("div"), { className: "screen-layer coming" });
+  const into = Object.assign(document.createElement("div"), { className: "screen-layer spare" });
   const frame = sandboxed();
   frame.setAttribute("aria-hidden", "true");
   into.append(frame);
