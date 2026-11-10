@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "bun install --frozen-lockfile",
     "build": "node undeclared.mjs && tsc --noEmit && vite build && node build.js"
   },
   "dependencies": {

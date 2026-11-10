@@ -94,7 +94,6 @@ fn check<'a>(here: &Path, files: impl Iterator<Item = &'a str>) -> Result<()> {
     if files.iter().any(|f| screen(&f)) {
         let ui = here.join("src/screen/ui");
         timed("built the screens", || {
-            quietly(Command::new("bun").current_dir(&ui).args(["install", "--frozen-lockfile"]))?;
             quietly(Command::new("bun").current_dir(&ui).args(["run", "build"]))
         })?;
     }
