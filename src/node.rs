@@ -24,6 +24,7 @@ use crate::database::scopes::{Scope, new_id};
 use crate::database::scopes::{self, ScopeDb};
 use crate::database::content;
 use crate::database::scopes::{Principal, ScopeState};
+use crate::config::{CLI, YOURS};
 use crate::rank;
 use crate::release;
 use crate::schedules::{self, Schedule};
@@ -429,7 +430,7 @@ impl Node {
 
     fn with<R>(&self, f: impl FnOnce(&mut Network) -> Result<R>) -> Result<R> {
         let mut network = self.0.network.lock()?;
-        f(network.as_mut().context("this device is in no network yet: create one, or join with a pairing code")?)
+        f(network.as_mut().with_context(|| not_joined(&self.device_name()))?)
     }
 
     /// `with`, for what answers a plain yes or no, or a list, and can't fail: `default` when it's in no network yet, or
@@ -571,3 +572,8 @@ fn scope_name(i: &Network, scope: &str) -> Result<String> {
     })
 }
 
+/// What a computer says when its node isn't in a network yet, whatever else is signed in on it (the Mac app's own
+/// sign-in is a client's): what the command line, `status` and a call that needs one all tell to do.
+pub fn not_joined(device: &str) -> String {
+    format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it with a pairing code, or {CLI} create <name> --as <your name> starts a new one")
+}

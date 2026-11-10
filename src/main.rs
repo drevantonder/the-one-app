@@ -197,7 +197,7 @@ fn connection(node: &Client) -> String {
     };
     let device = &state.device.name;
     let Some(network) = &state.network else {
-        return format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it, or {CLI} create <name> --as <your name> starts a new one.");
+        return format!("{}.", one::node::not_joined(device));
     };
     let network = if network.name.is_empty() { format!("{YOURS} (still joining)") } else { network.name.clone() };
     let ready = if state.device.ready { "" } else { ", catching up" };
