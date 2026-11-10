@@ -78,9 +78,11 @@ public static class CustomBuild
 CS
 # The app's program, for Windows, built here with mingw-w64; its debug lines go, which only make it slow to send.
 (cd "$native" && CONFIG=$config nice cargo build -q --target x86_64-pc-windows-gnu $([ "$profile" = release ] && echo --release))
-out=$native/target/x86_64-pc-windows-gnu/$([ "$profile" = release ] && echo release || echo debug)
+dir=x86_64-pc-windows-gnu/$([ "$profile" = release ] && echo release || echo debug)
+out=$native/target/$dir
 x86_64-w64-mingw32-strip -o "$stage/app/$file.exe" "$out/one-native.exe"
-loader=$(ls -t "$out"/build/webview2-com-sys-*/out/x64/WebView2Loader.dll | head -1)
+# Its build scripts' output is where the program's is, unless checkouts share what cargo compiles.
+loader=$(ls -t "${CARGO_BUILD_BUILD_DIR:-$native/target}/$dir"/build/webview2-com-sys-*/out/x64/WebView2Loader.dll | head -1)
 cp "$loader" "$stage/app/"
 printf '{"name":%s,"file":%s,"publisher":%s,"start":%s}\n' "$(quote "$name")" "$(quote "$file")" "$(quote "CN=${name//[^A-Za-z0-9 ]/}")" "$([ -n "${NO_START:-}" ] && echo false || echo true)" > "$stage/build.json"
 
