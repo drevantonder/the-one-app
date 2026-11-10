@@ -92,9 +92,14 @@ struct Inner {
     /// A connection to each node it asks for calls.
     conns: Mutex<HashMap<Key, Connection>>,
     strangers: AtomicUsize,
+    /// What insights was told before a node brought who's who, and so before it knew where to say it.
+    untold: Mutex<Vec<Value>>,
     /// What its app declares its program may reach, as oned gave it (`declared.json`), if it did.
     declared: Option<crate::services::sandbox::Declared>,
 }
+
+/// How many things it tells insights it holds on to before a node has told it who's who.
+const MOST_UNTOLD: usize = 32;
 
 /// Where oned puts what a service's app declares it may reach, in its folder.
 pub const DECLARED: &str = "declared.json";
@@ -153,6 +158,7 @@ impl Service {
             endpoint: Mutex::new(None),
             conns: Mutex::new(HashMap::new()),
             strangers: AtomicUsize::new(0),
+            untold: Mutex::default(),
             declared: std::fs::read(dir.join(DECLARED)).ok().and_then(|b| serde_json::from_slice(&b).ok()),
         })))
     }
@@ -405,6 +411,8 @@ impl Service {
         let kept: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
         write_private(&self.0.dir.join("steps"), &serde_json::to_vec(&kept)?)?;
         *known = placed(root, &steps);
+        drop(known);
+        self.tell_untold();
         Ok(())
     }
 
@@ -453,6 +461,32 @@ impl Service {
 
     /// Asks a node of its user's own to run a call, as them: the first that answers. A service asks only for its own
     /// app, in its user's own scope (`limited`), which their node runs with its own keys until grants land.
+    /// Tells this service's own device what insights keeps, in the background, or once a node has told it who's who and so
+    /// where its device is. Telemetry may be lost, and the program that said it doesn't wait.
+    pub fn tell_node(&self, body: Value, runtime: &tokio::runtime::Handle) {
+        let device = self.0.known.lock().unwrap().service(&self.key()).ok().flatten().and_then(|s| s.device);
+        let Some(device) = device else {
+            let mut untold = self.0.untold.lock().unwrap();
+            if untold.len() < MOST_UNTOLD {
+                untold.push(body);
+            }
+            return;
+        };
+        let service = self.clone();
+        runtime.spawn(async move {
+            if let Err(err) = service.send(device, &json!({ "kind": crate::protocol::message::INSIGHTS, "body": body })).await {
+                tracing::debug!("telling insights: {err:#}");
+            }
+        });
+    }
+
+    /// Who's who has come: whatever was waiting for it goes.
+    fn tell_untold(&self) {
+        for body in std::mem::take(&mut *self.0.untold.lock().unwrap()) {
+            self.tell_node(body, &tokio::runtime::Handle::current());
+        }
+    }
+
     pub async fn ask_node(&self, call: Value) -> Result<Value> {
         let owner = self.owner()?.context("this service isn't approved yet")?;
         let mut call = limited(&self.0.name, &call)?;
@@ -502,6 +536,10 @@ impl Service {
             // A file is as big as it is (a browser profile is hundreds of MB): the node gives each user their room.
             .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::disable()))
             .route("/v1/blobs/{hash}", get(get_blob))
+            // Standard OTLP/JSON from its program, as `OTEL_EXPORTER_OTLP_ENDPOINT` says (`program_env`).
+            .route("/v1/traces", post(otlp))
+            .route("/v1/logs", post(otlp))
+            .route("/v1/metrics", post(otlp))
             // Its program's way out, from its sandbox: `CONNECT host:port`, to a host its app declares.
             .fallback(proxy)
             .with_state(self.clone())
@@ -595,6 +633,19 @@ async fn state(State(s): State<Service>, headers: HeaderMap) -> Response {
         Ok(state) => Json(state).into_response(),
         Err(err) => refused(StatusCode::INTERNAL_SERVER_ERROR, &format!("{err:#}")),
     }
+}
+
+/// OTLP/JSON from the program: passed to its node, which keeps what closed sets allow (`crate::insights::otlp`), said
+/// back as taken whatever happens to it, as an exporter would only retry. Metrics aren't kept: each signal is a span or
+/// an event, and a metric's rollups are the node's.
+async fn otlp(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+    if let Err(r) = s.0.registry.ours(&headers) {
+        return r;
+    }
+    if body.get("resourceMetrics").is_none() {
+        s.tell_node(json!({ "otlp": body }), &tokio::runtime::Handle::current());
+    }
+    Json(json!({})).into_response()
 }
 
 async fn call(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
@@ -720,7 +771,7 @@ pub fn run(name: &str) -> Result<()> {
     let at = runtime.block_on(service.start())?;
     let data = crate::home().join(name);
     std::fs::create_dir_all(&data)?;
-    host(name, &program, &data, at, &service, &stop)?;
+    host(name, &program, &data, at, &service, &stop, runtime.handle())?;
     eprintln!("{name}: stopping, for oned to start it again");
     Ok(())
 }
@@ -910,17 +961,20 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
 
 /// Runs a service's program in another language, started again whenever it stops, until `stop`. One that can't start
 /// in its sandbox says why (`PROBLEM`), and is tried again a minute on.
-fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service, stop: &impl Fn() -> bool) -> Result<()> {
+fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service, stop: &impl Fn() -> bool, runtime: &tokio::runtime::Handle) -> Result<()> {
     use std::os::unix::fs::MetadataExt;
     let built = || std::fs::metadata(program).map(|m| (m.ino(), m.mtime())).ok();
     let problem = service.0.dir.join(PROBLEM);
     let before = crate::services::sandbox::dir(name).join(crate::services::sandbox::BEFORE);
     while !stop() {
         let started = built();
+        let build = std::fs::read(program).map(|bytes| crate::keys::hex(&crate::keys::sha256(&bytes))).unwrap_or_default();
+        let told = |event: Value| service.tell_node(event, runtime);
         let mut running = match begin(name, program, data, at, service) {
             Ok(r) => {
                 let _ = std::fs::remove_file(&problem);
                 PROGRAM.store(r.pid(), SeqCst);
+                told(json!({ "name": "service.start", "build": build }));
                 r
             }
             Err(err) => {
@@ -938,6 +992,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
         loop {
             if let Some(status) = running.done()? {
                 PROGRAM.store(0, SeqCst);
+                told(json!({ "name": "service.exit", "build": build, "reason": exit_reason(&status) }));
                 eprintln!("{} stopped ({status}): starting it again", program.display());
                 std::thread::sleep(Duration::from_secs(2));
                 break;
@@ -951,6 +1006,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
             if stop() || renewed {
                 running.end();
                 PROGRAM.store(0, SeqCst);
+                told(json!({ "name": "service.exit", "build": build, "reason": if renewed { "renewed" } else { "stopped" } }));
                 if renewed {
                     eprintln!("{}: a new build is there, so it starts again", program.display());
                 }
@@ -960,6 +1016,16 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
         }
     }
     Ok(())
+}
+
+/// Why a program stopped, as a closed set of words: `exit-<code>`, `signal-<n>`, or systemd's state for one it ran.
+fn exit_reason(status: &str) -> String {
+    let number = |after: &str| status.split(after).nth(1).and_then(|s| s.split_whitespace().next()).and_then(|n| n.parse::<u32>().ok());
+    match (number("exit status: "), number("signal: ")) {
+        (Some(code), _) => format!("exit-{code}"),
+        (_, Some(n)) => format!("signal-{n}"),
+        _ => "failed".into(),
+    }
 }
 
 /// Stops a program: asked, then made to, if it hasn't in ten seconds, so it closes what it keeps (WhatsApp's link).

@@ -76,10 +76,15 @@ impl Node {
             return Ok(());
         }
         let started = Instant::now();
-        let ran = match self.count(app, "schedule").await {
-            Err(err) => Err(err),
-            Ok(()) => self.app_schedules_call(scope, app, user, &schedule.tool, schedule.input.clone(), "schedule").await,
-        };
+        let traced = trace::Trace::quiet();
+        let ran = trace::within(Some(traced.clone()), async {
+            match self.count(app, "schedule").await {
+                Err(err) => Err(err),
+                Ok(()) => self.app_schedules_call(scope, app, user, &schedule.tool, schedule.input.clone(), "schedule").await,
+            }
+        })
+        .await;
+        self.finish_schedule(app, &schedule.name, user, started.elapsed(), &traced, ran.as_ref().err());
         let error = ran.as_ref().err().map(|e| format!("{e:#}").chars().take(500).collect::<String>());
         let said = status::Run { slot, time: now_ms(), device: self.0.id, user: user.to_string(), ok: error.is_none(), error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
         // The scope's own rows open only with its epochs, which a machine that only runs the app's schedules hasn't.

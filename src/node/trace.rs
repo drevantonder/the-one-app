@@ -125,6 +125,11 @@ pub fn kind(scope: &crate::database::scopes::Scope) -> &'static str {
     }
 }
 
+/// The trace running here, and the span within it: what a child span names as its trace and parent.
+pub fn parent_now() -> (Option<String>, Option<String>) {
+    TRACE.try_with(|t| (Some(t.0.trace_id.clone()), t.0.span.lock().unwrap().clone())).unwrap_or_default()
+}
+
 /// The trace of the request running here, if it has one: a call always does.
 pub fn current() -> Option<Trace> {
     TRACE.try_with(Clone::clone).ok()

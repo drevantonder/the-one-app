@@ -81,6 +81,8 @@ pub mod message {
     pub const STEPS: &str = "steps";
     /// An app's data changed, which the other devices pass on to their screens.
     pub const CHANGED: &str = "changed";
+    /// What a service's endpoint has to say to its own node for insights: its program starting and stopping, and OTLP.
+    pub const INSIGHTS: &str = "insights";
 }
 
 /// What a database keeps in the bucket beside its steps (`<prefix>/<n>`): the newest step's hint, where its steps

@@ -592,7 +592,12 @@ impl Node {
             true => self.fill_for_service(&resolved.app, &mut request["input"], me, req.from.as_deref()).await?,
             false => Vec::new(),
         };
-        let mut reply = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await?;
+        let hop = Instant::now();
+        let asked = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await;
+        if service {
+            self.finish_hop(&resolved, me, device, hop.elapsed(), asked.as_ref().ok());
+        }
+        let mut reply = asked?;
         if let Some(ok) = reply.get_mut("ok") {
             crate::vault::blot(ok, &used);
         }

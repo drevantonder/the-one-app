@@ -214,6 +214,94 @@ impl Node {
         self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, true, print);
     }
 
+    /// A service's program going through a hop's worth of a call: one child span, with its status and bytes.
+    pub(super) fn finish_hop(&self, req: &CallRequest, me: &Caller, device: Key, took: Duration, answer: Option<&Value>) {
+        let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let ms = took.as_millis() as u64;
+        let ok = answer.is_some_and(|a| a.get("error").is_none());
+        let code = answer.and_then(|a| a["code"].as_str());
+        let fault = (!ok).then(|| insights::fault(code, stage::RUN, None));
+        let kept = !ok || ms >= insights::SLOW_MS;
+        let mut attrs = Attrs::default().device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(crate::config::BUILD);
+        attrs = attrs.tried(&hex(&device), if ok { "answered" } else if answer.is_some() { "failed" } else { "unreachable" });
+        if destination.named {
+            attrs = attrs.service(&req.app);
+        }
+        if kept {
+            attrs = attrs.bytes(req.input.to_string().len() as u64 + answer.map_or(0, |a| a.to_string().len() as u64));
+        }
+        if !ok {
+            attrs = attrs.error(code.unwrap_or(insights::OTHER));
+        }
+        let (trace, parent) = trace::parent_now();
+        let app = if destination.named { req.app.clone() } else { String::new() };
+        let signal = Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: "service.hop".into(), app, trace: trace.unwrap_or_else(trace::ids::trace), span: trace::ids::span(), parent, ms, ok, fault, attrs };
+        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, kept, None);
+    }
+
+    /// A schedule's run: one span, with the call it made under it (`finish_call`). The run stays in `runs` for its own
+    /// screens; this is for what reads every kind of failure the same.
+    pub(super) fn finish_schedule(&self, app: &str, schedule: &str, user: &str, took: Duration, traced: &trace::Trace, err: Option<&anyhow::Error>) {
+        let destination = self.destination(app, &Caller::own(self.0.id, user)).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let ms = took.as_millis() as u64;
+        let ok = err.is_none();
+        let code = err.and_then(crate::protocol::Coded::of);
+        let steps = traced.since(0);
+        let exception = steps.iter().rev().find(|s| s["step"] == "exception").and_then(|s| Exception::from_json(&s["exception"]));
+        let fault = (!ok).then(|| insights::fault(code.as_deref(), stage::RUN, None));
+        let mut attrs = Attrs::default().device(&hex(&self.0.id)).client("schedule").scope(destination.kind).build(crate::config::BUILD);
+        if destination.named {
+            attrs = attrs.service(app).schedule(schedule);
+        }
+        if !ok {
+            attrs = attrs.error(&exception_kind(code.as_deref(), exception.as_ref(), traced.stage()));
+        }
+        let app = if destination.named { app.to_string() } else { String::new() };
+        let signal = Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: "schedule.run".into(), app, trace: traced.trace_id(), span: trace::ids::span(), parent: None, ms, ok, fault, attrs };
+        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, !ok || ms >= insights::SLOW_MS, None);
+    }
+
+    /// What a service's endpoint says for insights: its program starting and ending, and OTLP. Only one of the network's
+    /// services, about itself: which app is what its key is listed as, never what it says.
+    pub(super) async fn service_said(&self, remote: &Key, body: &Value) {
+        let Ok(Some((app, user))) = self.with(|i| Ok(i.r.db().service(remote)?.map(|s| (s.service.clone().unwrap_or_default(), s.user.clone())))) else { return };
+        let me = Caller::own(*remote, user);
+        let destination = self.destination(&app, &me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let base = || Attrs::default().device(&hex(&self.0.id)).scope(destination.kind).build(crate::config::BUILD);
+        let named_app = if destination.named { app.clone() } else { String::new() };
+        let say = |signal: Signal, kept: bool| self.0.insights.0.lock().unwrap().entry(destination.scope.clone()).or_default().add(signal, kept, None);
+        let signal = |name: &str, ms: u64, ok: bool, attrs: Attrs| Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: name.to_string(), app: named_app.clone(), trace: trace::ids::trace(), span: trace::ids::span(), parent: None, ms, ok, fault: (!ok).then_some(Fault::Internal), attrs };
+        if let Some(name) = body["name"].as_str().filter(|n| ["service.start", "service.exit"].contains(n)) {
+            let reason = body["reason"].as_str().unwrap_or("");
+            let ok = name == "service.start" || ["exit-0", "renewed", "stopped"].contains(&reason);
+            let mut attrs = base().version(body["build"].as_str().unwrap_or("")).reason(reason);
+            if destination.named {
+                attrs = attrs.service(&app);
+            }
+            let event = Signal { kind: Kind::Event, ..signal(name, 0, ok, attrs) };
+            say(event, true);
+        }
+        for span in insights::otlp::spans(&body["otlp"]) {
+            let mut attrs = base();
+            if destination.named {
+                attrs = attrs.service(&app);
+            }
+            if let Some(code) = span.status_code {
+                attrs = attrs.status_code(code);
+            }
+            if !span.ok {
+                attrs = attrs.error(&span.error);
+            }
+            let name = if destination.named { format!("{app}.{}", span.name) } else { "span".into() };
+            let mut built = signal(&name, span.ms, span.ok, attrs);
+            built.kind = span.kind;
+            if let Some(ids) = span.ids {
+                (built.trace, built.span, built.parent) = ids;
+            }
+            say(built, !span.ok || span.ms >= insights::SLOW_MS);
+        }
+    }
+
     async fn screen_named(&self, app: &str, screen: &str) -> String {
         let listed = self.0.apps.describe(app).await.is_ok_and(|d| d["screens"].as_array().is_some_and(|s| s.iter().any(|s| s["name"] == screen)));
         if listed { screen.to_string() } else { "_unknown".into() }

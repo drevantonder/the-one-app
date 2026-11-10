@@ -499,6 +499,10 @@ impl Node {
                 };
                 let answer = match msg["kind"].as_str() {
                     Some(M::ASK) => node.accept_service_call(remote, &msg["body"]["call"]).await.json(),
+                    Some(M::INSIGHTS) => {
+                        node.service_said(&remote, &msg["body"]).await;
+                        Value::Null
+                    }
                     _ => json!({ "error": "a service only asks for calls" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {

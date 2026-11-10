@@ -24,6 +24,7 @@ pub mod cli;
 pub(crate) mod store;
 #[cfg(feature = "node")]
 pub mod routes;
+pub mod otlp;
 
 /// How long a call takes before it keeps a full span. ARCHITECTURE.md's targets state none for a whole call, and its
 /// nearest is a write seen elsewhere within 1 s.
@@ -186,6 +187,25 @@ impl Attrs {
             self.0.insert("one.node", json!(node));
         }
         self.0.insert("one.result", json!(if TRY_RESULTS.contains(&result) { result } else { "failed" }));
+        self
+    }
+
+    pub fn schedule(mut self, schedule: &str) -> Attrs {
+        self.token("one.schedule", schedule);
+        self
+    }
+
+    /// Why a program ended, a closed set (`service.exit`): `exit-<code>`, `signal-<n>`, `renewed`, `stopped` or `failed`.
+    pub fn reason(mut self, reason: &str) -> Attrs {
+        let numbered = |prefix: &str| reason.strip_prefix(prefix).is_some_and(|n| !n.is_empty() && n.len() <= 3 && n.bytes().all(|b| b.is_ascii_digit()));
+        if numbered("exit-") || numbered("signal-") || ["renewed", "stopped", "failed"].contains(&reason) {
+            self.0.insert("one.reason", json!(reason));
+        }
+        self
+    }
+
+    pub fn status_code(mut self, code: u64) -> Attrs {
+        self.0.insert("http.response.status_code", json!(code));
         self
     }
 
