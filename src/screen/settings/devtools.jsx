@@ -129,7 +129,7 @@ function route(r, known) {
   }
   // What this device did that nothing above timed: picking a device to send it to, and reading the answer.
   if ((r.ms || 0) - used >= 1) parts.push(["Other work on this device", (r.ms || 0) - used]);
-  if (r.failed) parts.push(["Failed", 0, true]);
+  if (r.failed) parts.push([r.id ? `Failed, trace-id ${r.id}` : "Failed", 0, true]);
   return { marks, parts, end: Math.max(t, r.ms || 0) };
 }
 

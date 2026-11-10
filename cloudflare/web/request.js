@@ -40,7 +40,7 @@ export async function api(path, { method = "GET", body, query, raw, signal, sinc
     if (trace) trace.status = raw ? out.status : 200;
     return out;
   } catch (err) {
-    if (trace) trace.failed = true;
+    if (trace) (trace.failed = true), (trace.id = err.trace);
     throw err;
   } finally {
     if (trace) developer.keep(trace);
@@ -101,7 +101,7 @@ async function sending(url, method, body, raw, signal, trace) {
     if (raw && r.ok) return r;
     const out = await r.json().catch(() => null);
     if (out?.code === CODES.update) tooOld.set();
-    if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again.")), { status: r.status, code: out?.code });
+    if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again.")), { status: r.status, code: out?.code, trace: out?.trace });
     return out;
   }
 }

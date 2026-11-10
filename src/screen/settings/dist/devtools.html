@@ -190,7 +190,7 @@ function S(e, t) {
 		}), r.push(["Found the keys it needed", t.client.ms]), o += t.client.ms, s += t.client.ms);
 	}
 	return (e.ms || 0) - s >= 1 && r.push(["Other work on this device", (e.ms || 0) - s]), e.failed && r.push([
-		"Failed",
+		e.id ? `Failed, trace-id ${e.id}` : "Failed",
 		0,
 		!0
 	]), {

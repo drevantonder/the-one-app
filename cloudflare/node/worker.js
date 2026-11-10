@@ -741,6 +741,7 @@ class Run {
       return { ok };
     } catch (err) {
       this.tell(app.name, req, time, err);
+      err.trace = req.traceparent?.split("-")[1];
       throw err;
     }
   }
@@ -1075,9 +1076,9 @@ async function sealedKeys(bucket, scope, to, app) {
 }
 
 function failure(err) {
-  if (err instanceof Refused) return json({ error: err.message, ...err.said }, err.status);
+  if (err instanceof Refused) return json({ error: err.message, ...err.said, trace: err.trace }, err.status);
   console.error(err.stack || err);
-  return json({ error: String(err?.message ?? err) }, 400);
+  return json({ error: String(err?.message ?? err), trace: err?.trace }, 400);
 }
 
 /// Who a client's request over iroh is from: the device `remote` (hex) is, or, for a session's key, the device its

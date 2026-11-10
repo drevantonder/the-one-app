@@ -22,7 +22,7 @@
   }
 
   // Framed: each message goes up as `{ one: message, id }`, answered with `{ oneReply: id, ok }` or `{ oneReply: id,
-  // error, code? }`; node events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
+  // error, code?, trace? }`; node events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
   let asked = 0;
   const waiting = {};
   // What had focus here, for the page holding the frame to give it back after a menu, alert or sheet it opened for this
@@ -48,7 +48,7 @@
       const w = waiting[m.oneReply];
       if (!w) return;
       delete waiting[m.oneReply];
-      m.error === undefined ? w.ok(m.ok) : w.fail(Object.assign(new Error(m.error), { code: m.code }));
+      m.error === undefined ? w.ok(m.ok) : w.fail(Object.assign(new Error(m.error), { code: m.code, trace: m.trace }));
     });
     // A still of the screen as it looks, a second after it last changed, for the page holding the frame to show
     // while this screen next opens: its page without its scripts, at its scroll.

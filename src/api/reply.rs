@@ -16,20 +16,35 @@ impl IntoResponse for Error {
             Some(_) => StatusCode::PRECONDITION_REQUIRED,
             None => StatusCode::BAD_REQUEST,
         };
-        (status, Json(failed(&self.0))).into_response()
+        let mut answer = (status, Json(failed(&self.0))).into_response();
+        if self.0.downcast_ref::<crate::node::Needs>().is_none() {
+            answer.extensions_mut().insert(RouteFailed { code: crate::protocol::Coded::of(&self.0), said: format!("{:#}", self.0) });
+        }
+        answer
     }
 }
 
+/// How a route failed, for the span that says so: what goes back to its caller is only `failed`.
+#[derive(Clone)]
+pub(crate) struct RouteFailed {
+    pub(crate) code: Option<String>,
+    pub(crate) said: String,
+}
+
 /// Why something failed, as the API says it: `{ error }`, with `{ code }` for the kinds callers act on (`protocol::code`),
-/// and `{ need, to, seal }` for keys a call wasn't handed.
+/// `{ trace }` for what to look up in insights, and `{ need, to, seal }` for keys a call wasn't handed.
 pub(super) fn failed(err: &anyhow::Error) -> Value {
-    match err.downcast_ref::<crate::node::Needs>() {
-        Some(n) => n.json(),
-        None => match crate::protocol::Coded::of(err) {
-            Some(code) => json!({ "error": format!("{err:#}"), "code": code }),
-            None => json!({ "error": format!("{err:#}") }),
-        },
+    let mut said = match err.downcast_ref::<crate::node::Needs>() {
+        Some(n) => return n.json(),
+        None => json!({ "error": format!("{err:#}") }),
+    };
+    if let Some(code) = crate::protocol::Coded::of(err) {
+        said["code"] = json!(code);
     }
+    if let Some(trace) = crate::node::trace::current() {
+        said["trace"] = json!(trace.trace_id());
+    }
+    said
 }
 
 impl<E: Into<anyhow::Error>> From<E> for Error {

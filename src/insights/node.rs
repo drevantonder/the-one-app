@@ -51,6 +51,7 @@ impl Call {
 impl Node {
     pub(super) fn begin_call(&self) -> Call {
         let trace = trace::current().unwrap_or_else(trace::Trace::quiet);
+        trace.call_begins();
         let span = trace::ids::span();
         let parent = trace.enter(span.clone());
         let stage = trace.stage();
@@ -115,6 +116,22 @@ impl Node {
                 batch.metric(time, metric, service, &instance, &about, value);
             }
         }
+    }
+
+    /// A request to one of the API's routes that failed with no call to say so, so its trace has a span to find: named by
+    /// its route, never its path.
+    pub(crate) fn finish_route_request(&self, traced: &trace::Trace, route: &str, took: Duration, failed: &crate::api::RouteFailed) {
+        if traced.called() {
+            return;
+        }
+        // A route's failure with no code is nearly always what it was asked, and nothing tells it from one that broke.
+        let failure = failed.code.as_deref().map_or_else(|| Failure::Refused(insights::OTHER.into()), |code| Failure::of(Some(code), None, stage::CHECK));
+        let name = route.replace(['{', '}', '*'], "");
+        let build = crate::config::BUILD;
+        let attrs = Attrs::default().client("api").build(build).failed(&failure).stage(stage::CHECK).fingerprint(failure.kind(), &name, build);
+        let message = matches!(failure, Failure::Broke(_)).then(|| insights::message::cleaned(&failed.said));
+        let span = Span { time: now_ms().saturating_sub(took.as_millis() as u64), trace: traced.trace_id(), span: trace::ids::span(), parent: traced.span(), name, service: insights::own().to_string(), version: None, instance: hex(&self.0.id), kind: SpanKind::Server, status: failure.status(), duration: took.as_millis() as u64, message, attrs };
+        self.0.insights.0.lock().unwrap().span(span, true, &[]);
     }
 
     /// How trying the devices for a call went (`Node::route`): a span under its request, and, if no device's own run of it

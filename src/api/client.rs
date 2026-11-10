@@ -156,6 +156,10 @@ pub fn answered(status: u16, body: Value, home: &std::path::Path) -> Result<Valu
         Some(crate::protocol::code::UPDATE) => format!("{} Run {} update.", err.as_str().unwrap_or("failed"), crate::config::CLI),
         _ => err.as_str().unwrap_or("failed").to_string(),
     };
+    let err = match body["trace"].as_str() {
+        Some(trace) => format!("{err} (trace-id {trace})"),
+        None => err,
+    };
     Err(match matches!(status, 401 | 403) || code.as_deref() == Some(crate::protocol::code::REFUSED) {
         true => crate::cli::Failed::Refused(err).into(),
         false => crate::protocol::Coded::or_plain(code, err),

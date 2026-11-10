@@ -33,18 +33,20 @@ pub fn guarded(routes: Routes, node: Node) -> Router {
         .with_state(node)
 }
 
-/// A request that asks for a trace (`x-one-trace`, a client in developer mode) gets what it did here in the same
-/// header of its answer, as base64 of its JSON (`node::trace`). One that names the trace it's part of (W3C's
-/// `traceparent`) continues it, asked for or not.
+/// Every request is a trace, which a failure names to its caller. One that names the trace it's part of (W3C's
+/// `traceparent`) continues it. One that asks for a trace (`x-one-trace`, a client in developer mode) gets what it did
+/// here in the same header of its answer, as base64 of its JSON (`node::trace`).
 async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     use crate::node::trace;
     let asked = req.headers().contains_key(crate::protocol::header::TRACE);
     let parent = req.headers().get(crate::protocol::header::TRACEPARENT).and_then(|h| h.to_str().ok()).map(str::to_string);
-    if !asked && parent.is_none() {
-        return next.run(req).await;
-    }
+    let route = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string());
     let t = trace::Trace::continuing(asked, parent.as_deref());
+    let began = std::time::Instant::now();
     let mut resp = trace::within(Some(t.clone()), next.run(req)).await;
+    if let (Some(failed), Some(route)) = (resp.extensions_mut().remove::<super::RouteFailed>(), route) {
+        node.finish_route_request(&t, &route, began.elapsed(), &failed);
+    }
     if !asked {
         return resp;
     }

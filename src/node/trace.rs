@@ -4,6 +4,7 @@
 //! names, never data or keys. Every call has one, asked for or not: it's the span insights keeps of a call (`src/insights`)
 //! as well as what `--trace` shows.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -28,6 +29,8 @@ struct Inner {
     span: Mutex<Option<String>>,
     /// Where it's got to, which is where a failure failed (`insights::stage`).
     stage: Mutex<&'static str>,
+    /// A call has run in it, whose own span says how it went.
+    called: AtomicBool,
 }
 
 impl Trace {
@@ -47,7 +50,7 @@ impl Trace {
 
     fn make(asked: bool, parent: Option<(String, String)>) -> Trace {
         let (trace_id, span) = parent.map_or_else(|| (ids::trace(), None), |(t, s)| (t, Some(s)));
-        Trace(Arc::new(Inner { start: Instant::now(), steps: Mutex::new(Vec::new()), asked, trace_id, span: Mutex::new(span), stage: Mutex::new(crate::insights::stage::CHECK) }))
+        Trace(Arc::new(Inner { start: Instant::now(), steps: Mutex::new(Vec::new()), asked, trace_id, span: Mutex::new(span), stage: Mutex::new(crate::insights::stage::CHECK), called: AtomicBool::new(false) }))
     }
 
     pub fn note(&self, mut step: Value, took: std::time::Duration) {
@@ -74,6 +77,19 @@ impl Trace {
 
     pub fn trace_id(&self) -> String {
         self.0.trace_id.clone()
+    }
+
+    /// The span it's in now, or the one it continues.
+    pub fn span(&self) -> Option<String> {
+        self.0.span.lock().unwrap().clone()
+    }
+
+    pub fn called(&self) -> bool {
+        self.0.called.load(Ordering::Relaxed)
+    }
+
+    pub fn call_begins(&self) {
+        self.0.called.store(true, Ordering::Relaxed);
     }
 
     /// Runs a new span from here on, saying which it replaced so the end of it can put it back.

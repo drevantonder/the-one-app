@@ -629,7 +629,7 @@ addEventListener("message", async (e) => {
   // pages), so a screen offline starts from them.
   if (m.type !== "icons" && !(mine && m.type === "cache")) await joined;
   const reply = (ok) => f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*");
-  const fail = (err) => f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err), code: err?.code }, "*");
+  const fail = (err) => f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err), code: err?.code, trace: err?.trace }, "*");
   try {
     reply(await oneHost.answer(m, {
       frame: f.frame,

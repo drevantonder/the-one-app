@@ -16,7 +16,7 @@ pub fn feature() -> Feature {
                 "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations and its failing and slow traces, then trace_id for one trace's spans. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: requests by the hour, spans, logs, metrics and errors as JSON, each up to limit. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset. What's newest takes up to a minute or two to show.",
                 "input": { "type": "object", "properties": {
                     "service": { "type": "string", "description": "only this service: an app's name, or the network's own program" },
-                    "trace_id": { "type": "string", "description": "one trace by its id, as its spans" },
+                    "trace_id": { "type": "string", "description": "one trace by its id, as its spans: a failure says its trace-id" },
                     "raw": { "type": "boolean", "description": "the rows themselves, as JSON" },
                     "name": { "type": "string", "description": "with raw, only spans of this name or logs of this body" },
                     "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d (1d unless raw)" },
