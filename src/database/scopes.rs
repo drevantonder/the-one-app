@@ -16,6 +16,8 @@ use crate::permissions;
 pub use super::scope::{app, device, group, object, user_principal, service};
 
 pub const NETWORK: &str = permissions::NETWORK;
+/// Everyone's handle: the build's own name, so no user or group may have it.
+pub const EVERYONE: &str = crate::config::CLI;
 
 /// One scope database, and the time it was built at, which `may` asks as of. Nothing in it lasts until a time yet but
 /// app schedules, which are asked with the time they're asked at (`app_schedules_at`).
@@ -483,8 +485,9 @@ impl ScopeDb {
         Ok(self.row("SELECT id FROM principals WHERE handle = ?1 ORDER BY kind DESC LIMIT 1", [handle], |r| r.get::<_, String>(0))?.map(|p| owner_of(&p)))
     }
 
-    /// Everyone's and every group's handle, as apps get them (`ctx.handles`): `{ handle, id, name }`, `id` being
-    /// `user:<id>` or `group:<id>`; a removed user's with `removed`, and a group's with its `members`' roles by id.
+    /// Every user's and group's handle, and Everyone's, as apps get them (`ctx.handles`): `{ handle, id, name }`, `id`
+    /// being `user:<id>`, `group:<id>` or the network; a removed user's with `removed`. A group's, and Everyone's, has
+    /// its `members`' roles by id, and Everyone's is `automatic`: its members were never given it on purpose.
     pub fn handles(&self) -> Result<Value> {
         let users = self.users()?.into_iter().map(|u| {
             let mut v = json!({ "handle": u.handle, "id": format!("user:{}", u.id), "name": u.name });
@@ -494,7 +497,9 @@ impl ScopeDb {
             v
         });
         let groups = self.groups()?.into_iter().map(|g| json!({ "handle": g.handle, "id": format!("group:{}", g.id), "name": g.name, "members": g.members }));
-        Ok(Value::Array(users.chain(groups).collect()))
+        let everyone: BTreeMap<String, Role> = self.users()?.into_iter().filter(|u| !u.removed).map(|u| (u.id, u.role)).collect();
+        let network = json!({ "handle": EVERYONE, "id": NETWORK, "name": "Everyone", "members": everyone, "automatic": true });
+        Ok(Value::Array(users.chain(groups).chain([network]).collect()))
     }
 
     /// Every scope there is: `global`, each group's and each user's (removed users' too: removing deletes nothing).

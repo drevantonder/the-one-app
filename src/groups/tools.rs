@@ -79,7 +79,7 @@ mod serve {
             let (name, role) = (handled(&u.name, &u.handle), u.role.as_str());
             if u.me { format!("{name} (you, {role})") } else { format!("{name} ({role})") }
         }).collect();
-        let mut out = format!("Users in {YOURS}: {}.\n", everyone.join(", "));
+        let mut out = format!("Users in {YOURS} (@{}): {}.\n", crate::database::scopes::EVERYONE, everyone.join(", "));
         let users = |list: &[crate::state::Member]| -> Vec<String> {
             list.iter().map(|m| {
                 let (name, role) = (names.get(m.user.as_str()).map_or(m.user.as_str(), String::as_str), m.role.as_str());

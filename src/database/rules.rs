@@ -21,7 +21,7 @@ use crate::keys::{Hash, Key, hex, unhex};
 
 use crate::database::scopes::{Scope, is_id};
 use crate::database::content::Change;
-use crate::database::scopes::{AGENTS, APP, Kind, Machine, Principal, Role, handle_from, source_link, valid_app_name, valid_handle, valid_host, valid_page, valid_secret_name};
+use crate::database::scopes::{AGENTS, APP, EVERYONE, Kind, Machine, Principal, Role, handle_from, source_link, valid_app_name, valid_handle, valid_host, valid_page, valid_secret_name};
 
 use super::scope::{group, int, owner, user_principal, role};
 use super::scopes::{NETWORK, ScopeDb, object, owner_object};
@@ -519,7 +519,7 @@ impl Rule<'_> {
             let handle = handle.as_str().context("a handle is text")?;
             ensure!(valid_handle(handle), "a handle is lowercase letters, digits and single hyphens, up to 39, like {}", handle_from(handle, "name"));
             let mine = row.context("a handle is a user's or a group's")?;
-            ensure!(self.who.by_handle(handle)?.is_none_or(|p| p == mine), "{handle} is taken");
+            ensure!(handle != EVERYONE && self.who.by_handle(handle)?.is_none_or(|p| p == mine), "{handle} is taken");
             self.out.execute("UPDATE principals SET handle = ? WHERE id = ?", params![handle, owner(&mine)])?;
             return Ok(());
         }
@@ -741,7 +741,7 @@ fn pick_handle(out: &Connection, name: &str, fallback: &str) -> Result<String> {
         format!("{}{tail}", base[..base.len().min(39 - tail.len())].trim_end_matches('-'))
     };
     for h in (1..).map(|n| if n == 1 { base.clone() } else { numbered(n) }) {
-        if out.query_row("SELECT 1 FROM principals WHERE handle = ?", [&h], |_| Ok(())).optional()?.is_none() {
+        if h != EVERYONE && out.query_row("SELECT 1 FROM principals WHERE handle = ?", [&h], |_| Ok(())).optional()?.is_none() {
             return Ok(h);
         }
     }

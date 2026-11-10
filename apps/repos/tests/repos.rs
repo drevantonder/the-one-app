@@ -126,7 +126,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
         let line = if deleting { (head.as_str(), zero.as_str(), r.as_str()) } else { (zero.as_str(), head.as_str(), r.as_str()) };
         let (body, _) = a.put_blob_from(sam, axum::body::Body::from(push(&[line], if deleting { &[] } else { &pack }))).await.unwrap();
         // A call reaches the groups he's in too, whose keys his device would hand; this one hands global's alone.
-        let told = call(CallRequest { scopes: repo.starts_with("team/").then(|| vec!["global".into()]), ..http(repo, Some(body)) }, sam).await.unwrap();
+        let told = call(CallRequest { scopes: (!repo.starts_with("andre/")).then(|| vec!["global".into()]), ..http(repo, Some(body)) }, sam).await.unwrap();
         told["text"].as_str().unwrap().contains(&format!("ok {r}"))
     };
 
@@ -146,6 +146,19 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let refused = call(CallRequest { scopes: Some(vec!["global".into()]), ..repos("delete", json!({ "repo": "team/site" })) }, &client).await.unwrap_err();
     assert!(format!("{refused:#}").contains("only Team's admins manage team/site"), "{refused:#}");
 
+    // Everyone's repo: being in the network makes no one its maker or pusher, until its admin adds them.
+    let core = format!("{}/core", one::config::CLI);
+    let as_sam = |tool: &str, input: Value| CallRequest { scopes: Some(vec!["global".into()]), ..repos(tool, input) };
+    let refused = call(as_sam("create", json!({ "name": "core", "owner": one::config::CLI })), &client).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("only Everyone's admins make its repos"), "{refused:#}");
+    a.call(repos("create", json!({ "name": "core", "owner": one::config::CLI }))).await.unwrap();
+    assert!(!sams_push(&client, &core, "sams", false).await, "being in the network doesn't push to Everyone's repo");
+    a.call(repos("add_collaborator", json!({ "repo": core, "user": "sam", "confirm": true }))).await.unwrap();
+    assert!(sams_push(&client, &core, "sams", false).await, "a collaborator its admin added pushes");
+    let refused = call(as_sam("delete", json!({ "repo": core })), &client).await.unwrap_err();
+    assert!(format!("{refused:#}").contains(&format!("only Everyone's admins manage {core}")), "{refused:#}");
+
+    a.call(repos("delete", json!({ "repo": core }))).await.unwrap();
     a.call(repos("delete", json!({ "repo": "andre/home" }))).await.unwrap();
     a.call(repos("delete", json!({ "repo": "team/site" }))).await.unwrap();
 }

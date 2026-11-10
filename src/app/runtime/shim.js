@@ -192,9 +192,10 @@ function context(ask, body, appends, later) {
     /// another site sends the user back to `<address>/back?state=<app>/<screen>&…`, which opens that screen of this
     /// app with `params.back`, that whole address.
     address: body.address ?? null,
-    /// Everyone's and every group's handle in the network, what apps call them by in addresses and lists:
-    /// [{ handle, id: "user:<id>" | "group:<id>", name }], a removed user's with removed: true, a group's with its
-    /// members: { <user id>: "admin" | "member" }. `me.handle` is the caller's.
+    /// Every user's and group's handle in the network, and Everyone's, what apps call them by in addresses and lists:
+    /// [{ handle, id: "user:<id>" | "group:<id>" | "network:global", name }], a removed user's with removed: true, a
+    /// group's and Everyone's with members: { <user id>: "admin" | "member" }. Everyone's has automatic: true, as being in
+    /// the network isn't being given anything on purpose. `me.handle` is the caller's.
     handles: body.handles,
     /// Says what this call spent on AI, { model, usd, input, output }: it shows in the insights of the app that called
     /// it (ctx.from), or else of this one.

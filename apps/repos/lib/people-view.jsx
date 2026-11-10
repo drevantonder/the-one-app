@@ -1,4 +1,4 @@
-// Who pushes to a repo: its owner, a group's members, and the collaborators its owners add and remove. A part of a
+// Who pushes to a repo: its owner, those who push by being in its group or Everyone, and the collaborators its owners add and remove. A part of a
 // repo's Settings.
 import { useState } from "react"
 import { Avatar, Button, Grid, GridRow, Hint, Icon, List, ListRow, Pending, Problem, ResponsiveDialog, SearchInput, Section, useCall } from "@one/ui"
