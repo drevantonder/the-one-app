@@ -591,7 +591,10 @@ const LAST_SAY: std::time::Duration = std::time::Duration::from_secs(3);
 #[tokio::main]
 async fn serve(args: &[String]) -> Result<()> {
     #[cfg(windows)]
-    crate::os::children_end_with_me()?;
+    {
+        crate::os::children_end_with_me()?;
+        crate::os::remove_replaced(&crate::this_program()?);
+    }
     // What it says is kept too, for `one logs`.
     crate::logs::keep(crate::logs::NODE);
     tracing_subscriber::fmt()

@@ -229,7 +229,11 @@ fn node() -> Client {
 fn unreached(err: ureq::Error) -> anyhow::Error {
     match err {
         ureq::Error::Io(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
-            let start = if cfg!(target_os = "macos") { "open its app".to_string() } else { format!("sudo systemctl start {CLI}d") };
+            let start = match () {
+                _ if cfg!(target_os = "macos") => "open its app".to_string(),
+                _ if cfg!(windows) => format!("Start-ScheduledTask {CLI}d, in PowerShell"),
+                _ => format!("sudo systemctl start {CLI}d"),
+            };
             anyhow::anyhow!("{NAME} isn't running on this computer: install it here, or if it's installed, start it ({start})")
         }
         err => anyhow::anyhow!("{err}"),

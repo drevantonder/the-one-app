@@ -277,6 +277,17 @@ mod tests {
         assert_eq!(pinned("go"), go);
     }
 
+    /// install.ps1 is PowerShell, so it says config.toml's repo, cli and key again, as install.sh does.
+    #[test]
+    fn the_windows_installer_says_what_the_config_does() {
+        let says = |name: &str| include_str!("../install.ps1").lines().find_map(|l| l.strip_prefix(&format!("${name} = '"))?.strip_suffix('\''));
+        if crate::state::installer_says("cli") == Some(CLI) {
+            assert_eq!(says("cli"), Some(CLI));
+            assert_eq!(says("repo"), Some(crate::config::REPO));
+            assert_eq!(says("key"), Some(crate::config::RELEASE_KEY));
+        }
+    }
+
     /// install.sh is shell, so it can't read the table: it must say what the table does.
     #[test]
     fn the_installer_is_for_the_platforms_here() {
@@ -349,6 +360,7 @@ const PACKAGES: &[(&str, &str, &str)] = &[
     ("aarch64-unknown-linux-gnu", "linux-aarch64", "ZTVtpf9zmHSBVPX1sBwe5agGb/rN34yPGg/Hby8e2Ax2uCUA2URZKlZH7qLntK7qaFJCMXh9v0GWNYN2zINz1w=="),
     ("aarch64-apple-darwin", "darwin-aarch64", "zW/hxwc8sJAILGwB5eTC4i48ouGXf0V4lrxmEOk3JIE6JkYVW1TZh1E2pIempqsezgW1sckTIIDudFON8bJ2Mw=="),
     ("x86_64-apple-darwin", "darwin-x64", "oKGcxLsvh4oHjAo28nPm8c/xN0o/OmGyj1IHYc94vprkWsW2hNg2keEZt5f40cI5Hvu4jDlSRTR0UNpv1UIAxw=="),
+    ("x86_64-pc-windows-gnu", "windows-x64", "a3LNctBVO8PjePsFZfwDleF2JXYf2BfQ1u/PLRnBDLnC2Riml+4+LgJpKj4xRGhB92KweGyQI5PXaTkP9qypMQ=="),
 ];
 
 /// The pinned Bun, downloaded and checked the first time.
@@ -356,7 +368,8 @@ pub fn bun() -> Result<PathBuf> {
     let (_, package, integrity) =
         PACKAGES.iter().find(|(target, _, _)| *target == crate::config::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", crate::config::TARGET))?;
     let url = format!("https://registry.npmjs.org/@oven/bun-{package}/-/bun-{package}-{BUN}.tgz");
-    crate::app::runtime::pinned(&format!("bun-{BUN}"), "bun", &url, integrity)
+    let bin = format!("bun{}", std::env::consts::EXE_SUFFIX);
+    crate::app::runtime::pinned(&format!("bun-{BUN}"), &bin, &format!("package/bin/{bin}"), &url, integrity)
 }
 
 /// A browser with no window on this machine, for drawing screens (one-dev throwaway's web client, the tests), started as lean as

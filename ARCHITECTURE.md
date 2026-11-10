@@ -56,7 +56,8 @@ A removed device's later steps fail rule 3, because they come after its removal 
 
 Andre, 2026-11-05: the dumbest choice that works.
 
-- A service's identity is its own OS user on Linux (systemd's `DynamicUser=`), Seatbelt as the user on a Mac, AppContainer on Windows once Windows runs a node.
+- A service's identity is its own OS user on Linux (systemd's `DynamicUser=`), Seatbelt as the user on a Mac. A Windows computer runs the app runtime and no services: AppContainer can't reach its device over loopback without an exemption only an administrator can make, so its sandbox is still to design, and none is published for it.
+- On Windows, `oned` is a task of its user's, started at sign-in and looked at every minute, with no administrator (`install.ps1`): it stops at sign-out, like a Mac's launch agent, because a standard user can't have a task that runs signed out. A running program can be renamed but not overwritten, so an update gives the old file one more name, then renames the new one over each of its names (`os::replace_program`).
 - A service that needs the user (`user: true`: Shell, AGENTS.md, AI Usage, the Mac's Apple-data services) is allowed for any app, said plainly when adding ("Runs as you on mac"), never silently.
 - The machine that deploys builds a network's own app's service, for every platform it can build; nodes never build. A network's own Mac service gets no Mac permissions.
 - One node runs a service. When it's gone nothing moves by itself: the app shows one problem box with Move. For a group's or everyone's app, the admin adding it picks one of their own nodes or the Cloudflare node, and any admin may move it to one of theirs.

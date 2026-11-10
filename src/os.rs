@@ -1,5 +1,5 @@
 //! What differs between the operating systems this program runs on, so the rest of it doesn't have to know: which name
-//! it was started by, stopping what it started, private files, links and a disk's space.
+//! it was started by, stopping what it started, private files, links, replacing the running program and a disk's space.
 
 use std::path::Path;
 use std::process::{Child, Command};
@@ -84,7 +84,8 @@ pub fn is_program(pid: u32, program: &str) -> bool {
 #[cfg(windows)]
 pub fn is_program(pid: u32, program: &str) -> bool {
     let out = Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).output().ok();
-    out.is_some_and(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains(&format!("\"{}\"", program.to_lowercase())))
+    let name = program.strip_suffix(std::env::consts::EXE_SUFFIX).unwrap_or(program).to_lowercase();
+    out.is_some_and(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains(&format!("\"{name}{}\"", std::env::consts::EXE_SUFFIX)))
 }
 
 /// Ends everything this process starts when it ends, however it does, as `PR_SET_PDEATHSIG` does for each child on
@@ -132,6 +133,48 @@ pub fn link_program(original: &Path, link: &Path) -> std::io::Result<()> {
     return std::os::unix::fs::symlink(original, link);
     #[cfg(windows)]
     return std::fs::hard_link(original, link);
+}
+
+/// Puts the program at `new` where `exe` is, in one step, so nothing ever finds it half written or missing.
+#[cfg(unix)]
+pub fn replace_program(new: &Path, exe: &Path) -> std::io::Result<()> {
+    std::fs::rename(new, exe)
+}
+
+/// Puts the program at `new` at `exe` and at its other names beside it, each hard links of one file (`link_program`).
+/// Windows only refuses to take away the last name of a program that's running, so the file being replaced first gets
+/// one more, `*.old`, which goes once nothing runs it (`remove_replaced`). `<cli>d`'s name goes last, so a crash partway
+/// leaves the old build running, and the next update check finishes the job.
+#[cfg(windows)]
+pub fn replace_program(new: &Path, exe: &Path) -> std::io::Result<()> {
+    use crate::config::CLI;
+    let dir = exe.parent().ok_or_else(|| std::io::Error::other("this program is in no folder"))?;
+    let name = |n: String| dir.join(format!("{n}{}", std::env::consts::EXE_SUFFIX));
+    let oned = name(format!("{CLI}d"));
+    let mut names = vec![name(crate::git_wire::helper()), name(CLI.to_string()), exe.to_path_buf()];
+    names.retain(|path| path.exists() && *path != oned);
+    names.dedup();
+    names.extend(oned.exists().then_some(oned));
+    let when = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    std::fs::hard_link(exe, exe.with_extension(format!("{when}.old")))?;
+    for path in &names {
+        let next = path.with_extension("next");
+        let _ = std::fs::remove_file(&next);
+        std::fs::hard_link(new, &next)?;
+        std::fs::rename(&next, path)?;
+    }
+    std::fs::remove_file(new)
+}
+
+/// Removes what updates left beside the program at `exe` (`replace_program`): whichever nothing runs any more.
+#[cfg(windows)]
+pub fn remove_replaced(exe: &Path) {
+    let Some(dir) = exe.parent() else { return };
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.path().extension().is_some_and(|e| e == "old") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// What tells a file from the one that replaced it at its path.

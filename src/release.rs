@@ -43,7 +43,7 @@ pub fn install_commit(commit: &str, bytes: &[u8]) -> Result<PathBuf> {
     ensure!(!in_app_bundle(), "this node lives in an app bundle, which updates with the app");
     // Named for this process, since `one update` and a device's own check can both be installing at once.
     let tmp = exe.with_extension(format!("new.{}", std::process::id()));
-    let placed = placed_at(&tmp, commit, bytes).and_then(|()| std::fs::rename(&tmp, &exe).context("replace the binary"));
+    let placed = placed_at(&tmp, commit, bytes).and_then(|()| crate::os::replace_program(&tmp, &exe).context("replace the binary"));
     if placed.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }

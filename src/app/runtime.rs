@@ -375,6 +375,9 @@ fn broken_since(log: &Path, from: u64) -> Option<Broken> {
     })
 }
 
+/// The file in a runtime's folder that says the id of the workerd running there.
+const WORKERD_PID: &str = "workerd.pid";
+
 /// Set once this process is stopping, under `RUNNING`'s lock: no workerd starts again.
 static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The workerds this process runs, by process id.
@@ -410,6 +413,7 @@ fn keep(workerd: &Path, dir: &Path, listener: Option<&std::net::TcpListener>) {
         };
         match spawned {
             Ok(mut child) => {
+                let _ = std::fs::write(dir.join(WORKERD_PID), child.id().to_string());
                 let status = child.wait();
                 RUNNING.lock().unwrap().remove(&child.id());
                 tracing::debug!("workerd stopped ({status:?}); starting it again");
@@ -472,10 +476,16 @@ pub fn run(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// None can be left on Windows: a workerd ends with the oned whose job it's in (`os::children_end_with_me`).
+/// Stops the workerd serving `dir`'s config, by the id `keep` wrote there (`WORKERD_PID`), saying whether there was one:
+/// Windows' list of processes doesn't say what each was started with.
 #[cfg(windows)]
-fn kill_serving(_: &Path) -> bool {
-    false
+fn kill_serving(dir: &Path) -> bool {
+    let Some(pid) = std::fs::read_to_string(dir.join(WORKERD_PID)).ok().and_then(|p| p.trim().parse().ok()) else { return false };
+    let running = crate::os::is_program(pid, "workerd.exe");
+    if running {
+        crate::os::kill(pid);
+    }
+    running
 }
 
 /// Stops each workerd serving `dir`'s config, saying whether there was one.
@@ -509,12 +519,36 @@ pub fn workerd() -> Result<PathBuf> {
         .find(|(target, _, _)| *target == crate::config::TARGET)
         .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", crate::config::TARGET))?;
     let url = format!("https://registry.npmjs.org/@cloudflare/workerd-{package}/-/workerd-{package}-{WORKERD}.tgz");
-    pinned(&format!("workerd-{WORKERD}"), &format!("workerd{}", std::env::consts::EXE_SUFFIX), &url, integrity)
+    let dir = format!("workerd-{WORKERD}");
+    #[cfg(windows)]
+    for dll in VISUAL_C_RUNTIME.dlls {
+        pinned(&dir, dll, &format!("{}/{dll}", VISUAL_C_RUNTIME.folder), VISUAL_C_RUNTIME.url, VISUAL_C_RUNTIME.integrity)?;
+    }
+    let bin = format!("workerd{}", std::env::consts::EXE_SUFFIX);
+    pinned(&dir, &bin, &format!("package/bin/{bin}"), &url, integrity)
 }
 
-/// A program from an npm package's tarball (`package/bin/<bin>`), downloaded once into the node's cache and checked
-/// against the package's pinned sha512.
-pub fn pinned(dir: &str, bin: &str, url: &str, integrity: &str) -> Result<PathBuf> {
+/// workerd on Windows needs Visual C++'s runtime, which Windows doesn't come with and only an administrator can install
+/// for the whole computer: these, Microsoft's own, count beside the program, which Microsoft allows for its redistributable files.
+#[cfg(windows)]
+struct VisualCRuntime {
+    dlls: [&'static str; 3],
+    folder: &'static str,
+    url: &'static str,
+    integrity: &'static str,
+}
+
+#[cfg(windows)]
+const VISUAL_C_RUNTIME: VisualCRuntime = VisualCRuntime {
+    dlls: ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"],
+    folder: "Contents/VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT",
+    url: "https://download.visualstudio.microsoft.com/download/pr/45d3b8dd-bced-4b37-9974-142f748d710c/4aaf54db0bfc9435f7c3660e1a00237a4b556042bfeea64bde44c2e0194e6ee5/Microsoft.VC.14.44.17.14.CRT.Redist.X64.base.vsix",
+    integrity: "7WPZeCauExma1IgIWhowo0drr7iQT1u4ZyDByfp+czuJJ8drKHVCu8KkhyypveuIpRhrchMqBtnIXcMctVyujw==",
+};
+
+/// The file at `member` in an archive (an npm package, or a zip on Windows, which its `tar` reads too), downloaded once
+/// into the node's cache as `bin` and checked against the archive's pinned sha512.
+pub fn pinned(dir: &str, bin: &str, member: &str, url: &str, integrity: &str) -> Result<PathBuf> {
     let dir = crate::cache().join(dir);
     let path = dir.join(bin);
     if path.exists() {
@@ -532,7 +566,8 @@ pub fn pinned(dir: &str, bin: &str, url: &str, integrity: &str) -> Result<PathBu
     let tmp = dir.with_extension(format!("{}-{call}.part", std::process::id()));
     std::fs::create_dir_all(&tmp)?;
     std::fs::File::create(tmp.join("package.tgz"))?.write_all(&tarball)?;
-    let ok = std::process::Command::new("tar").args(["-xzf", "package.tgz", "--strip-components=2", &format!("package/bin/{bin}")]).current_dir(&tmp).status()?;
+    let strip = format!("--strip-components={}", member.matches('/').count());
+    let ok = std::process::Command::new("tar").args(["-xf", "package.tgz", &strip, member]).current_dir(&tmp).status()?;
     ensure!(ok.success(), "couldn't unpack {bin}");
     std::fs::create_dir_all(&dir)?;
     std::fs::rename(tmp.join(bin), &path)?;
