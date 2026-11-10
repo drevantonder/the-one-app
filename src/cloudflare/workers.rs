@@ -1254,8 +1254,8 @@ impl Cloudflare {
         self.send("POST", path, body)
     }
 
-    pub(crate) fn patch(&self, path: &str, body: Value) -> Result<Value> {
-        self.send("PATCH", path, body)
+    pub(crate) fn delete(&self, path: &str) -> Result<Value> {
+        self.send("DELETE", path, json!({}))
     }
 
     fn send(&self, method: &str, path: &str, body: Value) -> Result<Value> {
