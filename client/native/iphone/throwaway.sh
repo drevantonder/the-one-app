@@ -20,6 +20,7 @@ xcrun simctl bootstatus "$sim" -b >/dev/null
 xcrun simctl ui "$sim" appearance dark
 xcrun simctl ui "$sim" content_size small
 log=$native/target/iphone-throwaway.log
+mkdir -p "$(dirname "$log")"
 rm -f "$log"
 upper=$(echo "$CONFIG_CLI" | tr '[:lower:]' '[:upper:]')
 # What the app reads as it starts, passed by simctl, and where it prints.
