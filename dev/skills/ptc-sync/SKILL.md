@@ -23,6 +23,6 @@ If `origin/main` and `github/main` are the same commit, stop: there's nothing to
    - Nothing of PTC's own left: `git merge --ff-only github/main`, and its tested sign-offs come with it.
    - Otherwise `git merge github/main`, and test the merge as AGENTS.md says. A conflict you can't resolve with confidence: `git merge --abort`, open an issue on `ptc/the-one-app` saying what conflicts, and stop.
    - `git push origin HEAD:main 'refs/signoff/tested/*:refs/signoff/tested/*'`; for a merge, `ptc-dev signoff tested --ran "<the tests you chose>"` after it.
-4. `ptc-dev status --until <commit>-<PTC's config commit> --device ptc`. If it doesn't arrive, `journalctl --user -u ptc-update`: a failed check says what failed, and nothing of that build went out. Fix it in the fork, or open an issue.
+4. `ptc-dev update`, then `ptc-dev status --until <commit>-<PTC's config commit> --device ptc`. A failed check says what failed, and nothing of that build went out. Fix it in the fork, or open an issue.
 
 Finish with one line in Agent Memory, only if something moved or needs Andre.
