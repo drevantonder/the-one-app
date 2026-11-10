@@ -5,7 +5,6 @@ use one::cli::{Command, Given};
 use one::api;
 use serde_json::Value;
 
-mod client_device;
 mod git_remote;
 mod network;
 #[path = "onboarding/sign_in.rs"]
@@ -100,9 +99,7 @@ fn main() {
     }
     // Run by git, for a repo's address.
     if std::env::args_os().next().is_some_and(|me| std::path::Path::new(&me).file_name().is_some_and(|n| *n == *one::git_wire::helper())) {
-        let ran = git_remote::run(&args);
-        client_device::end();
-        match ran {
+        match git_remote::run(&args) {
             Ok(code) => std::process::exit(code),
             Err(err) => {
                 eprintln!("{CLI}: {err:#}");
@@ -110,9 +107,7 @@ fn main() {
             }
         }
     }
-    let ran = run(args);
-    client_device::end();
-    if let Err(err) = ran {
+    if let Err(err) = run(args) {
         // What the node says names its tools (apps_restore); the command line names them as commands.
         eprintln!("{CLI}: {}", tools::in_cli_words(&node(), &format!("{err:#}")));
         std::process::exit(tools::exit_code(&err));
@@ -195,12 +190,8 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
 fn connection(node: &Client) -> String {
     let state = match node.state() {
         Ok(state) => state,
-        Err(err) if client_device::active() => return format!("This computer is one of your devices, but {err:#}."),
-        Err(_) => return format!("{}.", client_device::not_here()),
+        Err(err) => return format!("{err:#}"),
     };
-    if let Some(said) = client_device::said(&state) {
-        return format!("{said}.");
-    }
     let device = &state.device.name;
     let Some(network) = &state.network else {
         return format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it, or {CLI} create <name> --as <your name> starts a new one.");
@@ -210,7 +201,7 @@ fn connection(node: &Client) -> String {
     format!("You're {} in {network}, on {device}{ready}.", state.looking())
 }
 
-/// How the CLI asks this machine's node (`agent()`).
+/// How the CLI asks this machine's node, as one of its own programs.
 struct Http;
 
 impl one::api::client::Via for Http {
@@ -219,15 +210,11 @@ impl one::api::client::Via for Http {
         for (name, value) in headers {
             req = req.header(*name, *value);
         }
-        let agent = agent();
+        let agent = api::agent();
         let req = agent.configure_request(req.body(body.unwrap_or_default())?).timeout_global(wait).build();
         let resp = agent.run(req).map_err(unreached)?;
         let trace = resp.headers().get(one::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
         Ok(one::api::client::Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
-    }
-
-    fn tries(&self) -> Option<Value> {
-        client_device::take_tries()
     }
 }
 
@@ -235,24 +222,13 @@ fn node() -> Client {
     Client::new(Http, false)
 }
 
-/// An HTTP client for this machine's node, as one of its own programs; or, where none runs and this computer is a
-/// device of its user, for their nodes, over iroh (`client_device::route`).
-fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder().http_status_as_error(false).middleware(client_device::route).build().into()
-}
-
-fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
-    // Not even reached: the nodes tried are all there is to say.
-    let mut resp = resp.map_err(unreached)?;
-    let status = resp.status().as_u16();
-    one::api::client::answered(status, resp.body_mut().read_json()?, &one::home())
-}
-
+/// The one thing to say when nothing answers: what to install or start.
 fn unreached(err: ureq::Error) -> anyhow::Error {
-    match client_device::active() {
-        true => anyhow::anyhow!("{err}"),
-        false if matches!(&err, ureq::Error::Io(e) if e.kind() == std::io::ErrorKind::ConnectionRefused) => anyhow::anyhow!(client_device::not_here()),
-        false => anyhow::Error::new(err).context(client_device::not_here()),
+    match err {
+        ureq::Error::Io(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+            let start = if cfg!(target_os = "macos") { "open its app".to_string() } else { format!("sudo systemctl start {CLI}d") };
+            anyhow::anyhow!("{NAME} isn't running on this computer: install it here, or if it's installed, start it ({start})")
+        }
+        err => anyhow::anyhow!("{err}"),
     }
 }
-

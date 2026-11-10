@@ -1,8 +1,7 @@
 //! Who's in the network and this machine, on the command line: status, signing in and out, making or joining a
-//! network, and its settings. A command of this program, not the library's: signing in makes this computer one of its
-//! user's devices (`client_device`).
+//! network, and its settings. A command of this program, not the library's: signing in is a browser's work.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use one::api::Client;
 use one::cli::{Command, Given};
 use one::config::{CLI, NAME, YOURS};
@@ -10,19 +9,13 @@ use one::rank::Priority;
 use one::state::State;
 use serde_json::{Value, json};
 
-use one::api;
-
-use crate::{agent, client_device, request};
-
 /// Who's in the network and this device: status, signing in and out, making or joining a network, settings.
 pub fn commands() -> Command {
     Command {
         help: vec![
             ("status".into(), format!("this device, and the users, groups and devices in {YOURS}")),
-            ("sign-in [--address <url>]".into(), format!("sign this machine in, as you: approve its code by signing in on any of your devices; {CLI} and {CLI} mcp here then act as you. Where {NAME} doesn't run, this computer becomes one of your devices, once you approve its next code too, and asks your devices for everything")),
-            ("sign-in --recovery-key <file> [--address <url>]".into(), format!("when no device of yours is left to approve this one: sign in, and this computer lets itself in with {YOURS}'s recovery key, from a file or - for stdin")),
-            ("sign-in --invite <link>".into(), "join with the invite link someone sent you, on your first computer: you make your passkey in a browser, and they approve this computer's code".into()),
-            ("sign-out".into(), "sign this machine out, and take it out of your devices if it's one".into()),
+            ("sign-in [--address <url>]".into(), "sign this machine in, as you: approve its code by signing in on any of your devices".into()),
+            ("sign-out".into(), "sign this machine out".into()),
             ("create <name> --as <your name> [--user <id>]".into(), "create a network, with you as its first admin (--user: who you were in one it replaces, so your sign-in is still yours)".into()),
             ("pair [--user <name>]".into(), "a pairing code for another of your machines (or, for admins, someone else's)".into()),
             ("join <code>".into(), format!("join {YOURS} with a pairing code")),
@@ -32,7 +25,7 @@ pub fn commands() -> Command {
         ],
         run: |g| {
             let takes = match g.words().as_slice() {
-                ["sign-in"] => &["address", "invite", "recovery-key"][..],
+                ["sign-in"] => &["address"][..],
                 ["status"] => &[],
                 ["create", ..] => &["as", "user"],
                 ["pair"] => &["user"],
@@ -43,20 +36,10 @@ pub fn commands() -> Command {
             g.takes_only(takes)?;
             match g.words().as_slice() {
                 ["sign-in"] => sign_in(g)?,
-                ["sign-out"] => {
-                    // A device takes itself out of its user's devices first, while its sign-in still says who it is; git
-                    // here then no longer reaches its repos, which a node here still serves.
-                    let address = crate::sign_in::kept().map(|k| k.address).filter(|_| !client_device::node_here());
-                    let device = client_device::sign_out();
-                    if let Some(address) = address {
-                        one::git_wire::unwire(&address);
-                    }
-                    match crate::sign_in::sign_out()? || device {
-                        true if device => println!("Signed out: this computer is no longer one of your devices, and {CLI} here no longer acts as you."),
-                        true => println!("Signed out."),
-                        false => println!("This machine isn't signed in."),
-                    }
-                }
+                ["sign-out"] => match crate::sign_in::sign_out()? {
+                    true => println!("Signed out."),
+                    false => println!("This machine isn't signed in."),
+                },
                 ["status"] if g.json => println!("{}", serde_json::to_string(&g.node.state()?)?),
                 ["status"] => status(g.node, &g.node.state()?),
                 ["create", name @ ..] if !name.is_empty() => {
@@ -105,42 +88,15 @@ pub fn commands() -> Command {
 
 /// `sign-in`: this machine signs in at the network's address, as the user who approves its code with their passkey.
 fn sign_in(g: &Given) -> Result<()> {
-    let node = g.node;
-    // Someone new's invite: its link (`<address>/invite#<secret>`), or its secret with --address.
-    let invite = g.flag("invite").map(|i| match i.split_once("/invite#") {
-        Some((address, secret)) => (Some(address.to_string()), secret.to_string()),
-        None => (None, i.trim_start_matches('#').to_string()),
-    });
-    if invite.is_some() && client_device::node_here() {
-        bail!("{NAME} runs on this computer, so it joins as a device, not with an invite: {CLI} join <pairing code>, from {CLI} pair on a device in {YOURS}");
-    }
-    let address = match g.flag("address").map(str::to_string).or_else(|| invite.as_ref().and_then(|(a, _)| a.clone())) {
-        Some(a) => a,
-        // With no node here, it's the address it was signed in at before, or the one given.
-        None if !client_device::node_here() => crate::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
-        None => {
-            let state: State = serde_json::from_value(request(agent().get(format!("http://{}/v1/state", api::addr())).call())?)?;
-            state.address().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
-        }
+    let state = g.node.state()?;
+    let address = match g.flag("address") {
+        Some(a) => a.to_string(),
+        None => state.address().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string(),
     };
-    let join = (!client_device::node_here()).then(|| client_device::signing_in_for(&address)).transpose()?;
-    let started = crate::sign_in::start(&address, join.as_deref())?;
+    let started = crate::sign_in::start(&address)?;
     let with = if one::config::JOIN_DOMAIN.is_empty() { "your passkey" } else { "your work account" };
-    // Someone new joins first, in a browser, which then signs this in as them.
-    let link = match &invite {
-        Some((_, secret)) => {
-            let code = started.url.rsplit_once("c=").map_or("", |(_, c)| c);
-            let link = format!("{}/invite?code={code}#{secret}", address.trim_end_matches('/'));
-            let how = if one::config::JOIN_DOMAIN.is_empty() { "make your passkey" } else { "sign in with the account it's for" };
-            println!("To join, open this link in a browser on any device, phone or computer, and {how}:\n\n  {link}\n");
-            link
-        }
-        None => {
-            println!("To sign in this machine, open this link on any of your devices and sign in with {with}:\n\n  {}\n\nor go to {}/sign-in/code and type {}.", started.url, address.trim_end_matches('/'), started.code);
-            started.url.clone()
-        }
-    };
-    if crate::sign_in::has_screen() && crate::sign_in::open(&link) {
+    println!("To sign in this machine, open this link on any of your devices and sign in with {with}:\n\n  {}\n\nor go to {}/sign-in/code and type {}.", started.url, address.trim_end_matches('/'), started.code);
+    if crate::sign_in::has_screen() && crate::sign_in::open(&started.url) {
         println!("It's open in your browser here.");
     }
     crate::sign_in::finish(started)?;
@@ -150,26 +106,14 @@ fn sign_in(g: &Given) -> Result<()> {
     {
         eprintln!("{err:#}");
     }
-    if client_device::node_here() {
-        let me = node.state()?.user.map_or("its user".into(), |u| u.name);
-        println!("Signed in. {NAME} runs on this computer, so {CLI} and {CLI} mcp here act as {me}, whose device it is, whoever signs in.");
-        return Ok(());
-    }
-    match g.flag("recovery-key") {
-        Some(file) => client_device::join_by_recovery(&address, file)?,
-        None => client_device::join(&address, invite.as_ref().map(|(_, secret)| secret.as_str()))?,
-    }
-    let me = node.state()?.user.map_or("you".into(), |u| u.name);
-    println!("\nSigned in as {me}: {} is one of your devices now. {CLI} and {CLI} mcp here act as you, on your devices, until {CLI} sign-out.", crate::sign_in::hostname());
+    let me = state.user.map_or("its user".into(), |u| u.name);
+    println!("Signed in. {NAME} runs on this computer, so {CLI} and {CLI} mcp here act as {me}, whose device it is, whoever signs in.");
     Ok(())
 }
 
 fn status(node: &Client, state: &State) {
     let device = &state.device;
-    match client_device::said(state) {
-        Some(said) => println!("{said}"),
-        None => println!("{} ({}){}", device.name, &device.key[..8.min(device.key.len())], if device.ready { "" } else { ", not ready yet" }),
-    }
+    println!("{} ({}){}", device.name, &device.key[..8.min(device.key.len())], if device.ready { "" } else { ", not ready yet" });
     let Some(i) = &state.network else {
         println!("\nNot in {YOURS} yet: {CLI} join <code> joins it with a pairing code, or {CLI} create <name> --as <your name> starts a new one.");
         return;
@@ -194,8 +138,7 @@ fn status(node: &Client, state: &State) {
     println!("\nDevices");
     for s in &i.devices {
         let dot = if s.now.online { "●" } else { "○" };
-        // As a device, the node that answered is "here" to itself, not to this computer.
-        let here = if s.now.here && client_device::me().is_none() { " (this one)" } else { "" };
+        let here = if s.now.here { " (this one)" } else { "" };
         let serves = if s.serves_me { "" } else { ", doesn't run yours" };
         let build = s.now.build.as_ref().map(|b| format!("  {b}")).unwrap_or_default();
         println!("  {dot} {}{here}  {}'s{serves}{build}", s.name, name(&s.user));
@@ -230,15 +173,14 @@ fn status(node: &Client, state: &State) {
     }
     // A device that's only a client (a phone, a computer, a browser) is listed with them; a passkey isn't one.
     let (passkeys, clients): (Vec<&one::state::Client>, Vec<&one::state::Client>) = i.clients.iter().partition(|c| c.passkey.is_some());
-    let this = |c: &one::state::Client| if client_device::me().is_some_and(|(_, key)| c.key == key) { " (this one)" } else { "" };
     for c in &clients {
         let glyph = if is_phone(c) { "▯" } else { "▭" };
-        println!("  {glyph} {}{}  {}'s", c.name, this(c), name(&c.user));
+        println!("  {glyph} {}  {}'s", c.name, name(&c.user));
     }
     if !passkeys.is_empty() {
         println!("\nPasskeys");
         for c in &passkeys {
-            println!("  {}{}  {}", c.name, this(c), name(&c.user));
+            println!("  {}  {}", c.name, name(&c.user));
         }
     }
 }

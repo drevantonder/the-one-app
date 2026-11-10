@@ -1,6 +1,6 @@
-//! How a client asks its node's local API: the CLI and its MCP server over HTTP, as one of this machine's own programs or
-//! as a device of its user's (src/main.rs), and the node's own MCP in the node itself (`InProcess`), with the proof
-//! of who asks that the request it answers came with.
+//! How a client asks its node's local API: the CLI and its MCP server over HTTP, as one of this machine's own programs
+//! (src/main.rs), and the node's own MCP in the node itself (`InProcess`), with the proof of who asks that the request it
+//! answers came with.
 
 use std::io::Read;
 use std::sync::Mutex;
@@ -23,12 +23,6 @@ pub struct Answer {
 pub trait Via: Send + Sync {
     /// Asks `method` `path`: an error only when no node answered. `wait` bounds the whole answer, for one that streams.
     fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<Duration>) -> Result<Answer>;
-
-    /// The devices the last request tried before one answered, for its trace: a device of its user's asks them over
-    /// the network (client/src/lib.rs).
-    fn tries(&self) -> Option<Value> {
-        None
-    }
 
     /// The home it reads the token it shows the node from, for the refusal that says it was the wrong one.
     fn home(&self) -> std::path::PathBuf {
@@ -119,7 +113,6 @@ impl Client {
 
     /// Runs a call (`/v1/call`'s body), with what it did when `trace` asks: after its answer, or the reason it failed.
     pub fn call(&self, body: &Value, trace: bool) -> Called {
-        drop(self.via.tries());
         let mut headers = vec![("content-type", "application/json")];
         if trace {
             headers.push((crate::protocol::header::TRACE, "1"));
@@ -131,32 +124,11 @@ impl Client {
             }
             Err(err) => (Err(err), None),
         };
-        let trace = trace.then(|| {
-            let tries = self.via.tries();
-            if node.is_none() && tries.is_none() {
-                return vec![format!("no trace: this ran in {} here, not on a device", crate::config::CLI)];
-            }
-            let names = match &node {
-                Some(n) => n["names"].clone(),
-                None => self.names(),
-            };
-            crate::node::trace::said(tries.as_ref(), node.as_ref(), &names)
+        let trace = trace.then(|| match &node {
+            Some(node) => crate::node::trace::said(node),
+            None => vec!["no trace came back".to_string()],
         });
         Called { ok: ok.map(|mut r| r["ok"].take()), trace }
-    }
-
-    /// The network's nodes' names by key (hex), for a trace of a call whose node sent none (the Cloudflare node sends no trace).
-    fn names(&self) -> Value {
-        let Ok(state) = self.state() else { return Value::Null };
-        let Some(network) = state.network else { return Value::Null };
-        let mut names = serde_json::Map::new();
-        for d in &network.devices {
-            names.insert(d.key.clone(), d.name.clone().into());
-        }
-        if let Some(cloudflare) = &network.cloudflare_node {
-            names.insert(cloudflare.key.clone(), crate::rank::CLOUDFLARE.into());
-        }
-        Value::Object(names)
     }
 
     /// What a call it made needed and wasn't handed, since this was last asked (`{ error, need, to, seal }`): the node's

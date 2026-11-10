@@ -1,13 +1,13 @@
 //! This machine's CLI and MCP signed in at the network's address, as every other client is: an OAuth client of its auth
 //! service, registered the first time it signs in. The user approves a short code by signing in on any device
 //! (`cloudflare/auth`'s `/sign-in/code`), here in the browser if this machine has a screen. The refresh token is kept in a
-//! file only this machine's user reads, outside the node's data: the node is only ever sent access tokens.
+//! file only this machine's user reads, outside the node's data, for signing out to revoke.
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use one::config::{CLI, NAME};
 use one_client::sign_in::{Asked, Auth};
 use serde::{Deserialize, Serialize};
@@ -20,11 +20,6 @@ pub struct Kept {
     pub client: String,
     #[serde(default)]
     pub refresh: Option<String>,
-    #[serde(default)]
-    pub access: Option<String>,
-    /// When the access token expires (milliseconds).
-    #[serde(default)]
-    pub until: u64,
 }
 
 /// Where it's kept: in the user's config, one for each node this CLI reaches (`<CLI>_ADDR`); a throwaway network's, in its
@@ -58,10 +53,6 @@ fn keep(kept: &Kept) -> Result<()> {
     Ok(())
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into()
 }
@@ -92,12 +83,11 @@ pub struct Started {
     asked: Asked,
 }
 
-/// Starts signing in to the network at `address`, for the device `join` names (its key ‖ seal key, hex), if it's one
-/// that then asks to be let in: → the code the user approves, and its link.
-pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
+/// Starts signing in to the network at `address`: → the code the user approves, and its link.
+pub fn start(address: &str) -> Result<Started> {
     let auth = Auth::at(address)?;
     let client = client(&auth)?;
-    let asked = auth.ask(&client, &back(&auth.address), join);
+    let asked = auth.ask(&client, &back(&auth.address), None);
     let mut resp = agent().post(format!("{}/sign-in/code", auth.address)).send_json(serde_json::json!({ "query": asked.query }))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     let (Some(code), Some(url)) = (out["code"].as_str(), out["url"].as_str()) else {
@@ -117,82 +107,18 @@ pub fn finish(started: Started) -> Result<()> {
             _ => bail!("{}", said(&out, "signing in didn't work")),
         }
     };
-    let mut kept = Kept { address: address.clone(), client: started.client.clone(), ..Default::default() };
-    keep_tokens(&mut kept, started.auth.code(&started.asked, &code))
+    let tokens = started.auth.code(&started.asked, &code)?;
+    keep(&Kept { address: address.clone(), client: started.client.clone(), refresh: tokens.refresh })
 }
 
-/// What a grant gave, kept: each refresh token works once, so the new one is kept before anything else can ask. A
-/// refusal means this machine is signed out.
-fn keep_tokens(kept: &mut Kept, tokens: Result<one_client::sign_in::Tokens, one_client::sign_in::Failed>) -> Result<()> {
-    let tokens = match tokens {
-        Ok(t) => t,
-        Err(e) if e.signed_out => {
-            let _ = std::fs::remove_file(path());
-            bail!("this machine is signed out ({e}): {CLI} sign-in");
-        }
-        Err(e) => return Err(e.into()),
-    };
-    kept.access = Some(tokens.access);
-    kept.until = now_ms() + tokens.expires_in * 1000;
-    if let Some(refresh) = tokens.refresh {
-        kept.refresh = Some(refresh);
-    }
-    keep(kept)
-}
-
-/// The access token this machine asks auth to be let in with, good for a minute more, refreshed if it's older: None if
-/// this machine isn't signed in. One process at a time refreshes, since each refresh token works once.
-pub fn token() -> Result<Option<String>> {
-    let fresh = |k: &Kept| k.access.clone().filter(|_| k.until > now_ms() + 60_000);
-    let Some(kept) = kept() else { return Ok(None) };
-    if let Some(access) = fresh(&kept) {
-        return Ok(Some(access));
-    }
-    let _lock = Lock::take()?;
-    // Another process may have refreshed it while this one waited.
-    let Some(mut kept) = self::kept() else { return Ok(None) };
-    if let Some(access) = fresh(&kept) {
-        return Ok(Some(access));
-    }
-    let refresh = kept.refresh.clone().context(format!("this machine is signed out: {CLI} sign-in"))?;
-    let tokens = Auth::at(&kept.address)?.refresh(&kept.client, &refresh);
-    keep_tokens(&mut kept, tokens)?;
-    Ok(kept.access)
-}
-
-/// Signs this machine out: its refresh token is revoked, and forgotten here. Waits for a refresh another process is
-/// making, so what that keeps is what's revoked and forgotten, not kept again after; the lock's file stays, as every
-/// process must lock the same one.
+/// Signs this machine out: its refresh token is revoked, and forgotten here.
 pub fn sign_out() -> Result<bool> {
-    let _lock = Lock::take()?;
     let Some(kept) = kept() else { return Ok(false) };
-    let _ = std::fs::remove_file(path());
+    std::fs::remove_file(path())?;
     if let (Some(refresh), Ok(auth)) = (&kept.refresh, Auth::at(&kept.address)) {
         auth.revoke(&kept.client, refresh);
     }
     Ok(true)
-}
-
-/// Held while this machine refreshes its token: an exclusive lock on a file beside it.
-struct Lock(std::fs::File);
-
-impl Lock {
-    fn take() -> Result<Lock> {
-        use std::os::fd::AsRawFd;
-        use std::os::unix::fs::OpenOptionsExt;
-        let file = std::fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(path().with_extension("lock"))?;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            bail!("couldn't wait for another {NAME} command signing in: {}", std::io::Error::last_os_error());
-        }
-        Ok(Lock(file))
-    }
-}
-
-impl Drop for Lock {
-    fn drop(&mut self) {
-        use std::os::fd::AsRawFd;
-        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
-    }
 }
 
 pub fn hostname() -> String {

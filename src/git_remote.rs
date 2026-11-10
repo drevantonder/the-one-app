@@ -2,8 +2,8 @@
 //! (`url.<CLI>::<address>/.insteadOf`) to reach it as `<CLI>::<address>/<app>/…`, so it runs this program as
 //! `git-remote-<CLI>`, its remote helper. That runs git's own HTTP transport (`git remote-http`) for the address, with
 //! this program as its proxy while it runs: what git asks goes where every command's request goes, to this machine's
-//! node, or from a computer that's only a device, over iroh to its user's nodes (`client_device::instead`). Git's own
-//! transport speaks git; the proxy only carries it, and answers only the git it started (a secret only that git has).
+//! node. Git's own transport speaks git; the proxy only carries it, and answers only the git it started (a secret only
+//! that git has).
 
 use std::io::Read;
 use std::sync::Arc;
@@ -29,9 +29,9 @@ pub fn run(args: &[String]) -> Result<i32> {
     let (host, path) = rest.split_once('/').with_context(bad)?;
     let (address, path) = (format!("{scheme}://{host}"), format!("/{path}"));
     anyhow::ensure!(one::api::app_route(&path), bad());
-    let ours = here(&address)?;
+    let ours = here()?;
     if ours != address {
-        bail!("this computer is in {YOURS} at {ours}, not at {address}: {CLI} sign-in --address {address}, then try again");
+        bail!("this computer is in {YOURS} at {ours}, not at {address}");
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
@@ -55,21 +55,14 @@ pub fn run(args: &[String]) -> Result<i32> {
     Ok(status.code().unwrap_or(128))
 }
 
-/// The address of the install this computer reaches: its node's, or the one it's a device of; `asked` is the one git
-/// was given.
-fn here(asked: &str) -> Result<String> {
-    if crate::client_device::node_here() {
-        let state = crate::node().state()?;
-        let address = state.address().with_context(|| format!("this computer's {NAME} has no address yet: an admin sets it with {CLI} cloudflare use"))?;
-        return Ok(address.trim_end_matches('/').to_string());
-    }
-    if !crate::client_device::active() {
-        bail!("this computer isn't one of your devices yet: {CLI} sign-in --address {asked}, then try again");
-    }
-    Ok(crate::sign_in::kept().map(|k| k.address.trim_end_matches('/').to_string()).unwrap_or_default())
+/// The address of the network this computer's node is in.
+fn here() -> Result<String> {
+    let state = crate::node().state()?;
+    let address = state.address().with_context(|| format!("this computer's {NAME} has no address yet: an admin sets it with {CLI} cloudflare use"))?;
+    Ok(address.trim_end_matches('/').to_string())
 }
 
-/// Carries what git asks of an app's address on this machine's node, or its user's nodes, until this program exits.
+/// Carries what git asks of an app's address on this machine's node until this program exits.
 fn proxy(listener: std::net::TcpListener, auth: String) {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     runtime.block_on(async move {
@@ -110,13 +103,13 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
     std::thread::spawn(move || {
         let url = format!("http://{}{path}", one::api::addr());
         let asked = if post {
-            let mut r = crate::agent().post(&url);
+            let mut r = one::api::agent().post(&url);
             for (n, v) in &headers {
                 r = r.header(n, v);
             }
             r.send(ureq::SendBody::from_owned_reader(Fed { sent, part: Bytes::new() }))
         } else {
-            let mut r = crate::agent().get(&url);
+            let mut r = one::api::agent().get(&url);
             for (n, v) in &headers {
                 r = r.header(n, v);
             }

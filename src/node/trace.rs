@@ -174,34 +174,12 @@ pub fn bucket(kind: &str, took: std::time::Duration, found: bool) {
     });
 }
 
-/// A call's trace as a few readable lines, in the Developer panel's words (src/screen/settings/devtools.jsx): the devices
-/// the client tried (`tries`, from the client library), what the one that answered did (`node`, its `x-one-trace`),
-/// each wait with its milliseconds, and the total. `names` says the devices by key (hex): the answering node's, or the
-/// network's when it sent no trace, as the Cloudflare node sends none.
-pub fn said(tries: Option<&Value>, node: Option<&Value>, names: &Value) -> Vec<String> {
+/// A call's trace as a few readable lines, in the Developer panel's words (src/screen/settings/devtools.jsx): what the
+/// device that answered did (`node`, its `x-one-trace`), each wait with its milliseconds, and the total.
+pub fn said(node: &Value) -> Vec<String> {
     let mut out = Vec::new();
-    let name = |key: &str| names[key].as_str().map(str::to_string).unwrap_or_else(|| format!("a device ({})", key.get(..6).unwrap_or(key)));
-    let mut total = node.and_then(|n| n["ms"].as_u64()).unwrap_or(0);
-    for t in tries.and_then(Value::as_array).into_iter().flatten() {
-        let (who, ms) = (name(t["node"].as_str().unwrap_or("")), t["ms"].as_u64().unwrap_or(0));
-        if let Some(connect) = t["connect"].as_u64() {
-            out.push(format!("connected to {who}: {connect} ms"));
-        }
-        out.push(match t["result"].as_str().unwrap_or("") {
-            "answered" => format!("asked {who}, which answered: {ms} ms there and back"),
-            "elsewhere" => format!("asked {who}, which said to ask elsewhere: {ms} ms"),
-            r => format!("asked {who}: {}, gave up after {ms} ms", r.replace("no connection", "couldn't connect").replace("no answer", "didn't answer")),
-        });
-        total = total.max(t["at"].as_u64().unwrap_or(0) + ms);
-    }
-    match node {
-        Some(node) => steps(node, node["device"].as_str().unwrap_or("the device that answered"), &mut out),
-        None => {
-            let answered = tries.and_then(Value::as_array).into_iter().flatten().find(|t| t["result"] == "answered").and_then(|t| t["node"].as_str());
-            out.push(format!("no trace from {}", answered.map_or("the device that answered".into(), name)));
-        }
-    }
-    out.push(format!("total {total} ms"));
+    steps(node, node["device"].as_str().unwrap_or("the device that answered"), &mut out);
+    out.push(format!("total {} ms", node["ms"].as_u64().unwrap_or(0)));
     out
 }
 

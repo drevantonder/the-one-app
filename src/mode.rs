@@ -62,12 +62,6 @@ impl Throwaway {
         &self.home
     }
 
-    /// Serves the throwaway network's bucket from this process, as its node does beside its API (`serve_beside`), until
-    /// it's stopped: with its node gone, its data stays reachable.
-    pub fn serve_bucket(&self) -> Result<()> {
-        tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(bucket(self.home.clone()))
-    }
-
     /// The folder its pages and Workers are read from instead of what its build holds: a checkout's root.
     pub fn ui(&self) -> Option<PathBuf> {
         Self::ui_in(&self.home)

@@ -269,8 +269,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
   /// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up. Opened as it was sent, it
   /// goes on through the web client, whose sign-in comes back here (`invited`), so what joining makes is that sign-in and
   /// nothing is asked twice. Then it makes a first passkey, or signs in with a provider (`providers`, for an invite that
-  /// names the account), or on a throwaway network (`throwaway`), with nothing to make. With `?code=`, the CLI's
-  /// (`sign-in --invite`), it goes on to sign that in, as the user who just joined.
+  /// names the account), or on a throwaway network (`throwaway`), with nothing to make.
   function invitePage(look) {
     const { throwaway, providers = [] } = look;
     const script = `
@@ -278,8 +277,8 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
       const throwaway = ${throwaway ? "true" : "false"}, providers = ${json(providers)};
       const oauth_query = location.search.slice(1);
       const params = new URLSearchParams(oauth_query);
-      const code = params.get("code"), client_id = params.get("client_id");
-      if (secret && !code && !client_id) {
+      const client_id = params.get("client_id");
+      if (secret && !client_id) {
         localStorage.removeItem("one.signin");
         sessionStorage.setItem("one.invite", secret);
         location.replace("/");
@@ -294,7 +293,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
       // whose invite it is, and then the passkey's options, so the prompt comes the moment Join is tapped.
       const out = api("/api/auth/sign-out", {}).catch(() => {});
       if (!throwaway && !providers.length) out.then(() => ready(register(secret)));
-      const next = () => (code ? "/sign-in/code?c=" + encodeURIComponent(code) : client_id ? "/sign-in?" + oauth_query : "/");
+      const next = () => (client_id ? "/sign-in?" + oauth_query : "/");
       const withProvider = async (p, e) => {
         const undo = busy(e.currentTarget, "Opening " + p.name + "…");
         try {

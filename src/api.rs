@@ -110,15 +110,6 @@ pub fn routes() -> Routes {
         .merge(crate::insights::routes::routes())
 }
 
-/// Whether a client device may ask `path` (`Who::Clients`), as the node's routes match it.
-pub fn clients_may(path: &str) -> bool {
-    let asked: Vec<&str> = path.split('/').collect();
-    calls::app_route(path)
-        || routes().who().iter().filter(|(r, w)| r != calls::APP_ROUTE && matches!(w, Who::Clients)).any(|(route, _)| {
-            let route: Vec<&str> = route.split('/').collect();
-            route.len() == asked.len() && route.iter().zip(&asked).all(|(r, a)| r == a || (r.starts_with('{') && !a.is_empty()))
-        })
-}
 pub fn port() -> u16 {
     port_of(&addr())
 }

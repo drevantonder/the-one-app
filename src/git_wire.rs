@@ -62,10 +62,6 @@ pub fn wire(address: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn unwire(address: &str) {
-    git(&["config", "--global", "--unset-all", &instead_of(address).0]);
-}
-
 fn git(args: &[&str]) -> bool {
     std::process::Command::new("git").args(args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
 }

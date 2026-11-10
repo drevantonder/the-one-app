@@ -93,9 +93,9 @@ function gitWithoutCli(env, url) {
   const name = env.NAME || "The One App", cli = env.CLI || "one";
   const said = [
     `${url.origin}${url.pathname.replace(/(\.git)\/.*$|\/(info\/refs|git-[a-z-]+)$/, "$1")} is a git address in ${env.YOURS || "your One App network"}, which git reaches through ${name}'s CLI, ${cli}.`,
-    `Install it on this computer, then run`,
-    `  ${cli} sign-in --address ${url.origin}`,
-    `and try again.`,
+    `Install it on this computer, join ${env.YOURS || "your One App network"} there with`,
+    `  ${cli} join <pairing code>`,
+    `(${cli} pair on a device in it gives one), and try again.`,
   ];
   return new Response(said.join("\n") + "\n", { status: 403, headers: { "content-type": "text/plain; charset=utf-8", "x-content-type-options": "nosniff" } });
 }

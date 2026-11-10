@@ -12,7 +12,6 @@ use super::network::client_session;
 
 mod android;
 pub(super) mod apple;
-mod cli;
 mod linux;
 mod web;
 mod windows;
@@ -36,7 +35,6 @@ pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Se
     let user = user.filter(|name| Some(name.to_lowercase()) != first);
     match rest.first().map(String::as_str) {
         Some("web") => web::web(dir, settings, user.as_deref())?,
-        Some("cli") => return cli::cli(dir, settings, &rest[1..]),
         Some("linux") => {
             if let Some(name) = &user {
                 web::joined(dir, settings, name)?;
@@ -54,7 +52,7 @@ pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Se
             }
             device_client(dir, checkout, settings, kind, user.as_deref())?
         }
-        _ => bail!("which client? {CLI}-dev throwaway client web, linux, mac, iphone, android, windows or cli, with --as <name> for someone else"),
+        _ => bail!("which client? {CLI}-dev throwaway client web, linux, mac, iphone, android or windows, with --as <name> for someone else"),
     }
     println!("Ready in {}s.", started.elapsed().as_secs());
     Ok(())

@@ -22,7 +22,6 @@ use n0_future::time::{Duration, Instant, timeout};
 mod join;
 pub mod keyring;
 mod settings;
-pub use one::settings::answered;
 #[cfg(feature = "relayed")]
 pub mod relayed;
 #[cfg(target_family = "wasm")]
