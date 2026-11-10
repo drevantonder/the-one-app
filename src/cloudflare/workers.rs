@@ -1375,9 +1375,15 @@ impl Cloudflare {
         Ok(token)
     }
 
-    /// Runs a Worker at `cron` too, or on no schedule.
+    /// Runs a Worker at `cron` too, or on no schedule. Changed only if it differs: a change takes Cloudflare up to 15
+    /// minutes to take up, in which a run can be missed.
     pub(crate) fn schedule(&self, name: &str, cron: Option<&str>) -> Result<()> {
-        self.send("PUT", &format!("/accounts/{}/workers/scripts/{name}/schedules", self.account), json!(cron.iter().map(|c| json!({ "cron": c })).collect::<Vec<_>>()))?;
+        let path = format!("/accounts/{}/workers/scripts/{name}/schedules", self.account);
+        let has: Vec<String> = self.call("GET", &path, None)?["schedules"].as_array().into_iter().flatten().filter_map(|s| s["cron"].as_str().map(str::to_string)).collect();
+        if has.iter().map(String::as_str).eq(cron.iter().copied()) {
+            return Ok(());
+        }
+        self.send("PUT", &path, json!(cron.iter().map(|c| json!({ "cron": c })).collect::<Vec<_>>()))?;
         Ok(())
     }
 
