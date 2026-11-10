@@ -40,6 +40,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Client**: where a user or their agent uses the network, and the only place keys are opened: the native apps (Mac,
   iPhone, Android, Windows), the web client in a browser, the CLI and the local MCP server on a computer, and the remote
   MCP server. Each has its own key, never shared.
+- **onet**: being built (ARCHITECTURE.md, Designed): the entry point into the network, the same on every device. `one_client` today.
 - **oned**: the small program, and the spec it follows, that makes a machine a node: it connects the machine to the
   network, and installs and runs what the node's owner switches on there (the app runtime, services). It runs nothing
   itself, and stays small. It has a version for each platform it runs on: computers (Mac, Windows, Linux) and
