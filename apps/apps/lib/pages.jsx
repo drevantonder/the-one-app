@@ -1,7 +1,7 @@
 // An app's pages: the one control wherever an app can be added, Add to while it's on none of the person's pages and
 // Manage once it's on one, and the sheet it opens, a switch for each page they may change.
 import { useRef, useState } from "react"
-import { AppIcon, Button, Hint, List, ListRow, Problem, ResponsiveDialog, Switch, useDialog } from "@one/ui"
+import { Button, Hint, List, ListRow, Problem, ResponsiveDialog, Switch, useDialog } from "@one/ui"
 import { onAPage, said } from "./store.jsx"
 
 function Pages({ name, store }) {
@@ -16,10 +16,7 @@ function Pages({ name, store }) {
   }
   return (
     <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      <div className="flex items-center gap-3">
-        <AppIcon app={a} size={44} />
-        <p className="min-w-0 flex-1 text-sm text-muted-foreground">Choose the pages it’s on. Turning one off removes it from that page without deleting what it kept there.</p>
-      </div>
+      <p className="text-sm text-muted-foreground">Turning one off keeps its data.</p>
       <List>
         {places.filter((p) => p.may).map((p) => (
           <ListRow key={p.id} title={p.name} trailing={<Switch checked={a.added.includes(p.id)} aria-label={p.name} onCheckedChange={(on) => flip(p, on)} />} />

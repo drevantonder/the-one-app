@@ -47,49 +47,41 @@ function te() {
 }
 var A = (e, t) => e.added.some((e) => t.some((t) => t.id === e)), ne = (e, t) => one.open("main", {}, e.name, { scope: t.find((t) => e.added.includes(t.id))?.scope }), re = (e, t) => one.open("settings", { add: !0 }, e.name, { scope: t.find((t) => e.added.includes(t.id))?.scope });
 function j(t) {
-	let n = e(24), { name: i, store: o } = t, [s, c] = r(""), [u, d] = r(""), { apps: m, places: h } = o.data, g, v, y, b;
-	if (n[0] !== m || n[1] !== i || n[2] !== h || n[3] !== o) {
+	let n = e(24), { name: i, store: a } = t, [o, s] = r(""), [c, u] = r(""), { apps: d, places: m } = a.data, h, g, v, y;
+	if (n[0] !== d || n[1] !== i || n[2] !== m || n[3] !== a) {
 		let e;
 		n[8] === i ? e = n[9] : (e = (e) => e.name === i, n[8] = i, n[9] = e);
-		let t = m.find(e), r = (e, n) => {
-			c(""), d(""), o.put(t, e, n).then(d).catch((e) => c(ee(e).title));
+		let t = d.find(e), r = (e, n) => {
+			s(""), u(""), a.put(t, e, n).then(u).catch((e) => s(ee(e).title));
 		};
-		y = "flex min-h-0 flex-col gap-4 overflow-y-auto p-4";
-		let s;
-		n[10] === Symbol.for("react.memo_cache_sentinel") ? (s = /* @__PURE__ */ D("p", {
-			className: "min-w-0 flex-1 text-sm text-muted-foreground",
-			children: "Choose the pages it’s on. Turning one off removes it from that page without deleting what it kept there."
-		}), n[10] = s) : s = n[10], b = /* @__PURE__ */ O("div", {
-			className: "flex items-center gap-3",
-			children: [/* @__PURE__ */ D(a, {
-				app: t,
-				size: 44
-			}), s]
-		}), g = f, v = h.filter(M).map((e) => /* @__PURE__ */ D(p, {
+		v = "flex min-h-0 flex-col gap-4 overflow-y-auto p-4", n[10] === Symbol.for("react.memo_cache_sentinel") ? (y = /* @__PURE__ */ D("p", {
+			className: "text-sm text-muted-foreground",
+			children: "Turning one off keeps its data."
+		}), n[10] = y) : y = n[10], h = f, g = m.filter(M).map((e) => /* @__PURE__ */ D(p, {
 			title: e.name,
 			trailing: /* @__PURE__ */ D(S, {
 				checked: t.added.includes(e.id),
 				"aria-label": e.name,
 				onCheckedChange: (t) => r(e, t)
 			})
-		}, e.id)), n[0] = m, n[1] = i, n[2] = h, n[3] = o, n[4] = g, n[5] = v, n[6] = y, n[7] = b;
-	} else g = n[4], v = n[5], y = n[6], b = n[7];
+		}, e.id)), n[0] = d, n[1] = i, n[2] = m, n[3] = a, n[4] = h, n[5] = g, n[6] = v, n[7] = y;
+	} else h = n[4], g = n[5], v = n[6], y = n[7];
+	let b;
+	n[11] !== h || n[12] !== g ? (b = /* @__PURE__ */ D(h, { children: g }), n[11] = h, n[12] = g, n[13] = b) : b = n[13];
 	let x;
-	n[11] !== g || n[12] !== v ? (x = /* @__PURE__ */ D(g, { children: v }), n[11] = g, n[12] = v, n[13] = x) : x = n[13];
+	n[14] === o ? x = n[15] : (x = o && /* @__PURE__ */ D(_, { title: o }), n[14] = o, n[15] = x);
 	let C;
-	n[14] === s ? C = n[15] : (C = s && /* @__PURE__ */ D(_, { title: s }), n[14] = s, n[15] = C);
+	n[16] === c ? C = n[17] : (C = c && /* @__PURE__ */ D(l, { children: c }), n[16] = c, n[17] = C);
 	let w;
-	n[16] === u ? w = n[17] : (w = u && /* @__PURE__ */ D(l, { children: u }), n[16] = u, n[17] = w);
-	let T;
-	return n[18] !== y || n[19] !== b || n[20] !== x || n[21] !== C || n[22] !== w ? (T = /* @__PURE__ */ O("div", {
-		className: y,
+	return n[18] !== v || n[19] !== y || n[20] !== b || n[21] !== x || n[22] !== C ? (w = /* @__PURE__ */ O("div", {
+		className: v,
 		children: [
+			y,
 			b,
 			x,
-			C,
-			w
+			C
 		]
-	}), n[18] = y, n[19] = b, n[20] = x, n[21] = C, n[22] = w, n[23] = T) : T = n[23], T;
+	}), n[18] = v, n[19] = y, n[20] = b, n[21] = x, n[22] = C, n[23] = w) : w = n[23], w;
 }
 function M(e) {
 	return e.may;
