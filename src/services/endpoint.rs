@@ -557,10 +557,16 @@ impl Service {
     fn state(&self) -> Result<Value> {
         let known = self.0.known.lock().unwrap();
         let m = &*known;
-        // Whether another is on, it can't know: asked, one that isn't says so.
-        // The devices it runs on, each the device it's part of there.
+        // The devices it runs on, each the device it's part of there. A service's listing outlives its being switched off, so that's
+        // read from the switches, not the listing; whether one that's on is online, it can't know: asked, one that isn't says so.
         let listed = m.service(&self.key())?;
         let device = listed.as_ref().and_then(|s| s.device);
+        // As a node reads its own parts: a process of oned's is on by its entry; a Mac helper the app carries unless switched off.
+        let switched_on = |d: &Key| match m.switch(d, &self.0.name) {
+            Ok(Some(s)) => s.on,
+            Ok(None) => crate::oned::helper(&self.0.name).is_some(),
+            Err(_) => true,
+        };
         let devices: Vec<Value> = m
             .offering(&self.0.name)?
             .into_iter()
@@ -568,6 +574,7 @@ impl Service {
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .flatten()
+            .filter(|d| Some(d.key) == device || switched_on(&d.key))
             .map(|d| json!({ "key": hex(&d.key), "name": d.name, "here": Some(d.key) == device, "online": true, "services": [self.0.name] }))
             .collect();
         // The scopes its device runs, whose part it is: a program here may reach what they hold.

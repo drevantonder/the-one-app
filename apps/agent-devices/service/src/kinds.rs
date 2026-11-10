@@ -855,6 +855,9 @@ impl Devices {
             if ["open", "install", "run"].contains(&function) {
                 return Some(self.run_linux(function, name, input));
             }
+            if function == "reach" {
+                return Some((|| -> Result<Value> { refuse!("{name} can't reach a port here: only a Windows, Android or iPhone device on this machine can") })());
+            }
             return None;
         };
         let k = v.kind();
