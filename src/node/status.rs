@@ -191,8 +191,10 @@ impl Node {
     pub(super) async fn say(&self, scope: &Scope, said: Said) -> Result<()> {
         let now = now_ms();
         let db = self.node_database(scope).await?;
+        let mut db = db.lock().await;
+        let before = db.at();
         // As every write is, so a step that says the log may be frozen is answered, not the end of every row here.
-        self.write_in(scope, &mut *db.lock().await, &self.bucket()?, |c| {
+        self.write_in(scope, &mut db, &self.bucket()?, |c| {
             let ex = |sql: &str, params: &[Value]| crate::database::stored::execute(c, sql, params).map(|_| ());
             match &said {
                 Said::Used { app, user, client, agent, day } => ex(
@@ -237,7 +239,11 @@ impl Node {
             }
         })
         .await?;
-        self.read_status(scope).await
+        let at = db.at();
+        drop(db);
+        // The devices that hold the scope read these rows from their copies, which this fills.
+        self.ping(scope, Some((NODE_DATABASE.0, NODE_DATABASE.1, at)));
+        self.read_status(scope, &self.bucket()?, Some(before)).await
     }
 
     /// A scope's node database, brought to its schema.
@@ -245,10 +251,16 @@ impl Node {
         self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await
     }
 
-    pub(super) async fn read_status(&self, scope: &Scope) -> Result<()> {
+    /// Reads a scope's rows from `bucket` (or only this device's copy of it) after what its database here has, and says
+    /// they changed if there were any since `since` (by default, where it was), or this device hadn't read them yet.
+    pub(super) async fn read_status(&self, scope: &Scope, bucket: &Copied, since: Option<u64>) -> Result<()> {
         let db = self.node_database(scope).await?;
         let mut db = db.lock().await;
-        db.catch_up(&self.bucket()?).await?;
+        let at = since.unwrap_or(db.at());
+        db.catch_up(bucket).await?;
+        if db.at() == at && self.with(|i| Ok(i.status.contains_key(&scope.to_string())))? {
+            return Ok(());
+        }
         let rows = |sql: &str| db.query(sql, &[]);
         let text = |v: &Value| v.as_str().unwrap_or("").to_string();
         let n = |v: &Value| v.as_u64().unwrap_or(0);
@@ -322,23 +334,26 @@ impl Node {
             }
             i.status.insert(scope.to_string(), s);
             Ok(())
-        })
+        })?;
+        self.emit(super::Event::Changed { apps: Vec::new() });
+        Ok(())
     }
 
-    /// Reads every scope's rows this device holds again, for what other devices said: in the background.
-    pub(super) fn read_all_status(&self) {
+    /// Reads every scope's rows this device holds again, for what other devices said, in the background: from the
+    /// bucket, or with `here`, only as far as this device's copy, which their notices fill.
+    pub(super) fn read_all_status(&self, here: bool) {
         let node = self.clone();
         tokio::spawn(async move {
-            let scopes = match node.with(|i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())) {
-                Ok(scopes) => scopes,
+            let (scopes, bucket) = match node.with(|i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).and_then(|s| Ok((s, node.bucket()?))) {
+                Ok(read) => read,
                 Err(err) => return tracing::warn!("reading every scope's status: {err:#}"),
             };
+            let bucket = if here { bucket.here_only() } else { bucket };
             for scope in scopes {
-                if let Err(err) = node.read_status(&scope).await {
+                if let Err(err) = node.read_status(&scope, &bucket, None).await {
                     tracing::warn!("reading {scope}'s status: {err:#}");
                 }
             }
-            node.emit(super::Event::Changed { apps: Vec::new() });
         });
     }
 }

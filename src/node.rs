@@ -88,6 +88,9 @@ const CALL_LIMIT: Duration = Duration::from_secs(30);
 const FAR: Duration = Duration::from_millis(250);
 
 const TICK: Duration = Duration::from_secs(10);
+/// How often a device reads what other devices wrote that no notice told it of, for a notice that was lost; and as it
+/// wakes from sleep, when it may have missed many.
+const REFILL: Duration = Duration::from_secs(120);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
 /// How often a device says hello to the others: how loaded it is, and what its parts are doing.
@@ -347,7 +350,7 @@ impl Node {
             node.keep_alone_here()?;
             node.read_own_items();
             node.follow_net();
-            node.read_all_status();
+            node.read_all_status(false);
             let reader = node.clone();
             tokio::spawn(async move {
                 if let Err(err) = reader.read_scopes().await {
@@ -536,15 +539,21 @@ impl Node {
 
     /// Now and then, reads what other devices wrote and said.
     async fn tick_loop(self) {
+        let mut refilled: Option<SystemTime> = None;
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
             if self.has_network() {
-                if let Err(err) = self.read_scopes().await {
-                    tracing::debug!("reading the bucket: {err:#}");
+                // The wall clock, which runs on while a machine sleeps, as `Instant` doesn't everywhere.
+                let refill = refilled.is_none_or(|at| at.elapsed().unwrap_or_default() >= REFILL);
+                if refill {
+                    refilled = Some(SystemTime::now());
+                    if let Err(err) = self.read_scopes().await {
+                        tracing::debug!("reading the bucket: {err:#}");
+                    }
+                    self.fill_copies().await;
                 }
-                self.fill_copies().await;
                 self.forget_sessions();
-                self.read_all_status();
+                self.read_all_status(!refill);
                 self.read_own_items();
             }
             if tick % 6 == 0 && self.has_network() {

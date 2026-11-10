@@ -30,6 +30,8 @@ pub(super) struct Sessions {
     /// The step keys handed here that opened what the bucket holds of their scope at their epoch, each by a hash of
     /// (scope, epoch, key): not the key, which is kept only while a session that handed it lasts.
     opened_steps: Mutex<HashSet<[u8; 32]>>,
+    /// The oldest epoch each database's reader needs, by its newest hint's name, as that hint said when last read here.
+    oldest: Mutex<HashMap<String, u32>>,
 }
 
 /// A database opened with keys a caller handed: shared only with calls handed exactly them.
@@ -97,6 +99,10 @@ impl Credential {
             Credential::Own | Credential::AppSchedules { .. } => None,
         }
     }
+}
+
+fn hint_name(scope: &Scope, app: &str, database: &str) -> String {
+    crate::database::stored::newest_name(&crate::bucket::database_prefix(&scope.to_string(), app, database))
 }
 
 /// How many hints of a request's databases are read from the bucket at once.
@@ -364,15 +370,18 @@ impl Node {
         if me.credential == Credential::Own {
             return Ok(());
         }
-        // A caller handed every epoch from the first needs none: the hints, read from the bucket, only say how old the
-        // oldest it needs is, and none is older than the first.
-        let handed_all = |(scope, app, database): &(Scope, &str, &str)| -> Result<bool> {
+        // A caller handed every epoch from the oldest it needs needs none. The oldest is as each database's hint said when
+        // this device last read it, which says the same or older than it says now as copies are made under newer epochs,
+        // so it's read from the bucket again only when the caller lacks one of those, or a call found one older needed.
+        let covered = |(scope, app, database): &(Scope, &str, &str)| -> Result<bool> {
+            let newest = self.with(|i| Ok(i.r.db().epoch(scope)?))?.max(1);
+            let oldest = self.0.sessions.oldest.lock().unwrap().get(&hint_name(scope, app, database)).copied().unwrap_or(1).min(newest);
             let handed = self.handed(me, scope, app, database);
-            Ok((1..=self.with(|i| Ok(i.r.db().epoch(scope)?))?.max(1)).all(|n| handed.contains_key(&n)))
+            Ok((oldest..=newest).all(|n| handed.contains_key(&n)))
         };
         let mut lacking = Vec::new();
         for w in want {
-            if !handed_all(w)? {
+            if !covered(w)? {
                 lacking.push(w.clone());
             }
         }
@@ -383,14 +392,14 @@ impl Node {
         let bucket = self.bucket()?;
         // Each database's newest hint, a few at once as a page asks for dozens. R2 now and then holds a read of one for half a minute
         // and resets it: a hint only says how old a key it needs, so without one it asks for the newest, and the page goes on.
-        let hints: Vec<Option<crate::bucket::Object>> = {
+        let hints: Vec<Option<Option<crate::bucket::Object>>> = {
             use futures_util::StreamExt;
             let bucket = &bucket;
-            let names: Vec<String> = want.iter().map(|(scope, app, database)| crate::database::stored::newest_name(&crate::bucket::database_prefix(&scope.to_string(), app, database))).collect();
+            let names: Vec<String> = want.iter().map(|(scope, app, database)| hint_name(scope, app, database)).collect();
             futures_util::stream::iter(names)
                 .map(|name| async move {
                     match tokio::time::timeout(HINT_WITHIN, crate::bucket::Bucket::get(bucket, &name)).await {
-                        Ok(Ok(hint)) => hint,
+                        Ok(Ok(hint)) => Some(hint),
                         Ok(Err(err)) => {
                             tracing::warn!("{name}: {err:#}");
                             None
@@ -408,7 +417,11 @@ impl Node {
         let mut need = Vec::new();
         for ((scope, app, database), hint) in want.iter().zip(hints) {
             let newest = self.newest_epoch(scope).await?.max(1);
-            let oldest = crate::keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest);
+            let oldest = crate::keys::oldest_needed(database, hint.as_ref().and_then(|h| h.as_ref()).map(|o| &o.bytes[..]), newest);
+            // Only what the bucket said, never a read that failed.
+            if hint.is_some() {
+                self.0.sessions.oldest.lock().unwrap().insert(hint_name(scope, app, database), oldest);
+            }
             let handed = self.handed(me, scope, app, database);
             need.extend((oldest..=newest).filter(|n| !handed.contains_key(n)).map(|epoch| Need { scope: scope.to_string(), epoch, app: app.to_string(), database: database.to_string() }));
         }
@@ -437,6 +450,8 @@ impl Node {
         let db = match self.database(scope, app, database, schema, Some(super::databases::Given { keys, bucket: &bucket, until, app_schedules })).await {
             Err(err) => {
                 let epoch = err.downcast_ref::<crate::database::stored::Missing>().map(|m| m.epoch).or(err.downcast_ref::<crate::database::stored::Ahead>().map(|a| a.epoch));
+                // What its hint said when last read here no longer holds: it's read again next time.
+                self.0.sessions.oldest.lock().unwrap().remove(&hint_name(scope, app, database));
                 return match epoch {
                     Some(epoch) => Err(self.need(vec![Need { scope: scope.to_string(), epoch, app: app.into(), database: database.into() }]).into()),
                     None => Err(err),
