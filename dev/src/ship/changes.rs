@@ -45,7 +45,7 @@ impl Parts {
         Parts { node: true, mac: true, dev: true, workers: true, web: true, ..Default::default() }
     }
 
-    fn add_rust(&mut self) {
+    pub(super) fn add_rust(&mut self) {
         let Parts { node, mac, dev, workers, web, .. } = Parts::rust();
         (self.node, self.mac, self.dev, self.workers, self.web) = (node, mac, dev, workers, web);
     }

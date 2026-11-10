@@ -130,6 +130,7 @@ fn changes(commit: Option<&str>) -> Result<()> {
         Some(_) => At::at(commit)?,
         None => to_send()?,
     };
+    rebuild_if_stale(&at)?;
     println!("{}, against what each part last sent:", at.build_name());
     let yes = |b: bool| if b { "yes".to_string() } else { "no".to_string() };
     let list = |names: Vec<String>| if names.is_empty() { "none".to_string() } else { names.join(", ") };
@@ -162,6 +163,7 @@ fn github_release(tag: &str) -> Result<()> {
     let key = release_key()?;
     let _turn = turn()?;
     let at = to_send()?;
+    rebuild_if_stale(&at)?;
     let folder = match at.build() {
         Some(folder) => folder,
         None => build_release(&at)?,
