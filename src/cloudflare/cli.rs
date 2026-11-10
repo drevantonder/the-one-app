@@ -122,6 +122,7 @@ pub fn commands() -> Command {
                 ["cloudflare", "deploy"] => {
                     let loaded = crate::cloudflare::Settings::load();
                     // A throwaway network's Workers run here, not on Cloudflare: they start again on the newest.
+                    #[cfg(unix)]
                     if let Some(settings) = loaded.as_ref().ok().filter(|s| s.throwaway_user.is_some()) {
                         crate::cloudflare::redeploy(settings)?;
                         println!("Asked the Workers to start again on the newest.");
