@@ -41,8 +41,8 @@ var j = one.api, M = (e) => one.plain(e).title, N = one.config.yours, P = (e) =>
 	if (e.platform === "cloudflare") return H("cloud");
 	let t = V(e.name);
 	return H(t === "desktop" && /iphone|android/.test(e.platform || "") ? "device-mobile" : t, W[e.platform] || B("", e.name));
-}, K = { cloud: !0 };
-function q(e) {
+}, ee = { cloud: !0 };
+function K(e) {
 	if (e?.passkey) return "Passkey";
 	let t = e?.provider;
 	if (!t) return "";
@@ -57,8 +57,8 @@ function q(e) {
 	}[n] || n;
 	return [t.email, r].filter(Boolean).join(" · ");
 }
-var J = {}, Y = 3e4, ee = 1e4, te = 3e5;
-function ne(e, t) {
+var q = {}, J = 3e4, Y = 1e4, X = 3e5;
+function Z(e, t) {
 	let { state: n, device: r, apps: i, seen: a, seenRead: o, versions: s } = e, c = n.user?.id, l = n.user?.role === "admin", u = (e) => i.find((t) => t.name === e), d = (e) => u(e)?.title || e, f = (e) => (e.runs_for || []).includes(`user:${c}`), p = (e) => n.network?.users.find((t) => t.id === e)?.name || "someone";
 	function m() {
 		let e = (e) => ({
@@ -92,12 +92,12 @@ function ne(e, t) {
 	}
 	let h = m();
 	function g(e, t) {
-		let n = `${e.node.key} ${t.name}`, r = J[n];
-		return r ? r.state !== "failed" && t.on === r.on && (!r.again || t.doing || t.problem !== r.again) ? (delete J[n], t) : r.state === "failed" ? t.on === r.on ? (delete J[n], t) : {
+		let n = `${e.node.key} ${t.name}`, r = q[n];
+		return r ? r.state !== "failed" && t.on === r.on && (!r.again || t.doing || t.problem !== r.again) ? (delete q[n], t) : r.state === "failed" ? t.on === r.on ? (delete q[n], t) : {
 			...t,
 			failed: r.error,
 			wanted: r.on
-		} : r.again && t.on === r.on && r.state === "written" && Date.now() - r.at > ee ? (delete J[n], t) : Date.now() - r.at < Y ? {
+		} : r.again && t.on === r.on && r.state === "written" && Date.now() - r.at > Y ? (delete q[n], t) : Date.now() - r.at < J ? {
 			...t,
 			on: r.on,
 			doing: r.on ? "Starting" : "Stopping",
@@ -166,7 +166,7 @@ function ne(e, t) {
 		return t && e.push({
 			id: "cloudflare",
 			name: "Cloudflare",
-			icon: K,
+			icon: ee,
 			whose: "",
 			p: t.priority ?? "last",
 			keys: ["cloudflare"]
@@ -191,7 +191,7 @@ function ne(e, t) {
 			e.push({
 				c: null,
 				name: "Cloudflare",
-				icon: K,
+				icon: ee,
 				parts: n.map((e) => e.fixed || !l ? {
 					...e,
 					fixed: !0
@@ -229,7 +229,7 @@ function ne(e, t) {
 		runners: (e) => (n.network?.devices || []).filter((t) => (t.runs_for || []).includes(e))
 	};
 }
-function X() {
+function Q() {
 	let [e, i] = r(null), [a, s] = r(null), [c, l] = r(""), [u, d] = r([
 		"devices",
 		"priority",
@@ -275,10 +275,10 @@ function X() {
 		W().then((t) => {
 			if (!t) return;
 			let n = String(one.params?.approve || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
-			n && !t.waiting.some((e) => n.startsWith(e.code.replaceAll(" ", ""))) && K(n), e && t.device.keys ? P({ schedules: e }) : one.params?.add && P({ add: !0 });
+			n && !t.waiting.some((e) => n.startsWith(e.code.replaceAll(" ", ""))) && ee(n), e && t.device.keys ? P({ schedules: e }) : one.params?.add && P({ add: !0 });
 		}), one.on("changed", () => W());
 	}, []);
-	async function K(e) {
+	async function ee(e) {
 		let t = String(e).toUpperCase().replace(/[^A-Z2-7]/g, "");
 		try {
 			let e = await j("POST", "/api/devices/approve", { code: t });
@@ -290,33 +290,33 @@ function X() {
 			S({ error: M(e) });
 		}
 	}
-	async function q(e, t, n = null) {
+	async function K(e, t, n = null) {
 		let r = `${e.device} ${e.name ?? e.service}`, i = Date.now();
-		J[r] = {
+		q[r] = {
 			on: t,
 			again: n,
 			at: i,
 			state: "sent"
 		}, V((e) => e + 1);
-		for (let e of n ? [ee, Y] : [Y]) setTimeout(() => J[r]?.at === i && W(), e + 500);
+		for (let e of n ? [Y, J] : [J]) setTimeout(() => q[r]?.at === i && W(), e + 500);
 		try {
 			await j("POST", "/api/service", {
 				device: e.device,
 				name: e.name ?? e.service,
 				on: t
-			}), J[r]?.at === i && (J[r].state = "written");
+			}), q[r]?.at === i && (q[r].state = "written");
 		} catch (t) {
-			if (J[r]?.at === i && (J[r] = {
-				...J[r],
+			if (q[r]?.at === i && (q[r] = {
+				...q[r],
 				state: "failed",
 				error: M(t)
 			}), e.service) throw t;
 			one.tap("error");
 		}
 	}
-	let X = e && ne(e, (e, t, n) => () => G(() => q(e, t, n)));
-	function Z(t, n) {
-		let { cols: r, last: a } = X.board(), o = [...r.flat(), ...a].find((e) => e.id === t);
+	let Q = e && Z(e, (e, t, n) => () => G(() => K(e, t, n)));
+	function te(t, n) {
+		let { cols: r, last: a } = Q.board(), o = [...r.flat(), ...a].find((e) => e.id === t);
 		if (!o) return;
 		let s = r.map((e) => e.filter((e) => e.id !== t)), c = a.filter((e) => e.id !== t);
 		n === "last" ? c.push(o) : n === "new" ? s.push([o]) : s[Number(n)]?.push(o), s = s.filter((e) => e.length);
@@ -352,11 +352,11 @@ function X() {
 			value: f
 		})));
 	}
-	let ie = n(0);
-	async function Q(e, t) {
-		if (Date.now() - ie.current < 800) return;
-		ie.current = Date.now();
-		let { cols: n } = X.board(), r = n.findIndex((t) => t.some((t) => t.id === e)), i = r !== n.length - 1 || n[r].length !== 1, a = [
+	let ne = n(0);
+	async function re(e, t) {
+		if (Date.now() - ne.current < 800) return;
+		ne.current = Date.now();
+		let { cols: n } = Q.board(), r = n.findIndex((t) => t.some((t) => t.id === e)), i = r !== n.length - 1 || n[r].length !== 1, a = [
 			...n.map((e, t) => t),
 			...i ? ["new"] : [],
 			"last"
@@ -371,13 +371,13 @@ function X() {
 			title: I(e + 1),
 			checked: e === r
 		}), s = await one.menu(o, t).catch(() => null);
-		ie.current = Date.now(), s != null && Z(e, a[s]);
+		ne.current = Date.now(), s != null && te(e, a[s]);
 	}
-	Ce(U, (e, t) => re.current.place(e, t), (e, t) => re.current.moveMenu(e, t)), re.current = {
-		place: (...e) => Z(...e),
-		moveMenu: (...e) => Q(...e)
+	Ce(U, (e, t) => $.current.place(e, t), (e, t) => $.current.moveMenu(e, t)), $.current = {
+		place: (...e) => te(...e),
+		moveMenu: (...e) => re(...e)
 	};
-	async function ae(e, t, n) {
+	async function ie(e, t, n) {
 		let r = t ? [] : [{
 			title: "Rename",
 			icon: "pencil-simple"
@@ -404,9 +404,9 @@ function X() {
 		}) : r[a].title === "This Device’s Code" ? G(async () => one.alert({
 			title: "This Device’s Code",
 			text: (await j("GET", "/api/devices/code")).code
-		})) : e.me ? fe() : le(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null));
+		})) : e.me ? de() : ce(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null));
 	}
-	async function le(e, t, n) {
+	async function ce(e, t, n) {
 		if (n) return P({ remove: {
 			name: e,
 			keys: t,
@@ -420,7 +420,7 @@ function X() {
 			for (let e of t) await j("POST", "/api/devices/remove", { device: e });
 		}));
 	}
-	async function ue(e) {
+	async function le(e) {
 		let t = e.old.length, n = e.name ? ` of ${e.name}` : "";
 		await one.alert({
 			title: `Remove ${t} old sign-in${t > 1 ? "s" : ""}${n}?`,
@@ -430,19 +430,19 @@ function X() {
 			for (let t of e.old) await j("POST", "/api/devices/remove", { device: t.key });
 		});
 	}
-	async function fe() {
+	async function de() {
 		await one.alert({
 			title: `Sign Out of ${N} on this device?`,
 			action: "Sign Out",
 			danger: !0
 		}) && one.signOut();
 	}
-	async function pe(e) {
+	async function fe(e) {
 		l(""), one.tap("medium");
 		for (let t of e) {
 			B({ [t.node.key]: !0 });
 			try {
-				if (await j("POST", "/api/devices/update", { device: t.node.key }), !await me(t.node.key)) {
+				if (await j("POST", "/api/devices/update", { device: t.node.key }), !await pe(t.node.key)) {
 					l(`${t.name} didn’t come back on the new version.`), one.tap("error");
 					break;
 				}
@@ -453,8 +453,8 @@ function X() {
 		}
 		B({}), await W();
 	}
-	async function me(e) {
-		let t = Date.now() + te;
+	async function pe(e) {
+		let t = Date.now() + X;
 		for (; Date.now() < t;) {
 			await new Promise((e) => setTimeout(e, 3e3));
 			let t = await j("POST", "/api/devices/versions", {}).catch(() => null);
@@ -462,16 +462,16 @@ function X() {
 		}
 		return !1;
 	}
-	function he(e) {
-		let t = e.slice(0, e.indexOf(" ")), n = e.slice(e.indexOf(" ") + 1), r = X.gridColumns()[t], i = r?.parts.find((e) => e.name === n);
+	function me(e) {
+		let t = e.slice(0, e.indexOf(" ")), n = e.slice(e.indexOf(" ") + 1), r = Q.gridColumns()[t], i = r?.parts.find((e) => e.name === n);
 		if (i) {
-			if (r.c && X.problemOf(r.c, i)) return y(h === e ? "" : e);
-			!i.fixed && i.part && (one.tap(), G(() => q(i.part, !i.on)));
+			if (r.c && Q.problemOf(r.c, i)) return y(h === e ? "" : e);
+			!i.fixed && i.part && (one.tap(), G(() => K(i.part, !i.on)));
 		}
 	}
-	let ge = async (e, t) => {
+	let he = async (e, t) => {
 		one.tap(), R(e), await G(t), R("");
-	}, _e = /* @__PURE__ */ k(C, {
+	}, ge = /* @__PURE__ */ k(C, {
 		value: u,
 		onValueChange: d,
 		children: /* @__PURE__ */ A(w, {
@@ -491,56 +491,56 @@ function X() {
 				})
 			]
 		})
-	}), ve;
-	if (!e) ve = a ? /* @__PURE__ */ k(_, {
+	}), _e;
+	if (!e) _e = a ? /* @__PURE__ */ k(_, {
 		problem: a,
 		retry: () => W()
-	}) : /* @__PURE__ */ A(O, { children: [_e, /* @__PURE__ */ k(g, { rows: 3 })] });
+	}) : /* @__PURE__ */ A(O, { children: [ge, /* @__PURE__ */ k(g, { rows: 3 })] });
 	else {
-		let { waiting: t, device: n } = e, r = X.justJoined();
-		ve = /* @__PURE__ */ A(O, { children: [
+		let { waiting: t, device: n } = e, r = Q.justJoined();
+		_e = /* @__PURE__ */ A(O, { children: [
 			!!t.length && /* @__PURE__ */ k(b, {
 				title: "Waiting for you",
-				children: t.map((e) => /* @__PURE__ */ k(oe, {
+				children: t.map((e) => /* @__PURE__ */ k(ae, {
 					r: e,
 					busy: L === e.code,
-					answer: ge
+					answer: he
 				}, e.code))
 			}),
-			r.map((e) => /* @__PURE__ */ k(se, {
+			r.map((e) => /* @__PURE__ */ k(oe, {
 				c: e,
-				remove: () => le(e.name, [e.key], null)
+				remove: () => ce(e.name, [e.key], null)
 			}, e.key)),
 			x?.error && /* @__PURE__ */ k(v, { title: x.error }),
-			x?.r && /* @__PURE__ */ k(ce, {
+			x?.r && /* @__PURE__ */ k(se, {
 				scan: x,
 				done: () => (S(null), W()),
 				cancel: () => S(null)
 			}),
-			_e,
-			u === "priority" ? /* @__PURE__ */ k(xe, {
-				m: X,
-				move: Q
+			ge,
+			u === "priority" ? /* @__PURE__ */ k(be, {
+				m: Q,
+				move: re
 			}) : u === "services" ? /* @__PURE__ */ k(Te, {
-				m: X,
+				m: Q,
 				cellOpen: h,
-				tap: he
-			}) : /* @__PURE__ */ k(de, {
-				m: X,
+				tap: me
+			}) : /* @__PURE__ */ k(ue, {
+				m: Q,
 				data: e,
 				opened: p,
 				flag: (e) => m((t) => ({
 					...t,
 					[e]: !t[e]
 				})),
-				menu: ae,
-				removeOld: ue,
-				signOut: fe,
+				menu: ie,
+				removeOld: le,
+				signOut: de,
 				schedule: () => P({ schedules: {} }),
 				restore: () => P({ restore: {} }),
 				act: G,
 				updating: z,
-				update: pe
+				update: fe
 			}),
 			c && /* @__PURE__ */ k(v, { title: c })
 		] });
@@ -560,7 +560,7 @@ function X() {
 					children: "Devices"
 				})
 			}),
-			ve,
+			_e,
 			e && E.for?.rename && /* @__PURE__ */ k(Ae, {
 				card: E.for.rename,
 				open: E.open,
@@ -591,7 +591,7 @@ function X() {
 				done: () => (F(!1), W())
 			}, E.n),
 			e && E.for?.schedules && /* @__PURE__ */ k(Re, {
-				m: X,
+				m: Q,
 				asked: E.for.schedules,
 				open: E.open,
 				setOpen: F,
@@ -600,17 +600,17 @@ function X() {
 		]
 	});
 }
-var re = { current: {
+var $ = { current: {
 	place() {},
 	moveMenu() {}
-} }, Z = (t) => {
+} }, te = (t) => {
 	let n = e(2), { children: r } = t, i;
 	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ k("p", {
 		className: "max-w-2xl text-sm text-muted-foreground",
 		children: r
 	}), n[0] = r, n[1] = i), i;
 };
-function ie(t) {
+function ne(t) {
 	let n = e(4), { className: r } = t, i, a;
 	n[0] === Symbol.for("react.memo_cache_sentinel") ? (i = /* @__PURE__ */ k("path", {
 		fill: "#F38020",
@@ -627,13 +627,13 @@ function ie(t) {
 		children: [i, a]
 	}), n[2] = r, n[3] = o), o;
 }
-function Q(t) {
+function re(t) {
 	let n = e(16), { icon: r, className: i } = t;
 	if (r.cloud) {
 		let e;
 		n[0] === i ? e = n[1] : (e = E("grid size-8 shrink-0 place-items-center", i), n[0] = i, n[1] = e);
 		let t;
-		n[2] === Symbol.for("react.memo_cache_sentinel") ? (t = /* @__PURE__ */ k(ie, { className: "size-8" }), n[2] = t) : t = n[2];
+		n[2] === Symbol.for("react.memo_cache_sentinel") ? (t = /* @__PURE__ */ k(ne, { className: "size-8" }), n[2] = t) : t = n[2];
 		let r;
 		return n[3] === e ? r = n[4] : (r = /* @__PURE__ */ k("span", {
 			className: e,
@@ -658,9 +658,9 @@ function Q(t) {
 		children: [s, c]
 	}), n[12] = o, n[13] = s, n[14] = c, n[15] = u) : u = n[15], u;
 }
-function ae(t) {
+function ie(t) {
 	let n = e(13), { icon: r, title: i, sub: a, children: o } = t, s;
-	n[0] === r ? s = n[1] : (s = /* @__PURE__ */ k(Q, { icon: r }), n[0] = r, n[1] = s);
+	n[0] === r ? s = n[1] : (s = /* @__PURE__ */ k(re, { icon: r }), n[0] = r, n[1] = s);
 	let c;
 	n[2] === i ? c = n[3] : (c = /* @__PURE__ */ k("span", {
 		className: "block truncate font-medium",
@@ -686,7 +686,7 @@ function ae(t) {
 		]
 	}), n[9] = o, n[10] = s, n[11] = u, n[12] = d) : d = n[12], d;
 }
-function oe(t) {
+function ae(t) {
 	let n = e(60), { r, busy: i, answer: a } = t, s = r.yours ? "" : r.lost ? `${r.user}, with no device left` : `${r.user}’s first device`, c;
 	n[0] !== r.place || n[1] !== s ? (c = [s, r.place].filter(Boolean), n[0] = r.place, n[1] = s, n[2] = c) : c = n[2];
 	let l = c.join(" · "), u = `${r.device} wants to join`, d;
@@ -695,7 +695,7 @@ function oe(t) {
 		platform: r.platform
 	}), n[3] = r.device, n[4] = r.platform, n[5] = d) : d = n[5];
 	let f;
-	n[6] === d ? f = n[7] : (f = /* @__PURE__ */ k(Q, { icon: d }), n[6] = d, n[7] = f);
+	n[6] === d ? f = n[7] : (f = /* @__PURE__ */ k(re, { icon: d }), n[6] = d, n[7] = f);
 	let p;
 	n[8] === r.device ? p = n[9] : (p = /* @__PURE__ */ k("span", {
 		className: "block font-medium break-words",
@@ -707,9 +707,9 @@ function oe(t) {
 		children: l
 	}), n[10] = l, n[11] = m);
 	let h;
-	n[12] === r.sign_in ? h = n[13] : (h = q(r.sign_in) && /* @__PURE__ */ k("span", {
+	n[12] === r.sign_in ? h = n[13] : (h = K(r.sign_in) && /* @__PURE__ */ k("span", {
 		className: "block break-words text-muted-foreground",
-		children: q(r.sign_in)
+		children: K(r.sign_in)
 	}), n[12] = r.sign_in, n[13] = h);
 	let g;
 	n[14] === r.replaces ? g = n[15] : (g = r.replaces && /* @__PURE__ */ A("span", {
@@ -789,7 +789,7 @@ function oe(t) {
 		]
 	}), n[55] = y, n[56] = w, n[57] = P, n[58] = u, n[59] = F) : F = n[59], F;
 }
-function se(t) {
+function oe(t) {
 	let n = e(14), { c: r, remove: i } = t, a;
 	n[0] === r ? a = n[1] : (a = G(r), n[0] = r, n[1] = a);
 	let s = `${r.name} joined`, c = r.place, l;
@@ -805,14 +805,14 @@ function se(t) {
 		children: "Remove"
 	}), n[7] = i, n[8] = f);
 	let m;
-	return n[9] !== a || n[10] !== s || n[11] !== d || n[12] !== f ? (m = /* @__PURE__ */ k(p, { children: /* @__PURE__ */ k(ae, {
+	return n[9] !== a || n[10] !== s || n[11] !== d || n[12] !== f ? (m = /* @__PURE__ */ k(p, { children: /* @__PURE__ */ k(ie, {
 		icon: a,
 		title: s,
 		sub: d,
 		children: f
 	}) }), n[9] = a, n[10] = s, n[11] = d, n[12] = f, n[13] = m) : m = n[13], m;
 }
-function ce(t) {
+function se(t) {
 	let n = e(35), { scan: i, done: a, cancel: s } = t, { code: c, r: l } = i, [u, d] = r(!1), [f, p] = r(""), m;
 	n[0] !== c || n[1] !== a ? (m = async function() {
 		one.tap(), d(!0), p("");
@@ -840,9 +840,9 @@ function ce(t) {
 		children: y
 	}), n[5] = y, n[6] = b);
 	let S;
-	n[7] === l.sign_in ? S = n[8] : (S = q(l.sign_in) && /* @__PURE__ */ k("div", {
+	n[7] === l.sign_in ? S = n[8] : (S = K(l.sign_in) && /* @__PURE__ */ k("div", {
 		className: "text-sm text-muted-foreground",
-		children: q(l.sign_in)
+		children: K(l.sign_in)
 	}), n[7] = l.sign_in, n[8] = S);
 	let C;
 	n[9] === l.replaces ? C = n[10] : (C = l.replaces && /* @__PURE__ */ A("div", {
@@ -890,39 +890,42 @@ function ce(t) {
 		]
 	}), n[30] = P, n[31] = g, n[32] = w, n[33] = T, n[34] = F) : F = n[34], F;
 }
-var le = {
+var ce = {
 	iphone: "the App Store",
 	android: "Google Play"
-}, ue = (e) => {
-	let t = le[e.signIn?.platform];
+}, le = (e) => {
+	let t = ce[e.signIn?.platform];
 	return [e.version && `Version ${e.version.version.slice(0, 7)}`, t && `Updates from ${t}`].filter(Boolean).join(" · ");
 };
-function de(t) {
-	let n = e(49), { m: r, data: i, opened: a, flag: s, menu: c, removeOld: u, signOut: d, schedule: f, restore: h, act: g, updating: _, update: v } = t, { device: y, state: S } = i, { cards: C, passkeys: w, stale: T } = r.drawn, D;
-	if (n[0] !== g || n[1] !== C || n[2] !== i.seen || n[3] !== y || n[4] !== s || n[5] !== r || n[6] !== c || n[7] !== a || n[8] !== w || n[9] !== u || n[10] !== h || n[11] !== f || n[12] !== d || n[13] !== T || n[14] !== S.network || n[15] !== v || n[16] !== _) {
+function ue(t) {
+	let n = e(56), { m: r, data: i, opened: a, flag: s, menu: c, removeOld: u, signOut: d, schedule: f, restore: h, act: g, updating: _, update: v } = t, { device: y, state: S } = i, { cards: C, passkeys: w, stale: T } = r.drawn, D;
+	if (n[0] !== g || n[1] !== C || n[2] !== i.seen || n[3] !== i.versions.cloudflare || n[4] !== y || n[5] !== s || n[6] !== r || n[7] !== c || n[8] !== a || n[9] !== w || n[10] !== u || n[11] !== h || n[12] !== f || n[13] !== d || n[14] !== T || n[15] !== S.network || n[16] !== v || n[17] !== _) {
 		let e;
-		n[18] === r.me ? e = n[19] : (e = (e) => e.user === r.me, n[18] = r.me, n[19] = e);
-		let t = C.filter(e), O = y.keys ? (S.network?.app_schedules || []).filter(ve) : [], M = !!y.keys && (O.length > 0 || r.scheduled().length > 0), N;
-		if (n[20] !== r || n[21] !== S.network) {
+		n[19] === r.me ? e = n[20] : (e = (e) => e.user === r.me, n[19] = r.me, n[20] = e);
+		let t = C.filter(e), O = y.keys ? (S.network?.app_schedules || []).filter(_e) : [], M = !!y.keys && (O.length > 0 || r.scheduled().length > 0), N;
+		if (n[21] !== r || n[22] !== S.network) {
 			if (N = [], S.network?.recovery_used && (r.admin || S.network.recovery_used.user === r.me)) {
 				let e = S.network.recovery_used, t;
-				n[23] !== r || n[24] !== e.user ? (t = e.user === r.me ? "yours" : `${r.userName(e.user)}’s`, n[23] = r, n[24] = e.user, n[25] = t) : t = n[25];
+				n[24] !== r || n[25] !== e.user ? (t = e.user === r.me ? "yours" : `${r.userName(e.user)}’s`, n[24] = r, n[25] = e.user, n[26] = t) : t = n[26];
 				let i;
-				n[26] === e.time ? i = n[27] : (i = R(e.time), n[26] = e.time, n[27] = i), N.push(`The recovery key last let in a device of ${t}, ${i}.`);
+				n[27] === e.time ? i = n[28] : (i = R(e.time), n[27] = e.time, n[28] = i), N.push(`The recovery key last let in a device of ${t}, ${i}.`);
 			}
-			n[20] = r, n[21] = S.network, n[22] = N;
-		} else N = n[22];
+			n[21] = r, n[22] = S.network, n[23] = N;
+		} else N = n[23];
 		let I;
-		n[28] !== y.keys || n[29] !== S.network?.users ? (I = !!y.keys && !!S.network?.users?.find(_e)?.recovery_holder, n[28] = y.keys, n[29] = S.network?.users, n[30] = I) : I = n[30];
-		let L = I, z = M || w.length > 0 || N.length > 0 || L, B = t.filter(ge).sort(he), V = z && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]", U;
-		n[31] === V ? U = n[32] : (U = E("grid max-w-5xl items-start gap-x-8 gap-y-8", V), n[31] = V, n[32] = U);
-		let W = B.length > 1 && /* @__PURE__ */ k(o, {
+		n[29] !== y.keys || n[30] !== S.network?.users ? (I = !!y.keys && !!S.network?.users?.find(ge)?.recovery_holder, n[29] = y.keys, n[30] = S.network?.users, n[31] = I) : I = n[31];
+		let L = I, z = M || w.length > 0 || N.length > 0 || L, B = t.filter(he).sort(me), V = i.versions.cloudflare, U = r.admin && V?.behind ? {
+			name: "Cloudflare",
+			node: { key: "cloudflare" }
+		} : null, W = U ? [...B, U] : B, G = z && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]", K;
+		n[32] === G ? K = n[33] : (K = E("grid max-w-5xl items-start gap-x-8 gap-y-8", G), n[32] = G, n[33] = K);
+		let q = W.length > 1 && /* @__PURE__ */ k(o, {
 			variant: "outline",
 			className: "self-start",
 			disabled: Object.keys(_).length > 0,
-			onClick: () => v(B),
+			onClick: () => v(W),
 			children: "Update All"
-		}), G = !!t.length && /* @__PURE__ */ k(p, { children: t.map((e) => {
+		}), J = !!t.length && /* @__PURE__ */ k(p, { children: t.map((e) => {
 			let n = t.some((t) => t !== e && t.name === e.name), i = e.me ? "This device" : e.seen && Date.now() - e.seen > 36e5 ? F(e.seen) : n && e.signIn?.since ? `Joined ${F(e.signIn.since)}` : "", d = r.problemsOf(e), f = d.length > 0 && a[e.id];
 			return /* @__PURE__ */ A("div", {
 				onContextMenu: (t) => (t.preventDefault(), c(e, !1, {
@@ -930,10 +933,10 @@ function de(t) {
 					y: t.clientY
 				})),
 				children: [
-					/* @__PURE__ */ A(ae, {
+					/* @__PURE__ */ A(ie, {
 						icon: e.icon,
 						title: e.name,
-						sub: [i, ue(e)].filter(Boolean).join(" · "),
+						sub: [i, le(e)].filter(Boolean).join(" · "),
 						children: [
 							B.includes(e) && /* @__PURE__ */ A(o, {
 								variant: "outline",
@@ -954,51 +957,65 @@ function de(t) {
 									className: "size-5"
 								})
 							}),
-							/* @__PURE__ */ k(ye, {
+							/* @__PURE__ */ k(ve, {
 								name: e.name,
 								onClick: (t) => c(e, !1, t.currentTarget)
 							})
 						]
 					}),
-					f && d.map(me),
-					/* @__PURE__ */ k(be, {
+					f && d.map(pe),
+					/* @__PURE__ */ k(ye, {
 						c: e,
 						remove: () => u(e)
 					})
 				]
 			}, e.id);
-		}) }), K;
-		n[33] !== u || n[34] !== T ? (K = !!T.length && /* @__PURE__ */ k(p, { children: /* @__PURE__ */ k(be, {
+		}) }), Y;
+		n[34] !== V || n[35] !== U || n[36] !== v || n[37] !== _ ? (Y = V && /* @__PURE__ */ k(p, { children: /* @__PURE__ */ k(ie, {
+			icon: ee,
+			title: "Cloudflare",
+			sub: [`Version ${V.version.slice(0, 7)}`, V.node && V.node !== V.version && `Apps run on ${V.node.slice(0, 7)}`].filter(Boolean).join(" · "),
+			children: U && /* @__PURE__ */ A(o, {
+				variant: "outline",
+				size: "sm",
+				disabled: Object.keys(_).length > 0,
+				onClick: () => v([U]),
+				children: [_.cloudflare && /* @__PURE__ */ k(x, {}), "Update"]
+			})
+		}) }), n[34] = V, n[35] = U, n[36] = v, n[37] = _, n[38] = Y) : Y = n[38];
+		let X;
+		n[39] !== u || n[40] !== T ? (X = !!T.length && /* @__PURE__ */ k(p, { children: /* @__PURE__ */ k(ye, {
 			c: { old: T },
 			remove: () => u({ old: T })
-		}) }), n[33] = u, n[34] = T, n[35] = K) : K = n[35];
-		let q;
-		n[36] !== C || n[37] !== y.signOut || n[38] !== d ? (q = y.signOut && !C.some(pe) && /* @__PURE__ */ k(o, {
+		}) }), n[39] = u, n[40] = T, n[41] = X) : X = n[41];
+		let Z;
+		n[42] !== C || n[43] !== y.signOut || n[44] !== d ? (Z = y.signOut && !C.some(fe) && /* @__PURE__ */ k(o, {
 			variant: "ghost",
 			className: "self-start text-destructive",
 			onClick: d,
 			children: "Sign Out"
-		}), n[36] = C, n[37] = y.signOut, n[38] = d, n[39] = q) : q = n[39];
-		let J;
-		n[40] !== g || n[41] !== y ? (J = y.notify === "default" && /* @__PURE__ */ A(o, {
+		}), n[42] = C, n[43] = y.signOut, n[44] = d, n[45] = Z) : Z = n[45];
+		let Q;
+		n[46] !== g || n[47] !== y ? (Q = y.notify === "default" && /* @__PURE__ */ A(o, {
 			variant: "ghost",
 			className: "self-start",
 			onClick: () => g(async () => y.notify = await one.notify()),
 			children: [/* @__PURE__ */ k(l, { name: "bell" }), "Get Notifications Here"]
-		}), n[40] = g, n[41] = y, n[42] = J) : J = n[42];
-		let Y;
-		n[43] !== J || n[44] !== W || n[45] !== G || n[46] !== K || n[47] !== q ? (Y = /* @__PURE__ */ A("div", {
+		}), n[46] = g, n[47] = y, n[48] = Q) : Q = n[48];
+		let $;
+		n[49] !== Z || n[50] !== Q || n[51] !== q || n[52] !== J || n[53] !== Y || n[54] !== X ? ($ = /* @__PURE__ */ A("div", {
 			className: "flex min-w-0 flex-col gap-4",
 			children: [
-				W,
-				G,
-				K,
 				q,
-				J
+				J,
+				Y,
+				X,
+				Z,
+				Q
 			]
-		}), n[43] = J, n[44] = W, n[45] = G, n[46] = K, n[47] = q, n[48] = Y) : Y = n[48], D = /* @__PURE__ */ A("div", {
-			className: U,
-			children: [Y, !!z && /* @__PURE__ */ A("div", {
+		}), n[49] = Z, n[50] = Q, n[51] = q, n[52] = J, n[53] = Y, n[54] = X, n[55] = $) : $ = n[55], D = /* @__PURE__ */ A("div", {
+			className: K,
+			children: [$, !!z && /* @__PURE__ */ A("div", {
 				className: "flex min-w-0 flex-col gap-8",
 				children: [
 					M && /* @__PURE__ */ A(b, {
@@ -1046,7 +1063,7 @@ function de(t) {
 							icon: /* @__PURE__ */ k(l, { name: "arrows-clockwise" }),
 							onClick: f,
 							children: "Run an App’s Schedules"
-						})] }), !!O.length && /* @__PURE__ */ k(Z, { children: "Once one stops, that device can’t open the app’s data." })]
+						})] }), !!O.length && /* @__PURE__ */ k(te, { children: "Once one stops, that device can’t open the app’s data." })]
 					}),
 					!!w.length && /* @__PURE__ */ k(b, {
 						title: "Passkeys",
@@ -1055,11 +1072,11 @@ function de(t) {
 								x: t.clientX,
 								y: t.clientY
 							})),
-							children: /* @__PURE__ */ k(ae, {
+							children: /* @__PURE__ */ k(ie, {
 								icon: H("key"),
 								title: e.name,
 								sub: i.seen[e.key] && Date.now() - i.seen[e.key] > 36e5 ? F(i.seen[e.key]) : "",
-								children: /* @__PURE__ */ k(ye, {
+								children: /* @__PURE__ */ k(ve, {
 									name: e.name,
 									onClick: (t) => c(e, !0, t.currentTarget)
 								})
@@ -1073,21 +1090,21 @@ function de(t) {
 					}) }),
 					N.length > 0 && /* @__PURE__ */ k("div", {
 						className: "flex flex-col gap-2",
-						children: N.map(fe)
+						children: N.map(de)
 					})
 				]
 			})]
-		}), n[0] = g, n[1] = C, n[2] = i.seen, n[3] = y, n[4] = s, n[5] = r, n[6] = c, n[7] = a, n[8] = w, n[9] = u, n[10] = h, n[11] = f, n[12] = d, n[13] = T, n[14] = S.network, n[15] = v, n[16] = _, n[17] = D;
-	} else D = n[17];
+		}), n[0] = g, n[1] = C, n[2] = i.seen, n[3] = i.versions.cloudflare, n[4] = y, n[5] = s, n[6] = r, n[7] = c, n[8] = a, n[9] = w, n[10] = u, n[11] = h, n[12] = f, n[13] = d, n[14] = T, n[15] = S.network, n[16] = v, n[17] = _, n[18] = D;
+	} else D = n[18];
 	return D;
 }
-function fe(e) {
-	return /* @__PURE__ */ k(Z, { children: e }, e);
+function de(e) {
+	return /* @__PURE__ */ k(te, { children: e }, e);
 }
-function pe(e) {
+function fe(e) {
 	return e.me;
 }
-function me(e, t) {
+function pe(e, t) {
 	return /* @__PURE__ */ k("div", {
 		className: "px-3 pb-3 pl-14",
 		children: /* @__PURE__ */ k(v, {
@@ -1096,19 +1113,19 @@ function me(e, t) {
 		})
 	}, t);
 }
-function he(e, t) {
+function me(e, t) {
 	return t.me - e.me;
 }
-function ge(e) {
+function he(e) {
 	return e.node && e.online && e.version?.behind;
 }
-function _e(e) {
+function ge(e) {
 	return e.me;
 }
-function ve(e) {
+function _e(e) {
 	return e.until > Date.now();
 }
-var ye = (t) => {
+var ve = (t) => {
 	let n = e(4), { name: r, onClick: i } = t, a = `More for ${r}`, s;
 	n[0] === Symbol.for("react.memo_cache_sentinel") ? (s = /* @__PURE__ */ k(l, {
 		name: "dots-three-outline-fill",
@@ -1122,7 +1139,7 @@ var ye = (t) => {
 		onClick: i,
 		children: s
 	}), n[1] = i, n[2] = a, n[3] = c) : c = n[3], c;
-}, be = (t) => {
+}, ye = (t) => {
 	let n = e(3), { c: r, remove: i } = t, a;
 	return n[0] !== r.old.length || n[1] !== i ? (a = r.old.length > 0 ? /* @__PURE__ */ A("div", {
 		className: "flex items-center gap-3 px-3 py-1.5 pl-14 text-sm text-muted-foreground",
@@ -1142,13 +1159,13 @@ var ye = (t) => {
 		})]
 	}) : null, n[0] = r.old.length, n[1] = i, n[2] = a) : a = n[2], a;
 };
-function xe(t) {
+function be(t) {
 	let n = e(21), { m: r, move: i } = t, a, o, s, c;
 	if (n[0] !== r || n[1] !== i) {
 		let { cols: e, last: t } = r.board(), u = r.admin, d;
 		if (n[6] !== u || n[7] !== i) {
 			let e = (e, t) => {
-				let n = /* @__PURE__ */ A(O, { children: [/* @__PURE__ */ k(Q, { icon: e.icon }), /* @__PURE__ */ A("span", {
+				let n = /* @__PURE__ */ A(O, { children: [/* @__PURE__ */ k(re, { icon: e.icon }), /* @__PURE__ */ A("span", {
 					className: "min-w-0 flex-1 text-left",
 					children: [/* @__PURE__ */ k("span", {
 						className: "block truncate font-medium",
@@ -1163,7 +1180,7 @@ function xe(t) {
 					"aria-haspopup": "menu",
 					"aria-label": `${e.name}${e.whose ? `, ${e.whose}` : ""}, ${t}. Move`,
 					className: E("flex w-full items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm", "cursor-grab touch-pan-y select-none [-webkit-touch-callout:none]"),
-					onClick: (t) => $.now ? $.now = !1 : i(e.id, t.currentTarget),
+					onClick: (t) => Se.now ? Se.now = !1 : i(e.id, t.currentTarget),
 					children: [n, /* @__PURE__ */ k("span", {
 						"data-grip": !0,
 						className: "shrink-0 touch-none text-muted-foreground",
@@ -1187,7 +1204,7 @@ function xe(t) {
 				}), r.map((t) => e(t, n))]
 			}, t), n[6] = u, n[7] = i, n[8] = d;
 		} else d = n[8];
-		let f = d, p = Se, m;
+		let f = d, p = xe, m;
 		n[9] === f ? m = n[10] : (m = (e, t) => f(t, I(t + 1), e), n[9] = f, n[10] = m);
 		let h = e.map(m);
 		if (u) {
@@ -1220,7 +1237,7 @@ function xe(t) {
 		children: [c, u]
 	}), n[17] = s, n[18] = c, n[19] = u, n[20] = d) : d = n[20], d;
 }
-function Se(e) {
+function xe(e) {
 	return /* @__PURE__ */ k("div", {
 		"aria-hidden": "true",
 		className: "grid h-6 shrink-0 place-items-center text-muted-foreground @2xl:h-auto @2xl:w-6",
@@ -1230,12 +1247,12 @@ function Se(e) {
 		})
 	}, e);
 }
-var $ = { now: !1 };
+var Se = { now: !1 };
 function Ce(n, r, i) {
 	let a = e(5), o;
 	a[0] !== n || a[1] !== i || a[2] !== r ? (o = () => {
 		let e = null, t = (t) => {
-			$.now = !1;
+			Se.now = !1;
 			let n = t.target.closest?.("[data-pcard]");
 			if (!n || t.button !== 0) return;
 			let r = t.pointerType === "mouse" || !!t.target.closest("[data-grip]");
@@ -1249,7 +1266,7 @@ function Ce(n, r, i) {
 				over: null
 			}, r || (e.press = setTimeout(() => {
 				let t = e;
-				e = null, t && ($.now = !0, i(t.id, t.card));
+				e = null, t && (Se.now = !0, i(t.id, t.card));
 			}, 500));
 		}, a = (t) => {
 			if (!e) return;
@@ -1278,7 +1295,7 @@ function Ce(n, r, i) {
 			r !== e.over && (e.over?.classList.remove("ring-2", "ring-ring"), r?.classList.add("ring-2", "ring-ring"), e.over = r), t.clientY < 60 ? scrollBy(0, -12) : t.clientY > innerHeight - 60 && scrollBy(0, 12);
 		}, o = (t) => {
 			let i = e;
-			e = null, i && (clearTimeout(i.press), i.lifted && (i.lifted.remove(), i.card.classList.remove("opacity-30"), i.over?.classList.remove("ring-2", "ring-ring"), n.current = !1, $.now = !0, t.type === "pointerup" && i.over && r(i.id, i.over.dataset.col)));
+			e = null, i && (clearTimeout(i.press), i.lifted && (i.lifted.remove(), i.card.classList.remove("opacity-30"), i.over?.classList.remove("ring-2", "ring-ring"), n.current = !1, Se.now = !0, t.type === "pointerup" && i.over && r(i.id, i.over.dataset.col)));
 		}, s = (t) => {
 			let n = t.target.closest?.("[data-pcard]");
 			n && (t.preventDefault(), e = null, i(n.dataset.pcard, {
@@ -1294,7 +1311,7 @@ function Ce(n, r, i) {
 	a[4] === Symbol.for("react.memo_cache_sentinel") ? (s = [], a[4] = s) : s = a[4], t(o, s);
 }
 function we() {
-	return $.now = !1;
+	return Se.now = !1;
 }
 function Te({ m: e, cellOpen: t, tap: n }) {
 	let r = e.gridColumns();
@@ -1358,7 +1375,7 @@ function Te({ m: e, cellOpen: t, tap: n }) {
 					children: [/* @__PURE__ */ k("thead", { children: /* @__PURE__ */ A("tr", { children: [/* @__PURE__ */ k("th", { className: "sticky left-0 z-10 bg-card" }), r.map((e, t) => /* @__PURE__ */ A("th", {
 						scope: "col",
 						className: "min-w-24 px-1 pt-3.5 pb-1.5 align-bottom text-[13px] font-medium text-muted-foreground",
-						children: [/* @__PURE__ */ k(Q, {
+						children: [/* @__PURE__ */ k(re, {
 							icon: e.icon,
 							className: "mx-auto mb-1.5"
 						}), /* @__PURE__ */ k("span", {
@@ -1446,7 +1463,7 @@ function ke(t) {
 		onKeyDown: T
 	}), n[15] = s, n[16] = T, n[17] = E) : E = n[17];
 	let D;
-	n[18] === l ? D = n[19] : (D = l && /* @__PURE__ */ k(Z, { children: l }), n[18] = l, n[19] = D);
+	n[18] === l ? D = n[19] : (D = l && /* @__PURE__ */ k(te, { children: l }), n[18] = l, n[19] = D);
 	let O;
 	n[20] === m ? O = n[21] : (O = m && /* @__PURE__ */ k(v, { title: m }), n[20] = m, n[21] = O);
 	let N;
@@ -1642,7 +1659,7 @@ function Ne(n) {
 		className: "flex items-center gap-3 rounded-xl border p-3 text-sm",
 		children: [/* @__PURE__ */ k("span", {
 			className: "min-w-0 flex-1 truncate font-medium",
-			children: q(g)
+			children: K(g)
 		}), /* @__PURE__ */ k(o, {
 			size: "sm",
 			disabled: d !== null,
@@ -1686,12 +1703,12 @@ function Pe(e) {
 	return [...e.sign_in ? [{
 		id: `${e.key}.`,
 		key: e.key,
-		label: q(e.sign_in)
+		label: K(e.sign_in)
 	}] : [], ...(e.linked || []).map((t, n) => ({
 		id: `${e.key}.${n}`,
 		key: e.key,
 		account: t,
-		label: q(t)
+		label: K(t)
 	}))];
 }
 function Fe(t) {
@@ -1800,7 +1817,7 @@ function Re(t) {
 				className: "py-6",
 				children: "None yet"
 			}),
-			t && /* @__PURE__ */ k(Z, { children: t }),
+			t && /* @__PURE__ */ k(te, { children: t }),
 			m && /* @__PURE__ */ k(v, { title: m })
 		]
 	}), n[0] = m, n[1] = _);
@@ -1838,5 +1855,5 @@ function Re(t) {
 		children: T
 	}), n[17] = o, n[18] = c, n[19] = C, n[20] = w, n[21] = T, n[22] = E) : E = n[22], E;
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ k(X, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ k(Q, {}));
 </script>

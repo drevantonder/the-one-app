@@ -208,6 +208,10 @@ pub struct Settings {
     /// again (`at_home`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<(String, String)>,
+    /// What the relay says of the Workers (`Newest::deployed`), set by whatever deploys or serves them, so Devices can show
+    /// what they're on.
+    #[serde(skip)]
+    pub deployed: Option<String>,
     /// The node home these are kept in (`load_in`): this machine's, or a throwaway network's.
     #[serde(skip)]
     pub(super) dir: PathBuf,
@@ -456,6 +460,7 @@ impl Settings {
             root: None,
             throwaway_user: None,
             home: None,
+            deployed: None,
             dir: crate::home(),
         }
     }
@@ -470,6 +475,7 @@ impl Settings {
         settings.auth_url = format!("http://127.0.0.1:{}", ports[0]);
         settings.ports = ports;
         settings.throwaway_user = Some(user);
+        settings.home = Some(crate::node::device_here(home)?);
         settings.dir = home.to_path_buf();
         // Its node serves its data there (throwaway::bucket), signatures unchecked: the URL signer holds these.
         settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway", "region": "auto", "key_id": "throwaway", "secret": "throwaway" }));
@@ -558,12 +564,14 @@ fn push_bindings(settings: &Settings) -> Vec<Binding> {
 
 /// The relay holds no secrets: only the keys of the network's first devices, which it starts its list with, and the
 /// Cloudflare node's, whose datagrams it hands its Durable Object, and the remote MCP server's devices, each bound to its
-/// object while it runs.
+/// object while it runs; and what the Workers are on and the device they're deployed from (`Newest::deployed`), which it
+/// says to every device.
 fn relay_bindings(settings: &Settings) -> Vec<Binding> {
     let devices = (!settings.devices.is_empty()).then(|| plain("DEVICES", json!(settings.devices).to_string()));
     let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("NODE", format!("object:{}:{}", NODE.name, NODE.class.unwrap()))]);
     let mcp = plain("MCP", format!("object:mcp:{}", Worker::named("mcp").class.unwrap()));
-    devices.into_iter().chain(node.into_iter().flatten()).chain([mcp, plain("YOURS", crate::config::YOURS)]).chain(location()).collect()
+    let deployed = settings.deployed.clone().map(|d| plain("DEPLOYED", d));
+    devices.into_iter().chain(node.into_iter().flatten()).chain([mcp, plain("YOURS", crate::config::YOURS)]).chain(deployed).chain(location()).collect()
 }
 
 /// The remote MCP server: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches the
@@ -651,20 +659,20 @@ fn reaches(value: &str) -> Option<&str> {
 
 /// The network's Workers as one workerd runs them, the gateway serving the web client's files from `web`; and the
 /// Cloudflare node, if the network has one and this build carries it.
-pub fn served(settings: &Settings, web: &Path) -> Result<Vec<Served>> {
-    served_with(settings, web, crate::cloudflare::node::modules().ok())
+pub fn served(settings: &Settings, web: &Path, sources: &Files) -> Result<Vec<Served>> {
+    served_with(settings, web, sources, crate::cloudflare::node::modules().ok())
 }
 
 /// `served`, with the Cloudflare node's build `cloudflare_node` (this build's, or a test's).
-pub fn served_with(settings: &Settings, web: &Path, cloudflare_node: Option<Modules>) -> Result<Vec<Served>> {
+pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_node: Option<Modules>) -> Result<Vec<Served>> {
     let node = cloudflare_node.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::cloudflare::node::served(settings, modules));
     // A build without the Cloudflare node's WebAssembly has no remote MCP server, and nothing binds one.
     let mut served = Vec::new();
     for worker in WORKERS {
-        let Some(modules) = worker.modules(&crate::ui_folder::cloudflare(), cloudflare_node.as_ref()) else { continue };
+        let Some(modules) = worker.modules(sources, cloudflare_node.as_ref()) else { continue };
         served.push(Served {
             name: worker.name.to_string(),
-            module: module(worker.entry)?,
+            module: module_from(sources.clone(), worker.entry)?,
             modules,
             class: worker.class.map(str::to_string),
             listen: worker.place(settings).map(|(_, port)| format!("127.0.0.1:{port}")),
@@ -732,19 +740,109 @@ fn windows_links() -> Vec<u8> {
 }
 
 /// Runs the network's Workers on this machine, in the pinned workerd, until it stops: their modules built from this
-/// release, the web client's files in `<home>/cloudflare/web`, and their storage in `<home>/cloudflare/data`.
+/// release, the web client's files in `<home>/cloudflare/web`, and their storage in `<home>/cloudflare/data`. Where
+/// they're a throwaway network's, which has no Cloudflare to deploy to, a deploy (`redeploy`) starts them again on the
+/// newest the network's record names.
 pub fn serve(settings: &Settings) -> Result<()> {
     let dir = Settings::path_in(&settings.dir).parent().unwrap().to_path_buf();
     let web = web_dir(settings);
-    let served = served(settings, &web)?;
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
-    ensure!(settings.throwaway_user.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network, at 127.0.0.1");
-    let _ = std::fs::remove_dir_all(&web);
-    write_web(settings)?;
-    let config = write_config(&dir, &served)?;
-    let mut child = start(&config, Vec::new())?;
-    let status = child.wait()?;
-    bail!("the Workers' workerd stopped: {status}")
+    let mut settings = settings.clone();
+    let mut newest = crate::cloudflare::Newest::built();
+    #[cfg(unix)]
+    let redeploys = redeploys::listen(&dir, &settings.address)?;
+    loop {
+        settings.deployed = Some(newest.deployed(&settings));
+        let served = served(&settings, &web, &newest.workers)?;
+        ensure!(settings.throwaway_user.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network, at 127.0.0.1");
+        let _ = std::fs::remove_dir_all(&web);
+        write_web_of(&settings, newest.web.clone())?;
+        let config = write_config(&dir, &served)?;
+        let mut child = start(&config, Vec::new())?;
+        #[cfg(unix)]
+        {
+            redeploys.running(child.id());
+            let status = child.wait()?;
+            match redeploys.next() {
+                Some(next) => newest = next,
+                None => bail!("the Workers' workerd stopped: {status}"),
+            }
+        }
+        #[cfg(not(unix))]
+        bail!("the Workers' workerd stopped: {}", child.wait()?);
+    }
+}
+
+/// Asks the Workers `serve` runs here to start again on the newest: for a throwaway network, a deploy. → once `serve` has
+/// read the newest, or why it couldn't.
+#[cfg(unix)]
+pub fn redeploy(settings: &Settings) -> Result<()> {
+    use std::io::Read;
+    let mut asked = std::os::unix::net::UnixStream::connect(Settings::path_in(&settings.dir).with_file_name(redeploys::SOCKET)).context("the Workers aren't running here: the throwaway network starts them")?;
+    let mut said = String::new();
+    asked.read_to_string(&mut said)?;
+    ensure!(said.is_empty(), "{said}");
+    Ok(())
+}
+
+/// The newest, read while the Workers still answer, and their workerd, stopped for `serve` to start another.
+#[cfg(unix)]
+mod redeploys {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicI32, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    /// Where `serve` listens for a deploy, in the Workers' folder.
+    pub const SOCKET: &str = "redeploy.sock";
+
+    pub struct Redeploys {
+        workerd: Arc<AtomicI32>,
+        newest: Arc<Mutex<Option<crate::cloudflare::Newest>>>,
+    }
+
+    /// Listens for `redeploy`'s asks on a thread of its own.
+    pub fn listen(dir: &Path, address: &str) -> Result<Redeploys> {
+        let path = dir.join(SOCKET);
+        let _ = std::fs::remove_file(&path);
+        let listener = std::os::unix::net::UnixListener::bind(&path).with_context(|| format!("listen at {}", path.display()))?;
+        let (workerd, newest) = (Arc::new(AtomicI32::new(0)), Arc::new(Mutex::new(None)));
+        let (pid, slot, address) = (workerd.clone(), newest.clone(), address.to_string());
+        std::thread::spawn(move || {
+            for mut asked in listener.incoming().flatten() {
+                let said = match crate::cloudflare::Newest::read(&address) {
+                    Ok(read) => {
+                        *slot.lock().unwrap() = Some(read);
+                        // Not asked to stop: workerd told to waits for its open connections, and the relay's never close.
+                        let pid = pid.load(Ordering::SeqCst);
+                        if pid > 0 {
+                            unsafe { libc::kill(pid, libc::SIGKILL) };
+                        }
+                        String::new()
+                    }
+                    Err(err) => format!("the newest can't be read, so the Workers stay as they are: {err:#}"),
+                };
+                let _ = asked.write_all(said.as_bytes());
+            }
+        });
+        Ok(Redeploys { workerd, newest })
+    }
+
+    impl Redeploys {
+        /// `pid` is the workerd now running. One asked for while it started is stopped now, as it wasn't then.
+        pub fn running(&self, pid: u32) {
+            self.workerd.store(pid as i32, Ordering::SeqCst);
+            if self.newest.lock().unwrap().is_some() {
+                unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+            }
+        }
+
+        /// What was asked for, once the workerd it stopped has gone.
+        pub fn next(&self) -> Option<crate::cloudflare::Newest> {
+            self.workerd.store(0, Ordering::SeqCst);
+            self.newest.lock().unwrap().take()
+        }
+    }
 }
 
 /// Where the network's Workers read the web client's files from on this machine.
@@ -756,8 +854,12 @@ fn web_dir(settings: &Settings) -> PathBuf {
 /// workerd reads each file as it's asked for, so a file written while they run is what the next request gets): each one
 /// whole or not at all, so a request never gets half of one.
 pub fn write_web(settings: &Settings) -> Result<()> {
+    write_web_of(settings, crate::web::with_client())
+}
+
+fn write_web_of(settings: &Settings, client: Files) -> Result<()> {
     let web = web_dir(settings);
-    let mut files = settings.web();
+    let mut files = settings.web_with(client);
     parses(&files)?;
     files.extend(precompressed(&files)?);
     for (file, bytes) in files {

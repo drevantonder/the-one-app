@@ -843,9 +843,18 @@ async fn seen(m: &impl Me) -> Result<Value> {
 }
 
 /// Asks a device, through the relay, to take the newest published build. Only its user or an admin may; its own device
-/// checks that too, and only ever starts `one update`.
+/// checks that too, and only ever starts `one update`. Cloudflare is asked to deploy the Workers again, from the device they're
+/// deployed from, which the relay knows: only an admin may.
 async fn update_device(m: &impl Me, device: &str) -> Result<Value> {
     let user = m.user()?;
+    if device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) {
+        m.who(|who| {
+            allowed!(who.may(&user, "change-settings", scopes::NETWORK), "Only an admin updates Cloudflare.");
+            Ok(())
+        })?;
+        tell(m, m, json!({ "cloudflare": true })).await?;
+        return Ok(json!({ "said": "Asked Cloudflare to update." }));
+    }
     let (key, name) = m.who(|who| {
         let key = who.find_node(device)?;
         allowed!(who.may(&user, "remove", &scopes::device(&key)), "Only its user or an admin updates a device.");

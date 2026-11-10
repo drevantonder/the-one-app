@@ -15,12 +15,29 @@ pub struct Newest {
     pub workers: Files,
     pub web: Files,
     pub said: String,
+    /// What each is, as `protocol::version` says a build is, with the record's name for it in place of a target.
+    pub workers_version: String,
+    pub web_version: String,
 }
 
 impl Newest {
     /// As this program was built with them.
     pub fn built() -> Newest {
-        Newest { workers: crate::ui_folder::cloudflare(), web: crate::web::with_client(), said: format!("Workers and web client from this build, {}", crate::config::BUILD) }
+        let of = |name: &str| format!("{} {} {name}", crate::config::BUILD, COMMITTED);
+        Newest { workers: crate::ui_folder::cloudflare(), web: crate::web::with_client(), said: format!("Workers and web client from this build, {}", crate::config::BUILD), workers_version: of(Thing::WORKERS), web_version: of(Thing::WEB) }
+    }
+
+    /// What the relay says of the Workers (`DEPLOYED`, `workers` in its answer to `POST /relay/computes`): the device they're
+    /// deployed from, which an ask to deploy them again is left for, and what each is on. The Cloudflare node is on what the
+    /// program that deploys it is.
+    pub fn deployed(&self, settings: &crate::cloudflare::Settings) -> String {
+        serde_json::json!({
+            "home": settings.home.as_ref().map(|(key, _)| key),
+            "workers": self.workers_version,
+            "web": self.web_version,
+            "node": settings.cloudflare_node.then(crate::protocol::version),
+        })
+        .to_string()
     }
 
     /// The newest of each, as the record at `address` names them or as this program was built with them. Failing to read
@@ -36,15 +53,16 @@ impl Newest {
     fn from_record(record: &Latest, committed: u64, get: &dyn Fn(&Thing) -> Result<Vec<u8>>) -> Result<Newest> {
         let built = Newest::built();
         let newer = |name: &str| record.get(name).filter(|t| t.committed >= committed).cloned();
-        let (workers, from_workers) = match newer(Thing::WORKERS) {
-            Some(thing) => (Bundle::unpacked(&get(&thing)?).context("the Workers' sources in the record")?.files, thing.commit),
-            None => (built.workers, "this build".to_string()),
+        let version = |thing: &Thing| format!("{} {} {}", thing.commit, thing.committed, thing.name);
+        let (workers, from_workers, workers_version) = match newer(Thing::WORKERS) {
+            Some(thing) => (Bundle::unpacked(&get(&thing)?).context("the Workers' sources in the record")?.files, thing.commit.clone(), version(&thing)),
+            None => (built.workers, "this build".to_string(), built.workers_version),
         };
-        let (web, from_web) = match newer(Thing::WEB) {
-            Some(thing) => (open(crate::mode::here().release_key(), &get(&thing)?).context("the web client in the record")?.files, thing.commit),
-            None => (built.web, "this build".to_string()),
+        let (web, from_web, web_version) = match newer(Thing::WEB) {
+            Some(thing) => (open(crate::mode::here().release_key(), &get(&thing)?).context("the web client in the record")?.files, thing.commit.clone(), version(&thing)),
+            None => (built.web, "this build".to_string(), built.web_version),
         };
-        Ok(Newest { workers, web, said: format!("Workers from {from_workers}, web client from {from_web}") })
+        Ok(Newest { workers, web, said: format!("Workers from {from_workers}, web client from {from_web}"), workers_version, web_version })
     }
 }
 

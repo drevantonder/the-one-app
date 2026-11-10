@@ -119,6 +119,8 @@ struct Network {
     connected: std::collections::HashSet<Key>,
     /// What each device told the relay it's on, as it last said: its key → `protocol::version`.
     versions: Value,
+    /// What the relay says the Workers are on, and the device they're deployed from (`workers` in its answer).
+    workers: Value,
     builds: HashMap<Key, release::Running>,
     /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
     /// last position read, and the database, once its anchor checked out here.

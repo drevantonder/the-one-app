@@ -684,11 +684,15 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
   const side = scheduling || passkeys.length > 0 || recovery.length > 0 || holder
   // Those a newer version is published for and that can hear the ask, this device first: a bad version is best found on the machine in front of you.
   const behind = mine.filter((c) => c.node && c.online && c.version?.behind).sort((a, b) => b.me - a.me)
+  // Cloudflare has one version for what's at the network's address, and its admins update it, last: it deploys with what its computer has.
+  const cloudflare = data.versions.cloudflare
+  const cloudflareCard = m.admin && cloudflare?.behind ? { name: "Cloudflare", node: { key: "cloudflare" } } : null
+  const all = cloudflareCard ? [...behind, cloudflareCard] : behind
   return (
     <div className={cn("grid max-w-5xl items-start gap-x-8 gap-y-8", side && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]")}>
       <div className="flex min-w-0 flex-col gap-4">
-        {behind.length > 1 && (
-          <Button variant="outline" className="self-start" disabled={Object.keys(updating).length > 0} onClick={() => update(behind)}>Update All</Button>
+        {all.length > 1 && (
+          <Button variant="outline" className="self-start" disabled={Object.keys(updating).length > 0} onClick={() => update(all)}>Update All</Button>
         )}
         {!!mine.length && (
           <List>
@@ -726,6 +730,17 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
                 </div>
               )
             })}
+          </List>
+        )}
+        {cloudflare && (
+          <List>
+            <DeviceRow icon={CLOUDFLARE} title="Cloudflare" sub={[`Version ${cloudflare.version.slice(0, 7)}`, cloudflare.node && cloudflare.node !== cloudflare.version && `Apps run on ${cloudflare.node.slice(0, 7)}`].filter(Boolean).join(" · ")}>
+              {cloudflareCard && (
+                <Button variant="outline" size="sm" disabled={Object.keys(updating).length > 0} onClick={() => update([cloudflareCard])}>
+                  {updating.cloudflare && <Spinner />}Update
+                </Button>
+              )}
+            </DeviceRow>
           </List>
         )}
         {!!stale.length && <List><OldSignIns c={{ old: stale }} remove={() => removeOld({ old: stale })} /></List>}

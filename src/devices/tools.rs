@@ -8,7 +8,7 @@ use crate::config::{CLI, NAME, YOURS};
 use crate::core_tools::{Feature, Tool, serves};
 
 pub fn feature() -> Feature {
-    let guide = format!("A new device signs in, then shows a code of 16 letters and digits. devices_approve with that code, run on one of the user's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, on the device that made the link. devices_versions says what each device is on; devices_update asks one of your computers to take the newest published version. devices_remove takes a device out, or a user with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in on a computer running {NAME}, by the command {CLI} devices approve <code> --recovery-key <file>, with a file holding {YOURS}'s recovery key, never the key in the chat. If an admin already let that device in, someone holding the recovery key gives it its keys with {CLI} devices restore <code>, from the code on its own screen (This Device's Code in its menu, or {CLI} devices code). An app's schedules run only on a device chosen for them: devices_run_schedules picks one, which then holds that app's keys alone, and devices_stop_schedules stops them.");
+    let guide = format!("A new device signs in, then shows a code of 16 letters and digits. devices_approve with that code, run on one of the user's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, on the device that made the link. devices_versions says what each device and Cloudflare are on; devices_update asks one of your computers to take the newest published version, or Cloudflare (an admin) to deploy it. devices_remove takes a device out, or a user with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in on a computer running {NAME}, by the command {CLI} devices approve <code> --recovery-key <file>, with a file holding {YOURS}'s recovery key, never the key in the chat. If an admin already let that device in, someone holding the recovery key gives it its keys with {CLI} devices restore <code>, from the code on its own screen (This Device's Code in its menu, or {CLI} devices code). An app's schedules run only on a device chosen for them: devices_run_schedules picks one, which then holds that app's keys alone, and devices_stop_schedules stops them.");
     Feature {
         name: "devices",
         title: "Devices",
@@ -61,11 +61,12 @@ fn tools() -> Vec<Tool> {
         Tool::route(
             json!({
                 "name": "versions", "title": "Each device's version", "reads": true,
-                "description": "Which version each device is on, as it last told the network, and whether a newer one is published for it.",
+                "description": "Which version each device is on, as it last told the network, and whether a newer one is published for it; and Cloudflare, under `cloudflare`.",
                 "input": { "type": "object", "properties": {} },
                 "output": { "type": "object", "additionalProperties": { "type": "object", "properties": {
                     "version": { "type": "string" }, "newest": { "type": ["string", "null"], "description": "the newest published for what it runs on, if any" },
                     "behind": { "type": "boolean", "description": "a newer version is published for it" },
+                    "node": { "type": ["string", "null"], "description": "Cloudflare's: the version its node runs, which follows the device it is deployed from" },
                 } } },
             }),
             serves!(serve::versions),
@@ -73,9 +74,9 @@ fn tools() -> Vec<Tool> {
         Tool::route(
             json!({
                 "name": "update", "title": "Update a device to the newest version", "confirm": true,
-                "description": "Asks one of your computers, by name, to take the newest published version and restart on it. Nothing updates by itself. It can't be undone: a device has no earlier version to go back to. Its user or an admin only.",
+                "description": "Asks one of your computers, by name, to take the newest published version and restart on it; or Cloudflare, as `cloudflare`, to deploy the newest from the computer it is deployed from. Nothing updates by itself. It can't be undone: nothing has an earlier version to go back to. A device's user or an admin only; Cloudflare, an admin only.",
                 "input": { "type": "object", "required": ["device"], "properties": {
-                    "device": { "type": "string", "description": "a computer's name" },
+                    "device": { "type": "string", "description": "a computer's name, or cloudflare" },
                 } },
                 "output": said("that it was asked"),
             }),

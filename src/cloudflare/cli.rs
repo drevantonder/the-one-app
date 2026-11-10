@@ -40,6 +40,19 @@ fn at_home(settings: &mut crate::cloudflare::Settings) -> Result<()> {
     })
 }
 
+/// Puts `newest` on Cloudflare: each Worker, and the Cloudflare node if the network has one. The relay says what they're on
+/// (`Newest::deployed`), for every client to show.
+fn put_up(cf: &crate::cloudflare::Cloudflare, settings: &mut crate::cloudflare::Settings, newest: crate::cloudflare::Newest) -> Result<()> {
+    settings.deployed = Some(newest.deployed(settings));
+    let mut web = settings.web_with(newest.web);
+    web.extend(crate::cloudflare::precompressed(&web)?);
+    crate::cloudflare::deploy(cf, settings, &newest.workers, &web)?;
+    if settings.cloudflare_node {
+        crate::cloudflare::node::deploy(cf, settings, &newest.workers)?;
+    }
+    Ok(())
+}
+
 /// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, or else the Workers' own (their .env.local's), for the account
 /// `--account` names or the token's only one.
 fn cloudflare(g: &Given, settings: Option<&crate::cloudflare::Settings>) -> Result<crate::cloudflare::Cloudflare> {
@@ -101,6 +114,12 @@ pub fn commands() -> Command {
                 }
                 ["cloudflare", "deploy"] => {
                     let loaded = crate::cloudflare::Settings::load();
+                    // A throwaway network's Workers run here, not on Cloudflare: they start again on the newest.
+                    if let Some(settings) = loaded.as_ref().ok().filter(|s| s.throwaway_user.is_some()) {
+                        crate::cloudflare::redeploy(settings)?;
+                        println!("Asked the Workers to start again on the newest.");
+                        return Ok(true);
+                    }
                     let first = loaded.is_err();
                     let cf = cloudflare(g, loaded.as_ref().ok())?;
                     let settings = match loaded {
@@ -134,12 +153,8 @@ pub fn commands() -> Command {
                     // A first deploy has nothing at its address yet to read.
                     let newest = if first { crate::cloudflare::Newest::built() } else { crate::cloudflare::Newest::read(&settings.address)? };
                     println!("{}", newest.said);
-                    let mut web = settings.web_with(newest.web);
-                    web.extend(crate::cloudflare::precompressed(&web)?);
-                    crate::cloudflare::deploy(&cf, &settings, &newest.workers, &web)?;
-                    if settings.cloudflare_node {
-                        crate::cloudflare::node::deploy(&cf, &settings, &newest.workers)?;
-                    }
+                    let mut settings = settings;
+                    put_up(&cf, &mut settings, newest)?;
                     // The clients its users sign in with, signed by this admin's device: a new device's sign-in counts
                     // only for one of them (`sign_in_proof::CLIENTS`), whatever auth says.
                     if let Some(clients) = settings.sign_in_clients() {
@@ -163,7 +178,8 @@ pub fn commands() -> Command {
                     }
                     // The relay it deploys again binds the Cloudflare node's endpoint only for a network that has one.
                     let was = std::mem::replace(&mut settings.cloudflare_node, true);
-                    crate::cloudflare::node::deploy(&cf, &settings, &crate::cloudflare::Newest::read(&settings.address)?.workers)?;
+                    let newest = crate::cloudflare::Newest::read(&settings.address)?;
+                    put_up(&cf, &mut settings, newest)?;
                     if !was {
                         settings.save()?;
                     }

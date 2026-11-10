@@ -254,8 +254,7 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-/// A device is approved only by its user's own device, or a newcomer's by the admin whose invite their proof was made
-/// with; a device removed opens no epoch made after.
+/// A device updates, or deploys the Workers, only when asked by a device who's who says may.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_someone_who_may_remove_a_device_can_ask_it_to_update() {
     let secret: [u8; 32] = rand::random();
@@ -268,14 +267,21 @@ async fn only_someone_who_may_remove_a_device_can_ask_it_to_update() {
     let_sam_in(&a, &sam).await;
     let stranger = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let ask = |by: &ed25519_dalek::SigningKey, of: [u8; 32]| one::keys::signed_request(by, one::protocol::RELAY, json!({ "update": one::keys::hex(&of) }), one::node::now_ms());
-    assert_eq!(a.who_asked_to_update(&ask(&me, a.id())).unwrap(), "a", "its own user may");
+    assert_eq!(a.who_asked_to_update(&ask(&me, a.id())).unwrap().0, "a", "its own user may");
     assert!(a.who_asked_to_update(&ask(&sam, a.id())).is_err(), "someone else's device may not");
     assert!(a.who_asked_to_update(&ask(&stranger, a.id())).is_err(), "nor a device who's who doesn't list");
     assert!(a.who_asked_to_update(&ask(&me, sam.verifying_key().to_bytes())).is_err(), "an ask for another device isn't for this one");
     let forged = { let mut f = ask(&me, a.id()); f["update"] = json!(one::keys::hex(&rand::random::<[u8; 32]>())); f };
     assert!(a.who_asked_to_update(&forged).is_err(), "a change to the ask breaks its signature");
+    // Deploying the Workers again, which the relay leaves for the device they're deployed from, is for an admin's device.
+    let deploy = |by: &ed25519_dalek::SigningKey| one::keys::signed_request(by, one::protocol::RELAY, json!({ "cloudflare": true }), one::node::now_ms());
+    assert_eq!(a.who_asked_to_update(&deploy(&me)).unwrap().0, "a", "an admin's");
+    assert!(a.who_asked_to_update(&deploy(&sam)).is_err(), "not someone else's");
+    assert!(a.who_asked_to_update(&deploy(&stranger)).is_err(), "nor a device who's who doesn't list");
 }
 
+/// A device is approved only by its user's own device, or a newcomer's by the admin whose invite their proof was made
+/// with; a device removed opens no epoch made after.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     let dir = temp("approve");

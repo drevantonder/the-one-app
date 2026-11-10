@@ -899,7 +899,11 @@ impl Node {
                 Err(err) => return tracing::debug!("reading who's connected: {err:#}"),
             };
             node.heard_ask(&said["asked"]);
-            node.with_or((), |i| Ok(i.versions = said["versions"].clone()));
+            node.with_or((), |i| {
+                i.versions = said["versions"].clone();
+                i.workers = said["workers"].clone();
+                Ok(())
+            });
             let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| crate::keys::unhex(k.as_str()?).ok()).collect();
             let was = node.with_or(None, |i| {
                 let was = std::mem::replace(&mut i.connected, connected.clone());

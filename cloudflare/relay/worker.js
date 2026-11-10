@@ -28,7 +28,9 @@
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
 // endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; `online`, those
 // of them connected here now and heard from lately, which a client races first and every node shows as online; and
-// `versions`, each key's that said one, for every client to show. 403 is only for a key that isn't let in; a request
+// `versions`, each key's that said one, for every client to show; and `workers`, once a deploy has said it, what the
+// Workers are on (`{ home, workers, web, node }`: the device they're deployed from, which an ask to deploy them again is
+// left for, and each part's version in a version's words). 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows. A device's own request
 // that says it reads less of who's who than this build (`reads`, protocol.js's `READS`; an older build's says
 // nothing) is 426, telling it to update. A browser's session runs the code the address serves, the newest, so it isn't
@@ -52,6 +54,8 @@
 // - `{ update }`: a key on the list, whose device this signed ask is left for, whole, until it next asks for the computes:
 //   any key on the list may leave one, the receiver checks who signed it and that they may remove it, and it can only
 //   ever bring the signed record's newest build. Another replaces it.
+// - `{ cloudflare: true }`: the same, to deploy the Workers again, left for the device they're deployed from (`workers.home`),
+//   which checks that the asker is an admin.
 //
 // One endpoint isn't a socket: the Cloudflare node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
@@ -350,7 +354,7 @@ export class Relay extends DurableObject {
     if (asked && !asked.session && behind(asked.reads)) return { update: true, ...heard };
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
     const versions = Object.fromEntries(this.sql.exec("SELECT key, version FROM keys WHERE version IS NOT NULL").toArray().map((r) => [r.key, r.version]));
-    return { computes: this.env.BOUND ? [...keys, this.env.BOUND] : keys, versions, ...heard };
+    return { computes: this.env.BOUND ? [...keys, this.env.BOUND] : keys, versions, ...(this.env.DEPLOYED && { workers: JSON.parse(this.env.DEPLOYED) }), ...heard };
   }
 
   /// Keeps what `by` says it's on, and gives it what was left for it, once: → `{ asked }`, or nothing.
@@ -768,12 +772,13 @@ export class Relay extends DurableObject {
       if (pairing.key && !this.key(pairing.key)) this.end(pairing.key, "its pairing code ended");
       return null;
     }
-    if (told.update !== undefined) {
-      if (!isKey(told.update) || !this.key(told.update)) return { error: "that key isn't on the list", code: CODES.notListed };
-      this.sql.exec("INSERT OR REPLACE INTO asks VALUES (?, ?)", told.update, JSON.stringify(signed));
+    if (told.update !== undefined || told.cloudflare === true) {
+      const key = told.cloudflare === true ? (this.env.DEPLOYED ? JSON.parse(this.env.DEPLOYED).home : null) : told.update;
+      if (!isKey(key) || !this.key(key)) return { error: "that key isn't on the list", code: CODES.notListed };
+      this.sql.exec("INSERT OR REPLACE INTO asks VALUES (?, ?)", key, JSON.stringify(signed));
       return null;
     }
-    return "a tell adds or removes a key, makes or ends a pairing code, or asks a device to update";
+    return "a tell adds or removes a key, makes or ends a pairing code, or asks a device to update, or to deploy the Workers";
   }
 
   /// Takes `key` out, with the pairing codes it made, closing its sockets. Only a tell naming a key takes it out: an admin's

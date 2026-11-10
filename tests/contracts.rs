@@ -1062,8 +1062,10 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
     assert_eq!(tell(&admin, json!({ "add": hex_device, "role": "client" })).0, 204);
     let version = "abcdef123456 1700000000 x86_64-unknown-linux-gnu";
     let (status, said) = computes(&device, json!({ "computes": true, "reads": one::database::READS, "version": version }));
-    assert_eq!((status, said.as_object().unwrap().keys().cloned().collect::<Vec<_>>()), (200, ["computes", "online", "versions"].map(String::from).to_vec()));
+    assert_eq!((status, said.as_object().unwrap().keys().cloned().collect::<Vec<_>>()), (200, ["computes", "online", "versions", "workers"].map(String::from).to_vec()));
     assert_eq!(said["versions"][&hex_device], version);
+    // What a deploy says of the Workers: the device they're deployed from, and each part's version in a version's words.
+    assert_eq!(said["workers"], json!({ "home": hex(&admin), "workers": crate::cloudflare::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null }));
 
     // The ask is left whole, signed by the asker, and heard once, even by a device too old to be told anything else.
     let ask = keys::signed_request(&signer(&admin), "one/relay", json!({ "update": hex_device }), at());
@@ -1083,6 +1085,16 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
     assert!(said.get("asked").is_none());
     assert!(computes(&device, json!({ "computes": true, "reads": one::database::READS, "version": version })).1.get("asked").is_none(), "heard once");
     assert_eq!(tell(&device, json!({ "update": data_encoding::HEXLOWER.encode(&[9u8; 32]) })).0, 403, "an ask for no one on the list");
+
+    // An ask to deploy the Workers again is left for the device they're deployed from, whoever leaves it, and heard once, whole.
+    let deploy = keys::signed_request(&signer(&device), "one/relay", json!({ "cloudflare": true }), at());
+    assert_eq!(crate::cloudflare::post(&format!("{address}/relay/tell"), &[], deploy.clone()).0, 204);
+    let home = json!({ "computes": true, "reads": one::database::READS, "version": version });
+    let (status, said) = computes(&admin, home.clone());
+    assert_eq!((status, &said["asked"]), (200, &deploy), "{said}");
+    let (by, fields) = keys::check_request("one/relay", &said["asked"], at()).unwrap();
+    assert_eq!((data_encoding::HEXLOWER.encode(&by), fields["cloudflare"].clone()), (hex_device.clone(), json!(true)));
+    assert!(computes(&admin, home).1.get("asked").is_none(), "heard once");
 }
 
 /// A release for Windows adds its own line to the signed record. Signed once, as a record with that line is: every device
