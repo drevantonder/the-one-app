@@ -1933,13 +1933,28 @@ function Bt() {
 				raw: !0,
 				since: x,
 				limit: F,
-				check: !!e
+				check: !!e,
+				parts: ["requests", "errors"]
 			});
 			if (t !== R.current) return;
 			a({
 				...n,
 				at: Date.now()
 			}), l(null);
+			let r = await one.api("POST", "/api/insights/insights", {
+				raw: !0,
+				since: x,
+				limit: F,
+				parts: [
+					"spans",
+					"logs",
+					"metrics"
+				]
+			});
+			t === R.current && a((e) => ({
+				...e,
+				...r
+			}));
 		} catch (e) {
 			t === R.current && l(one.plain(e));
 		} finally {
@@ -1947,7 +1962,7 @@ function Bt() {
 		}
 	}
 	t(() => void z(), [x]);
-	let B = n(() => e ? oe(e.spans) : [], [e]);
+	let B = n(() => e?.spans ? oe(e.spans) : [], [e]);
 	if (!e) return /* @__PURE__ */ O("div", {
 		className: "flex flex-col gap-6",
 		children: [/* @__PURE__ */ D(u, { children: "Insights" }), s ? /* @__PURE__ */ D(f, {
@@ -1955,7 +1970,7 @@ function Bt() {
 			retry: z
 		}) : /* @__PURE__ */ D(d, { rows: 3 })]
 	});
-	let V = e.at, H = V - N.find(([e]) => e === x)[2], U = se(e.spans.map((e) => e.service)), W = A && B.find((e) => e.id === A);
+	let V = e.at, H = V - N.find(([e]) => e === x)[2], U = se((e.spans || []).map((e) => e.service)), W = A && B.find((e) => e.id === A);
 	if (W) return /* @__PURE__ */ D(tt, {
 		trace: W,
 		back: () => j(null),
@@ -2022,7 +2037,8 @@ function Bt() {
 				showTrace: j,
 				showTraces: K
 			}),
-			m === "Traces" && /* @__PURE__ */ D(Ye, {
+			m !== "Services" && m !== "Errors" && !e.spans && /* @__PURE__ */ D(d, { rows: 3 }),
+			m === "Traces" && e.spans && /* @__PURE__ */ D(Ye, {
 				traces: B,
 				filters: I,
 				query: L.Traces,
@@ -2030,12 +2046,12 @@ function Bt() {
 				colour: U,
 				more: q(e.spans)
 			}),
-			m === "Logs" && /* @__PURE__ */ D(pt, {
+			m === "Logs" && e.logs && /* @__PURE__ */ D(pt, {
 				rows: e.logs,
 				more: q(e.logs),
 				query: L.Logs
 			}),
-			m === "Metrics" && /* @__PURE__ */ D(_t, {
+			m === "Metrics" && e.metrics && /* @__PURE__ */ D(_t, {
 				rows: e.metrics,
 				from: H,
 				to: V,

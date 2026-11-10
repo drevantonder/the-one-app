@@ -28,6 +28,10 @@ const ERRORS_READ = 500;
 const PAST = 8 * 86_400_000;
 const FUTURE = 300_000;
 const ALLOWED_FOR = 5_000;
+/// How long the same summary is answered from memory: Basin SQL takes 0.7–1.2 s whatever it's asked (measured 2026-11-10), and a
+/// reading is a person or an agent looking again.
+const SUMMARY_FOR = 30_000;
+const MOST_SUMMARIES = 32;
 /// OTEL's default duration boundaries, in ms: bucket `i` is what's over boundary `i - 1` and at most boundary `i`, and the last what's over them all.
 export const BOUNDS = [0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000];
 const NAMESPACE = "telemetry";
@@ -146,9 +150,60 @@ const QUERIES = {
   errors: { sql: (a) => `SELECT service, name, status, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", MIN("time") AS first_seen, MAX("time") AS last_seen, MIN(message) AS message FROM ${NAMESPACE}.spans ${where(a, [`${attr("one.fingerprint")} IS NOT NULL`, ...(a.status === "error" || a.status === "unset" ? [`status = ${quoted(a.status)}`] : [])])} GROUP BY service, name, status, ${attr("one.fingerprint")} ORDER BY last_seen DESC LIMIT ${Math.min(a.limit, ERRORS_READ)}` },
 };
 
+// `requests` and `errors` read the same spans, so a view that shows both is one trip to Basin: each is split out here, its
+// `status` applied only to `errors`, as it is when they're separate. Each kept row is a kind of span at a status in an hour.
+const SUMMARY = (a) => `SELECT ${hour} AS hour, service, name, kind, status, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", SUM("duration") AS "sum", ${buckets()}, MIN("time") AS first_seen, MAX("time") AS last_seen, MIN(message) AS message FROM ${NAMESPACE}.spans ${where(a, [`(kind = 'server' OR ${attr("one.fingerprint")} IS NOT NULL)`])} GROUP BY ${hour}, service, name, kind, status, ${attr("one.fingerprint")} ORDER BY hour DESC LIMIT ${a.limit}`;
+
+function summary(rows, a) {
+  const requests = new Map(), errors = new Map();
+  for (const row of asBuckets(rows)) {
+    const count = Number(row.count), sum = Number(row.sum);
+    if (row.kind === "server") {
+      const key = `${row.hour}|${row.service}|${row.name}`;
+      const had = requests.get(key);
+      if (had) {
+        had.count += count;
+        had.errors += row.status === "error" ? count : 0;
+        had.sum += sum;
+        had.buckets = had.buckets.map((n, i) => n + row.buckets[i]);
+      } else {
+        requests.set(key, { hour: row.hour, service: row.service, name: row.name, count, errors: row.status === "error" ? count : 0, sum, buckets: row.buckets });
+      }
+    }
+    if (row.fingerprint && (!a.status || (a.status !== "error" && a.status !== "unset") || row.status === a.status)) {
+      const key = `${row.service}|${row.name}|${row.status}|${row.fingerprint}`;
+      const had = errors.get(key);
+      if (had) {
+        had.count += count;
+        had.first_seen = Math.min(had.first_seen, row.first_seen);
+        had.last_seen = Math.max(had.last_seen, row.last_seen);
+        had.message ??= row.message;
+      } else {
+        errors.set(key, { service: row.service, name: row.name, status: row.status, fingerprint: row.fingerprint, count, first_seen: row.first_seen, last_seen: row.last_seen, message: row.message });
+      }
+    }
+  }
+  return { requests: [...requests.values()], errors: [...errors.values()].sort((x, y) => y.last_seen - x.last_seen).slice(0, Math.min(a.limit, ERRORS_READ)) };
+}
+
+/// What's kept of summaries asked for lately, each while `SUMMARY_FOR` lasts: the promise, so a second asking waits for the first.
+const remembered = new Map();
+
+async function summaryOf(env, a) {
+  const sql = SUMMARY(a), key = `${a.status}|${sql}`;
+  const had = remembered.get(key);
+  if (had && Date.now() - had.at < SUMMARY_FOR) return had.rows;
+  if (remembered.size >= MOST_SUMMARIES) remembered.clear();
+  const rows = query(env, sql).then((r) => summary(r, a));
+  remembered.set(key, { at: Date.now(), rows });
+  rows.catch(() => remembered.delete(key));
+  return rows;
+}
+
 function asked(fields) {
   const a = { since: fields.since ?? 0, services: fields.services, limit: Math.min(fields.limit ?? 100, MOST_READ) };
   if (!count(a.since) || !count(a.limit) || !a.limit) refuse(400, "since and limit are numbers");
+  a.since -= a.since % 60_000;
   if (!Array.isArray(a.services) || a.services.length > MOST_SERVICES || !a.services.every(word)) refuse(400, "services are names");
   for (const key of ["service", "name", "status", "trace"]) {
     const given = fields[key];
@@ -171,11 +226,12 @@ async function read(request, env) {
   const a = asked(fields);
   const names = Array.isArray(fields.queries) ? fields.queries.filter((n) => Object.hasOwn(QUERIES, n)) : [];
   if (!a.services.length) return Response.json(Object.fromEntries(names.map((n) => [n, []])));
-  const results = await Promise.all(names.map(async (name) => {
+  const together = names.includes("requests") && names.includes("errors") && !a.trace;
+  const results = await Promise.all(names.filter((n) => !together || (n !== "requests" && n !== "errors")).map(async (name) => {
     const { sql, rows = (r) => r } = QUERIES[name];
     return [name, rows(await query(env, sql(a)))];
-  }));
-  return Response.json(Object.fromEntries(results));
+  }).concat(together ? [summaryOf(env, a).then((s) => [["requests", s.requests], ["errors", s.errors]])] : []));
+  return Response.json(Object.fromEntries(results.flatMap((r) => (typeof r[0] === "string" ? [r] : r))));
 }
 
 const ROUTES = { "/telemetry/write": write, "/telemetry/read": read };

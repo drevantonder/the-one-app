@@ -18,6 +18,7 @@ pub fn feature() -> Feature {
                     "service": { "type": "string", "description": "only this service: an app's name, or the network's own program" },
                     "trace_id": { "type": "string", "description": "one trace by its id, as its spans: a failure says its trace-id" },
                     "raw": { "type": "boolean", "description": "the rows themselves, as JSON" },
+                    "parts": { "type": "array", "items": { "type": "string", "enum": ["requests", "spans", "logs", "metrics", "errors"] }, "description": "with raw, only these kinds of row (each costs a read of its own): every kind unless given" },
                     "check": { "type": "boolean", "description": "check telemetry's own path now, by sending a known signal and reading the last one back, before answering. It's checked every 15 minutes anyway" },
                     "name": { "type": "string", "description": "with raw, only spans of this name or logs of this body" },
                     "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d (1d unless raw)" },
@@ -42,11 +43,12 @@ mod serve {
     /// As much of a table as a reading of it needs: its lines are cut, never what they add up from.
     const ALL_ROWS: usize = 10_000;
     const DAY: u64 = 86_400_000;
+    const ALL_PARTS: [&str; 5] = ["requests", "spans", "logs", "metrics", "errors"];
 
     /// Only what's read of it: each is a query of Basin's.
-    fn queries(raw: bool, trace: bool, service: bool) -> Vec<&'static str> {
+    fn queries(raw: bool, parts: Option<&Vec<Value>>, trace: bool, service: bool) -> Vec<&'static str> {
         match (raw, trace, service) {
-            (true, _, _) => vec![],
+            (true, _, _) => parts.into_iter().flatten().filter_map(|p| ALL_PARTS.iter().copied().find(|q| p == q)).collect(),
             (_, true, _) => vec!["spans"],
             (_, _, true) => vec!["requests", "errors", "spans"],
             _ => vec!["requests", "errors"],
@@ -68,7 +70,7 @@ mod serve {
         if input.get("check").and_then(Value::as_bool).unwrap_or(false) {
             node.check_telemetry().await;
         }
-        let ask = Ask { queries: queries(raw, trace.is_some(), service.is_some()), service, name: text("name"), trace: trace.clone(), since, status: text("status"), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
+        let ask = Ask { queries: queries(raw, input.get("parts").and_then(Value::as_array), trace.is_some(), service.is_some()), service, name: text("name"), trace: trace.clone(), since, status: text("status"), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
         let rows = node.insights(&me, &ask).await?;
         if raw {
             return Ok(rows);

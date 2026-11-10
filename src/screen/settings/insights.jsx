@@ -668,10 +668,13 @@ function Insights() {
     const mine = ++asked.current
     setLoading(true)
     try {
-      const got = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: MOST_ROWS, check: !!check })
+      // What's summed first, as it's what the first tab shows; the rows afterwards, which are many and most of the wait.
+      const got = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: MOST_ROWS, check: !!check, parts: ["requests", "errors"] })
       if (mine !== asked.current) return
       setData({ ...got, at: Date.now() })
       setProblem(null)
+      const rows = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: MOST_ROWS, parts: ["spans", "logs", "metrics"] })
+      if (mine === asked.current) setData((had) => ({ ...had, ...rows }))
     } catch (e) {
       if (mine === asked.current) setProblem(one.plain(e))
     } finally {
@@ -680,7 +683,7 @@ function Insights() {
   }
   useEffect(() => void load(), [range])
 
-  const traces = useMemo(() => (data ? tracesOf(data.spans) : []), [data])
+  const traces = useMemo(() => (data?.spans ? tracesOf(data.spans) : []), [data])
 
   if (!data) {
     return (
@@ -692,7 +695,7 @@ function Insights() {
   }
 
   const to = data.at, from = to - RANGES.find(([v]) => v === range)[2]
-  const colour = colours(data.spans.map((s) => s.service))
+  const colour = colours((data.spans || []).map((s) => s.service))
   const opened = traceId && traces.find((t) => t.id === traceId)
   if (opened) return <Trace trace={opened} back={() => setTraceId(null)} colour={colour} />
   const toTraces = (next) => (filters[1](next), setTab("Traces"))
@@ -719,9 +722,10 @@ function Insights() {
         </Tabs>
       </div>
       {tab === "Services" && <Services rows={data.requests} traces={traces} from={from} to={to} open={service} colour={colour} showTrace={setTraceId} showTraces={toTraces} />}
-      {tab === "Traces" && <Traces traces={traces} filters={filters} query={queries.Traces} open={setTraceId} colour={colour} more={more(data.spans)} />}
-      {tab === "Logs" && <Logs rows={data.logs} more={more(data.logs)} query={queries.Logs} />}
-      {tab === "Metrics" && <Metrics rows={data.metrics} from={from} to={to} more={more(data.metrics)} query={queries.Metrics} />}
+      {tab !== "Services" && tab !== "Errors" && !data.spans && <ListSkeleton rows={3} />}
+      {tab === "Traces" && data.spans && <Traces traces={traces} filters={filters} query={queries.Traces} open={setTraceId} colour={colour} more={more(data.spans)} />}
+      {tab === "Logs" && data.logs && <Logs rows={data.logs} more={more(data.logs)} query={queries.Logs} />}
+      {tab === "Metrics" && data.metrics && <Metrics rows={data.metrics} from={from} to={to} more={more(data.metrics)} query={queries.Metrics} />}
       {tab === "Errors" && <Errors rows={data.errors} query={queries.Errors} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
     </div>
   )

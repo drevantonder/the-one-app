@@ -537,9 +537,13 @@ impl Node {
     }
 
     /// What `viewer` may see of how things went, by `ask`, from the telemetry Worker: an app's only for someone who may
-    /// deploy it, and what's the network's own program's only for an admin. What this device hasn't sent yet is sent first.
+    /// deploy it, and what's the network's own program's only for an admin. What this device hasn't sent yet goes alongside
+    /// rather than before: a row takes a minute or two to be readable, so waiting for it says nothing about what's read.
     pub async fn insights(&self, viewer: &Caller, ask: &Ask) -> Result<Value> {
-        self.flush_insights().await;
+        let sending = self.clone();
+        tokio::spawn(async move {
+            sending.flush_insights().await;
+        });
         let (services, admin) = self.with(|i| {
             let m = i.r.db();
             let mut seen: Vec<String> = m.apps()?.into_iter().map(|a| a.name).filter(|app| app != insights::own() && m.may(&viewer.user, "deploy", &scopes::app(app))).collect();
