@@ -112,14 +112,14 @@ const OTLP_PATH = "/telemetry/otlp";
 /// Who it's from isn't a device, so a Worker's own spans have no device of their own.
 const NOBODY = "0".repeat(64);
 /// As OTEL's tail sampling does: a trace is kept whole if it failed or was slow, or is one in 20 of a Worker's requests
-/// (src/insights.rs). Every server span is counted first, kept or not, so rates come from counts.
+/// (src/insights.rs). Every request is counted first, kept or not, so rates come from counts.
 const SLOW_MS = 1000;
 const SAMPLED_ONE_IN = 20;
-/// What a Worker answers as a request. Its other events (each WebSocket message the relay takes is one, some 200,000 an hour)
-/// have no caller to report to: they're kept only if they failed or were slow, and counted all the same.
-const REQUEST = /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/;
+/// What a Worker answers as a request. Its other events (each WebSocket message the relay takes is one, some 130,000 an hour,
+/// and each RPC) have no caller to report to and aren't requests: they're kept only if they failed or were slow, and not counted.
+const REQUEST = /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)(\s|$)/;
 const sampledTrace = (trace) => parseInt(trace.slice(-8), 16) % SAMPLED_ONE_IN === 0;
-/// What every Worker's server spans add up to, kept or not, as OTEL's span metrics connector names it.
+/// What every Worker's requests add up to, kept or not, as OTEL's span metrics connector names it.
 const SPAN_METRIC = "traces.span.metrics.duration";
 /// The errors a JavaScript engine names (src/insights.rs's `EXCEPTIONS`): any other name is `Error`.
 export const EXCEPTIONS = ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];
@@ -149,8 +149,8 @@ function exceptionOf(s) {
 
 /// OTLP/JSON from Cloudflare, each Worker's spans as rows for the spans table, `spans`: only its name if that's a plain
 /// token, its ids, timing, kind and status, a status code, and an exception's type, frame and plain words. Its other
-/// attributes are Cloudflare's, and may name a URL: none are kept. And `metrics`, what every server span adds up to, a
-/// minute at a time, kept or not.
+/// attributes are Cloudflare's, and may name a URL: none are kept. And `metrics`, what every request adds up to, a minute
+/// at a time, kept or not.
 export function workerSpans(request, cli) {
   const spans = [];
   for (const resource of request.resourceSpans ?? []) {
@@ -164,7 +164,7 @@ export function workerSpans(request, cli) {
   const server = ({ s }) => s.kind === 2 || s.kind === "SPAN_KIND_SERVER";
   const nameOf = ({ s }) => (token(s.name) ? s.name : "span");
   const counts = new Map();
-  for (const x of spans.filter(server)) {
+  for (const x of spans.filter((x) => server(x) && REQUEST.test(x.s.name))) {
     const minute = nanos(x.s.startTimeUnixNano) - (nanos(x.s.startTimeUnixNano) % 60_000);
     const status = failed(x) ? "STATUS_CODE_ERROR" : "STATUS_CODE_UNSET";
     const key = `${minute}|${x.job}|${nameOf(x)}|${status}`;
