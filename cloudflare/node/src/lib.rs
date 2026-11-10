@@ -344,7 +344,7 @@ pub fn statements(appends: &str, scopes: &str) -> Result<String, JsError> {
 /// `linked` or not.
 #[wasm_bindgen]
 pub fn screen(context: &str, body: &str, linked: bool) -> Result<String, JsError> {
-    Ok(one::screen::page(&serde_json::from_str(context)?, body, false, linked))
+    Ok(one::screen::page(&serde_json::from_str(context)?, body, linked))
 }
 
 /// The custom build this node is: `{ name, cli, port, made_here }`, and the name a call gives for this node (`cloudflare`).

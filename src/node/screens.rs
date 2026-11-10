@@ -174,16 +174,16 @@ impl Node {
         let deployed = row.is_some_and(|a| a.bundle.is_some() && !a.erased);
         // A screen the app doesn't have (an old or mistyped link), or an app not deployed here, is a page that says so.
         let body = if deployed { self.0.apps.screen(app, name).await?.unwrap_or_default() } else { String::new() };
-        self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body, false, linked)
+        self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body, linked)
     }
 
     /// A screen's page: its body with the design kit, the bridge, and `window.__one`, which is `context` and who's
     /// looking.
-    pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str, own: bool, linked: bool) -> Result<String> {
+    pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str, linked: bool) -> Result<String> {
         context["me"] = json!(self.me_for(viewer)?);
         let api = format!("http://localhost:{}", crate::api::port());
         context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": crate::config::MADE_HERE });
-        Ok(crate::screen::page(&context, body, own, linked))
+        Ok(crate::screen::page(&context, body, linked))
     }
 
     /// Arranges a page for `caller` alone: the order of its apps and widgets, which widgets, their sizes and options,

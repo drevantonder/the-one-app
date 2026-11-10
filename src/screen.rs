@@ -48,16 +48,16 @@ fn ui_imports() -> Cow<'static, str> {
     ui_folder::text("src/screen/ui/dist/importmap.json", include_str!("screen/ui/dist/importmap.json"))
 }
 
-/// A screen's page: `context` is `{ app, screen, params, me, scope, config }` (a Settings screen has no app or scope), `body` its HTML.
-/// A client's own (`own`) acts as the user, and draws what apps say, so it runs only its own scripts: they carry this
-/// page's nonce, and its policy refuses every other, inline event handlers too. `linked`, `@one/ui` and the bridge are links
-/// to the address's files (`/screen/<path>?v=`, named by content as the gateway names them), which the web client
-/// already has, rather than in the page.
-pub fn page(context: &serde_json::Value, body: &str, own: bool, linked: bool) -> String {
-    page_with(context, body, own.then(|| data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>())), linked)
+/// An app's screen's page: `context` is `{ app, screen, params, me, scope, config }`, `body` its HTML. `linked`, `@one/ui`
+/// and the bridge are links to the address's files (`/screen/<path>?v=`, named by content as the gateway names them),
+/// which the web client already has, rather than in the page.
+pub fn page(context: &serde_json::Value, body: &str, linked: bool) -> String {
+    page_with(context, body, None, linked)
 }
 
-/// `page`, with a client's own screen's `nonce`, or none for an app's.
+/// A screen's page, with a client's own screen's `nonce`, or none for an app's. A client's own acts as the user, and
+/// draws what apps say, so it runs only its own scripts: they carry the nonce, and its policy refuses every other,
+/// inline event handlers too.
 fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, linked: bool) -> String {
     let body = if body.is_empty() { MISSING } else { body };
     let mut context = context.clone();
@@ -258,9 +258,9 @@ mod tests {
         let context = serde_json::json!({ "app": "a", "screen": "main" });
         let theme = |page: &str, linked: bool| if linked { page.contains("/screen/ui/ui.css?v=") } else { page.contains(&*super::ui_css()) };
         for linked in [false, true] {
-            let plain = super::page(&context, "<p>hi</p>", false, linked);
+            let plain = super::page(&context, "<p>hi</p>", linked);
             assert!(theme(&plain, linked) && !plain.contains("importmap") && !plain.contains("OneUI"));
-            let new = super::page(&context, &format!("{}<div id=root></div>", super::UI), false, linked);
+            let new = super::page(&context, &format!("{}<div id=root></div>", super::UI), linked);
             assert!(theme(&new, linked) && new.contains(r#"<script type="importmap">{"imports":{"react":"#));
             assert!(new.find("importmap").unwrap() < new.find("<div id=root>").unwrap());
         }
