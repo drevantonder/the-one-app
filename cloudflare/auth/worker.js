@@ -800,7 +800,7 @@ export class Auth extends DurableObject {
       const plain = { id: hex16(), app: "settings", screen: "devices", ...note };
       if (to.length) await this.env.PUSH.send(to.map((key) => ({ to: key, plain })));
     } catch (err) {
-      console.error(`pushing "${note.title}": ${err.stack || err}`);
+      console.error(`pushing a note of a device asking in: ${err.stack || err}`);
     }
   }
 

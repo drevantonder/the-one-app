@@ -2,13 +2,15 @@
 import { b64u, canonical, certify, checkCertificate, checkRequest, discoveryUrl, ed25519Public, hex, idOf, joinChallenge, joinCode, joinNonce, openNote, openUnder, sealTo, sealUnder, signedRequest, x25519Public } from "../shared/crypto.js";
 import { CODES, copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { AGENTS } from "../screen/agents.js";
-import { BOUNDS, EXCEPTIONS, TABLES, TRACED, workerSpans } from "../telemetry/worker.js";
+import { BOUNDS, EXCEPTIONS, TABLES, TRACED, plainWords, workerLogs, workerSpans } from "../telemetry/worker.js";
 import { PRODUCTS, query, rows } from "../telemetry/usage.js";
 
 const ops = {
   telemetryBounds: () => BOUNDS,
   telemetryTraced: () => TRACED,
   telemetryWorkerSpans: ({ request, cli }) => workerSpans(request, cli),
+  telemetryWorkerLogs: ({ request, cli }) => workerLogs(request, cli),
+  telemetryPlainWords: ({ said }) => said.map(plainWords),
   telemetryExceptions: () => EXCEPTIONS,
   /// The one analytics query of the network's resources (`usage`), and an hour's answer (each dataset's groups by its name) as rows.
   telemetryUsage: ({ usage, answer }) => ({ query: query(usage), rows: rows(Object.fromEntries(PRODUCTS.map((p, i) => [`p${i}`, answer[p.dataset] ?? []])), usage, 0, "0".repeat(64)) }),

@@ -129,39 +129,46 @@ pub fn usage(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
     Ok(())
 }
 
-/// The name of Cloudflare's destination for the Workers' own traces.
-pub fn destination() -> String {
-    format!("{}-worker-traces", crate::config::CLI)
+/// What the Workers export through Cloudflare's OTLP destinations, each its signal and Cloudflare's dataset of it.
+pub const EXPORTED: [(&str, &str); 2] = [("traces", "opentelemetry-traces"), ("logs", "opentelemetry-logs")];
+
+/// The name of Cloudflare's destination for the Workers' own `signal`.
+pub fn destination(signal: &str) -> String {
+    format!("{}-worker-{signal}", crate::config::CLI)
 }
 
-/// Points Cloudflare's trace destination at the telemetry Worker, with a header only it knows: Cloudflare's export can't
-/// sign, and is OTLP/JSON. It's the telemetry Worker's own address, never the gateway's, or each export would be a request
-/// of the gateway's for the next export to carry; a deploy that can't yet (Workers Observability Write) leaves it as it is.
-pub fn traces(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
+/// Points Cloudflare's destination of each of `EXPORTED` at the telemetry Worker, with a header only it knows: Cloudflare's
+/// export can't sign, and is OTLP/JSON. It's the telemetry Worker's own address, never the gateway's, or each export would
+/// be a request of the gateway's for the next export to carry; a deploy that can't yet (Workers Observability Write) leaves
+/// them as they are.
+pub fn exports(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
     let url = format!("https://{}.{}.workers.dev/telemetry/otlp", crate::cloudflare::worker_name("telemetry"), cf.subdomain()?);
-    if settings.traces.as_deref() == Some(url.as_str()) {
-        return Ok(());
-    }
-    let name = destination();
     let path = format!("/accounts/{}/workers/observability/destinations", cf.account);
-    let there = cf.list(&path).context("reading Cloudflare's trace destinations, which needs an API token with Workers Observability Write")?;
-    let token = match &settings.otlp_token {
-        Some(token) => token.clone(),
-        None => {
-            let token = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
-            settings.set_secret("OTLP_TOKEN", &token)?;
-            settings.otlp_token = Some(token.clone());
-            token
+    for (signal, dataset) in EXPORTED {
+        if settings.exported(signal) == Some(url.as_str()) {
+            continue;
         }
-    };
-    let configuration = json!({ "type": "logpush", "logpushDataset": "opentelemetry-traces", "url": url, "headers": { "authorization": format!("Bearer {token}") } });
-    // Cloudflare's destinations change their URL only with new header values, and the token stays: it's made anew at the same name.
-    if there.iter().any(|d| d["name"] == name) {
-        cf.delete(&format!("{path}/{name}")).context("replacing Cloudflare's trace destination")?;
+        let name = destination(signal);
+        let there = cf.list(&path).context("reading Cloudflare's OTLP destinations, which needs an API token with Workers Observability Write")?;
+        let token = match &settings.otlp_token {
+            Some(token) => token.clone(),
+            None => {
+                let token = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
+                settings.set_secret("OTLP_TOKEN", &token)?;
+                settings.otlp_token = Some(token.clone());
+                token
+            }
+        };
+        let configuration = json!({ "type": "logpush", "logpushDataset": dataset, "url": url, "headers": { "authorization": format!("Bearer {token}") } });
+        // Cloudflare's destinations change their URL only with new header values, and the token stays: it's made anew at the same name.
+        if there.iter().any(|d| d["name"] == name) {
+            cf.delete(&format!("{path}/{name}")).with_context(|| format!("replacing Cloudflare's {signal} destination"))?;
+        }
+        cf.post(&path, json!({ "name": name, "enabled": true, "skipPreflightCheck": true, "configuration": configuration })).with_context(|| format!("making Cloudflare's {signal} destination"))?;
+        *settings.exported_mut(signal) = Some(url.clone());
+        settings.save()?;
     }
-    cf.post(&path, json!({ "name": name, "enabled": true, "skipPreflightCheck": true, "configuration": configuration })).context("making Cloudflare's trace destination")?;
-    settings.traces = Some(url);
-    settings.save()
+    Ok(())
 }
 
 /// A token only for that bucket's SQL, catalog and files: what the Worker reads with and the sinks write with.

@@ -41,8 +41,8 @@ fn put_up(cf: &crate::cloudflare::Cloudflare, settings: &mut crate::cloudflare::
             eprintln!("Insights won't have data until this is done, by a deploy with a token that may: {err:#}");
         }
     }
-    if let Err(err) = crate::cloudflare::basin::traces(cf, settings) {
-        eprintln!("The Workers' own traces won't reach Insights until this is done, by a deploy with a token that may: {err:#}");
+    if let Err(err) = crate::cloudflare::basin::exports(cf, settings) {
+        eprintln!("The Workers' own traces and logs won't reach Insights until this is done, by a deploy with a token that may: {err:#}");
     }
     let usage = |settings: &mut crate::cloudflare::Settings| {
         if let Err(err) = crate::cloudflare::basin::usage(cf, settings) {

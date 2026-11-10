@@ -55,8 +55,9 @@ pub const WORKERS: &[Worker] = &[
 /// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
 pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", classes: &["Node"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings, cron: None };
 
-/// The Workers traced at 100% (`metadata`): those that open nothing but the telemetry Worker. The web client is the gateway's assets.
-const TRACED: [&str; 5] = crate::insights::TRACED;
+/// The Workers traced at 100% (`metadata`), their logs exported too: all but the telemetry Worker and the Cloudflare node.
+/// The web client is the gateway's assets.
+const TRACED: [&str; 6] = crate::insights::TRACED;
 
 impl Worker {
     pub fn named(name: &str) -> &'static Worker {
@@ -215,10 +216,13 @@ pub struct Settings {
     /// The token only for telemetry's bucket that `telemetry` was set up with, which the telemetry Worker reads with.
     #[serde(default, skip_serializing)]
     pub telemetry_token: Option<String>,
-    /// Where the Workers' own traces go, once a deploy has pointed Cloudflare's destination there (`basin::traces`).
+    /// Where the Workers' own traces go, once a deploy has pointed Cloudflare's destination there (`basin::exports`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub traces: Option<String>,
-    /// What Cloudflare sends those traces with, which the telemetry Worker checks: its export can't sign.
+    /// Where their logs go, the same way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logs: Option<String>,
+    /// What Cloudflare sends those with, which the telemetry Worker checks: its export can't sign.
     #[serde(default, skip_serializing)]
     pub otlp_token: Option<String>,
     /// The token only for reading the account's analytics, made by a deploy (`basin::usage`), which the telemetry Worker
@@ -255,7 +259,7 @@ CLOUDFLARE_API_TOKEN=
 # The token only for telemetry's bucket, made by cloudflare deploy, which the telemetry Worker reads Basin with.
 # @optional
 TELEMETRY_TOKEN=
-# What Cloudflare's export of the Workers' traces is let in by, made by cloudflare deploy.
+# What Cloudflare's export of the Workers' traces and logs is let in by, made by cloudflare deploy.
 # @optional
 OTLP_TOKEN=
 # The token only for reading the account's analytics, made by cloudflare deploy, which the telemetry Worker reads the
@@ -474,6 +478,21 @@ impl Settings {
     }
 
     /// What `sign_in_proof::CLIENTS` says of the clients this network registered, if it has any.
+    /// Where the Workers' `signal` (one of `basin::EXPORTED`) goes.
+    pub fn exported(&self, signal: &str) -> Option<&str> {
+        match signal {
+            "traces" => self.traces.as_deref(),
+            _ => self.logs.as_deref(),
+        }
+    }
+
+    pub fn exported_mut(&mut self, signal: &str) -> &mut Option<String> {
+        match signal {
+            "traces" => &mut self.traces,
+            _ => &mut self.logs,
+        }
+    }
+
     pub fn sign_in_clients(&self) -> Option<String> {
         let clients: Vec<String> = self.providers.iter().filter_map(|p| Some(format!("{} {}", p.issuer, p.client.as_ref()?.0))).collect();
         (!clients.is_empty()).then(|| clients.join("\n"))
@@ -561,6 +580,7 @@ impl Settings {
             telemetry: None,
             telemetry_token: None,
             traces: None,
+            logs: None,
             otlp_token: None,
             analytics_token: None,
             usage: None,
@@ -1537,13 +1557,16 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
         }
     }
     let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::app::runtime::COMPATIBILITY_DATE, "bindings": bindings, "observability": { "enabled": true } });
-    // Kept in Cloudflare, sent to the telemetry Worker once a deploy has made where to (`basin::traces`), and never for the
-    // two that open data (mcp, node).
+    // Kept in Cloudflare, sent to the telemetry Worker once a deploy has made where to (`basin::exports`), and never for the
+    // Cloudflare node, which reports its calls as every node does, or the telemetry Worker.
     if TRACED.contains(&worker.name) {
         meta["observability"]["traces"] = json!({ "enabled": true, "head_sampling_rate": 1 });
-        if settings.traces.is_some() {
-            meta["observability"]["traces"]["destinations"] = json!([crate::cloudflare::basin::destination()]);
-            meta["observability"]["traces"]["persist"] = json!(true);
+        for (signal, _) in crate::cloudflare::basin::EXPORTED {
+            if settings.exported(signal).is_some() {
+                meta["observability"][signal]["enabled"] = json!(true);
+                meta["observability"][signal]["destinations"] = json!([crate::cloudflare::basin::destination(signal)]);
+                meta["observability"][signal]["persist"] = json!(true);
+            }
         }
     }
     let had = migration.and_then(|tag| tag.strip_prefix('v')?.parse::<usize>().ok()).unwrap_or(0);
@@ -1642,15 +1665,22 @@ pub(crate) fn upload_hash(parts: &[Vec<u8>]) -> String {
 mod observability_tests {
     use super::*;
 
-    /// Traces at 100% only for the Workers that open nothing: a trace of what mcp or node does would be of data they opened.
+    /// Every Worker's traces and logs are exported but the telemetry Worker's, which would be handed its own export, and
+    /// the Cloudflare node's, which reports its calls as every node does.
     #[test]
-    fn only_workers_that_open_nothing_are_traced() {
-        let settings = Settings::new("https://example.org");
-        let traced = |worker: &Worker| metadata(&settings, worker, None, |_| true).0["observability"]["traces"]["enabled"] == true;
+    fn every_worker_but_telemetry_and_the_node_is_exported() {
+        let mut settings = Settings::new("https://example.org");
+        settings.traces = Some("https://t.example/telemetry/otlp".into());
+        settings.logs = settings.traces.clone();
+        let observed = |worker: &Worker| metadata(&settings, worker, None, |_| true).0["observability"].clone();
         for name in TRACED {
-            assert!(traced(Worker::named(name)), "{name}");
+            let o = observed(Worker::named(name));
+            assert_eq!((&o["traces"]["enabled"], &o["traces"]["destinations"][0], &o["logs"]["destinations"][0]), (&json!(true), &json!(crate::cloudflare::basin::destination("traces")), &json!(crate::cloudflare::basin::destination("logs"))), "{name}");
         }
-        assert!(!traced(Worker::named("mcp")), "the remote MCP server opens data");
-        assert!(!traced(&NODE), "the Cloudflare node opens data");
+        assert!(TRACED.contains(&"mcp"));
+        for worker in [Worker::named("telemetry"), &NODE] {
+            let o = observed(worker);
+            assert!(o["traces"].is_null() && o["logs"].is_null(), "{}", worker.name);
+        }
     }
 }

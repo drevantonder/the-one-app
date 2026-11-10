@@ -1083,7 +1083,9 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     let request = json!({ "resourceSpans": [of("one-gateway", vec![failed, span("GET", 'd', 0, None), span("GET", '0', 0, None)]), of("one-relay", vec![span("hibernatableWebSocket", 'e', 0, None)]), of("one-telemetry", vec![span("fetch", 'c', 2, None)]), of("one-mcp", vec![span("fetch", 'b', 2, None)]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
     let read = formats.js(json!({ "op": "telemetryWorkerSpans", "request": request, "cli": "one" }));
     let rows = read["spans"].as_array().unwrap();
-    assert_eq!(rows.len(), 2, "the gateway's failure and the one request in 20: not another request, a WebSocket message, nor what mcp, node or telemetry did: {rows:?}");
+    assert_eq!(rows.len(), 3, "the gateway's failure, the one request in 20, and mcp's failure: not another request, a WebSocket message, nor what node or telemetry did: {rows:?}");
+    assert_eq!((rows[2]["service"].as_str(), rows[2]["name"].as_str()), (Some("worker.mcp"), Some("fetch")));
+    assert!(!rows[2].to_string().contains("anna"), "{}", rows[2]);
     let stored = rows[0].to_string();
     assert!(!stored.contains("anna") && !stored.contains("example") && !stored.contains("url.full") && !stored.contains("l1kp"), "{stored}");
     let attrs: Value = serde_json::from_str(rows[0]["attrs"].as_str().unwrap()).unwrap();
@@ -1098,6 +1100,59 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     assert_eq!((program[0].name.as_str(), program[0].ms, program[0].ok, program[0].status_code), ("span", 500, false, Some(500)), "the same span reads the same on a device");
     let named: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryExceptions" }))).unwrap();
     assert!(named.iter().all(|n| one::insights::exception_type(n) == n) && one::insights::exception_type("Nope") == "Error", "a Worker's exception is named as a program's is: {named:?}");
+}
+
+/// Cloudflare's export of the Workers' logs keeps only what broke, an error-level line or an exception, and of it only what
+/// an allow-list names: its ids, its severity and OTEL's `exception.*`, cleaned. Whatever else Cloudflare sends (a request's
+/// URL and headers, the caller's address, `cf`) is never kept, nor any of what node or telemetry logged.
+#[test]
+fn a_workers_logs_keep_only_what_broke_cleaned() {
+    let formats = Formats::start();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() * 1_000_000;
+    let string = |k: &str, v: &str| json!({ "key": k, "value": { "stringValue": v } });
+    let private = vec![string("url.full", "https://one.example/api/anna"), string("http.request.header.authorization", "Bearer sekrit"), string("client.address", "10.1.2.3"), json!({ "key": "cf", "value": { "kvlistValue": { "values": [string("city", "Anna Bay")] } } })];
+    let record = |severity: Value, body: &str, mut attrs: Vec<Value>| {
+        attrs.extend(private.clone());
+        json!({ "timeUnixNano": now.to_string(), "severityNumber": severity, "body": { "stringValue": body }, "traceId": "a".repeat(32), "spanId": "b".repeat(16), "attributes": attrs })
+    };
+    let of = |worker: &str, records: Vec<Value>| json!({ "resource": { "attributes": [string("service.name", worker), string("cloudflare.script_name", "anna")] }, "scopeLogs": [{ "logRecords": records }] });
+    let stack = "TypeError: internal error; reference = l1kprhha71iut801 for anna@example.org\n    at Relay.ask (relay/worker.js:474:18)";
+    let request = json!({ "resourceLogs": [
+        of("one-relay", vec![record(json!(17), stack, vec![]), record(json!(9), "GET https://one.example/api/anna", vec![])]),
+        of("one-mcp", vec![record(json!("SEVERITY_NUMBER_INFO"), "", vec![string("exception.type", "Nope"), string("exception.message", "token: hunter at https://x.example/?a=b"), string("exception.stacktrace", "at mcp/worker.js:1:2")])]),
+        of("one-node", vec![record(json!(17), "anna's mail failed", vec![])]),
+        of("one-telemetry", vec![record(json!(17), "failed", vec![])]),
+    ] });
+    let rows: Vec<Value> = serde_json::from_value(formats.js(json!({ "op": "telemetryWorkerLogs", "request": request, "cli": "one" }))).unwrap();
+    assert_eq!(rows.len(), 2, "the relay's error and mcp's exception, not its info line, nor what node or telemetry said: {rows:?}");
+    for row in &rows {
+        let stored = row.to_string();
+        for private in ["anna", "Anna", "example", "sekrit", "hunter", "10.1.2.3", "l1kp", "url.full", "client.address", "cf", "script_name"] {
+            assert!(!stored.contains(private), "{private} in {stored}");
+        }
+        let columns: Vec<&String> = row.as_object().unwrap().keys().collect();
+        assert_eq!(columns, ["attrs", "body", "instance", "service", "severity_number", "severity_text", "span", "time", "trace"]);
+    }
+    let attrs = |row: &Value| serde_json::from_str::<Value>(row["attrs"].as_str().unwrap()).unwrap();
+    assert_eq!((rows[0]["service"].as_str(), rows[0]["body"].as_str(), rows[0]["trace"].as_str(), rows[0]["severity_text"].as_str()), (Some("worker.relay"), Some("exception"), Some("a".repeat(32).as_str()), Some("ERROR")));
+    assert_eq!(attrs(&rows[0]), json!({ "exception.type": "TypeError", "exception.message": "internal error; reference = <value> for <value>", "exception.stacktrace": "at worker.js:474:18" }));
+    assert_eq!(attrs(&rows[1]), json!({ "exception.type": "Error", "exception.message": "token: <value> at <value>", "exception.stacktrace": "at worker.js:1:2" }), "an exception is kept whatever its level, its name one the engine gives");
+    assert_eq!(rows[1]["severity_number"], 17);
+}
+
+/// The Workers' cleaner keeps a message's plain words alone, so it hides at least what the node's (src/insights/message.rs)
+/// does: no word the node's would hide survives it.
+#[test]
+fn a_workers_cleaner_hides_what_a_nodes_does() {
+    let formats = Formats::start();
+    let said = ["couldn't mail anna.lee@example.org, try again", "fetching https://x.example/a?token=abc failed", "no file at /home/anna/taxes.pdf", "connecting to 10.0.0.12:8080: refused", "connecting to 2001:db8::1 timed out", "call +61 400 123 456 back", "call (02) 9876 5432 back", "order 123456789 isn't there", "bad key ab12cd34ef56ab12cd34ef56ab12", "(mac: 1fcdd729 isn't connected)", "token=hunter was refused", "token = hunter was refused", "password: hunter was refused", "Authorization: Bearer abcdefgh", "eyJhbGci.eyJzdWIi.c2lnbmF0dXJl expired", "no device deadbeefcafebabedead here"];
+    let cleaned: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryPlainWords", "said": said }))).unwrap();
+    for (said, worker) in said.iter().zip(&cleaned) {
+        let node = one::insights::message::cleaned(said);
+        for hidden in said.split_whitespace().filter(|w| !node.contains(w.trim_end_matches([',', '.', ':', ')']))) {
+            assert!(!worker.contains(hidden.trim_end_matches([',', '.', ':', ')'])), "{hidden:?} of {said:?} is in {worker:?}, and the node's hides it: {node:?}");
+        }
+    }
 }
 
 /// What the network uses of Cloudflare is asked of its analytics by its own resources alone, grouped by nothing that's

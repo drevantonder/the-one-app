@@ -7,7 +7,7 @@
 // cleaned message (src/insights/message.rs).
 //
 //   POST /telemetry/write { spans, logs, metrics, at, by, sig } → 204
-//   POST /telemetry/otlp  Cloudflare's export of the Workers' own traces (`otlp`), gzipped or not → 204
+//   POST /telemetry/otlp  Cloudflare's export of the Workers' own traces and logs (`otlp`), gzipped or not → 204
 //   POST /telemetry/read  { queries: [name], since, services, service?, name?, status?, trace?, least?, limit?, at, by, sig }
 //                         → { <name>: [row] }
 //   hourly                each of `SOURCES`' metric rows of the hour before
@@ -105,9 +105,9 @@ async function signed(request, env, most) {
 
 const STREAMS = { spans: "SPANS", logs: "LOGS", metrics: "METRICS" };
 
-/// The Workers whose own traces are kept: those that open nothing, never `mcp` or `node`, whatever a request says of itself,
-/// and not this one, as an export of its traces would be the next thing it was handed (src/insights.rs).
-export const TRACED = ["gateway", "auth", "relay", "signer", "push"];
+/// The Workers whose own traces and logs are kept: never `node`, which reports its calls as every node does, whatever a
+/// request says of itself, and not this one, as an export of what it did would be the next thing it was handed (src/insights.rs).
+export const TRACED = ["gateway", "auth", "relay", "signer", "push", "mcp"];
 const token = (v) => typeof v === "string" && /^[A-Za-z0-9_.+-]{1,72}$/.test(v);
 const nanos = (v) => Number(BigInt(v ?? 0) / 1000000n);
 const OTLP_PATH = "/telemetry/otlp";
@@ -129,11 +129,32 @@ const OUTCOMES = ["exceededCpu", "exceededMemory", "canceled", "responseStreamDi
 /// The errors a JavaScript engine names (src/insights.rs's `EXCEPTIONS`): any other name is `Error`.
 export const EXCEPTIONS = ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];
 
-/// What a Worker's exception said, kept to its plain words: Cloudflare's own ("internal error; reference = …", "Network
-/// connection lost.") are what explains a failure there. Any other word, a value of any kind, is `<value>`, which also
+/// Words that say the next one is a secret, as in `password: hunter` or `Bearer abc` (src/insights/message.rs).
+const NAMES_A_SECRET = ["token", "key", "secret", "password", "passwd", "pwd", "auth", "authorization", "bearer", "apikey", "api_key", "cookie", "session"];
+
+/// What a Worker said of a failure, kept to its plain words: Cloudflare's own ("internal error; reference = …", "Network
+/// connection lost.") are what explains a failure there. Any other word, a value of any kind, is `<value>`, as are a word
+/// all of hex, one a word naming a secret goes before, and so anything src/insights/message.rs would hide, which also
 /// makes failures that differ only by one read the same. It never passes through a node, so this is its cleaner.
-function plainWords(said) {
-  const words = String(said ?? "").slice(0, 2048).split(/(\s+)/).map((w) => (!w || /^\s+$/.test(w) || /^[A-Za-z][A-Za-z'-]*[.,;:!?]?$/.test(w) || /^[=:;,.()-]+$/.test(w) ? w : "<value>"));
+export function plainWords(said) {
+  // `named`: the word before named a secret, and an `=` or `:` would say this one is it; `secret`: this one is.
+  let named = false;
+  let secret = false;
+  const words = String(said ?? "").slice(0, 2048).split(/(\s+)/).map((w) => {
+    if (!w || /^\s+$/.test(w)) return w;
+    if (/^[=:;,.()-]+$/.test(w)) {
+      secret = named && /^[=:]$/.test(w);
+      named = false;
+      return w;
+    }
+    const plain = /^[A-Za-z][A-Za-z'-]*[.,;:!?]?$/.test(w) && !/^[0-9A-Fa-f]{16,}[.,;:!?]?$/.test(w);
+    const kept = plain && !secret ? w : "<value>";
+    const bare = w.replace(/[.,;:!?]$/, "").toLowerCase();
+    const names = NAMES_A_SECRET.includes(bare);
+    secret = names && (w.endsWith(":") || bare === "bearer");
+    named = names && bare === w.toLowerCase();
+    return kept;
+  });
   const kept = words.join("").trim();
   return kept.length > 512 ? `${kept.slice(0, 512)}…` : kept;
 }
@@ -143,14 +164,22 @@ const attribute = (attrs, key) => {
   return v?.stringValue ?? v?.intValue;
 };
 
+/// The first frame of a stack, as `file:line:col`, or "".
+function frameOf(stack) {
+  const at = /([A-Za-z0-9_.\/-]+\.js):(\d+):(\d+)/.exec(String(stack ?? ""));
+  return at ? `${at[1].split("/").pop()}:${at[2]}:${at[3]}` : "";
+}
+
 /// A span's exception event, as OTEL's: its type, the first frame of its stack (`file:line:col`), and its plain words.
 function exceptionOf(s) {
   const event = (s.events ?? []).find((e) => e.name === "exception");
   if (!event) return null;
   const named = String(attribute(event.attributes, "exception.type") ?? "");
-  const at = /([A-Za-z0-9_.\/-]+\.js):(\d+):(\d+)/.exec(String(attribute(event.attributes, "exception.stacktrace") ?? ""));
-  return { type: EXCEPTIONS.includes(named) ? named : "Error", frame: at ? `${at[1].split("/").pop()}:${at[2]}:${at[3]}` : "", message: plainWords(attribute(event.attributes, "exception.message")) };
+  return { type: EXCEPTIONS.includes(named) ? named : "Error", frame: frameOf(attribute(event.attributes, "exception.stacktrace")), message: plainWords(attribute(event.attributes, "exception.message")) };
 }
+
+/// Which of `TRACED` a resource is, by its `service.name`, `<cli>-<name>`.
+const jobOf = (resource, cli) => String((resource.resource?.attributes ?? []).find((a) => a.key === "service.name")?.value?.stringValue ?? "").replace(`${cli}-`, "");
 
 /// OTLP/JSON from Cloudflare, each Worker's spans as rows for the spans table, `spans`: only its name if that's a plain
 /// token, an RPC's as what it called (`<entrypoint>.<method>`), its ids, timing, kind and status, a status code, how it
@@ -160,8 +189,7 @@ function exceptionOf(s) {
 export function workerSpans(request, cli) {
   const spans = [];
   for (const resource of request.resourceSpans ?? []) {
-    const named = (resource.resource?.attributes ?? []).find((a) => a.key === "service.name")?.value?.stringValue ?? "";
-    const job = String(named).replace(`${cli}-`, "");
+    const job = jobOf(resource, cli);
     if (!TRACED.includes(job)) continue;
     for (const scope of resource.scopeSpans ?? []) spans.push(...(scope.spans ?? []).filter((s) => hex(s.traceId, 32) && hex(s.spanId, 16)).map((s) => ({ s, job })));
   }
@@ -206,12 +234,56 @@ export function workerSpans(request, cli) {
   return { spans: rows, metrics };
 }
 
+/// OTEL's severity numbers by the text a record may carry instead: an error is 17 and over.
+const SEVERITIES = { trace: 1, debug: 5, info: 9, log: 9, warn: 13, warning: 13, error: 17, fatal: 21 };
+const ERROR = 17;
+const FATAL = 21;
+
+function severityOf(r) {
+  if (Number.isSafeInteger(r.severityNumber)) return r.severityNumber;
+  const named = /^SEVERITY_NUMBER_([A-Z]+)(\d?)$/.exec(String(r.severityNumber ?? ""));
+  if (named) return (SEVERITIES[named[1].toLowerCase()] ?? 0) + Math.max(0, Number(named[2] || 1) - 1);
+  return SEVERITIES[String(r.severityText ?? "").toLowerCase()] ?? 0;
+}
+
+/// OTLP/JSON from Cloudflare, each Worker's log records as rows for the logs table: only what says something broke, a line
+/// at error level or an exception, and of it only its time, trace and span ids, severity, and as OTEL's `exception.*`: its
+/// type, the first frame of its stack and its first line's plain words. Every attribute Cloudflare adds is left unread
+/// (a request's URL and headers, the caller's address, its `cf`), as is a body that isn't text.
+export function workerLogs(request, cli) {
+  const rows = [];
+  for (const resource of request.resourceLogs ?? []) {
+    const job = jobOf(resource, cli);
+    if (!TRACED.includes(job)) continue;
+    for (const scope of resource.scopeLogs ?? []) {
+      for (const r of scope.logRecords ?? []) {
+        const thrown = attribute(r.attributes, "exception.type") !== undefined;
+        const severity = severityOf(r);
+        if (severity < ERROR && !thrown) continue;
+        const text = String(attribute(r.attributes, "exception.message") ?? r.body?.stringValue ?? "");
+        const [first, ...rest] = text.split("\n");
+        // A stack logged as text starts with its error's name: `TypeError: …`.
+        const prefixed = /^([A-Za-z]+): /.exec(first);
+        const named = String(attribute(r.attributes, "exception.type") ?? prefixed?.[1] ?? "");
+        const type = thrown || EXCEPTIONS.includes(named) ? (EXCEPTIONS.includes(named) ? named : "Error") : null;
+        const frame = frameOf(attribute(r.attributes, "exception.stacktrace") ?? rest.join("\n"));
+        const message = plainWords(prefixed && EXCEPTIONS.includes(prefixed[1]) ? first.slice(prefixed[0].length) : first);
+        const attrs = { ...(type ? { "exception.type": type } : {}), ...(message ? { "exception.message": message } : {}), ...(frame ? { "exception.stacktrace": `at ${frame}` } : {}) };
+        const time = nanos(r.timeUnixNano || r.observedTimeUnixNano) || Date.now();
+        const row = { time, ...(hex(r.traceId, 32) ? { trace: r.traceId } : {}), ...(hex(r.spanId, 16) ? { span: r.spanId } : {}), severity_number: Math.min(Math.max(severity, ERROR), 24), severity_text: severity >= FATAL ? "FATAL" : "ERROR", body: type ? "exception" : "log", service: `worker.${job}`, instance: NOBODY, attrs: JSON.stringify(attrs) };
+        if (kept(row, TABLES.logs, NOBODY, false)) rows.push(row);
+      }
+    }
+  }
+  return rows;
+}
+
 /// How often this path says what it was handed, each way that can go, as a device's canary does: an export that's refused
 /// or all dropped leaves no span to show it ever came.
 const EXPORT_SAID_EVERY = 15 * 60_000;
 const exportSaid = {};
 
-/// One log record of an export: how many spans it held and how many were kept (`read`), that it couldn't be read
+/// One log record of an export: how many spans and log records it held and how many were kept (`read`), that it couldn't be read
 /// (`unreadable`), or that it came without the token (`refused`), which anyone can make happen, so it's said no more often.
 async function sayExport(env, result, found, kept) {
   const now = Date.now();
@@ -221,12 +293,12 @@ async function sayExport(env, result, found, kept) {
   await env.LOGS.send([{ time: now, severity_number: result === "read" ? 9 : 17, severity_text: result === "read" ? "INFO" : "ERROR", body: "telemetry.export", service: "worker.telemetry", instance: NOBODY, attrs: JSON.stringify(attrs) }]);
 }
 
-/// Cloudflare's export of the Workers' traces: it can't sign, so it's a header only the deploy that made it knows. A log
+/// Cloudflare's export of the Workers' traces or logs: it can't sign, so it's a header only the deploy that made it knows. A log
 /// export of Cloudflare's is gzipped, which nothing here unpacks unasked.
 async function otlp(request, env) {
   if (!env.OTLP_TOKEN || request.headers.get("authorization") !== `Bearer ${env.OTLP_TOKEN}`) {
     if (env.OTLP_TOKEN) await sayExport(env, "refused", 0, 0);
-    refuse(401, "only Cloudflare's export of the Workers' traces, with its token");
+    refuse(401, "only Cloudflare's export of the Workers' traces and logs, with its token");
   }
   const gzipped = request.headers.get("content-encoding") === "gzip" && request.body;
   const body = await textOf(gzipped ? new Response(request.body.pipeThrough(new DecompressionStream("gzip"))) : request, MOST_EXPORT).catch(() => undefined);
@@ -238,11 +310,13 @@ async function otlp(request, env) {
     await sayExport(env, "unreadable", 0, 0);
     refuse(400, "OTLP here is JSON, gzipped or not");
   }
-  const found = (parsed.resourceSpans ?? []).reduce((n, r) => n + (r.scopeSpans ?? []).reduce((m, s) => m + (s.spans ?? []).length, 0), 0);
+  const held = (list, inner, leaf) => (list ?? []).reduce((n, r) => n + (r[inner] ?? []).reduce((m, s) => m + (s[leaf] ?? []).length, 0), 0);
+  const found = held(parsed.resourceSpans, "scopeSpans", "spans") + held(parsed.resourceLogs, "scopeLogs", "logRecords");
   const { spans, metrics } = workerSpans(parsed, env.CLI);
   const rows = spans.slice(0, MOST_ROWS);
-  await Promise.all([rows.length && env.SPANS.send(rows), metrics.length && env.METRICS.send(metrics.slice(0, MOST_ROWS))]);
-  await sayExport(env, "read", found, rows.length);
+  const logs = workerLogs(parsed, env.CLI).slice(0, MOST_ROWS);
+  await Promise.all([rows.length && env.SPANS.send(rows), metrics.length && env.METRICS.send(metrics.slice(0, MOST_ROWS)), logs.length && env.LOGS.send(logs)]);
+  await sayExport(env, "read", found, rows.length + logs.length);
   return new Response(null, { status: 204 });
 }
 
