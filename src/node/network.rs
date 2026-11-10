@@ -135,11 +135,12 @@ impl Node {
         for scope in [Scope::Global, Scope::User(me.user.clone())] {
             crate::settings::new_vault_key(self, &scope, 1, &[self.0.id]).await?;
         }
+        // Written first and run together: running them one by one, each runs them all again.
         for (app, _) in crate::config::BUILT_IN {
-            self.bring_in(&me, app).await?;
+            self.write_built_in(&me, app).await?;
         }
         for app in apps {
-            self.bring_in(&me, app).await?;
+            self.write_built_in(&me, app).await?;
             self.append(&Scope::Global, content::added(app, true)).await?;
         }
         self.settle().await?;

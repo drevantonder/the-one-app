@@ -286,14 +286,21 @@ impl Node {
 
     /// Adds a built-in app the network doesn't have yet, owned by admins, as this release has it. Admins only.
     pub(super) async fn bring_in(&self, caller: &Caller, app: &str) -> Result<()> {
+        self.write_built_in(caller, app).await?;
+        self.settle().await
+    }
+
+    /// Writes a built-in app's deploy if the network doesn't have it, leaving it to the caller to run it here.
+    pub(super) async fn write_built_in(&self, caller: &Caller, app: &str) -> Result<()> {
         let Some(bundle) = self.0.built_in.get(app) else { return Ok(()) };
         let (present, admin) = self.with(|i| Ok((i.r.db().app(app)?.is_some(), i.r.db().may(&caller.user, "add-apps", scopes::NETWORK))))?;
         if present {
             return Ok(());
         }
         ensure!(admin, "{app} is built in, but {} doesn't have it yet: an admin adds it first", crate::config::YOURS);
-        self.member_content(caller, content::app(app, "admins")).await?;
-        self.member_content(caller, content::deploy(app, bundle, [])).await
+        self.append_as(&Scope::Global, &caller.user, content::app(app, "admins")).await?;
+        self.append_as(&Scope::Global, &caller.user, content::deploy(app, bundle, [])).await?;
+        Ok(())
     }
 
     /// What an app's latest deploy says it uses: (apps, services). Waits a while for this device to run that deploy.
