@@ -116,7 +116,8 @@ These run on Cloudflare, each named by its job, with no name for them together. 
   nothing, since everything in the bucket is sealed.
 - **Telemetry Worker**: where the network's spans, logs and metrics go and are read back, in Cloudflare Basin. It opens no
   user data: telemetry is operational, and unsealed.
-- **Remote MCP server**: the client for MCP clients that aren't on a user's devices (claude.ai, ChatGPT). It opens
-  keys, but only while an MCP client calls, under that client's own tokens. The **local MCP server** is `one mcp`, which
+- **Remote MCP server**: the client for programs that aren't on a user's devices (claude.ai, ChatGPT, anything else that
+  logs in as them), one device per program, serving the API at `/api/*` and MCP at `/mcp`. It opens keys, but only while a
+  program calls, under that program's own tokens. The **local MCP server** is `one mcp`, which
   agents on a computer start themselves. Avoid: MCP Worker.
 - **Cloudflare node**: oned on Cloudflare. A node like any other.

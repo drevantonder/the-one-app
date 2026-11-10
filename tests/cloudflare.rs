@@ -574,6 +574,88 @@ fn only_its_users_own_device_or_an_admins_answers_a_request() {
     assert_eq!(agent.delete(format!("{}/api/auth/devices/requests/{second_key}", k.address)).header("x-one-request", asked).call().unwrap().status().as_u16(), 200, "still Sam's");
 }
 
+/// Taking a device out ends its sign-in: only its user's own device, an admin's or itself may, and a sign-in the same
+/// client made since, for a device that replaced it, goes on.
+#[test]
+fn removing_a_device_ends_its_sign_in_and_only_its_own() {
+    use data_encoding::HEXLOWER;
+    use sha2::Digest;
+    let (admin, admin_hex) = endpoint();
+    let (stranger, stranger_hex) = endpoint();
+    let k = Workers::for_devices(vec![admin_hex]);
+    assert_eq!(post(&format!("{}/relay/tell", k.address), &[], one::keys::signed_request(&admin, "one/relay", json!({ "add": stranger_hex, "role": "client" }), now())).0, 204);
+    let (secret, _) = invited(&k, &admin, "Andre", None);
+    let passkey = k.passkey();
+    let mut b = k.browser();
+    let (_, options, _) = b.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
+    assert_eq!(b.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
+    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+    let redirect = "https://a-program.example/back";
+    let (status, client) = b.post("/api/auth/oauth2/register", json!({ "client_name": "A program", "redirect_uris": [redirect], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"] }));
+    assert_eq!(status, 201, "{client}");
+    let client = client["client_id"].as_str().unwrap().to_string();
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    // Signs in for a new device as this client, and asks to join with its token: → its key and refresh token.
+    let mut signs_in = || -> (String, String) {
+        let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+        let (key, seal) = (HEXLOWER.encode(&device.key), HEXLOWER.encode(&device.seal));
+        let verifier = B64U.encode(&rand::random::<[u8; 32]>());
+        let challenge = B64U.encode(&sha2::Sha256::digest(verifier.as_bytes()));
+        let query = format!("response_type=code&client_id={client}&redirect_uri={}&scope=openid%20offline_access&state={}&code_challenge={challenge}&code_challenge_method=S256", enc(redirect), "s".repeat(32));
+        let (_, _, page) = b.get(&format!("/api/auth/oauth2/authorize?{query}"));
+        let oauth_query = page.expect("the authorization goes to the sign-in page").split_once('?').unwrap().1.to_string();
+        let (_, options, _) = b.get("/api/auth/passkey/generate-authenticate-options");
+        assert_eq!(b.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
+        let (status, out) = b.post("/api/auth/oauth2/consent", json!({ "accept": true, "oauth_query": oauth_query }));
+        assert_eq!(status, 200, "{out}");
+        let code = url_query(out["url"].as_str().unwrap())["code"].clone();
+        let (status, tokens, _) = b.send("POST", "/api/auth/oauth2/token", None, Some(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", redirect), ("client_id", &client), ("code_verifier", &verifier)]));
+        assert_eq!(status, 200, "{tokens}");
+        let resp = agent.post(format!("{}/api/auth/devices/requests", k.address)).header("authorization", format!("Bearer {}", tokens["access_token"].as_str().unwrap())).send_json(json!({ "key": key, "seal": seal, "name": "A program", "reads": one::database::READS })).unwrap();
+        assert_eq!(resp.status(), 200);
+        (key, tokens["refresh_token"].as_str().unwrap().to_string())
+    };
+    let removed = |by: &ed25519_dalek::SigningKey, key: &str| post(&format!("{}/api/auth/devices/removed", k.address), &[], signed(by, "POST /api/auth/devices/removed", json!({ "key": key }))).0;
+    let mut other = k.browser();
+    let mut refresh = |token: &str| other.send("POST", "/api/auth/oauth2/token", None, Some(&[("grant_type", "refresh_token"), ("refresh_token", token), ("client_id", &client)]));
+    let (first, refresh1) = signs_in();
+    // Asked by a device that isn't its user's or an admin's, nothing ends.
+    assert_eq!(removed(&stranger, &first), 403, "another user's device ended a sign-in");
+    let (status, tokens, _) = refresh(&refresh1);
+    assert_eq!(status, 200, "still signed in: {tokens}");
+    let refresh1 = tokens["refresh_token"].as_str().unwrap().to_string();
+    // A newer sign-in by the same client replaces it; the old device's removal doesn't touch that one.
+    let (second, refresh2) = signs_in();
+    assert_eq!(removed(&admin, &first), 200);
+    let (status, tokens, _) = refresh(&refresh2);
+    assert_eq!(status, 200, "removing the device it replaced ended the new sign-in: {tokens}");
+    let refresh2 = tokens["refresh_token"].as_str().unwrap().to_string();
+    // Its own removal ends it, the token before it too.
+    assert_eq!(removed(&admin, &second), 200);
+    assert!(refresh(&refresh2).0 >= 400, "a removed device's refresh token still rotates");
+    assert!(refresh(&refresh1).0 >= 400);
+}
+
+/// A client registered with two places to come back to: the card names where this sign-in went, and with no sign-in to
+/// go by, both.
+#[test]
+fn a_cards_host_is_where_the_sign_in_went() {
+    let (admin, admin_hex) = endpoint();
+    let k = Workers::for_devices(vec![admin_hex]);
+    let (secret, _) = invited(&k, &admin, "Andre", None);
+    let passkey = k.passkey();
+    let mut b = k.browser();
+    let (_, options, _) = b.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
+    assert_eq!(b.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
+    let (status, client) = b.post("/api/auth/oauth2/register", json!({ "client_name": "Two", "redirect_uris": ["https://fine.example/back", "https://elsewhere.example/back"], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }));
+    assert_eq!(status, 201, "{client}");
+    let id = client["client_id"].as_str().unwrap();
+    let (_, second, _) = b.get(&format!("/sign-in/about?client_id={id}&redirect_uri=https%3A%2F%2Felsewhere.example%2Fback"));
+    assert_eq!(second["goes"], "elsewhere.example");
+    let (_, unsaid, _) = b.get(&format!("/sign-in/about?client_id={id}"));
+    assert_eq!(unsaid["goes"], "fine.example, elsewhere.example");
+}
+
 /// A passkey belongs to an account. An invite that names a provider's account can't be taken up by making a passkey, and
 /// someone with no email is never matched by one a provider says.
 #[test]

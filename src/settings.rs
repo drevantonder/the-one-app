@@ -826,20 +826,27 @@ pub async fn tell(m: &impl Me, by: &impl Signs, fields: Value) -> Result<()> {
     }
 }
 
-/// Takes a key off the relay's list; one it doesn't list is out already.
+/// Takes a key off the relay's list; one it doesn't list is out already. Its sign-in ends first, while this device
+/// is still one the network lists, or auth wouldn't take its word for it.
 pub async fn take_out(m: &impl Me, key: &[u8; 32]) -> Result<()> {
+    if m.address().is_some() {
+        let (status, out) = asked_auth(m, "POST", "/api/auth/devices/removed", json!({ "key": hex(key) })).await?;
+        // A network's auth from before this route has no sign-in to end: a node is sent out before the Workers.
+        ensure!((200..300).contains(&status) || status == 404, "{}", error(&out).unwrap_or_else(|| format!("{YOURS}'s auth answered {status}.")));
+    }
     match tell(m, m, json!({ "remove": hex(key) })).await {
         Err(err) if Coded::of(&err).as_deref() != Some(code::NOT_LISTED) => Err(err),
         _ => Ok(()),
     }
 }
 
-/// When each of the network's devices was last let onto it, as the relay says: `{ key: ms }`.
+/// When each of the network's devices was last let onto it, and which key let it in, as the relay says: `{ seen: { key:
+/// ms }, let_in: { key: key } }`.
 async fn seen(m: &impl Me) -> Result<Value> {
-    let Some(address) = m.address() else { return Ok(json!({})) };
+    let Some(address) = m.address() else { return Ok(json!({ "seen": {}, "let_in": {} })) };
     let signed = keys::signed_request_by(m, crate::protocol::RELAY, json!({ "seen": true }), keys::next_at(m.now())).await?;
     let (status, out) = m.ask("POST", &format!("{address}/relay/seen"), None, Some(signed)).await?;
-    Ok(if status == 200 { out["seen"].clone() } else { json!({}) })
+    Ok(if status == 200 { json!({ "seen": out["seen"], "let_in": out["let_in"] }) } else { json!({ "seen": {}, "let_in": {} }) })
 }
 
 /// Asks a device, through the relay, to take the newest published build. Only its user or an admin may; its own device
@@ -915,17 +922,21 @@ async fn remove_user(m: &impl Me, named: &str) -> Result<Value> {
 /// Asks the network's auth something as this device, signed with its key: a GET's or DELETE's in `x-one-request`,
 /// signed for `path` without its query; a POST's as its body, with `fields`.
 pub async fn ask_auth(m: &impl Me, method: &str, path: &str, fields: Value) -> Result<Value> {
+    let (status, out) = asked_auth(m, method, path, fields).await?;
+    ensure!((200..300).contains(&status), "{}", error(&out).unwrap_or_else(|| format!("{YOURS}'s auth answered {status}.")));
+    Ok(out)
+}
+
+async fn asked_auth(m: &impl Me, method: &str, path: &str, fields: Value) -> Result<(u16, Value)> {
     let address = m.address().ok_or_else(|| anyhow!("{YOURS} has no address yet, so it has no sign-ins or requests to join."))?;
     let mut fields = fields;
     fields["route"] = json!(format!("{method} {}", path.split('?').next().unwrap_or_default()));
     let signed = keys::signed_request_by(m, crate::protocol::AUTH_DOMAIN, fields, m.now()).await?;
     let url = format!("{address}{path}");
-    let (status, out) = match method {
-        "POST" => m.ask(method, &url, None, Some(signed)).await?,
-        _ => m.ask(method, &url, Some((crate::protocol::header::REQUEST, B64U.encode(&serde_json::to_vec(&signed)?))), None).await?,
-    };
-    ensure!((200..300).contains(&status), "{}", error(&out).unwrap_or_else(|| format!("{YOURS}'s auth answered {status}.")));
-    Ok(out)
+    match method {
+        "POST" => m.ask(method, &url, None, Some(signed)).await,
+        _ => m.ask(method, &url, Some((crate::protocol::header::REQUEST, B64U.encode(&serde_json::to_vec(&signed)?))), None).await,
+    }
 }
 
 /// The invites this device made that still work, by who they're for: an error if what it keeps of them can't be read,

@@ -5,6 +5,7 @@ import signer from "../signer/worker.js";
 import { presign } from "../shared/s3.js";
 import { Issuer, verify } from "../shared/token.js";
 import { Copies } from "../mcp/copies.js";
+import { deviceName } from "../mcp/name.js";
 import { apns, encrypt, fcm, webPush, wns } from "../push/senders.js";
 
 class Store {
@@ -146,6 +147,11 @@ async function stepsAreCreatedInTurn() {
 /// token used once opens nothing after, nor rotates anything.
 async function remoteMcpClientsSecrets() {
   let now = 1_000_000;
+    // Where a program's sign-in went comes first, so a long name can't push it out of view, nor a long host hide its domain.
+    equal(deviceName("A".repeat(60), "claude.ai").startsWith("claude.ai · A"), true, "the host is first");
+    equal(deviceName("A".repeat(60), "claude.ai").length, 64, "a device's name stays short");
+    equal(deviceName("Claude", "a".repeat(80) + ".example.com").includes("example.com"), true, "a long host keeps its end");
+
   const copies = new Copies(new Store(), () => now);
   const secret = random(64);
   const same = (got, what) => equal(got && [...got].join(), [...secret].join(), what);

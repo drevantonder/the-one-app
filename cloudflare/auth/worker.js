@@ -216,6 +216,8 @@ export class Auth extends DurableObject {
     sql.exec("create table if not exists devices (key text primary key, user text not null, at integer not null)");
     // Devices whose request was turned down, whose user isn't pushed again when they ask again.
     sql.exec("create table if not exists refused (key text primary key, at integer not null)");
+    // Each client's sign-in as a user, by the device it last signed in for: what removing that device ends.
+    sql.exec("create table if not exists sign_ins (key text primary key, client text not null, user text not null)");
     // Signed requests taken, until they're too old to take again.
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
     // Goes once every network's auth has run this: sign-in codes, which the CLI once signed in with.
@@ -416,6 +418,8 @@ export class Auth extends DurableObject {
     if (invited && method === "DELETE") return json(await this.withdrawInvite(request, invited[1]));
     if (path === "/api/auth/devices/proof" && method === "GET") return json(await this.proofsFor(request));
     if (path === "/api/auth/devices/forget-sign-in" && method === "POST") return json(await this.forgetSignIn(request));
+    if (path === "/api/auth/devices/removed" && method === "POST") return json(await this.signOutDevice(request));
+    if (path === "/api/auth/devices/own-sign-in" && method === "POST") return json(await this.ownSignIn(request));
     if (path === "/api/auth/devices/theirs" && method === "POST") return json(await this.pairedAs(request));
     if (path === "/api/auth/devices/requests" && method === "POST") return json(await this.ask(request));
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
@@ -467,7 +471,7 @@ export class Auth extends DurableObject {
       const jwks = await (await this.auth.handler(new Request(`${origin}/api/auth/jwks`))).json();
       const claims = await verify(token, jwks, `${origin}/api/auth`).catch((err) => refuse(401, `That access token won't do: ${err.message}.`));
       const client = await this.client(String(claims.azp || claims.client_id || "")).catch(() => null);
-      return { user: claims.sub, here: !!client && this.signsInHere(client) };
+      return { user: claims.sub, here: !!client && this.signsInHere(client), client: client?.clientId };
     }
     const user = (await this.auth.api.getSession({ headers: request.headers }))?.user.id;
     return user ? { user, here: true } : null;
@@ -645,7 +649,7 @@ export class Auth extends DurableObject {
   /// whether an invite already said yes (`invited`), so it shows no code to approve.
   async ask(request) {
     const body = await request.json().catch(() => refuse(400, "the body isn't JSON"));
-    const { user, here } = (await this.asker(request)) || refuse(401, "Sign in first.");
+    const { user, here, client } = (await this.asker(request)) || refuse(401, "Sign in first.");
     const { key, seal, name, proof, device, platform, reads } = body;
     if (!isKey(key) || !isKey(seal)) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
     // A device whose build reads less of who's who than this one (an older one says nothing) would be let in to what it
@@ -674,6 +678,7 @@ export class Auth extends DurableObject {
     sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device, by_link, told, platform) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null, here ? null : 1, told, platform ?? null);
     // Whoever asks names any key, so this never changes whose one already is.
     sql.exec("insert or ignore into devices (key, user, at) values (?, ?, ?)", key, user, made);
+    if (client) this.signedInFor(key, client, user);
     await this.keepProviderProof(key, seal, user);
     const invited = here && (proof != null || this.anInviteLetsIn(user, key));
     if (!told) {
@@ -699,6 +704,42 @@ export class Auth extends DurableObject {
   anInviteLetsIn(user, key) {
     const sql = this.ctx.storage.sql;
     return sql.exec("select 1 from invites where user = ? and email is not null and used is not null", user).toArray().length > 0 && !sql.exec("select 1 from devices where user = ? and key != ?", user, key).toArray().length;
+  }
+
+  /// `key` as the device `client`'s sign-in as `user` is for now: the one before it stays listed until it's removed,
+  /// and removing that one ends nothing.
+  signedInFor(key, client, user) {
+    const sql = this.ctx.storage.sql;
+    sql.exec("delete from sign_ins where client = ? and user = ?", client, user);
+    sql.exec("insert or replace into sign_ins (key, client, user) values (?, ?, ?)", key, client, user);
+  }
+
+  /// A device already let in saying which sign-in is its, for sign-ins from before auth kept that: `{ key }`, with that
+  /// client's token.
+  async ownSignIn(request) {
+    const { key } = await request.json().catch(() => refuse(400, "the body isn't JSON"));
+    const { user, client } = (await this.asker(request)) || refuse(401, "Sign in first.");
+    if (!client || !isKey(key) || this.ownerOf(key) !== user) refuse(403, "That isn't your device.");
+    this.signedInFor(key, client, user);
+    return {};
+  }
+
+  /// A device taken out ends its sign-in: `{ key }`, signed by its user's own device, an admin's or itself, as the
+  /// relay lets them take it out. Refresh tokens stop rotating (an access token still in date opens nothing: its
+  /// device is off the relay, and its object deletes what's sealed as the relay takes it off). Nothing for a device
+  /// another sign-in replaced, which isn't the one this client signs in for now.
+  async signOutDevice(request) {
+    const signed = (await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")))) || refuse(401, "Sign in first.");
+    const { key } = signed.fields;
+    if (!isKey(key)) refuse(400, "key is 64 hex characters");
+    const sql = this.ctx.storage.sql;
+    const [row] = sql.exec("select client, user from sign_ins where key = ?", key).toArray();
+    if (!row) return {};
+    if (!signed.admin && signed.by !== key && this.ownerOf(signed.by) !== row.user) refuse(403, "Only its user's own device, or an admin's, ends its sign-in.");
+    sql.exec("delete from oauthRefreshToken where clientId = ? and userId = ?", row.client, row.user);
+    sql.exec("delete from oauthAccessToken where clientId = ? and userId = ?", row.client, row.user);
+    sql.exec("delete from sign_ins where key = ?", key);
+    return {};
   }
 
   /// Tells a request's user it wants in, once, unless it was turned down before.
@@ -893,7 +934,7 @@ export class Auth extends DurableObject {
   }
 
   /// What signing in to a client (its authorization's `query`) says: its name (the network's, for the web client, which
-  /// is at its address), where its sign-in goes (its redirect_uri, if it's one of the client's, else its first), since
+  /// is at its address), where its sign-in goes (its redirect_uri, if it's one of the client's, else all of them), since
   /// the name is only what it calls itself, the user's, if they're signed in here already, and whether that sign-in was
   /// made after this authorization was asked for (Better Auth's signed `ba_iat`), which goes straight on.
   async about(request, query) {
@@ -903,7 +944,8 @@ export class Auth extends DurableObject {
     const origin = new URL(this.env.ADDRESS).origin;
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
-    const goes = web ? null : this.goes(uris.includes(redirect) ? redirect : uris[0]);
+    // Asked without the one this sign-in used, it names them all: which one it was is what it can't say.
+    const goes = web ? null : uris.includes(redirect) ? this.goes(redirect) : [...new Set(uris.map((u) => this.goes(u)))].join(", ");
     return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, user: session?.user.name || null, fresh: !!session && query.has("ba_iat") && new Date(session.session.createdAt).getTime() >= Number(query.get("ba_iat")) };
   }
 

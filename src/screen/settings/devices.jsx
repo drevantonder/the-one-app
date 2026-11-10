@@ -84,7 +84,7 @@ const deviceKey = (node) => node.device || node.key
 // What the screen knows of the devices, from what the node says: each of theirs with what's on it, their passkeys, and
 // what each part of a device is doing. `again` gives what Try Again runs.
 function model(x, again) {
-  const { state, device, apps, seen, seenRead, versions } = x
+  const { state, device, apps, seen, seenRead, versions, letIn = {} } = x
   const me = state.user?.id
   const admin = state.user?.role === "admin"
   const appOf = (name) => apps.find((a) => a.name === name)
@@ -145,11 +145,15 @@ function model(x, again) {
       c.signIn = now[0] || null
       c.old = now.slice(1)
       c.seen = Math.max(0, ...c.keys.map((k) => seen[k] || 0))
+      // An outside program that let this device in, as the relay says: only a label, and only ever one of its own devices.
+      c.letInBy = c.keys.map((k) => clients.find((p) => p.key === letIn[k] && p.platform === "cloudflare")).find(Boolean)?.name || null
       c.version = versions[c.node?.key] || versions[c.signIn?.key] || null
       c.icon = c.node
         ? glyph(c.node.kind === "laptop" ? "laptop" : /apple|windows/.test(c.node.target || "") ? "desktop" : "hard-drives", osOf(c.node.target, c.name), !c.online)
         : iconOf({ ...c.signIn, name: c.signIn?.name || c.name })
     }
+    // What an outside program let in, which removing it offers to take too.
+    for (const c of cards) c.letIn = c.signIn?.platform === "cloudflare" ? cards.filter((o) => o !== c && o.keys.some((k) => c.keys.includes(letIn[k]))) : []
     // Theirs, and others' that run their apps: all of those for an admin, who sets where things run.
     const shownCards = cards.filter((c) => c.user === me || (c.node && (admin || holds(c.node))))
     shownCards.sort((a, b) => (a.runs ? rank(a.priority) : 2000) - (b.runs ? rank(b.priority) : 2000) || a.name.localeCompare(b.name))
@@ -258,19 +262,19 @@ function Devices() {
     try {
       const [state, device] = await Promise.all([api("GET", "/api/state"), one.device()])
       // Who waits, from a node or the web client itself; one with no code to compare is an older node's, not shown.
-      let waiting = [], seen = null, versions = {}
+      let waiting = [], seen = null, letIn = {}, versions = {}
       const asks = [
         api("POST", "/api/devices/versions", {}).then((v) => (versions = v), () => {}),
         !apps.current.length ? api("GET", "/api/apps").then((a) => (apps.current = a), () => {}) : null,
         api("POST", "/api/devices/requests", {}).then((w) => (waiting = w.filter((r) => r.code)), () => {}),
       ]
       if (device.keys) {
-        asks.push(api("GET", "/api/devices/seen").then((s) => (seen = s || {}), () => {}))
+        asks.push(api("GET", "/api/devices/seen").then((s) => { seen = s?.seen || {}; letIn = s?.let_in || {} }, () => {}))
       }
       await Promise.all(asks)
       // Not while they're dragging.
       if (dragging.current) return
-      setData({ state, device, apps: apps.current, waiting, seen: seen || {}, seenRead: seen !== null, versions })
+      setData({ state, device, apps: apps.current, waiting, seen: seen || {}, seenRead: seen !== null, letIn, versions })
       setProblem(null)
       return { device, waiting }
     } catch (e) {
@@ -411,13 +415,13 @@ function Devices() {
     else if (items[i].title === "Sign-Ins…") show({ signIns: signedIn, me: item.me })
     else if (items[i].title === "This Device’s Code") act(async () => one.alert({ title: "This Device’s Code", text: (await api("GET", "/api/devices/code")).code }))
     else if (item.me) signOut()
-    else remove(item.name, passkey ? [item.key] : item.keys, !passkey && item.node && item.online ? item.node.key : null)
+    else remove(item.name, passkey ? [item.key] : item.keys, !passkey && item.node && item.online ? item.node.key : null, passkey ? [] : item.letIn)
   }
 
   /// Removes a device, everything on it: it opens nothing new. One that runs oned and is on can also erase what it
   /// keeps first, which it does itself, so only while it's reachable: that asks in a dialog, the rest in the alert.
-  async function remove(name, keys, erasable) {
-    if (erasable) return show({ remove: { name, keys, erasable } })
+  async function remove(name, keys, erasable, letIn = []) {
+    if (erasable || letIn.length) return show({ remove: { name, keys, erasable, letIn } })
     if (!(await one.alert({ title: `Remove ${name}?`, action: "Remove", danger: true }))) return
     one.tap("medium")
     act(async () => {
@@ -719,7 +723,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
                   key={c.id}
                   onContextMenu={(e) => (e.preventDefault(), menu(c, false, { x: e.clientX, y: e.clientY }))}
                 >
-                  <DeviceRow icon={c.icon} title={c.name} sub={[sub, versionLine(c)].filter(Boolean).join(" · ")}>
+                  <DeviceRow icon={c.icon} title={c.name} sub={[sub, c.letInBy && `Let in by ${c.letInBy}`, versionLine(c)].filter(Boolean).join(" · ")}>
                     {behind.includes(c) && (
                       <Button variant="outline" size="sm" disabled={Object.keys(updating).length > 0} onClick={() => update([c])}>
                         {updating[c.node.key] && <Spinner />}Update
@@ -1119,8 +1123,9 @@ function Rename({ card, open, setOpen, done }) {
 }
 
 /// Removes a device that's on, and so can erase what it keeps first: asked in a dialog, since there's a choice.
-function RemoveDevice({ name, keys, erasable, open, setOpen, done }) {
+function RemoveDevice({ name, keys, erasable, letIn = [], open, setOpen, done }) {
   const [erase, setErase] = useState(false)
+  const [also, setAlso] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   async function go() {
@@ -1128,6 +1133,7 @@ function RemoveDevice({ name, keys, erasable, open, setOpen, done }) {
     setError("")
     try {
       if (erase) await api("POST", "/api/erase", { key: erasable })
+      for (const key of also ? letIn.flatMap((c) => c.keys) : []) await api("POST", "/api/devices/remove", { device: key })
       for (const key of keys) await api("POST", "/api/devices/remove", { device: key })
       one.tap("success")
       done()
@@ -1140,7 +1146,8 @@ function RemoveDevice({ name, keys, erasable, open, setOpen, done }) {
     <ResponsiveDialog open={open} onOpenChange={setOpen} title={`Remove ${name}?`} action={<><Cancel setOpen={setOpen} /><Go variant="destructive" busy={busy} onClick={go}>Remove</Go></>}>
       <div className="flex flex-col gap-4 p-4">
         <List>
-          <Label className="justify-between px-3 py-3 font-normal">Also erase its data<Switch checked={erase} onCheckedChange={setErase} /></Label>
+          {erasable && <Label className="justify-between px-3 py-3 font-normal">Also erase its data<Switch checked={erase} onCheckedChange={setErase} /></Label>}
+          {!!letIn.length && <Label className="justify-between px-3 py-3 font-normal">Also remove what it let in: {letIn.map((c) => c.name).join(", ")}<Switch checked={also} onCheckedChange={setAlso} /></Label>}
         </List>
         {error && <Problem title={error} />}
       </div>

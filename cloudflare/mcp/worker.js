@@ -1,9 +1,12 @@
-// The remote MCP server: remote MCP clients' device. ChatGPT, Claude.ai and the like can't run our code, so each one a user
-// signs in with is a device of theirs here, a client of the network like any app, which the user approves like any
-// device. It speaks MCP to them over HTTPS at `<address>/mcp`, and asks a node's own `/mcp` as that device, over iroh
-// (`<cli>/http/1`, onet in cloudflare/node/src/clients.rs), handing it the keys a call needs, sealed to that node and
-// bound to the device's key; it sends nodes no token. A tool that changes who can do what it answers itself, signing
-// as that device (`one::settings_tools`), since a node signs that only for its own machine's programs.
+// The remote MCP server: outside programs' device. ChatGPT, Claude.ai and any other program that logs in as the user
+// can't run our code, so each one a user signs in with is a device of theirs here, a client of the network like any
+// app (onet, in cloudflare/node/src/clients.rs), which the user approves like any device, removes like any device, and
+// which acts as them with nothing barred. It serves them the API at `<address>/api/*` (`/api/auth/` stays auth's, in
+// the gateway) and MCP at `<address>/mcp`: both are requests of that device, over iroh (`<cli>/http/1`), which hands
+// a node the keys each needs, sealed to that node and bound to the device's key; it sends nodes no token. MCP is
+// translated where a node answers `/mcp`, with what that request is handed; this Worker's own side holds no keys
+// outside the device. A tool that changes who can do what it answers itself, signing as that device
+// (`one::settings_tools`), since a node signs that only for its own machine's programs.
 //
 // A device's secret is kept only sealed under its client's own tokens (copies.js), so nothing here opens it alone: the
 // Worker is on its clients' token path (its own token endpoint, in the authorization server's metadata it serves for
@@ -11,7 +14,8 @@
 // first sign-in makes its device and asks auth to let it join; the user approves it by its code on one of their
 // devices, which lists it, seals it the keys of their scopes and lets it in at the relay. Until then its MCP requests
 // are answered with that code. Signing in again makes a new device, as the old one's secret opened only under the
-// tokens it had.
+// tokens it had. Removing a device ends it here: auth stops its tokens rotating, and the relay has its object delete
+// its secret and all it kept.
 //
 // Each device is a Durable Object (`Client`), one per client and user, so no two users' state meet: its iroh
 // endpoint, with no socket, which the relay hands the datagrams sent to its key by RPC (`deliver`), its connections to
@@ -34,6 +38,7 @@ import { CORS, answer, json, near, textOf } from "../shared/http.js";
 import { CODES, IROH_PATHS, READS, RELAY } from "../shared/protocol.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
+import { deviceName } from "./name.js";
 
 initSync({ module: wasm });
 
@@ -41,6 +46,8 @@ const IDLE = 30_000;
 const TO_NODE = ["content-type", "accept", "mcp-session-id", "mcp-protocol-version"];
 const FROM_NODE = ["content-type", "mcp-session-id"];
 const BODY_MOST = 1 << 20;
+/// As much as a device's answer: onet's ANSWER_MOST.
+const API_BODY_MOST = 8 << 20;
 const VIEW_EVERY = 10_000;
 /// How long the relay keeps a device's binding, if it doesn't say, and how long before that ends it's bound again.
 const BOUND = 3_600_000;
@@ -108,7 +115,7 @@ async function token(request, env) {
   const client = claims.azp || claims.client_id || asked.get("client_id");
   const grant = asked.get("grant_type");
   const old = grant === "refresh_token" ? asked.get("refresh_token") : null;
-  const signedIn = { client, user: claims.sub, old, refresh: out.refresh_token, access: out.access_token, until: claims.exp * 1000 };
+  const signedIn = { client, user: claims.sub, old, refresh: out.refresh_token, access: out.access_token, until: claims.exp * 1000, redirect: asked.get("redirect_uri") };
   try {
     await deviceOf(env, client, claims.sub).signedIn(signedIn);
   } catch (err) {
@@ -120,32 +127,59 @@ async function token(request, env) {
   return json(out, 200, { "cache-control": "no-store", pragma: "no-cache" });
 }
 
-async function mcp(request, env) {
+/// Who's asking with their outside program's token: `{ token, claims, device }`, its object, or `{ refused }`, the
+/// answer. A sign-in for the network's own apps (`<address>`) opens no device here.
+async function whoAsks(request, env) {
   const token = bearer(request);
-  if (!token) return signInFirst(env);
+  if (!token) return { refused: signInFirst(env) };
   let claims;
   try {
     claims = await issuerOf(env).verify(token);
   } catch (err) {
-    return signInFirst(env, `that sign-in won't do: ${err.message}`);
+    return { refused: signInFirst(env, `that sign-in won't do: ${err.message}`) };
   }
-  // An MCP client's sign-in is for this, `<address>/mcp`; the network's own apps' (`<address>`) open no device here.
-  if (![claims.aud].flat().includes(`${origin(env)}/mcp`)) return signInFirst(env, `that sign-in isn't for ${origin(env)}/mcp`);
-  if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
-  const body = await textOf(request, BODY_MOST);
-  if (body === null) return json({ error: "that request is too big" }, 413);
+  if (![claims.aud].flat().includes(`${origin(env)}/mcp`)) return { refused: signInFirst(env, `that sign-in isn't for ${origin(env)}/mcp`) };
+  return { token, claims, device: deviceOf(env, claims.azp || claims.client_id, claims.sub) };
+}
+
+function toNode(request) {
   const headers = {};
   for (const name of TO_NODE) if (request.headers.has(name)) headers[name] = request.headers.get(name);
-  const out = await deviceOf(env, claims.azp || claims.client_id, claims.sub).asked(token, claims.exp * 1000, headers, body);
+  return headers;
+}
+
+function answered(env, out) {
   if (out.signIn) return signInFirst(env, out.signIn);
   return new Response(out.body, { status: out.status, headers: out.headers });
 }
 
+async function mcp(request, env) {
+  const asker = await whoAsks(request, env);
+  if (asker.refused) return asker.refused;
+  if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
+  const body = await textOf(request, BODY_MOST);
+  if (body === null) return json({ error: "that request is too big" }, 413);
+  return answered(env, await asker.device.asked(asker.token, asker.claims.exp * 1000, { method: "POST", path: "/mcp", headers: toNode(request), body: new TextEncoder().encode(body) }));
+}
+
+/// The API, asked by an outside program: answered as its user by its device.
+async function api(request, env, url) {
+  const asker = await whoAsks(request, env);
+  if (asker.refused) return asker.refused;
+  const tooLarge = () => json({ error: "that request is too big" }, 413);
+  if (Number(request.headers.get("content-length") || 0) > API_BODY_MOST) return tooLarge();
+  const body = ["GET", "HEAD"].includes(request.method) ? new Uint8Array() : new Uint8Array(await request.arrayBuffer());
+  if (body.byteLength > API_BODY_MOST) return tooLarge();
+  return answered(env, await asker.device.asked(asker.token, asker.claims.exp * 1000, { method: request.method, path: url.pathname + url.search, headers: toNode(request), body }));
+}
+
 export default {
   async fetch(request, env) {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
     try {
       if (path === "/mcp") return await mcp(request, env);
+      if (path.startsWith("/api/")) return await api(request, env, url);
       if (path === "/mcp/token" && request.method === "POST") return await token(request, env);
       if (path === "/.well-known/oauth-protected-resource/mcp" || path === "/.well-known/oauth-protected-resource") {
         const resource = path.endsWith("/mcp") ? `${origin(env)}/mcp` : origin(env);
@@ -205,17 +239,18 @@ export class Client extends DurableObject {
   /// same answer again, to a refresh whose answer was lost, opens it as it is). A sign-in, or a refresh whose old token
   /// opens nothing, makes a new device and asks auth to let it join; the device it replaces is removed once the new one
   /// is approved.
-  async signedIn({ client, user, old, refresh, access, until }) {
+  async signedIn({ client, user, old, refresh, access, until, redirect }) {
     await this.ctx.storage.put("name", `${client}\n${user}`);
-    if (old && (await this.copies.rotate(old, refresh, access, until))) return;
+    if (old && (await this.copies.rotate(old, refresh, access, until))) return this.saysItsSignIn(access);
     const seed = random(32);
     const seal = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
     const sealSecret = b64u.decode((await crypto.subtle.exportKey("jwk", seal.privateKey)).d);
-    const device = { key: hex.encode(await ed25519Public(seed)), seal: hex.encode(new Uint8Array(await crypto.subtle.exportKey("raw", seal.publicKey))), client, user };
-    // Its name is the client's own, so where its sign-in goes is shown beside it: a name says nothing a client can't.
-    const about = await this.env.AUTH.fetch(`${origin(this.env)}/sign-in/about?client_id=${encodeURIComponent(client)}`).then((r) => (r.ok ? r.json() : {}), () => ({}));
-    const called = String(about.client || "MCP client").slice(0, 40);
-    device.name = (about.goes ? `${called} (${about.goes})` : called).slice(0, 64);
+    const device = { key: hex.encode(await ed25519Public(seed)), seal: hex.encode(new Uint8Array(await crypto.subtle.exportKey("raw", seal.publicKey))), client, user, told: true };
+    // Its name is the client's own, so where this sign-in really went (its `redirect`, which auth checked was the one
+    // it was given the code for) is shown beside it: a name says nothing a client can't.
+    const query = new URLSearchParams({ client_id: client, ...(redirect ? { redirect_uri: redirect } : {}) });
+    const about = await this.env.AUTH.fetch(`${origin(this.env)}/sign-in/about?${query}`).then((r) => (r.ok ? r.json() : {}), () => ({}));
+    device.name = deviceName(String(about.client || "MCP client").slice(0, 40), about.goes);
     device.code = await joinCode(hex.decode(device.key), hex.decode(device.seal));
     await this.end();
     const was = await this.ctx.storage.get("device");
@@ -225,6 +260,27 @@ export class Client extends DurableObject {
     await this.ctx.storage.put({ device, replaces });
     await this.copies.start(new Uint8Array([...seed, ...sealSecret]), refresh, access, until);
     await this.join(device, access);
+  }
+
+  /// Tells auth which sign-in is this device's, once, for a device from before auth kept that (`join` tells it for any
+  /// other): what lets removing it end its tokens.
+  async saysItsSignIn(access) {
+    const device = await this.ctx.storage.get("device");
+    if (!device || device.told) return;
+    try {
+      const r = await this.env.AUTH.fetch(`${origin(this.env)}/api/auth/devices/own-sign-in`, { method: "POST", headers: { authorization: `Bearer ${access}`, "content-type": "application/json" }, body: JSON.stringify({ key: device.key }) });
+      if (r.ok) await this.ctx.storage.put("device", { ...device, told: true });
+    } catch (err) {
+      console.log(JSON.stringify({ told: "not", why: String(err?.message ?? err) }));
+    }
+  }
+
+  /// `key`, this object's device, was taken out: everything sealed for it and everything it kept goes, and the program
+  /// signs in again from nothing. A device that replaced it, signed in again since, stays.
+  async removed(key) {
+    if ((await this.ctx.storage.get("device"))?.key !== key) return;
+    await this.end();
+    await this.ctx.storage.deleteAll();
   }
 
   /// A device's stages: asking auth to let it join, waiting there (`join`, until when auth keeps its request), approved
@@ -248,11 +304,14 @@ export class Client extends DurableObject {
     await this.ctx.storage.put("join", { key: device.key, until });
   }
 
-  /// An MCP request with `token`, an access token until `until` (ms): its device answers it, or says why not. →
+  /// A request with `token`, an access token until `until` (ms), `{ method, path, headers, body }`: its device answers
+  /// it, or says why not, to MCP as each message's answer, to the API as a status and `{ error }`. →
   /// `{ status, headers, body }`, or `{ signIn }`, why it must sign in again.
-  async asked(token, until, headers, body) {
+  async asked(token, until, asking) {
     this.asking++;
     this.awake();
+    const { path, body } = asking;
+    const say = (status, text) => (path === "/mcp" ? answerAll(new TextDecoder().decode(body), text) : { status, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: text }) });
     try {
       const secret = await this.copies.open(token);
       const device = await this.ctx.storage.get("device");
@@ -261,7 +320,7 @@ export class Client extends DurableObject {
       const approve = `Approve ${device.name} on one of your devices: in Settings › Devices, enter ${device.code.replace(/(.{4})(?=.)/g, "$1 ")}.`;
       if (!(await this.approved(device))) {
         await this.join(device, token);
-        return answerAll(body, approve);
+        return say(403, approve);
       }
       let nodes;
       try {
@@ -269,12 +328,12 @@ export class Client extends DurableObject {
       } catch (err) {
         // Taken out since it was approved: the relay no longer lets its key in, nor the network lists it.
         this.isApproved = false;
-        return answerAll(body, err.notLetIn || err.code === CODES.notLetIn ? approve : `${device.name} couldn't start: ${err.message}`);
+        return say(err.notLetIn || err.code === CODES.notLetIn ? 403 : 503, err.notLetIn || err.code === CODES.notLetIn ? approve : `${device.name} couldn't start: ${err.message}`);
       }
       if (!nodes.length) nodes = await this.reorder(me);
-      if (!nodes.length) return answerAll(body, "None of your devices is on right now.");
+      if (!nodes.length) return say(503, "None of your devices is on right now.");
       this.ctx.waitUntil(this.removeReplaced(me));
-      return await this.forward(me, headers, body);
+      return await this.forward(me, asking, say);
     } finally {
       this.asking--;
       this.awake();
@@ -421,18 +480,17 @@ export class Client extends DurableObject {
     };
   }
 
-  /// Asks a node's `/mcp` as this device, with the keys its tool needs (the keyring's 428s); once more, if no node
-  /// answered, with the nodes on the relay now.
-  async forward(me, headers, body) {
-    const bytes = new TextEncoder().encode(body);
+  /// Asks a node as this device, with the keys its request needs (the keyring's 428s); once more, if no node answered,
+  /// with the nodes on the relay now.
+  async forward(me, { method, path, headers, body }, say) {
     for (let tries = 0; ; tries++) {
       let r;
       try {
-        r = await device_fetch(me.key, "POST", "/mcp", Object.entries(headers).flat(), bytes, me.until, this.on(me));
+        r = await device_fetch(me.key, method, path, Object.entries(headers).flat(), body, me.until, this.on(me));
       } catch (err) {
-        if (err.sent) return answerAll(body, `Your device stopped answering: ${err.message}`);
+        if (err.sent) return say(502, `Your device stopped answering: ${err.message}`);
         if (tries === 0 && (await this.reorder(me)).length) continue;
-        return answerAll(body, this.order.length ? err.message : "None of your devices is on right now.");
+        return say(503, this.order.length ? err.message : "None of your devices is on right now.");
       }
       this.ctx.waitUntil(this.learnOrder(me));
       if (r.status === 428) {
@@ -440,7 +498,7 @@ export class Client extends DurableObject {
         try {
           error = JSON.parse(new TextDecoder().decode(r.body)).error;
         } catch {}
-        return answerAll(body, typeof error === "string" ? error.slice(0, 500) : "That needs keys this device wasn't given.");
+        return say(428, typeof error === "string" ? error.slice(0, 500) : "That needs keys this device wasn't given.");
       }
       const out = {};
       for (let i = 0; i < r.headers.length; i += 2) if (FROM_NODE.includes(r.headers[i])) out[r.headers[i]] = r.headers[i + 1];

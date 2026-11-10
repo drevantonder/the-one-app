@@ -1,6 +1,6 @@
 // The gateway: the network's address, the one users use. It holds no keys and runs no app code; it only sends each
 // request where its path says: signing in to auth (with the gateway's host kept, since passkeys belong to it),
-// `/urls` and `/updates/…` (what devices update themselves from) to the URL signer, `/push/…` to the push Worker, `/telemetry/…` to the telemetry Worker, `/mcp` and what MCP clients read to sign in to it to the
+// `/urls` and `/updates/…` (what devices update themselves from) to the URL signer, `/push/…` to the push Worker, `/telemetry/…` to the telemetry Worker, `/mcp`, `/api/` (but `/api/auth/`, which is auth's) and what MCP clients read to sign in to it to the
 // remote MCP server, everything under `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything
 // else to the web client's files. Devices reach the network's nodes over iroh, never through here, and so does git: a
 // git request here is git on a computer without the CLI, told how to get it.
@@ -23,6 +23,7 @@ const under = (path, prefixes) => prefixes.some((p) => (p.endsWith("/") ? path.s
 function where(path) {
   if (under(path, MCP)) return "mcp";
   if (under(path, AUTH)) return "auth";
+  if (path.startsWith("/api/")) return "mcp";
   return "web";
 }
 

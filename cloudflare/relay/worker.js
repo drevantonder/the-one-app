@@ -159,6 +159,7 @@ export default class extends WorkerEntrypoint {
     const said = await answer(this.relay()[what](asked.by, asked));
     if (said?.update) return refusal(426, { error: updateRefusal(this.env.YOURS), code: CODES.update, ...(said.asked && { asked: said.asked }) });
     if (what === "computes" && said?.computes) return Response.json({ ...said, online: await answer(this.relay().connected(said.computes)) });
+    if (what === "seen" && said && typeof said === "object") return Response.json({ seen: said, let_in: await answer(this.relay().letIn()) });
     if (said?.code) return refusal(400, said);
     if (said && typeof said === "object") return Response.json({ [what]: said });
     return said === null ? refusal(403, `the relay takes only ${this.env.YOURS}'s devices`) : refusal(400, said);
@@ -248,7 +249,9 @@ export class Relay extends DurableObject {
       CREATE TABLE IF NOT EXISTS proofs (nonce TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');
       CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS asks (key TEXT PRIMARY KEY, signed TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS asks (key TEXT PRIMARY KEY, signed TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS objects (key TEXT PRIMARY KEY, name TEXT NOT NULL);
+      INSERT OR IGNORE INTO objects SELECT key, name FROM bound;`);
     // A network's relay from before devices said their versions has no column for them.
     if (!this.sql.exec("PRAGMA table_info(keys)").toArray().some((c) => c.name === "version")) this.sql.exec("ALTER TABLE keys ADD COLUMN version TEXT");
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
@@ -547,6 +550,7 @@ export class Relay extends DurableObject {
     const until = Date.now() + 3_600_000;
     const ticket = hex.encode(crypto.getRandomValues(new Uint8Array(32)));
     this.sql.exec("INSERT OR REPLACE INTO bound VALUES (?, ?, ?, ?)", fields.by, name, until, ticket);
+    this.sql.exec("INSERT OR REPLACE INTO objects VALUES (?, ?)", fields.by, name);
     this.bound.set(fields.by, { name, until, ticket });
     return { ticket, until };
   }
@@ -789,10 +793,25 @@ export class Relay extends DurableObject {
     this.sql.exec("DELETE FROM keys WHERE key = ?", key);
     this.sql.exec("DELETE FROM asks WHERE key = ?", key);
     this.unbind(key);
+    this.forgetObject(key);
     for (const { key: joined } of this.sql.exec("SELECT key FROM pairings WHERE by = ? AND key IS NOT NULL", key).toArray()) this.end(joined, "taken out");
     this.sql.exec("DELETE FROM pairings WHERE by = ?", key);
     this.end(key, "taken out");
     this.endSessionsOf(key);
+  }
+
+  /// A removed key of an outside program's object (`bind` keeps which): the object deletes what it holds for that key,
+  /// and a device signed in again in its place stays.
+  forgetObject(key) {
+    const [object] = this.sql.exec("DELETE FROM objects WHERE key = ? RETURNING name", key).toArray();
+    if (!object || !this.env.MCP) return;
+    const stub = this.env.MCP.get(this.env.MCP.idFromName(object.name), near(this.env));
+    this.ctx.waitUntil(stub.removed(key).catch((err) => console.log(JSON.stringify({ forgotten: "not", why: String(err?.message ?? err) }))));
+  }
+
+  /// Which key let in each key on the list, for the Devices screen to say which outside program let a device in.
+  letIn() {
+    return Object.fromEntries(this.sql.exec("SELECT key, by FROM keys").toArray().map((r) => [r.key, r.by]));
   }
 
   endSessionsOf(key) {
