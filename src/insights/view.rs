@@ -13,6 +13,9 @@ pub const ERROR: &str = "error";
 /// screen's (`src/screen/settings/quantile.js`), held to it by tests/contracts.rs.
 pub const BOUNDS: [f64; 16] = [0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0, 5000.0, 7500.0, 10000.0, 60000.0];
 
+/// The last bound a duration is counted under: a quantile past it is only known to be over it.
+const LAST_BOUND: f64 = BOUNDS[BOUNDS.len() - 2];
+
 const MINUTE: u64 = 60_000;
 const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
@@ -40,12 +43,21 @@ fn requests(rows: &Value) -> Vec<&Value> {
     rows["requests"].as_array().into_iter().flatten().collect()
 }
 
-/// What requests add up to: a line of a table, its requests, error rate and P95.
+/// What requests add up to: a line of a table, its requests, error rate, P95 and average.
 struct Line {
     name: String,
     requests: u64,
     errors: u64,
     p95: Option<f64>,
+    average: Option<f64>,
+}
+
+/// A line's P95 as far as its histogram says: past its last bound only that it's over it, with the average, which is exact.
+fn p95(line: &Line) -> String {
+    match line.p95 {
+        Some(ms) if ms > LAST_BOUND => format!(">{:.0}s, average {}", LAST_BOUND / 1000.0, took(line.average)),
+        ms => took(ms),
+    }
 }
 
 fn lines(rows: Vec<&Value>, name: fn(&Value) -> String) -> Vec<Line> {
@@ -53,7 +65,11 @@ fn lines(rows: Vec<&Value>, name: fn(&Value) -> String) -> Vec<Line> {
     for row in rows {
         by.entry(name(row)).or_default().push(row);
     }
-    let mut lines: Vec<Line> = by.into_iter().map(|(name, rows)| Line { name, requests: rows.iter().map(|r| r["count"].as_u64().unwrap_or(0)).sum(), errors: rows.iter().map(|r| r["errors"].as_u64().unwrap_or(0)).sum(), p95: quantile(&rows, 0.95) }).collect();
+    let mut lines: Vec<Line> = by.into_iter().map(|(name, rows)| {
+        let requests: u64 = rows.iter().map(|r| r["count"].as_u64().unwrap_or(0)).sum();
+        let sum: f64 = rows.iter().map(|r| r["sum"].as_f64().unwrap_or(0.0)).sum();
+        Line { name, requests, errors: rows.iter().map(|r| r["errors"].as_u64().unwrap_or(0)).sum(), p95: quantile(&rows, 0.95), average: (requests > 0).then(|| sum / requests as f64) }
+    }).collect();
     lines.sort_by_key(|l| std::cmp::Reverse(l.requests));
     lines
 }
@@ -135,7 +151,7 @@ fn since_said(since: u64, now: u64) -> String {
 
 fn table(lines: &[Line], limit: usize, label: &str) -> String {
     let width = lines.iter().take(limit).map(|l| l.name.len()).max().unwrap_or(0).max(label.len());
-    let rows = listed(lines, limit, |l| format!("{:<width$}  {:>7}  {:<16}  {}", l.name, l.requests, rate(l), took(l.p95)));
+    let rows = listed(lines, limit, |l| format!("{:<width$}  {:>7}  {:<16}  {}", l.name, l.requests, rate(l), p95(l)));
     format!("  {label:<width$}  {:>7}  {:<16}  P95\n{rows}", "requests", "errors")
 }
 
@@ -213,13 +229,13 @@ pub fn effect(rows: &Value, build: &str, now: u64, limit: usize) -> String {
     errors.sort_by_key(|r| std::cmp::Reverse(r["count"].as_u64()));
     let mut out = vec![format!("{ran} against {was}: {} since {}.", plural(total, "request"), ago(now, first_seen(ran).unwrap_or(now)))];
     if !errors.is_empty() {
-        out.push(format!("New errors:\n{}", listed(&errors, limit, |r| format!("{}: {} at {}, {}", operation(r), r["type"].as_str().unwrap_or(""), r["frame"].as_str().unwrap_or(""), plural(r["count"].as_u64().unwrap_or(0), "time")))));
+        out.push(format!("New errors:\n{}", listed(&errors, limit, |r| format!("{}: {} at {}, {}{}", operation(r), r["type"].as_str().unwrap_or(""), r["frame"].as_str().unwrap_or(""), plural(r["count"].as_u64().unwrap_or(0), "time"), r["trace"].as_str().map(|t| format!(", trace {t}")).unwrap_or_default()))));
     }
     let worse: Vec<String> = new.iter().filter_map(|n| {
         let o = old.iter().find(|o| o.name == n.name)?;
         let enough = n.requests >= ENOUGH_REQUESTS && o.requests >= ENOUGH_REQUESTS;
         let slower = n.p95? >= o.p95? * 2.0 && n.p95? >= o.p95? + 100.0;
-        (enough && slower).then(|| format!("{}: P95 {} from {}", n.name, took(n.p95), took(o.p95)))
+        (enough && slower).then(|| format!("{}: P95 {} from {}", n.name, p95(n), p95(o)))
     }).collect();
     if !worse.is_empty() {
         out.push(format!("Slower:\n{}", listed(&worse, limit, |w| w.clone())));

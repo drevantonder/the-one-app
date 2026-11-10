@@ -6,7 +6,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/insights.html.
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { quantile } from "./quantile.js"
+import { quantile, LAST_BOUND } from "./quantile.js"
 import { Button, Empty, Icon, Input, LargeTitle, ListSkeleton, LoadFailure, Problem, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sparkline, Split, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
 
 const HOUR = 3600000
@@ -36,6 +36,7 @@ const hourOf = (ms) => new Date(ms).toLocaleString(undefined, { month: "short", 
 const number = (n) => (n == null ? "–" : new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n))
 const percent = (r) => (r == null ? "–" : r === 0 ? "0%" : r < 0.001 ? "<0.1%" : `${(r * 100).toFixed(r < 0.1 ? 1 : 0)}%`)
 const took = (ms) => (ms == null ? "–" : ms >= 60000 ? `${(ms / 60000).toFixed(1)}m` : ms >= 1000 ? `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s` : `${Math.round(ms)}ms`)
+const p95 = (ms) => (ms > LAST_BOUND ? `>${took(LAST_BOUND)}` : took(ms))
 const ago = (ms) => {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
   return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`
@@ -215,7 +216,7 @@ function Health({ rows, from, to }) {
       <Panel title="Errors" value={percent(all.rate)} note={plural(all.errors, "error")}>
         <Bars hours={hours} stacks={[{ name: "Errors", colour: ERROR, values: failed }]} />
       </Panel>
-      <Panel title="Duration" value={took(all.p95)} note="P95">
+      <Panel title="Duration" value={p95(all.p95)} note="P95">
         <Lines hours={hours} format={took} series={[{ name: "P95", colour: hue(0), values: at((r) => r.p95) }]} />
       </Panel>
     </div>
@@ -266,7 +267,7 @@ const redColumns = (name, trend) => [
   { key: "count", label: "Requests", right: true, value: (r) => r.count, cell: (r) => number(r.count) },
   { key: "errors", label: "Errors", right: true, value: (r) => r.errors, cell: (r) => <span className={r.errors ? "text-destructive" : "text-muted-foreground"}>{percent(r.rate)}</span> },
   { key: "avg", label: "Average", right: true, wide: true, value: (r) => r.avg, cell: (r) => took(r.avg) },
-  { key: "p95", label: "P95", right: true, value: (r) => r.p95, cell: (r) => took(r.p95) },
+  { key: "p95", label: "P95", right: true, value: (r) => r.p95, cell: (r) => p95(r.p95) },
   ...(trend ? [{ key: "trend", label: "", wide: true, value: (r) => r.count, cell: (r) => <Sparkline values={r.trend} className="h-5 w-24 text-muted-foreground" /> }] : []),
 ]
 
