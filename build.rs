@@ -121,6 +121,12 @@ fn main() {
         println!("cargo:rerun-if-changed={}", root.join(watched).display());
     }
     let mut files: Vec<(String, String)> = ui_files::list(&root).into_iter().map(|(rel, abs)| (rel, abs.to_string_lossy().into())).collect();
+    // Its demo's recording (cloudflare/web/demo.js), if it has one.
+    if !optional("demo").is_empty() {
+        let demo = std::path::Path::new(&path).parent().unwrap().join(optional("demo"));
+        println!("cargo:rerun-if-changed={}", demo.display());
+        files.push(("web/demo.json".into(), std::fs::canonicalize(&demo).unwrap_or_else(|e| panic!("{}: {e}", demo.display())).to_string_lossy().into()));
+    }
     // The custom build's logo, which the web client shows where the apps show it.
     let logo = std::path::Path::new(&path).parent().unwrap().join(get("logo").as_str().unwrap());
     println!("cargo:rerun-if-changed={}", logo.display());

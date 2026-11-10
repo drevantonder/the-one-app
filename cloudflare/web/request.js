@@ -3,6 +3,7 @@
 // this device being taken out, and traced in Developer mode.
 import { HEADER } from "../shared/protocol.js";
 import { platform } from "./platform.js";
+import { recording } from "./demo.js";
 
 export class NodeError extends Error {}
 export const UNANSWERED = "Your devices aren’t answering. Check that one is on and online.";
@@ -59,7 +60,8 @@ async function sending(url, method, body, raw, signal, trace) {
     let r;
     const watch = watching();
     try {
-      r = await Promise.race([platform.fetch(method, url.pathname + url.search, headers, sent, signal, platform.until(), !!trace), watch.out]);
+      const asked = [method, url.pathname + url.search, headers, sent, signal, platform.until(), !!trace];
+      r = await Promise.race([recording.on() ? recording.fetch(platform.fetch, ...asked) : platform.fetch(...asked), watch.out]);
       if (trace) traced(r.trace);
     } catch (err) {
       if (trace) traced(err.trace);

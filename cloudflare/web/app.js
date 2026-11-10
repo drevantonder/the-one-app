@@ -3,6 +3,7 @@
 // asks for its network's address first, joins a Mac's own node to one with a pairing code, opens the links the app was
 // opened with, takes a phone's hardware Back and text size, and may be the menu bar panel, a small window of its own:
 // this page showing only the client's own `panel` screen, with the app's rows under it.
+import { demoFile, demoOn, enterDemo, leaveDemo, replaying } from "./demo.js";
 import { codeOf } from "./device.js";
 import { net } from "./net.js";
 import { $, h, logo, show, ui } from "./view.js";
@@ -16,6 +17,8 @@ export function app(native) {
   let notify = null;
   /// Every icon, read once.
   let allIcons = null;
+  /// Whether this build has a demo to offer on the sign-in screen.
+  let hasDemo = false;
   const query = new URLSearchParams(location.search);
   const panel = query.has("panel");
 
@@ -141,6 +144,24 @@ export function app(native) {
     device: () => ({ name: about.device, signOut: true, keys: true, notify }),
   };
 
+  /// Try a Demo: nothing to reach or keep, and every request answered from this build's recording (demo.js).
+  const inDemo = (calls) => ({
+    async join() {
+      isIn = true;
+    },
+    reaches: async () => true,
+    fetch: replaying(calls),
+    took: async () => undefined,
+    removed: async () => false,
+    async leave() {},
+    nodes() {},
+    async settle() {},
+    kept: async () => null,
+    renew: async () => null,
+    forget: async () => {},
+    device: () => ({ name: about.device, signOut: true }),
+  });
+
   /// The page's client needs Ed25519 in its WebCrypto for the session's own key (its endpoint's): an older Android WebView has
   /// none, and on one the app's own Rust answers instead.
   const runsClient = () => (net.has ? crypto.subtle.importKey("raw", new Uint8Array(32), { name: "Ed25519" }, false, ["verify"]).then(() => true, () => false) : false);
@@ -158,7 +179,15 @@ export function app(native) {
     /// whether it took it), and `look` (light, dark or automatic).
     async start(window) {
       about = await native.about();
-      Object.assign(platform, (await runsClient()) ? inPage : inShell);
+      const demo = demoOn() || !about.signedIn ? await demoFile() : null;
+      if (demoOn() && demo) {
+        about = { ...about, signedIn: true, user: "demo" };
+        Object.assign(platform, inDemo(demo));
+      } else {
+        leaveDemo();
+        hasDemo = !!demo;
+        Object.assign(platform, (await runsClient()) ? inPage : inShell);
+      }
       // The app draws its next start in it from the first frame.
       native.appearance(window.look);
       native.onOpen = (link) => opened(link, window);
@@ -187,13 +216,16 @@ export function app(native) {
     until: () => Date.now() + 60_000,
     signIn: () => native.signIn().then(() => location.reload()),
     async signOut() {
+      leaveDemo();
       await native.signOut().catch(() => {});
       about = await native.about();
     },
     /// The sign-in screen (`props`, @one/ui's Welcome's); but first, where: an address, or an invite link to one.
-    welcome(props) {
+    welcome(shown) {
+      // Visible on purpose: a store's reviewer has to find it, and Apple rejects hidden ways in.
+      const props = hasDemo ? { ...shown, other: { label: "Try a Demo", run: enterDemo } } : shown;
       if (about.address) return h(ui.Welcome, props);
-      const again = (problem, note) => show(platform.welcome({ ...props, problem, note }));
+      const again = (problem, note) => show(platform.welcome({ ...shown, problem, note }));
       const take = async (typed) => {
         try {
           await native.address(typed);
@@ -207,7 +239,7 @@ export function app(native) {
       };
       const field = { label: "Address", placeholder: "one.example.com" };
       // A Mac whose own node is in no network yet joins one with a pairing code.
-      const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing(() => again()) } : undefined;
+      const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing(() => again()) } : props.other;
       return h(ui.Welcome, { ...props, field, action: { label: "Sign In", invite: "Open Invite", run: take }, other });
     },
 
