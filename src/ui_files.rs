@@ -12,7 +12,8 @@ pub fn list(root: &Path) -> Vec<(String, PathBuf)> {
     // so only what it built ships; the Cloudflare node (node/) is Rust, which ships built.
     files.retain(|(rel, _)| !rel.starts_with("test/") && !rel.starts_with("relay/protos/") && rel != "relay/build.sh" && !rel.starts_with("node/"));
     // The gateway serves the screens' design kit beside the web client, the same files nodes put in screens.
-    files.extend(collect(&root.join("src/screen")).into_iter().filter_map(|(rel, abs)| {
+    // Not its source maps: only nodes read those, and every client would download them.
+    files.extend(collect(&root.join("src/screen")).into_iter().filter(|(rel, _)| !rel.ends_with(".html.map")).filter_map(|(rel, abs)| {
         let rel = match rel.strip_prefix("ui/") {
             Some(ui) => format!("ui/{}", ui.strip_prefix("dist/")?),
             None => rel,

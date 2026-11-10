@@ -124,11 +124,18 @@
     const stack = String(err?.stack ?? "");
     const message = String(err?.message ?? "");
     const after = message && stack.includes(message) ? stack.slice(stack.indexOf(message) + message.length) : stack;
+    const frameOf = (line) => {
+      const at = /(?:^\s*at .*?\(?|@)([^()\s@]+):(\d+):(\d+)\)?\s*$/.exec(line);
+      return at && { at: at[1], file: at[1].split(/[?#]/)[0].split("/").pop().replace(/^about:|[<>]/g, ""), line: Number(at[2]), col: Number(at[3]) };
+    };
+    // Where the screen's module starts, which it says in its own first line (screens.mjs): the same in every browser.
+    const screen = globalThis.__oneScreen;
+    const first = String(screen?.at ?? "").split("\n").map(frameOf).find(Boolean);
     const frames = [];
     for (const line of after.split("\n")) {
-      const at = /(?:^\s*at .*?\(?|@)([^()\s@]+):(\d+):(\d+)\)?\s*$/.exec(line);
-      const file = at?.[1].split(/[?#]/)[0].split("/").pop().replace(/^about:|[<>]/g, "");
-      if (at && /^[\w.-]{1,64}$/.test(file)) frames.push({ file, line: Number(at[2]), col: Number(at[3]) });
+      const at = frameOf(line);
+      if (at && first && at.at === first.at && at.line >= first.line) frames.push({ file: `${screen.name}.screen.js`, line: at.line - first.line + 1, col: at.col });
+      else if (at && /^[\w.-]{1,64}$/.test(at.file)) frames.push({ file: at.file, line: at.line, col: at.col });
       if (frames.length === 8) break;
     }
     return { type: String(err?.name ?? "Error"), message: message.slice(0, 1024), frames };

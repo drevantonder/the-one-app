@@ -137,6 +137,31 @@ const CLIENT_SCREENS: &[(&str, &str, &str)] = &[
     ("devtools", "src/screen/settings/dist/devtools.html", include_str!("screen/settings/dist/devtools.html")),
 ];
 
+/// Each of the client's own screens' source maps: what a frame thrown in one of them came from (`insights::source_map`).
+const CLIENT_MAPS: &[(&str, &str)] = &[
+    ("pages", include_str!("screen/home/dist/pages.html.map")),
+    ("accounts", include_str!("screen/home/dist/accounts.html.map")),
+    ("panel", include_str!("screen/home/dist/panel.html.map")),
+    ("request", include_str!("screen/settings/dist/request.html.map")),
+    ("appearance", include_str!("screen/settings/dist/appearance.html.map")),
+    ("vault", include_str!("screen/settings/dist/vault.html.map")),
+    ("requests", include_str!("screen/settings/dist/requests.html.map")),
+    ("groups", include_str!("screen/settings/dist/groups.html.map")),
+    ("users", include_str!("screen/settings/dist/users.html.map")),
+    ("backups", include_str!("screen/settings/dist/backups.html.map")),
+    ("insights", include_str!("screen/settings/dist/insights.html.map")),
+    ("labs", include_str!("screen/settings/dist/labs.html.map")),
+    ("devices", include_str!("screen/settings/dist/devices.html.map")),
+    ("connect-ai", include_str!("screen/settings/dist/connect-ai.html.map")),
+    ("developer", include_str!("screen/settings/dist/developer.html.map")),
+    ("devtools", include_str!("screen/settings/dist/devtools.html.map")),
+];
+
+/// The source map of a client's own screen.
+pub fn client_map(name: &str) -> Option<&'static str> {
+    CLIENT_MAPS.iter().find(|(n, _)| *n == name).map(|(_, map)| *map)
+}
+
 /// A client's own screen's HTML, or none for a name that's none of them, which a page shows as not there (`MISSING`).
 pub fn client_screen(name: &str) -> Cow<'static, str> {
     CLIENT_SCREENS.iter().find(|(n, ..)| *n == name).map_or(Cow::Borrowed(""), |(_, path, html)| ui_folder::text(path, html))

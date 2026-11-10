@@ -1041,8 +1041,9 @@ fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
         { "message": "anna@example.org", "name": "TypeError", "stack": "TypeError: anna@example.org\n    at run (https://x.example/a.js?token=SECRET:12:3)\n    at b (about:srcdoc:2:5)" },
         { "message": "line one\n    at SECRET (leak.js:9:9)", "name": "Weird", "stack": "Error: line one\n    at SECRET (leak.js:9:9)\n    at real (app.js:1:2)" },
         { "message": "from safari", "name": "Error", "stack": "run@https://x.example/b.js?q=SECRET:4:5\n@about:srcdoc:6:7" },
+        { "message": "in a screen", "name": "Error", "stack": "Error: in a screen\n    at explode (about:srcdoc:12:30)\n    at bridge (about:srcdoc:3:5)", "screen": { "name": "main", "at": "Error\n    at about:srcdoc:10:1" } },
     ]);
-    let script = format!("{body}\nconsole.log(JSON.stringify({cases}.map((c) => described(Object.assign(new Error(c.message), {{ name: c.name, stack: c.stack }})))))");
+    let script = format!("{body}\nconsole.log(JSON.stringify({cases}.map((c) => {{ globalThis.__oneScreen = c.screen; return described(Object.assign(new Error(c.message), {{ name: c.name, stack: c.stack }})) }})))");
     let at = std::env::temp_dir().join(format!("bridge-thrown-{}.js", std::process::id()));
     std::fs::write(&at, script).unwrap();
     let out = std::process::Command::new(one::build::bun().unwrap()).arg(&at).output().unwrap();
@@ -1060,6 +1061,7 @@ fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
     assert_eq!(kept[1].kind, "Error", "a name of the program's own is `Error`");
     assert_eq!(kept[1].frames, ["app.js:1:2"]);
     assert_eq!(kept[2].frames, ["b.js:4:5", "srcdoc:6:7"]);
+    assert_eq!(kept[3].frames, ["main.screen.js:3:30", "srcdoc:3:5"], "a frame in the screen's own module is a line of it, and its source map's to resolve; anything before it isn't");
 }
 
 /// The body a device sends `POST /relay/computes`, what it's answered, and the signed ask it hears are frozen, as the

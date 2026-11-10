@@ -59,7 +59,8 @@ fn bundle(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
     if dir.join("package.json").is_file() {
         run(&["install", "--ignore-scripts"], "bun install")?;
     }
-    let out = tempdir()?;
+    // In the folder, so the source map names the files as `bundle::sources` does.
+    let out = dir.join(".built");
     let outfile = out.join("app.js");
     let meta = out.join("meta.json");
     let built = run(
@@ -71,7 +72,9 @@ fn bundle(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
             "--no-macros",
             "--external=cloudflare:*",
             "--external=node:*",
-            &format!("--outfile={}", outfile.display()),
+            "--sourcemap=external",
+            "--entry-naming=app.js",
+            &format!("--outdir={}", out.display()),
             &format!("--metafile={}", meta.display()),
         ],
         "bun build",
@@ -83,10 +86,10 @@ fn bundle(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
             let path = Path::new(input);
             ensure!(path.is_relative() && path.components().all(|c| matches!(c, std::path::Component::Normal(_))), "the app imports {input}, outside its folder: an app is built only from its own files and npm packages");
         }
-        Ok(std::fs::read(&outfile)?)
+        Ok((std::fs::read(&outfile)?, crate::insights::source_map::kept(&std::fs::read(out.join("app.js.map"))?)?))
     });
-    let _ = std::fs::remove_dir_all(&out);
-    let mut packed = vec![("app.js".to_string(), module?)];
+    let (module, map) = module?;
+    let mut packed = vec![("app.js".to_string(), module), (crate::insights::source_map::BUILT.to_string(), map)];
     packed.extend(files.iter().map(|(path, bytes)| (format!("src/{path}"), bytes.clone())));
     crate::app::bundle::pack(&packed)
 }

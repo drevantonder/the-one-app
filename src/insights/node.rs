@@ -1,7 +1,7 @@
 //! A node's part of insights: the batch it keeps in memory, sent every minute or so and when it stops, and what it reads
 //! back for the tool.
 
-use crate::insights::{self, Ask, Attrs, Batch, Exception, Failure, Log, Severity, Span, SpanKind, Status, stage};
+use crate::insights::{self, Ask, Attrs, Batch, Exception, Failure, Log, Severity, Span, SpanKind, Status, source_map, stage};
 
 use super::calls::record::Destination;
 use super::*;
@@ -95,6 +95,7 @@ impl Node {
         let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
         let build = crate::config::BUILD;
         let bundle = self.0.bundles.lock().unwrap().get(&req.app).cloned().filter(|_| destination.named);
+        let exception = self.located(exception, bundle.clone()).await;
         let (service, tool) = match destination.named {
             true => (req.app.as_str(), self.tool_named(req).await),
             false => (insights::own(), "call".to_string()),
@@ -275,6 +276,18 @@ impl Node {
         std::mem::take(&mut *self.0.insights.0.lock().unwrap())
     }
 
+    /// `exception` with each frame where it was written, by what was deployed beside what ran (`bundle`, or the client's own
+    /// screens for none): only ever a location, as a frame is. Read from disk, so never on the thread answering calls.
+    async fn located(&self, exception: Option<Exception>, bundle: Option<String>) -> Option<Exception> {
+        let exception = exception?;
+        let dir = self.0.dir.clone();
+        let ran = exception.clone();
+        Some(tokio::task::spawn_blocking(move || {
+            let files = bundle.and_then(|bundle| crate::app::bundle::unpack(&std::fs::read(crate::release::blob_path(&dir, &bundle).ok()?).ok()?).ok()).unwrap_or_default();
+            exception.located(|file| source_map::of(file, &files))
+        }).await.unwrap_or(ran))
+    }
+
     /// Sends what this device has to say to the telemetry Worker, and says whether it went. Telemetry may be lost, so what
     /// doesn't go is dropped.
     pub async fn flush_insights(&self) -> bool {
@@ -406,8 +419,8 @@ impl Node {
         if let (true, Some(screen)) = (destination.named, &screen) {
             attrs = attrs.screen(screen);
         }
-        let exception = exception.filter(|_| destination.named || app.is_empty());
-        let (frame, build) = match exception.as_ref().and_then(|x| x.frames.first()) {
+        let exception = self.located(exception.filter(|_| destination.named || app.is_empty()), bundle.clone().filter(|_| destination.named)).await;
+        let (frame, build) = match exception.as_ref().and_then(Exception::top_frame) {
             Some(top) => (top.clone(), bundle.clone().unwrap_or_else(|| crate::config::BUILD.into())),
             None => (name.to_string(), crate::config::BUILD.to_string()),
         };

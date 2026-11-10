@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use crate::protocol::code;
 
 pub mod message;
+pub mod source_map;
 pub mod tools;
 pub mod view;
 
@@ -206,21 +207,40 @@ impl Exception {
         Some(Exception { kind, frames, message: v["message"].as_str().filter(|m| !m.is_empty()).map(str::to_string) })
     }
 
-    /// The frame that says what threw it: the first of the app's own, past the runtime's that carried it there.
+    /// The frame that says what threw it: the first of the app's or screen's own, past the runtime's that carried it there.
     pub fn top_frame(&self) -> Option<&String> {
-        self.frames.iter().find(|f| !f.starts_with(RUNTIME_FRAME)).or(self.frames.first())
+        self.frames.iter().find(|f| !RUNTIME_FRAMES.iter().any(|r| f.starts_with(r))).or(self.frames.first())
+    }
+
+    /// Each frame where it was written, for those of a built file `map_of` knows the source map of: the rest stay as they are.
+    pub fn located(mut self, map_of: impl Fn(&str) -> Option<String>) -> Exception {
+        let mut maps = BTreeMap::new();
+        for at in &mut self.frames {
+            let mut parts = at.rsplitn(3, ':');
+            let (col, line, file) = (parts.next().and_then(|c| c.parse().ok()), parts.next().and_then(|l| l.parse().ok()), parts.next());
+            let (Some(col), Some(line), Some(file)) = (col, line, file) else { continue };
+            let map = maps.entry(file.to_string()).or_insert_with(|| map_of(file));
+            let Some((source, line, col)) = map.as_deref().and_then(|map| source_map::located(map, line, col)) else { continue };
+            if file_named(&source) {
+                *at = format!("{source}:{line}:{col}");
+            }
+        }
+        self
     }
 }
 
-/// What the app runtime's own frames start with (src/app/runtime/shim.js).
-const RUNTIME_FRAME: &str = "shim.js:";
+/// What the runtime's own frames start with: an app's (src/app/runtime/shim.js), and a screen's kit (@one/ui).
+const RUNTIME_FRAMES: [&str; 2] = ["shim.js:", "ui.js:"];
 
 /// A frame as `file:line:col`, if it's only that: a file's name is the app's code's, in a bundle, and nothing else may be
 /// where one goes.
 fn frame(v: &Value) -> Option<String> {
     let file = v["file"].as_str()?;
-    let name_ok = !file.is_empty() && file.len() <= 96 && file.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-/".contains(&b));
-    name_ok.then(|| format!("{file}:{}:{}", v["line"].as_u64().unwrap_or(0), v["col"].as_u64().unwrap_or(0)))
+    file_named(file).then(|| format!("{file}:{}:{}", v["line"].as_u64().unwrap_or(0), v["col"].as_u64().unwrap_or(0)))
+}
+
+fn file_named(file: &str) -> bool {
+    !file.is_empty() && file.len() <= 96 && file.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-/".contains(&b))
 }
 
 /// A signal's attributes: what one may name, and only values that can say nothing but what the key says.

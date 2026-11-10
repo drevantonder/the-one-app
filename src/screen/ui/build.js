@@ -94,8 +94,8 @@ export default { pages: draw(pages), parts: draw(parts) }
 // the pages' and Accounts' (../home, with what they share in its lib/).
 const settings = path.join(here, "..", "settings")
 const home = path.join(here, "..", "home")
-await buildScreens(settings, path.join(settings, "dist"), settings, `<meta name="@one/ui">`, shared)
-await buildScreens(home, path.join(home, "dist"), home, `<meta name="@one/ui">`, shared)
+await buildScreens(settings, path.join(settings, "dist"), settings, `<meta name="@one/ui">`, shared, "src/screen/settings")
+await buildScreens(home, path.join(home, "dist"), home, `<meta name="@one/ui">`, shared, "src/screen/home")
 
 // What the built files were made from: every source file, by path and content, in order: @one/ui's, the Settings
 // screens' and what they share, everything in the pages' folder but its dist/, and onboarding's screens.
