@@ -5,6 +5,8 @@
 //! Only on Linux, and under systemd only where the service lets other processes tell it its main pid
 //! (`NotifyAccess=all`, as install.sh writes it); elsewhere a node exits and its supervisor starts the new one.
 
+use std::panic::Location;
+use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -110,6 +112,46 @@ pub fn supervised() -> bool {
     !cfg!(target_os = "linux") || unit().is_some()
 }
 
+/// What's held the node's who's who since when (`Node::with`), which a stuck runtime is usually waiting for: what says why
+/// when it can't be seen from outside.
+static HELD_AT: AtomicPtr<Location<'static>> = AtomicPtr::new(std::ptr::null_mut());
+static HELD_SINCE: AtomicU64 = AtomicU64::new(0);
+
+/// While it lives, says who has the node's who's who, for a stall to name.
+pub struct Held;
+
+impl Held {
+    #[track_caller]
+    pub fn new() -> Held {
+        HELD_SINCE.store(STARTED.get().map_or(0, |s| s.elapsed().as_secs()), Ordering::Relaxed);
+        HELD_AT.store(std::panic::Location::caller() as *const _ as *mut _, Ordering::Relaxed);
+        Held
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        HELD_AT.store(std::ptr::null_mut(), Ordering::Relaxed);
+    }
+}
+
+/// What a stuck runtime was doing, as far as can be seen from outside it: what held its who's who, how many tasks it
+/// had and threads it was waiting on, and, on a Mac, every thread's stack, kept in the node's log folder.
+fn stuck_on(runtime: &tokio::runtime::Handle, now: u64) -> String {
+    let at = HELD_AT.load(Ordering::Relaxed);
+    // Set only from `Location::caller()`, which is 'static, and never freed.
+    let held = (!at.is_null()).then(|| unsafe { &*at }).map_or("nothing".to_string(), |l| format!("{l} for {} seconds", now.saturating_sub(HELD_SINCE.load(Ordering::Relaxed))));
+    let metrics = runtime.metrics();
+    let mut said = format!("Who's who was held by {held}; {} tasks alive on {} workers, {} queued", metrics.num_alive_tasks(), metrics.num_workers(), metrics.global_queue_depth());
+    if cfg!(target_os = "macos") {
+        let file = crate::home().join("logs").join("stall.sample");
+        if std::process::Command::new("sample").arg(std::process::id().to_string()).args(["2", "-file"]).arg(&file).output().is_ok_and(|o| o.status.success()) {
+            said.push_str(&format!("; every thread's stack is in {}", file.display()));
+        }
+    }
+    said
+}
+
 /// A node whose runtime has made no progress for a minute says so and exits, for its supervisor to start it again. A node
 /// whose every thread is stuck still listens, and what's asked of it would otherwise wait unanswered, every agent and the
 /// CLI with it, until someone restarts it by hand. Progress is a task on the runtime that ticks every few seconds, not a
@@ -119,6 +161,7 @@ pub fn watch() {
         return;
     }
     const STUCK_FOR: u64 = 60;
+    let runtime = tokio::runtime::Handle::current();
     let beat = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let up = || STARTED.get().map_or(0, |s| s.elapsed().as_secs());
     tokio::spawn({
@@ -138,7 +181,7 @@ pub fn watch() {
             }
             let silent = up().saturating_sub(beat.load(std::sync::atomic::Ordering::SeqCst));
             if silent >= STUCK_FOR {
-                tracing::error!("this node's runtime has done nothing for {silent} seconds: exiting, to be started again");
+                tracing::error!("this node's runtime has done nothing for {silent} seconds: exiting, to be started again. {}", stuck_on(&runtime, up()));
                 crate::insights::Ended::Watchdog.write(&crate::home());
                 std::process::exit(1);
             }

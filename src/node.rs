@@ -423,13 +423,16 @@ impl Node {
         &self.0.local_token
     }
 
+    #[track_caller]
     fn with<R>(&self, f: impl FnOnce(&mut Network) -> Result<R>) -> Result<R> {
         let mut network = self.0.network.lock()?;
+        let _held = crate::handoff::Held::new();
         f(network.as_mut().with_context(|| not_joined(&self.device_name()))?)
     }
 
     /// `with`, for what answers a plain yes or no, or a list, and can't fail: `default` when it's in no network yet, or
     /// when its who's who couldn't be read, which the log says.
+    #[track_caller]
     fn with_or<R>(&self, default: R, f: impl FnOnce(&mut Network) -> Result<R>) -> R {
         self.with(f).unwrap_or_else(|err| {
             if self.has_network() {
