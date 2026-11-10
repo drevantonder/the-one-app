@@ -41,6 +41,12 @@ Who can do what is the signed steps of each scope's database, in the one order t
 
 A removed device's later steps fail rule 3, because they come after its removal in the one order.
 
+## Insights
+
+Recorded by the network itself, in OpenTelemetry's data model and names, with no SDK or Collector (`src/insights.rs`).
+
+- **Errors follow OTEL** (Andre, 11-10), so what isn't an error never poisons Insights. A caller's mistake (refused, a code `insights::REFUSALS` lists) has its span status left unset and no `error.type`, its code kept in `one.code`, and is in no rate and not in the Errors list. Only what broke has status Error and an `error.type`. A hop keeps its own client span status and never counts against a call that went on elsewhere: rates and the Errors list read server spans.
+
 ## Designed, not built
 
 - **`onet` and `oned`** (Andre, 11-10, being built). "Node" blurred several jobs, so it goes. **`onet`** is the entry point into the network, the same on every device: its identity, who's who, connecting to the best machine, opening keys, answering the API, and the store of what it last read. It's built into the phone app, runs in a browser's shared worker, in a Cloudflare Worker for each outside program (Claude.ai, ChatGPT), and in the background on a computer, where the desktop app, the CLI and the local MCP server are views on it with no keys of their own: one key per device. A phone is only ever a client, never an app server. **`oned`** only manages services, starting and stopping them and saying their versions, on computers and Cloudflare, as a user of `onet` like any other. **The app runtime is a service**, switched on per device, and does what needs something that stays on: answering other devices' calls, schedules, running apps' code, and the database copies that takes. Built so far: the API's document (`/api/openapi.json`) is made by `onet` for its own client, from the apps a node lists and what routes say of themselves (`src/says.rs`, a table that builds without the node), the same code in a browser, a computer and the Cloudflare node.

@@ -607,12 +607,12 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
 
 function Errors({ rows, showTraces, query: [query, setQuery] }) {
   const [service, setService] = useState(ALL)
-  const [fault, setFault] = useState(ALL)
+  const [status, setStatus] = useState("error")
   const [open, setOpen] = useState(null)
   const found = useMemo(() => {
     const matches = matcher(query)
-    return rows.filter((r) => (service === ALL || r.service === service) && (fault === ALL || r.fault === fault) && matches(r)).map((r) => ({ ...r, id: `${r.service}|${r.tool}|${r.fingerprint}` }))
-  }, [rows, service, fault, query])
+    return rows.filter((r) => (service === ALL || r.service === service) && (status === ALL || r.status === status) && matches(r)).map((r) => ({ ...r, id: `${r.service}|${r.tool}|${r.fingerprint}` }))
+  }, [rows, service, status, query])
   const chosen = found.find((r) => r.id === open)
   const columns = [
     { key: "type", label: "Error", value: (p) => p.type, cell: (p) => <span className="break-all"><span className="font-medium">{p.type}</span> <span className="text-muted-foreground">{p.frame}</span></span> },
@@ -629,7 +629,7 @@ function Errors({ rows, showTraces, query: [query, setQuery] }) {
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <Pick label="Service" value={service} set={setService} all="All Services" options={sorted(rows.map((r) => r.service))} />
-            <Pick label="Fault" value={fault} set={setFault} all="All Faults" options={sorted(rows.map((r) => r.fault).filter(Boolean))} />
+            <Pick label="Status" value={status} set={setStatus} all="All Statuses" options={sorted(rows.map((r) => r.status))} />
             <Input className="min-w-52 flex-1" aria-label="Search" placeholder="Search, or key=value" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
           {found.length ? <Table label="Errors" columns={columns} rows={found} start={{ key: "last", down: true }} open={(r) => setOpen(r.id)} /> : <Empty>No errors match.</Empty>}

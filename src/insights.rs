@@ -91,19 +91,58 @@ const MOST_SIGNALS: usize = 500;
 /// The most stack frames a signal keeps.
 pub const MOST_FRAMES: usize = 8;
 
-/// Whose a failure is, which only where it happened knows.
+/// OTEL's span status: left unset unless it failed, and never `Ok`, which is an operator's to set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Fault {
-    /// Refused, invalid input, not allowed, no such thing.
-    Caller,
-    Internal,
+pub enum Status {
+    Unset,
+    Error,
 }
 
-impl Fault {
+impl Status {
+    pub fn of(ok: bool) -> Status {
+        if ok { Status::Unset } else { Status::Error }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
-            Fault::Caller => "caller",
-            Fault::Internal => "internal",
+            Status::Unset => "unset",
+            Status::Error => "error",
+        }
+    }
+}
+
+/// How a call that didn't do what was asked ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Failure {
+    /// The caller's to change, and nothing broke: OTEL's expected failure, its status unset and no `error.type`. Its code.
+    Refused(String),
+    /// Something broke: its `error.type`.
+    Broke(String),
+}
+
+/// The codes a caller's request is refused with (`protocol::code`): everything else, and anything with no code, broke.
+const REFUSALS: &[&str] = &[code::UPDATE, code::NOT_LET_IN, code::REFUSED, code::NOT_THIS_MACHINE, code::NOT_SIGNED_IN, code::NOT_ADDED, code::APP_DELETED, code::ALREADY, code::NOT_LISTED, code::PAIRING_USED, code::BAD_PAIRING_CODE, code::ALREADY_IN_NETWORK];
+
+impl Failure {
+    /// What ended a call with this `code`, if it carries one, or as `exception`, at `stage`.
+    pub fn of(code: Option<&str>, exception: Option<&Exception>, stage: &str) -> Failure {
+        match code {
+            Some(c) if REFUSALS.contains(&c) => Failure::Refused(c.to_string()),
+            _ => Failure::Broke(code.map(str::to_string).or(exception.map(|e| e.kind.clone())).unwrap_or_else(|| if stage == stage::LIMIT { TIMEOUT } else { OTHER }.to_string())),
+        }
+    }
+
+    pub fn status(&self) -> Status {
+        match self {
+            Failure::Refused(_) => Status::Unset,
+            Failure::Broke(_) => Status::Error,
+        }
+    }
+
+    /// What it's listed as.
+    pub fn kind(&self) -> &str {
+        match self {
+            Failure::Refused(kind) | Failure::Broke(kind) => kind,
         }
     }
 }
@@ -165,12 +204,6 @@ impl Exception {
         Some(Exception { kind, frames })
     }
 
-    /// Whether the app's own code threw it, as `throw new Error("…")`: a choice to refuse, unlike the engine's errors
-    /// and what the app runtime throws for it.
-    pub fn thrown_by_app(&self) -> bool {
-        self.kind == "Error" && self.frames.first().is_some_and(|f| !f.starts_with(RUNTIME_FRAME))
-    }
-
     /// The frame that says what threw it: the first of the app's own, past the runtime's that carried it there.
     pub fn top_frame(&self) -> Option<&String> {
         self.frames.iter().find(|f| !f.starts_with(RUNTIME_FRAME)).or(self.frames.first())
@@ -186,15 +219,6 @@ fn frame(v: &Value) -> Option<String> {
     let file = v["file"].as_str()?;
     let name_ok = !file.is_empty() && file.len() <= 96 && file.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-/".contains(&b));
     name_ok.then(|| format!("{file}:{}:{}", v["line"].as_u64().unwrap_or(0), v["col"].as_u64().unwrap_or(0)))
-}
-
-/// Whose failure it is: said by its code if it has one, else by where it failed.
-pub fn fault(code: Option<&str>, stage: &str, exception: Option<&Exception>) -> Fault {
-    let caller = |is: bool| if is { Fault::Caller } else { Fault::Internal };
-    match code {
-        Some(c) => caller([code::UPDATE, code::NOT_LET_IN, code::REFUSED, code::NOT_THIS_MACHINE, code::NOT_SIGNED_IN, code::NOT_ADDED, code::APP_DELETED, code::ALREADY, code::NOT_LISTED, code::PAIRING_USED, code::BAD_PAIRING_CODE, code::ALREADY_IN_NETWORK].contains(&c)),
-        None => caller(stage == stage::CHECK || (stage == stage::RUN && exception.is_some_and(Exception::thrown_by_app))),
-    }
 }
 
 /// A signal's attributes: what one may name, and only values that can say nothing but what the key says.
@@ -325,6 +349,18 @@ impl Attrs {
         self
     }
 
+    /// How a call that failed ended: `error.type` if something broke, or, as OTEL's expected failures do, a code of our own.
+    pub fn failed(self, failure: &Failure) -> Attrs {
+        match failure {
+            Failure::Refused(code) => {
+                let mut attrs = self;
+                attrs.token("one.code", code);
+                attrs
+            }
+            Failure::Broke(kind) => self.error(kind),
+        }
+    }
+
     /// `error.type`: a protocol code, an exception's type, a device that couldn't be asked, or OTEL's own `timeout` or `_OTHER`.
     pub fn error(mut self, kind: &str) -> Attrs {
         let known = code::ALL.contains(&kind) || EXCEPTIONS.contains(&kind) || [TIMEOUT, UNREACHABLE, LOST].contains(&kind);
@@ -362,12 +398,9 @@ impl Attrs {
     }
 
     /// The attributes a rollup groups by, as its key: those that are few.
-    fn rollup_key(&self, kind: &str, fault: Option<Fault>) -> String {
-        let mut key: BTreeMap<&str, Value> = self.0.iter().filter(|(k, _)| ["one.client", "one.scope", "one.device", "one.build", "gen_ai.request.model", "gen_ai.token.type", "one.outcome", "span.kind"].contains(k)).map(|(k, v)| (*k, v.clone())).collect();
+    fn rollup_key(&self, kind: &str) -> String {
+        let mut key: BTreeMap<&str, Value> = self.0.iter().filter(|(k, _)| ["one.client", "one.scope", "one.device", "one.build", "one.code", "gen_ai.request.model", "gen_ai.token.type", "one.outcome", "span.kind"].contains(k)).map(|(k, v)| (*k, v.clone())).collect();
         key.insert("kind", json!(kind));
-        if let Some(fault) = fault {
-            key.insert("fault", json!(fault.as_str()));
-        }
         serde_json::to_string(&key).unwrap_or_default()
     }
 
@@ -448,8 +481,7 @@ pub struct Signal {
     pub span: String,
     pub parent: Option<String>,
     pub ms: u64,
-    pub ok: bool,
-    pub fault: Option<Fault>,
+    pub status: Status,
     pub attrs: Attrs,
 }
 
@@ -461,7 +493,7 @@ pub struct Print {
     pub kind: String,
     pub frame: String,
     pub build: String,
-    pub fault: Fault,
+    pub status: Status,
 }
 
 impl Print {
@@ -521,13 +553,13 @@ impl Batch {
 
     /// Adds to a metric's rollup: for a metric, `ms` is the sum of its values and `count` how many were added.
     pub fn metric(&mut self, time: u64, name: &str, app: &str, attrs: &Attrs, value: u64) {
-        self.rollups.entry((time / 3_600_000, name.to_string(), app.to_string(), attrs.rollup_key("metric", None))).or_default().add(value, true);
+        self.rollups.entry((time / 3_600_000, name.to_string(), app.to_string(), attrs.rollup_key("metric"))).or_default().add(value, true);
     }
 
     /// Adds a finished signal: to the rollups always, and in full only if it's `kept`.
     pub fn add(&mut self, signal: Signal, kept: bool, print: Option<Print>) {
-        let key = (signal.time / 3_600_000, signal.name.clone(), signal.app.clone(), signal.attrs.rollup_key(signal.kind.as_str(), signal.fault));
-        self.rollups.entry(key).or_default().add(signal.ms, signal.ok);
+        let key = (signal.time / 3_600_000, signal.name.clone(), signal.app.clone(), signal.attrs.rollup_key(signal.kind.as_str()));
+        self.rollups.entry(key).or_default().add(signal.ms, signal.status == Status::Unset);
         if let Some(print) = print {
             let at = signal.time;
             let id = (print.app.clone(), print.tool.clone(), print.fingerprint());
@@ -546,9 +578,8 @@ pub struct Ask {
     pub name: Option<String>,
     pub trace: Option<String>,
     pub since: Option<u64>,
-    /// `ok` or `error`.
+    /// `unset` or `error`.
     pub status: Option<String>,
-    pub fault: Option<String>,
     pub limit: usize,
 }
 
@@ -570,15 +601,16 @@ mod tests {
         assert_eq!(e.frames, ["app.js:3:9", "lib/a.js:2:1"]);
     }
 
+    /// What's the caller's to change never counts as something that broke, and nothing else is taken for it.
     #[test]
-    fn a_caller_is_told_apart_from_a_fault() {
-        let thrown = |kind: &str, file: &str| Exception { kind: kind.into(), frames: vec![format!("{file}:1:1")] };
-        assert_eq!(fault(Some(code::REFUSED), stage::RUN, None), Fault::Caller);
-        assert_eq!(fault(Some(code::RESTARTING), stage::RUN, None), Fault::Internal);
-        assert_eq!(fault(None, stage::CHECK, None), Fault::Caller);
-        assert_eq!(fault(None, stage::WRITE, None), Fault::Internal);
-        assert_eq!(fault(None, stage::RUN, Some(&thrown("Error", "app.js"))), Fault::Caller);
-        assert_eq!(fault(None, stage::RUN, Some(&thrown("TypeError", "app.js"))), Fault::Internal);
-        assert_eq!(fault(None, stage::RUN, Some(&thrown("Error", "shim.js"))), Fault::Internal);
+    fn only_a_refusal_is_the_callers() {
+        let thrown = Exception { kind: "TypeError".into(), frames: vec!["app.js:1:1".into()] };
+        assert_eq!(Failure::of(Some(code::REFUSED), None, stage::RUN), Failure::Refused("refused".into()));
+        assert_eq!(Failure::of(Some(code::REFUSED), None, stage::RUN).status(), Status::Unset);
+        assert_eq!(Failure::of(Some(code::RESTARTING), None, stage::RUN), Failure::Broke("restarting".into()));
+        assert_eq!(Failure::of(None, None, stage::CHECK), Failure::Broke(OTHER.into()));
+        assert_eq!(Failure::of(None, Some(&thrown), stage::RUN), Failure::Broke("TypeError".into()));
+        assert_eq!(Failure::of(None, None, stage::LIMIT), Failure::Broke(TIMEOUT.into()));
+        assert_eq!(Failure::of(Some("whatever"), None, stage::RUN).status(), Status::Error, "only the codes that say so are refusals");
     }
 }

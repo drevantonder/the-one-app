@@ -8,14 +8,14 @@ use crate::database::stored::execute;
 
 use super::{Batch, RAW_KEPT_MS, ROLLUPS_KEPT_MS};
 
-/// Writes `batch`. A fingerprint goes once its build is out of `live`, the builds and app bundles still running, or a
-/// migrated one, which names none, as a rollup would. With nothing known to be live, none goes.
+/// Writes `batch`. A fingerprint goes once its build is out of `live`, the builds and app bundles still running. With
+/// nothing known to be live, none goes.
 pub fn write(c: &Connection, batch: &Batch, now: u64, live: &[String]) -> Result<()> {
     let ex = |sql: &str, params: &[Value]| execute(c, sql, params).map(|_| ());
     for s in &batch.signals {
         ex(
-            "insert into signals values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            &[json!(s.time), json!(s.device), json!(s.kind.as_str()), json!(s.name), json!(s.app), json!(s.trace), json!(s.span), json!(s.parent), json!(s.ms), json!(if s.ok { "ok" } else { "error" }), json!(s.fault.map(|f| f.as_str())), json!(s.attrs.json().to_string())],
+            "insert into signals values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            &[json!(s.time), json!(s.device), json!(s.kind.as_str()), json!(s.name), json!(s.app), json!(s.trace), json!(s.span), json!(s.parent), json!(s.ms), json!(s.status.as_str()), json!(s.attrs.json().to_string())],
         )?;
     }
     for ((hour, name, app, key), r) in &batch.rollups {
@@ -30,15 +30,14 @@ pub fn write(c: &Connection, batch: &Batch, now: u64, live: &[String]) -> Result
         ex(
             "insert into fingerprints values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (app, tool, fingerprint) do update set
                count = count + excluded.count, first = min(first, excluded.first), last = max(last, excluded.last)",
-            &[json!(app), json!(tool), json!(id), json!(p.print.kind), json!(p.print.frame), json!(p.print.build), json!(p.print.fault.as_str()), json!(p.count), json!(p.first), json!(p.last)],
+            &[json!(app), json!(tool), json!(id), json!(p.print.kind), json!(p.print.frame), json!(p.print.build), json!(p.print.status.as_str()), json!(p.count), json!(p.first), json!(p.last)],
         )?;
     }
     ex("delete from signals where time < ?", &[json!(now.saturating_sub(RAW_KEPT_MS))])?;
     ex("delete from rollups where hour < ?", &[json!(now.saturating_sub(ROLLUPS_KEPT_MS) / 3_600_000)])?;
-    ex("delete from fingerprints where build = '' and last < ?", &[json!(now.saturating_sub(ROLLUPS_KEPT_MS))])?;
     if !live.is_empty() {
         let holes = vec!["?"; live.len()].join(", ");
-        ex(&format!("delete from fingerprints where build != '' and build not in ({holes})"), &live.iter().map(|b| json!(b)).collect::<Vec<_>>())?;
+        ex(&format!("delete from fingerprints where build not in ({holes})"), &live.iter().map(|b| json!(b)).collect::<Vec<_>>())?;
     }
     Ok(())
 }

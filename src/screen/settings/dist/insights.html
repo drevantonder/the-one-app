@@ -1704,10 +1704,10 @@ function xt(e) {
 	return Object.keys(X(e));
 }
 function St(t) {
-	let n = e(43), { rows: r, showTraces: a, query: c } = t, [u, d] = c, [f, p] = i(j), [m, h] = i(j), [g, _] = i(null), v;
-	if (n[0] !== m || n[1] !== u || n[2] !== r || n[3] !== f) {
+	let n = e(43), { rows: r, showTraces: a, query: c } = t, [u, d] = c, [f, p] = i(j), [m, h] = i("error"), [g, _] = i(null), v;
+	if (n[0] !== u || n[1] !== r || n[2] !== f || n[3] !== m) {
 		let e = re(u);
-		v = r.filter((t) => (f === j || t.service === f) && (m === j || t.fault === m) && e(t)).map(Ft), n[0] = m, n[1] = u, n[2] = r, n[3] = f, n[4] = v;
+		v = r.filter((t) => (f === j || t.service === f) && (m === j || t.status === m) && e(t)).map(Ft), n[0] = u, n[1] = r, n[2] = f, n[3] = m, n[4] = v;
 	} else v = n[4];
 	let y = v, x;
 	if (n[5] !== y || n[6] !== g) {
@@ -1763,13 +1763,13 @@ function St(t) {
 		options: k
 	}), n[14] = f, n[15] = k, n[16] = A) : A = n[16];
 	let M;
-	n[17] === r ? M = n[18] : (M = J(r.map(Ct).filter(Boolean)), n[17] = r, n[18] = M);
+	n[17] === r ? M = n[18] : (M = J(r.map(Ct)), n[17] = r, n[18] = M);
 	let N;
 	n[19] !== m || n[20] !== M ? (N = /* @__PURE__ */ E($, {
-		label: "Fault",
+		label: "Status",
 		value: m,
 		set: h,
-		all: "All Faults",
+		all: "All Statuses",
 		options: M
 	}), n[19] = m, n[20] = M, n[21] = N) : N = n[21];
 	let P;
@@ -1828,7 +1828,7 @@ function St(t) {
 	}), n[39] = R, n[40] = z, n[41] = T, n[42] = B) : B = n[42], B;
 }
 function Ct(e) {
-	return e.fault;
+	return e.status;
 }
 function wt(e) {
 	return e.service;

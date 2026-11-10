@@ -2,7 +2,7 @@
 //! services' builds, and the builds of a service a deploy names, which a device runs instead of any release.
 
 use super::*;
-use crate::insights::{Attrs, Fault};
+use crate::insights::{Attrs, Status};
 
 pub(crate) mod routes;
 
@@ -51,11 +51,11 @@ impl Node {
         let Some(thing) = latest.get(&part).cloned() else { return Ok(()) };
         let newer = thing.commit != crate::config::BUILD;
         if newer && self.note_update_seen(&thing.commit) {
-            self.device_signal("update.seen", Attrs::default().part(&part), true, None);
+            self.device_signal("update.seen", Attrs::default().part(&part), Status::Unset);
         }
         if release::in_app_bundle() {
             if newer {
-                self.device_signal("update.not_taken", Attrs::default().part(&part).reason("app-bundle"), true, None);
+                self.device_signal("update.not_taken", Attrs::default().part(&part).reason("app-bundle"), Status::Unset);
             }
             return Ok(());
         }
@@ -69,7 +69,7 @@ impl Node {
             return Ok(());
         }
         let not_taken = |reason: &'static str, err: anyhow::Error| {
-            self.device_signal("update.not_taken", Attrs::default().part(&part).reason(reason), false, Some(Fault::Internal));
+            self.device_signal("update.not_taken", Attrs::default().part(&part).reason(reason), Status::Error);
             err
         };
         let bytes = {
@@ -78,7 +78,7 @@ impl Node {
         };
         let exe = release::install_commit(&thing.commit, &bytes).map_err(|e| not_taken("install", e))?;
         crate::update::took(&self.0.dir, &thing.sha256).map_err(|e| not_taken("install", e.into()))?;
-        self.device_signal("update.taken", Attrs::default().part(&part), true, None);
+        self.device_signal("update.taken", Attrs::default().part(&part), Status::Unset);
         tracing::info!("updated {} to {}; restarting", exe.display(), thing.commit);
         *handed = Instant::now();
         crate::handoff::restart();
@@ -134,7 +134,7 @@ impl Node {
         let replaced = Bucket::replace(&bucket.place, &crate::latest::newest_name(), text.as_bytes(), tag).await?;
         if replaced && let Ok(new) = crate::latest::Latest::read(crate::mode::here().release_key(), text) {
             for thing in new.things.iter().filter(|t| was.get(&t.name).is_none_or(|w| w.sha256 != t.sha256)) {
-                self.device_signal("update.sent", Attrs::default().part(&thing.name), true, None);
+                self.device_signal("update.sent", Attrs::default().part(&thing.name), Status::Unset);
             }
         }
         Ok(replaced)

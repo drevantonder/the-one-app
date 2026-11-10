@@ -59,6 +59,20 @@ update signals set attrs = json_set(attrs, '$.\"span.kind\"', case
     when name = 'service.hop' then 'client'
     when name = 'schedule.run' or json_extract(attrs, '$.\"one.client\"') is null then 'internal'
     else 'server' end) where kind = 'span';
+", "
+delete from fingerprints where frame = 'migrated';
+alter table fingerprints rename column fault to status;
+update fingerprints set status = case status when 'caller' then 'unset' else 'error' end;
+update signals set attrs = json_remove(json_set(attrs, '$.\"one.code\"', case when json_extract(attrs, '$.\"error.type\"') in ('Error', '_OTHER') then 'refused' else json_extract(attrs, '$.\"error.type\"') end), '$.\"error.type\"'), status = 'unset' where fault = 'caller';
+update signals set status = 'unset' where status = 'ok';
+alter table signals drop column fault;
+update rollups set errors = 0 where json_extract(key, '$.fault') = 'caller';
+create table rollups_merged (hour integer not null, name text not null, app text not null, key text not null, count integer not null, errors integer not null,
+                             ms integer not null, under_10 integer not null, under_100 integer not null, under_1000 integer not null, under_10000 integer not null,
+                             over integer not null, primary key (hour, name, app, key));
+insert into rollups_merged select hour, name, app, json_remove(key, '$.fault'), sum(count), sum(errors), sum(ms), sum(under_10), sum(under_100), sum(under_1000), sum(under_10000), sum(over) from rollups group by 1, 2, 3, 4;
+drop table rollups;
+alter table rollups_merged rename to rollups;
 "];
 
 pub const RUNS_KEPT: usize = 20;
@@ -110,8 +124,8 @@ pub struct Fingerprint {
     pub kind: String,
     pub frame: String,
     pub build: String,
-    /// `caller` or `internal`; none for what was kept before faults were.
-    pub fault: Option<String>,
+    /// `error`, or `unset` for a refusal.
+    pub status: String,
     pub count: u64,
     pub first: u64,
     pub last: u64,
@@ -258,7 +272,7 @@ impl Node {
             s.insights.entry(text(&r["app"])).or_default().used.insert((text(&r["user"]), text(&r["client"])), used);
         }
         for r in rows("select * from fingerprints")? {
-            let print = Fingerprint { kind: text(&r["type"]), frame: text(&r["frame"]), build: text(&r["build"]), fault: r["fault"].as_str().map(str::to_string), count: n(&r["count"]), first: n(&r["first"]), last: n(&r["last"]) };
+            let print = Fingerprint { kind: text(&r["type"]), frame: text(&r["frame"]), build: text(&r["build"]), status: text(&r["status"]), count: n(&r["count"]), first: n(&r["first"]), last: n(&r["last"]) };
             s.insights.entry(text(&r["app"])).or_default().errors.insert((text(&r["tool"]), text(&r["fingerprint"])), print);
         }
         for r in rows("select * from cost")? {
@@ -373,7 +387,7 @@ mod tests {
     #[test]
     fn spans_kept_before_span_kinds_gain_theirs() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
-        let before = SCHEMA.len() - 1;
+        let before = SCHEMA.iter().position(|s| s.contains("when name = 'service.hop'")).unwrap();
         db.execute_batch(&SCHEMA[..before].concat()).unwrap();
         let span = r#"{"kind":"span","one.client":"cli"}"#;
         db.execute_batch(&format!("insert into rollups values (1, 'list', 'repos', '{span}', 3, 0, 9, 3, 0, 0, 0, 0), (1, 'service.hop', 'shell', '{span}', 2, 1, 9, 2, 0, 0, 0, 0), (1, 'schedule.run', 'a', '{span}', 1, 0, 9, 1, 0, 0, 0, 0), (1, 'ping', 'a', '{{\"kind\":\"span\"}}', 1, 0, 2, 1, 0, 0, 0, 0), (1, 'node.start', '', '{{\"kind\":\"event\"}}', 1, 0, 0, 1, 0, 0, 0, 0);")).unwrap();
@@ -384,6 +398,33 @@ mod tests {
         assert_eq!(of("schedule.run"), (Some("internal".to_string()), 1));
         assert_eq!(of("ping"), (Some("internal".to_string()), 1));
         assert_eq!(of("node.start"), (None, 1));
+    }
+
+    /// What was refused stops being counted as broken, without losing how often it happened, and what was migrated from
+    /// before fingerprints goes.
+    #[test]
+    fn what_was_refused_stops_being_an_error() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let before = SCHEMA.iter().position(|s| s.contains("rollups_merged")).unwrap();
+        db.execute_batch(&SCHEMA[..before].concat()).unwrap();
+        let fault = |fault: &str| format!(r#"{{"kind":"span","fault":"{fault}"}}"#);
+        db.execute_batch(&format!(
+            "insert into rollups values (1, 'get', 'repos', '{}', 3, 3, 9, 3, 0, 0, 0, 0), (1, 'get', 'repos', '{}', 2, 2, 9, 2, 0, 0, 0, 0);
+             insert into signals values (5, 'd', 'span', 'get', 'repos', 't', 's', null, 1, 'error', 'caller', '{{\"error.type\":\"refused\"}}'), (6, 'd', 'span', 'get', 'repos', 't', 'u', null, 1, 'error', 'internal', '{{\"error.type\":\"TypeError\"}}'), (7, 'd', 'span', 'get', 'repos', 't', 'v', null, 1, 'ok', null, '{{}}');
+             insert into fingerprints values ('repos', 'get', 'a', 'refused', 'stage:run', 'b1', 'caller', 3, 1, 2), ('repos', 'get', 'b', 'TypeError', 'app.js:1:1', 'b1', 'internal', 2, 1, 2), ('repos', 'get', 'Error|migrated|', 'Error', 'migrated', '', null, 9, 1, 2);",
+            fault("caller"), fault("internal"),
+        )).unwrap();
+        db.execute_batch(SCHEMA[before]).unwrap();
+        let (count, errors): (i64, i64) = db.query_row("select sum(count), sum(errors) from rollups", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((count, errors), (5, 2), "both counted, only what broke an error");
+        let rows: i64 = db.query_row("select count(*) from rollups", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 1, "the same row once what told them apart is gone");
+        let of = |span: &str| -> (String, String) { db.query_row("select status, attrs from signals where span = ?", [span], |r| Ok((r.get(0)?, r.get(1)?))).unwrap() };
+        assert_eq!(of("s"), ("unset".to_string(), r#"{"one.code":"refused"}"#.to_string()));
+        assert_eq!(of("u"), ("error".to_string(), r#"{"error.type":"TypeError"}"#.to_string()));
+        assert_eq!(of("v").0, "unset");
+        let statuses: Vec<String> = db.prepare("select status from fingerprints order by fingerprint").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        assert_eq!(statuses, ["unset", "error"], "and the migrated row is gone");
     }
 
     /// A failure kept before fingerprints keeps its app, tool, count and times, and never what it said.

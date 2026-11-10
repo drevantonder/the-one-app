@@ -7,6 +7,8 @@ use serde_json::Value;
 
 /// The most lines a list has unless asked for more.
 pub const LISTED: usize = 20;
+/// What a fingerprint's `status` is when something broke, which is all that's listed unless other's asked for.
+pub const ERROR: &str = "error";
 /// A histogram's bucket columns and the upper bound of each; the last has none, so it's drawn as a minute. The same as
 /// the screen's (`src/screen/settings/quantile.js`), held to it by tests/contracts.rs.
 pub const BUCKETS: [(&str, f64); 5] = [("under_10", 10.0), ("under_100", 100.0), ("under_1000", 1000.0), ("under_10000", 10000.0), ("over", 60000.0)];
@@ -95,18 +97,18 @@ fn listed<T>(some: &[T], limit: usize, line: impl Fn(&T) -> String) -> String {
     out.join("\n")
 }
 
-fn errors(rows: &Value, since: u64, now: u64, limit: usize) -> Option<String> {
-    let mut prints: Vec<&Value> = rows["fingerprints"].as_array().into_iter().flatten().filter(|p| p["last"].as_u64() >= Some(since)).collect();
+/// The fingerprints of `status`: real errors unless asked for what wasn't one.
+fn errors(rows: &Value, status: &str, since: u64, now: u64, limit: usize) -> Option<String> {
+    let mut prints: Vec<&Value> = rows["fingerprints"].as_array().into_iter().flatten().filter(|p| p["status"] == status && p["last"].as_u64() >= Some(since)).collect();
     if prints.is_empty() {
         return None;
     }
     prints.sort_by_key(|p| std::cmp::Reverse(p["count"].as_u64()));
     let text = |row: &Value, key: &str| row[key].as_str().unwrap_or("").to_string();
     let lines = listed(&prints, limit, |p| {
-        let fault = p["fault"].as_str().map(|f| format!(", {f}")).unwrap_or_default();
-        format!("{} {}: {} at {}, {}, last {}{fault}", text(p, "service"), text(p, "tool"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)))
+        format!("{} {}: {} at {}, {}, last {}", text(p, "service"), text(p, "tool"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)))
     });
-    Some(format!("Top errors:\n{lines}"))
+    Some(format!("{}:\n{lines}", if status == ERROR { "Top errors" } else { "Not errors" }))
 }
 
 fn since_said(since: u64, now: u64) -> String {
@@ -120,14 +122,14 @@ fn table(lines: &[Line], limit: usize, label: &str) -> String {
 }
 
 /// What's going on across the network: each service, and the top errors.
-pub fn overview(rows: &Value, since: u64, now: u64, limit: usize) -> String {
+pub fn overview(rows: &Value, status: &str, since: u64, now: u64, limit: usize) -> String {
     let services = lines(requests(rows), |r| r["service"].as_str().unwrap_or("").to_string());
     if services.is_empty() {
         return format!("Nothing recorded in {}.", since_said(since, now));
     }
     let (count, failed) = services.iter().fold((0, 0), |(c, f), l| (c + l.requests, f + l.errors));
     let mut out = format!("{} in {}, {:.1}% failed.\n\n{}", plural(count, "request"), since_said(since, now), failed as f64 * 100.0 / count.max(1) as f64, table(&services, limit, "service"));
-    if let Some(errors) = errors(rows, since, now, limit) {
+    if let Some(errors) = errors(rows, status, since, now, limit) {
         out.push_str("\n\n");
         out.push_str(&errors);
     }
@@ -136,13 +138,13 @@ pub fn overview(rows: &Value, since: u64, now: u64, limit: usize) -> String {
 }
 
 /// One service: its operations, and its failing and slow traces.
-pub fn service(rows: &Value, service: &str, since: u64, now: u64, limit: usize) -> String {
+pub fn service(rows: &Value, service: &str, status: &str, since: u64, now: u64, limit: usize) -> String {
     let operations = lines(requests(rows), |r| r["name"].as_str().unwrap_or("").to_string());
     if operations.is_empty() {
         return format!("{service} answered no requests in {}.", since_said(since, now));
     }
     let mut out = format!("{service}, {}:\n\n{}", since_said(since, now), table(&operations, limit, "operation"));
-    if let Some(errors) = errors(rows, since, now, limit) {
+    if let Some(errors) = errors(rows, status, since, now, limit) {
         out.push_str("\n\n");
         out.push_str(&errors);
     }

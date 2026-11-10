@@ -89,7 +89,7 @@ impl Node {
                 usage.push(json!({ "user": name(&u)?, "client": client, "agent": agent, "days": days, "last": last }));
             }
             usage.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
-            let mut errors: Vec<Value> = errors.into_iter().map(|((tool, _), e)| json!({ "tool": tool, "error": if e.frame == "migrated" { e.kind.clone() } else { format!("{} at {}", e.kind, e.frame) }, "build": e.build, "fault": e.fault, "count": e.count, "first": e.first, "last": e.last })).collect();
+            let mut errors: Vec<Value> = errors.into_iter().filter(|(_, e)| e.status == "error").map(|((tool, _), e)| json!({ "tool": tool, "error": format!("{} at {}", e.kind, e.frame), "build": e.build, "count": e.count, "first": e.first, "last": e.last })).collect();
             errors.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
             let cost: Vec<Value> = cost.into_iter().map(|(model, (usd, input, output, calls))| json!({ "model": model, "usd": usd, "input": input, "output": output, "calls": calls })).collect();
             Ok(Some(json!({ "usage": usage, "errors": errors, "cost": cost })))

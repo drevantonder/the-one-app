@@ -728,7 +728,7 @@ impl Node {
             && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings()?, &crate::labs::app_key(&req.app, lab))))?
         {
             let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
-            return Ok(Reply::error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs.")));
+            return Ok(Reply::Error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs."), Some(crate::protocol::code::REFUSED.into())));
         }
         // A call that lacks a key of a scope it names fails here, before it runs or writes anything: its
         // app's database's, and the Vault's there too if it says it uses items.
@@ -860,7 +860,7 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
             let mut out = Vec::new();
             for s in named {
                 let s = Scope::parse_for(s, &me.user)?;
-                ensure!(reach.contains(&s), "{title} can't reach {} for you", scope_name(i, &s.to_string())?);
+                crate::protocol::allowed!(reach.contains(&s), "{title} can't reach {} for you", scope_name(i, &s.to_string())?);
                 out.push(s);
             }
             out

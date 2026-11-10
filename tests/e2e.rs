@@ -662,7 +662,7 @@ async fn a_calls_arguments_and_an_apps_error_never_reach_what_insights_keeps() {
     assert!(format!("{failed:#}").contains("a private thought"), "the caller still reads it: {failed:#}");
     let kept = a.insights(&me, &one::insights::Ask { limit: 500, ..Default::default() }).await.unwrap();
     let said = kept.to_string();
-    assert!(kept["signals"].as_array().unwrap().iter().any(|s| s["name"] == "fail" && s["status"] == "error" && s["fault"] == "caller"), "{said}");
+    assert!(kept["signals"].as_array().unwrap().iter().any(|s| s["name"] == "fail" && s["status"] == "error"), "{said}");
     assert!(kept["fingerprints"].as_array().unwrap().iter().any(|p| p["app"] == "notes" && p["tool"] == "fail" && p["count"] == 1), "{said}");
     assert!(kept["rollups"].as_array().unwrap().iter().any(|r| r["name"] == "post" && r["count"] == 1), "{said}");
     assert!(!said.contains("private thought") && !said.contains(&a.user().unwrap()), "only names and numbers: {said}");
