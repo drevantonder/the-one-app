@@ -29,20 +29,21 @@ pub(super) fn deploy_cloudflare(build: Option<&str>) -> Result<()> {
     );
     let (online, offline): (Vec<&Value>, Vec<&Value>) = linux.iter().partition(|d| d["online"] == true);
     let (here, others): (Vec<&Value>, Vec<&Value>) = online.into_iter().partition(|d| d["here"] == true);
+    // This device first: if its settings are here, nothing is asked of another's Shell. One that can't be reached or may
+    // pass soon is asked again after every other was, so a device that's away doesn't hold up the one that can deploy.
     let (mut failed, mut deployed) = (false, false);
-    // This device first: if its settings are here, nothing is asked of another's Shell.
-    for device in here.into_iter().chain(others) {
-        if deployed {
-            break;
-        }
-        let name = device["name"].as_str().unwrap_or("");
-        let local = device["here"] == true;
-        println!("  {name}: deploying to Cloudflare");
-        let deadline = Instant::now() + Duration::from_secs(180);
-        let mut failures = 0;
-        let said = loop {
-            let said = if local { run_here(&deploy) } else { shell(device, &deploy, 600) };
-            let again = match &said {
+    let mut waiting: Vec<(&Value, u32)> = here.into_iter().chain(others).map(|d| (d, 0)).collect();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    while !waiting.is_empty() && !deployed {
+        let mut again = Vec::new();
+        for (device, mut failures) in std::mem::take(&mut waiting) {
+            if deployed {
+                break;
+            }
+            let name = device["name"].as_str().unwrap_or("");
+            println!("  {name}: deploying to Cloudflare");
+            let said = if device["here"] == true { run_here(&deploy) } else { shell(device, &deploy, 600) };
+            let may_pass = match &said {
                 Err(_) => true,
                 Ok(r) if r["exit"] == one::cli::exit::NOT_YET => true,
                 Ok(r) if r["exit"] == one::cli::exit::REFUSED || r["exit"] == one::cli::exit::NO_SETTINGS => false,
@@ -52,30 +53,34 @@ pub(super) fn deploy_cloudflare(build: Option<&str>) -> Result<()> {
                 }
                 Ok(_) => false,
             };
-            if !again || Instant::now() > deadline {
-                break said;
+            if may_pass && Instant::now() < deadline {
+                again.push((device, failures));
+                continue;
             }
+            match said {
+                Ok(r) if r["exit"] == one::cli::exit::NO_SETTINGS => {}
+                Ok(r) if r["exit"] == one::cli::exit::REFUSED => {
+                    let said = r["stderr"].as_str().unwrap_or("").trim();
+                    println!("  {name}: {}", said.strip_prefix(&format!("{CLI}: ")).unwrap_or(said));
+                }
+                Ok(r) if r["exit"] == 0 => {
+                    deployed = true;
+                    println!("  {name}: {}", r["stdout"].as_str().unwrap_or("").lines().find(|l| l.contains(" from ")).unwrap_or("deployed to Cloudflare"));
+                }
+                Ok(r) => {
+                    failed = true;
+                    println!("  {name}: couldn't deploy to Cloudflare:\n{}{}", r["stdout"].as_str().unwrap_or(""), r["stderr"].as_str().unwrap_or("").trim());
+                }
+                Err(err) => {
+                    failed = true;
+                    let hint = if one::protocol::Coded::is(&err, one::protocol::code::NOT_ADDED) { " (add Shell in the App Store, or run this on the device with the Cloudflare settings)" } else { "" };
+                    println!("  {name}: couldn't deploy to Cloudflare: {err:#}{hint}");
+                }
+            }
+        }
+        waiting = again;
+        if !waiting.is_empty() && !deployed {
             std::thread::sleep(Duration::from_secs(10));
-        };
-        match said {
-            Ok(r) if r["exit"] == one::cli::exit::NO_SETTINGS => {}
-            Ok(r) if r["exit"] == one::cli::exit::REFUSED => {
-                let said = r["stderr"].as_str().unwrap_or("").trim();
-                println!("  {name}: {}", said.strip_prefix(&format!("{CLI}: ")).unwrap_or(said));
-            }
-            Ok(r) if r["exit"] == 0 => {
-                deployed = true;
-                println!("  {name}: {}", r["stdout"].as_str().unwrap_or("").lines().find(|l| l.contains(" from ")).unwrap_or("deployed to Cloudflare"));
-            }
-            Ok(r) => {
-                failed = true;
-                println!("  {name}: couldn't deploy to Cloudflare:\n{}{}", r["stdout"].as_str().unwrap_or(""), r["stderr"].as_str().unwrap_or("").trim());
-            }
-            Err(err) => {
-                failed = true;
-                let hint = if one::protocol::Coded::is(&err, one::protocol::code::NOT_ADDED) { " (add Shell in the App Store, or run this on the device with the Cloudflare settings)" } else { "" };
-                println!("  {name}: couldn't deploy to Cloudflare: {err:#}{hint}");
-            }
         }
     }
     if !deployed && !failed {
