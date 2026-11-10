@@ -112,18 +112,39 @@ async function due(env, bucket, names) {
   return names.filter((_, i) => !needs[i] || needs[i].some((n) => there.get(n)));
 }
 
+/// Each object's bytes, base64url, or null. A reader at the end of a log asks for the next step and the positions
+/// after it, which aren't there yet: so of a database's steps (and the signatures beside them), the first asked is
+/// read first, and the rest only if it's there.
 async function got(env, bucket, names) {
   const reads = env.R2 ? null : (await bucketUrls(bucket, { read: names }, 60)).read;
   const out = {};
-  await Promise.all(names.map(async (name) => {
+  const read = async (name) => {
     const bytes = env.R2 ? await (await env.R2.get(name))?.arrayBuffer() : await (async () => {
       const r = await fetch(reads[name]);
       if (!r.ok && r.status !== 404) throw new Error(`the bucket said ${r.status}`);
       return r.ok ? r.arrayBuffer() : null;
     })();
     out[name] = bytes ? b64u.encode(new Uint8Array(bytes)) : null;
-  }));
-  return out;
+  };
+  const step = new RegExp(`^(.+)/(\\d{${STEP_DIGITS}})(\\.sig)?$`);
+  const logs = new Map();
+  const others = [];
+  for (const name of names) {
+    const [, prefix, n] = step.exec(name) || [];
+    if (!prefix) others.push(name);
+    else logs.set(prefix, [...(logs.get(prefix) || []), [Number(n), name]]);
+  }
+  await Promise.all([
+    ...others.map(read),
+    ...[...logs.values()].map(async (asked) => {
+      asked.sort((a, b) => a[0] - b[0] || a[1].length - b[1].length);
+      const [[, first], ...rest] = asked;
+      await read(first);
+      if (out[first] === null && !first.endsWith(".sig")) for (const [, name] of rest) out[name] = null;
+      else await Promise.all(rest.map(([, name]) => read(name)));
+    }),
+  ]);
+  return Object.fromEntries(names.map((n) => [n, out[n]]));
 }
 
 async function urls(request, env) {

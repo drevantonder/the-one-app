@@ -85,7 +85,8 @@ export default {
 /// hand it junk for a real step. Only a device of the network's reaches it.
 async function browsersReadStepsFromTheBucket() {
   const objects = new Map([["global/node/scope/000000000001", new Uint8Array([1, 2, 3])], ["global/node/scope/000000000002", new Uint8Array([4])]]);
-  const R2 = { get: async (name) => (objects.has(name) ? { arrayBuffer: async () => objects.get(name).buffer } : null) };
+  const asked = [];
+  const R2 = { get: async (name) => (asked.push(name), objects.has(name) ? { arrayBuffer: async () => objects.get(name).buffer } : null) };
   const device = random(32);
   const env = { R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({}) } };
   const ask = async (fields, e = env, key = device) => {
@@ -98,6 +99,9 @@ async function browsersReadStepsFromTheBucket() {
   const got = answer.get;
   equal(Object.keys(got), ["global/node/scope/000000000001", "global/node/scope/000000000002", "global/node/scope/000000000003"], "a range's names");
   equal([b64u.decode(got["global/node/scope/000000000001"]).join(), b64u.decode(got["global/node/scope/000000000002"]).join(), got["global/node/scope/000000000003"]], ["1,2,3", "4", null], "each step's bytes as the bucket holds them, and null past the last");
+  asked.length = 0;
+  const past = (await (await ask({ get: [{ steps: "global/node/scope", from: 3, to: 18 }] })).json()).get;
+  equal([Object.values(past).every((b) => b === null), asked], [true, ["global/node/scope/000000000003"]], "past the last step, only the first asked is read");
   equal((await ask({ get: [{ steps: "global/node/scope", from: 1, to: 33 }] })).status, 400, "at most 32 at once");
   equal((await ask({ get: ["global/node/scope/000000000001"] }, { ...env, RELAY: { allowed: async () => null } }, random(32))).status, 403, "only the network's devices");
 }

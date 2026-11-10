@@ -223,10 +223,12 @@ class Bucket {
     const ahead = this.fetched.get(name);
     this.fetched.delete(name);
     const got = ahead ? ahead.then((o) => o ?? this.fetchObject(name)) : this.fetchObject(name);
-    // The steps after one aren't in the bucket yet, mostly: their URLs come with its, and only those read are fetched.
-    // A step's signature is fetched when it's read.
+    // The steps after one aren't in the bucket yet, mostly: their URLs come with its, and they're fetched only once it
+    // was there. A step's signature is fetched when it's read.
     for (const n of following(name, 15)) if (!this.urls.has(n) && !this.sealed.has(n)) this.readUrl(n).catch(() => {});
-    for (const n of following(name, 5)) if (!n.endsWith(".sig")) this.prefetch([n]);
+    got.then((o) => {
+      if (o) for (const n of following(name, 5)) if (!n.endsWith(".sig")) this.prefetch([n]);
+    }, () => {});
     return got;
   }
 
