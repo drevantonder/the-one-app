@@ -19,12 +19,17 @@ pub(crate) fn agent_devices(tool: &str, input: Value) -> Result<Value> {
     Ok(again(|| crate::node().post("/api/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one-dev throwaway" })))?["ok"].clone())
 }
 
+/// What this machine's node says as it restarts: that it is, or, if it's gone before it can, nothing at all.
+fn restarting(err: &anyhow::Error) -> bool {
+    one::protocol::Coded::is(err, one::protocol::code::RESTARTING) || err.chain().any(|e| e.downcast_ref::<ureq::Error>().is_some_and(|e| matches!(e, ureq::Error::Io(_) | ureq::Error::ConnectionFailed)))
+}
+
 /// What `ask` gives, asking again for up to 3 minutes while this machine's node or a service of its restarts.
 pub(crate) fn again(ask: impl Fn() -> Result<Value>) -> Result<Value> {
     let start = Instant::now();
     loop {
         match ask() {
-            Err(err) if start.elapsed() < Duration::from_secs(180) && one::protocol::Coded::is(&err, one::protocol::code::RESTARTING) => {
+            Err(err) if start.elapsed() < Duration::from_secs(180) && restarting(&err) => {
                 eprintln!("{NAME} is restarting here; asking again once it's back…");
                 std::thread::sleep(Duration::from_secs(5));
             }
@@ -49,12 +54,19 @@ pub(crate) fn borrowed_for(checkout: &Path, kind: &str) -> String {
     format!("one-dev throwaway client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
 }
 
-/// Gives back every device borrowed for the throwaway network: those devices.json names, and any Agent Devices lists as
-/// borrowed for this checkout (what the file lost, or never got because the node restarted as it was lent).
+/// One of this machine's network's Agent Devices tools, asked once, for what needn't wait for its node to come back.
+fn asked_once(tool: &str, input: Value) -> Result<Value> {
+    Ok(crate::node().post("/api/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one-dev throwaway" }))?["ok"].clone())
+}
+
+/// Gives back every device borrowed for the throwaway network, asking once: those devices.json names, and any Agent Devices lists as
+/// borrowed for this checkout (what the file lost, or never got because the node restarted as it was lent). What
+/// isn't given back while the node restarts goes back by itself after 15 minutes without a call.
 pub(crate) fn give_back(dir: &Path, checkout: &Path) {
     let mut all: Vec<(String, String)> = devices(dir).into_iter().filter_map(|(kind, d)| Some((kind, d.as_str()?.to_string()))).collect();
     let ours = format!(", for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
-    for d in listed_devices().as_array().into_iter().flatten() {
+    let listed = asked_once("_list", json!({})).map(|l| l["devices"].clone()).unwrap_or_default();
+    for d in listed.as_array().into_iter().flatten() {
         if let (Some(name), Some(what)) = (d["name"].as_str(), d["borrowed"]["for"].as_str())
             && what.starts_with("one-dev throwaway client ")
             && what.ends_with(&ours)
@@ -64,7 +76,7 @@ pub(crate) fn give_back(dir: &Path, checkout: &Path) {
         }
     }
     for (kind, device) in all {
-        if let Err(err) = agent_devices("give_back", json!({ "device": device })) {
+        if let Err(err) = asked_once("give_back", json!({ "device": device })) {
             eprintln!("Couldn't give back the {kind} device {device}: {err:#}");
         }
     }
