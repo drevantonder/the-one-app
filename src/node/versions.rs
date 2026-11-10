@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use crate::config::{CLI, YOURS};
 use crate::database::scopes;
 use crate::keys::hex;
-use crate::latest::{Latest, Thing, wanted};
+use crate::latest::{Latest, wanted};
 use crate::logs;
 
 use super::{Node, now_ms};
@@ -29,7 +29,7 @@ impl Node {
         let of = |version: &str| -> Option<Value> {
             let mut words = version.split(' ');
             let (commit, committed, target) = (words.next()?, words.next()?.parse().ok()?, words.next()?);
-            let newest = builds.get(&Thing::node_name(target));
+            let newest = builds.to_update_to(target);
             Some(json!({ "version": commit, "newest": newest.map(|b| &b.commit), "behind": newest.is_some_and(|b| wanted(b, commit, committed, "")) }))
         };
         Ok(told.as_object().map(|v| v.iter().filter_map(|(key, version)| Some((key.clone(), of(version.as_str()?)?))).collect()).unwrap_or_default())

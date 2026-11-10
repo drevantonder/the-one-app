@@ -126,6 +126,11 @@ impl Latest {
         self
     }
 
+    /// What `one update` puts on a device on `target`: a Mac's app as a whole (`app/<target>`), else its node's program.
+    pub fn to_update_to(&self, target: &str) -> Option<&Thing> {
+        if crate::build::Platform::is_mac(target) { self.get(&Thing::app_name(target)) } else { self.get(&Thing::node_name(target)) }
+    }
+
     /// What a device on `target` should run: for a Mac, what's to be built (`source`), else its node's build.
     pub fn for_target(&self, target: &str) -> Option<&Thing> {
         if crate::build::Platform::is_mac(target) { self.get("source") } else { self.get(&Thing::node_name(target)) }
@@ -186,6 +191,14 @@ mod tests {
 
     fn thing(name: &str, commit: &str, committed: u64) -> Thing {
         Thing { name: name.into(), commit: commit.into(), committed, sha256: "a".repeat(64), size: 3, config: "-".into() }
+    }
+
+    #[test]
+    fn a_mac_updates_to_its_app_and_others_to_their_node() {
+        let record = Latest { things: vec![thing("source", "s", 3), thing("app/aarch64-apple-darwin", "app", 2), thing("node/x86_64-unknown-linux-gnu", "node", 1)] };
+        assert_eq!(record.to_update_to("aarch64-apple-darwin").unwrap().commit, "app");
+        assert_eq!(record.to_update_to("x86_64-unknown-linux-gnu").unwrap().commit, "node");
+        assert!(record.to_update_to("x86_64-apple-darwin").is_none(), "an app built for another Mac isn't its");
     }
 
     /// This text was signed once by an older build. It must read today exactly as it did: a device that can't read

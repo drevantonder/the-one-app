@@ -17,7 +17,7 @@ const HAND_OVER_AGAIN: Duration = Duration::from_secs(150);
 impl Node {
     /// Checks the record at the network's address now and then and, if it says there's a newer build of this node, takes it:
     /// nothing else of the network has to work for that. A bad or missing record means staying on what it has and saying
-    /// why (`updating`). A node in an app bundle reads the record for `status` but doesn't take it: `keep-mac-current` builds and installs it.
+    /// why (`updating`). A node in an app bundle reads the record for `status` but doesn't take it: its app is replaced whole, by `one update` when someone presses Update.
     pub(super) async fn pull_loop(self) {
         if crate::mode::here().release_key().is_empty() {
             return;
@@ -91,11 +91,11 @@ impl Node {
         (seen.as_deref() != Some(commit)).then(|| seen.replace(commit.to_string())).is_some()
     }
 
-    /// Whether this device can't update, and why, as its hello says and `status` shows: on a Mac, what the job beside
-    /// the app last said, since the node's inside the thing being replaced.
+    /// Whether this device can't update, and why, as its hello says and `status` shows: on a Mac, what the last install
+    /// of its app said, since the node's inside the thing being replaced.
     pub fn updating(&self) -> Option<String> {
         if release::in_app_bundle() {
-            return std::fs::read_to_string(crate::user_home().join("Library/Caches").join(crate::config::CLI).join("why")).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+            return crate::update::why(&self.0.dir);
         }
         self.0.updating.lock().unwrap().clone()
     }

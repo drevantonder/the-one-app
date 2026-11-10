@@ -224,12 +224,75 @@ fn a_build_that_isnt_what_the_record_names_changes_nothing() {
     device.unchanged(was);
 }
 
+/// A Mac: the program runs from inside its app, which `one update` replaces whole with the app the record names, by the
+/// installer that `build.sh` uses too. Everything Apple's the installer calls is a stand-in here; what's held is that
+/// the app named is the one installed, and one that isn't what the record says changes nothing.
+#[test]
+fn a_mac_takes_the_app_the_record_names() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("update-mac-{}", rand::random::<u64>()));
+    let (cli, name) = (one::config::CLI, one::config::NAME);
+    let user = dir.join("user");
+    let installed = user.join(format!("Applications/{name}.app/Contents/MacOS/{cli}"));
+    let home = dir.join("home");
+    let bin = dir.join("bin");
+    for folder in [installed.parent().unwrap(), &home, &bin] {
+        std::fs::create_dir_all(folder).unwrap();
+    }
+    std::fs::hard_link(env!("CARGO_BIN_EXE_one"), &installed).unwrap();
+    let stub = |name: &str, body: &str| {
+        std::fs::write(bin.join(name), format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(bin.join(name), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    };
+    for nothing in ["osascript", "open", "launchctl"] {
+        stub(nothing, "exit 0");
+    }
+    for none in ["pgrep", "pkill"] {
+        stub(none, "exit 1");
+    }
+    // ditto -x -k <zip> <into>: our "zip" is the program itself, put where an unpacked app has it. ditto <app> <to>: copies.
+    let inside = format!("{name}.app/Contents/MacOS");
+    stub("ditto", &format!("if [ \"$1\" = -x ]; then mkdir -p \"$4/{inside}\"; cat \"$3\" > \"$4/{inside}/{cli}\"; chmod 755 \"$4/{inside}/{cli}\"; else cp -R \"$1\" \"$2\"; fi"));
+    let key = Throwaway::own_release_key(&home).unwrap();
+    let address = Address::start();
+    one::update::keep_address(&home, &address.at).unwrap();
+    let device = Device { dir: dir.clone(), program: installed.clone(), home, key, address };
+    let update = || {
+        let mut command = std::process::Command::new(&installed);
+        Throwaway::tell(&mut command, &device.home, "127.0.0.1:1");
+        let out = command.arg("update").env("HOME", &user).env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())).output().unwrap();
+        (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
+    };
+    let was = std::fs::read(&installed).unwrap();
+
+    // An app that says it's another build than the record names isn't installed.
+    device.published("newer", NEWER, build("another", TARGET, NEWER));
+    let (ok, _, _) = update();
+    assert!(!ok, "it says it's another commit than the record says");
+    assert_eq!(std::fs::read(&installed).unwrap(), was);
+
+    // The one it names is: after this returns, apart from it.
+    let new = build("newer", TARGET, NEWER);
+    device.published("newer", NEWER, new.clone());
+    let (ok, said, err) = update();
+    assert!(ok, "{err}");
+    assert!(said.contains("Updating this Mac"), "{said}");
+    for _ in 0..200 {
+        if std::fs::read(&installed).is_ok_and(|b| b == new) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(std::fs::read(&installed).unwrap(), new, "the installer didn't run");
+}
+
 /// A process named as `oned`'s program, standing in for it: `one update` tells it apart from a stranger's only by that.
 fn sleeping_as(dir: &Path, name: &str) -> std::process::Child {
     use std::os::unix::process::CommandExt;
     std::fs::create_dir_all(dir).unwrap();
     let sleeper = dir.join(name);
-    std::fs::copy("/bin/sleep", &sleeper).unwrap();
+    // A link, not a copy: a program just written can't be started while another test's fork still holds it open (ETXTBSY).
+    let _ = std::fs::remove_file(&sleeper);
+    std::os::unix::fs::symlink(std::fs::canonicalize("/bin/sleep").unwrap(), &sleeper).unwrap();
     std::process::Command::new(&sleeper).arg0("sleep").arg("600").spawn().unwrap()
 }
 
@@ -299,6 +362,7 @@ fn updating_imports_nothing_of_the_network() {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let allowed: &[(&str, &[&str])] = &[
         ("src/update.rs", &["cli", "config", "home", "latest", "mode", "oned::name", "os", "release"]),
+        ("src/update/mac.rs", &["config", "latest", "release"]),
         ("src/update/cli.rs", &["cli", "config"]),
         ("src/latest.rs", &["build::Platform", "keys", "protocol"]),
         ("src/release.rs", &["config", "os"]),

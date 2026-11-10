@@ -1,7 +1,9 @@
 #!/bin/bash
-# Installs the app at $1 (built by client/native/mac/build.sh) to
-# ~/Applications and starts it. CONFIG_NAME and CONFIG_CLI name it.
+# Installs the app at $1 (built by client/native/mac/build.sh, or unpacked from the record by `one update`) to
+# ~/Applications and starts it. CONFIG_NAME and CONFIG_CLI name it. INSTALL_WHY, if set, is a file this says in when
+# it can't finish (for `one status`), and removes when it does.
 set -euo pipefail
+trap '[ $? = 0 ] || { [ -z "${INSTALL_WHY:-}" ] || echo "Failed: the new app couldn'\''t be installed on this Mac" > "$INSTALL_WHY"; }' EXIT
 app=$1
 BUNDLE_ID=app.$CONFIG_CLI.mac
 label=$BUNDLE_ID.oned
@@ -25,3 +27,4 @@ if [ ! -e "$cli" ] || [ -L "$cli" ]; then ln -sf "$dest/Contents/MacOS/$CONFIG_C
 launchctl kickstart -k "gui/$(id -u)/$label" 2>/dev/null || true
 open "$dest"
 echo "Installed $dest"
+[ -z "${INSTALL_WHY:-}" ] || rm -f "$INSTALL_WHY"

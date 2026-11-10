@@ -1,17 +1,19 @@
 //! `one update`: this device taking the newest signed build by itself, with a GET of the record at its network's address
 //! and nothing else of the network: no background program, relay, or who's who, so a device stuck on anything else can
 //! still take the fix. It imports only `latest` and `release` of what updating is (a test holds to that), then makes oned
-//! exit, for its supervisor to bring it back on the new build.
+//! exit, for its supervisor to bring it back on the new build. A Mac takes its whole app, which `mac` puts in place.
 
 use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 
 use crate::config::{BUILD, CLI, COMMITTED, TARGET};
-use crate::latest::{self, Latest, Thing};
+use crate::latest::{self, Latest};
 use crate::release;
 
 pub mod cli;
+mod mac;
+pub use mac::why;
 
 /// The file in a device's home holding its network's address, the only thing an update needs that's the network's.
 /// The address itself is a setting in who's who, which this can't read: the node keeps it here, each time it checks.
@@ -53,11 +55,10 @@ pub fn run() -> Result<String> {
     let home = crate::home();
     let key = crate::mode::here().release_key();
     ensure!(!key.is_empty(), "this custom build has no release key, so nothing can be released to it");
-    ensure!(!release::in_app_bundle(), "this device's program is inside its app, which updates as a whole: {CLI} update can't replace it");
     let address = std::fs::read_to_string(home.join(ADDRESS)).ok().map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).context("this device doesn't know its network's address yet: its background program notes it once it's joined and running")?;
     let Some(text) = latest::fetch(&address)? else { return Ok(format!("Nothing has been published at {address} yet.")) };
     let record = Latest::read(key, &text).with_context(|| format!("the record at {address}"))?;
-    let thing = record.get(&Thing::node_name(TARGET)).with_context(|| format!("the record at {address} has no build for {TARGET}"))?;
+    let thing = record.to_update_to(TARGET).with_context(|| format!("the record at {address} has no build for {TARGET}"))?;
     if !latest::wanted(thing, BUILD, COMMITTED, "") {
         // The program may be the newest while the oned running is still the one before it: the device's own check put it
         // in place, or an update before this couldn't stop it. Update must never say "current" and leave that as it is.
@@ -65,6 +66,11 @@ pub fn run() -> Result<String> {
             return Ok(format!("This device's program is on {BUILD} already; restarting it, which still runs the build before."));
         }
         return Ok(format!("This device is current, on {BUILD}. The newest published is {}.", thing.commit));
+    }
+    // A Mac's program is inside its app, which is replaced as a whole, and which restarts oned itself.
+    if release::in_app_bundle() {
+        mac::install(&home, &address, thing)?;
+        return Ok(format!("Updating this Mac to {}: its app is replaced and restarted in a moment.", thing.commit));
     }
     let bytes = latest::download(&address, thing)?;
     release::install_commit(&thing.commit, &bytes)?;
