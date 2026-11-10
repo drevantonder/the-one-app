@@ -1,5 +1,5 @@
 // This user's devices, in three tabs: Devices (each of theirs, with Rename and Remove, Add Device, their
-// passkeys), Priority (the order every device runs apps in, an admin's to change) and Services (what each of their
+// passkeys), Run Priority (the order every device runs apps in, an admin's to change) and Enabled Services (what each of their
 // devices runs, switched by tapping). Devices waiting to be let in show on top of every tab, approved by tapping;
 // under Devices, where this device holds its own keys (`device.keys`, the web client), which of their devices run
 // which apps' schedules.
@@ -438,8 +438,8 @@ function Devices() {
     <Tabs value={tab} onValueChange={setTab}>
       <TabsList className="max-w-full justify-start overflow-x-auto">
         <TabsTrigger value="devices">Devices</TabsTrigger>
-        <TabsTrigger value="priority">Priority</TabsTrigger>
-        <TabsTrigger value="services">Services</TabsTrigger>
+        <TabsTrigger value="priority">Run Priority</TabsTrigger>
+        <TabsTrigger value="services">Enabled Services</TabsTrigger>
       </TabsList>
     </Tabs>
   )
