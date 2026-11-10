@@ -412,25 +412,29 @@ impl Node {
         Some(format!("{title} needs a device that's on: {why}. Turn it on, or move it with apps_move {app} <node> (apps_devices {app} lists them)."))
     }
 
-    /// Runs a service's call on every device that runs it for the caller, one at a time: `{ <device>: answer }`, or
+    /// Runs a service's call on every device that runs it for the caller, all at once: `{ <device>: answer }`, or
     /// `{ error }` for one that failed. Only for services: an app's call runs once.
     pub(super) async fn everywhere(&self, req: CallRequest, me: Caller) -> Result<Value> {
         ensure!(req.service.is_some(), "{} is an app: its calls run once, on one device", req.app);
         let req = CallRequest { device: None, ..req };
-        let mut out = serde_json::Map::new();
-        for device in self.candidates(&req, &me)? {
-            let reply = match device == self.0.id {
-                true => Ok(self.run(&req, &me).await),
-                false => self.ask_device(device, &req, &me).await.map(|(reply, _)| reply),
-            };
-            let answer = match reply {
-                Ok(Reply::Ok(v)) => v,
-                Ok(Reply::Error(e, _) | Reply::Elsewhere(e)) => json!({ "error": e }),
-                Ok(Reply::Needs(n)) => json!({ "error": n.to_string() }),
-                Err(err) => json!({ "error": format!("{err:#}") }),
-            };
-            out.insert(self.name_of(&device), answer);
-        }
+        let devices = self.candidates(&req, &me)?;
+        let asked = devices.iter().map(|device| {
+            let (req, me) = (&req, &me);
+            async move {
+                let reply = match *device == self.0.id {
+                    true => Ok(self.run(req, me).await),
+                    false => self.ask_device(*device, req, me).await.map(|(reply, _)| reply),
+                };
+                let answer = match reply {
+                    Ok(Reply::Ok(v)) => v,
+                    Ok(Reply::Error(e, _) | Reply::Elsewhere(e)) => json!({ "error": e }),
+                    Ok(Reply::Needs(n)) => json!({ "error": n.to_string() }),
+                    Err(err) => json!({ "error": format!("{err:#}") }),
+                };
+                (self.name_of(device), answer)
+            }
+        });
+        let out: serde_json::Map<String, Value> = futures_util::future::join_all(asked).await.into_iter().collect();
         if out.is_empty() {
             bail!(self.no_device(&req.app, &me).await);
         }
