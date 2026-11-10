@@ -369,7 +369,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                         let patient = crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(120)) && node.runs_apps();
                         let declaring = said.is_none() && (deployed || patient);
                         if wanted && said.is_none() && deployed {
-                            say(&node, &runtime, name, Now { doing: None, problem: Some("Its app doesn’t say what it may reach, so it doesn’t run.".into()) });
+                            say(&node, &runtime, name, Now { doing: None, problem: Some(UNDECLARED.into()) });
                         }
                         if wanted && released.get(name) == Some(&Build::None) {
                             say(&node, &runtime, name, Now { doing: None, problem: Some("Its app’s latest deploy has no build of it for this device’s platform.".into()) });
@@ -382,7 +382,8 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                                     let held = Held { sandbox: crate::services::sandbox::unsandboxed(said.as_ref(), &device), user: said.as_ref().is_some_and(|d| d.user) };
                                     hold(&node, &runtime, name, Some(held));
                                     running.insert(name.clone(), (child, Instant::now()));
-                                    let problem = node.parts().now.lock().unwrap().0.get(name).and_then(|n| n.problem.clone());
+                                    // It runs now, so that its app said nothing yet no longer holds.
+                                    let problem = node.parts().now.lock().unwrap().0.get(name).and_then(|n| n.problem.clone()).filter(|p| p != UNDECLARED);
                                     say(&node, &runtime, name, Now { doing: problem.is_none().then_some("Starting"), problem });
                                 }
                                 Err(err) => say(&node, &runtime, name, Now { doing: None, problem: Some(format!("Couldn’t start it: {err:#}")) }),
@@ -584,6 +585,9 @@ pub fn run(args: &[String]) -> Result<()> {
     }
     Ok(())
 }
+
+/// What a service whose app hasn’t said what it may reach shows, until it does.
+const UNDECLARED: &str = "Its app doesn’t say what it may reach, so it doesn’t run.";
 
 /// How long a node stopping waits for its last insights to be written: they may be lost, and stopping may not wait.
 const LAST_SAY: std::time::Duration = std::time::Duration::from_secs(3);
