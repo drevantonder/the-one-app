@@ -77,6 +77,8 @@ targets:
               - ${CONFIG_CLI}
         # Asked the first time an app scans a document.
         NSCameraUsageDescription: Scan documents for your apps.
+        # Standard algorithms, not offered in France: what App Store Connect records for that answer, so it doesn't ask of each build.
+        ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
