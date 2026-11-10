@@ -421,6 +421,15 @@ impl Attrs {
         self
     }
 
+    /// What an app says of a span of its own (`ctx.span`): only numbers and true or false, so it can name nothing.
+    fn app(mut self, said: &Value) -> Attrs {
+        let kept: serde_json::Map<String, Value> = said.as_object().into_iter().flatten().filter(|(key, value)| token(key) && (value.is_number() || value.is_boolean())).take(MOST_APP_ATTRS).map(|(key, value)| (key.clone(), value.clone())).collect();
+        if !kept.is_empty() {
+            self.0.insert("app", Value::Object(kept));
+        }
+        self
+    }
+
     fn token(&mut self, key: &'static str, value: &str) {
         if token(value) {
             self.0.insert(key, json!(value));
@@ -456,22 +465,31 @@ pub fn new_trace() -> String {
     data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>())
 }
 
-/// A span's steps, each as a real child of it. Only the steps `STEPS` names are kept.
+/// The most spans of its own a call may add (`ctx.span`), and attributes on each.
+pub const MOST_APP_SPANS: usize = 32;
+const MOST_APP_ATTRS: usize = 16;
+
+/// A span's steps, each as a real child of it. Only the steps `STEPS` names are kept, and an app's own (`ctx.span`) by a
+/// plain name, with only its numbers and true or false.
 pub fn step_spans(parent: &Span, steps: &[Value]) -> Vec<Span> {
-    steps.iter().filter(|s| s["step"].as_str().is_some_and(|name| STEPS.contains(&name))).map(|step| Span {
-        time: parent.time + step["at"].as_u64().unwrap_or(0),
-        trace: parent.trace.clone(),
-        span: new_span(),
-        parent: Some(parent.span.clone()),
-        name: step["step"].as_str().unwrap_or("").to_string(),
-        service: parent.service.clone(),
-        version: None,
-        instance: parent.instance.clone(),
-        kind: SpanKind::Internal,
-        status: Status::Unset,
-        duration: step["ms"].as_u64().unwrap_or(0),
-        message: None,
-        attrs: Attrs::default().step(step),
+    let app_named = |s: &Value| s["step"] == "span" && s["name"].as_str().is_some_and(token);
+    steps.iter().filter(|s| s["step"].as_str().is_some_and(|name| STEPS.contains(&name)) || app_named(s)).map(|step| {
+        let app = step["step"] == "span";
+        Span {
+            time: parent.time + step[if app { "began" } else { "at" }].as_u64().unwrap_or(0),
+            trace: parent.trace.clone(),
+            span: new_span(),
+            parent: Some(parent.span.clone()),
+            name: step[if app { "name" } else { "step" }].as_str().unwrap_or("").to_string(),
+            service: parent.service.clone(),
+            version: None,
+            instance: parent.instance.clone(),
+            kind: SpanKind::Internal,
+            status: Status::of(step["failed"] != true),
+            duration: step["ms"].as_u64().unwrap_or(0),
+            message: None,
+            attrs: if app { Attrs::default().app(&step["attrs"]) } else { Attrs::default().step(step) },
+        }
     }).collect()
 }
 
@@ -608,11 +626,13 @@ pub struct Batch {
     pub logs: Vec<Log>,
     /// By (minute, name, service, instance, attributes as JSON): its metric and how it adds up.
     pub metrics: BTreeMap<(u64, &'static str, String, String, String), (Metric, Sum)>,
+    /// What programs said in OTLP (`otlp::metrics`), by (minute, name, service, instance), added up.
+    pub programs: BTreeMap<(u64, String, String, String), otlp::Point>,
 }
 
 impl Batch {
     pub fn is_empty(&self) -> bool {
-        self.spans.is_empty() && self.logs.is_empty() && self.metrics.is_empty()
+        self.spans.is_empty() && self.logs.is_empty() && self.metrics.is_empty() && self.programs.is_empty()
     }
 
     /// Adds a finished span, and its children if it's kept. A server span always goes: rates are read from them.
@@ -639,12 +659,23 @@ impl Batch {
         }
     }
 
+    /// Adds what a program said of a metric to this minute's.
+    pub fn program(&mut self, time: u64, point: otlp::Point, service: &str, instance: &str) {
+        let key = (time / 60_000 * 60_000, point.name.clone(), service.to_string(), instance.to_string());
+        if let Some(had) = self.programs.get_mut(&key) {
+            had.add(&point);
+        } else if self.programs.len() < MOST_ROWS {
+            self.programs.insert(key, point);
+        }
+    }
+
     /// As the telemetry Worker takes it, each row with its table's columns.
     pub fn rows(&self) -> Value {
         let spans: Vec<Value> = self.spans.iter().map(|s| json!({ "time": s.time, "trace": s.trace, "span": s.span, "parent": s.parent, "name": s.name, "service": s.service, "version": s.version, "instance": s.instance, "kind": s.kind.as_str(), "status": s.status.as_str(), "duration": s.duration, "message": s.message, "attrs": s.attrs.json().to_string() })).collect();
         let logs: Vec<Value> = self.logs.iter().map(|l| json!({ "time": l.time, "trace": l.trace, "span": l.span, "severity_number": l.severity.number(), "severity_text": l.severity.text(), "body": l.body, "service": l.service, "version": l.version, "instance": l.instance, "attrs": l.attrs.json().to_string() })).collect();
         let metrics: Vec<Value> = self.metrics.iter().map(|((time, name, service, instance, attrs), (metric, sum))| json!({ "time": time, "name": name, "type": if metric.histogram { "histogram" } else { "counter" }, "unit": metric.unit, "service": service, "instance": instance, "count": sum.count, "sum": sum.sum, "buckets": metric.histogram.then(|| json!(sum.buckets).to_string()), "attrs": attrs })).collect();
-        json!({ "spans": spans, "logs": logs, "metrics": metrics })
+        let programs = self.programs.iter().map(|((time, name, service, instance), p)| json!({ "time": time, "name": name, "type": p.kind, "unit": p.unit, "service": service, "instance": instance, "count": p.count, "sum": p.sum, "buckets": p.buckets.as_ref().map(|b| json!(b).to_string()), "attrs": "{}" }));
+        json!({ "spans": spans, "logs": logs, "metrics": metrics.iter().cloned().chain(programs).collect::<Vec<Value>>() })
     }
 }
 

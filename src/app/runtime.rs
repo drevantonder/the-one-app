@@ -211,6 +211,9 @@ impl Apps {
             }
         })
         .await??;
+        for span in reply["spans"].as_array().into_iter().flatten().take(crate::insights::MOST_APP_SPANS) {
+            crate::node::trace::note(json!({ "step": "span", "name": span["name"], "began": span["began"], "failed": span["failed"], "attrs": span["attrs"] }), Duration::from_millis(span["ms"].as_u64().unwrap_or(0)));
+        }
         if let Some(err) = reply.get("error") {
             if reply["exception"].is_object() {
                 crate::node::trace::note(json!({ "step": "exception", "exception": reply["exception"] }), Duration::ZERO);

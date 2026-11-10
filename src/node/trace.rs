@@ -215,6 +215,10 @@ fn steps(trace: &Value, lane: &str, out: &mut Vec<String>) {
                     steps(&s["trace"], to, out);
                 }
             }
+            "span" => {
+                listed += ms;
+                out.push(format!("{lane} ran its own {}: {ms} ms", s["name"].as_str().unwrap_or("span")));
+            }
             "bucket" => {
                 listed += ms;
                 match s["kind"].as_str() {

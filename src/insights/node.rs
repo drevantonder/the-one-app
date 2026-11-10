@@ -23,7 +23,7 @@ const MOST_REPORTED: usize = 300;
 
 /// What this device hasn't sent yet, and how its check of telemetry's own path is going.
 #[derive(Default)]
-pub(super) struct State(Mutex<Batch>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>, Mutex<Canary>);
+pub(super) struct State(Mutex<Batch>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>, Mutex<Canary>, Mutex<HashMap<(String, String), insights::otlp::Point>>);
 
 /// Telemetry checking itself: what it last sent, and how many checks in a row failed, how and since when.
 #[derive(Default)]
@@ -509,6 +509,18 @@ impl Node {
             let ok = name == "service.start" || ["exit-0", "renewed", "stopped"].contains(&reason);
             let log = Log { time: now_ms(), trace: None, span: None, severity: if ok { Severity::Info } else { Severity::Error }, body: name.to_string(), service: service.clone(), version: version.clone(), instance: instance.clone(), attrs: base().reason(reason) };
             self.0.insights.0.lock().unwrap().log(log);
+        }
+        for point in insights::otlp::metrics(&body["otlp"]) {
+            let new = match point.cumulative {
+                true => {
+                    let key = (service.clone(), point.name.clone());
+                    self.0.insights.4.lock().unwrap().insert(key, point.clone()).map(|was| point.since(&was))
+                }
+                false => Some(point),
+            };
+            if let Some(new) = new.filter(|p| p.count > 0) {
+                self.0.insights.0.lock().unwrap().program(now_ms(), new, &service, &instance);
+            }
         }
         for item in insights::otlp::items(&body["otlp"]) {
             let mut attrs = base();

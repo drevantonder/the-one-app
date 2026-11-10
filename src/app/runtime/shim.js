@@ -119,7 +119,7 @@ async function widgetOptions(widget, ctx) {
 }
 
 /// What a call, widget or hook gets: the caller, and a handle on each scope the node lets it reach.
-function context(ask, body, appends, later) {
+function context(ask, body, appends, later, spans) {
   const writing = () => {
     if (body.read_only) throw new Error(READ_ONLY);
   };
@@ -210,6 +210,23 @@ function context(ask, body, appends, later) {
       later.push(Promise.resolve(promise));
     },
     now: () => body.now,
+    /// Times `run` as a span of its own under this call, named `name` (a plain word: letters, digits, `_ . - +`), what insights
+    /// shows with the call's other steps: for a failed or slow call, and one call in 20. `attrs` are numbers and true or
+    /// false, never text, so a span can't say who or what. Time only passes across a wait (a fetch, a query), as in any Worker.
+    span: async (name, run, attrs = {}) => {
+      const started = Date.now();
+      const done = (failed) => {
+        if (spans.length < MOST_SPANS) spans.push({ name: String(name), began: started - spans.begun, ms: Date.now() - started, failed, attrs });
+      };
+      try {
+        const result = await run();
+        done(false);
+        return result;
+      } catch (err) {
+        done(true);
+        throw err;
+      }
+    },
     user: scopes.find((s) => s.id.startsWith("user:")) || null,
     global: find("global"),
     groups: scopes.filter((s) => s.id.startsWith("group:")),
@@ -310,11 +327,12 @@ async function handle(what, name, body, send, waitUntil, out) {
   if (broken) return { error: broken };
   if (what === "describe") return { ok: describe() };
   if (what === "screen") return { ok: app.screens?.[name]?.html ?? null };
+  const spans = Object.assign([], { begun: Date.now() });
   try {
     const appends = [];
     const later = [];
     const ask = asking(send, body);
-    const ctx = context(ask, body, appends, later);
+    const ctx = context(ask, body, appends, later, spans);
     let run;
     if (what === "call") {
       const tool = tools()[body.tool];
@@ -339,14 +357,17 @@ async function handle(what, name, body, send, waitUntil, out) {
     const call = { token: body.token, out };
     const result = await calls.run(call, run);
     const keep = what === "call" && later.length > 0;
-    const reply = { ok: result, appends: what === "call" ? appends.splice(0) : [], later: keep };
+    const reply = { ok: result, appends: what === "call" ? appends.splice(0) : [], later: keep, spans };
     if (keep) waitUntil(calls.run(call, () => finish(ask, later, appends)));
     return reply;
   } catch (err) {
     // An error with a `code` (`not_signed_in`, `refused`…: src/protocol.rs) says what kind it is, which callers act on.
-    return { error: String(err?.message ?? err), ...(typeof err?.code === "string" ? { code: err.code } : {}), exception: exception(err) };
+    return { error: String(err?.message ?? err), ...(typeof err?.code === "string" ? { code: err.code } : {}), exception: exception(err), spans };
   }
 }
+
+/// The most spans of its own a call keeps (`ctx.span`).
+const MOST_SPANS = 32;
 
 /// What insights keeps of a thrown error: its type and where it was thrown. Its message is what the app said and may hold
 /// anything, as the top of its stack repeats it, so frames are only read after that.
