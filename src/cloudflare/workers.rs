@@ -489,8 +489,12 @@ impl Settings {
             return Ok(());
         }
         let title = item_title();
-        let out = op(&["item", "get", &title, "--format", "json"], None)?;
-        ensure!(out.status.success(), "1Password has no item {title} this device can read ({}): sign this device in to 1Password with the service account that holds it (OP_SERVICE_ACCOUNT_TOKEN), or deploy once from a device whose Cloudflare settings are here, which keeps them there", String::from_utf8_lossy(&out.stderr).trim());
+        // A service account finds an item only in a vault it's told, so each it may read is asked.
+        let vaults = op(&["vault", "list", "--format", "json"], None)?;
+        ensure!(vaults.status.success(), "op can't list 1Password's vaults ({}): sign this device in to 1Password with the service account that holds {title} (OP_SERVICE_ACCOUNT_TOKEN)", String::from_utf8_lossy(&vaults.stderr).trim());
+        let vaults: Vec<Value> = serde_json::from_slice(&vaults.stdout).context("op said something other than its vaults")?;
+        let found = vaults.iter().filter_map(|v| v["id"].as_str()).find_map(|vault| op(&["item", "get", &title, "--vault", vault, "--format", "json"], None).ok().filter(|o| o.status.success()));
+        let out = found.with_context(|| format!("1Password has no item {title} in a vault this device's sign-in reads: sign it in with the service account that holds it (OP_SERVICE_ACCOUNT_TOKEN), or deploy once from a device whose Cloudflare settings are here, which keeps them there"))?;
         let item: Value = serde_json::from_slice(&out.stdout).context("op said something other than the item")?;
         let (settings, env) = files_of(&item).with_context(|| format!("{title} in 1Password isn't the Workers' settings: it needs its fields settings and env, as a deploy keeps them"))?;
         write_private(&path, &settings)?;

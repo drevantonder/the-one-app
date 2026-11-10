@@ -142,7 +142,11 @@ pub fn commands() -> Command {
                         return Ok(true);
                     }
                     let first = loaded.is_err();
-                    let cf = cloudflare(g, loaded.as_ref().ok())?;
+                    // With no settings here, why 1Password gave none says more than a missing token.
+                    let cf = match (cloudflare(g, loaded.as_ref().ok()), &kept) {
+                        (Err(err), Err(why)) if loaded.is_err() => return Err(err.context(format!("{why:#}"))),
+                        (cf, _) => cf?,
+                    };
                     let settings = match loaded {
                         Ok(settings) => settings,
                         Err(err) => {
