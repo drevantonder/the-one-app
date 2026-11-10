@@ -4,7 +4,7 @@
 //!
 //! THIS FORMAT MUST NEVER BREAK. A device too old to speak anything else still reads it, and only by reading it does it
 //! get out of being too old; everything old in the field is on the other end of this. Readers ignore a line they don't
-//! understand, so new kinds of things are new lines (`tests` holds the format; `client/native/mac/pull.sh` reads the same
+//! understand, so new kinds of things are new lines (`tests` holds the format; dev/skills/keep-mac-current reads the same
 //! lines, in its own language). The text:
 //!
 //! ```text
@@ -174,48 +174,6 @@ pub fn hashed(path: &Path) -> Result<(String, u64)> {
     let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
     Ok((sha256(&bytes), bytes.len() as u64))
 }
-
-/// The shell that sets a Mac up to take its own updates: the job (`pull.sh`) and what it installs an app with
-/// (`install-app.sh`) put in place and started, with nothing that's running stopped. Every value it needs is written in
-/// it, since it runs with nothing else of the network. Run by the Mac's oned, and once by hand for a Mac too old to have it.
-pub fn mac_job(address: &str) -> String {
-    use crate::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO};
-    let quoted = |v: &str| v.replace('\'', r"'\''");
-    let job = include_str!("../client/native/mac/pull.sh")
-        .replace("@CLI@", CLI)
-        .replace("@NAME@", &quoted(NAME))
-        .replace("@ADDRESS@", &quoted(address))
-        .replace("@KEY@", &quoted(RELEASE_KEY))
-        .replace("@REPO@", &quoted(REPO))
-        .replace("@CONFIG_REPO@", &quoted(CONFIG_REPO))
-        .replace("@CONFIG_FILE@", CONFIG_FILE)
-        .replace("@SIGNER@", &quoted(RELEASE_SIGNER));
-    format!(
-        r#"set -e
-c="$HOME/Library/Caches/{CLI}"; label=app.{CLI}.pull; plist="$HOME/Library/LaunchAgents/$label.plist"
-mkdir -p "$c" "$HOME/Library/LaunchAgents"
-put() {{ cat > "$1.new"; chmod 755 "$1.new"; mv "$1.new" "$1"; }}
-put "$c/pull.sh" <<'JOB'
-{job}JOB
-put "$c/install-app.sh" <<'JOB'
-{install}JOB
-cat > "$plist.new" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>$label</string>
-<key>RunAtLoad</key><true/>
-<key>StartInterval</key><integer>120</integer>
-<key>ProgramArguments</key><array><string>/bin/zsh</string><string>-l</string><string>$c/pull.sh</string></array>
-</dict></plist>
-PLIST
-mv "$plist.new" "$plist"
-launchctl print "gui/$(id -u)/$label" > /dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$plist"
-"#,
-        install = include_str!("../client/native/mac/install-app.sh"),
-    )
-}
-
 
 #[cfg(test)]
 mod tests {

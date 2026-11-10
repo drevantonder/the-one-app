@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs the app at $1 (built by client/native/mac/build.sh or downloaded and checked by the Mac's job beside it) to
+# Installs the app at $1 (built by client/native/mac/build.sh) to
 # ~/Applications and starts it. CONFIG_NAME and CONFIG_CLI name it.
 set -euo pipefail
 app=$1

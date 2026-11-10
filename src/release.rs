@@ -31,7 +31,7 @@ pub fn put_blob(dir: &Path, bytes: &[u8]) -> Result<String> {
     Ok(hash)
 }
 
-/// Whether this program runs from inside an app bundle, which updates as a whole, by what the Mac's job installs.
+/// Whether this program runs from inside an app bundle, which updates as a whole, by what `keep-mac-current` installs.
 pub fn in_app_bundle() -> bool {
     std::env::current_exe().and_then(|e| e.canonicalize()).is_ok_and(|e| e.to_string_lossy().contains(".app/Contents/"))
 }

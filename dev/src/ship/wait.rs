@@ -29,10 +29,10 @@ pub(super) fn limit(g: &one::cli::Given, default: u64) -> Result<Duration> {
     Ok(Duration::from_secs(n * match unit { "" | "s" => 1, "m" => 60, "h" => 3600, _ => return Err(typed()) }))
 }
 
-/// Waits until each of the user's devices online now (or those named, online or not) runs `commit`, or a build with it
+/// Waits until each of the user's devices online now but its Macs (or those named, online or not) runs `commit`, or a build with it
 /// in, and its services answer, or its update fails; says what each did, and fails unless all made it. One that isn't
 /// named and is offline at the start isn't waited for: it's named, with how far behind it is, and updates itself when
-/// it's back. Why one hasn't yet is what its own node or Mac job says (`updating`).
+/// it's back. Why one hasn't yet is what its own node says (`updating`).
 pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     keep_history()?;
     // Says so when no node answers, which later polls (a node restarting on the new build) never do.
@@ -42,7 +42,11 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
     for n in names {
         ensure!(all.iter().any(|d| d["name"] == n.as_str()), "no device named {n}: {}", all.iter().filter_map(|d| d["name"].as_str()).collect::<Vec<_>>().join(", "));
     }
-    let wanted: Vec<Value> = all.into_iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).collect();
+    let (macs, wanted): (Vec<Value>, Vec<Value>) =
+        all.into_iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).partition(|d| names.is_empty() && one::build::Platform::is_mac(d["target"].as_str().unwrap_or("")));
+    for d in macs {
+        println!("  {}: not waited for: a Mac takes a build when its agent builds it; --device {} to wait", d["name"].as_str().unwrap_or(""), d["name"].as_str().unwrap_or(""));
+    }
     wait_for(commit, &wanted, !names.is_empty(), limit)
 }
 

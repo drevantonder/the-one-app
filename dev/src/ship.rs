@@ -44,7 +44,6 @@ pub fn commands() -> one::cli::Command {
             form("build --dev", "build this checkout as cargo build does, with the Cloudflare node and web client in it, which a plain cargo build then keeps".into()),
             form("release <vX.Y.Z>", "publish main's tip's build on GitHub for the installer, with the Linux app and the app a Mac published for it".into()),
             form("web bundle [--out <folder>]", "write this build's web client as a bundle for the native apps, ready to sign".into()),
-            form("mac-job", format!("the shell that sets up a Mac to take its own updates: {CLI}-dev mac-job | ssh <mac> sh, once, for a Mac too old to have the job its app starts")),
             form("status --until <commit> [--device <name>[,<name>…]] [--timeout <10m>]", "wait until every device online now, or those named (online or not), runs that commit, or a later build, and its services answer, or a build fails; names offline devices and how far behind they are without waiting for them, and fails unless all it waited for made it".into()),
         ],
         run: |g| {
@@ -76,7 +75,6 @@ pub fn commands() -> one::cli::Command {
                 ["release", tag] => github_release(tag)?,
                 ["status"] if g.has("until") => wait(g)?,
                 ["web", "bundle"] => println!("{}", web_bundle(Path::new(g.flag("out").unwrap_or(".")))?.display()),
-                ["mac-job"] => print!("{}", one::latest::mac_job(&crate::node().state()?.address().context("this network has no address yet")?)),
                 _ => return Ok(false),
             }
             Ok(true)

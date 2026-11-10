@@ -17,7 +17,7 @@ const HAND_OVER_AGAIN: Duration = Duration::from_secs(150);
 impl Node {
     /// Checks the record at the network's address now and then and, if it says there's a newer build of this node, takes it:
     /// nothing else of the network has to work for that. A bad or missing record means staying on what it has and saying
-    /// why (`updating`). A node in an app bundle reads the record for `status` but doesn't take it: the Mac's job does.
+    /// why (`updating`). A node in an app bundle reads the record for `status` but doesn't take it: `keep-mac-current` builds and installs it.
     pub(super) async fn pull_loop(self) {
         if crate::config::RELEASE_KEY.is_empty() {
             return;

@@ -626,13 +626,6 @@ async fn serve(args: &[String]) -> Result<()> {
             }
         });
     }
-    // The Mac's job beside the app takes its updates (`client/native/mac/pull.sh`): each app brings the job it was built with.
-    if cfg!(target_os = "macos") && matches!(mode, crate::mode::Mode::Own) && crate::release::in_app_bundle() && let Ok(address) = node.address() {
-        std::thread::spawn(move || match std::process::Command::new("sh").args(["-c", &crate::latest::mac_job(&address)]).stdout(std::process::Stdio::null()).status() {
-            Ok(s) if s.success() => tracing::info!("the Mac's update job is in place"),
-            done => tracing::warn!("putting the Mac's update job in place: {done:?}"),
-        });
-    }
     if handed.is_some() {
         node.warm().await;
     }

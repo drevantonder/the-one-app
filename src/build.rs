@@ -413,7 +413,7 @@ pub fn release_key() -> Result<ssh_key::PrivateKey> {
     Ok(key)
 }
 
-/// The command a Mac's update job runs after building its app (client/native/mac/pull.sh), on a Mac with the release key.
+/// What publishes a Mac's built app (dev/skills/keep-mac-current), on a Mac with the release key.
 pub fn commands() -> crate::cli::Command {
     crate::cli::Command {
         help: vec![("publish-app --zip <zip> [--config <commit>]".into(), "publish this Mac's built app, so every Mac downloads it instead of building it".into())],
