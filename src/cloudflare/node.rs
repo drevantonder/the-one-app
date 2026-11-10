@@ -11,8 +11,9 @@ use crate::cloudflare::{Cloudflare, Files, NODE, Settings, Worker, upload_hash};
 /// The Cloudflare node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
 /// in (the apps themselves it reads from the bucket, each at its latest deploy).
 pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
+    let files = crate::ui_folder::wasm(crate::config::CLOUDFLARE_NODE_FILES, crate::config::CLOUDFLARE_NODE);
     let built = |name: &str| {
-        let found = crate::config::CLOUDFLARE_NODE.iter().find(|(n, _)| *n == name).map(|(_, b)| b.to_vec());
+        let found = files.iter().find(|(n, _)| n == name).map(|(_, b)| b.clone());
         found.with_context(|| format!("this build of {} has no Cloudflare node: {}-dev update node builds one, on a Linux device with Rust", crate::config::NAME, crate::config::CLI))
     };
     Ok(modules_from(built("one_cloudflare_node.js")?, built("one_cloudflare_node_bg.wasm")?))

@@ -245,7 +245,7 @@ codegen-units = 1
 panic = "abort"
 incremental = false
 
-# onet for a throwaway network: seconds to build after an edit, for a file three times the size of a release's `web`.
+# A throwaway network's WebAssembly: seconds to build after an edit, for onet three times the size of a release's `web`.
 [profile.web-dev]
 inherits = "web"
 opt-level = 1

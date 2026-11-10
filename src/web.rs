@@ -90,22 +90,31 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
 /// onet's build, as the web client fetches it (`/onet/<version>/`): what its files hash to, so a browser
 /// keeps one for good. None if this build has no onet (`update node` builds it, where Rust builds for WebAssembly).
 pub fn onet_version() -> Option<String> {
+    version_of(&onet())
+}
+
+fn onet() -> Vec<(String, Vec<u8>)> {
+    crate::ui_folder::wasm(crate::config::ONET_FILES, crate::config::ONET)
+}
+
+fn version_of(onet: &[(String, Vec<u8>)]) -> Option<String> {
     use sha2::Digest;
     let mut hash = sha2::Sha256::new();
-    for (name, bytes) in crate::config::ONET {
+    for (name, bytes) in onet {
         hash.update(name.as_bytes());
         hash.update(bytes);
     }
-    (!crate::config::ONET.is_empty()).then(|| data_encoding::HEXLOWER.encode(&hash.finalize()[..8]))
+    (!onet.is_empty()).then(|| data_encoding::HEXLOWER.encode(&hash.finalize()[..8]))
 }
 
 /// The web client's files with onet, at a path named by its build, which the page says (net.js):
 /// what the address serves browsers and what the native apps run. Without onet built (`ONET`), a page that has none.
 pub fn with_client() -> Vec<(String, Vec<u8>)> {
     let mut files = files();
-    if let Some(version) = onet_version() {
-        for (name, bytes) in crate::config::ONET {
-            files.push((format!("onet/{version}/{name}"), bytes.to_vec()));
+    let onet = onet();
+    if let Some(version) = version_of(&onet) {
+        for (name, bytes) in onet {
+            files.push((format!("onet/{version}/{name}"), bytes));
         }
         if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
             *page = String::from_utf8_lossy(page).replacen(r#"<meta name="onet" content="">"#, &format!(r#"<meta name="onet" content="{version}">"#), 1).into_bytes();

@@ -63,17 +63,15 @@ pub fn run(rest: &[String]) -> Result<()> {
     let Some((dir, checkout)) = folder() else {
         bail!("{} throwaway is for a checkout of The One App, and this folder isn't in one: run it in the checkout, or any folder in it", dev())
     };
-    // These two need what only this checkout's debug build made with them holds; the first time in a checkout there is none.
-    if build.is_none() && (rest.iter().map(String::as_str).eq(["client", "web"]) || rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"])) {
-        // This program is the build it replaces (a build of this checkout, named before it's replaced), and writes the pages a UI folder
-        // is served as (`read_pages_again`): the new one runs this command, so those pages hold what its Workers' do.
-        let this = built_in().and(std::env::current_exe().ok());
-        if rebuild::with_web_client_and_cloudflare_node(&checkout)?
-            && let Some(this) = this
-        {
-            use std::os::unix::process::CommandExt;
-            return Err(std::process::Command::new(this).args(std::env::args_os().skip(1)).exec().into());
-        }
+    // A browser (the web client, and anyone `--as` joins in one) and the Cloudflare node need the WebAssembly, which a
+    // throwaway network running this checkout's build reads from the checkout, as it reads its pages from its UI folder.
+    let given = ui.is_some();
+    let mut ui = ui;
+    let words: Vec<&str> = rest.iter().map(String::as_str).collect();
+    let browser = words.first() == Some(&"client") && (words.get(1) == Some(&"web") || words.contains(&"--as"));
+    if build.is_none() && (browser || words == ["cloudflare", "node", "deploy"]) {
+        rebuild::web_client_and_cloudflare_node(&checkout)?;
+        ui = ui.or_else(|| Throwaway::ui_in(&dir).is_none().then(|| checkout.clone()));
     }
     let starting = network::exclusive(&dir)?;
     network::choose(&dir, build.as_deref(), ui.as_deref())?;
@@ -100,7 +98,7 @@ pub fn run(rest: &[String]) -> Result<()> {
         None => start(&dir)?,
     };
     network::read_pages_again(&dir)?;
-    if ui.is_some() {
+    if given {
         eprintln!("Its pages and screens are read from there now, and again by each command here. Its Workers' own code is read when they start: {} throwaway restart, once you've changed that.", dev());
     }
     if rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"]) {
@@ -144,12 +142,6 @@ fn chosen(rest: &[String]) -> Result<(Option<PathBuf>, Option<PathBuf>, &[String
         rest = more;
     }
     Ok((build, ui, rest))
-}
-
-/// `build --dev`: this checkout's debug build with the web client and the Cloudflare node in it.
-pub fn build_dev() -> Result<()> {
-    let (_, checkout) = folder().context("run this in a checkout of The One App")?;
-    rebuild::with_web_client_and_cloudflare_node(&checkout).map(drop)
 }
 
 /// Publishes this checkout's build at the throwaway network's address, under its own release key, for its device to take

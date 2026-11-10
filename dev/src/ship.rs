@@ -41,7 +41,6 @@ pub fn commands() -> one::cli::Command {
             form("signoff seen [<commit>] --checked <what you checked>", "sign a commit off as seen working where it went: the last thing a change needs".into()),
             form("ship [<commit>] [--timeout <30m>]", "send out what's tested, as a plain update does, and return when every device online runs it, or say which doesn't and why".into()),
             form("unfinished [--here]", "the changes from the last day that aren't yet tested, sent, running everywhere and seen, or with --here only those this checkout made, and what each needs next".into()),
-            form("build --dev", "build this checkout as cargo build does, with the Cloudflare node and web client in it, which a plain cargo build then keeps".into()),
             form("release <vX.Y.Z>", "publish main's tip's build on GitHub for the installer, with the Linux app and the app a Mac published for it".into()),
             form("web bundle [--out <folder>]", "write this build's web client as a bundle for the native apps, ready to sign".into()),
             form("status --until <commit> [--device <name>[,<name>…]] [--timeout <10m>]", "wait until every device online now, or those named (online or not), runs that commit, or a later build, and its services answer, or a build fails; names offline devices and how far behind they are without waiting for them, and fails unless all it waited for made it".into()),
@@ -50,7 +49,6 @@ pub fn commands() -> one::cli::Command {
             match g.words().as_slice() {
                 ["changes"] => changes(None)?,
                 ["changes", commit] => changes(Some(commit))?,
-                ["build"] if g.has("dev") => crate::throwaway::build_dev()?,
                 ["signoff", "tested"] => {
                     g.takes_only(&["ran"])?;
                     tested(g.flag("ran").context("say which tests you ran: --ran \"contracts auth\", or --ran none if the change needs none")?)?

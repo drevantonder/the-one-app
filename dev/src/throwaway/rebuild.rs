@@ -1,23 +1,13 @@
-//! This checkout's own debug build, made with the web client and the Cloudflare node it's otherwise built without.
+//! The web client's and the Cloudflare node's WebAssembly, built in this checkout for its throwaway network, which reads
+//! them from there.
 
 use std::path::Path;
 
-/// Builds the web client's and the Cloudflare node's WebAssembly into target/, at dev speed (cargo keeps what hasn't
-/// changed), and, unless this build already holds them as they are, this checkout's debug build with them in: build.rs
-/// takes them from there, so every build of this checkout holds them from then on. A program that began before it keeps
-/// the files it was built with, so a throwaway network starts again from the new build. → whether it made a new build, which
-/// the program running this (an older build of this checkout) isn't.
-pub(crate) fn with_web_client_and_cloudflare_node(checkout: &Path) -> anyhow::Result<bool> {
+/// Builds both into target/, quickly (cargo keeps what hasn't changed), with one profile, so they share what they compile.
+pub(crate) fn web_client_and_cloudflare_node(checkout: &Path) -> anyhow::Result<()> {
     let config = checkout.join(one::config::CONFIG_FILE);
     eprintln!("Building the web client's and the Cloudflare node's WebAssembly (the first time takes minutes)…");
-    let onet = one::build::onet(checkout, &config, "web-dev")?;
-    let node = one::build::cloudflare_node(checkout, &config, "dev")?;
-    let held = |built: &Path, files: &[(&str, &[u8])]| !files.is_empty() && files.iter().all(|(name, bytes)| std::fs::read(built.join(name)).is_ok_and(|file| file == *bytes));
-    if held(&onet, one::config::ONET) && held(&node, one::config::CLOUDFLARE_NODE) {
-        return Ok(false);
-    }
-    // build.rs watches this, for the first time, when it found none of them to watch.
-    std::fs::File::create(checkout.join("target").join(one::config::WASM_BUILT))?;
-    one::build::quietly(one::build::nice_cargo().current_dir(checkout).env_remove("ONET").env_remove("CLOUDFLARE_NODE").arg("build"))?;
-    Ok(true)
+    one::build::onet(checkout, &config, "web-dev")?;
+    one::build::cloudflare_node(checkout, &config, "web-dev")?;
+    Ok(())
 }

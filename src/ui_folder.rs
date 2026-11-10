@@ -22,6 +22,14 @@ pub fn cloudflare() -> Vec<(String, Vec<u8>)> {
     files
 }
 
+/// Built WebAssembly (`files`: its folder in the checkout, and its files' names): as the checkout has it, once it's built there,
+/// else as this build holds it (`built`).
+pub fn wasm(files: (&str, [&str; 2]), built: &'static [(&'static str, &'static [u8])]) -> Vec<(String, Vec<u8>)> {
+    let (dir, names) = files;
+    let read: Option<Vec<(String, Vec<u8>)>> = names.iter().map(|name| Some((name.to_string(), from_folder(&format!("{dir}/{name}"))?))).collect();
+    read.unwrap_or_else(|| built.iter().map(|(name, bytes)| (name.to_string(), bytes.to_vec())).collect())
+}
+
 #[cfg(feature = "node")]
 static CHOSEN: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
