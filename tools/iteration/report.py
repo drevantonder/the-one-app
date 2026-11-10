@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """How fast work on The One App goes from started to done, and where the time goes, for the last day.
 
-Reads this machine's Claude Code sessions in the repo and its worktrees, Agent Memory and git, and writes a report
-to ~/one-export/iteration/<date>.md. Sessions on other machines and other harnesses aren't in it, and the report says
-so; Agent Memory and git are everyone's. Memories have a date and no time, so it reads whole days.
+Reads this machine's Claude Code sessions in the repo and its worktrees, Agent Memory, Tracker's friction and git, and
+writes a report to ~/one-export/iteration/<date>.md. Sessions on other machines and other harnesses aren't in it, and the
+report says so; the rest are everyone's. Memories have a date and no time, so it reads whole days.
 
     python3 -I tools/iteration/report.py [--days 1]
 """
@@ -172,16 +172,22 @@ MEMORY = re.compile(r"#(\d+) (\d{4}-\d\d-\d\d) (.*)$")
 
 
 def memories(since):
-    """Memories since since's day that correct an earlier report or say Friction, oldest first: (id, date, text).
+    """Memories since since's day that correct an earlier report, oldest first: (id, date, text).
     Asked a day at a time, as recall gives only the newest matches that fit."""
     out, day = [], since.date()
     while day <= dt.datetime.now(dt.timezone.utc).date():
-        text = one("memory", "recall", f"^#\\d+ {day:%Y-%m-%d} (correcting|.*friction)")
+        text = one("memory", "recall", f"^#\\d+ {day:%Y-%m-%d} correcting")
         if "Narrow the regex" in text:
             sys.exit(f"Agent Memory has more matches for {day} than recall gives: the report would undercount")
         out += [(int(m.group(1)), m.group(2), m.group(3)) for m in map(MEMORY.match, text.splitlines()) if m]
         day += dt.timedelta(days=1)
     return out
+
+
+def friction(since):
+    """What was noted as friction in Tracker since since, oldest first: (item id, text)."""
+    items = json.loads(one("tracker", "list", "--tags", "friction", "--limit", "500", "--json"))["items"]
+    return [(i["id"], i["title"]) for i in sorted(items, key=lambda i: i["at"]) if i["at"] >= since.timestamp() * 1000]
 
 
 def commits(since):
@@ -202,7 +208,7 @@ def main():
     s = sessions(since)
     posts = memories(since)
     corrected = [p for p in posts if p[2].lower().startswith("correcting")]
-    friction = [p for p in posts if re.search(r"\bFriction\b[^:.]{0,12}:", p[2])]
+    noted = friction(since)
     total = sum(s["split"].values()) or 1
 
     lines = [f"# Iteration, {since:%Y-%m-%d %H:%M} to {now:%Y-%m-%d %H:%M} UTC: {commits(since)} commits to main", "",
@@ -225,7 +231,7 @@ def main():
     lines += [f"| {k} | {len(v)} | {pct(v, .5):.0f}s | {pct(v, .9):.0f}s | {hours(sum(v))} |" for k, v in slow]
 
     lines += ["", f"## Reports corrected afterwards ({len(corrected)})", ""] + [f"- #{n} {text[:200]}" for n, _, text in corrected]
-    lines += ["", f"## Friction ({len(friction)})", ""] + [f"- #{n} {text}" for n, _, text in friction]
+    lines += ["", f"## Friction ({len(noted)})", ""] + [f"- {i} {text}" for i, text in noted]
     report = "\n".join(lines) + "\n"
 
     os.makedirs(OUT, exist_ok=True)
