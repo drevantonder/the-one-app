@@ -151,7 +151,7 @@ pub fn device_made(id: &str) -> Result<[u8; 32], String> {
     if let Some(key) = store::get(&service("device"), id)?.and_then(|b| b.try_into().ok()) {
         return Ok(key);
     }
-    let key = device(SIGNING_IN).unwrap_or_else(one_client::new_secret);
+    let key = device(SIGNING_IN).unwrap_or_else(onet::new_secret);
     set("device", id, &key)?;
     delete("device", SIGNING_IN);
     Ok(key)
@@ -162,7 +162,7 @@ pub fn signing_in() -> Result<[u8; 32], String> {
     if let Some(key) = device(SIGNING_IN) {
         return Ok(key);
     }
-    let key = one_client::new_secret();
+    let key = onet::new_secret();
     set("device", SIGNING_IN, &key)?;
     Ok(key)
 }
@@ -174,7 +174,7 @@ pub fn this_device() -> Result<[u8; 32], String> {
     if let Some(key) = device("this device") {
         return Ok(key);
     }
-    let key = one_client::new_secret();
+    let key = onet::new_secret();
     set("device", "this device", &key)?;
     Ok(key)
 }

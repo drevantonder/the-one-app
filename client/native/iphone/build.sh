@@ -68,17 +68,17 @@ contents "" > "$out/Artwork.xcassets/Contents.json"
 cp "$(art logo)" "$out/Artwork.xcassets/Logo.imageset/logo.png"
 contents '{"filename":"logo.png","idiom":"universal"}' > "$out/Artwork.xcassets/Logo.imageset/Contents.json"
 
-# With push, the client library (client/ffi) and its Swift, for the notification extension to open notes with.
+# With push, onet (onet/ffi) and its Swift, for the notification extension to open notes with.
 if [ -n "$PUSH" ]; then
-	client=$out/Client
-	"$root/client/ffi/bindings.sh" swift "$client/generated"
-	mkdir -p "$client/headers"
-	cp "$client/generated/one_client_ffi.swift" "$client/"
-	cp "$client/generated/one_client_ffiFFI.h" "$client/headers/"
-	cp "$client/generated/one_client_ffiFFI.modulemap" "$client/headers/module.modulemap"
-	(cd "$root" && CONFIG=$config cargo build -q -p one-client-ffi --release --target $rust)
-	rm -rf "$client/Client.xcframework"
-	xcodebuild -create-xcframework -library "$root/target/$rust/release/libone_client_ffi.a" -headers "$client/headers" -output "$client/Client.xcframework" >/dev/null
+	onet=$out/Onet
+	"$root/onet/ffi/bindings.sh" swift "$onet/generated"
+	mkdir -p "$onet/headers"
+	cp "$onet/generated/onet_ffi.swift" "$onet/"
+	cp "$onet/generated/onet_ffiFFI.h" "$onet/headers/"
+	cp "$onet/generated/onet_ffiFFI.modulemap" "$onet/headers/module.modulemap"
+	(cd "$root" && CONFIG=$config cargo build -q -p onet-ffi --release --target $rust)
+	rm -rf "$onet/Onet.xcframework"
+	xcodebuild -create-xcframework -library "$root/target/$rust/release/libonet_ffi.a" -headers "$onet/headers" -output "$onet/Onet.xcframework" >/dev/null
 fi
 xcodegen generate --quiet --spec iphone/project.yml
 

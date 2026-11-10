@@ -148,7 +148,7 @@ mod tests {
         crate::Response { node: [0; 32], status: 200, headers: Vec::new(), body: crate::Body::whole(body.to_vec()), trace: None }
     }
 
-    /// What a native app keeps of its screens' calls, to show at once next time (one-client's `Answers`), is its user's
+    /// What a native app keeps of its screens' calls, to show at once next time (onet's `Answers`), is its user's
     /// alone: only what tools that only read answered, sealed under that device's own key, so another user's
     /// sign-in on the same computer (a device with its own key, even in the same folder) opens none of it; and it's gone
     /// once the device signs out.

@@ -32,7 +32,7 @@ n0-future = "0.3"
 # Client devices ask it as they ask any node, HTTP/1.1 on a stream (src/net.rs), whose requests it reads.
 httparse = "1"
 # The remote MCP server's devices (src/clients.rs, cloudflare/mcp/) ask nodes as every client does, with no socket.
-one-client = { path = "../../client", features = ["relayed"] }
+onet = { path = "../../onet", features = ["relayed"] }
 n0-watcher = "1"
 noq-udp = "1.4"
 # iroh's randomness, from the Worker's crypto.getRandomValues, for each version of getrandom it builds.

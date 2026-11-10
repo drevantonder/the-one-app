@@ -89,7 +89,7 @@ impl Client {
     }
 }
 
-/// This browser as a device of its user (client/src/keyring.rs): who's who as it reads it itself, the keys it opens,
+/// This browser as a device of its user (onet/src/keyring.rs): who's who as it reads it itself, the keys it opens,
 /// and its requests, which hand them, through its session's `Client`. `key` and `seal` are its keys, hex; `on` is what it
 /// reaches through JavaScript (`crate::js::On`), and `shared(share)`, the X25519 secret its seal key, which WebCrypto
 /// never lets out, agrees with `share`.

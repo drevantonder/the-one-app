@@ -51,7 +51,7 @@ pub fn url_encode(s: &str) -> String {
 pub(crate) fn user_home() -> PathBuf {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_else(|| ".".into())
 }
-// What the Cloudflare node (cloudflare/node/) and the native apps' client (client/) share with nodes on machines; the rest
+// What the Cloudflare node (cloudflare/node/) and the native apps' onet (onet/) share with nodes on machines; the rest
 // is only theirs (the `node` feature).
 pub mod backups;
 pub mod bucket;

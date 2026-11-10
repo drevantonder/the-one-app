@@ -4261,29 +4261,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "one-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "data-encoding",
- "ed25519-dalek 3.0.0",
- "getrandom 0.2.17",
- "getrandom 0.4.3",
- "httparse",
- "iroh",
- "n0-future",
- "one",
- "rand 0.8.8",
- "rusqlite",
- "serde_json",
- "sqlite-wasm-rs",
- "tokio",
- "ureq",
- "wasm-bindgen",
- "wasm-bindgen-futures",
-]
-
-[[package]]
 name = "one-native"
 version = "0.1.0"
 dependencies = [
@@ -4296,7 +4273,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "one",
- "one-client",
+ "onet",
  "rand 0.8.8",
  "security-framework",
  "serde",
@@ -4318,6 +4295,29 @@ dependencies = [
  "windows",
  "windows-collections",
  "windows-registry",
+]
+
+[[package]]
+name = "onet"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "data-encoding",
+ "ed25519-dalek 3.0.0",
+ "getrandom 0.2.17",
+ "getrandom 0.4.3",
+ "httparse",
+ "iroh",
+ "n0-future",
+ "one",
+ "rand 0.8.8",
+ "rusqlite",
+ "serde_json",
+ "sqlite-wasm-rs",
+ "tokio",
+ "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

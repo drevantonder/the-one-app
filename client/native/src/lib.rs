@@ -1,5 +1,5 @@
 //! The native app: one window, which is the web client's own page (cloudflare/web/web.js, its files from one::web,
-//! built in), drawn and run as it is in a browser, but on this device's client (one_client) rather than a browser's.
+//! built in), drawn and run as it is in a browser, but on this device's client (onet) rather than a browser's.
 //! The page finds the app as `window.__oneNative` (src/native.js), which only it has: screens run in sandboxed frames
 //! in it with no origin of their own, which reach none of the app's commands, and ask the page, as they do in a
 //! browser. What the app adds is what a page can't do: this device's key in the OS's secret store, signing in through
@@ -75,7 +75,7 @@ fn local(path: &str, body: Option<Value>, secs: u64) -> Result<(bool, Value), St
 
 /// A response's body the page reads, and what stops a read waiting on it once the page cancels.
 struct Reading {
-    body: tokio::sync::Mutex<one_client::Body>,
+    body: tokio::sync::Mutex<onet::Body>,
     stop: tokio::sync::Notify,
 }
 
@@ -84,7 +84,7 @@ struct App {
     /// Where it keeps what isn't secret: the address, who's signed in, and the client's own folder per user.
     data: PathBuf,
     sign_in: Mutex<Option<Arc<signin::SignIn>>>,
-    device: Mutex<Option<Arc<one_client::Device>>>,
+    device: Mutex<Option<Arc<onet::Device>>>,
     /// Responses whose bodies the page reads as they come, by id.
     bodies: Mutex<HashMap<u64, Arc<Reading>>>,
     next: AtomicU64,
@@ -110,8 +110,8 @@ fn address_in(data: &std::path::Path) -> Option<String> {
 }
 
 /// This device's client for `id` (`<address> <user>`), its folder in `data` named by it.
-fn client(data: &std::path::Path, address: &str, id: &str, secret: [u8; 32]) -> one_client::Device {
-    one_client::Device::new(secret, address, &data.join("client").join(secrets::folder(id)).to_string_lossy()).keeping().logging(data)
+fn client(data: &std::path::Path, address: &str, id: &str, secret: [u8; 32]) -> onet::Device {
+    onet::Device::new(secret, address, &data.join("client").join(secrets::folder(id)).to_string_lossy()).keeping().logging(data)
 }
 
 /// A device's code, as typed or pushed: its letters and digits.
@@ -150,14 +150,14 @@ impl App {
         Ok(a)
     }
 
-    fn device(&self) -> Result<Arc<one_client::Device>, String> {
+    fn device(&self) -> Result<Arc<onet::Device>, String> {
         self.device.lock().unwrap().clone().ok_or_else(|| "This device hasn't been approved yet.".into())
     }
 }
 
 /// What a node answers `method` at `path` (with `body`, as JSON), as JSON: its `error`, or a status that isn't a success,
 /// an Err.
-async fn node(device: &one_client::Device, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+async fn node(device: &onet::Device, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
     let (headers, body) = match body {
         Some(b) => (vec![("content-type".into(), "application/json".into())], serde_json::to_vec(&b).map_err(|e| e.to_string())?),
         None => (Vec::new(), Vec::new()),
@@ -173,7 +173,7 @@ async fn node(device: &one_client::Device, method: &str, path: &str, body: Optio
 }
 
 /// The widgets kept for the platform's own again, and drawn again where the app runs.
-async fn widgets_changed(device: &one_client::Device) {
+async fn widgets_changed(device: &onet::Device) {
     let said = widgets::refresh(device, &platform::widgets_dir()).await;
     if let Err(e) = &said {
         one::logs::say(&format!("widgets: {e}"));
@@ -249,8 +249,8 @@ impl From<&str> for Failure {
     }
 }
 
-impl From<one_client::sign_in::Failed> for Failure {
-    fn from(f: one_client::sign_in::Failed) -> Failure {
+impl From<onet::sign_in::Failed> for Failure {
+    fn from(f: onet::sign_in::Failed) -> Failure {
         Failure { message: f.message, signed_out: f.signed_out }
     }
 }
@@ -263,7 +263,7 @@ async fn token() -> Result<String, Failure> {
 
 /// Who an access token is for.
 fn subject(token: &str) -> Result<String, Failure> {
-    signin::subject(token).ok_or_else(|| one_client::sign_in::signed_out("Sign in again: that sign-in names no one.").into())
+    signin::subject(token).ok_or_else(|| onet::sign_in::signed_out("Sign in again: that sign-in names no one.").into())
 }
 
 // MARK: What the page asks
@@ -310,7 +310,7 @@ fn native() -> Value {
         "behind": bundle::behind(&a.data),
         // What it's called among its user's devices, and its invite: for its own client, in the page, to ask to be let in.
         "joinName": join_name(),
-        "joinPlatform": one_client::PLATFORM,
+        "joinPlatform": onet::PLATFORM,
         "invite": a.kept("invite"),
     })
 }
@@ -347,7 +347,7 @@ fn address_of(typed: &str) -> Result<String, String> {
 async fn sign_in() -> Result<(), Failure> {
     let a = app();
     a.address().ok_or("Enter your address first.")?;
-    let join = one_client::join_of(secrets::signing_in()?);
+    let join = onet::join_of(secrets::signing_in()?);
     let signing = a.sign_in()?;
     let print = env("SIGN_IN_PRINT").is_some();
     tauri::async_runtime::spawn_blocking(move || platform::sign_in(&signing, &join, print)).await.map_err(|e| e.to_string())??;
@@ -465,7 +465,7 @@ fn unbase64(s: &str) -> Result<Vec<u8>, Failure> {
 /// What names this device: its key and seal key, hex. Its own client in the page signs and opens with them through the app.
 #[tauri::command]
 fn device_keys() -> Result<Value, Failure> {
-    let join = one_client::join_of(secret_here()?);
+    let join = onet::join_of(secret_here()?);
     Ok(json!({ "key": &join[..64], "seal": &join[64..] }))
 }
 

@@ -58,14 +58,14 @@
   addEventListener("load", () => setTimeout(blank, 6000));
   setTimeout(blank, 30_000);
   const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.content || "";
-  const client = meta("one-client");
+  const client = meta("onet");
   const named = meta("one-files").split(" ").find((f) => f.startsWith("net-worker.js="));
   if (!client || !named) return;
   self.oneNet = { url: `/net-worker.js?v=${named.slice("net-worker.js=".length)}&client=${encodeURIComponent(client)}` };
   // The client's WebAssembly (and its glue) is asked for now, not once the worker runs: the worker's own request, when it
   // gets there, is answered by this one as it arrives, from the browser's cache (the files are named by their build).
   // Before anything else the page asks for (the icons wait: web.js), as the first answer waits for this.
-  for (const file of ["one_client_bg.wasm", "one_client.js"]) fetch(`/client/${client}/${file}`, { priority: "high" }).then((r) => r.blob()).catch(() => {});
+  for (const file of ["onet_bg.wasm", "onet.js"]) fetch(`/onet/${client}/${file}`, { priority: "high" }).then((r) => r.blob()).catch(() => {});
   if (self.__oneNative || typeof SharedWorker !== "function") return;
   const worker = (self.oneNet.worker = new SharedWorker(self.oneNet.url, { type: "module", name: "one" }));
   try {

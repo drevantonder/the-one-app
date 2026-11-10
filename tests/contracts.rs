@@ -218,7 +218,7 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
 }
 
 /// What sign-in's word on a device's request to be let in means (`keys::waited`), which every client acts on
-/// (client/src/join.rs): an approval names only a network and a welcome that are one.
+/// (onet/src/join.rs): an approval names only a network and a welcome that are one.
 #[test]
 fn a_client_takes_only_a_network_and_a_welcome_that_are_one() {
     use one::keys::{Waited, waited};
@@ -766,7 +766,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
     }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut files = Vec::new();
-    for dir in ["cloudflare", "src/screen", "client/src", "client/native/src", "apps"] {
+    for dir in ["cloudflare", "src/screen", "onet/src", "client/native/src", "apps"] {
         let mut stack = vec![root.join(dir)];
         while let Some(dir) = stack.pop() {
             let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();

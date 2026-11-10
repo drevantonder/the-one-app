@@ -14,7 +14,7 @@ use super::{Routes, Who};
 use super::guard::Me;
 use super::reply::{Body, Error, Reply, failed};
 
-/// What a client that picks the node it asks itself says with each request (client/src/lib.rs): a call this node can't
+/// What a client that picks the node it asks itself says with each request (onet/src/lib.rs): a call this node can't
 /// run is answered 421 with the nodes that can (`node::Elsewhere`), not passed on.
 
 /// An app's own requests (`app_http`): how stock git reaches Repos.

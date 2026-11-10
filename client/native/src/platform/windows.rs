@@ -114,7 +114,7 @@ fn helper() -> Option<std::path::PathBuf> {
 /// Let in: this device's WNS channel, registered with the push Worker by the helper (`register-push` back to this
 /// program, src/headless.rs), each start, since a channel lasts 30 days; a custom build with no Microsoft Entra app for
 /// WNS has none, and the helper ends.
-pub fn let_in(_: Arc<one_client::Device>) {
+pub fn let_in(_: Arc<onet::Device>) {
     let Some(helper) = helper() else { return };
     use std::os::windows::process::CommandExt;
     // No console window for it.

@@ -144,14 +144,14 @@ fn main() {
     files.sort();
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
-    // The Cloudflare node's WebAssembly (cloudflare/node/) and the client's, for browsers (client/src/wasm.rs), which `one-dev update node`
-    // builds into CLOUDFLARE_NODE and CLIENT where Rust builds for WebAssembly, so a release carries them to devices with no
+    // The Cloudflare node's WebAssembly (cloudflare/node/) and onet's, for browsers (onet/src/wasm.rs), which `one-dev update node`
+    // builds into CLOUDFLARE_NODE and ONET where Rust builds for WebAssembly, so a release carries them to devices with no
     // Rust to deploy it from, and the address serves the web client. With neither set, the ones `update node`, `throwaway cloudflare
     // node deploy` and `throwaway client web` build into target/, if they're there, so every build of a checkout is the same one,
     // with or without them, but not their own (they're built with `one` in them, which would hold itself). Only a file that
     // exists is watched: cargo reruns a build for one that doesn't.
     let out = format!("{out}{}", wasm_constant("CLOUDFLARE_NODE", "target/cloudflare-node", ["one_cloudflare_node.js", "one_cloudflare_node_bg.wasm"]));
-    let out = format!("{out}{}", wasm_constant("CLIENT", "target/client", ["one_client.js", "one_client_bg.wasm"]));
+    let out = format!("{out}{}", wasm_constant("ONET", "target/onet", ["onet.js", "onet_bg.wasm"]));
     // The apps every agent needs from the start: their guide is in MCP's instructions, and code mode keeps their tools.
     let always_on: String = config.get("always_on").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()).map(|n| format!("{n:?},")).collect();
     let out = format!("{out}pub const ALWAYS_ON: &[&str] = &[{always_on}];\n");

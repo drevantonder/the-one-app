@@ -89,7 +89,7 @@ pub(crate) fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
 pub(crate) fn browser(dir: &Path, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<u16> {
     // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it can't sign anyone in.
     let page = agent().get(&settings.address).call()?.body_mut().read_to_string()?;
-    anyhow::ensure!(!page.contains(r#"<meta name="one-client" content="">"#), "this build has no web client's WebAssembly: {CLI}-dev build --dev builds it");
+    anyhow::ensure!(!page.contains(r#"<meta name="onet" content="">"#), "this build has no web client's WebAssembly: {CLI}-dev build --dev builds it");
     let web = web_folder(dir, user);
     std::fs::create_dir_all(&web)?;
     let port = std::fs::read_to_string(web.join("port")).ok().and_then(|p| p.trim().parse::<u16>().ok());

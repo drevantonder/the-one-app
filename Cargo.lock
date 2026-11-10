@@ -2887,7 +2887,7 @@ dependencies = [
  "jiff",
  "libc",
  "one",
- "one-client",
+ "onet",
  "rand 0.8.8",
  "ring",
  "rusqlite",
@@ -2900,41 +2900,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
-]
-
-[[package]]
-name = "one-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "data-encoding",
- "ed25519-dalek 3.0.0",
- "getrandom 0.2.17",
- "getrandom 0.4.3",
- "httparse",
- "iroh",
- "iroh-base",
- "n0-future",
- "n0-watcher",
- "noq-udp",
- "one",
- "rand 0.8.8",
- "rusqlite",
- "serde_json",
- "sqlite-wasm-rs",
- "tokio",
- "ureq",
- "wasm-bindgen",
- "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "one-client-ffi"
-version = "0.1.0"
-dependencies = [
- "libc",
- "one-client",
- "uniffi",
 ]
 
 [[package]]
@@ -2955,7 +2920,7 @@ dependencies = [
  "n0-watcher",
  "noq-udp",
  "one",
- "one-client",
+ "onet",
  "serde_json",
  "sqlite-wasm-rs",
  "wasm-bindgen",
@@ -3004,6 +2969,41 @@ dependencies = [
  "libc",
  "one-service",
  "serde_json",
+]
+
+[[package]]
+name = "onet"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "data-encoding",
+ "ed25519-dalek 3.0.0",
+ "getrandom 0.2.17",
+ "getrandom 0.4.3",
+ "httparse",
+ "iroh",
+ "iroh-base",
+ "n0-future",
+ "n0-watcher",
+ "noq-udp",
+ "one",
+ "rand 0.8.8",
+ "rusqlite",
+ "serde_json",
+ "sqlite-wasm-rs",
+ "tokio",
+ "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "onet-ffi"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "onet",
+ "uniffi",
 ]
 
 [[package]]

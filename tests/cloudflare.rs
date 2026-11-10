@@ -1085,8 +1085,8 @@ mod relay {
         assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
         // As connecting leaves it, once this key was in.
         std::fs::write(dir.join("joined"), hex(&phone)).unwrap();
-        let device = one_client::Device::new(secret, &address, dir.to_str().unwrap());
-        let signed_in_again = one_client::Device::new(rand::random(), &address, dir.to_str().unwrap());
+        let device = onet::Device::new(secret, &address, dir.to_str().unwrap());
+        let signed_in_again = onet::Device::new(rand::random(), &address, dir.to_str().unwrap());
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
             assert!(!device.removed().await, "a device the relay lets in was taken for one taken out");
@@ -1264,7 +1264,7 @@ mod relay {
     /// in as that device, only for the key the certificate names, until its `until`, and while the device is listed.
     /// A client races connections to its nodes and asks the first one up, keeping the others it raced for the next
     /// request. The keys a request hands are sealed as the node it's sent to is picked, to that one alone: never to a
-    /// node it only raced a connection to (client/src/lib.rs, `fetch_with`).
+    /// node it only raced a connection to (onet/src/lib.rs, `fetch_with`).
     #[test]
     fn a_request_hands_keys_only_to_the_node_it_is_sent_to() {
         use std::sync::{Arc, Mutex};
@@ -1311,10 +1311,10 @@ mod relay {
             };
             let gate = Arc::new(tokio::sync::Notify::new());
             let _nodes = (serve(&slow, Some(gate.clone())).await, serve(&quick, None).await);
-            let client = one_client::Client::start(secret, None, &address, &[*slow.public().as_bytes(), *quick.public().as_bytes()]).await.unwrap();
+            let client = onet::Client::start(secret, None, &address, &[*slow.public().as_bytes(), *quick.public().as_bytes()]).await.unwrap();
             let sealed: Arc<Mutex<Vec<String>>> = Arc::default();
             let ask = || {
-                let request = one_client::Request { method: "GET".into(), path: "/v1/state".into(), headers: Vec::new(), body: Vec::new().into() };
+                let request = onet::Request { method: "GET".into(), path: "/v1/state".into(), headers: Vec::new(), body: Vec::new().into() };
                 client.fetch_with(request, |node| {
                     let node = data_encoding::HEXLOWER.encode(node);
                     sealed.lock().unwrap().push(node.clone());

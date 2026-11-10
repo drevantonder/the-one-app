@@ -1,10 +1,10 @@
-//! The remote MCP server's devices (cloudflare/mcp/), each a client of the network as any app is (one-client, over `<cli>/http/1`),
+//! The remote MCP server's devices (cloudflare/mcp/), each a client of the network as any app is (onet, over `<cli>/http/1`),
 //! with no socket: one per remote MCP client, in its own Durable Object, which may share this isolate with others'.
 //! What one sends goes to its object's `send(dst, segment size, contents)`, and the relay hands it what's sent to its
 //! key, by RPC, which comes in at `device_deliver`. It lives while its object does, and holds its key only while it
 //! runs.
 //!
-//! What it knows of who's who, the keys it opened and how it asks with them are one-client's `Keyring`, as every client
+//! What it knows of who's who, the keys it opened and how it asks with them are onet's `Keyring`, as every client
 //! device's: its object hands it the bucket, through the URL signer, its storage and the relay (`On`).
 
 use std::cell::RefCell;
@@ -13,8 +13,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use js_sys::{Function, Reflect, Uint8Array};
-use one_client::js::On;
-use one_client::keyring::Keyring;
+use onet::js::On;
+use onet::keyring::Keyring;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
@@ -27,7 +27,7 @@ const FORGOTTEN_AFTER: f64 = 10.0 * 60_000.0;
 thread_local! {
     /// Each device running here, by its key: its client, where the relay's datagrams for it go, and when it was last
     /// used (ms).
-    static CLIENTS: RefCell<HashMap<Key, (one_client::Client, one_client::relayed::Inbox, f64)>> = RefCell::new(HashMap::new());
+    static CLIENTS: RefCell<HashMap<Key, (onet::Client, onet::relayed::Inbox, f64)>> = RefCell::new(HashMap::new());
     /// Each device's `send`, which can't cross into the transport (a JavaScript function is neither Send nor Sync).
     static SENDS: RefCell<HashMap<Key, Function>> = RefCell::new(HashMap::new());
     /// What each device knows of who's who, and the keys it opened.
@@ -41,7 +41,7 @@ fn now() -> f64 {
 /// Ends the devices here that nobody has used for `FORGOTTEN_AFTER`: their objects ended without closing them.
 fn sweep() {
     let now = now();
-    let gone: Vec<(Key, one_client::Client)> = CLIENTS.with(|c| {
+    let gone: Vec<(Key, onet::Client)> = CLIENTS.with(|c| {
         let mut c = c.borrow_mut();
         let old: Vec<Key> = c.iter().filter(|(_, (_, _, used))| now - *used > FORGOTTEN_AFTER).map(|(k, _)| *k).collect();
         old.into_iter().filter_map(|k| c.remove(&k).map(|(client, _, _)| (k, client))).collect()
@@ -57,7 +57,7 @@ fn forget(key: &Key) {
     KEYRINGS.with(|k| k.borrow_mut().remove(key));
 }
 
-fn running(me: &Key) -> Option<one_client::Client> {
+fn running(me: &Key) -> Option<onet::Client> {
     CLIENTS.with(|c| {
         let mut c = c.borrow_mut();
         let (client, _, used) = c.get_mut(me)?;
@@ -90,7 +90,7 @@ pub async fn device_start(seed: Vec<u8>, nodes: Vec<String>, send: Function) -> 
     if let Some(client) = running(&me) {
         client.set_nodes(&nodes).map_err(thrown)?;
     } else {
-        let to_relay: one_client::relayed::Send = Arc::new(move |dst: &Key, segment: u16, contents: &[u8]| {
+        let to_relay: onet::relayed::Send = Arc::new(move |dst: &Key, segment: u16, contents: &[u8]| {
             SENDS.with(|s| {
                 if let Some(send) = s.borrow().get(&me) {
                     let args = [Uint8Array::from(&dst[..]).into(), JsValue::from(segment), Uint8Array::from(contents).into()];
@@ -98,7 +98,7 @@ pub async fn device_start(seed: Vec<u8>, nodes: Vec<String>, send: Function) -> 
                 }
             })
         });
-        let (client, inbox) = one_client::Client::relayed(seed, to_relay, &nodes).await.map_err(thrown)?;
+        let (client, inbox) = onet::Client::relayed(seed, to_relay, &nodes).await.map_err(thrown)?;
         CLIENTS.with(|c| c.borrow_mut().insert(me, (client, inbox, now())));
     }
     Ok(data_encoding::HEXLOWER.encode(&me))
@@ -128,8 +128,8 @@ pub fn device_nodes(me: &str, nodes: Vec<String>) -> Result<(), JsError> {
 #[wasm_bindgen]
 pub async fn device_fetch(me: String, method: String, path: String, headers: Vec<String>, body: Vec<u8>, until: f64, on: JsValue) -> Result<JsValue, JsValue> {
     let me = key(&me).map_err(JsValue::from)?;
-    let client = running(&me).ok_or_else(|| failed(&one_client::keyring::refused()))?;
-    let keyring = KEYRINGS.with(|k| k.borrow().get(&me).cloned()).ok_or_else(|| failed(&one_client::keyring::refused()))?;
+    let client = running(&me).ok_or_else(|| failed(&onet::keyring::refused()))?;
+    let keyring = KEYRINGS.with(|k| k.borrow().get(&me).cloned()).ok_or_else(|| failed(&onet::keyring::refused()))?;
     let on = On::of(on, me);
     if method == "POST" && path == "/mcp"
         && let Some(answer) = tool_here(&keyring, &client, &on, &body, until as u64).await
@@ -138,7 +138,7 @@ pub async fn device_fetch(me: String, method: String, path: String, headers: Vec
         return Ok(answered([0; 32], 200, vec![("content-type".into(), "application/json".into())], &answer));
     }
     let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
-    let request = one_client::Request { method, path, headers, body: body.into() };
+    let request = onet::Request { method, path, headers, body: body.into() };
     let response = keyring.request(&client, &on, request, until as u64, None).await.map_err(|e| failed(&e))?;
     let body = response.body.bytes_within(ANSWER_MOST).await.map_err(|e| failed(&e))?;
     Ok(answered(response.node, response.status, response.headers, &body))
@@ -157,7 +157,7 @@ fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8])
 /// The answer to an MCP client's call of a core tool that's one request the device answers itself (`one::core_tools`,
 /// `one::settings::answered`): one that changes who can do what, which it signs as its user's, as any device does.
 /// None for any other MCP message, which goes to a node, as its user.
-async fn tool_here(keyring: &Keyring, client: &one_client::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, one_client::Error>> {
+async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, onet::Error>> {
     use one::core_tools::Reader;
     let msg: Value = serde_json::from_slice(body).ok()?;
     if msg["method"] != "tools/call" {
@@ -172,7 +172,7 @@ async fn tool_here(keyring: &Keyring, client: &one_client::Client, on: &On, body
     if feature.tools[at].spec["confirm"] == true && !confirmed {
         return Some(Ok(result(&msg, Err(Reader::Mcp.unconfirmed(name)))));
     }
-    let request = one_client::Request {
+    let request = onet::Request {
         method: "POST".into(),
         path: asks.path,
         headers: vec![("content-type".into(), "application/json".into())],
@@ -201,7 +201,7 @@ fn result(msg: &Value, said: Result<Value, String>) -> Vec<u8> {
     json!({ "jsonrpc": "2.0", "id": msg["id"], "result": result }).to_string().into_bytes()
 }
 
-fn failed(err: &one_client::Error) -> JsValue {
+fn failed(err: &onet::Error) -> JsValue {
     let out = js_sys::Error::new(&err.to_string());
     let _ = Reflect::set(&out, &"sent".into(), &err.sent.into());
     let _ = Reflect::set(&out, &"notLetIn".into(), &err.not_let_in.into());

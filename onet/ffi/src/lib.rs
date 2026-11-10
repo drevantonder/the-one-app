@@ -18,8 +18,8 @@ impl std::fmt::Display for OneError {
 
 impl std::error::Error for OneError {}
 
-impl From<one_client::Error> for OneError {
-    fn from(e: one_client::Error) -> Self {
+impl From<onet::Error> for OneError {
+    fn from(e: onet::Error) -> Self {
         OneError::Failed { reason: e.to_string() }
     }
 }
@@ -44,7 +44,7 @@ pub struct Note {
 #[uniffi::export]
 pub fn open_note(secret: Vec<u8>, pushed: String) -> Result<Note, OneError> {
     let secret: [u8; 32] = secret.try_into().map_err(|_| failed("a device's key is 32 bytes"))?;
-    let (n, _) = one_client::open_note(secret, &pushed)?;
+    let (n, _) = onet::open_note(secret, &pushed)?;
     let (link, join) = (n.link(), n.join().map(str::to_string));
     Ok(Note { title: n.title, body: n.body, app: n.app, link, join })
 }

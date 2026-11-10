@@ -1,5 +1,5 @@
 // What the client's own screens (Settings, Home, the panel) ask of this page, as the user, which no app's may:
-// `one.api` to their nodes and to this device's own answers (one-client's `settings`, its keyring signing what changes
+// `one.api` to their nodes and to this device's own answers (onet's `settings`, its keyring signing what changes
 // who can do what), the look, and what they keep. screens.js answers their
 // bridges with these, and with what opens over the window.
 import { platform } from "./platform.js";
@@ -8,7 +8,7 @@ import { keeping, leave, refreshState, screensKey, withWaiting } from "./store.j
 
 /// `one.api` for a client's own screen: the node's /v1 at this origin, as this user; nothing else here. What
 /// changes who can do what, and letting devices in, this device answers itself, as its keyring signs it
-/// (one-client's `settings`), at the same paths.
+/// (onet's `settings`), at the same paths.
 async function clientApi(m) {
   const url = new URL(String(m.path || ""), location.origin);
   if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn’t on your devices.");

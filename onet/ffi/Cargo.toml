@@ -1,13 +1,13 @@
 [package]
-name = "one-client-ffi"
+name = "onet-ffi"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 publish = false
 
-# The client (one-client) for the iPhone's notification extension, which opens a push's note with its device key: one
+# onet for the iPhone's notification extension, which opens a push's note with its device key: one
 # definition (src/lib.rs) from which uniffi makes the Swift, by the app's build from the library it links, so no binding
-# is kept to drift. (The Tauri app, client/native, links one-client itself, and Android's pushes are opened in it.)
+# is kept to drift. (The Tauri app, client/native, links onet itself, and Android's pushes are opened in it.)
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
 doctest = false
@@ -18,11 +18,11 @@ path = "src/bindgen.rs"
 required-features = ["bindgen"]
 
 [features]
-# The generator itself, for the apps' builds: cargo run -p one-client-ffi --features bindgen --bin uniffi-bindgen.
+# The generator itself, for the apps' builds: cargo run -p onet-ffi --features bindgen --bin uniffi-bindgen.
 bindgen = ["uniffi/cli"]
 
 [dependencies]
-one-client = { path = ".." }
+onet = { path = ".." }
 uniffi = "=0.31.0"
 # Not used here: held at 0.2.189 because 0.2.190 made the Apple routing and IPv6 interface types iroh 1.4.1's netwatch and
 # netdev use macOS's alone, so they don't build for the iPhone with a newer one. Goes once an iroh release does.

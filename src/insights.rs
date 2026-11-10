@@ -129,7 +129,7 @@ pub const CLIENTS: &[&str] = &["cli", "mcp", "code", "mac", "phone", "android", 
 /// The JavaScript errors whose name is the engine's, not a program's: anything else is `Error`.
 const EXCEPTIONS: &[&str] = &["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];
 
-/// How a client's try of a node went (client/src/lib.rs).
+/// How a client's try of a node went (onet/src/lib.rs).
 const TRY_RESULTS: &[&str] = &["answered", "elsewhere", "no connection", "not taking requests", "no answer", "unreachable", "lost", "failed"];
 
 /// Why a process ended or an update wasn't taken.

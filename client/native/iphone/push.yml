@@ -15,10 +15,10 @@ targets:
     platform: iOS
     sources:
       - Notifications
-      - ../target/iphone/Client/one_client_ffi.swift
+      - ../target/iphone/Onet/onet_ffi.swift
     dependencies:
-      # The client library (client/ffi), for opening a note, which build.sh makes.
-      - framework: ../target/iphone/Client/Client.xcframework
+      # onet (onet/ffi), for opening a note, which build.sh makes.
+      - framework: ../target/iphone/Onet/Onet.xcframework
         embed: false
       - sdk: SystemConfiguration.framework
       - sdk: Network.framework

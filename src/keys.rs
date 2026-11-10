@@ -88,7 +88,7 @@ impl Endpoint {
     }
 }
 
-/// What a native app's device seals the last answers of its screens' calls under (client/src/device.rs): its own, from
+/// What a native app's device seals the last answers of its screens' calls under (onet/src/device.rs): its own, from
 /// its key, so no other device (another user's sign-in has its own) opens them.
 pub fn answers_key(key: &SigningKey) -> [u8; 32] {
     hkdf(&key.to_bytes(), b"one/answers")

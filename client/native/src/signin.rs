@@ -1,4 +1,4 @@
-//! This app's sign-in, as every client signs in (one_client::sign_in), with sign-in and consent in a browser that comes back to a
+//! This app's sign-in, as every client signs in (onet::sign_in), with sign-in and consent in a browser that comes back to a
 //! port on this machine (RFC 8252's loopback redirect), or on a phone to the app's own link (`<cli>://signed-in/`),
 //! which an iPhone's system sign-in sheet takes and an Android phone's Chrome Custom Tab opens the app on. The refresh
 //! token is kept in the OS's secret store; access tokens only in memory. It names the device it's for (`join`), so the
@@ -12,11 +12,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use one_client::sign_in::{Auth, Failed, Tokens, signed_out};
+use onet::sign_in::{Auth, Failed, Tokens, signed_out};
 
 use crate::secrets;
 
-pub use one_client::sign_in::subject;
+pub use onet::sign_in::subject;
 
 pub struct SignIn {
     pub address: String,

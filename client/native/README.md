@@ -1,6 +1,6 @@
 # The native app
 
-One app for every platform, Tauri 2 on the client itself (`one-client`, `../`): its window is the web client's own page
+One app for every platform, Tauri 2 on the client itself (`onet`, `../`): its window is the web client's own page
 (`cloudflare/web/` and @one/ui, from `one::web`), the same sidebar, sheets, menus and alerts as in a browser, run
 on this device's client and key rather than a browser's. `src/native.js` is what the page finds of the app; everything
 else a screen asks is the page's, as in a browser. Only what a web view can't do is the app's (`src/lib.rs`): the key in

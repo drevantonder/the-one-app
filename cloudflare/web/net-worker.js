@@ -5,16 +5,16 @@
 // Its endpoint is a key of the session's, made here, which the browser's device key vouches for (`certify`): that key
 // can't be read out of WebCrypto, and iroh signs with raw bytes. The relay and nodes take the endpoint as the device.
 //
-// The browser as a device of its user is one-client's keyring (client/src/keyring.rs, `Keyring` in its WebAssembly),
+// The browser as a device of its user is onet's keyring (onet/src/keyring.rs, `Keyring` in its WebAssembly),
 // here too: who's who as it reads it from the bucket itself, the keys it opens, and each request, with the keys its kind
 // needed, sealed to the one node it's sent to. Its seal key's secret stays in WebCrypto: the keyring asks it for each
 // secret it agrees (`shared`).
 //
 // A tab says `start` with its user; then each `fetch` is answered with its status and headers, its body's parts as
 // they come, and `done` (or `error`); `cancel` stops one. What changes who can do what is a `fetch` too, of the path a
-// node's route has, which the keyring answers itself, signing it (one-client's `settings`). `settle`, `renew` and `push`
+// node's route has, which the keyring answers itself, signing it (onet's `settings`). `settle`, `renew` and `push`
 // are the rest a device does as itself; `ask` and `waited`, what it does before it's one, asking to be let in; and
-// `auth`, signing in. `kept` gives what a call that only reads answered last (one-client's
+// `auth`, signing in. `kept` gives what a call that only reads answered last (onet's
 // `answers`), and `forget` forgets what this device kept, as it signs out. `nodes` gives the order to ask nodes in, which is remembered; `reconnect`
 // starts a fresh endpoint, after the network came back.
 
@@ -90,15 +90,15 @@ function browserHost(keptJs) {
 }
 
 export function server(version, givenHost) {
-  const base = `/client/${version}/`;
+  const base = `/onet/${version}/`;
   /// What's fetched once: if the connection drops while it comes, whoever asks next fetches it again, as `unreachable` says.
   const fetched = (get) => {
     let got = null;
     return () => (got ||= get().catch((err) => ((got = null), Promise.reject(Object.assign(err, { unreachable: true })))));
   };
   const glue = fetched(async () => {
-    const compiled = WebAssembly.compileStreaming(fetch(`${base}one_client_bg.wasm`));
-    const g = await import(`${base}one_client.js`);
+    const compiled = WebAssembly.compileStreaming(fetch(`${base}onet_bg.wasm`));
+    const g = await import(`${base}onet.js`);
     await g.default({ module_or_path: await compiled });
     return g;
   });
@@ -113,7 +113,7 @@ export function server(version, givenHost) {
     return listed?.length ? keys.filter((key) => listed.includes(key)) : keys;
   }
 
-  /// What `user`'s device (`me`, its keys as kept) reaches through JavaScript (one-client's `js::On`, which reads the
+  /// What `user`'s device (`me`, its keys as kept) reaches through JavaScript (onet's `js::On`, which reads the
   /// bucket through the URL signer with these): the network's address, and a JSON request to it; what it keeps (the host's); whether the relay still lets it in (`still`); its key's signature, and the secret
   /// its seal key agrees with another's, neither key read.
   async function reaches(user, me, still) {
@@ -143,7 +143,7 @@ export function server(version, givenHost) {
     };
   }
 
-  /// Where this browser keeps its calls' answers for `user` (one-client's `answers::Shelf`): IndexedDB's `one.answers`,
+  /// Where this browser keeps its calls' answers for `user` (onet's `answers::Shelf`): IndexedDB's `one.answers`,
   /// each sealed (AES-GCM) under a key of its own that WebCrypto never lets out, made for one user: another's
   /// sign-in finds only what it can't open, which goes.
   function shelf(user) {
@@ -376,7 +376,7 @@ export function server(version, givenHost) {
             if (m.wakes && nodes.includes(m.wakes)) s?.client.wakes(m.wakes);
             return s?.client.nodes(nodes);
           }
-          // Signing in at the network's auth, a step at a time (one-client's `sign_in`): this browser registered (as
+          // Signing in at the network's auth, a step at a time (onet's `sign_in`): this browser registered (as
           // `name`, coming back to `back`) unless it has its `client` id, and an authorization asked for (`start`); what
           // came back exchanged for tokens (`finish`); its refresh token exchanged for new ones (`refresh`), or revoked.
           case "auth": {
@@ -397,7 +397,7 @@ export function server(version, givenHost) {
             await auth.revoke(m.client, m.refresh);
             return post({ id });
           }
-          // Asking auth to let this browser in, and what auth says of it while it waits (one-client's `join`).
+          // Asking auth to let this browser in, and what auth says of it while it waits (onet's `join`).
           case "ask": {
             return post({ id, invited: await (await asking(m.user)).ask(m.token, m.name, m.platform ?? undefined, m.invite ?? undefined) });
           }

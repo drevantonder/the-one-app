@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use one::config::{CLI, NAME};
-use one_client::sign_in::{Asked, Auth};
+use onet::sign_in::{Asked, Auth};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

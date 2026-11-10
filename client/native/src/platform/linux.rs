@@ -89,7 +89,7 @@ pub fn badge(count: u32) {
 }
 
 /// Pushes come only to computers that register a channel (Windows).
-pub fn let_in(_: std::sync::Arc<one_client::Device>) {}
+pub fn let_in(_: std::sync::Arc<onet::Device>) {}
 
 /// Links to the network's address open only the browser.
 pub fn claim(_: Option<String>) {}

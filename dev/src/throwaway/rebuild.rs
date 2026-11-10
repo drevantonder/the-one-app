@@ -10,14 +10,14 @@ use std::path::Path;
 pub(crate) fn with_web_client_and_cloudflare_node(checkout: &Path) -> anyhow::Result<bool> {
     let config = checkout.join(one::config::CONFIG_FILE);
     eprintln!("Building the web client's and the Cloudflare node's WebAssembly (the first time takes minutes)…");
-    let client = one::build::client(checkout, &config)?;
+    let onet = one::build::onet(checkout, &config)?;
     let node = one::build::cloudflare_node(checkout, &config, "dev")?;
     let held = |built: &Path, files: &[(&str, &[u8])]| !files.is_empty() && files.iter().all(|(name, bytes)| std::fs::read(built.join(name)).is_ok_and(|file| file == *bytes));
-    if held(&client, one::config::CLIENT) && held(&node, one::config::CLOUDFLARE_NODE) {
+    if held(&onet, one::config::ONET) && held(&node, one::config::CLOUDFLARE_NODE) {
         return Ok(false);
     }
     // cargo watches only files that exist: the first time, build.rs was watching none of these.
     std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
-    one::build::quietly(one::build::nice_cargo().current_dir(checkout).env_remove("CLIENT").env_remove("CLOUDFLARE_NODE").arg("build"))?;
+    one::build::quietly(one::build::nice_cargo().current_dir(checkout).env_remove("ONET").env_remove("CLOUDFLARE_NODE").arg("build"))?;
     Ok(true)
 }

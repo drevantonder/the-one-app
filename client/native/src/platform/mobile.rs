@@ -45,7 +45,7 @@ pub fn signed_in_at(url: String, open: bool) -> Result<String, String> {
 }
 
 /// Gives the push Worker this phone's token from the plugin, as `address` makes it its push address.
-pub fn push(device: Arc<one_client::Device>, address: impl FnOnce(String) -> one::push::Address + Send + 'static) {
+pub fn push(device: Arc<onet::Device>, address: impl FnOnce(String) -> one::push::Address + Send + 'static) {
     tauri::async_runtime::spawn(async move {
         let token = match ask_off("push", json!({})).await {
             Ok(out) => out["token"].as_str().map(str::to_string),

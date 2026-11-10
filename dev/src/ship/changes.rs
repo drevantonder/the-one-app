@@ -121,8 +121,8 @@ impl Parts {
                 // Android's own (client/native/windows/, client/native/android/), which no update sends out.
                 Some("client") if file.starts_with("client/native/windows/") || file.starts_with("client/native/android/") => {}
                 Some("client") if file.starts_with("client/native/") => parts.mac = true,
-                // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
-                Some("client") => (parts.node, parts.mac, parts.web, parts.dev) = (true, true, true, true),
+                // onet is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
+                Some("onet") => (parts.node, parts.mac, parts.web, parts.dev) = (true, true, true, true),
                 Some("docs" | "tests" | "tools") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
                 _ => parts.add_rust(),
@@ -156,7 +156,7 @@ mod tests {
         assert_eq!(of(&["client/native/windows/build.sh"]), Parts::default());
         assert_eq!(of(&["dev/src/ship.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
         assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
-        assert!(of(&["src/node.rs"]).is_built_in() && of(&["client/src/lib.rs"]).is_built_in());
+        assert!(of(&["src/node.rs"]).is_built_in() && of(&["onet/src/lib.rs"]).is_built_in());
         assert_eq!(of(&["cloudflare/auth/worker.js", "cloudflare/relay/worker.js", "cloudflare/package.json"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
         for file in ["cloudflare/web/web.js", "cloudflare/shared/crypto.js", "src/screen/ui/dist/ui.js", "src/screen/settings/dist/vault.html", "src/screen/bridge.js", "src/onboarding/pages.js", "src/onboarding/pages.tsx"] {
             assert_eq!(of(&[file]), Parts { web: true, workers: true, ..Default::default() }, "{file}: the web client and the Workers that serve it, with no node");
@@ -167,7 +167,7 @@ mod tests {
             let parts = of(&[rust]);
             assert!(parts.node && parts.mac && parts.workers && parts.web && parts.dev, "{rust}: anything not listed sends everything");
         }
-        let client = of(&["client/src/lib.rs"]);
-        assert!(client.node && client.mac && client.web && !client.workers, "the client's WebAssembly is in the node and the web client");
+        let onet = of(&["onet/src/lib.rs"]);
+        assert!(onet.node && onet.mac && onet.web && !onet.workers, "onet's WebAssembly is in the node and the web client");
     }
 }

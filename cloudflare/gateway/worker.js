@@ -70,7 +70,7 @@ async function toWeb(request, env, url) {
     headers.delete("etag");
     return new Response(packed.body, { status: resp.status, headers, encodeBody: "manual" });
   };
-  if (resp.ok && path.startsWith("/client/")) {
+  if (resp.ok && path.startsWith("/onet/")) {
     headers.set("cache-control", "public, max-age=31536000, immutable");
     return send(resp.body);
   }

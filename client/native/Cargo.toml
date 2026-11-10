@@ -1,5 +1,5 @@
 # The native app, one for every platform (Linux, Windows, Mac, iPhone, Android): a window that is the web client's own
-# (cloudflare/web, through one::web), on the client itself (one-client, ../) with this device's key in the OS's secret
+# (cloudflare/web, through one::web), on the client itself (onet, ../../onet) with this device's key in the OS's secret
 # store. Its own workspace, so the repo's `cargo build` and `cargo test` never build Tauri.
 [package]
 name = "one-native"
@@ -42,7 +42,7 @@ tauri-plugin-clipboard-manager = "2"
 # Links that open the app (`<cli>://open?…`), and on computers, one app at a time, a second start (with a link or none)
 # showing the first; the window as big and where it was left.
 tauri-plugin-deep-link = "2"
-one-client = { path = ".." }
+onet = { path = "../../onet" }
 one = { path = "../..", default-features = false, features = ["web-bundle"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

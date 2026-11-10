@@ -130,7 +130,7 @@ pub fn open(url: String) -> Result<(), String> {
 
 /// Signs in in a Chrome Custom Tab, which comes back to the app's own link; a test's prints the link and waits for it
 /// to be opened.
-pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Result<(), one_client::sign_in::Failed> {
+pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Result<(), onet::sign_in::Failed> {
     signing.sign_in_here(join, |u| {
         if print {
             println!("Sign in: {u}");
@@ -163,7 +163,7 @@ pub fn text_scale() -> f64 {
 /// Once let in, in a build with pushes (a Firebase project in its config.toml): gives the push Worker this phone's FCM
 /// token, as it starts and whenever it changes (`register-push`); and asks the user, once, whether it may show
 /// notifications. Notes are opened with the device's key by Kotlin's `PushService`.
-pub fn let_in(device: Arc<one_client::Device>) {
+pub fn let_in(device: Arc<onet::Device>) {
     push(device, |token| one::push::Address { via: "fcm".into(), address: token, ..Default::default() });
     tell("notify", json!({ "ask": true, "once": true }));
 }

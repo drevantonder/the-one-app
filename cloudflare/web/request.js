@@ -1,4 +1,4 @@
-// The request path: a request to the user's nodes, as this device (the platform's `fetch`: in a browser, one-client's
+// The request path: a request to the user's nodes, as this device (the platform's `fetch`: in a browser, onet's
 // keyring in the SharedWorker, net.js; in the app, its own client), asked again while no node answers, watched for
 // this device being taken out, and traced in Developer mode.
 import { HEADER } from "../shared/protocol.js";
@@ -38,7 +38,7 @@ export async function api(path, { method = "GET", body, query, raw, signal, sinc
 }
 
 /// `api`'s request, each send's trace kept in `trace` if it has one. The device sends it again with the keys a node
-/// asks for (one-client's keyring); a request that doesn't reach a node is asked again here.
+/// asks for (onet's keyring); a request that doesn't reach a node is asked again here.
 async function sending(url, method, body, raw, signal, trace) {
   const user = platform.user();
   const joining = performance.now();

@@ -87,28 +87,28 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
     files
 }
 
-/// The client's build, as the web client fetches it (`/client/<version>/`): what its files hash to, so a browser
-/// keeps one for good. None if this build has no client (`update node` builds it, where Rust builds for WebAssembly).
-pub fn client_version() -> Option<String> {
+/// onet's build, as the web client fetches it (`/onet/<version>/`): what its files hash to, so a browser
+/// keeps one for good. None if this build has no onet (`update node` builds it, where Rust builds for WebAssembly).
+pub fn onet_version() -> Option<String> {
     use sha2::Digest;
     let mut hash = sha2::Sha256::new();
-    for (name, bytes) in crate::config::CLIENT {
+    for (name, bytes) in crate::config::ONET {
         hash.update(name.as_bytes());
         hash.update(bytes);
     }
-    (!crate::config::CLIENT.is_empty()).then(|| data_encoding::HEXLOWER.encode(&hash.finalize()[..8]))
+    (!crate::config::ONET.is_empty()).then(|| data_encoding::HEXLOWER.encode(&hash.finalize()[..8]))
 }
 
-/// The web client's files with the client that reaches nodes, at a path named by its build, which the page says (net.js):
-/// what the address serves browsers and what the native apps run. Without a client built (`CLIENT`), a page that has none.
+/// The web client's files with onet, at a path named by its build, which the page says (net.js):
+/// what the address serves browsers and what the native apps run. Without onet built (`ONET`), a page that has none.
 pub fn with_client() -> Vec<(String, Vec<u8>)> {
     let mut files = files();
-    if let Some(version) = client_version() {
-        for (name, bytes) in crate::config::CLIENT {
-            files.push((format!("client/{version}/{name}"), bytes.to_vec()));
+    if let Some(version) = onet_version() {
+        for (name, bytes) in crate::config::ONET {
+            files.push((format!("onet/{version}/{name}"), bytes.to_vec()));
         }
         if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
-            *page = String::from_utf8_lossy(page).replacen(r#"<meta name="one-client" content="">"#, &format!(r#"<meta name="one-client" content="{version}">"#), 1).into_bytes();
+            *page = String::from_utf8_lossy(page).replacen(r#"<meta name="onet" content="">"#, &format!(r#"<meta name="onet" content="{version}">"#), 1).into_bytes();
         }
     }
     files

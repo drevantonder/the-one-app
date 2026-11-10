@@ -105,7 +105,7 @@ fn signed_in(data: &std::path::Path) -> Result<(String, String, [u8; 32]), Strin
 }
 
 /// The running app's device if it's been let in, else one started from what it keeps.
-async fn device(mine: Option<Arc<one_client::Device>>) -> Result<Arc<one_client::Device>, String> {
+async fn device(mine: Option<Arc<onet::Device>>) -> Result<Arc<onet::Device>, String> {
     if let Some(d) = mine {
         return Ok(d);
     }
@@ -126,7 +126,7 @@ pub async fn run_here(kind: &str, input: &Value) -> Value {
 }
 
 /// One of them, with `mine`, the running app's device, or else one started here.
-async fn run(kind: &str, input: &Value, mine: Option<Arc<one_client::Device>>) -> Result<Value, String> {
+async fn run(kind: &str, input: &Value, mine: Option<Arc<onet::Device>>) -> Result<Value, String> {
     let text = |key: &str| input[key].as_str().map(str::to_string).ok_or_else(|| format!("{kind} wants {key}: see client/native/src/headless.rs"));
     match kind {
         "call" => {
@@ -145,7 +145,7 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<one_client::Device>>) -
         }
         "open-note" => {
             let (_, _, key) = signed_in(&data())?;
-            let (note, _) = one_client::open_note(key, &text("n")?).map_err(|e| e.to_string())?;
+            let (note, _) = onet::open_note(key, &text("n")?).map_err(|e| e.to_string())?;
             let mut out = json!({ "id": note.id, "title": note.title, "body": note.body, "app": note.app, "link": note.link(), "join": note.join() });
             // Absent, not null: Kotlin's optString reads a null as "null".
             out.as_object_mut().unwrap().retain(|_, v| !v.is_null());

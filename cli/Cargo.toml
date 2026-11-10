@@ -1,5 +1,5 @@
 # The `one` program: the CLI, MCP and the node it serves (src/main.rs and the modules beside it). A package of its own,
-# not the root's, since it's a client too: it signs in through `one-client`, which depends on `one` itself, and Cargo
+# not the root's, since it's a client too: it signs in through `onet`, which depends on `one` itself, and Cargo
 # allows no package to depend on its own dependent.
 [package]
 name = "one-cli"
@@ -21,7 +21,7 @@ path = "../tests/main.rs"
 
 [dependencies]
 one = { path = ".." }
-one-client = { path = "../client" }
+onet = { path = "../onet" }
 anyhow = "1"
 axum = "0.8"
 data-encoding = "2"

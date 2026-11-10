@@ -16,7 +16,7 @@ use one::call::Append;
 use one::database::stored::Db;
 use one::database::scopes::{Scope, ScopeDb, ScopeState};
 use one::keys::Hash;
-use one_client::js::Js;
+use onet::js::Js;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 

@@ -1,13 +1,13 @@
 [package]
-name = "one-client"
+name = "onet"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 publish = false
 
 # A library for every client (the CLI, native apps by FFI), and WebAssembly for browsers, built alone as a cdylib (with
-# an rlib beside it, LTO leaves a quarter more), as `update` builds it (dev/src/update.rs, `client`):
-#   cargo rustc -p one-client --profile web --target wasm32-unknown-unknown --crate-type cdylib
+# an rlib beside it, LTO leaves a quarter more), as `build::onet` builds it (src/build.rs):
+#   cargo rustc -p onet --profile web --target wasm32-unknown-unknown --crate-type cdylib
 # then wasm-bindgen --target web, and wasm-opt -Oz.
 [lib]
 doctest = false

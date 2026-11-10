@@ -13,7 +13,7 @@ export const network = () => store.state?.network;
 const customBuild = { name: document.querySelector('meta[name="application-name"]')?.content || "", cli: document.querySelector('meta[name="one-cli"]')?.content || "" };
 export const config = () => store.state?.config || customBuild;
 export const app = (name) => store.apps.find((a) => a.name === name);
-/// Whether an app's tool only reads, as its app says: only what such a call answered is kept (one-client's `answers`).
+/// Whether an app's tool only reads, as its app says: only what such a call answered is kept (onet's `answers`).
 export const reads = (name, tool) => !!app(name)?.tools?.some((t) => t.name === tool && t.reads === true);
 export const label = (a) => a?.title || a?.name || "";
 const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
@@ -81,7 +81,7 @@ let forgotten = false;
 export const keeping = () => !forgotten;
 
 /// What the client's own screens keep between visits, the window as it was last, the screens it showed and what their
-/// calls answered (the device's, one-client's `answers`): all forgotten with the sign-in.
+/// calls answered (the device's, onet's `answers`): all forgotten with the sign-in.
 export function forgetScreens() {
   forgotten = true;
   Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k.startsWith(LAST)).forEach((k) => localStorage.removeItem(k));

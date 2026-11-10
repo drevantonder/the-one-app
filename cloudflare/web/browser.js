@@ -1,6 +1,6 @@
 // The web client in a browser (platform.js): it signs in as an OAuth client of the network's auth (PKCE, and the
 // user's passkey at its sign-in page), keeps its refresh token in this browser, and is its user's device
-// (device.js, and one-client's keyring in the SharedWorker, net.js), let in by someone already in the network saying yes.
+// (device.js, and onet's keyring in the SharedWorker, net.js), let in by someone already in the network saying yes.
 import { browserKeys, browserName, codeOf, signingInFor } from "./device.js";
 import { del, get, put } from "./kept.js";
 import { net } from "./net.js";
@@ -16,7 +16,7 @@ const CLIENT = "one.client";
 /// Where auth sends this browser back to, signed in.
 const back = () => `${location.origin}/callback`;
 
-/// This browser as an OAuth client of its network's auth, each step one-client's (`sign_in`, in the worker, net.js's
+/// This browser as an OAuth client of its network's auth, each step onet's (`sign_in`, in the worker, net.js's
 /// `auth`): its registration and tokens kept here.
 const auth = {
   kept: () => JSON.parse(localStorage.getItem(KEPT) || "null"),
@@ -112,9 +112,9 @@ export function browser() {
   }
 
   /// This browser's key goes, signing out or starting over: a removed key can't be let in again, so signing in makes a
-  /// new one. With it, what it kept as that device: the nodes it asks, and what its keyring kept (one-client's
+  /// new one. With it, what it kept as that device: the nodes it asks, and what its keyring kept (onet's
   /// `keyring::Keep`: the network it was let into, who's who and what each kind of request needed), which the next
-  /// approval names again. As a native app's device forgets (one-client's `Device::sign_out`).
+  /// approval names again. As a native app's device forgets (onet's `Device::sign_out`).
   async function forgetDevice() {
     const user = auth.user();
     if (user) await Promise.all(["device", "joined", "nodes", "root", "welcome", "who.json", "needs.json", "invites.json"].map((k) => del(`${k}:${user}`))).catch(() => {});

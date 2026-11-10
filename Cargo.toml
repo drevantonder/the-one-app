@@ -1,8 +1,8 @@
 [workspace]
-members = [".", "cli", "dev", "cloudflare/node", "client", "client/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service"]
+members = [".", "cli", "dev", "cloudflare/node", "onet", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service"]
 # `cargo build` and `cargo test` here build the program too (cli/), as target/debug/one, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
-default-members = [".", "cli", "dev", "client", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service"]
+default-members = [".", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service"]
 
 [package]
 name = "one"
@@ -18,7 +18,7 @@ autotests = false
 [lib]
 doctest = false
 
-# `node`, the node on a machine; without it, only what the Cloudflare node (cloudflare/node/) and the clients (client/)
+# `node`, the node on a machine; without it, only what the Cloudflare node (cloudflare/node/) and onet (onet/)
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
@@ -233,7 +233,7 @@ incremental = true
 [profile.release.package.one-cloudflare-node]
 strip = false
 
-# The client's WebAssembly for browsers (client/src/wasm.rs), as small as it builds: every page load downloads it once.
+# onet's WebAssembly for browsers (onet/src/wasm.rs), as small as it builds: every page load downloads it once.
 [profile.web]
 inherits = "release"
 opt-level = "z"

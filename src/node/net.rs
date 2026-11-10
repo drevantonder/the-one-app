@@ -604,14 +604,14 @@ impl Node {
     /// held to devices and services.
     pub(super) fn close_removed(&self) {
         let (clients, held): (Vec<Key>, Vec<Key>) = (self.0.net.clients.lock().unwrap().keys().copied().collect(), self.0.net.conns.lock().unwrap().keys().copied().collect());
-        let (gone_clients, gone_held): (Vec<Key>, Vec<Key>) = self
+        let (gonets, gone_held): (Vec<Key>, Vec<Key>) = self
             .with(|i| {
                 let m = i.r.db();
                 // A session's endpoint, listed nowhere, is cut off at its next request instead.
-                let mut gone_clients = Vec::new();
+                let mut gonets = Vec::new();
                 for k in clients {
                     if m.machine_ever(&k)?.is_some() && m.client(&k)?.is_none() {
-                        gone_clients.push(k);
+                        gonets.push(k);
                     }
                 }
                 let mut gone_held = Vec::new();
@@ -620,12 +620,12 @@ impl Node {
                         gone_held.push(k);
                     }
                 }
-                Ok((gone_clients, gone_held))
+                Ok((gonets, gone_held))
             })
             // What can't be read closes nothing; the next look tries again.
             .inspect_err(|err| tracing::warn!("closing removed devices' connections: {err:#}"))
             .unwrap_or_default();
-        for key in gone_clients {
+        for key in gonets {
             for (conn, _) in self.0.net.clients.lock().unwrap().remove(&key).unwrap_or_default() {
                 conn.close(1u32.into(), b"removed from this network");
             }
@@ -736,7 +736,7 @@ impl Node {
     }
 
     /// Asks the client device `to` for its log, on a connection it opened to this node (`take_client`), where a client
-    /// answers whatever a node asks on one (client/src/lib.rs's `Asked`): → its answer, or None if it isn't connected here.
+    /// answers whatever a node asks on one (onet/src/lib.rs's `Asked`): → its answer, or None if it isn't connected here.
     pub(super) async fn ask_client(&self, to: &Key, ask: &Value) -> Result<Option<Value>> {
         let conn = self.0.net.clients.lock().unwrap().get(to).and_then(|open| open.iter().rev().map(|(c, _)| c).find(|c| c.close_reason().is_none()).cloned());
         let Some(conn) = conn else { return Ok(None) };

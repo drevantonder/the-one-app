@@ -159,7 +159,7 @@ struct Wasm<'a> {
 impl Wasm<'_> {
     /// → the folder it's in. It needs Rust's wasm32-unknown-unknown target, a clang that builds for it (SQLite is C), and the
     /// wasm-bindgen of the version it's built with. Its glue is only made again for what cargo built again: a build that
-    /// holds it (`CLOUDFLARE_NODE`, `CLIENT`) watches these files, so rewriting them would have that build done again.
+    /// holds it (`CLOUDFLARE_NODE`, `ONET`) watches these files, so rewriting them would have that build done again.
     fn build(&self, src: &Path, config: &Path) -> Result<PathBuf> {
         quietly(cargo().current_dir(src).env("CONFIG", config).args(self.cargo)).with_context(|| format!("build the {} (rustup target add wasm32-unknown-unknown)", self.what))?;
         let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
@@ -184,11 +184,11 @@ pub fn cloudflare_node(src: &Path, config: &Path, profile: &str) -> Result<PathB
     Wasm { what: "Cloudflare node", cargo: &["build", "--profile", profile, "-p", "one-cloudflare-node", "--target", "wasm32-unknown-unknown"], wasm, out, glued: "one_cloudflare_node_bg.wasm", shrink: false }.build(src, config)
 }
 
-/// Builds the client (`client/`) into WebAssembly for browsers, as small as it builds, and its JavaScript glue: → the
+/// Builds onet (`onet/`) into WebAssembly for browsers, as small as it builds, and its JavaScript glue: → the
 /// folder they're in.
-pub fn client(src: &Path, config: &Path) -> Result<PathBuf> {
-    let (wasm, out) = (src.join("target/wasm32-unknown-unknown/web/one_client.wasm"), src.join("target/client"));
-    Wasm { what: "client", cargo: &["rustc", "-p", "one-client", "--profile", "web", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib"], wasm, out, glued: "one_client_bg.wasm", shrink: true }.build(src, config)
+pub fn onet(src: &Path, config: &Path) -> Result<PathBuf> {
+    let (wasm, out) = (src.join("target/wasm32-unknown-unknown/web/onet.wasm"), src.join("target/onet"));
+    Wasm { what: "onet", cargo: &["rustc", "-p", "onet", "--profile", "web", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib"], wasm, out, glued: "onet_bg.wasm", shrink: true }.build(src, config)
 }
 
 /// A tool by its name, or where it's kept when a shell doesn't have it on its PATH: `probe` is an argument that makes it

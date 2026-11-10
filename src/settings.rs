@@ -1,7 +1,7 @@
 //! What a device changes of who can do what, signed by itself as its user's device: Settings' changes (roles, groups,
 //! handles, names, settings, removing a device or a user, the new epochs that go with it), letting devices in or
 //! turning them down, inviting someone new, and app schedules. Every device runs this one copy (`Me`): each client
-//! through its keyring (client/src/settings.rs), and a machine with a node as its own device, which its CLI and MCP
+//! through its keyring (onet/src/settings.rs), and a machine with a node as its own device, which its CLI and MCP
 //! use (src/node/settings.rs). Each is asked as a node's route of the same path (`ROUTES`).
 //!
 //! What it signs, it signs with what each device has (`keys::Signs`): a native app's key, a browser's WebCrypto key,

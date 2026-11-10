@@ -78,7 +78,7 @@ pub fn can_scan() -> bool {
 
 /// Signs in in the system's sign-in sheet, which comes back to the app's own link; a test's prints the link, to the
 /// loopback.
-pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Result<(), one_client::sign_in::Failed> {
+pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Result<(), onet::sign_in::Failed> {
     if print {
         return signing.sign_in(join, |u| Ok(println!("Sign in: {u}")));
     }
@@ -87,7 +87,7 @@ pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Resu
 
 /// In a build with pushes (Info.plist's `Push`), once it's let in: asks the user the first time, and gives the push
 /// Worker this iPhone's token, each start, as a token can change. Its notification extension opens each one.
-pub fn let_in(device: Arc<one_client::Device>) {
+pub fn let_in(device: Arc<onet::Device>) {
     if super::apple::info_true("Push") {
         push(device, |token| one::push::Address { via: "apns".into(), address: token, env: environment().into(), topic: crate::identifier().into(), keys: None });
     }
