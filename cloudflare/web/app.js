@@ -222,8 +222,8 @@ export function app(native) {
     },
     /// The sign-in screen (`props`, @one/ui's Welcome's); but first, where: an address, or an invite link to one.
     welcome(shown) {
-      // Visible on purpose: a store's reviewer has to find it, and Apple rejects hidden ways in.
-      const props = hasDemo ? { ...shown, other: { label: "Try a Demo", run: enterDemo } } : shown;
+      // After the menu has closed: WebKit drops a reload started while it does.
+      const props = hasDemo ? { ...shown, help: [{ label: "Try a Demo", run: () => setTimeout(enterDemo) }] } : shown;
       if (about.address) return h(ui.Welcome, props);
       const again = (problem, note) => show(platform.welcome({ ...shown, problem, note }));
       const take = async (typed) => {
@@ -239,7 +239,7 @@ export function app(native) {
       };
       const field = { label: "Address", placeholder: "one.example.com" };
       // A Mac whose own node is in no network yet joins one with a pairing code.
-      const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing(() => again()) } : props.other;
+      const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing(() => again()) } : undefined;
       return h(ui.Welcome, { ...props, field, action: { label: "Sign In", invite: "Open Invite", run: take }, other });
     },
 

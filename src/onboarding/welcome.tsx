@@ -1,6 +1,8 @@
 import { Problem } from "@/components/problem"
 import * as React from "react"
+import { Icon } from "@/components/icon"
 import { Button } from "@/components/ui/button"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { appear, rise, transition } from "./motion"
@@ -27,11 +29,11 @@ function Stage({ logo, children }: { logo?: string; children: React.ReactNode })
 /// and `title`; `text`, a grey line under it; `field`, what to type first (a native app's address, a sign-in code),
 /// which the button runs with; `children`, what the page lists; `callout`, what to know before going on;
 /// `action`, the one thing to do, if any, as a button that runs or a link, named `invite` instead when what's typed is an invite
-/// link; `other`, a second way in (a Mac's Join with a Pairing Code), or back from it; `note`, a grey line under them;
+/// link; `other`, a second way in (a Mac's Join with a Pairing Code), or back from it; `help`, what the corner's menu offers; `note`, a grey line under them;
 /// `problem`, why the last try didn't work. Near the top, not centred: what comes in later (a problem, a client's name)
 /// grows it down, never moving what's already there. A text, a callout, a note and a problem have their places even when empty, for a
 /// page's script to fill.
-function Welcome({ logo, title, text, field, callout, children, action, other, note, problem }: {
+function Welcome({ logo, title, text, field, callout, children, action, other, help, note, problem }: {
   logo?: string
   title: string
   text?: string
@@ -40,6 +42,7 @@ function Welcome({ logo, title, text, field, callout, children, action, other, n
   children?: React.ReactNode
   action?: { label: string; invite?: string; run?: (typed?: string) => unknown; href?: string }
   other?: { label: string; run?: () => unknown; href?: string }
+  help?: { label: string; run: () => unknown }[]
   note?: string
   problem?: string
 }) {
@@ -54,6 +57,16 @@ function Welcome({ logo, title, text, field, callout, children, action, other, n
   React.useLayoutEffect(() => { if (problem) appear(told.current!) }, [problem])
   return (
     <Stage logo={logo}>
+        {help && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="Help" data-slot="welcome-help" className="fixed top-[max(0.75rem,env(safe-area-inset-top))] right-3 text-muted-foreground"><Icon name="question" className="size-5" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {help.map((h) => <DropdownMenuItem key={h.label} onSelect={h.run}>{h.label}</DropdownMenuItem>)}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <h1 data-slot="welcome-title" className="mt-2 text-3xl font-semibold tracking-tight text-balance">{title}</h1>
         <p data-slot="welcome-text" className="text-sm text-balance text-muted-foreground empty:hidden">{text}</p>
         {field && (
