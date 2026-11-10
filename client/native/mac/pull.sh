@@ -94,7 +94,8 @@ build_here() {
 	fi
 	rm -f failed
 	if [ -n "$signer" ]; then
-		ditto -c -k --keepParent "$HOME/Applications/$name.app" app.zip && "$bin" publish-app --zip "$c/app.zip" --config "${want_config:--}" > publish.log 2>&1 || true
+		# launchd's shell doesn't read ~/.profile, where the password manager's sign-in is: without it, op asks on the Mac's screen.
+		ditto -c -k --keepParent "$HOME/Applications/$name.app" app.zip && (set +u; . "$HOME/.profile" > /dev/null 2>&1; "$bin" publish-app --zip "$c/app.zip" --config "${want_config:--}") > publish.log 2>&1 || true
 	fi
 }
 
