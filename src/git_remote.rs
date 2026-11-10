@@ -50,6 +50,9 @@ pub fn run(args: &[String]) -> Result<i32> {
         .env(format!("GIT_CONFIG_VALUE_{}", config + 1), "basic")
         .env_remove("no_proxy")
         .env_remove("NO_PROXY")
+        // In a partial clone git's transport can ask for a missing object, which git fetches by this helper, whose transport
+        // asks again: without end, thousands of processes deep.
+        .env("GIT_NO_LAZY_FETCH", "1")
         .status()
         .context("couldn't run git's HTTP transport")?;
     Ok(status.code().unwrap_or(128))
