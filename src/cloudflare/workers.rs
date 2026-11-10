@@ -1427,7 +1427,6 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &[(Str
 
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &[(String, Vec<u8>)], workers: &[&Worker]) -> Result<()> {
     ensure!(settings.throwaway_user.is_none(), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network");
-    ensure!(settings.telemetry.is_some(), "telemetry isn't set up in Basin for this network, so there's nowhere for its Worker to write");
     if workers.iter().any(|w| w.serves_web) {
         parses(web)?;
     }

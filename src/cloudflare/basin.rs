@@ -24,9 +24,10 @@ pub const TABLES: &[(&str, &[Column])] = &[
 const NAMESPACE: &str = "telemetry";
 /// How often a sink rolls a file: how long a row takes to be read. Cloudflare's default never showed new rows.
 const ROLL_SECONDS: u64 = 10;
-/// The Cloudflare permission groups of the Worker's own token, "Workers R2 SQL Read", "Workers R2 Data Catalog Write" and
-/// "Workers R2 Storage Write".
-const WORKER_PERMISSIONS: [&str; 3] = ["f45430d92e2b4a6cb9f94f2594c141b8", "d229766a2f7f4d299f20eaa8c9b1fde9", "bf7481a1826f439697cb59a20b22293e"];
+/// The Cloudflare permission groups of the Worker's own token: on the account "Workers R2 SQL Read", which SQL refuses to
+/// take for one bucket, and on the bucket Basin's catalog and its objects, which a sink writes with.
+const ACCOUNT_PERMISSIONS: [&str; 1] = ["f45430d92e2b4a6cb9f94f2594c141b8"];
+const BUCKET_PERMISSIONS: [&str; 3] = ["d229766a2f7f4d299f20eaa8c9b1fde9", "6a018a9f2fc74eb6b293b0c548f38b39", "2efd5506f9c8494dacb1fa10a3e7d5b6"];
 
 /// The permissions the API token a deploy uses needs for this. An error saying "Unauthorized" doesn't say which.
 const NEEDS: &str = "Account API Tokens Write, Pipelines Write, Workers R2 Data Catalog Write and Workers R2 Storage Write";
@@ -94,8 +95,12 @@ pub fn provision(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
 /// A token only for that bucket's SQL, catalog and files: what the Worker reads with and the sinks write with.
 fn worker_token(cf: &Cloudflare, account: &str, bucket: &str) -> Result<String> {
     let resource = format!("com.cloudflare.edge.r2.bucket.{account}_default_{bucket}");
-    let groups: Vec<Value> = WORKER_PERMISSIONS.iter().map(|id| json!({ "id": id })).collect();
-    let made = cf.post(&format!("/accounts/{account}/tokens"), json!({ "name": format!("{}-telemetry", crate::config::CLI), "policies": [{ "effect": "allow", "resources": { resource: "*" }, "permission_groups": groups }] }))?;
+    let groups = |ids: &[&str]| ids.iter().map(|id| json!({ "id": id })).collect::<Vec<Value>>();
+    let policies = json!([
+        { "effect": "allow", "resources": { format!("com.cloudflare.api.account.{account}"): "*" }, "permission_groups": groups(&ACCOUNT_PERMISSIONS) },
+        { "effect": "allow", "resources": { resource: "*" }, "permission_groups": groups(&BUCKET_PERMISSIONS) },
+    ]);
+    let made = cf.post(&format!("/accounts/{account}/tokens"), json!({ "name": format!("{}-telemetry", crate::config::CLI), "policies": policies }))?;
     Ok(made["value"].as_str().context("Cloudflare made the token and didn't give its value")?.to_string())
 }
 
@@ -115,7 +120,7 @@ fn pipeline(cf: &Cloudflare, account: &str, bucket: &str, token: &str, table: &s
         }
     };
     if existing("sinks", &sink)?.is_none() {
-        cf.post(&format!("{base}/sinks"), json!({ "name": sink, "type": "r2_data_catalog", "format": { "type": "parquet", "compression": "zstd" }, "schema": { "fields": fields(columns) }, "config": { "account_id": account, "bucket": bucket, "namespace": NAMESPACE, "table_name": table, "token": token, "rolling_policy": { "interval_seconds": ROLL_SECONDS } } }))?;
+        cf.post(&format!("{base}/sinks"), json!({ "name": sink, "type": "basin_catalog", "format": { "type": "parquet", "compression": "zstd" }, "schema": { "fields": fields(columns) }, "config": { "account_id": account, "bucket": bucket, "namespace": NAMESPACE, "table_name": table, "token": token, "rolling_policy": { "interval_seconds": ROLL_SECONDS } } }))?;
     }
     if existing("pipelines", &pipeline)?.is_none() {
         cf.post(&format!("{base}/pipelines"), json!({ "name": pipeline, "sql": format!("INSERT INTO {sink} SELECT * FROM {stream}") }))?;
