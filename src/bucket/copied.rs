@@ -1,7 +1,10 @@
-//! The network's bucket as a device on a machine reads it: every database step and copy it reads or writes is kept on
-//! its own disk too, sealed as it is in the bucket, so it reads each from the bucket once. Each is written once, at a
-//! name its seal binds it to, so what's kept here can only be behind the bucket, never different from it; holding it
-//! opens nothing without the key. Everything else (keys, hints, leases) is read from the bucket each time.
+//! The network's bucket as a device on a machine reads it: every database step and copy it reads or writes, and every
+//! key sealed in it (an epoch's to each device, an app's under each epoch, a Vault's to each machine), is kept on its
+//! own disk too, sealed as it is in the bucket, so it reads each from the bucket once. Each is written once, at a name
+//! its seal binds it to, so what's kept here can only be behind the bucket, never different from it; holding it opens
+//! nothing without the key. A removal or a new recovery key seals new keys at new names, never over old ones, and an
+//! app's keys erased are forgotten here as they're deleted there (`Copied::forget`). What isn't there yet is asked of
+//! the bucket again, and everything else (hints, leases) is read from it each time.
 //!
 //! Devices tell each other a "something changed" notice over iroh, which is only a hint: each reads what changed from
 //! the bucket, and every two minutes (`node::REFILL`) fills its copy from the bucket anyway, for a notice that was lost. A read uses the
@@ -114,11 +117,20 @@ impl<B: Bucket + Clone> Copied<B> {
 }
 
 /// Whether an object is written once and kept here: a database's step, the signature beside one, or a copy, named by
-/// its 12-digit position.
+/// its 12-digit position; or a key sealed in a scope (`keys`): an app's in an epoch, or an epoch's or a Vault's sealed to
+/// someone.
 fn kept(name: &str) -> bool {
-    let mut segments = name.rsplit('/');
-    let position = |last: &str| last.len() == crate::protocol::STEP_DIGITS && last.bytes().all(|b| b.is_ascii_digit());
-    segments.next().is_some_and(|last| position(last.strip_suffix(".sig").unwrap_or(last))) && name.split('/').count() > 1 && name.split('/').all(segment)
+    let parts: Vec<&str> = name.split('/').collect();
+    let number = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let position = |last: &str| last.len() == crate::protocol::STEP_DIGITS && number(last);
+    parts.len() > 1
+        && parts.iter().all(|s| segment(s))
+        && match parts[..] {
+            [_, _, "_key", n] => number(n),
+            [_, "_epochs" | "_vault", n, _] => number(n),
+            [.., last] => position(last.strip_suffix(".sig").unwrap_or(last)),
+            [] => false,
+        }
 }
 
 /// This device's reads of the bucket since `take_reads` last took them, by kind of object and whether it was there.
