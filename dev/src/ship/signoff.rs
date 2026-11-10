@@ -145,14 +145,16 @@ pub(super) fn to_send() -> Result<At> {
     At::at(Some(&main[newest]))
 }
 
-/// `ship [<commit>] [--timeout <10m>]`: sends what's tested and returns when every device runs it, or says which doesn't and why.
+/// `ship [<commit>] [--timeout <9m>]`: sends what's tested and returns when every device runs it, or says which doesn't and why,
+/// within `limit` of starting, waiting at least a minute.
 pub(super) fn ship(commit: Option<&str>, limit: Duration) -> Result<()> {
+    let started = Instant::now();
     keep_history()?;
     let wanted = named_commit(commit)?;
     ensure!(on_main(&wanted), "{} isn't on main: push it first", short(&wanted));
     let at = update(None, false)?;
     ensure!(has(&wanted, &at.build_name(), &mut Default::default()), "{} isn't tested, so it didn't go out: {CLI}-dev signoff tested --ran \"<the tests you chose>\" in a checkout of it", short(&wanted));
-    wait_until(&at.build_name(), &[], limit)?;
+    wait_until(&at.build_name(), &[], limit.saturating_sub(started.elapsed()).max(Duration::from_secs(60)))?;
     keep(Stage::Running, &at.commit, "Every device online then took it");
     prune()?;
     println!("{}", effect_of(&at.build_name()));

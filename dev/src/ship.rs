@@ -39,11 +39,11 @@ pub fn commands() -> one::cli::Command {
             form("update [workers|web|apps|services|mac|node|dev] [--release]", format!("send out the part named, built and sent on its own, or, with none, each that changed, in order: apps, mac, services, node, workers, web, dev. A part with nothing changed does nothing, and each keeps the commit it sent. --release has a Mac notarize its app. Run it on a device with the release key: {CLI}-dev changes says what's due")),
             form("signoff tested --ran <the tests you chose>", "sign this checkout's pushed commit off as tested: it compiles, its screens type-check and build as committed, and you say which tests you ran. Sending takes only a commit signed off this way".into()),
             form("signoff seen [<commit>] --checked <what you checked>", "sign a commit off as seen working where it went: the last thing a change needs".into()),
-            form("ship [<commit>] [--timeout <30m>]", "send out what's tested, as a plain update does, and return when every device online runs it, or say which doesn't and why".into()),
+            form("ship [<commit>] [--timeout <9m>]", "send out what's tested, as a plain update does, and return when every device online runs it, or say which doesn't and why; run again to wait on".into()),
             form("unfinished [--here]", "the changes from the last day that aren't yet tested, sent, running everywhere and seen, or with --here only those this checkout made, and what each needs next".into()),
             form("release <vX.Y.Z>", "publish main's tip's build on GitHub for the installer, with the Linux app and the app a Mac published for it".into()),
             form("web bundle [--out <folder>]", "write this build's web client as a bundle for the native apps, ready to sign".into()),
-            form("status --until <commit> [--device <name>[,<name>…]] [--timeout <10m>]", "wait until every device online now, or those named (online or not), runs that commit, or a later build, and its services answer, or a build fails; names offline devices and how far behind they are without waiting for them, and fails unless all it waited for made it".into()),
+            form("status --until <commit> [--device <name>[,<name>…]] [--timeout <9m>]", "wait until every device online now, or those named (online or not), runs that commit, or a later build, and its services answer, or a build fails; names offline devices and how far behind they are without waiting for them, and fails unless all it waited for made it".into()),
         ],
         run: |g| {
             match g.words().as_slice() {
@@ -59,7 +59,7 @@ pub fn commands() -> one::cli::Command {
                 }
                 ["ship"] | ["ship", _] => {
                     g.takes_only(&["timeout"])?;
-                    ship(g.words().get(1).copied(), wait::limit(g, 30 * 60)?)?
+                    ship(g.words().get(1).copied(), wait::limit(g, wait::CALL)?)?
                 }
                 ["unfinished"] => {
                     g.takes_only(&["here"])?;

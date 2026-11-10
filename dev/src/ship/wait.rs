@@ -13,12 +13,16 @@ pub(super) fn devices() -> Vec<Value> {
 pub fn wait(g: &one::cli::Given) -> Result<()> {
     g.takes_only(&["until", "device", "timeout"])?;
     let names: Vec<String> = g.values("device").iter().flat_map(|d| d.split(',')).map(str::to_string).collect();
-    let limit = limit(g, 10 * 60)?;
+    let limit = limit(g, CALL)?;
     let commit = g.flag("until").unwrap_or_default().to_lowercase();
     let (code, config) = named(&commit);
     ensure!(code.len() >= 7 && [code, config.unwrap_or("0")].iter().all(|c| c.chars().all(|c| c.is_ascii_hexdigit())), "give the commit, or a custom build's <commit>-<config>: {CLI}-dev status --until $(git rev-parse HEAD)");
     wait_until(&commit, &names, limit)
 }
+
+/// How long a wait takes unless told: an agent's harness cuts a call off at 10 minutes, so it ends before that and says
+/// how to go on.
+pub(super) const CALL: u64 = 9 * 60;
 
 /// `--timeout`, or `default` seconds.
 pub(super) fn limit(g: &one::cli::Given, default: u64) -> Result<Duration> {
@@ -197,7 +201,7 @@ pub(super) fn wait_for(commit: &str, wanted: &[Value], named: bool, limit: Durat
             for (key, name, _) in &open {
                 println!("  {name}: {}", reasons.get(key).map_or("not answering".to_string(), |r| r.clone()));
             }
-            println!("Gave up waiting for {short} after {}s.", limit.as_secs());
+            println!("Gave up waiting for {short} after {}s. The same command again waits on from here.", limit.as_secs());
             bail!("not every device runs {short}");
         }
         std::thread::sleep(Duration::from_secs(3));
