@@ -29,6 +29,9 @@ pub struct Windows;
 const OVMF_CODE: &str = "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd";
 const WINDOWS_USER: &str = "one";
 
+/// How long Windows booted from its disk stays up before its own restarts are over.
+const SETTLED: Duration = Duration::from_secs(120);
+
 /// A device's bases: what its copies are made on, each a folder with a copy of its disk, UEFI variables and TPM (and
 /// its saved state, if it was stopped), taken when it's first copied and used for each copy after until it next stops.
 /// bases/current names the one copies are made on now; another is deleted once no copy is on it (`prune_bases`), never
@@ -140,8 +143,14 @@ impl Kind for Windows {
             Err(err) => tracing::warn!("{} didn't carry on where it stopped, so it boots: {err:#}", v.name),
         }
         self.launch(v, None)?;
-        if !super::wait_for(Duration::from_secs(240), Duration::from_secs(5), || self.ssh(v, "echo ready").is_ok()) {
-            bail!("{} started but didn't answer in 4 minutes: look at it with screen", v.name);
+        // Booted from a disk a power cut left, Windows finishes its servicing by restarting itself, once or twice in
+        // the first minutes of a boot (the saved state is the way round it), and its SSH server answers before each
+        // restart and is gone for a minute after. It's ready once it has stayed up for SETTLED.
+        if !super::wait_for(Duration::from_secs(8 * 60), Duration::from_secs(5), || {
+            let up = self.ssh(v, "[int]((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalSeconds");
+            up.ok().and_then(|s| s.trim().parse::<u64>().ok()).is_some_and(|s| s >= SETTLED.as_secs())
+        }) {
+            bail!("{} started but wasn't up and answering for {} seconds in 8 minutes: look at it with screen", v.name, SETTLED.as_secs());
         }
         Ok(())
     }
