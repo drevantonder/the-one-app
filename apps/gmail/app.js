@@ -4,7 +4,7 @@
 // every Google app: see google/google.js.
 
 import settings from "./dist/settings.html" with { type: "text" };
-import { google } from "./google/google.js";
+import { google, refusal } from "./google/google.js";
 
 const SCOPES = "openid email https://www.googleapis.com/auth/gmail.modify";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me/";
@@ -155,7 +155,7 @@ function address(a) {
     else email = String(a).trim();
   }
   email = email.replace(/[\r\n]/g, "");
-  if (!/^[^\s@<>,]+@[^\s@<>,]+$/.test(email)) throw new Error(`"${email || a}" isn't an email address`);
+  if (!/^[^\s@<>,]+@[^\s@<>,]+$/.test(email)) throw refusal(`"${email || a}" isn't an email address`);
   name = name.replace(/[\r\n]+/g, " ").trim();
   if (!name) return email;
   if (!ASCII.test(name) || name.includes("{{")) return `${word(name)} <${email}>`;
@@ -177,18 +177,18 @@ const TYPES = {
 /// The files to attach, each { name, type?, base64 | data (base64) | blob or file (a blob's hash) }.
 async function files(ctx, given) {
   const list = given || [];
-  if (list.length > MOST_FILES) throw new Error(`at most ${MOST_FILES} attachments`);
+  if (list.length > MOST_FILES) throw refusal(`at most ${MOST_FILES} attachments`);
   let total = 0;
   const out = [];
   for (const f of list) {
-    if (!f?.name) throw new Error("each attachment needs a name");
+    if (!f?.name) throw refusal("each attachment needs a name");
     let bytes;
     if (f.blob || f.file) bytes = await ctx.blob.get(f.blob || f.file);
     else if ((f.base64 ?? f.data) != null) {
-      try { bytes = fromB64(f.base64 ?? f.data); } catch { throw new Error(`attachment ${f.name} isn't base64`); }
-    } else throw new Error(`attachment ${f.name} needs base64 or blob`);
+      try { bytes = fromB64(f.base64 ?? f.data); } catch { throw refusal(`attachment ${f.name} isn't base64`); }
+    } else throw refusal(`attachment ${f.name} needs base64 or blob`);
     total += bytes.length;
-    if (total > MOST_BYTES) throw new Error("attachments may be 25 MB in all");
+    if (total > MOST_BYTES) throw refusal("attachments may be 25 MB in all");
     out.push({ name: String(f.name).replace(/[\r\n"]/g, ""), type: f.type || TYPES[f.name.split(".").pop().toLowerCase()] || "application/octet-stream", bytes });
   }
   return out;
@@ -276,7 +276,7 @@ const writing = {
   },
 };
 const list = (v) => (v == null ? [] : (Array.isArray(v) ? v : [v]).flatMap((s) => String(s).split(",")).map((s) => s.trim()).filter(Boolean));
-const need = (v, what) => { if (!String(v ?? "").trim()) throw new Error(`give ${what}`); return String(v).trim(); };
+const need = (v, what) => { if (!String(v ?? "").trim()) throw refusal(`give ${what}`); return String(v).trim(); };
 const noMessage = (id) => `no message ${id}: message ids come from gmail_search`;
 const noDraft = (id) => `no draft ${id}: draft ids come from gmail_drafts`;
 const more = (token) => (token ? `\n\nMore: give pageToken ${token}` : "");
@@ -385,9 +385,9 @@ export default {
         id = need(id, "id: a message's id, from gmail_search");
         const m = await api(ctx, email, "GET", `messages/${encodeURIComponent(id)}`, { query: { format: "full" }, missing: noMessage(id) });
         const all = attachments(m.payload);
-        if (!all.length) throw new Error(`message ${id} has no attachments`);
+        if (!all.length) throw refusal(`message ${id} has no attachments`);
         const f = name ? all.find((x) => x.name === name) || all.find((x) => x.name.toLowerCase().includes(String(name).toLowerCase())) : all[(Number(number) || 1) - 1];
-        if (!f) throw new Error(`no attachment ${name ? `"${name}"` : number} on message ${id}; it has: ${all.map((x, i) => `${i + 1}. ${x.name}`).join(", ")}`);
+        if (!f) throw refusal(`no attachment ${name ? `"${name}"` : number} on message ${id}; it has: ${all.map((x, i) => `${i + 1}. ${x.name}`).join(", ")}`);
         const data = f.id ? (await api(ctx, email, "GET", `messages/${encodeURIComponent(m.id)}/attachments/${encodeURIComponent(f.id)}`)).data : f.data;
         const bytes = fromB64(data || "");
         return { name: f.name, type: f.type, size: bytes.length, base64: toB64(bytes) };
@@ -418,12 +418,12 @@ export default {
       async run(ctx, { account: a, ids: given, addLabelIds: add, removeLabelIds: remove }) {
         const email = await account(ctx, a);
         const which = list(given);
-        if (!which.length) throw new Error("give ids: messages' ids, from gmail_search");
-        if (list(add).length + list(remove).length === 0) throw new Error("give addLabelIds or removeLabelIds: label ids or names, as gmail_labels lists them");
+        if (!which.length) throw refusal("give ids: messages' ids, from gmail_search");
+        if (list(add).length + list(remove).length === 0) throw refusal("give addLabelIds or removeLabelIds: label ids or names, as gmail_labels lists them");
         const { labels = [] } = await api(ctx, email, "GET", "labels");
         const resolve = (names) => list(names).map((g) => {
           const l = labels.find((l) => l.id === g || l.name.toLowerCase() === g.toLowerCase());
-          if (!l) throw new Error(`no label "${g}": gmail_labels lists them`);
+          if (!l) throw refusal(`no label "${g}": gmail_labels lists them`);
           return l;
         });
         const [adding, removing] = [resolve(add), resolve(remove)];
@@ -444,7 +444,7 @@ export default {
       async run(ctx, { account: a, ids: given }) {
         const email = await account(ctx, a);
         const which = list(given);
-        if (!which.length) throw new Error("give ids: messages' ids, from gmail_search");
+        if (!which.length) throw refusal("give ids: messages' ids, from gmail_search");
         for (const [i, one] of which.entries()) {
           try { await api(ctx, email, "POST", `messages/${encodeURIComponent(one)}/trash`, { missing: noMessage(one) }); } catch (e) { throw new Error(i ? `trashed ${i} of ${which.length}, then ${e.message}` : e.message); }
         }
@@ -521,7 +521,7 @@ export default {
       async run(ctx, input) {
         const email = await account(ctx, input.account);
         const d = await compose(ctx, email, input);
-        if (!d.to.length && !d.cc.length && !d.bcc.length) throw new Error("give to: who it's to, or reply_to a message");
+        if (!d.to.length && !d.cc.length && !d.bcc.length) throw refusal("give to: who it's to, or reply_to a message");
         const sent = await upload(ctx, email, "POST", "messages/send", d, d.thread ? { threadId: d.thread } : {});
         return `Sent, as message ${sent.id}.`;
       },

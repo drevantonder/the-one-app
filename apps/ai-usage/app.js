@@ -8,6 +8,9 @@
 
 import main from "./dist/main.html" with { type: "text" };
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 const FRESH = 5 * 60 * 1000;
 const KEEP = 30 * 86400 * 1000;
 const PRUNE = () => Date.now() - KEEP;
@@ -348,7 +351,7 @@ export default {
       },
       async run(ctx, { provider = "all", format = "text", device } = {}) {
         const b = ctx.user;
-        if (!b) throw new Error("your own data is on one of your devices: run it there");
+        if (!b) throw refusal("your own data is on one of your devices: run it there");
         const now = ctx.now();
         const ids = provider === "all" ? Object.keys(PROVIDERS) : [provider];
         let asked = null;

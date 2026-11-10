@@ -3,6 +3,7 @@
 // jsdiff for line diffs: hunks with context, and it gives up on huge rewrites instead of running for minutes.
 import { structuredPatch } from "diff";
 import { objects } from "./git.js";
+import { refusal } from "./shapes.js";
 
 const PAGE = 25;
 const PREVIEW = 1 << 20; // bigger files aren't shown
@@ -20,7 +21,7 @@ export async function open(ctx, g, r, ref) {
   ref ||= branches.find((b) => b.branch === "main")?.branch || branches[0].branch;
   const b = branches.find((x) => x.branch === ref);
   const sha = b ? b.head : SHA.test(ref) && o.has(ref) ? ref : null;
-  if (!sha) throw new Error(`There's no branch or commit ${ref} in ${r.path}`);
+  if (!sha) throw refusal(`There's no branch or commit ${ref} in ${r.path}`);
   return { r, o, branches, ref, sha, branch: b ? ref : null };
 }
 
@@ -52,7 +53,7 @@ export async function tree(ctx, g, { repo, ref, path = "" }) {
   const info = { repo: r.path, branches: branches.map((b) => b.branch), ref: name, branch, path };
   if (!sha) return { ...info, empty: true, entries: [] };
   const here = at(o, sha, path);
-  if (!here) throw new Error(`There's no ${path} in ${repo.path} at ${branch || sha.slice(0, 7)}`);
+  if (!here) throw refusal(`There's no ${path} in ${repo.path} at ${branch || sha.slice(0, 7)}`);
   if (here.type !== "tree") return { ...info, commit: summary(o.commit(sha)), file: true };
   const entries = sorted(o.tree(here.sha)).map((e) => ({ name: e.name, type: e.type, mode: e.mode, sha: e.sha }));
   const rm = entries.filter((e) => e.type === "blob" && README.test(e.name)).sort((a, b) => /\.md$/i.test(b.name) - /\.md$/i.test(a.name))[0];
@@ -66,9 +67,9 @@ export async function tree(ctx, g, { repo, ref, path = "" }) {
 
 export async function file(ctx, g, { repo, ref, path }) {
   const { o, ref: name, sha, branch, branches } = await open(ctx, g, repo, ref);
-  if (!sha) throw new Error(`${repo.path} has no code yet`);
+  if (!sha) throw refusal(`${repo.path} has no code yet`);
   const e = at(o, sha, path || "");
-  if (!e || e.type === "tree") throw new Error(`There's no file ${path} in ${repo.path}`);
+  if (!e || e.type === "tree") throw refusal(`There's no file ${path} in ${repo.path}`);
   const info = { repo: repo.path, ref: name, branch, sha, path, branches: branches.map((b) => b.branch), mode: e.mode, latest: summary(o.commit(last(o, sha, path) || sha)) };
   if (e.type === "commit") return { ...info, submodule: e.sha, size: 0 };
   const bytes = o.blob(e.sha);
@@ -223,7 +224,7 @@ export async function commit(ctx, g, { repo, sha }) {
 export async function diff(ctx, g, { repo, sha, path }) {
   const { o } = await open(ctx, g, repo, sha);
   const r = changes(o, o.commit(sha)).find((x) => x.path === path);
-  if (!r) throw new Error(`There's no change to ${path} in ${sha.slice(0, 7)}`);
+  if (!r) throw refusal(`There's no change to ${path} in ${sha.slice(0, 7)}`);
   return { ...row(r), ...diffFile(o, r, true) };
 }
 

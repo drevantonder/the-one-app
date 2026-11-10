@@ -8,6 +8,9 @@
 // adds this app's scopes to it (incremental consent). Google sends the browser back to the network's address, which
 // opens this app's settings screen (./settings.jsx) to finish; the verifier waits for it in this app's own data.
 
+/// What's the caller's to change: nothing broke.
+export const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 const OAUTH = "oauth2.googleapis.com";
 
 const WAITS = 30 * 60_000;
@@ -17,7 +20,7 @@ const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-"
 // Where Google sends the browser back: the network's address, which opens this app's settings screen to finish. The
 // Google sign-in (a Web application client) lists it as an authorized redirect URI.
 function redirect(ctx) {
-  if (!ctx.address) throw new Error("This device is out of date: update it, then sign in again");
+  if (!ctx.address) throw refusal("This device is out of date: update it, then sign in again");
   return `${ctx.address}/back`;
 }
 
@@ -53,7 +56,7 @@ async function accountItems(ctx) {
 }
 
 async function accounts(ctx) {
-  if (!ctx.user) throw new Error("this device doesn't keep your data, so it can't reach your accounts: use one of your own devices");
+  if (!ctx.user) throw refusal("this device doesn't keep your data, so it can't reach your accounts: use one of your own devices");
   return (await accountItems(ctx)).map((i) => i.fields.email.value);
 }
 
@@ -82,7 +85,7 @@ export function google({ app, title, scopes, base }) {
     if (!name) return all[0];
     const n = String(name).toLowerCase();
     const found = all.find((e) => e.toLowerCase() === n) || (all.filter((e) => e.toLowerCase().includes(n)).length === 1 && all.find((e) => e.toLowerCase().includes(n)));
-    if (!found) throw new Error(`no single account matches "${name}"; they are: ${all.join(", ")}`);
+    if (!found) throw refusal(`no single account matches "${name}"; they are: ${all.join(", ")}`);
     return found;
   }
 
@@ -93,7 +96,7 @@ export function google({ app, title, scopes, base }) {
   async function token(ctx, email) {
     const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
     if (!item) throw Object.assign(new Error(`Sign in to ${email} first: ${app}_sign_in signs it in`), { code: "not_signed_in" });
-    if (!allowed(item)) throw new Error(`Needs signing in again, to allow ${title}: ${app}_sign_in with account ${email} signs it in`);
+    if (!allowed(item)) throw refusal(`Needs signing in again, to allow ${title}: ${app}_sign_in with account ${email} signs it in`);
     const key = `${ctx.user.id}/${email}`;
     const t = tokens.get(key);
     if (t && t.expires > Date.now() + 60_000) return t.value;
@@ -143,13 +146,13 @@ export function google({ app, title, scopes, base }) {
     const waiting = await ctx.user.query("select state, verifier, client from pending where at >= ?", [Date.now() - WAITS]);
     const p = state ? waiting.find((w) => w.state === state) : waiting.length === 1 ? waiting[0] : null;
     if (!p) {
-      if (!state && waiting.length > 1) throw new Error("More than one sign-in is waiting: give the whole address the browser came back to, not just its code.");
+      if (!state && waiting.length > 1) throw refusal("More than one sign-in is waiting: give the whole address the browser came back to, not just its code.");
       throw Object.assign(new Error(`Start signing in again: no sign-in is waiting for that address; ${app}_sign_in starts one`), { code: "not_waiting" });
     }
     const refused = params?.get("error");
     if (refused) return failed(ctx, p.state, `Google didn't sign you in (${refused}). Try again: ${app}_sign_in starts again.`);
     const code = params ? params.get("code") : s;
-    if (!code) throw new Error("That address has no code. Copy the whole address the browser ended up on.");
+    if (!code) throw refusal("That address has no code. Copy the whole address the browser ended up on.");
     const client = (await ctx.vault.items()).find((i) => i.id === p.client && i.fields.client_secret) || await googleClient(ctx);
     if (!client) throw noClient();
     const r = await fetch(`https://${OAUTH}/token`, {
@@ -209,7 +212,7 @@ export function google({ app, title, scopes, base }) {
         properties: { url: { type: "string", description: "for the user to open and sign in at" }, then: { type: "string", description: "what happens next, in words" } },
       },
       async run(ctx, { account }) {
-        if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
+        if (!ctx.user) throw refusal("this device doesn't keep your data: use one of your own devices");
         return {
           url: await startSignIn(ctx, account),
           then: `The user opens url and signs in, and Google sends them back to finish; ${app}_accounts then lists the account. If it doesn't, give the address their browser came back to to ${app}_finish_sign_in.`,
@@ -267,9 +270,9 @@ export function google({ app, title, scopes, base }) {
       let message = text.slice(0, 300) || r.statusText;
       try { message = JSON.parse(text).error?.message || message; } catch {}
       // Gmail answers a made-up id with 400 "Invalid id value"; Calendar answers a deleted event with 410.
-      if (missing && (r.status === 404 || r.status === 410 || /invalid id value/i.test(message))) throw new Error(missing);
-      if (missing && r.status === 403) throw new Error(`${email} can't open it (${message.replace(/\.$/, "")}): use the account it's shared with (${app}_accounts lists them), or ask its owner to share it`);
-      if (hint && r.status === 400) throw new Error(`${title}: ${message.replace(/\.$/, "")}: ${hint}`);
+      if (missing && (r.status === 404 || r.status === 410 || /invalid id value/i.test(message))) throw refusal(missing);
+      if (missing && r.status === 403) throw refusal(`${email} can't open it (${message.replace(/\.$/, "")}): use the account it's shared with (${app}_accounts lists them), or ask its owner to share it`);
+      if (hint && r.status === 400) throw refusal(`${title}: ${message.replace(/\.$/, "")}: ${hint}`);
       throw new Error(`${title}: ${message}`);
     }
     return text ? JSON.parse(text) : null;

@@ -9,7 +9,7 @@
 // a JWT the Vault signs with the App's key), unless their own sign-in reaches the repo, which is used instead.
 // Nothing GitHub gives is kept but those sign-ins and which organizations are connected for which group.
 
-import { PERSON, STEP, TEXT } from "./shapes.js";
+import { PERSON, STEP, TEXT, refusal } from "./shapes.js";
 
 export const PREFIX = "github.com/";
 const PAGE = 25;
@@ -36,7 +36,7 @@ export const isGithub = (repo) => String(repo || "").toLowerCase().startsWith(PR
 
 function fullOf(repo) {
   const m = /^github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(\.git)?$/i.exec(String(repo || "").trim());
-  if (!m) throw new Error(`give a GitHub repo as github.com/<owner>/<name>, like github.com/octocat/hello-world: repos_list has them`);
+  if (!m) throw refusal(`give a GitHub repo as github.com/<owner>/<name>, like github.com/octocat/hello-world: repos_list has them`);
   return `${m[1]}/${m[2]}`;
 }
 
@@ -45,7 +45,7 @@ async function appItem(ctx) {
   const all = (await ctx.vault.items()).filter((i) => i.type === "GitHub App" && i.fields.client_id?.value);
   return all.find((i) => i.scope.startsWith("user:")) || all[0] || null;
 }
-const noApp = (ctx) => new Error(ctx.me.role === "admin"
+const noApp = (ctx) => refusal(ctx.me.role === "admin"
   ? "GitHub isn't connected yet: Repos › Settings › Create GitHub App makes the network's GitHub App, once, for everyone (repos_create_github_app)"
   : "GitHub isn't connected yet: an admin makes the network's GitHub App once, in Repos › Settings; ask them");
 /// GitHub's site and API for an App: github.com's unless it was made on another (GitHub Enterprise, or a stand-in).
@@ -54,7 +54,7 @@ const apiOf = (app) => app?.fields.api?.value || (webOf(app) === "https://github
 const graphqlOf = (app) => (webOf(app) === "https://github.com" ? "https://api.github.com/graphql" : `${webOf(app)}/api/graphql`);
 
 function redirect(ctx) {
-  if (!ctx.address) throw new Error("This device is out of date: update it, then try again");
+  if (!ctx.address) throw refusal("This device is out of date: update it, then try again");
   return `${ctx.address}/back`;
 }
 
@@ -71,7 +71,7 @@ async function userAuth(ctx, app, item) {
   if (held && (!held.expires || held.expires > Date.now() + 60_000)) return `Bearer ${held.value}`;
   const expires = Number(item.fields.expires?.value || 0);
   if (!held && (!expires || expires > Date.now() + 60_000)) return `Bearer {{${item.id}:access_token}}`;
-  if (!item.fields.refresh_token) throw new Error(`GitHub signed ${item.fields.login.value} out: Repos › Settings signs in again (repos_sign_in)`);
+  if (!item.fields.refresh_token) throw refusal(`GitHub signed ${item.fields.login.value} out: Repos › Settings signs in again (repos_sign_in)`);
   // GitHub takes each refresh token once: calls at the same time share one refresh.
   if (!refreshing.has(item.id)) refreshing.set(item.id, refreshed(ctx, app, item).finally(() => refreshing.delete(item.id)));
   return refreshing.get(item.id);
@@ -148,7 +148,7 @@ const reaches = new Map();
 async function credFor(ctx, full) {
   const { app, all } = await credentials(ctx);
   if (!app) throw noApp(ctx);
-  if (!all.length) throw new Error("Sign in to GitHub first: Repos › Settings › Connect GitHub (repos_sign_in)");
+  if (!all.length) throw refusal("Sign in to GitHub first: Repos › Settings › Connect GitHub (repos_sign_in)");
   const key = `${ctx.me.user} ${full.toLowerCase()}`;
   const kept = reaches.get(key);
   const owner = full.split("/")[0].toLowerCase();
@@ -167,7 +167,7 @@ async function credFor(ctx, full) {
     }
   }
   if (why) throw why;
-  throw new Error(`GitHub has no ${PREFIX}${full} that ${all.filter((c) => c.kind === "user").map((c) => c.login).join(" or ") || "your groups' organizations"} can see`);
+  throw refusal(`GitHub has no ${PREFIX}${full} that ${all.filter((c) => c.kind === "user").map((c) => c.login).join(" or ") || "your groups' organizations"} can see`);
 }
 
 async function send(app, c, method, path, body, { accept = "application/vnd.github+json", ok = [] } = {}) {
@@ -188,7 +188,7 @@ async function send(app, c, method, path, body, { accept = "application/vnd.gith
   if (r.status === 401) {
     if (c.item) userTokens.delete(c.item.id);
     if (c.installation) installTokens.delete(c.installation);
-    throw new Error(c.kind === "user" ? `GitHub signed ${c.login} out: Repos › Settings signs in again (repos_sign_in)` : `GitHub no longer lets the App act for ${c.org}: its admins connect it again in Repos › Settings`);
+    throw refusal(c.kind === "user" ? `GitHub signed ${c.login} out: Repos › Settings signs in again (repos_sign_in)` : `GitHub no longer lets the App act for ${c.org}: its admins connect it again in Repos › Settings`);
   }
   if (r.status === 404) throw Object.assign(new Error(`GitHub has nothing at ${path.replace(/^\/repos\//, PREFIX).replace(/\?.*$/, "")} that ${c.login || c.org} can see`), { missing: true });
   const detail = json?.errors?.map((e) => e.message || `${e.field} ${e.code}`).filter(Boolean).join("; ");
@@ -238,7 +238,7 @@ async function at(o, ref) {
   ref ||= o.r.default_branch;
   const r = await send(o.app, o.c, "GET", `/repos/${o.full}/commits/${encodeURIComponent(ref)}`, null, { ok: [409, 422] });
   if (r.status === 409) return { ref: null, branch: null, sha: null, commit: null };
-  if (r.status === 422) throw new Error(`There's no branch or commit ${ref} in ${o.name}`);
+  if (r.status === 422) throw refusal(`There's no branch or commit ${ref} in ${o.name}`);
   const isBranch = !/^[0-9a-f]{7,40}$/i.test(ref) || ref === o.r.default_branch;
   return { ref, branch: isBranch ? ref : null, sha: r.json.sha, commit: r.json };
 }
@@ -277,7 +277,7 @@ const issueShape = (i) => ({
 /// What a user filed through an organization's installation says, so the issue shows who in the network filed it.
 const signed = (ctx, o, text, verb) => (o.c.kind === "installation" ? `${text || ""}\n\n<sub>${verb} by ${ctx.me.user_name || ctx.me.name} through ${ctx.address ? new URL(ctx.address).host : "Repos"}</sub>`.replace(/^\n\n/, "") : text);
 const quote = (s) => (/\s/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
-const ON_GITHUB = (o, what) => new Error(`${o.name} is on GitHub: ${what} there, at ${o.r.html_url}`);
+const ON_GITHUB = (o, what) => refusal(`${o.name} is on GitHub: ${what} there, at ${o.r.html_url}`);
 
 export const run = {
   async get(ctx, { repo }) {
@@ -305,12 +305,12 @@ export const run = {
   async file(ctx, { repo, ref, path }) {
     const o = await open(ctx, repo);
     const [h, branches] = await Promise.all([at(o, ref), branchNames(o)]);
-    if (!h.sha) throw new Error(`${o.name} has no code yet`);
+    if (!h.sha) throw refusal(`${o.name} has no code yet`);
     const [c, last] = await Promise.all([
       send(o.app, o.c, "GET", `/repos/${o.full}/contents/${enc(path)}?ref=${h.sha}`),
       send(o.app, o.c, "GET", `/repos/${o.full}/commits?sha=${h.sha}&path=${encodeURIComponent(path || "")}&per_page=1`).then((r) => r.json[0] || h.commit),
     ]);
-    if (Array.isArray(c.json)) throw new Error(`There's no file ${path} in ${o.name}`);
+    if (Array.isArray(c.json)) throw refusal(`There's no file ${path} in ${o.name}`);
     const info = { repo: o.name, ref: h.ref, branch: h.branch, sha: h.sha, path, branches, mode: null, latest: summary(last) };
     if (c.json.type === "submodule") return { ...info, submodule: c.json.sha, size: 0 };
     if (c.json.size > PREVIEW || c.json.encoding === "none") return { ...info, size: c.json.size, too_big: true };
@@ -342,7 +342,7 @@ export const run = {
     const o = await open(ctx, repo);
     const r = await send(o.app, o.c, "GET", `/repos/${o.full}/commits/${encodeURIComponent(sha)}`);
     const f = (r.json.files || []).find((x) => x.filename === path);
-    if (!f) throw new Error(`There's no change to ${path} in ${String(sha).slice(0, 7)}`);
+    if (!f) throw refusal(`There's no change to ${path} in ${String(sha).slice(0, 7)}`);
     return changed(f);
   },
   /// The last commit to each entry, as GitHub's own page shows it: one GraphQL request, its history of each path.
@@ -376,7 +376,7 @@ export const run = {
   // Issues, as GitHub's own: its search for the list and counts (which leaves out pull requests), its API for the rest.
   async issues(ctx, { repo, state = "open", label, assignee, author, q, page = 0 }) {
     const o = await open(ctx, repo);
-    if (!["open", "closed", "all"].includes(state)) throw new Error("state is open, closed or all");
+    if (!["open", "closed", "all"].includes(state)) throw refusal("state is open, closed or all");
     const terms = [`repo:${o.full}`, "is:issue"];
     if (label) terms.push(`label:${quote(label)}`);
     if (assignee === "none") terms.push("no:assignee");
@@ -402,7 +402,7 @@ export const run = {
       send(o.app, o.c, "GET", `/repos/${o.full}/issues/${n}`).then((r) => r.json),
       send(o.app, o.c, "GET", `/repos/${o.full}/issues/${n}/comments?per_page=100`).then((r) => r.json),
     ]);
-    if (i.pull_request) throw new Error(`#${n} of ${o.name} is a pull request: see it on GitHub, at ${i.html_url}`);
+    if (i.pull_request) throw refusal(`#${n} of ${o.name} is a pull request: see it on GitHub, at ${i.html_url}`);
     const me = o.c.login?.toLowerCase(), push = !!o.r.permissions?.push, author = !!me && i.user?.login?.toLowerCase() === me;
     return {
       repo: o.name, ...issueShape(i), body: i.body || "", url: i.html_url,
@@ -425,7 +425,7 @@ export const run = {
     if (input.body !== undefined) change.body = input.body;
     if (input.labels !== undefined) change.labels = input.labels;
     if (input.assignees !== undefined) change.assignees = input.assignees.map((a) => a.replace(/^@/, ""));
-    if (!Object.keys(change).length) throw new Error("give what changes: title, body, labels or assignees");
+    if (!Object.keys(change).length) throw refusal("give what changes: title, body, labels or assignees");
     const r = await send(o.app, o.c, "PATCH", `/repos/${o.full}/issues/${Number(input.number)}`, change);
     return { repo: o.name, ...issueShape(r.json), body: r.json.body || "" };
   },
@@ -446,7 +446,7 @@ export const run = {
   },
   async comment(ctx, input) {
     const o = await open(ctx, input.repo);
-    if (!String(input.body || "").trim()) throw new Error("a comment needs some text");
+    if (!String(input.body || "").trim()) throw refusal("a comment needs some text");
     const r = await send(o.app, o.c, "POST", `/repos/${o.full}/issues/${Number(input.number)}/comments`, { body: signed(ctx, o, input.body, "Commented") });
     return { repo: o.name, number: Number(input.number), id: String(r.json.id), author: userOf(r.json.user), body: r.json.body, created: r.json.created_at, updated: r.json.updated_at, yours: true };
   },
@@ -499,7 +499,7 @@ export const elsewhere = {
 };
 export async function refuse(ctx, tool, repo) {
   const full = fullOf(repo);
-  throw new Error(`${PREFIX}${full} is on GitHub: ${elsewhere[tool]} there, at https://github.com/${full}`);
+  throw refusal(`${PREFIX}${full} is on GitHub: ${elsewhere[tool]} there, at https://github.com/${full}`);
 }
 
 export async function list(ctx) {
@@ -560,7 +560,7 @@ export function tools({ global }) {
       input: { type: "object", properties: { account: { type: "string", description: "a GitHub username to suggest to GitHub, like one that needs signing in again" } } },
       output: STEP,
       async run(ctx, { account }) {
-        if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
+        if (!ctx.user) throw refusal("this device doesn't keep your data: use one of your own devices");
         const app = await appItem(ctx);
         if (!app) throw noApp(ctx);
         const q = new URLSearchParams({ client_id: app.fields.client_id.value, redirect_uri: redirect(ctx), state: "repos/settings", ...(account ? { login: account } : {}) });
@@ -584,7 +584,7 @@ export function tools({ global }) {
         const refused = s.match(/[?&]error_description=([^&#]+)/)?.[1] || s.match(/[?&]error=([^&#]+)/)?.[1];
         if (refused) return { signed_in: false, why: `GitHub didn't sign you in (${decodeURIComponent(refused.replace(/\+/g, " "))}). Try again.` };
         const code = s.includes("code=") ? new URL(s.startsWith("http") ? s : `http://x/?${s.split("?").pop()}`).searchParams.get("code") : s;
-        if (!code) throw new Error("That address has no code. Copy the whole address the browser ended up on.");
+        if (!code) throw refusal("That address has no code. Copy the whole address the browser ended up on.");
         const r = await fetch(`${webOf(app)}/login/oauth/access_token`, {
           method: "POST",
           headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
@@ -610,7 +610,7 @@ export function tools({ global }) {
       output: TEXT("that it's signed out, in words"),
       async run(ctx, { account }) {
         const item = (await accountItems(ctx)).find((i) => i.fields.login.value.toLowerCase() === String(account || "").replace(/^@/, "").toLowerCase());
-        if (!item) throw new Error(`${account} isn't signed in to Repos: repos_accounts lists those that are`);
+        if (!item) throw refusal(`${account} isn't signed in to Repos: repos_accounts lists those that are`);
         ctx.vault.release(item.id);
         userTokens.delete(item.id);
         return `Signed ${item.fields.login.value} out of Repos.`;
@@ -626,7 +626,7 @@ export function tools({ global }) {
       } },
       output: STEP,
       async run(ctx, { org, github = "https://github.com" }) {
-        if (ctx.me.role !== "admin") throw new Error("only an admin makes the network's GitHub App: ask them");
+        if (ctx.me.role !== "admin") throw refusal("only an admin makes the network's GitHub App: ask them");
         const web = String(github).replace(/\/+$/, "");
         const back = redirect(ctx);
         const host = new URL(ctx.address).host;
@@ -647,7 +647,7 @@ export function tools({ global }) {
       input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address GitHub sent the browser back to, or its code" } } },
       output: { type: "object", required: ["made", "app"], properties: { made: { type: "boolean" }, app: { type: "string", description: "its slug on GitHub" } } },
       async run(ctx, { code: given }) {
-        if (ctx.me.role !== "admin") throw new Error("only an admin makes the network's GitHub App");
+        if (ctx.me.role !== "admin") throw refusal("only an admin makes the network's GitHub App");
         const s = String(given || "");
         const code = s.includes("code=") ? new URL(s).searchParams.get("code") : s;
         const web = JSON.parse((await pending(ctx, "app")) || "{}").web || "https://github.com";
@@ -676,8 +676,8 @@ export function tools({ global }) {
       output: STEP,
       async run(ctx, { group }) {
         const g = (ctx.handles || []).find((h) => h.id.startsWith("group:") && h.handle === String(group || "").replace(/^@/, ""));
-        if (!g) throw new Error(`no group has the handle ${group}: groups_list has them`);
-        if (!adminOf(ctx, g.id)) throw new Error(`only ${g.name}'s admins connect an organization for it`);
+        if (!g) throw refusal(`no group has the handle ${group}: groups_list has them`);
+        if (!adminOf(ctx, g.id)) throw refusal(`only ${g.name}'s admins connect an organization for it`);
         const app = await appItem(ctx);
         if (!app) throw noApp(ctx);
         global(ctx).exec("insert or replace into github_pending values (?, ?, ?)", [`org ${ctx.me.user}`, g.id, ctx.now()]);
@@ -692,9 +692,9 @@ export function tools({ global }) {
       output: { type: "object", required: ["connected", "org"], properties: { connected: { type: "boolean" }, org: { type: "string" }, group: { type: "string", description: "the group it's connected for" } } },
       async run(ctx, { back }) {
         const installation = Number(new URL(back).searchParams.get("installation_id"));
-        if (!installation) throw new Error("That address has no installation_id: install the App from Repos › Settings again");
+        if (!installation) throw refusal("That address has no installation_id: install the App from Repos › Settings again");
         const group = await pending(ctx, `org ${ctx.me.user}`);
-        if (!group || !adminOf(ctx, group)) throw new Error("No organization is waiting to be connected: start from Repos › Settings › Connect an Organization");
+        if (!group || !adminOf(ctx, group)) throw refusal("No organization is waiting to be connected: start from Repos › Settings › Connect an Organization");
         const app = await appItem(ctx);
         if (!app) throw noApp(ctx);
         const auth = await installAuth(app, installation);
@@ -719,7 +719,7 @@ export function tools({ global }) {
       async run(ctx, { org }) {
         const g = global(ctx);
         const rows = (await g.query("select * from github_orgs where lower(org) = lower(?)", [String(org || "")])).filter((o) => adminOf(ctx, o.owner));
-        if (!rows.length) throw new Error(`no organization ${org} is connected for a group you're an admin of`);
+        if (!rows.length) throw refusal(`no organization ${org} is connected for a group you're an admin of`);
         for (const o of rows) g.exec("delete from github_orgs where installation = ?", [o.installation]);
         return `${rows[0].org}'s repos no longer show for ${groupOf(ctx, rows[0].owner)?.name || "the group"}.`;
       },

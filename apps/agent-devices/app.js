@@ -10,6 +10,9 @@ import mainHtml from "./dist/main.html" with { type: "text" };
 import deviceHtml from "./dist/device.html" with { type: "text" };
 import settingsHtml from "./dist/settings.html" with { type: "text" };
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 const service = (ctx, fn, input, on) => ctx.services["agent-devices"][fn](input, on ? { device: on } : undefined);
 
 function fnv(s) {
@@ -197,8 +200,8 @@ export default {
       },
       run: async (ctx, input) => {
         const title = String(input.profile || input.title || "").trim();
-        if (!title) throw new Error("Name it, like Personal or Work.");
-        if ((await profiles(ctx)).some((p) => p.title.toLowerCase() === title.toLowerCase())) throw new Error(`There's already a ${title} profile.`);
+        if (!title) throw refusal("Name it, like Personal or Work.");
+        if ((await profiles(ctx)).some((p) => p.title.toLowerCase() === title.toLowerCase())) throw refusal(`There's already a ${title} profile.`);
         const item = await ctx.vault.create({ title, type: TYPE, hosts: ["agent-devices"], fields: { _profile_key: { generate: true } } });
         return { item, profile: title, text: `Added the ${title} profile. It has no sign-ins yet: sign in to sites in it with sign_in.` };
       },
@@ -211,7 +214,7 @@ export default {
       output: { type: "string", description: "Saved." },
       run: async (ctx, { item, blob, salt, sites }) => {
         const all = await profiles(ctx);
-        if (!all.some((p) => p.id === item)) throw new Error("That browser profile was deleted from the Vault.");
+        if (!all.some((p) => p.id === item)) throw refusal("That browser profile was deleted from the Vault.");
         ctx.vault.update(item, { fields: { _blob: { value: blob }, _salt: { value: salt }, _saved: { value: new Date(ctx.now()).toISOString() }, ...(sites ? { sites: { value: sites } } : {}) } });
         const kept = await ctx.user.query("select item, blob from saves");
         for (const s of kept) {
@@ -449,7 +452,7 @@ export default {
       input: { type: "object", required: ["function"], properties: { function: { type: "string", enum: ACTS }, input: { type: "object" } } },
       output: { description: "what the service function gave" },
       run: (ctx, { function: fn, input = {} }) => {
-        if (!ACTS.includes(fn)) throw new Error(`Computer Use doesn't act on agent devices with ${fn}: only ${ACTS.join(", ")}`);
+        if (!ACTS.includes(fn)) throw refusal(`Computer Use doesn't act on agent devices with ${fn}: only ${ACTS.join(", ")}`);
         return service(ctx, fn, input);
       },
     },

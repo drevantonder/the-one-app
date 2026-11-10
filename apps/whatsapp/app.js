@@ -4,14 +4,17 @@
 
 import settings from "./dist/settings.html" with { type: "text" };
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 async function service(ctx, fn, input = {}) {
   const { device, ...rest } = input;
   try {
     return await ctx.services.whatsapp[fn](rest, device ? { device } : undefined);
   } catch (err) {
     const why = String(err.message);
-    if (why.startsWith("no chat called ")) throw new Error(`${why}: whatsapp_chats lists the chats; anyone else by their phone number with its country code`);
-    if (why.includes("matches several chats")) throw new Error(`${why}. Give more of the name, or a phone number with its country code`);
+    if (why.startsWith("no chat called ")) throw refusal(`${why}: whatsapp_chats lists the chats; anyone else by their phone number with its country code`);
+    if (why.includes("matches several chats")) throw refusal(`${why}. Give more of the name, or a phone number with its country code`);
     throw err;
   }
 }

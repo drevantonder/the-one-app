@@ -2,11 +2,14 @@
 // database, oldest first, each a revision; the newest of each says what's current. Its service (service/), on each
 // device it's switched on for, asks for them (_files) and writes them into each harness's folders there.
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 const SKILL = { description: "the skill's name, from agents_skills, like writing-for-agents", type: "string" };
 
 async function records(ctx) {
   const db = ctx.user;
-  if (!db) throw new Error("AGENTS.md is each user's own: this call reaches no one's");
+  if (!db) throw refusal("AGENTS.md is each user's own: this call reaches no one's");
   const rows = await db.query("select n, kind, data, time, by, device from records order by n");
   return rows.map((r) => ({ id: String(r.n), kind: r.kind, data: JSON.parse(r.data), time: r.time, by: r.by, device: r.device }));
 }
@@ -105,7 +108,7 @@ function named(skills, name) {
   const files = skills.get(name);
   if (files) return files;
   const all = [...skills.keys()];
-  throw new Error(`no skill ${name}: ${all.length ? `there's ${all.join(", ")}` : "there are none yet; agents_skill_set adds one"}`);
+  throw refusal(`no skill ${name}: ${all.length ? `there's ${all.join(", ")}` : "there are none yet; agents_skill_set adds one"}`);
 }
 
 const EVERY_DEVICE = "every device's harnesses get it within a minute";
@@ -144,7 +147,7 @@ export default {
       input: { properties: { text: { description: "the whole new AGENTS.md, as markdown", type: "string" } }, required: ["text"], type: "object" },
       output: { type: "string", description: "that it is set, in words" },
       run: async (ctx, input) => {
-        if (typeof input.text !== "string") throw new Error("give the text");
+        if (typeof input.text !== "string") throw refusal("give the text");
         await records(ctx);
         keep(ctx, "agentsmd", { text: input.text });
         return `AGENTS.md is set; ${EVERY_DEVICE}.`;
@@ -184,7 +187,7 @@ export default {
       output: { type: "string", description: "that it is set, in words" },
       run: async (ctx, input) => {
         const why = invalid(input.name, input.files) || unintroduced(input.name, input.files);
-        if (why) throw new Error(why);
+        if (why) throw refusal(why);
         await records(ctx);
         keep(ctx, "skill", { name: input.name, files: input.files });
         return `${input.name} is set; ${EVERY_DEVICE}.`;
@@ -235,14 +238,14 @@ export default {
       output: { type: "string", description: "which is current again, in words" },
       run: async (ctx, input) => {
         const r = (await records(ctx)).find((r) => r.id === String(input.id));
-        if (!r) throw new Error(`no revision ${input.id}: ids come from agents_history`);
+        if (!r) throw refusal(`no revision ${input.id}: ids come from agents_history`);
         if (r.kind === "agentsmd") {
           keep(ctx, "agentsmd", r.data);
           return `That AGENTS.md is current again; ${EVERY_DEVICE}.`;
         }
-        if (r.kind !== "skill") throw new Error(`${input.id} isn't a revision of AGENTS.md or a skill`);
+        if (r.kind !== "skill") throw refusal(`${input.id} isn't a revision of AGENTS.md or a skill`);
         const why = invalid(r.data.name, r.data.files);
-        if (why) throw new Error(why);
+        if (why) throw refusal(why);
         keep(ctx, "skill", r.data);
         return `That ${r.data.name} is current again; ${EVERY_DEVICE}.`;
       },

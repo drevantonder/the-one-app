@@ -7,6 +7,9 @@
 
 import main from "./dist/main.html" with { type: "text" };
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 /// An agent device's tool. A name that's one of the user's own devices only gets here when that device can't take the call,
 /// and Agent Devices, which knows only its own, would say there's no such device.
 async function act(ctx, fn, input) {
@@ -156,7 +159,7 @@ export default {
       output: { type: "string", description: "the link, and when it stops working" },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (d) throw new Error(`${d} is the user's own device: they watch it on the Computer Use page and on the device itself, and stop agents there.`);
+        if (d) throw refusal(`${d} is the user's own device: they watch it on the Computer Use page and on the device itself, and stop agents there.`);
         return act(ctx, "view", input);
       },
     },
@@ -355,7 +358,7 @@ export default {
       output: { type: "object", description: "{ running, title, bounds }", additionalProperties: true },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
+        if (!d) throw refusal(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
         return ctx.services.computer._mirror_status({}, { device: d });
       },
     },
@@ -367,7 +370,7 @@ export default {
       output: { type: "object", description: "{ running, title, bounds }", additionalProperties: true },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
+        if (!d) throw refusal(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
         return ctx.services.computer._mirror_launch({}, { device: d });
       },
     },
@@ -379,7 +382,7 @@ export default {
       output: CONTENT,
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
+        if (!d) throw refusal(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
         return ctx.services.computer._mirror_screen({ width: input.width }, { device: d });
       },
     },
@@ -391,7 +394,7 @@ export default {
       output: CONTENT,
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
+        if (!d) throw refusal(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
         return ctx.services.computer._mirror_use({ tool: input.tool, args: input.args || {} }, { device: d });
       },
     },
@@ -402,7 +405,7 @@ export default {
       output: { type: "object", description: "the device's status, as the computer service gives it", additionalProperties: true },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't use ${input.device} yet: no computer service runs there.`);
+        if (!d) throw refusal(`Agents can't use ${input.device} yet: no computer service runs there.`);
         return ctx.services.computer._allow({ on: !!input.on }, { device: d });
       },
     },

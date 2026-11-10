@@ -7,6 +7,9 @@
 
 import settings from "./dist/settings.html" with { type: "text" };
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 const HOME = "https://www.messenger.com/";
 const IDLE = 5 * 60 * 1000;
 /// The chat list's rows each have a button with this and the chat's name.
@@ -165,7 +168,9 @@ function matchesOf(nodes) {
   return out;
 }
 
-class NoChat extends Error {}
+class NoChat extends Error {
+  code = "refused";
+}
 
 function pick(chats, want) {
   const w = want.trim().toLowerCase();
@@ -178,7 +183,7 @@ function pick(chats, want) {
   const names = (cs) => cs.map((c) => c.name).join("; ");
   if (partial.length === 1) return partial[0];
   if (!partial.length) throw new NoChat(`no recent chat called ${JSON.stringify(want)}; recent chats: ${names(chats)}`);
-  throw new Error(`${JSON.stringify(want)} matches several chats: ${names(partial)}. Give more of the name`);
+  throw refusal(`${JSON.stringify(want)} matches several chats: ${names(partial)}. Give more of the name`);
 }
 
 class NotSignedIn extends Error {
@@ -399,7 +404,7 @@ class Browser {
   }
 
   async read(chat) {
-    if (!chat.trim()) throw new Error("which chat?");
+    if (!chat.trim()) throw refusal("which chat?");
     const p = await this.list();
     const c = pick(p.chats(), chat);
     this.dirty = true;
@@ -425,7 +430,7 @@ class Browser {
   }
 
   async search(query) {
-    if (!query.trim()) throw new Error("what to search for?");
+    if (!query.trim()) throw refusal("what to search for?");
     const p = await this.list();
     // The list shows results until it's loaded again.
     this.dirty = true;
@@ -449,7 +454,7 @@ class Browser {
   }
 
   async send(chat, message) {
-    if (!message.trim() || !chat.trim()) throw new Error("chat and text are required");
+    if (!message.trim() || !chat.trim()) throw refusal("chat and text are required");
     const name = await this.openChat(chat);
     let box;
     // The conversation loads; on a narrow page its details may cover it.
@@ -504,11 +509,11 @@ class Browser {
         await this.tool("browser_click", { ref: exact[0].id, input_route: "dom_event" });
         return want.trim();
       }
-      if (exact.length > 1) throw new Error(`several people are called ${JSON.stringify(want)}: send from the agent device yourself`);
+      if (exact.length > 1) throw refusal(`several people are called ${JSON.stringify(want)}: send from the agent device yourself`);
     }
     const how = ": messenger_chats lists recent chats; anyone else by the name Messenger shows for them";
-    if (!found.length) throw new Error(`no chat or person called ${JSON.stringify(want)}${how}`);
-    throw new Error(`no chat or person called exactly ${JSON.stringify(want)}; Messenger suggests: ${found.join("; ")}${how}`);
+    if (!found.length) throw refusal(`no chat or person called ${JSON.stringify(want)}${how}`);
+    throw refusal(`no chat or person called exactly ${JSON.stringify(want)}; Messenger suggests: ${found.join("; ")}${how}`);
   }
 }
 
@@ -521,7 +526,7 @@ const SCHEMA = `
   create table browsers (profile text primary key, device text not null, session text not null, target text not null, tab text not null, used integer not null, dirty integer not null);`;
 
 async function load(ctx) {
-  if (!ctx.user) throw new Error("This device doesn't keep your data: use one of your own devices");
+  if (!ctx.user) throw refusal("This device doesn't keep your data: use one of your own devices");
   const [accounts, seeded, browsers] = await Promise.all([
     ctx.user.query("select profile, why from accounts order by position"),
     ctx.user.query("select 1 as seeded from settings where key = 'linked'"),
@@ -549,10 +554,10 @@ function found(ctx, s, profile, why) {
 
 function profileOf(s, account) {
   const [first] = s.linked;
-  if (!first) throw new Error("Messenger isn't linked to a browser profile yet: messenger_sign_in links one");
+  if (!first) throw refusal("Messenger isn't linked to a browser profile yet: messenger_sign_in links one");
   if (!account) return first;
   const profile = s.linked.find((p) => p.toLowerCase() === String(account).toLowerCase());
-  if (!profile) throw new Error(`Messenger isn't linked to a profile ${JSON.stringify(account)}; it's linked to ${s.linked.join(", ")}`);
+  if (!profile) throw refusal(`Messenger isn't linked to a profile ${JSON.stringify(account)}; it's linked to ${s.linked.join(", ")}`);
   return profile;
 }
 
@@ -726,7 +731,7 @@ export default {
         const s = await load(ctx);
         const account = text(input.account);
         const i = s.linked.findIndex((p) => p.toLowerCase() === account.toLowerCase());
-        if (i < 0) throw new Error(`Messenger isn't linked to a profile ${JSON.stringify(account)}`);
+        if (i < 0) throw refusal(`Messenger isn't linked to a profile ${JSON.stringify(account)}`);
         const [profile] = s.linked.splice(i, 1);
         delete s.why[profile];
         const row = s.browsers[profile];

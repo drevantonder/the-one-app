@@ -1,6 +1,9 @@
 // What Repos' tools answer, as JSON Schema: each tool's `output`. A repo on GitHub answers in the same shapes as one here
 // (github.js), and a time is an ISO 8601 text in both.
 
+/// What's the caller's to change: nothing broke.
+export const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 const text = (description) => ({ type: "string", description });
 const nullable = (schema) => ({ ...schema, type: [].concat(schema.type, "null") });
 

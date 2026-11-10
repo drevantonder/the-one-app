@@ -2,7 +2,7 @@
 // Google app: see google/google.js.
 
 import settings from "./dist/settings.html" with { type: "text" };
-import { google } from "./google/google.js";
+import { google, refusal } from "./google/google.js";
 
 const APP = "docs";
 const TITLE = "Google Docs";
@@ -12,7 +12,7 @@ const { account, api, str, withAccount, vault, schema, tools: signIn } = google(
 
 const docId = (v) => {
   const s = String(v || "").trim();
-  if (!s) throw new Error("give documentId: the document's id or address");
+  if (!s) throw refusal("give documentId: the document's id or address");
   return /\/d\/([a-zA-Z0-9_-]+)/.exec(s)?.[1] || s;
 };
 const docInput = str("the document's id, or its address, like https://docs.google.com/document/d/1AbC…/edit; drive_files_list finds documents (q mimeType = 'application/vnd.google-apps.document' and name contains '…')");

@@ -18,7 +18,7 @@ export const LABELS = [
   ["wontfix", "ffffff", "This will not be worked on"],
 ];
 
-import { COMMENT, ISSUE, LABEL, PERSON, TEXT } from "./shapes.js";
+import { COMMENT, ISSUE, LABEL, PERSON, TEXT, refusal } from "./shapes.js";
 
 const PAGE = 25;
 const COLOR = /^#?([0-9a-f]{6})$/i;
@@ -31,20 +31,20 @@ const BODY = (what) => ({ type: "string", description: `${what}, in Markdown (Gi
 
 function number(n) {
   const x = Number(String(n ?? "").trim().replace(/^#/, ""));
-  if (!Number.isInteger(x) || x < 1) throw new Error("give an issue by its number, like 12 for #12: repos_issues lists them");
+  if (!Number.isInteger(x) || x < 1) throw refusal("give an issue by its number, like 12 for #12: repos_issues lists them");
   return x;
 }
 
 function title(t) {
   t = String(t ?? "").trim();
-  if (!t) throw new Error("an issue needs a title");
-  if (t.length > 256) throw new Error("a title is at most 256 characters: put the rest in its body");
+  if (!t) throw refusal("an issue needs a title");
+  if (t.length > 256) throw refusal("a title is at most 256 characters: put the rest in its body");
   return t;
 }
 
 function body(b, what = "a body") {
   b = String(b ?? "");
-  if (b.length > 65536) throw new Error(`${what} is at most 65536 characters`);
+  if (b.length > 65536) throw refusal(`${what} is at most 65536 characters`);
   return b;
 }
 
@@ -59,7 +59,7 @@ export function tools(R) {
 
   async function issueAt(g, r, n) {
     const i = (await g.query("select * from issues where repo = ? and number = ?", [r.id, number(n)]))[0];
-    if (!i) throw new Error(`${r.path} has no issue #${number(n)}: repos_issues lists them`);
+    if (!i) throw refusal(`${r.path} has no issue #${number(n)}: repos_issues lists them`);
     return i;
   }
 
@@ -82,28 +82,28 @@ export function tools(R) {
   }
 
   async function labelsNamed(g, r, names) {
-    if (!Array.isArray(names)) throw new Error('give labels as a list of names, like ["bug"]');
+    if (!Array.isArray(names)) throw refusal('give labels as a list of names, like ["bug"]');
     const all = await g.query("select name, color, description from labels where repo = ? order by name", [r.id]);
     return [...new Set(names.map((n) => String(n).trim().toLowerCase()))].map((n) => {
       const l = all.find((x) => x.name.toLowerCase() === n);
-      if (!l) throw new Error(`${r.path} has no label ${n}: ${all.length ? `it has ${all.map((x) => x.name).join(", ")}` : "it has none"}; repos_set_label makes one`);
+      if (!l) throw refusal(`${r.path} has no label ${n}: ${all.length ? `it has ${all.map((x) => x.name).join(", ")}` : "it has none"}; repos_set_label makes one`);
       return l;
     });
   }
 
   function users(ctx, hs) {
-    if (!Array.isArray(hs)) throw new Error('give assignees as a list of handles, like ["sam"]');
+    if (!Array.isArray(hs)) throw refusal('give assignees as a list of handles, like ["sam"]');
     const ids = [...new Set(hs.map((h) => {
       const p = byHandle(ctx, String(h).replace(/^@/, ""));
-      if (!p || !p.id.startsWith("user:") || p.removed) throw new Error(`no one has the handle ${h}: groups_list has them`);
+      if (!p || !p.id.startsWith("user:") || p.removed) throw refusal(`no one has the handle ${h}: groups_list has them`);
       return p.id.slice(5);
     }))];
-    if (ids.length > 10) throw new Error("an issue has at most 10 assignees");
+    if (ids.length > 10) throw refusal("an issue has at most 10 assignees");
     return ids;
   }
 
   const may = (ok, why) => {
-    if (!ok) throw new Error(why);
+    if (!ok) throw refusal(why);
   };
   const pushers = (r) => `the owners and collaborators of ${r.path}`;
 
@@ -115,7 +115,7 @@ export function tools(R) {
 
   async function commentAt(g, r, id) {
     const c = (await g.query("select * from comments where id = ? and repo = ?", [String(id ?? ""), r.id]))[0];
-    if (!c) throw new Error(`${r.path} has no comment ${id}: repos_issue gives an issue's comments`);
+    if (!c) throw refusal(`${r.path} has no comment ${id}: repos_issue gives an issue's comments`);
     return c;
   }
 
@@ -152,7 +152,7 @@ export function tools(R) {
       async run(ctx, { repo, state = "open", label, assignee, author, q, page = 0 }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
-        if (!["open", "closed", "all"].includes(state)) throw new Error("state is open, closed or all");
+        if (!["open", "closed", "all"].includes(state)) throw refusal("state is open, closed or all");
         const where = ["i.repo = ?"], params = [r.id];
         if (label) {
           const [l] = await labelsNamed(g, r, [label]);
@@ -265,7 +265,7 @@ export function tools(R) {
         const i = await issueAt(g, r, input.number);
         const push = await g.may("push", object(r));
         const text = input.title !== undefined || input.body !== undefined, triage = input.labels !== undefined || input.assignees !== undefined;
-        if (!text && !triage) throw new Error("give what changes: title, body, labels or assignees");
+        if (!text && !triage) throw refusal("give what changes: title, body, labels or assignees");
         may(!text || push || i.user === ctx.me.user, `only its author and ${pushers(r)} edit #${i.number}`);
         may(!triage || push, `only ${pushers(r)} label and assign its issues`);
         const [shaped] = await shape(ctx, g, r, [i]);
@@ -304,9 +304,9 @@ export function tools(R) {
         const g = global(ctx);
         const r = await named(ctx, repo);
         const i = await issueAt(g, r, n);
-        if (!REASONS.includes(state_reason)) throw new Error("state_reason is completed or not_planned");
+        if (!REASONS.includes(state_reason)) throw refusal("state_reason is completed or not_planned");
         may(i.user === ctx.me.user || (await g.may("push", object(r))), `only its author and ${pushers(r)} close #${i.number}`);
-        if (i.state === "closed" && i.state_reason === state_reason) throw new Error(`#${i.number} is already closed as ${state_reason.replace("_", " ")}`);
+        if (i.state === "closed" && i.state_reason === state_reason) throw refusal(`#${i.number} is already closed as ${state_reason.replace("_", " ")}`);
         if (comment?.trim()) addComment(ctx, g, r, i.number, body(comment, "a comment"));
         g.exec("update issues set state = 'closed', state_reason = ?, closed = ?, closed_by = ?, updated = ? where repo = ? and number = ?", [state_reason, ctx.now(), ctx.me.user, ctx.now(), r.id, i.number]);
         return `Closed ${r.path}#${i.number} as ${state_reason.replace("_", " ")}.`;
@@ -323,7 +323,7 @@ export function tools(R) {
         const r = await named(ctx, repo);
         const i = await issueAt(g, r, n);
         may(i.user === ctx.me.user || (await g.may("push", object(r))), `only its author and ${pushers(r)} reopen #${i.number}`);
-        if (i.state === "open") throw new Error(`#${i.number} is open`);
+        if (i.state === "open") throw refusal(`#${i.number} is open`);
         if (comment?.trim()) addComment(ctx, g, r, i.number, body(comment, "a comment"));
         g.exec("update issues set state = 'open', state_reason = 'reopened', closed = null, closed_by = null, updated = ? where repo = ? and number = ?", [ctx.now(), r.id, i.number]);
         return `Reopened ${r.path}#${i.number}.`;
@@ -356,7 +356,7 @@ export function tools(R) {
         const r = await named(ctx, input.repo);
         const i = await issueAt(g, r, input.number);
         const text = body(input.body, "a comment");
-        if (!text.trim()) throw new Error("a comment needs some text");
+        if (!text.trim()) throw refusal("a comment needs some text");
         const c = addComment(ctx, g, r, i.number, text);
         g.exec("update issues set updated = ? where repo = ? and number = ?", [ctx.now(), r.id, i.number]);
         return iso({ repo: r.path, number: i.number, ...c });
@@ -374,7 +374,7 @@ export function tools(R) {
         const c = await commentAt(g, r, input.id);
         may(c.user === ctx.me.user, "only its author edits a comment");
         const text = body(input.body, "a comment");
-        if (!text.trim()) throw new Error("a comment needs some text: repos_delete_comment deletes one");
+        if (!text.trim()) throw refusal("a comment needs some text: repos_delete_comment deletes one");
         g.exec("update comments set body = ?, updated = ? where id = ?", [text, ctx.now(), c.id]);
         return iso({ repo: r.path, number: c.number, id: c.id, author: userOf(ctx, c.user), body: text, created: c.created, updated: ctx.now(), yours: true });
       },
@@ -434,16 +434,16 @@ export function tools(R) {
         may(await g.may("push", object(r)), `only ${pushers(r)} manage its labels`);
         const name = String(input.name ?? "").trim();
         const to = input.new_name === undefined ? name : String(input.new_name).trim();
-        if (!name || !to || to.length > 50) throw new Error("a label's name is 1 to 50 characters");
-        if (input.color !== undefined && !COLOR.test(input.color)) throw new Error("give a colour as hex, like d73a4a");
-        if ((input.description ?? "").length > 100) throw new Error("a label's description is at most 100 characters");
+        if (!name || !to || to.length > 50) throw refusal("a label's name is 1 to 50 characters");
+        if (input.color !== undefined && !COLOR.test(input.color)) throw refusal("give a colour as hex, like d73a4a");
+        if ((input.description ?? "").length > 100) throw refusal("a label's description is at most 100 characters");
         const color = input.color === undefined ? undefined : COLOR.exec(input.color)[1].toLowerCase();
         const was = (await g.query("select * from labels where repo = ? and name = ?", [r.id, name]))[0];
         if (to.toLowerCase() !== (was?.name ?? name).toLowerCase() && (await g.query("select 1 from labels where repo = ? and name = ?", [r.id, to])).length) {
-          throw new Error(`${r.path} has a label ${to} already`);
+          throw refusal(`${r.path} has a label ${to} already`);
         }
         if (!was) {
-          if (input.new_name !== undefined) throw new Error(`${r.path} has no label ${name} to rename: repos_labels lists them`);
+          if (input.new_name !== undefined) throw refusal(`${r.path} has no label ${name} to rename: repos_labels lists them`);
           const l = { name, color: color ?? "ededed", description: input.description ?? "" };
           g.exec("insert into labels values (?, ?, ?, ?)", [r.id, l.name, l.color, l.description]);
           return { ...l, open_issues: 0 };

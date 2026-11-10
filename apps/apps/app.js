@@ -11,6 +11,9 @@ import activityHtml from "./dist/activity.html" with { type: "text" };
 import codeHtml from "./dist/code.html" with { type: "text" };
 import fileHtml from "./dist/file.html" with { type: "text" };
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 /// `why` says who can, in two words, where the caller can't.
 function places(ctx) {
   const out = [{ scope: "user", id: `user:${ctx.me.user}`, name: "You", may: true }];
@@ -26,7 +29,7 @@ function places(ctx) {
 function placeOf(ctx, given) {
   const want = String(given || "").trim();
   const p = places(ctx).find((p) => [p.scope, p.id].includes(want) || p.name.toLowerCase() === want.toLowerCase());
-  if (!p) throw new Error(`no place ${want}: give user (you), global (everyone) or a group by its name (${places(ctx).filter((p) => p.id.startsWith("group:")).map((p) => p.name).join(", ") || "you're in no group"})`);
+  if (!p) throw refusal(`no place ${want}: give user (you), global (everyone) or a group by its name (${places(ctx).filter((p) => p.id.startsWith("group:")).map((p) => p.name).join(", ") || "you're in no group"})`);
   return p.scope;
 }
 
@@ -75,10 +78,10 @@ function nodeFor(a, node) {
   const w = where(a);
   if (!w) return undefined;
   if (node) {
-    if (!w.nodes.some((n) => n.toLowerCase() === String(node).toLowerCase())) throw new Error(`${a.title || a.name} can't run on ${node}: it can run on ${w.nodes.join(", ") || "none of your devices"}`);
+    if (!w.nodes.some((n) => n.toLowerCase() === String(node).toLowerCase())) throw refusal(`${a.title || a.name} can't run on ${node}: it can run on ${w.nodes.join(", ") || "none of your devices"}`);
     return node;
   }
-  if (w.nodes.length > 1) throw new Error(`Where should ${a.title || a.name} run? Give node: ${w.nodes.join(" or ")}.`);
+  if (w.nodes.length > 1) throw refusal(`Where should ${a.title || a.name} run? Give node: ${w.nodes.join(" or ")}.`);
   return w.nodes[0];
 }
 
@@ -88,7 +91,7 @@ async function find(ctx, name) {
   if (app) return app;
   const want = String(name || "").toLowerCase();
   const like = all.filter((a) => !a.deleted && (a.name.includes(want) || want.includes(a.name) || (a.title || "").toLowerCase() === want)).map((a) => a.name);
-  throw new Error(`no app named ${name}: ${like.length ? `did you mean ${like.join(" or ")}?` : "apps_list gives their names"}`);
+  throw refusal(`no app named ${name}: ${like.length ? `did you mean ${like.join(" or ")}?` : "apps_list gives their names"}`);
 }
 
 /// Those deleted (`gone`) or not, or, for `full`, every one with its picture, which is large.
@@ -184,9 +187,9 @@ export default {
       output: { type: "string", description: "where it runs now, in words" },
       async run(ctx, { app, node, scope }) {
         const a = await find(ctx, app);
-        if (!hasService(a)) throw new Error(`${a.title || app} has no service to move`);
+        if (!hasService(a)) throw refusal(`${a.title || app} has no service to move`);
         const place = scope ? placeOf(ctx, scope) : a.runs_on?.find((r) => r.scope)?.scope || a.added?.find((s) => places(ctx).some((p) => p.may && p.id === s));
-        if (!place) throw new Error(`${a.title || app} isn't added anywhere you may move it: add adds it`);
+        if (!place) throw refusal(`${a.title || app} isn't added anywhere you may move it: add adds it`);
         ctx.add(app, place === `user:${ctx.me.user}` ? "user" : place, true, nodeFor(a, node));
         return `${a.title || app} runs on ${node}.`;
       },
@@ -222,7 +225,7 @@ export default {
       output: { type: "string", description: "that it is restored, in words" },
       async run(ctx, { app }) {
         const a = await find(ctx, app);
-        if (!a.deleted) throw new Error(`${app} isn't deleted: apps_list with deleted true lists those that are`);
+        if (!a.deleted) throw refusal(`${app} isn't deleted: apps_list with deleted true lists those that are`);
         ctx.retire(app, "restored");
         return `Restored ${app}.`;
       },
@@ -236,7 +239,7 @@ export default {
       output: { type: "string", description: "that it is erased, in words" },
       async run(ctx, { app }) {
         const a = await find(ctx, app);
-        if (!a.deleted) throw new Error(`delete ${app} (apps_delete) before erasing it`);
+        if (!a.deleted) throw refusal(`delete ${app} (apps_delete) before erasing it`);
         ctx.retire(app, "erased");
         return `Erased ${app}.`;
       },
@@ -249,8 +252,8 @@ export default {
       output: { type: "string", description: "what its source link is now, in words" },
       async run(ctx, { app, link }) {
         const a = await find(ctx, app);
-        if (!mine(ctx, a.owner)) throw new Error(`only ${app}'s owners set its source link`);
-        if (!a.deploys && a.built_in) throw new Error(`${app} isn't added to this network yet: add it first`);
+        if (!mine(ctx, a.owner)) throw refusal(`only ${app}'s owners set its source link`);
+        if (!a.deploys && a.built_in) throw refusal(`${app} isn't added to this network yet: add it first`);
         ctx.source(app, (link || "").trim());
         return link?.trim() ? `${app}'s source is ${link.trim()}.` : `${app} has no source link now.`;
       },

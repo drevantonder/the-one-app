@@ -1,13 +1,16 @@
 // iMessage: Messages on the user's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Messages;
 // this app is what users and agents use, wherever they are.
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 async function service(ctx, fn, input) {
   try {
     return await ctx.services.imessage[fn](input);
   } catch (err) {
     const why = String(err.message);
-    if (/^no chat (called|with) /.test(why)) throw new Error(`${why}: imessage_chats lists the chats; anyone else by their phone number with its country code, or email address`);
-    if (why.includes("matches several chats")) throw new Error(`${why}. Give more of the name, or the chat's id from imessage_chats`);
+    if (/^no chat (called|with) /.test(why)) throw refusal(`${why}: imessage_chats lists the chats; anyone else by their phone number with its country code, or email address`);
+    if (why.includes("matches several chats")) throw refusal(`${why}. Give more of the name, or the chat's id from imessage_chats`);
     throw err;
   }
 }

@@ -5,7 +5,7 @@
 // (ctx.apps.drive.<tool>) already know.
 
 import settings from "./dist/settings.html" with { type: "text" };
-import { google } from "./google/google.js";
+import { google, refusal } from "./google/google.js";
 
 const SCOPES = "openid email https://www.googleapis.com/auth/drive";
 const API = "https://www.googleapis.com/drive/v3/";
@@ -111,10 +111,10 @@ export default {
       }, ["metadata"]),
       output: FILE_RESOURCE,
       async run(ctx, { metadata = {}, file, type, data, blob, fields, account: a }) {
-        if (!file && !blob && data == null) throw new Error("give file (or data, base64, or blob): what to upload");
+        if (!file && !blob && data == null) throw refusal("give file (or data, base64, or blob): what to upload");
         const bytes = blob ? await ctx.blob.get(blob) : fromB64(file ? file.base64 : data);
         type = type || file?.type || metadata.mimeType;
-        if (!type) throw new Error("give type: the file's MIME type, like application/pdf");
+        if (!type) throw refusal("give type: the file's MIME type, like application/pdf");
         const meta = { ...metadata, name: metadata.name || file?.name, mimeType: metadata.mimeType || type };
         const boundary = "one-drive-upload";
         const head = new TextEncoder().encode(`--${boundary}\r\ncontent-type: application/json; charset=utf-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\ncontent-type: ${type}\r\n\r\n`);

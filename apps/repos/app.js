@@ -28,7 +28,7 @@ import issueScreen from "./dist/issue.html" with { type: "text" };
 import repoSettingsScreen from "./dist/repo-settings.html" with { type: "text" };
 import settingsScreen from "./dist/settings.html" with { type: "text" };
 
-import { BRANCH_HEAD, COMMIT, FILE_CHANGE, PERSON, REPO_LINE, TEXT } from "./shapes.js";
+import { BRANCH_HEAD, COMMIT, FILE_CHANGE, PERSON, REPO_LINE, TEXT, refusal } from "./shapes.js";
 
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const BRANCH = /^(?!\/)(?!.*(\.\.|\/\/|\/$|\.lock$|@\{))[A-Za-z0-9._\/@+-]{1,200}$/;
@@ -61,9 +61,9 @@ const withPath = (ctx, r) => r && { ...r, path: pathOf(ctx, r) };
 
 function parse(ctx, repo) {
   const m = /^([^/]+)\/([^/]+)$/.exec(String(repo || "").replace(/\.git$/, ""));
-  if (!m) throw new Error(`give a repo as <owner>/<name>, like ${ctx.me.handle || "andre"}/${repo || "notes"}: repos_list has them`);
+  if (!m) throw refusal(`give a repo as <owner>/<name>, like ${ctx.me.handle || "andre"}/${repo || "notes"}: repos_list has them`);
   const owner = byHandle(ctx, m[1]);
-  if (!owner) throw new Error(`no one and no group has the handle ${m[1]}: groups_list has them`);
+  if (!owner) throw refusal(`no one and no group has the handle ${m[1]}: groups_list has them`);
   return { owner: owner.id, name: m[2] };
 }
 
@@ -87,17 +87,17 @@ async function named(ctx, repo) {
   const g = global(ctx);
   if (!String(repo || "").includes("/")) {
     const same = (await g.query("select * from repos where name = ? and deleted is null", [repo || ""])).map((r) => pathOf(ctx, r));
-    if (same.length) throw new Error(`give a repo as <owner>/<name>: ${same.join(" or ")}`);
+    if (same.length) throw refusal(`give a repo as <owner>/<name>: ${same.join(" or ")}`);
   }
   const r = await live(ctx, repo);
   if (r) return r;
   const all = (await g.query("select owner, name from repos where deleted is null order by name")).map((r) => pathOf(ctx, r));
-  throw new Error(`no repo ${repo}: ${all.length ? `there's ${all.join(", ")}` : "there are none yet; repos_create makes one"}`);
+  throw refusal(`no repo ${repo}: ${all.length ? `there's ${all.join(", ")}` : "there are none yet; repos_create makes one"}`);
 }
 
 async function live(ctx, repo) {
   const r = await repoFrom(ctx, global(ctx), repo);
-  if (r?.deleted) throw new Error(`${r.path} was deleted: its owners restore it from Recently Deleted`);
+  if (r?.deleted) throw refusal(`${r.path} was deleted: its owners restore it from Recently Deleted`);
   return r;
 }
 
@@ -139,22 +139,22 @@ const ownerName = (ctx, owner) => byId(ctx, owner)?.name || "someone who left";
 function ownerFor(ctx, handle) {
   if (!handle || handle === ctx.me.handle) return `user:${ctx.me.user}`;
   const h = byHandle(ctx, handle);
-  if (!h) throw new Error(`no one and no group has the handle ${handle}`);
+  if (!h) throw refusal(`no one and no group has the handle ${handle}`);
   if (h.id === `user:${ctx.me.user}` || pushesAsOwner(h, ctx.me.user)) return h.id;
-  throw new Error(h.automatic ? `only ${h.name}'s admins make its repos` : h.members ? `you're not in ${h.name}: only its members make its repos` : `only ${h.name} makes repos as ${handle}`);
+  throw refusal(h.automatic ? `only ${h.name}'s admins make its repos` : h.members ? `you're not in ${h.name}: only its members make its repos` : `only ${h.name} makes repos as ${handle}`);
 }
 
 async function owned(ctx, repo) {
   const r = await repoFrom(ctx, global(ctx), repo);
   if (!r) await named(ctx, repo);
-  if (!(await global(ctx).may("manage", object(r)))) throw new Error(`only ${byId(ctx, r.owner)?.members ? `${ownerName(ctx, r.owner)}'s admins` : ownerName(ctx, r.owner)} ${r.deleted ? "restore or erase" : "manage"} ${r.path}`);
+  if (!(await global(ctx).may("manage", object(r)))) throw refusal(`only ${byId(ctx, r.owner)?.members ? `${ownerName(ctx, r.owner)}'s admins` : ownerName(ctx, r.owner)} ${r.deleted ? "restore or erase" : "manage"} ${r.path}`);
   return r;
 }
 
 const deletedOf = (r) => (r.deleted ? { time: r.deleted, by: r.deleted_by } : null);
 
 function global(ctx) {
-  if (!ctx.global) throw new Error("repos lives in global: install it there");
+  if (!ctx.global) throw refusal("repos lives in global: install it there");
   return ctx.global;
 }
 
@@ -485,10 +485,10 @@ const app = {
       async run(ctx, { repo, user }) {
         const r = await owned(ctx, repo);
         const h = byHandle(ctx, user);
-        if (!h || !h.id.startsWith("user:") || h.removed) throw new Error(`no one has the handle ${user}: groups_list has them`);
+        if (!h || !h.id.startsWith("user:") || h.removed) throw refusal(`no one has the handle ${user}: groups_list has them`);
         const id = h.id.slice(5);
-        if (r.owner === h.id) throw new Error(`${h.name} owns ${r.path}`);
-        if (pushesAsOwner(byId(ctx, r.owner), id)) throw new Error(`${h.name} is in ${ownerName(ctx, r.owner)}, so pushes to ${r.path} already`);
+        if (r.owner === h.id) throw refusal(`${h.name} owns ${r.path}`);
+        if (pushesAsOwner(byId(ctx, r.owner), id)) throw refusal(`${h.name} is in ${ownerName(ctx, r.owner)}, so pushes to ${r.path} already`);
         global(ctx).exec("insert or ignore into relations (subject, relation, object, by, time) values (?, 'collaborator', ?, ?, ?)", [`user:${id}`, object(r), ctx.me.user, ctx.now()]);
         return `${h.name} pushes to ${r.path} now.`;
       },
@@ -504,11 +504,11 @@ const app = {
         const g = global(ctx);
         const r = await owned(ctx, repo);
         const h = byHandle(ctx, user);
-        if (!h || !h.id.startsWith("user:")) throw new Error(`no one has the handle ${user}`);
+        if (!h || !h.id.startsWith("user:")) throw refusal(`no one has the handle ${user}`);
         const id = h.id.slice(5);
         const row = [`user:${id}`, object(r)];
         if (!(await g.query("select 1 from relations where subject = ? and relation = 'collaborator' and object = ?", row)).length) {
-          throw new Error(pushesAsOwner(byId(ctx, r.owner), id) ? `${h.name} pushes to ${r.path} as a member of ${ownerName(ctx, r.owner)}: take them out of the group to stop that` : `${h.name} isn't a collaborator of ${r.path}`);
+          throw refusal(pushesAsOwner(byId(ctx, r.owner), id) ? `${h.name} pushes to ${r.path} as a member of ${ownerName(ctx, r.owner)}: take them out of the group to stop that` : `${h.name} isn't a collaborator of ${r.path}`);
         }
         g.exec("delete from relations where subject = ? and relation = 'collaborator' and object = ?", row);
         return `${h.name} no longer pushes to ${r.path}.`;
@@ -523,9 +523,9 @@ const app = {
       async run(ctx, { name, owner }) {
         const g = global(ctx);
         const id = ownerFor(ctx, owner);
-        if (!NAME.test(name || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
+        if (!NAME.test(name || "")) throw refusal("repo names are lowercase letters, digits, ., _ and -");
         const path = `${byId(ctx, id).handle}/${name}`;
-        if (await repoAt(ctx, g, path)) throw new Error(`${path} already exists`);
+        if (await repoAt(ctx, g, path)) throw refusal(`${path} already exists`);
         newRepo(ctx, g, { name, owner: id });
         return address(ctx, path) ? `Created ${path}: git push ${address(ctx, path)} main` : `Created ${path}.`;
       },
@@ -541,9 +541,9 @@ const app = {
         const from = await named(ctx, repo);
         const id = ownerFor(ctx, owner);
         name ||= from.name;
-        if (!NAME.test(name)) throw new Error("repo names are lowercase letters, digits, ., _ and -");
+        if (!NAME.test(name)) throw refusal("repo names are lowercase letters, digits, ., _ and -");
         const path = `${byId(ctx, id).handle}/${name}`;
-        if (await repoAt(ctx, g, path)) throw new Error(`${path} already exists: give the fork another name`);
+        if (await repoAt(ctx, g, path)) throw refusal(`${path} already exists: give the fork another name`);
         newRepo(ctx, g, { name, owner: id, from });
         return address(ctx, path) ? `Forked ${from.path} as ${path}: git clone ${address(ctx, path)}` : `Forked ${from.path} as ${path}.`;
       },
@@ -558,11 +558,11 @@ const app = {
       async run(ctx, { repo, owner }) {
         const g = global(ctx);
         const r = await owned(ctx, repo);
-        if (r.deleted) throw new Error(`${r.path} was deleted: restore it first`);
+        if (r.deleted) throw refusal(`${r.path} was deleted: restore it first`);
         const id = ownerFor(ctx, owner);
-        if (id === r.owner) throw new Error(`${r.path} is already theirs`);
+        if (id === r.owner) throw refusal(`${r.path} is already theirs`);
         const to = `${byId(ctx, id).handle}/${r.name}`;
-        if (await repoAt(ctx, g, to)) throw new Error(`${to} already exists`);
+        if (await repoAt(ctx, g, to)) throw refusal(`${to} already exists`);
         const until = ctx.now() + MOVED_FOR;
         for (const [subject, relation] of holders(ctx, r.owner)) g.exec("delete from relations where subject = ? and relation = ? and object = ?", [subject, relation, object(r)]);
         give(ctx, g, id, r.id);
@@ -581,7 +581,7 @@ const app = {
       output: TEXT("that it's in Recently Deleted, in words"),
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
-        if (r.deleted) throw new Error(`${r.path} is already in Recently Deleted`);
+        if (r.deleted) throw refusal(`${r.path} is already in Recently Deleted`);
         global(ctx).exec("update repos set deleted = ?, deleted_by = ? where id = ? and deleted is null", [ctx.now(), ctx.me.user_name || ctx.me.name, r.id]);
         return `Deleted ${r.path}: it's in Recently Deleted.`;
       },
@@ -594,7 +594,7 @@ const app = {
       output: TEXT("that it's restored, in words"),
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
-        if (!r.deleted) throw new Error(`${r.path} isn't deleted`);
+        if (!r.deleted) throw refusal(`${r.path} isn't deleted`);
         global(ctx).exec("update repos set deleted = null, deleted_by = null where id = ?", [r.id]);
         return `Restored ${r.path}.`;
       },
@@ -609,7 +609,7 @@ const app = {
       async run(ctx, { repo }) {
         const g = global(ctx);
         const r = await owned(ctx, repo);
-        if (!r.deleted) throw new Error(`delete ${r.path} before erasing it`);
+        if (!r.deleted) throw refusal(`delete ${r.path} before erasing it`);
         const packs = await g.query("select hash from packs where repo = ?", [r.id]);
         // Erased, it's gone, and its name is free again; its forks keep their code, no longer forked from it.
         for (const p of packs) await http.forgetUnshared(g, r.id, p.hash);

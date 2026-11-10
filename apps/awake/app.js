@@ -3,6 +3,9 @@
 // each Mac it's switched on for, holds that Mac awake and keeps whether it's on, which it is unless turned off. A widget
 // can't call a service, so each Mac's setting is also kept here, as awake_set last left it, for the widget to show.
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 const service = (ctx, fn, { device, ...input }) => ctx.services.awake[fn](input, device ? { device } : undefined);
 
 const DEVICE = { type: "string", description: "the Mac, by name, as apps_devices lists it for awake; else the first that has it" };
@@ -52,7 +55,7 @@ export default {
       output: STATUS,
       async run(ctx, input) {
         const device = input.device || (await macs(ctx)).find((d) => d.online)?.name;
-        if (!device) throw new Error("No Mac of yours that's online has Stay Awake switched on: one services on awake --device <mac>");
+        if (!device) throw refusal("No Mac of yours that's online has Stay Awake switched on: one services on awake --device <mac>");
         const s = await service(ctx, "set", { ...input, device });
         ctx.user.exec("insert into macs (device, awake, at) values (?, ?, ?) on conflict (device) do update set awake = excluded.awake, at = excluded.at", [device, s.on ? 1 : 0, ctx.now()]);
         return s;

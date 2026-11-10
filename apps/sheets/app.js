@@ -2,7 +2,7 @@
 // Google app: see google/google.js.
 
 import settings from "./dist/settings.html" with { type: "text" };
-import { google } from "./google/google.js";
+import { google, refusal } from "./google/google.js";
 
 const APP = "sheets";
 const TITLE = "Google Sheets";
@@ -12,7 +12,7 @@ const { account, api, str, withAccount, vault, schema, tools: signIn } = google(
 
 const sheetId = (v) => {
   const s = String(v || "").trim();
-  if (!s) throw new Error("give spreadsheetId: the spreadsheet's id or address");
+  if (!s) throw refusal("give spreadsheetId: the spreadsheet's id or address");
   return /\/d\/([a-zA-Z0-9_-]+)/.exec(s)?.[1] || s;
 };
 const ss = (v) => `spreadsheets/${encodeURIComponent(sheetId(v))}`;

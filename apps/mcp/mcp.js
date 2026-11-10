@@ -10,6 +10,9 @@
 import server from "./server.json";
 import listed from "./tools.json";
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 const NAME = server.name;
 const PROTOCOL = "2025-06-18";
 // Where the browser goes after consent. Nothing listens there: the user copies the address it fails to load.
@@ -43,10 +46,10 @@ async function account(ctx, name) {
   const all = await accounts(ctx);
   if (name) {
     const a = all.find((a) => a.name === name);
-    if (!a) throw new Error(`no account ${name} is signed in: accounts lists them`);
+    if (!a) throw refusal(`no account ${name} is signed in: accounts lists them`);
     return a;
   }
-  if (all.length > 1) throw new Error(`several accounts are signed in (${all.map((a) => a.name).join(", ")}): say which as account`);
+  if (all.length > 1) throw refusal(`several accounts are signed in (${all.map((a) => a.name).join(", ")}): say which as account`);
   return all[0] || null;
 }
 
@@ -211,7 +214,7 @@ export default {
         },
       },
       async run(ctx, { code, account: name, client_id, client_secret }) {
-        if (!ctx.user) throw new Error("this device doesn't keep your data: sign in on one of your own devices");
+        if (!ctx.user) throw refusal("this device doesn't keep your data: sign in on one of your own devices");
         if (code) return finish(ctx, code, name);
         let unauthorized;
         try {
@@ -223,7 +226,7 @@ export default {
         }
         const as = await discover(unauthorized);
         if (!client_id) {
-          if (!as.registration_endpoint) throw new Error(`${as.issuer} doesn't register clients itself: make an OAuth client there, with redirect URI ${REDIRECT}, and pass its client_id (and client_secret)`);
+          if (!as.registration_endpoint) throw refusal(`${as.issuer} doesn't register clients itself: make an OAuth client there, with redirect URI ${REDIRECT}, and pass its client_id (and client_secret)`);
           const r = await fetch(as.registration_endpoint, {
             method: "POST",
             headers: { "content-type": "application/json", accept: "application/json" },
@@ -264,7 +267,7 @@ export default {
       input: { type: "object", properties: { account: ACCOUNT } },
       async run(ctx, { account: name }) {
         const acct = await account(ctx, name);
-        if (!acct) throw new Error("no account is signed in");
+        if (!acct) throw refusal("no account is signed in");
         ctx.vault.release(acct.id);
         return `Signed out ${acct.name}.`;
       },
@@ -298,7 +301,7 @@ function failed(ctx, why) {
 
 async function finish(ctx, code, name) {
   const p = (await ctx.user.query("select * from pending"))[0];
-  if (!p) throw new Error("no sign-in is in progress: call sign_in without code first");
+  if (!p) throw refusal("no sign-in is in progress: call sign_in without code first");
   let state = null, refused = null;
   try {
     const u = new URL(code);
@@ -306,7 +309,7 @@ async function finish(ctx, code, name) {
     state = u.searchParams.get("state");
     code = u.searchParams.get("code") || code;
   } catch {} // a bare code, not the address it came in
-  if (state && state !== p.state) throw new Error("that address is from an older sign-in: use the newest link sign_in gave");
+  if (state && state !== p.state) throw refusal("that address is from an older sign-in: use the newest link sign_in gave");
   if (refused) return failed(ctx, `Sign-in failed: ${refused}. Start again with sign_in.`);
   const r = await fetch(p.token_endpoint, {
     method: "POST",

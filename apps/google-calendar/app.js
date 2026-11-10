@@ -3,7 +3,7 @@
 // from any device.)
 
 import settings from "./dist/settings.html" with { type: "text" };
-import { google } from "./google/google.js";
+import { google, refusal } from "./google/google.js";
 
 const APP = "google-calendar";
 const TITLE = "Google Calendar";
@@ -195,7 +195,7 @@ export default {
       async run(ctx, { account: a, eventId, calendarId, sendUpdates }) {
         const email = await account(ctx, a);
         const e = await api(ctx, email, "GET", `calendars/${cal(calendarId)}/events/${encodeURIComponent(eventId)}`, { missing: noEvent(eventId, calendarId) });
-        if (e.status === "cancelled") throw new Error(noEvent(eventId, calendarId));
+        if (e.status === "cancelled") throw refusal(noEvent(eventId, calendarId));
         await api(ctx, email, "DELETE", `calendars/${cal(calendarId)}/events/${encodeURIComponent(eventId)}`, { query: { sendUpdates: sendUpdates || "none" }, missing: noEvent(eventId, calendarId) });
         return `Deleted "${e.summary || "(no title)"}" (${at(e.start)}).`;
       },

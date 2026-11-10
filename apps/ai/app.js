@@ -2,6 +2,9 @@
 // local models (the models service, on the device that has them) or with Gemini once the user's Vault has a Gemini
 // key item for it (its secret field `gemini_key`). Apps use it as ctx.apps.ai.read and ctx.apps.ai.decide, so none of them holds a key.
 
+/// What's the caller's to change: nothing broke.
+const refusal = (why) => Object.assign(new Error(why), { code: "refused" });
+
 const DEFAULTS = { provider: "local", local_device: null, read_model: "gemma4:12b", decide_model: "clef-flash", gemini_model: "gemini-3.5-flash-lite" };
 const GEMINI = "generativelanguage.googleapis.com";
 
@@ -90,9 +93,9 @@ export default {
       output: { type: "string", description: "Saved." },
       async run(ctx, input) {
         const s = input.scope === "global" ? ctx.global : ctx.user;
-        if (!s) throw new Error(input.scope === "global" ? "AI isn't added for everyone: an admin adds it with add, app ai and scope global" : "AI isn't added for you: add with app ai and scope user adds it");
-        if (input.scope === "global" && s.role !== "admin") throw new Error("only admins change everyone's AI: leave out scope to change your own");
-        if (input.provider && !["local", "gemini"].includes(input.provider)) throw new Error(`provider is local or gemini, not ${JSON.stringify(input.provider)}`);
+        if (!s) throw refusal(input.scope === "global" ? "AI isn't added for everyone: an admin adds it with add, app ai and scope global" : "AI isn't added for you: add with app ai and scope user adds it");
+        if (input.scope === "global" && s.role !== "admin") throw refusal("only admins change everyone's AI: leave out scope to change your own");
+        if (input.provider && !["local", "gemini"].includes(input.provider)) throw refusal(`provider is local or gemini, not ${JSON.stringify(input.provider)}`);
         for (const key of Object.keys(DEFAULTS)) if (input[key] !== undefined) s.exec("insert or replace into settings values (?, ?)", [key, JSON.stringify(input[key])]);
         return "Saved.";
       },
@@ -139,7 +142,7 @@ export default {
           console.log("ai read", JSON.stringify({ provider: "gemini", input: u.promptTokenCount, output: u.candidatesTokenCount, thinking: u.thoughtsTokenCount }));
           return { text, provider: "gemini", cut: reply.candidates?.some((x) => x.finishReason === "MAX_TOKENS") || false };
         }
-        if (files.some((f) => !f.type.startsWith("image/"))) throw new Error("Local models read photos, not PDFs: set Gemini up with ai_set to read PDFs.");
+        if (files.some((f) => !f.type.startsWith("image/"))) throw refusal("Local models read photos, not PDFs: set Gemini up with ai_set to read PDFs.");
         const reply = await ctx.apps.models.chat({
           model: s.read_model, system, think: false, ...(s.local_device ? { device: s.local_device } : {}),
           options: { temperature: 0, num_predict: max_tokens },
