@@ -23,7 +23,7 @@ Every network works the same way. A network's settings say which providers it ha
 
 A sign-in never lets anyone in by itself, for any network or user, so the "no tap" path goes. Being at the domain only decides who may ask. It's checked in the provider's signed token, not by the `hd` hint. Requests go out as ordinary pushes (a sleeping phone must still alert), and stay until answered or expired. Every join shows "joined · Remove" on the user's other devices. The approving device checks the sign-in's proof itself (`src/onboarding/sign_in_proof.rs`), so a hacked auth Worker can make requests and never approve one. The link-phishing guard stays (ARCHITECTURE.md's Trust): the short code doesn't cover it.
 
-An invited user's device is listed with no tap, by the provider's signed token as proof against the invite in the log. Its device holds no key to write that step, so an admin's device that's online writes it for it. Every device checks that proof. Providers change their signing keys, so the key that was valid is saved with the proof, or old joins couldn't be checked. Shared data reaches them once a device holding those keys is online, with no tap.
+An invited user's device is listed with no tap, by the provider's signed token as proof against the invite in the log. Its device holds no key to write that step, so any device of the network that's online writes it for it, by the provider's keys the invite saved (`ARCHITECTURE.md`). Every device checks that proof. Providers change their signing keys, so the key that was valid is saved with the proof, or old joins couldn't be checked. Shared data reaches them once a device holding those keys is online, with no tap.
 
 **Keys.** Each scope has random keys, sealed to who may open them and to the network's recovery key, as today. A device holds its user's keys, so a new device needs one handover. Keys are never derived from anything a rename can change: not from an app's, database's or scope's name.
 
@@ -56,7 +56,7 @@ Steps 1 to 7 land before PTC's staff are onboarded.
 Steps 1, 3, 4, 6 and 7 are built and shipped; step 2 went with each. Step 5's holders are built, and the rest of it wasn't:
 
 - **User keys were left out.** Nothing can hold one under the rules above: a browser's code comes from a Worker, a native app's page gets only what its shell hands it, a remote MCP client and an app-schedule machine would be widened by one, and a computer's CLI opens keys as its node. Every device would still need its seal per scope, so it added a powerful secret and saved nothing. `ARCHITECTURE.md` says why.
-- **An invited device can't add itself,** having no key to write to who's-who with. An admin's device that's online writes it with no tap, so an invite waits for one to be on.
+- **An invited device can't add itself,** having no key to write to who's-who with. Any device of the network that's online writes it with no tap, so an invite waits for one to be on.
 - **Placeholder emails remain,** never shown or matched, because Better Auth requires a unique email and passkey-only users exist.
 - **Passkeys prove who you are and never open anything.** The PRF device path is gone. Step 9 hasn't been asked for.
 - Step 8's deploy tokens are narrowed. Retiring the old tokens, audit logs and enforcing 2FA are Andre's.

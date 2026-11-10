@@ -618,15 +618,18 @@ impl ScopeDb {
 
     /// The invites by email that still count, used or not: each of an admin still.
     pub fn email_invites(&self) -> Result<Vec<EmailInvite>> {
-        let rows: Vec<(String, String, String, String, i64, Option<String>, Option<String>)> = self
+        let rows: Vec<(String, String, String, String, i64, Option<String>, Option<String>, Option<String>)> = self
             .conn()
-            .prepare("SELECT user, email, name, role, until, used, invited_by FROM email_invites ORDER BY user")?
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+            .prepare("SELECT user, email, name, role, until, used, invited_by, keys FROM email_invites ORDER BY user")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))?
             .collect::<rusqlite::Result<_>>()?;
         Ok(rows
             .into_iter()
-            .filter(|(.., by)| by.as_deref().is_some_and(|by| self.may(by, "invite", NETWORK)))
-            .filter_map(|(user, email, name, role, until, used, _)| Some(EmailInvite { user, email, name, role: serde_json::from_value(json!(role)).ok()?, until: until as u64, used: used.is_some() }))
+            .filter(|(.., by, _)| by.as_deref().is_some_and(|by| self.may(by, "invite", NETWORK)))
+            .filter_map(|(user, email, name, role, until, used, _, keys)| {
+                let keys = keys.and_then(|k| serde_json::from_str(&k).ok()).unwrap_or_default();
+                Some(EmailInvite { user, email, name, role: serde_json::from_value(json!(role)).ok()?, until: until as u64, used: used.is_some(), keys })
+            })
             .collect())
     }
 
@@ -1041,6 +1044,8 @@ pub struct EmailInvite {
     pub role: Role,
     pub until: u64,
     pub used: bool,
+    /// The provider's keys when they were invited: a sign-in signed by one lets them in from any device of the network.
+    pub keys: Vec<Value>,
 }
 
 /// An endpoint of the network, listed by a `device` step (or a new network's first, `content::first`): its key, the key things are sealed to,

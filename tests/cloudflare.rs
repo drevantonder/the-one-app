@@ -496,7 +496,8 @@ fn an_admin_signs_in_like_anyone_else() {
 }
 
 /// An invite naming an email needs no link: that account signs in as who the invite says, and no other does; and what a
-/// request's sign-in showed, an ID token being a bearer's, reaches only an admin's device or the user's own.
+/// request's sign-in showed, an ID token being a bearer's, reaches only who may answer it: any device of the network
+/// for their first device, which the invite lets in, and only an admin's device or the user's own for any after.
 #[test]
 fn an_invited_email_signs_in_and_only_who_may_answer_reads_its_proof() {
     use data_encoding::HEXLOWER;
@@ -514,19 +515,26 @@ fn an_invited_email_signs_in_and_only_who_may_answer_reads_its_proof() {
     assert_eq!(status, 200, "{out}");
     let proof = "a.proof.kept";
     assert_eq!(post(&format!("{}/api/auth/test", k.address), &[], json!({ "keep_proof": { "key": HEXLOWER.encode(&device.key), "user": sam, "proof": { "id_token": proof } } })).0, 200);
-    let listed_to = |key: &ed25519_dalek::SigningKey| -> Value {
+    let listed_to = |key: &ed25519_dalek::SigningKey, name: &str| -> Value {
         let asked = B64U.encode(signed(key, "GET /api/auth/devices/requests", json!({})).to_string().as_bytes());
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         let mut got = agent.get(format!("{}/api/auth/devices/requests", k.address)).header("x-one-request", asked).call().unwrap();
-        got.body_mut().read_json::<Value>().unwrap()["requests"][0].clone()
+        let got = got.body_mut().read_json::<Value>().unwrap();
+        got["requests"].as_array().unwrap().iter().find(|r| r["name"] == name).cloned().unwrap()
     };
-    assert_eq!(listed_to(&admin)["sign_in"]["id_token"], proof);
-    assert!(listed_to(&member).get("sign_in").is_none(), "another user's device read someone's ID token");
-    assert_eq!(listed_to(&member)["name"], "Sam's phone", "though it sees the request");
+    assert_eq!(listed_to(&admin, "Sam's phone")["sign_in"]["id_token"], proof);
+    assert_eq!(listed_to(&member, "Sam's phone")["sign_in"]["id_token"], proof, "a member's device lets in who an invite named");
+
+    let next = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    assert_eq!(sams.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&next.key), "seal": HEXLOWER.encode(&next.seal), "name": "Sam's laptop", "reads": one::database::READS })).0, 200);
+    assert_eq!(post(&format!("{}/api/auth/test", k.address), &[], json!({ "keep_proof": { "key": HEXLOWER.encode(&next.key), "user": sam, "proof": { "id_token": proof } } })).0, 200);
+    assert_eq!(listed_to(&admin, "Sam's laptop")["sign_in"]["id_token"], proof);
+    assert!(listed_to(&member, "Sam's laptop").get("sign_in").is_none(), "another user's device read the ID token of a device no invite lets in");
 }
 
-/// Only a request's user's own device, or an admin's, answers it: any other device of the network marks it approved or
-/// forgets it no more, whether auth knows whose it is or not; and auth knows whose a device is only from who may say.
+/// Only a request's user's own device, or an admin's, answers one no invite lets in: any other device of the network
+/// marks it approved or forgets it no more, whether auth knows whose it is or not; and auth knows whose a device is only
+/// from who may say.
 #[test]
 fn only_its_users_own_device_or_an_admins_answers_a_request() {
     use data_encoding::HEXLOWER;
@@ -551,6 +559,7 @@ fn only_its_users_own_device_or_an_admins_answers_a_request() {
         agent.delete(format!("{}/api/auth/devices/requests/{key}{query}", k.address)).header("x-one-request", asked).call().unwrap().status().as_u16()
     };
     let theirs = |by: &ed25519_dalek::SigningKey, key: &str, user: &str| post(&format!("{}/api/auth/devices/theirs", k.address), &[], signed(by, "POST /api/auth/devices/theirs", json!({ "key": key, "user": user, "name": "A computer" }))).0;
+    assert_eq!(theirs(&admin, &HEXLOWER.encode(&rand::random::<[u8; 32]>()), &sam), 200, "Sam has a device already, so no invite lets this one in");
 
     assert_eq!(answer(&sams_box, "?approved"), 403, "a device auth knows no user of answered someone's request");
     assert_eq!(answer(&stranger, ""), 403, "and forgot it");

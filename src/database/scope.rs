@@ -75,7 +75,8 @@ CREATE TABLE devices (
 ) STRICT;
 -- What a user also signs in with, linked from their device `device`, which checked it (`sign_in_proof::Account`, JSON).
 -- Someone new an admin (`invited_by`, their id) named by the email they sign in with: their device joins by an ID token for it,
--- once (`used`, its key), while that admin is one.
+-- once (`used`, its key), while that admin is one. `keys`: the provider's keys when they invited them (JWKS keys, JSON), the
+-- ones any device of the network may let them in by.
 CREATE TABLE email_invites (
   user TEXT PRIMARY KEY,
   email TEXT NOT NULL,
@@ -83,7 +84,8 @@ CREATE TABLE email_invites (
   role TEXT NOT NULL,
   until INTEGER NOT NULL,
   used TEXT,
-  invited_by TEXT
+  invited_by TEXT,
+  keys TEXT
 ) STRICT;
 CREATE TABLE linked_sign_ins (
   device TEXT NOT NULL,

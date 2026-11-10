@@ -191,8 +191,9 @@ pub fn invite(group: &str, user: &str, role: Role) -> Content {
 }
 
 /// Says someone new may join as `user` by signing in as `email`, until `until` (ms): an admin's yes, given in advance.
-pub fn invite_email(user: &str, email: &str, name: &str, role: Role, until: u64) -> Content {
-    node(Change::InviteEmail, json!({ "user": user, "email": email, "name": name, "role": role, "until": until }))
+/// `keys` are the provider's keys now (JWKS keys), which a sign-in any device of the network lets them in by is signed with.
+pub fn invite_email(user: &str, email: &str, name: &str, role: Role, until: u64, keys: &[Value]) -> Content {
+    node(Change::InviteEmail, json!({ "user": user, "email": email, "name": name, "role": role, "until": until, "keys": keys }))
 }
 
 pub fn withdraw_invite(user: &str) -> Content {

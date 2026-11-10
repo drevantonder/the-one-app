@@ -13,7 +13,7 @@
 // anyone may sign in and ask, which writes nothing anywhere but here; anyone else is refused before they can.
 //
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
-// its user (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
+// its user (or, for a newcomer's first, an admin's, or any by their invite) finds by its join code and approves, then clears with
 // `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
 // `&root=`, the network's root as the approving device holds it: the only network the new device then takes, so no
 // node it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
@@ -25,8 +25,8 @@
 // hex), so whoever answers its request can check it themselves (src/onboarding/sign_in_proof.rs): with a provider, auth asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
 // and keeps the token it gave; with a passkey, the prompt's challenge names it, the network and when
 // (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
-// request to join (`sign_in`), never checked here, and only to who may answer it: an admin's device, or one of that
-// user's own. Refusing a request forgets its proof too. A throwaway network's auth signs its own ID token, with
+// request to join (`sign_in`), never checked here, and only to who may answer it: an admin's device, one of that
+// user's own, or for an invited email's first device signed in on itself, any of the network's. Refusing a request forgets its proof too. A throwaway network's auth signs its own ID token, with
 // nothing else to show.
 //
 // Only a device that signed in itself goes straight in by an invite: a sign-in finished from a link opened on another
@@ -107,7 +107,7 @@ const refuse = (status, message) => {
 const INVITE = 30 * 86_400_000;
 /// How long a request waits for someone to answer it: long enough for an admin who is asleep.
 const REQUEST = 3 * 86_400_000;
-/// How long an invited newcomer's first device waits for an admin's device that's online to let it in (`node`'s
+/// How long an invited newcomer's first device waits for a device of the network that's online to let it in (`node`'s
 /// `invites_loop`, every few seconds) before anyone is pushed "wants in".
 const WANTS_IN = 10_000;
 /// The most devices of one user pushed to, the newest.
@@ -699,7 +699,7 @@ export class Auth extends DurableObject {
     if (claims.nonce === nonce) this.keepProof(key + seal, user, { id_token: row.idToken });
   }
 
-  /// Whether an admin's device that's online lets this request in by itself, an invite having said yes
+  /// Whether a device of the network that's online lets this request in by itself, an invite having said yes
   /// (src/settings.rs's `Joining::New`): an invited email's first device, once it has signed in on itself.
   anInviteLetsIn(user, key) {
     const sql = this.ctx.storage.sql;
@@ -817,8 +817,8 @@ export class Auth extends DurableObject {
   }
 
   /// Requests waiting: the signed-in user's own devices', or, for a signed request from one of the network's
-  /// devices, every one: a device approves only its own user's, or a newcomer's whose invite its user keeps, as
-  /// the steps it writes count only then. Signed in and signed both, it's their device asking: kept as theirs, for
+  /// devices, every one: a device approves only its own user's, or a newcomer's an invite said yes to, as the steps
+  /// it writes count only then. Signed in and signed both, it's their device asking: kept as theirs, for
   /// pushes, and shown their own.
   async requests(request) {
     this.expire();
@@ -834,10 +834,11 @@ export class Auth extends DurableObject {
   }
 
   /// Which requests a device of the network may answer and read the sign-ins of: every one, for an admin's; its own
-  /// user's (`ownerOf`), for any other.
+  /// user's (`ownerOf`), and an invited email's first device signed in on itself, which its invite lets in, for any
+  /// other.
   entitled(signed) {
     const mine = this.ownerOf(signed.by);
-    return (r) => signed.admin || r.user === mine;
+    return (r) => signed.admin || r.user === mine || (!r.by_link && this.anInviteLetsIn(r.user, r.key));
   }
 
   async mayTouch(request, key) {
@@ -859,7 +860,7 @@ export class Auth extends DurableObject {
   /// the network's `root` (hex) it was let into and its `welcome`, if the approving device said.
   async unask(request, key, approved, root, welcome) {
     const { row, signed } = await this.mayTouch(request, key);
-    if (signed ? !this.entitled(signed)(row) : approved) refuse(403, "Only its user's own device, or an admin's, answers that request.");
+    if (signed ? !this.entitled(signed)(row) : approved) refuse(403, "Only its user's own device or an admin's answers that request, or any device of the network when an invite lets it in.");
     // Approved again (a retry, or a second approving device): marked once, never forgotten by it.
     if (approved) {
       if (!row.approved) {

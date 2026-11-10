@@ -6,7 +6,7 @@ use super::*;
 use crate::bucket::Bucket;
 use crate::settings::Me;
 
-/// How often an admin's client looks for someone their invite lets in.
+/// How often a client looks for someone an invite lets in.
 const INVITES_EVERY: Duration = Duration::from_secs(4);
 
 /// How long an issuer's keys are kept before they're fetched again: a key it no longer signs with goes within the hour.
@@ -187,13 +187,13 @@ impl Node {
         });
     }
 
-    /// Every few seconds, on an admin's client, lets in each newcomer an invite already said yes to
+    /// Every few seconds, on a client of the network's, lets in each newcomer an invite already said yes to
     /// (`settings::requests`). Everyone else waits for someone to tap Approve.
     pub(super) async fn invites_loop(self) {
         loop {
             tokio::time::sleep(INVITES_EVERY).await;
-            let admin = self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.is_some_and(|c| c.user == i.user) && i.r.db().may(&i.user, "invite", scopes::NETWORK)));
-            if !admin.unwrap_or(false) || Node::address(&self).is_err() {
+            let client = self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.is_some_and(|c| c.user == i.user)));
+            if !client.unwrap_or(false) || Node::address(&self).is_err() {
                 continue;
             }
             if let Err(err) = crate::settings::requests(&self).await {

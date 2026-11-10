@@ -984,7 +984,7 @@ async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: 
     let told = ask_auth(m, "POST", "/api/auth/invites", fields).await?;
     if let (true, Some(email), true) = (new, email, m.who(|who| Ok(who.setting(sign_in_proof::CLIENTS)?.is_some_and(|c| !c.trim().is_empty())))?) {
         let user = told["user"].as_str().unwrap_or(&user);
-        m.write(content::invite_email(user, email, name, role, until)).await?;
+        m.write(content::invite_email(user, email, name, role, until, &provider_keys(m).await)).await?;
         return Ok(json!({ "email": email, "link": m.address().unwrap_or_default(), "until": until }));
     }
     if new {
@@ -992,6 +992,20 @@ async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: 
         keep_invites(m, &kept).await?;
     }
     Ok(json!({ "link": format!("{}/invite#{secret}", m.address().unwrap_or_default()), "until": until }))
+}
+
+/// The keys the network's providers sign ID tokens with now, for an invite to name: none that can't be fetched, so only
+/// an admin's device lets its newcomer in.
+async fn provider_keys(m: &impl Me) -> Vec<Value> {
+    let (Some(address), Ok((Some(root), clients))) = (m.address(), m.who(|who| Ok((who.root()?, who.setting(sign_in_proof::CLIENTS)?)))) else { return Vec::new() };
+    let network = sign_in_proof::Network::new(&address, *root.as_bytes(), clients.as_deref());
+    let mut keys = Vec::new();
+    for (issuer, _) in &network.clients {
+        let Some(at) = sign_in_proof::discovery(issuer, &network) else { continue };
+        let Some(jwks) = m.issuer_keys(&at).await.and_then(|d| d["jwks_uri"].as_str().map(str::to_string)) else { continue };
+        keys.extend(m.issuer_keys(&jwks).await.and_then(|k| k["keys"].as_array().cloned()).unwrap_or_default());
+    }
+    keys
 }
 
 /// Who a device waiting is, and so who may say yes.
@@ -1002,8 +1016,9 @@ pub enum Joining {
     /// Someone new, from an invite link this device made: the link is the approval, unless their sign-in was finished
     /// from another link, which could be anyone's who sent it.
     Link(Invited),
-    /// Someone new an admin may let in: named by an invite, or asking from the network's domain. `invite` is what lets
-    /// them in with no tap, when an invite named them and they signed in on the device asking.
+    /// Someone new: named by an invite, or asking from the network's domain, whom an admin may let in. `invite` is what
+    /// lets them in with no tap, when an invite named them and they signed in on the device asking: by any device of the
+    /// network, when the key that signed it is one the invite named.
     New { name: String, role: Role, invite: Option<InviteProof> },
     /// Someone in the network with no device of theirs left.
     Lost,
@@ -1016,8 +1031,9 @@ pub struct InviteProof {
 }
 
 /// Devices waiting that this device may let in: its user's own; someone new from an invite made here, whose proof is
-/// that invite's; and for an admin, someone an invite names, someone asking from the network's domain, or someone with
-/// no device left, each as their sign-in, checked here, shows. Never those taken out or turned down.
+/// that invite's; someone an invite names, signed in with a key it named; and for an admin, any other an invite names,
+/// someone asking from the network's domain, or someone with no device left, each as their sign-in, checked here,
+/// shows. Never those taken out or turned down.
 async fn waiting(m: &impl Me) -> Result<Vec<(Asked, Joining)>> {
     let user = m.user()?;
     let admin = m.who(|who| Ok(who.may(&user, "invite", scopes::NETWORK)))?;
@@ -1036,7 +1052,7 @@ async fn waiting(m: &impl Me) -> Result<Vec<(Asked, Joining)>> {
         } else if let Some(invite) = invites.get(&r.user).filter(|i| r.said["proof"].as_str() == Some(&keys::invite_proof(i.secret.as_bytes(), &r.endpoint))) {
             let invite = invite.clone();
             out.push((r, Joining::Link(invite)));
-        } else if admin && let Some(joining) = to_admin(m, &r).await {
+        } else if let Some(joining) = newcomer(m, &r, admin).await {
             out.push((r, joining));
         }
     }
@@ -1054,8 +1070,9 @@ async fn vouched(m: &impl Me, r: &Asked, accounts: &[Account]) -> bool {
     sign_in_proof::vouches(&proof, &r.endpoint, &network, jwks.as_ref(), accounts).is_ok()
 }
 
-/// Who `r` is to an admin, if their sign-in, checked here, shows they may ask at all: anyone else is no one's to answer.
-async fn to_admin(m: &impl Me, r: &Asked) -> Option<Joining> {
+/// Who `r` is, someone else's device, if their sign-in, checked here, shows this device may answer them: to any device,
+/// someone an invite names, signed in with a key the invite named; to an admin's, anyone who may ask at all.
+async fn newcomer(m: &impl Me, r: &Asked, admin: bool) -> Option<Joining> {
     let proof: Proof = serde_json::from_value(r.said["sign_in"].clone()).ok()?;
     let (ever, invite, none_left, accounts, listed) = m
         .who(|who| {
@@ -1067,19 +1084,27 @@ async fn to_admin(m: &impl Me, r: &Asked) -> Option<Joining> {
     let (network, jwks) = checked_against(m, &proof).await?;
     if ever && !listed {
         sign_in_proof::vouches(&proof, &r.endpoint, &network, jwks.as_ref(), &accounts).ok()?;
-        return none_left.then_some(Joining::Lost);
+        return (admin && none_left).then_some(Joining::Lost);
     }
     // Listed already: an admin's approval that the relay didn't hear of, so it's the same answer, for approving again to
     // finish it.
-    let Some(token) = proof.id_token() else { return listed.then_some(Joining::Lost) };
-    let jwk = sign_in_proof::signing_key(token, jwks.as_ref()?).ok()?;
+    let Some(token) = proof.id_token() else { return (admin && listed).then_some(Joining::Lost) };
+    let named = invite.as_ref().and_then(|i| sign_in_proof::signing_key(token, &json!({ "keys": i.keys })).ok());
+    let jwk = match named {
+        Some(jwk) => jwk,
+        None if admin => sign_in_proof::signing_key(token, jwks.as_ref()?).ok()?,
+        None => return None,
+    };
     let shown = sign_in_proof::id_token(token, &r.endpoint, &network, &jwk).ok()?;
-    let sign_in_proof::Account::Provider { email: Some(email), .. } = &shown.account else { return listed.then_some(Joining::Lost) };
+    let sign_in_proof::Account::Provider { email: Some(email), .. } = &shown.account else { return (admin && listed).then_some(Joining::Lost) };
     let email = email.to_lowercase();
     if let Some(invite) = invite.filter(|i| shown.email_verified && i.email == email && (listed || !i.used) && shown.issued <= i.until) {
-        // A sign-in finished from a link could be anyone's who sent it, so it waits for a tap.
+        // A sign-in finished from a link could be anyone's who sent it, so it waits for a tap, an admin's.
         let here = matches!(proof, Proof::IdToken(_));
-        return Some(Joining::New { name: invite.name, role: invite.role, invite: here.then(|| InviteProof { token: token.to_string(), jwk }) });
+        return (admin || here).then(|| Joining::New { name: invite.name, role: invite.role, invite: here.then(|| InviteProof { token: token.to_string(), jwk }) });
+    }
+    if !admin {
+        return None;
     }
     let domain = crate::config::JOIN_DOMAIN;
     if !domain.is_empty() && shown.email_verified && email.ends_with(&format!("@{domain}")) {
@@ -1330,8 +1355,8 @@ pub async fn approve(m: &impl Me, r: &Asked, joining: &Joining) -> Result<Value>
             ensure!(r.said["proof"].as_str() == Some(&keys::invite_proof(i.secret.as_bytes(), e)), "{}'s proof isn't from {}'s invite.", r.name, i.name);
             Some((i.name.clone(), i.role))
         }
-        Joining::New { name, role, .. } => {
-            allowed!(may_invite, "Only an admin lets someone new in.");
+        Joining::New { name, role, invite } => {
+            allowed!(may_invite || invite.is_some(), "Only an admin lets someone new in.");
             Some((name.clone(), *role))
         }
     };
@@ -1362,7 +1387,9 @@ pub async fn approve(m: &impl Me, r: &Asked, joining: &Joining) -> Result<Value>
         let own = Scope::User(r.user.clone());
         let scopes = who.scopes()?.into_iter().filter(|s| who.may(&r.user, "use", &scopes::object(s)) && (own_too || *s != own)).collect::<Vec<_>>();
         let before: Vec<[u8; 32]> = replaced(who.clients()?, r).into_iter().map(|c| c.key).collect();
-        Ok((scopes, who.may(&r.user, "invite", scopes::NETWORK), before))
+        // The relay takes an admin's device only from an admin's: one let in by a member's is an admin there once an
+        // admin's device tells it whose are (`tell_roles`).
+        Ok((scopes, may_invite && who.may(&r.user, "invite", scopes::NETWORK), before))
     })?;
     let (mut sealed, mut not_sealed) = (Vec::new(), Vec::new());
     for scope in &scopes {
