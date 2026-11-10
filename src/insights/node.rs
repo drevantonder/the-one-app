@@ -64,9 +64,9 @@ impl Node {
     /// A call that ran here, or failed trying: one span and a place in the rollups, and an error's fingerprint. Only a
     /// failure, a refusal or a slow call keeps its span whole. Elsewhere isn't a failure, and it says nothing.
     pub(super) async fn finish_call(&self, call: Call, req: &CallRequest, me: &Caller, reply: &Reply) {
-        let code = match reply {
-            Reply::Ok(_) => None,
-            Reply::Error(_, code) => Some(code.clone()),
+        let (code, said) = match reply {
+            Reply::Ok(_) => (None, None),
+            Reply::Error(said, code) => (Some(code.clone()), Some(said.as_str())),
             Reply::Elsewhere(_) | Reply::Needs(_) => return call.leave(),
         };
         let steps = call.steps();
@@ -105,10 +105,15 @@ impl Node {
                 None => (format!("stage:{at}"), build.to_string()),
             };
             attrs = std::mem::take(&mut attrs).failed(failure).stage(at);
-            if let Some(e) = exception.as_ref().filter(|_| destination.named) {
+            let said = broke(failure, said);
+            if let (Failure::Broke(_), Some(e)) = (failure, exception.as_ref().filter(|_| destination.named)) {
                 attrs = std::mem::take(&mut attrs).exception(e);
             }
-            Print { app: app.to_string(), tool: tool.clone(), kind: failure.kind().to_string(), frame, build: built, status }
+            let print = Print { app: app.to_string(), tool: tool.clone(), kind: failure.kind().to_string(), frame, build: built, status, said: said.as_deref().map_or_else(String::new, |s| insights::message::id(&insights::message::cleaned(s))) };
+            if let Some(said) = said {
+                attrs = std::mem::take(&mut attrs).message(&said).fingerprint(&print.fingerprint());
+            }
+            print
         });
         let name = if destination.named { tool.clone() } else { "call".into() };
         let bucket_of = |field: &str| steps.iter().filter(|s| s["step"] == "bucket").map(|s| s[field].as_u64().unwrap_or(0)).sum::<u64>();
@@ -157,10 +162,19 @@ impl Node {
         if kept {
             attrs = attrs.steps(&tried);
         }
+        let said = ended.as_ref().err().map(|err| format!("{err:#}"));
+        let said = failure.as_ref().and_then(|failure| broke(failure, said.as_deref()));
+        let cleaned = said.as_deref().map(insights::message::cleaned);
         if let Some(failure) = &failure {
             attrs = attrs.failed(failure).stage(at);
         }
-        let print = failure.as_ref().filter(|_| answers).map(|failure| Print { app: app.to_string(), tool: name.clone(), kind: failure.kind().to_string(), frame: format!("stage:{at}"), build: build.to_string(), status });
+        let print = failure.as_ref().filter(|_| answers).map(|failure| Print { app: app.to_string(), tool: name.clone(), kind: failure.kind().to_string(), frame: format!("stage:{at}"), build: build.to_string(), status, said: cleaned.as_deref().map_or_else(String::new, insights::message::id) });
+        if let (Some(said), true) = (&said, answers) {
+            attrs = attrs.message(said);
+            if let Some(print) = &print {
+                attrs = attrs.fingerprint(&print.fingerprint());
+            }
+        }
         let signal = Signal { time, device: hex(&self.0.id), kind: Kind::Span, name, app: app.to_string(), trace: trace.trace_id(), span, parent, ms, status, attrs };
         self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, kept, print);
     }
@@ -340,12 +354,15 @@ impl Node {
             if let Some(x) = &exception {
                 attrs = attrs.exception(x);
             }
+            let said = exception.as_ref().and_then(|x| x.message.as_deref()).map(insights::message::cleaned);
             let tool = match (&screen, destination.named) {
                 (Some(screen), true) => format!("screen:{screen}"),
                 _ if name == "page.exception" => "page".into(),
                 _ => "screen".into(),
             };
-            print = Some(Print { app: app_named.to_string(), tool, kind: exception.as_ref().map_or_else(|| insights::OTHER.to_string(), |x| x.kind.clone()), frame, build, status: Status::Error });
+            let made = Print { app: app_named.to_string(), tool, kind: exception.as_ref().map_or_else(|| insights::OTHER.to_string(), |x| x.kind.clone()), frame, build, status: Status::Error, said: said.as_deref().map_or_else(String::new, insights::message::id) };
+            attrs = attrs.fingerprint(&made.fingerprint());
+            print = Some(made);
         }
         let signal = Signal { time, device: hex(&me.key), kind: Kind::Event, name: name.to_string(), app: app_named.to_string(), trace: trace::ids::trace(), span: trace::ids::span(), parent: None, ms, status: Status::of(ok), attrs };
         self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, true, print);
@@ -397,6 +414,9 @@ impl Node {
         }
         if let Some(failure) = &failure {
             attrs = attrs.failed(failure);
+            if let Failure::Broke(_) = failure {
+                attrs = attrs.message(&err.map_or_else(String::new, |err| format!("{err:#}")));
+            }
         }
         let app = if destination.named { app.to_string() } else { String::new() };
         let signal = Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: "schedule.run".into(), app, trace: traced.trace_id(), span: trace::ids::span(), parent: None, ms, status, attrs };
@@ -549,6 +569,11 @@ fn hop_failed(err: &anyhow::Error) -> (Option<&'static str>, &'static str) {
     } else {
         (Some(insights::LOST), "lost")
     }
+}
+
+/// What a call said, if it broke: a refusal's is the caller's own to read, and kept nowhere.
+fn broke(failure: &Failure, said: Option<&str>) -> Option<String> {
+    matches!(failure, Failure::Broke(_)).then(|| said.map(str::to_string)).flatten()
 }
 
 /// OTEL's `service.name` of a row: its app, or the network's own program for what isn't an app's.

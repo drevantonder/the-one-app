@@ -1704,18 +1704,21 @@ function xt(e) {
 	return Object.keys(X(e));
 }
 function St(t) {
-	let n = e(43), { rows: r, showTraces: a, query: c } = t, [u, d] = c, [f, p] = i(j), [m, h] = i("error"), [g, _] = i(null), v;
-	if (n[0] !== u || n[1] !== r || n[2] !== f || n[3] !== m) {
-		let e = re(u);
-		v = r.filter((t) => (f === j || t.service === f) && (m === j || t.status === m) && e(t)).map(Ft), n[0] = u, n[1] = r, n[2] = f, n[3] = m, n[4] = v;
-	} else v = n[4];
-	let y = v, x;
-	if (n[5] !== y || n[6] !== g) {
+	let n = e(44), { rows: r, signals: a, showTraces: c, query: u } = t, [d, f] = u, [p, m] = i(j), [h, g] = i("error"), [_, v] = i(null), y;
+	if (n[0] !== d || n[1] !== r || n[2] !== p || n[3] !== a || n[4] !== h) {
+		let e = re(d), t = new Map(a.filter(Lt).map(It).reverse());
+		y = r.map((e) => ({
+			...e,
+			message: t.get(e.fingerprint)
+		})).filter((t) => (p === j || t.service === p) && (h === j || t.status === h) && e(t)).map(Ft), n[0] = d, n[1] = r, n[2] = p, n[3] = a, n[4] = h, n[5] = y;
+	} else y = n[5];
+	let x = y, S;
+	if (n[6] !== x || n[7] !== _) {
 		let e;
-		n[8] === g ? e = n[9] : (e = (e) => e.id === g, n[8] = g, n[9] = e), x = y.find(e), n[5] = y, n[6] = g, n[7] = x;
-	} else x = n[7];
-	let S = x, C;
-	n[10] === Symbol.for("react.memo_cache_sentinel") ? (C = [
+		n[9] === _ ? e = n[10] : (e = (e) => e.id === _, n[9] = _, n[10] = e), S = x.find(e), n[6] = x, n[7] = _, n[8] = S;
+	} else S = n[8];
+	let C = S, w;
+	n[11] === Symbol.for("react.memo_cache_sentinel") ? (w = [
 		{
 			key: "type",
 			label: "Error",
@@ -1749,83 +1752,83 @@ function St(t) {
 			value: Et,
 			cell: Tt
 		}
-	], n[10] = C) : C = n[10];
-	let w = C, T = S && `${S.type} ${S.frame}`, O;
-	n[11] === Symbol.for("react.memo_cache_sentinel") ? (O = () => _(null), n[11] = O) : O = n[11];
-	let k;
-	n[12] === r ? k = n[13] : (k = J(r.map(wt)), n[12] = r, n[13] = k);
+	], n[11] = w) : w = n[11];
+	let T = w, O = C && `${C.type} ${C.frame}`, k;
+	n[12] === Symbol.for("react.memo_cache_sentinel") ? (k = () => v(null), n[12] = k) : k = n[12];
 	let A;
-	n[14] !== f || n[15] !== k ? (A = /* @__PURE__ */ E($, {
-		label: "Service",
-		value: f,
-		set: p,
-		all: "All Services",
-		options: k
-	}), n[14] = f, n[15] = k, n[16] = A) : A = n[16];
+	n[13] === r ? A = n[14] : (A = J(r.map(wt)), n[13] = r, n[14] = A);
 	let M;
-	n[17] === r ? M = n[18] : (M = J(r.map(Ct)), n[17] = r, n[18] = M);
+	n[15] !== p || n[16] !== A ? (M = /* @__PURE__ */ E($, {
+		label: "Service",
+		value: p,
+		set: m,
+		all: "All Services",
+		options: A
+	}), n[15] = p, n[16] = A, n[17] = M) : M = n[17];
 	let N;
-	n[19] !== m || n[20] !== M ? (N = /* @__PURE__ */ E($, {
-		label: "Status",
-		value: m,
-		set: h,
-		all: "All Statuses",
-		options: M
-	}), n[19] = m, n[20] = M, n[21] = N) : N = n[21];
+	n[18] === r ? N = n[19] : (N = J(r.map(Ct)), n[18] = r, n[19] = N);
 	let P;
-	n[22] === d ? P = n[23] : (P = (e) => d(e.target.value), n[22] = d, n[23] = P);
+	n[20] !== h || n[21] !== N ? (P = /* @__PURE__ */ E($, {
+		label: "Status",
+		value: h,
+		set: g,
+		all: "All Statuses",
+		options: N
+	}), n[20] = h, n[21] = N, n[22] = P) : P = n[22];
 	let F;
-	n[24] !== u || n[25] !== P ? (F = /* @__PURE__ */ E(l, {
+	n[23] === f ? F = n[24] : (F = (e) => f(e.target.value), n[23] = f, n[24] = F);
+	let I;
+	n[25] !== d || n[26] !== F ? (I = /* @__PURE__ */ E(l, {
 		className: "min-w-52 flex-1",
 		"aria-label": "Search",
 		placeholder: "Search, or key=value",
-		value: u,
-		onChange: P
-	}), n[24] = u, n[25] = P, n[26] = F) : F = n[26];
-	let I;
-	n[27] !== N || n[28] !== F || n[29] !== A ? (I = /* @__PURE__ */ D("div", {
+		value: d,
+		onChange: F
+	}), n[25] = d, n[26] = F, n[27] = I) : I = n[27];
+	let L;
+	n[28] !== P || n[29] !== I || n[30] !== M ? (L = /* @__PURE__ */ D("div", {
 		className: "flex flex-wrap items-center gap-2",
 		children: [
-			A,
-			N,
-			F
+			M,
+			P,
+			I
 		]
-	}), n[27] = N, n[28] = F, n[29] = A, n[30] = I) : I = n[30];
-	let L;
-	n[31] === y ? L = n[32] : (L = y.length ? /* @__PURE__ */ E(ke, {
+	}), n[28] = P, n[29] = I, n[30] = M, n[31] = L) : L = n[31];
+	let R;
+	n[32] === x ? R = n[33] : (R = x.length ? /* @__PURE__ */ E(ke, {
 		label: "Errors",
-		columns: w,
-		rows: y,
+		columns: T,
+		rows: x,
 		start: {
 			key: "last",
 			down: !0
 		},
-		open: (e) => _(e.id)
-	}) : /* @__PURE__ */ E(s, { children: "No errors match." }), n[31] = y, n[32] = L);
-	let R;
-	n[33] !== I || n[34] !== L ? (R = /* @__PURE__ */ D("div", {
-		className: "flex flex-col gap-4",
-		children: [I, L]
-	}), n[33] = I, n[34] = L, n[35] = R) : R = n[35];
+		open: (e) => v(e.id)
+	}) : /* @__PURE__ */ E(s, { children: "No errors match." }), n[32] = x, n[33] = R);
 	let z;
-	n[36] !== S || n[37] !== a ? (z = S && /* @__PURE__ */ D("div", {
+	n[34] !== L || n[35] !== R ? (z = /* @__PURE__ */ D("div", {
+		className: "flex flex-col gap-4",
+		children: [L, R]
+	}), n[34] = L, n[35] = R, n[36] = z) : z = n[36];
+	let B;
+	n[37] !== C || n[38] !== c ? (B = C && /* @__PURE__ */ D("div", {
 		className: "flex flex-col items-start gap-3",
 		children: [/* @__PURE__ */ E(Ze, {
-			row: S,
+			row: C,
 			skip: ["id"]
 		}), /* @__PURE__ */ E(o, {
 			variant: "secondary",
-			onClick: () => a(S),
+			onClick: () => c(C),
 			children: "Show Traces"
 		})]
-	}), n[36] = S, n[37] = a, n[38] = z) : z = n[38];
-	let B;
-	return n[39] !== R || n[40] !== z || n[41] !== T ? (B = /* @__PURE__ */ E(b, {
-		title: T,
-		onClose: O,
-		list: R,
-		detail: z
-	}), n[39] = R, n[40] = z, n[41] = T, n[42] = B) : B = n[42], B;
+	}), n[37] = C, n[38] = c, n[39] = B) : B = n[39];
+	let V;
+	return n[40] !== z || n[41] !== B || n[42] !== O ? (V = /* @__PURE__ */ E(b, {
+		title: O,
+		onClose: k,
+		list: z,
+		detail: B
+	}), n[40] = z, n[41] = B, n[42] = O, n[43] = V) : V = n[43], V;
 }
 function Ct(e) {
 	return e.status;
@@ -1879,6 +1882,10 @@ function Nt(e) {
 			/* @__PURE__ */ E("span", {
 				className: "text-muted-foreground",
 				children: e.frame
+			}),
+			e.message && /* @__PURE__ */ E("span", {
+				className: "block text-muted-foreground",
+				children: e.message
 			})
 		]
 	});
@@ -1892,7 +1899,13 @@ function Ft(e) {
 		id: `${e.service}|${e.tool}|${e.fingerprint}`
 	};
 }
-function It() {
+function It(e) {
+	return [e.attrs["one.fingerprint"], e.attrs["exception.message"]];
+}
+function Lt(e) {
+	return e.attrs?.["one.fingerprint"];
+}
+function Rt() {
 	let [e, a] = i(null), [s, l] = i(null), [p, y] = i("Services"), [b, w] = i("1d"), [T, O] = i(!1), [k, A] = i(null), N = i(null), P = i({
 		service: j,
 		operation: j
@@ -2012,6 +2025,7 @@ function It() {
 			}),
 			p === "Errors" && /* @__PURE__ */ E(St, {
 				rows: e.fingerprints,
+				signals: e.signals,
 				query: F.Errors,
 				showTraces: (e) => (F.Traces[1](`error.type=${e.type}`), W({
 					service: e.service,
@@ -2021,5 +2035,5 @@ function It() {
 		]
 	});
 }
-a(document.getElementById("root")).render(/* @__PURE__ */ E(It, {}));
+a(document.getElementById("root")).render(/* @__PURE__ */ E(Rt, {}));
 </script>

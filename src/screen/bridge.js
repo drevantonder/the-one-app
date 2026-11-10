@@ -114,8 +114,8 @@
     throw new Error("Open this in the app.");
   }
 
-  // What goes wrong in a screen, for its host to report (`thrown`): what threw and where, never its message, which a thrown
-  // Error can fill with anything. A few per screen, as one loop of errors is one problem.
+  // What goes wrong in a screen, for its host to report (`thrown`): what threw, where, and what it said, which the node
+  // cleans before keeping. A few per screen, as one loop of errors is one problem.
   let threw = 0;
   function thrown(err) {
     if (threw++ < 10) host({ type: "thrown", exception: described(err) }).catch(() => {});
@@ -131,7 +131,7 @@
       if (at && /^[\w.-]{1,64}$/.test(file)) frames.push({ file, line: Number(at[2]), col: Number(at[3]) });
       if (frames.length === 8) break;
     }
-    return { type: String(err?.name ?? "Error"), frames };
+    return { type: String(err?.name ?? "Error"), message: message.slice(0, 1024), frames };
   }
   addEventListener("error", (e) => e.target === window && thrown(e.error));
   addEventListener("unhandledrejection", (e) => thrown(e.reason));

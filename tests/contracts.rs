@@ -1012,10 +1012,10 @@ fn the_iphone_build_scripts_name_the_app_as_the_build_does() {
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), one::config::IPHONE);
 }
 
-/// What a screen's bridge reports of what threw is only its type and where: what it says goes nowhere, however it's dressed
-/// (a message with lines like a stack's, a URL's query on a frame), and what it does send is what insights keeps.
+/// What a screen's bridge reports of what threw is its type, where, and what it said: a frame stays only a location, however
+/// a message is dressed (lines like a stack's, a URL's query on a frame), and what the node keeps of the message is cleaned.
 #[test]
-fn a_screens_error_crosses_from_the_bridge_without_what_it_said() {
+fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let bridge = std::fs::read_to_string(root.join("src/screen/bridge.js")).unwrap();
     let from = bridge.find("  function described(err) {").expect("bridge.js says what threw");
@@ -1032,9 +1032,12 @@ fn a_screens_error_crosses_from_the_bridge_without_what_it_said() {
     std::fs::remove_file(&at).unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let said = String::from_utf8(out.stdout).unwrap();
-    assert!(!said.contains("anna") && !said.contains("SECRET") && !said.contains("leak") && !said.contains("example"), "{said}");
     let said: Vec<Value> = serde_json::from_str(&said).unwrap();
     let kept: Vec<_> = said.iter().map(|e| one::insights::Exception::from_json(e).unwrap()).collect();
+    let stored = kept.iter().map(|e| one::insights::Attrs::default().exception(e).json().to_string()).collect::<String>();
+    assert!(!stored.contains("anna") && !stored.contains("SECRET:") && !stored.contains("example"), "{stored}");
+    assert!(kept.iter().all(|e| e.frames.iter().all(|f| !f.contains("SECRET") && !f.contains("leak"))), "{kept:?}");
+    assert_eq!(one::insights::Attrs::default().exception(&kept[0]).json()["exception.message"], "<email>");
     assert_eq!(kept[0].kind, "TypeError");
     assert_eq!(kept[0].frames, ["a.js:12:3", "srcdoc:2:5"]);
     assert_eq!(kept[1].kind, "Error", "a name of the program's own is `Error`");

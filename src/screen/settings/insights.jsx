@@ -605,17 +605,18 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
   )
 }
 
-function Errors({ rows, showTraces, query: [query, setQuery] }) {
+function Errors({ rows, signals, showTraces, query: [query, setQuery] }) {
   const [service, setService] = useState(ALL)
   const [status, setStatus] = useState("error")
   const [open, setOpen] = useState(null)
   const found = useMemo(() => {
     const matches = matcher(query)
-    return rows.filter((r) => (service === ALL || r.service === service) && (status === ALL || r.status === status) && matches(r)).map((r) => ({ ...r, id: `${r.service}|${r.tool}|${r.fingerprint}` }))
-  }, [rows, service, status, query])
+    const said = new Map(signals.filter((s) => s.attrs?.["one.fingerprint"]).map((s) => [s.attrs["one.fingerprint"], s.attrs["exception.message"]]).reverse())
+    return rows.map((r) => ({ ...r, message: said.get(r.fingerprint) })).filter((r) => (service === ALL || r.service === service) && (status === ALL || r.status === status) && matches(r)).map((r) => ({ ...r, id: `${r.service}|${r.tool}|${r.fingerprint}` }))
+  }, [rows, signals, service, status, query])
   const chosen = found.find((r) => r.id === open)
   const columns = [
-    { key: "type", label: "Error", value: (p) => p.type, cell: (p) => <span className="break-all"><span className="font-medium">{p.type}</span> <span className="text-muted-foreground">{p.frame}</span></span> },
+    { key: "type", label: "Error", value: (p) => p.type, cell: (p) => <span className="break-all"><span className="font-medium">{p.type}</span> <span className="text-muted-foreground">{p.frame}</span>{p.message && <span className="block text-muted-foreground">{p.message}</span>}</span> },
     { key: "service", label: "Service", value: (p) => p.service, cell: (p) => <span className="break-all">{p.service}</span> },
     { key: "tool", label: "Operation", wide: true, value: (p) => p.tool, cell: (p) => <span className="break-all">{p.tool}</span> },
     { key: "count", label: "Count", right: true, value: (p) => p.count, cell: (p) => number(p.count) },
@@ -715,7 +716,7 @@ function Insights() {
       {tab === "Traces" && <Traces traces={traces} filters={filters} query={queries.Traces} open={setTraceId} colour={colour} more={data.more_signals} />}
       {tab === "Logs" && <Logs rows={logs} more={data.more_signals} query={queries.Logs} />}
       {tab === "Metrics" && <Metrics rows={kinds.get("metric") || []} from={from} to={to} more={data.more_rollups} query={queries.Metrics} />}
-      {tab === "Errors" && <Errors rows={data.fingerprints} query={queries.Errors} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
+      {tab === "Errors" && <Errors rows={data.fingerprints} signals={data.signals} query={queries.Errors} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
     </div>
   )
 }

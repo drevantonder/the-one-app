@@ -105,8 +105,9 @@ fn errors(rows: &Value, status: &str, since: u64, now: u64, limit: usize) -> Opt
     }
     prints.sort_by_key(|p| std::cmp::Reverse(p["count"].as_u64()));
     let text = |row: &Value, key: &str| row[key].as_str().unwrap_or("").to_string();
+    let said = |fingerprint: &str| rows["signals"].as_array().into_iter().flatten().find(|s| s["attrs"]["one.fingerprint"] == fingerprint).and_then(|s| s["attrs"]["exception.message"].as_str()).map(|m| format!("\n    {m}")).unwrap_or_default();
     let lines = listed(&prints, limit, |p| {
-        format!("{} {}: {} at {}, {}, last {}", text(p, "service"), text(p, "tool"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)))
+        format!("{} {}: {} at {}, {}, last {}{}", text(p, "service"), text(p, "tool"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)), said(&text(p, "fingerprint")))
     });
     Some(format!("{}:\n{lines}", if status == ERROR { "Top errors" } else { "Not errors" }))
 }

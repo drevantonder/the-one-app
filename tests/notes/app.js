@@ -26,6 +26,14 @@ export default {
         throw new Error(text);
       },
     },
+    refuse: {
+      reads: true,
+      description: "Refuses what it's asked, saying what it's given.",
+      input: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+      async run(ctx, { text }) {
+        throw Object.assign(new Error(text), { code: "refused" });
+      },
+    },
     read: {
       reads: true,
       description: "Every line, oldest first.",

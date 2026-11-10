@@ -7,8 +7,10 @@
 //! fingerprints (until their build is gone from the network). Failures, slow calls and one trace in 20 keep their spans.
 //! Telemetry may be lost.
 //!
-//! A signal holds closed-set values only (`Attrs`): never a call's arguments or answer, an app's error text, a URL, a file,
-//! repo or account's name, an email, an IP, a prompt or anything key-shaped, and never names a user or a group.
+//! A signal's attributes hold closed-set values only (`Attrs`): never a call's arguments or answer, a URL, a file, repo or
+//! account's name, an email, an IP, a prompt or anything key-shaped, and never names a user or a group. The one free text is
+//! `exception.message`, what a real failure said, cleaned first (`message`) and kept with the raw signal alone; a refusal's
+//! is never kept.
 
 use std::collections::BTreeMap;
 
@@ -16,6 +18,7 @@ use serde_json::{Value, json};
 
 use crate::protocol::code;
 
+pub mod message;
 pub mod tools;
 pub mod view;
 
@@ -189,19 +192,21 @@ pub fn exception_type(name: &str) -> &'static str {
     EXCEPTIONS.iter().find(|e| **e == name).copied().unwrap_or("Error")
 }
 
-/// An exception as a screen or the app runtime reports it: what threw it and where, never what it said.
+/// An exception as a screen or the app runtime reports it: what threw it and where, and what it said, if it's been told.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Exception {
     pub kind: String,
     pub frames: Vec<String>,
+    /// As it came: `Attrs::message` cleans it.
+    pub message: Option<String>,
 }
 
 impl Exception {
-    /// From `{ type, frames: [{ file, line, col }] }`, whoever sent it: a frame that isn't only a location is left out.
+    /// From `{ type, message, frames: [{ file, line, col }] }`, whoever sent it: a frame that isn't only a location is left out.
     pub fn from_json(v: &Value) -> Option<Exception> {
         let kind = exception_type(v["type"].as_str()?).to_string();
         let frames = v["frames"].as_array().into_iter().flatten().filter_map(frame).take(MOST_FRAMES).collect();
-        Some(Exception { kind, frames })
+        Some(Exception { kind, frames, message: v["message"].as_str().filter(|m| !m.is_empty()).map(str::to_string) })
     }
 
     /// The frame that says what threw it: the first of the app's own, past the runtime's that carried it there.
@@ -379,6 +384,21 @@ impl Attrs {
         if !e.frames.is_empty() {
             self.0.insert("exception.stacktrace", json!(e.frames.iter().map(|f| format!("at {f}")).collect::<Vec<_>>().join("\n")));
         }
+        match &e.message {
+            Some(said) => self.message(said),
+            None => self,
+        }
+    }
+
+    /// `exception.message`, what a real failure said, cleaned: only ever for one that broke, as a refusal keeps no text.
+    pub fn message(mut self, said: &str) -> Attrs {
+        self.0.insert("exception.message", json!(message::cleaned(said)));
+        self
+    }
+
+    /// Which fingerprint this failure is, for a reader to find what a fingerprint's failures said: made from closed sets alone.
+    pub fn fingerprint(mut self, id: &str) -> Attrs {
+        self.0.insert("one.fingerprint", json!(id));
         self
     }
 
@@ -485,7 +505,8 @@ pub struct Signal {
     pub attrs: Attrs,
 }
 
-/// An error grouped by what threw it: its type, its top code frame or the stage it failed at, and the build it ran in.
+/// An error grouped by what threw it: its type, its top code frame or the stage it failed at, the build it ran in and,
+/// by its id alone, what it said once that's cleaned, so what differs only by a value is one line and the row holds no text.
 #[derive(Clone, Debug)]
 pub struct Print {
     pub app: String,
@@ -494,11 +515,16 @@ pub struct Print {
     pub frame: String,
     pub build: String,
     pub status: Status,
+    /// `message::id` of what it said; empty for a refusal, which says nothing here.
+    pub said: String,
 }
 
 impl Print {
     pub fn fingerprint(&self) -> String {
-        format!("{}|{}|{}", self.kind, self.frame, self.build)
+        match self.said.as_str() {
+            "" => format!("{}|{}|{}", self.kind, self.frame, self.build),
+            said => format!("{}|{}|{}|{said}", self.kind, self.frame, self.build),
+        }
     }
 }
 
@@ -546,6 +572,9 @@ pub struct Batch {
     pub prints: BTreeMap<(String, String, String), Printed>,
 }
 
+/// The most fingerprints a batch adds: past it what's new adds only to the rollups, as what a message varies by can be anything.
+const MOST_PRINTS: usize = 500;
+
 impl Batch {
     pub fn is_empty(&self) -> bool {
         self.signals.is_empty() && self.rollups.is_empty() && self.prints.is_empty()
@@ -563,7 +592,9 @@ impl Batch {
         if let Some(print) = print {
             let at = signal.time;
             let id = (print.app.clone(), print.tool.clone(), print.fingerprint());
-            self.prints.entry(id).and_modify(|p| { p.count += 1; p.last = p.last.max(at); p.first = p.first.min(at) }).or_insert(Printed { print, count: 1, first: at, last: at });
+            if self.prints.len() < MOST_PRINTS || self.prints.contains_key(&id) {
+                self.prints.entry(id).and_modify(|p| { p.count += 1; p.last = p.last.max(at); p.first = p.first.min(at) }).or_insert(Printed { print, count: 1, first: at, last: at });
+            }
         }
         if kept && self.signals.len() < MOST_SIGNALS {
             self.signals.push(signal);
@@ -599,12 +630,14 @@ mod tests {
         let e = Exception::from_json(&json!({ "type": secret, "frames": [{ "file": "app.js", "line": 3, "col": 9 }, { "file": "a/b@c", "line": 1, "col": 1 }, { "file": "lib/a.js", "line": 2, "col": 1 }] })).unwrap();
         assert_eq!(e.kind, "Error");
         assert_eq!(e.frames, ["app.js:3:9", "lib/a.js:2:1"]);
+        let cleaned = Attrs::default().exception(&Exception { message: Some(format!("no mail for {secret}")), ..e }).json();
+        assert_eq!(cleaned["exception.message"], "no mail for <email>");
     }
 
     /// What's the caller's to change never counts as something that broke, and nothing else is taken for it.
     #[test]
     fn only_a_refusal_is_the_callers() {
-        let thrown = Exception { kind: "TypeError".into(), frames: vec!["app.js:1:1".into()] };
+        let thrown = Exception { kind: "TypeError".into(), frames: vec!["app.js:1:1".into()], message: None };
         assert_eq!(Failure::of(Some(code::REFUSED), None, stage::RUN), Failure::Refused("refused".into()));
         assert_eq!(Failure::of(Some(code::REFUSED), None, stage::RUN).status(), Status::Unset);
         assert_eq!(Failure::of(Some(code::RESTARTING), None, stage::RUN), Failure::Broke("restarting".into()));

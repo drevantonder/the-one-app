@@ -46,6 +46,7 @@ A removed device's later steps fail rule 3, because they come after its removal 
 Recorded by the network itself, in OpenTelemetry's data model and names, with no SDK or Collector (`src/insights.rs`).
 
 - **Errors follow OTEL** (Andre, 11-10), so what isn't an error never poisons Insights. A caller's mistake (refused, a code `insights::REFUSALS` lists) has its span status left unset and no `error.type`, its code kept in `one.code`, and is in no rate and not in the Errors list. Only what broke has status Error and an `error.type`. A hop keeps its own client span status and never counts against a call that went on elsewhere: rates and the Errors list read server spans.
+- **Attributes stay in closed sets; one field is free text** (Andre, 11-10). A real failure keeps what it said as `exception.message`, from the node and from screens, on its raw signal alone (a week). Everything said passes the one cleaner on the node (`src/insights/message.rs`) before it's saved: emails, keys, tokens, URLs, IPs, phone numbers, long numbers and home paths become placeholders, and it's cut to a length. Errors that then read the same group together. A fingerprint row keeps none of the text, and a refusal's is kept nowhere.
 
 ## Designed, not built
 

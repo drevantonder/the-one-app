@@ -92,7 +92,7 @@ pub fn tools() -> Vec<Value> {
             "inputSchema": { "type": "object", "required": ["app", "screen", "exception"], "properties": {
                 "app": { "type": "string", "description": "the app's name" },
                 "screen": { "type": "string", "description": "the screen's name" },
-                "exception": { "type": "object", "description": "the type and top stack frames of what threw" },
+                "exception": { "type": "object", "description": "the type, message and top stack frames of what threw" },
             } },
             "annotations": crate::skills::hints(false, false),
             "_meta": { "ui": { "visibility": ["app"] } },
