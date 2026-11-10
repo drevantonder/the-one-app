@@ -199,11 +199,11 @@ pub fn cloudflare_node(src: &Path, config: &Path, profile: &str) -> Result<PathB
     Wasm { what: "Cloudflare node", cargo: &["build", "--profile", profile, "-p", "one-cloudflare-node", "--target", "wasm32-unknown-unknown"], wasm, out, glued: "one_cloudflare_node_bg.wasm", shrink: false }.build(src, config)
 }
 
-/// Builds onet (`onet/`) into WebAssembly for browsers, as small as it builds, and its JavaScript glue: → the
-/// folder they're in.
-pub fn onet(src: &Path, config: &Path) -> Result<PathBuf> {
-    let (wasm, out) = (src.join("target/wasm32-unknown-unknown/web/onet.wasm"), src.join("target/onet"));
-    Wasm { what: "onet", cargo: &["rustc", "-p", "onet", "--profile", "web", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib"], wasm, out, glued: "onet_bg.wasm", shrink: true }.build(src, config)
+/// Builds onet (`onet/`) into WebAssembly for browsers and its JavaScript glue: → the folder they're in. `profile` is
+/// cargo's: a release's `web` is as small as it builds, a throwaway network's `web-dev` as quick.
+pub fn onet(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
+    let (wasm, out) = (src.join(format!("target/wasm32-unknown-unknown/{profile}/onet.wasm")), src.join("target/onet"));
+    Wasm { what: "onet", cargo: &["rustc", "-p", "onet", "--profile", profile, "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib"], wasm, out, glued: "onet_bg.wasm", shrink: profile == "web" }.build(src, config)
 }
 
 /// A tool by its name, or where it's kept when a shell doesn't have it on its PATH: `probe` is an argument that makes it

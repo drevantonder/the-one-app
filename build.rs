@@ -2,6 +2,8 @@
 #[path = "src/ui_files.rs"]
 mod ui_files;
 
+const WASM_BUILT: &str = "wasm-built";
+
 fn main() {
     let path = std::env::var("CONFIG").unwrap_or_else(|_| "config.toml".into());
     println!("cargo:rerun-if-changed={path}");
@@ -158,6 +160,7 @@ fn main() {
     // exists is watched: cargo reruns a build for one that doesn't.
     let out = format!("{out}{}", wasm_constant("CLOUDFLARE_NODE", "target/cloudflare-node", ["one_cloudflare_node.js", "one_cloudflare_node_bg.wasm"]));
     let out = format!("{out}{}", wasm_constant("ONET", "target/onet", ["onet.js", "onet_bg.wasm"]));
+    let out = format!("{out}pub const WASM_BUILT: &str = {WASM_BUILT:?};\n");
     // The apps every agent needs from the start: their guide is in MCP's instructions, and code mode keeps their tools.
     let always_on: String = config.get("always_on").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()).map(|n| format!("{n:?},")).collect();
     let out = format!("{out}pub const ALWAYS_ON: &[&str] = &[{always_on}];\n");
@@ -214,6 +217,15 @@ fn main() {
 fn wasm_constant(var: &str, default: &str, names: [&str; 2]) -> String {
     println!("cargo:rerun-if-env-changed={var}");
     let wasm = std::env::var("TARGET").unwrap().starts_with("wasm32");
+    if !wasm {
+        // What `one-dev` rewrites once it has built these, as cargo watches only files that exist, and they may not yet.
+        let stamp = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("target").join(WASM_BUILT);
+        if !stamp.exists() {
+            std::fs::create_dir_all(stamp.parent().unwrap()).unwrap();
+            std::fs::write(&stamp, "").unwrap();
+        }
+        println!("cargo:rerun-if-changed={}", stamp.display());
+    }
     let explicit = std::env::var(var).ok();
     let dir = explicit.clone().map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join(default));
     for name in names.iter().filter(|_| explicit.is_some() || !wasm) {

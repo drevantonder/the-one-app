@@ -91,7 +91,7 @@ fn build_release(at: &At) -> Result<PathBuf> {
     // Every release carries the Cloudflare node: one without it couldn't deploy to Cloudflare.
     let cloudflare = timed("built the Cloudflare node", || build::cloudflare_node(src, config, "release")).context("couldn't build the Cloudflare node")?;
     // And the web client's way to nodes: one without it couldn't reach them.
-    let onet = timed("built the web client's onet", || build::onet(src, config)).context("couldn't build the web client's WebAssembly")?;
+    let onet = timed("built the web client's onet", || build::onet(src, config, "web")).context("couldn't build the web client's WebAssembly")?;
     let release = || {
         let mut command = cargo();
         command.current_dir(src).env("CONFIG", config).env("CLOUDFLARE_NODE", &cloudflare).env("ONET", &onet).args(["build", "--release"]);
