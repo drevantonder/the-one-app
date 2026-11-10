@@ -148,6 +148,26 @@ fn stopped(limit: Duration) -> String {
     format!("it took longer than {}s and was stopped, having written nothing", limit.as_secs())
 }
 
+/// A call stopped at its limit, which wrote nothing: it's said to the caller as `stopped`.
+#[derive(Debug)]
+struct Stopped(Duration);
+
+impl std::fmt::Display for Stopped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&stopped(self.0))
+    }
+}
+
+impl std::error::Error for Stopped {}
+
+/// Whether a call stopped at its limit, having written nothing, may run on another device: nothing it did can be done
+/// twice, as it's a tool that only reads, or it never reached its app. An app that ran may have done something outside
+/// (sent a message) and still be running.
+fn may_go_on(reads: bool, stage: &str) -> bool {
+    use crate::insights::stage::{PREPARE, RUN, WRITE};
+    reads || ![RUN, PREPARE, WRITE].contains(&stage)
+}
+
 /// Runs `work` until `deadline`, when it's stopped (None) unless it's writing by then, which it's left to finish.
 async fn unless_writing<T>(deadline: tokio::time::Instant, writing: &AtomicBool, work: impl Future<Output = T>) -> Option<T> {
     let mut work = std::pin::pin!(work);
@@ -286,7 +306,13 @@ impl Node {
         let mut why = Vec::new();
         let candidates = self.candidates(&req, &me)?;
         trace::stage(crate::insights::stage::ROUTE);
+        let began = Instant::now();
+        // A device that stalls costs a call's whole limit, so no call waits on more than one more after that.
+        let most = self.limit(&req).await * 2;
         for device in candidates {
+            if !why.is_empty() && began.elapsed() >= most {
+                break;
+            }
             let started = Instant::now();
             let name = self.name_of(&device);
             // Each device tried, for a trace: how long it took, and why the next was tried.
@@ -618,20 +644,27 @@ impl Node {
         let result = trace::within(Some(call.trace.clone()), unless_writing(tokio::time::Instant::now() + limit, &writing, Box::pin(self.run_here(req, me, limit, &writing)))).await;
         let reply = match result {
             Some(Ok(reply)) => reply,
-            Some(Err(err)) => match err.downcast::<crate::keys::Needs>() {
+            Some(Err(err)) if !err.is::<Stopped>() => match err.downcast::<crate::keys::Needs>() {
                 Ok(need) => {
                     call.leave();
                     return Err(need);
                 }
                 Err(err) => Reply::failed(&err),
             },
-            None => {
+            Some(Err(_)) | None => {
+                let at = call.trace.stage();
                 call.trace.stage_is(crate::insights::stage::LIMIT);
-                Reply::error(stopped(limit))
+                let reads = self.reads(req).await;
+                if may_go_on(reads, at) { Reply::Elsewhere(stopped(limit)) } else { Reply::error(stopped(limit)) }
             }
         };
         self.finish_call(call, req, me, &reply).await;
         Ok(reply)
+    }
+
+    /// Whether the tool of `req` only reads, as its app says.
+    async fn reads(&self, req: &CallRequest) -> bool {
+        self.0.apps.describe(&req.app).await.is_ok_and(|d| d["tools"].as_array().into_iter().flatten().any(|o| o["name"] == req.tool.as_str() && o["reads"] == true))
     }
 
     /// How long a call may run: an app's, CALL_LIMIT; a service's, and that of an app that uses services or other apps
@@ -706,8 +739,7 @@ impl Node {
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
         let mut lease = None;
         if let (Some(id), Some(scope), false) = (&req.id, scopes.first(), req.unleased) {
-            let reads = self.0.apps.describe(&req.app).await?["tools"].as_array().into_iter().flatten().any(|o| o["name"] == req.tool.as_str() && o["reads"] == true);
-            if !reads {
+            if !self.reads(req).await {
                 let base = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
                 let leasing = Instant::now();
                 trace::stage(crate::insights::stage::LEASE);
@@ -746,10 +778,7 @@ impl Node {
             anyhow::Ok(outcome)
         })
         .await
-        .unwrap_or_else(|| {
-            trace::stage(crate::insights::stage::LIMIT);
-            Err(anyhow!(stopped(limit)))
-        });
+        .unwrap_or_else(|| Err(anyhow!(Stopped(limit))));
         let outcome = match ran {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -846,6 +875,18 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One stopped at its limit runs on another device only if nothing it did could then be done twice.
+    #[test]
+    fn a_call_that_may_have_done_something_is_never_tried_again_after_its_limit() {
+        use crate::insights::stage::{KEYS, LEASE, PREPARE, RUN, WRITE};
+        assert!(may_go_on(true, RUN), "it only reads");
+        assert!(may_go_on(false, KEYS), "it never reached its app");
+        assert!(may_go_on(false, LEASE), "it never reached its app");
+        for stage in [RUN, PREPARE, WRITE] {
+            assert!(!may_go_on(false, stage), "its app ran, and may have done something outside: {stage}");
+        }
+    }
 
     #[tokio::test(start_paused = true)]
     async fn a_call_is_stopped_at_its_limit_only_before_it_writes() {
