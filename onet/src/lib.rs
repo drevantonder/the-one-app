@@ -194,7 +194,7 @@ struct Inner {
     /// What answers a node that opens a stream on a connection of this client's, if anything does.
     asked: Mutex<Option<Asked>>,
     /// This device's own app runtime, on its own machine, if it has one: asked first, over its loopback.
-    local: Option<Local>,
+    local: Mutex<Option<Local>>,
 }
 
 /// This device's own app runtime, on its own machine: its endpoint's key, and where its loopback answers this machine's
@@ -275,7 +275,7 @@ impl Client {
             conns: Mutex::default(),
             down: Mutex::default(),
             asked: Mutex::default(),
-            local,
+            local: Mutex::new(local),
         }))
     }
 
@@ -526,7 +526,12 @@ impl Client {
 
     /// This device's own runtime, if it has one and it's among `nodes`.
     fn local_among(&self, nodes: &[PublicKey]) -> Option<Local> {
-        self.0.local.clone().filter(|l| nodes.iter().any(|n| n.as_bytes() == &l.key))
+        self.0.local.lock().unwrap().clone().filter(|l| nodes.iter().any(|n| n.as_bytes() == &l.key))
+    }
+
+    /// This device's own app runtime as who's who lists it now: asked first from now on, or none.
+    pub fn set_local(&self, local: Option<Local>) {
+        *self.0.local.lock().unwrap() = local;
     }
 
     /// `req` of this device's own runtime, over its loopback, as one of this machine's own programs: with its token, and

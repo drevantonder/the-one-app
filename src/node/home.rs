@@ -47,15 +47,29 @@ pub fn runtime_folder(dir: &Path) -> PathBuf {
     dir.join("services").join(scopes::APPS_PART)
 }
 
-/// The app runtime's own key, in its folder, made the first time.
+/// The app runtime's own key, in its folder, made the first time: by whichever of it and its device's onet, which lists
+/// it, asks first, and then the same for both.
 pub(super) fn load_runtime_key(folder: &Path) -> Result<SigningKey> {
     let path = folder.join("key");
     if let Ok(secret) = std::fs::read_to_string(&path) {
         return Ok(SigningKey::from_bytes(&unhex(secret.trim()).context("the app runtime's key file isn't a key")?));
     }
+    std::fs::create_dir_all(folder)?;
     let key = SigningKey::from_bytes(&rand::random());
-    write_private(&path, hex(&key.to_bytes()).as_bytes())?;
-    Ok(key)
+    let made = folder.join(format!("key.{}", std::process::id()));
+    write_private(&made, hex(&key.to_bytes()).as_bytes())?;
+    // Put in place only if it isn't there yet, so a key the other one made at once is the one both keep.
+    let placed = std::fs::hard_link(&made, &path);
+    let _ = std::fs::remove_file(&made);
+    match placed {
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => load_runtime_key(folder),
+        placed => placed.map(|()| key).map_err(Into::into),
+    }
+}
+
+/// The endpoint of the app runtime of the device whose home is `dir` (`runtime_folder`), its key made the first time.
+pub fn runtime_endpoint(dir: &Path) -> Result<crate::keys::Endpoint> {
+    Ok(crate::keys::Endpoint::of(&load_runtime_key(&runtime_folder(dir))?))
 }
 
 /// This machine's own programs' token (in its app runtime's folder, the one they ask that with), made once: only its

@@ -85,39 +85,28 @@ struct Runtime {
     described: Mutex<std::collections::HashMap<String, Value>>,
     /// What each app last said it is, kept when the apps load again, for a service to be listed as its app says.
     identity: Mutex<std::collections::HashMap<String, Value>>,
-    apart: bool,
 }
 
 impl Apps {
     /// Starts workerd with no apps yet, keeping its files in `dir`; apps' requests go out through the node's
-    /// `outbound` port. `apart`: the runtime is a program of its own, which oned starts (`program`), not a thread of this process.
-    pub async fn start(dir: PathBuf, outbound: u16, apart: bool) -> Result<Self> {
-        tokio::task::spawn_blocking(move || Apps::start_blocking(&dir, outbound, apart)).await?
+    /// `outbound` port.
+    pub async fn start(dir: PathBuf, outbound: u16) -> Result<Self> {
+        tokio::task::spawn_blocking(move || Apps::start_blocking(&dir, outbound)).await?
     }
 
-    fn start_blocking(dir: &Path, outbound: u16, apart: bool) -> Result<Self> {
+    fn start_blocking(dir: &Path, outbound: u16) -> Result<Self> {
         // Held for as long as the node runs, and handed to each workerd: no one takes the port meanwhile.
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         write_config(dir, &[], port, outbound, 0)?;
         let listener = cfg!(unix).then_some(listener);
-        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), Vec::new(), 0)), listener, described: Mutex::new(Default::default()), identity: Mutex::new(Default::default()), apart });
-        if apart {
-            return Ok(Apps(runtime));
-        }
+        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), Vec::new(), 0)), listener, described: Mutex::new(Default::default()), identity: Mutex::new(Default::default()) });
         let workerd = workerd()?;
         stop_previous(dir);
         let (dir, listener) = (dir.to_path_buf(), runtime.listener.as_ref().map(|l| l.try_clone()).transpose()?);
         std::thread::Builder::new().name("workerd".into()).spawn(move || keep(&workerd, &dir, listener.as_ref()))?;
         runtime.wait_ready(0)?;
         Ok(Apps(runtime))
-    }
-
-    /// The app runtime's program, as oned starts it: the port it serves, which it keeps as its child's.
-    pub fn program(&self) -> std::io::Result<std::process::Command> {
-        let mut command = crate::oned::command(&[crate::database::scopes::APPS_PART, &format!("--runtime={}", self.0.dir.display())])?;
-        child(&mut command, &self.0.listener.iter().map(|l| ("listening", l)).collect::<Vec<_>>());
-        Ok(command)
     }
 
     /// Runs exactly these apps, (name, module source), restarting the runtime if they changed. `unadded` are built-in
@@ -138,10 +127,7 @@ impl Apps {
                 runtime.described.lock().unwrap().clear();
                 loaded.2
             };
-            // Stopped, the runtime starts with this config: there's no one to wait for.
-            if !runtime.restart() && runtime.apart {
-                return Ok(());
-            }
+            runtime.restart();
             runtime.wait_ready(generation)?;
             // The runtime it replaced answers until this one is up: what it said about its apps goes with it.
             runtime.described.lock().unwrap().clear();
@@ -315,8 +301,8 @@ impl Apps {
 impl Runtime {
     /// Stops the workerd serving this runtime's config, if one is: what keeps it starts it again, with the config as
     /// it is now.
-    fn restart(&self) -> bool {
-        kill_serving(&self.dir)
+    fn restart(&self) {
+        kill_serving(&self.dir);
     }
 
     /// Whether the runtime answers at all within a few seconds.
@@ -425,58 +411,6 @@ fn keep(workerd: &Path, dir: &Path, listener: Option<&std::net::TcpListener>) {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-}
-
-/// Waits until oned asks this program to stop, or stops itself.
-#[cfg(unix)]
-fn until_stopped() {
-    static TERMINATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    extern "C" fn term(_: i32) {
-        TERMINATED.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-    // SAFETY: the handler only stores to an atomic.
-    unsafe { libc::signal(libc::SIGTERM, term as *const () as libc::sighandler_t) };
-    let parent = std::os::unix::process::parent_id();
-    while !TERMINATED.load(std::sync::atomic::Ordering::SeqCst) && std::os::unix::process::parent_id() == parent {
-        std::thread::sleep(Duration::from_millis(200));
-    }
-}
-
-/// Waits until oned closes this program's stdin (`os::ask_to_stop`), which it does by stopping too.
-#[cfg(windows)]
-fn until_stopped() {
-    use std::io::Read;
-    while std::io::stdin().read(&mut [0u8; 64]).is_ok_and(|n| n > 0) {}
-}
-
-/// The port oned handed this program: on Windows none, as workerd binds its config's port itself.
-#[cfg(unix)]
-fn handed_port() -> Result<Option<std::net::TcpListener>> {
-    use std::os::fd::FromRawFd;
-    let fd: i32 = std::env::args().find_map(|a| a.strip_prefix("--socket-fd=listening=").and_then(|f| f.parse().ok())).context("oned hands the app runtime its port")?;
-    // SAFETY: the listening socket oned handed this process, open past exec for it alone, owned here from now on.
-    Ok(Some(unsafe { std::net::TcpListener::from_raw_fd(fd) }))
-}
-
-#[cfg(windows)]
-fn handed_port() -> Result<Option<std::net::TcpListener>> {
-    Ok(None)
-}
-
-/// The app runtime, as oned starts it (`program`): keeps a workerd serving the config in `dir` on the port oned handed
-/// it, until oned asks it to stop or stops itself, then stops its workerd and exits.
-pub fn run(dir: &Path) -> Result<()> {
-    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into())).init();
-    let listener = handed_port()?;
-    let workerd = workerd()?;
-    stop_previous(dir);
-    let dir2 = dir.to_path_buf();
-    std::thread::Builder::new().name("workerd".into()).spawn(move || keep(&workerd, &dir2, listener.as_ref()))?;
-    tracing::info!("the app runtime is serving {}", dir.display());
-    until_stopped();
-    stop_all();
-    tracing::info!("the app runtime stopped");
-    Ok(())
 }
 
 /// Stops the workerd serving `dir`'s config, by the id `keep` wrote there (`WORKERD_PID`), saying whether there was one:

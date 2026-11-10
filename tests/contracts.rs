@@ -792,7 +792,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
             (route.len() == asked.len() || (tail && asked.len() >= route.len() - 1)) && route.iter().zip(asked).all(|(r, a)| r.starts_with('{') || r == a || a.contains("${") || a.contains('{'))
         })
     };
-    const UNLISTED: [&str; 7] = ["/api/keys", "/api/steps", "/api/steps/global", "/api/openapi.json", "/api/holds", "/api/holds/shared", "/api/holds/write"];
+    const UNLISTED: [&str; 8] = ["/api/keys", "/api/steps", "/api/steps/global", "/api/openapi.json", "/api/holds", "/api/holds/shared", "/api/holds/write", "/api/holds/sign"];
     let document = one::openapi::document(&[], true);
     for (path, who, _) in one::says::listed() {
         assert!(one::api::routes().who().iter().any(|(p, w)| *p == path && *w == who), "src/says.rs says {path} is asked by {who:?}, which no route of the node (src/api.rs) is");

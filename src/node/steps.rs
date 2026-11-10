@@ -134,7 +134,7 @@ impl Node {
     /// `write_step`, signed by `key`: this device's, or the network's recovery key, which only ever signs on the machine
     /// it's kept on.
     pub(super) async fn write_step_as(&self, key: &SigningKey, user: &str, content: Content) -> Result<Step> {
-        let _write = self.own_writes().await?;
+        let _write = self.own_writes().await;
         for _ in 0..50 {
             self.read_steps_now().await?;
             let step = self.with(|i| i.r.make_step(key, user, content.clone(), now_ms()))?;
@@ -275,7 +275,7 @@ impl Node {
     /// `global`'s log is frozen, at the next position.
     pub(super) async fn write_scope_step(&self, scope: &Scope, user: &str, content: Content) -> Result<Step> {
         self.first_epoch(scope).await?;
-        let _write = self.own_writes().await?;
+        let _write = self.own_writes().await;
         for _ in 0..50 {
             self.read_scope_steps_now(scope).await?;
             let (step, at) = self.with(|i| {

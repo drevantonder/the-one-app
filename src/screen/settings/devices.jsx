@@ -147,7 +147,8 @@ function model(x, again) {
       c.seen = Math.max(0, ...c.keys.map((k) => seen[k] || 0))
       // An outside program that let this device in, as the relay says: only a label, and only ever one of its own devices.
       c.letInBy = c.keys.map((k) => clients.find((p) => p.key === letIn[k] && p.platform === "cloudflare")).find(Boolean)?.name || null
-      c.version = versions[c.node?.key] || versions[c.signIn?.key] || null
+      // What a device is on is its own to say: a device with an app runtime of its own says it, not the runtime.
+      c.version = (c.node && versions[deviceKey(c.node)]) || versions[c.signIn?.key] || null
       c.icon = c.node
         ? glyph(c.node.kind === "laptop" ? "laptop" : /apple|windows/.test(c.node.target || "") ? "desktop" : "hard-drives", osOf(c.node.target, c.name), !c.online)
         : iconOf({ ...c.signIn, name: c.signIn?.name || c.name })
@@ -448,8 +449,8 @@ function Devices() {
     for (const c of cards) {
       setUpdating({ [c.node.key]: true })
       try {
-        await api("POST", "/api/devices/update", { device: c.node.key })
-        if (!(await cameBack(c.node.key))) {
+        await api("POST", "/api/devices/update", { device: deviceKey(c.node) })
+        if (!(await cameBack(deviceKey(c.node)))) {
           setError(`${c.name} didn’t come back on the new version.`)
           one.tap("error")
           break

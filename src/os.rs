@@ -21,10 +21,15 @@ pub fn named(name: &str) -> std::io::Result<Command> {
 }
 
 /// This program, to be started as `name`: its link of that name beside it, as Windows can't give a program another
-/// first argument.
+/// first argument, made the first time (`replace_program` keeps it the same program after).
 #[cfg(windows)]
 pub fn named(name: &str) -> std::io::Result<Command> {
-    Ok(Command::new(crate::this_program()?.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX))))
+    let exe = crate::this_program()?;
+    let link = exe.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    if !link.exists() {
+        std::fs::hard_link(&exe, &link)?;
+    }
+    Ok(Command::new(link))
 }
 
 /// Asks a process this one started to stop, for it to end what it runs first.
@@ -151,7 +156,7 @@ pub fn replace_program(new: &Path, exe: &Path) -> std::io::Result<()> {
     let dir = exe.parent().ok_or_else(|| std::io::Error::other("this program is in no folder"))?;
     let name = |n: String| dir.join(format!("{n}{}", std::env::consts::EXE_SUFFIX));
     let oned = name(format!("{CLI}d"));
-    let mut names = vec![name(crate::git_wire::helper()), name(CLI.to_string()), exe.to_path_buf()];
+    let mut names = vec![name(crate::git_wire::helper()), name(crate::oned::onet()), name(CLI.to_string()), exe.to_path_buf()];
     names.retain(|path| path.exists() && *path != oned);
     names.dedup();
     names.extend(oned.exists().then_some(oned));

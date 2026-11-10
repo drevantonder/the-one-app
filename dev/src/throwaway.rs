@@ -163,18 +163,19 @@ fn publish(dir: &Path, addr: &str) -> Result<()> {
     Ok(())
 }
 
-/// `update`, in the throwaway network: nothing supervises its node, so what systemd or launchd does for a device's, this does
-/// here, starting it again once the program changed.
+/// `update`, in the throwaway network: nothing supervises its oned, so what systemd or launchd does for a device's, this does
+/// here, starting it again unless it runs the program's build already: its oned may have taken it by itself first.
 fn update(dir: &Path, addr: &str) -> Result<()> {
     let program = network::program(dir)?;
-    let was = Version::of(&program).context("ask the throwaway network's program what it is")?;
     let mut command = std::process::Command::new(&program);
     Throwaway::tell(&mut command, dir, addr);
     let status = command.arg("update").status().context("couldn't run the update")?;
     if !status.success() {
         std::process::exit(status.code().unwrap_or(1));
     }
-    if Version::of(&program).context("ask the throwaway network's program what it is")? != was {
+    let now = Version::of(&program).context("ask the throwaway network's program what it is")?;
+    let runs = std::fs::read_to_string(dir.join(one::update::RUNNING)).unwrap_or_default();
+    if runs.trim() != now.commit || running(dir).is_none() {
         start(dir)?;
     }
     Ok(())

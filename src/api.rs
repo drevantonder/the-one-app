@@ -32,7 +32,7 @@ pub use guard::{FromClient, guarded};
 pub(crate) use guard::Me;
 pub use local::{LOCAL_TOKEN, agent, as_this_machine, from_this_machine, local_token, not_this_machine, token_refused};
 pub(crate) use reply::{Body, Error, Invalid, Reply, RouteFailed, done, given, tagged};
-pub use serve::{serve, serve_until};
+pub use serve::serve;
 
 /// Where this machine's node serves its local API: the config's port, or `<CLI>_ADDR`.
 pub fn addr() -> String {
@@ -121,7 +121,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn each_route_refuses_whom_its_who_says() {
         let dir = std::env::temp_dir().join(format!("one-routes-{}", rand::random::<u64>()));
-        let node = crate::node::Node::start(&dir, false).await.unwrap();
+        let node = crate::node::Node::start(&dir).await.unwrap();
         let routes = super::routes();
         let who: Vec<(String, Who)> = routes.who().to_vec();
         // Only a client device's requests over iroh carry `FromClient`, which the node puts on them: here, a header.

@@ -1,22 +1,25 @@
-//! oned (`<cli>d`): a device's always-on program, this program run by that name; the `<cli>` command line runs, answers
-//! and exits. Its key and endpoint are the device's, and everyone calls it; its parts are the app runtime (`oned apps
-//! --runtime=`, `apps::run`: workerd, which oned hands apps' calls to over a loopback, holding no key or endpoint of its
-//! own; `oned apps --listen=` is the runtime as an endpoint of its own key, `runtime`, which only tests start yet) and
-//! each service: each a process of oned's own (`oned <name>`, `service::run`) with its own key, which oned lists as its
-//! device's. Each is on while the device's latest `service` step for it says so; with none, the app runtime is on, the
-//! rest off; and each is started again when it stops, the rest left running.
-//! Only the device's user writes that step (its switch in Settings' Devices), and oned starts and stops the parts as
-//! it changes. Each process part keeps its own key in its folder (`<home>/services/<name>`), so it answers only its own
+//! oned (`<cli>d`): a computer's always-on program, this program run by that name; the `<cli>` command line runs, answers
+//! and exits. It holds no key. It keeps two programs of its own running, starting each again when it stops: the
+//! computer's onet (`<cli>t`), which holds the device's key and answers its programs, and its app runtime (`oned apps
+//! --listen=`, `runtime`), an endpoint of its own key that onet asks on a loopback address oned gives both. And it takes
+//! the device's updates from the signed record by itself (`update::pull`), then starts again on the new build.
+//!
+//! The app runtime runs the device's parts that are processes of their own (`keep_parts`): each service, a process of
+//! oned's own (`oned <name>`, `service::run`) with its own key, which it lists as its device's. Each is on while the
+//! device's latest `service` step for it says so; with none, off; and each is started again when it stops, the rest
+//! left running. Only the device's user writes that step (its switch in Settings' Devices), and the parts start and stop
+//! as it changes. Each part keeps its own key in its folder (`<home>/services/<name>`), so it answers only its own
 //! user whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since
-//! its device lists it. Its program is its app's own (`apps/<name>/service/`), and oned runs only a build its app's
-//! latest deploy names for this platform (`bundle::SERVICES`), which `<cli> deploy` builds where it's run, or, for one
-//! whose deploy names none, as a built-in app's, the newest `<cli> update` published (`crate::latest`). oned fetches it, checks its hash and puts
-//! it at `~/.local/bin/<cli>-<name>` when it's switched on and again when another is named or a newer one's published;
-//! a Mac app carries the built-in ones in Rust inside it, built with it. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
-//! stopping, failed and why) and how it runs: in its sandbox as its app declares (`sandbox`, which oned tells each
-//! part in its folder, `declared.json`), without one and why, or as the user; which is what Settings' Devices shows. Removing a device removes its parts, and can erase
-//! what it keeps, which the device does itself, so only while it's reachable. On a Mac the app is oned; a phone runs
-//! none, its app is the device.
+//! its device lists it. Its program is its app's own (`apps/<name>/service/`), and only a build its app's
+//! latest deploy names for this platform runs (`bundle::SERVICES`), which `<cli> deploy` builds where it's run, or, for one
+//! whose deploy names none, as a built-in app's, the newest `<cli> update` published (`crate::latest`). It's fetched, its
+//! hash checked and put at `~/.local/bin/<cli>-<name>` when it's switched on and again when another is named or a newer
+//! one's published; a Mac app carries the built-in ones in Rust inside it, built with it. The runtime's hello says what
+//! the device can run (`parts`) and each part's state (on, off, starting, stopping, failed and why) and how it runs: in
+//! its sandbox as its app declares (`sandbox`, told to each part in its folder, `declared.json`), without one and why,
+//! or as the user; which is what Settings' Devices shows. Removing a device removes its parts, and can erase what it
+//! keeps, which the device does itself, so only while it's reachable. On a Mac the app carries oned; a phone runs none,
+//! its app is the device.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -227,8 +230,8 @@ fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, build: &Build)
 /// Keeps this device's parts that run as processes of their own running as its steps say: when one is switched on,
 /// its program fetched from the newest release for this platform if it isn't here (and again when a newer one is
 /// published), then started (and again if it stops); stopped when it's switched off; and listed as this device's once
-/// each asks. What each is doing meanwhile, and what went wrong, its hello says (`parts`). In a thread of its own for
-/// good, so what it starts is its child for as long as oned runs.
+/// each asks. What each is doing meanwhile, and what went wrong, its hello says (`parts`). Run by the app runtime, in
+/// a thread of its own for good, so what it starts is its child for as long as the runtime runs.
 pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
     std::thread::spawn(move || {
         let mut running: BTreeMap<String, (std::process::Child, Instant)> = BTreeMap::new();
@@ -248,31 +251,25 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
         let mut declared: BTreeMap<String, Option<crate::services::sandbox::Declared>> = BTreeMap::new();
         let mut started_with: BTreeMap<String, Option<crate::services::sandbox::Declared>> = BTreeMap::new();
         let device = node.device_name();
-        let mut apps: Option<std::process::Child> = None;
-        let mut apps_stops: Vec<Instant> = Vec::new();
         loop {
             if node.parts().erasing.load(std::sync::atomic::Ordering::SeqCst) {
                 let dir = node.dir().to_path_buf();
+                let oned = std::fs::read_to_string(dir.join(crate::update::PID)).ok().and_then(|p| p.trim().parse::<i32>().ok());
                 std::thread::sleep(Duration::from_secs(1));
                 for (name, (child, _)) in std::mem::take(&mut running) {
                     stop(&name, child);
-                }
-                if let Some(child) = apps.take() {
-                    stop(crate::database::scopes::APPS_PART, child);
                 }
                 crate::app::runtime::stop_all();
                 if let Err(err) = std::fs::remove_dir_all(&dir) {
                     tracing::warn!("erasing {}: {err:#}", dir.display());
                 }
                 tracing::warn!("erased {}: stopping", dir.display());
+                // Its oned too, with onet and all it started (`serve`), to start again as nobody's.
+                if let Some(pid) = oned {
+                    crate::os::ask_pid_to_stop(pid);
+                }
                 std::process::exit(0);
             }
-            // Handing over, the next oned keeps them: this one starting or listing any too would race it.
-            if node.is_handing_over() {
-                std::thread::sleep(Duration::from_secs(2));
-                continue;
-            }
-            keep_runtime(&node, &runtime, &mut apps, &mut apps_stops);
             if looked.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                 released = runtime.block_on(node.service_builds());
                 let carried: Vec<String> = helpers().iter().filter_map(|p| p.file_name()?.to_string_lossy().strip_prefix(&format!("{CLI}-")).map(str::to_string)).collect();
@@ -367,7 +364,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                         }
                         // Unknown, it waits a while for its app to run here; a build its deploy names never runs without one.
                         let deployed = matches!(released.get(name), Some(Build::Deployed(_)));
-                        let patient = crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(120)) && node.runs_apps();
+                        let patient = crate::watchdog::since_start().is_some_and(|s| s < Duration::from_secs(120)) && node.runs_apps();
                         let declaring = said.is_none() && (deployed || patient);
                         if wanted && said.is_none() && deployed {
                             say(&node, &runtime, name, Now { doing: None, problem: Some(UNDECLARED.into()) });
@@ -457,44 +454,6 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
     });
 }
 
-/// Keeps the app runtime running while its switch is on (with none, it is): started, and again whenever it stops,
-/// saying so once it keeps stopping; stopped once it's switched off.
-fn keep_runtime(node: &Node, runtime: &tokio::runtime::Handle, apps: &mut Option<std::process::Child>, stops: &mut Vec<Instant>) {
-    let name = crate::database::scopes::APPS_PART;
-    if let Some(child) = apps
-        && !matches!(child.try_wait(), Ok(None))
-    {
-        tracing::warn!("the app runtime stopped ({:?}): oned starts it again", child.try_wait());
-        *apps = None;
-        stops.retain(|t| t.elapsed() < Duration::from_secs(300));
-        stops.push(Instant::now());
-        if stops.len() >= 3 {
-            say(node, runtime, name, Now { doing: None, problem: Some("It keeps stopping. Its device’s log says why.".into()) });
-        }
-    }
-    match (apps.is_some(), node.runs_apps()) {
-        // On Windows, closing its stdin is how it's asked to stop (`os::ask_to_stop`).
-        (false, true) => match node.app_runtime().program().and_then(|mut c| c.stdin(if cfg!(windows) { std::process::Stdio::piped() } else { std::process::Stdio::null() }).spawn()) {
-            Ok(child) => {
-                tracing::info!("oned started the app runtime");
-                *apps = Some(child);
-            }
-            Err(err) => say(node, runtime, name, Now { doing: None, problem: Some(format!("Couldn’t start it: {err:#}")) }),
-        },
-        (true, false) => {
-            say(node, runtime, name, Now { doing: Some("Stopping"), problem: None });
-            stop(name, apps.take().expect("running"));
-            stops.clear();
-            say(node, runtime, name, Now::default());
-        }
-        (true, true) if stops.len() >= 3 && stops.last().is_some_and(|t| t.elapsed() > Duration::from_secs(60)) => {
-            stops.clear();
-            say(node, runtime, name, Now::default());
-        }
-        _ => {}
-    }
-}
-
 /// Starts a part, given the network it's in and what its app declares it may reach.
 fn start(network: &crate::services::endpoint::Network, name: &str, declared: Option<&crate::services::sandbox::Declared>) -> anyhow::Result<std::process::Child> {
     let folder = crate::services::endpoint::folder(name);
@@ -563,10 +522,14 @@ fn usage() -> String {
     format!("{} runs this device, or with a service's name, that service, as its oned starts it; --version says which build", name())
 }
 
-/// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`). It takes only the
-/// arguments its own starts give it (`--handoff=` to take over a node, `--sandboxed=`, `--runtime=` and the
-/// `--socket-fd=` that comes with it, `apps --listen=`): any other (`--version` typed to see the build) never starts a node, which would
-/// replace the one running.
+/// The name onet runs by on a computer (`<cli>t`), which oned starts it as.
+pub fn onet() -> String {
+    format!("{CLI}t")
+}
+
+/// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`, or `apps
+/// --listen=`, its app runtime). It takes only the arguments its own starts give it: any other (`--version` typed to see
+/// the build) never starts it, which would replace the one running.
 pub fn run(args: &[String]) -> Result<()> {
     let flags: Vec<&str> = args.iter().filter(|a| a.starts_with('-')).map(String::as_str).collect();
     let words: Vec<&str> = args.iter().filter(|a| !a.starts_with('-')).map(String::as_str).collect();
@@ -576,11 +539,13 @@ pub fn run(args: &[String]) -> Result<()> {
         ([], ["--help"]) => println!("{}", usage()),
         #[cfg(target_os = "linux")]
         ([], [_]) if let Some(dir) = flag("--sandboxed=") => return crate::services::sandbox::launch(std::path::Path::new(dir)),
-        ([], _) if flags.iter().all(|f| f.starts_with("--handoff=")) => {
+        // A device's node from before oned started onet starts the build it installed to take over from it, so: this
+        // exits at once, and that node, which can't hand over, exits for its supervisor to start this build afresh.
+        ([], [_]) if flag("--handoff=").is_some() => {}
+        ([], []) => {
             usual_path();
-            return serve(args);
+            return serve();
         }
-        ([crate::database::scopes::APPS_PART], _) if let Some(dir) = flag("--runtime=") && flags.iter().all(|f| f.starts_with("--runtime=") || f.starts_with("--socket-fd=")) => return crate::app::runtime::run(std::path::Path::new(dir)),
         ([crate::database::scopes::APPS_PART], [_]) if let Some(listen) = flag("--listen=") => return runtime(listen),
         ([name], []) if crate::database::scopes::valid_app_name(name) => return crate::services::endpoint::run(name),
         _ => bail!("{}", usage()),
@@ -588,46 +553,18 @@ pub fn run(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// `oned apps --listen=<address>`: this device's app runtime as an endpoint of its own key (`Node::runtime`), answering
-/// on `address` only its device's own programs, with the token in its folder, and asking its device's key, held at
-/// the API's address, for what that opens and signs. Only tests start it, until oned does.
+/// `oned apps --listen=<address>`: this device's app runtime, an endpoint of its own key (`Node::runtime`), answering on
+/// `address` only its device's own programs, with the token in its folder, and asking its device's key, held by the
+/// computer's onet at the API's address, for what that opens and signs. It runs the device's parts that are processes
+/// of their own (`keep_parts`), and its own watchdog.
 #[tokio::main]
 async fn runtime(listen: &str) -> Result<()> {
-    crate::logs::keep(crate::database::scopes::APPS_PART);
-    tracing_subscriber::fmt()
-        .with_writer(crate::logs::Tee)
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
-        .init();
-    let stop = stopped()?;
-    let dir = crate::home();
-    let token = api::local_token(&dir).with_context(|| format!("{} has no token for this device's own programs: its device makes it as it starts", dir.display()))?;
-    let node = Node::runtime(&dir, crate::node::Holder { at: api::addr(), token }).await?;
-    let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
-    tracing::info!("{NAME} app runtime {} answering {listen} from {}", crate::keys::short(&node.id()), dir.display());
-    let served = api::serve_until(listener, api::guarded(api::routes(), node), stop).await;
-    crate::app::runtime::stop_all();
-    Ok(served?)
-}
-
-/// What a service whose app hasn’t said what it may reach shows, until it does.
-const UNDECLARED: &str = "Its app doesn’t say what it may reach, so it doesn’t run.";
-
-/// How long a node stopping waits for its last insights to be written: they may be lost, and stopping may not wait.
-const LAST_SAY: std::time::Duration = std::time::Duration::from_secs(3);
-
-#[tokio::main]
-async fn serve(args: &[String]) -> Result<()> {
-    #[cfg(windows)]
-    {
-        crate::os::children_end_with_me()?;
-        crate::os::remove_replaced(&crate::this_program()?);
-    }
-    // What it says is kept too, for `one logs`.
     crate::logs::keep(crate::logs::NODE);
     tracing_subscriber::fmt()
         .with_writer(crate::logs::Tee)
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
+    crate::watchdog::started();
     // Asked to stop, even while it starts: its workerd first, then at once, rather than once every blocking task
     // ends, which a stuck request would hold up.
     let stop = stopped()?;
@@ -642,113 +579,156 @@ async fn serve(args: &[String]) -> Result<()> {
         std::process::exit(0)
     });
     let dir = crate::home();
-    // A new network's first start makes its home.
-    std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
-    // Taking over from the node before, an update's, with its socket: it answers until this one is warm.
-    let handed = crate::handoff::handed(args)?;
-    let listener = match &handed {
-        Some(h) => tokio::net::TcpListener::from_std(h.listener.try_clone()?)?,
-        None => listen(&dir).await?,
-    };
-    // Its app runtime is a program of its own, which oned starts as its parts.
-    let node = Node::start(&dir, true).await?;
+    let token = api::local_token(&dir).with_context(|| format!("{} has no token for this device's own programs: its onet makes it as it starts", dir.display()))?;
+    let node = Node::runtime(&dir, crate::node::Holder { at: api::addr(), token }).await?;
     let _ = ready_node.send(node.clone());
     node.node_started(crate::insights::Ended::read(&dir));
-    // Its parts that run as processes of their own, as its steps switch them.
-    crate::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
-    // Git here reaches the network's repos at their address, as on every computer of its user's, and the harnesses
-    // installed here reach this node.
-    let mode = crate::mode::here();
-    if matches!(mode, crate::mode::Mode::Own) {
-        let asked = node.clone();
-        let apps = move || {
-            let node = asked.clone();
-            async move {
-                let me = crate::node::Caller::local(&node).ok().filter(|_| node.has_network())?;
-                Some(node.apps(&me).await.unwrap_or_default())
-            }
-        };
-        tokio::spawn(crate::harnesses::keep(apps, dir.clone(), api::addr()));
-    }
-    if let Ok(address) = node.address() {
-        crate::git_wire::wire_here(address);
-    }
-    if handed.is_some() {
-        node.warm().await;
-    }
-    std::fs::write(dir.join(crate::update::PID), std::process::id().to_string())?;
-    crate::update::note_running(&dir)?;
-    tracing::info!("{NAME} node {} serving {} from {}", &crate::keys::hex(&node.id())[..8], api::addr(), dir.display());
+    keep_parts(node.clone(), tokio::runtime::Handle::current());
+    let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
+    tracing::info!("{NAME} app runtime {} answering {listen} from {}", crate::keys::short(&node.id()), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
-    let mut routes = api::guarded(api::routes(), node.clone());
-    if let crate::mode::Mode::Throwaway(network) = mode {
-        routes = network.serve_beside(routes);
-    }
-    // Asked to restart (an update, or SIGHUP): the program now at this one's path takes over, and this one stops
-    // taking connections, finishes what it's answering, and exits.
-    let fd = raw_fd(&listener);
-    let (drained, drain) = tokio::sync::oneshot::channel::<()>();
-    let restarting = {
-        let (node, args) = (node.clone(), args.to_vec());
-        async move {
-            loop {
-                crate::handoff::wanted().await;
-                tracing::info!("handing over to {}", crate::this_program().unwrap_or_default().display());
-                crate::insights::Ended::Update.write(&crate::home());
-                let _ = tokio::time::timeout(LAST_SAY, node.flush_insights()).await;
-                node.handing_over(true).await;
-                match crate::handoff::hand_over(fd, &args).await {
-                    Ok(()) => return node.handed_over(),
-                    Err(err) if crate::handoff::supervised() => {
-                        // Its supervisor starts the new build.
-                        tracing::warn!("couldn't hand over ({err:#}): exiting, to be started again");
-                        std::process::exit(0);
-                    }
-                    Err(err) => {
-                        tracing::warn!("couldn't hand over, so this build keeps running: {err:#}");
-                        node.handing_over(false).await;
-                    }
-                }
-            }
-        }
-    };
-    #[cfg(unix)]
-    tokio::spawn(async {
-        let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else { return };
-        while hup.recv().await.is_some() {
-            let _ = crate::handoff::restart();
-        }
-    });
-    tokio::spawn(async move {
-        restarting.await;
-        let _ = drained.send(());
-    });
-    let http = api::serve_until(listener, routes, async {
-        let _ = drain.await;
-    });
-    crate::handoff::able();
-    match handed {
-        Some(h) => h.ready(),
-        None => crate::handoff::notify("READY=1"),
-    }
-    tracing::info!("{NAME} node {} answering", &crate::keys::hex(&node.id())[..8]);
-    crate::handoff::watch();
-    let served = http.await;
+    crate::watchdog::watch();
+    let served = api::serve(listener, api::guarded(api::routes(), node)).await;
     crate::app::runtime::stop_all();
-    if crate::handoff::stopped() {
-        std::process::exit(0);
-    }
     Ok(served?)
 }
 
-#[cfg(unix)]
-fn raw_fd(listener: &tokio::net::TcpListener) -> i32 {
-    std::os::fd::AsRawFd::as_raw_fd(listener)
+/// What a computer's oned is checking the record at its network's address every so often for (`update::pull`).
+const PULL_EVERY: Duration = Duration::from_secs(30);
+
+/// What a node stopping waits at most for its last insights to be written: they may be lost, and stopping may not wait.
+const LAST_SAY: Duration = Duration::from_secs(3);
+
+/// What a service whose app hasn’t said what it may reach shows, until it does.
+const UNDECLARED: &str = "Its app doesn’t say what it may reach, so it doesn’t run.";
+
+/// One of the programs oned keeps running (onet and the app runtime): started again whenever it stops.
+struct Kept {
+    /// The name it runs by, and what it is, as oned's log says it.
+    name: String,
+    what: &'static str,
+    args: Vec<String>,
+    child: Option<std::process::Child>,
+    stops: Vec<Instant>,
 }
 
-#[cfg(not(unix))]
-fn raw_fd(_listener: &tokio::net::TcpListener) -> i32 {
-    -1
+impl Kept {
+    fn new(name: String, what: &'static str, args: Vec<String>) -> Kept {
+        Kept { name, what, args, child: None, stops: Vec::new() }
+    }
+
+    /// Started if it isn't running; one that stopped is said in oned's log, and once it keeps stopping, said so.
+    fn keep(&mut self) {
+        if let Some(child) = &mut self.child
+            && !matches!(child.try_wait(), Ok(None))
+        {
+            tracing::warn!("{} stopped ({:?}): oned starts it again", self.what, child.try_wait());
+            self.child = None;
+            self.stops.retain(|t| t.elapsed() < Duration::from_secs(300));
+            self.stops.push(Instant::now());
+            if self.stops.len() == 3 {
+                tracing::error!("{} keeps stopping: its log says why ({CLI} logs <this device>{})", self.what, self.log());
+            }
+        }
+        if self.child.is_none() {
+            // On Windows, closing its stdin is how it's asked to stop (`os::ask_to_stop`).
+            let stdin = if cfg!(windows) { std::process::Stdio::piped() } else { std::process::Stdio::null() };
+            match crate::os::named(&self.name).and_then(|mut c| c.args(&self.args).stdin(stdin).spawn()) {
+                Ok(child) => {
+                    tracing::info!("oned started {}", self.what);
+                    self.child = Some(child);
+                }
+                Err(err) => tracing::warn!("couldn't start {}: {err}", self.what),
+            }
+        }
+    }
+
+    /// How its log is read: onet's is its own, and the app runtime's the node's (`logs::NODE`).
+    fn log(&self) -> &str {
+        if self.name == onet() { " --service onet" } else { "" }
+    }
+
+    fn stop(&mut self) {
+        if let Some(child) = self.child.take() {
+            stop(self.what, child);
+        }
+    }
+}
+
+/// oned on a computer: keeps the computer's onet running, which holds its key and answers its programs, and its app
+/// runtime, which onet asks on a loopback address chosen here; and now and then takes the newest build the record at
+/// the network's address names (`update::pull`), needing nothing else of the network, then starts again on it.
+#[tokio::main(flavor = "current_thread")]
+async fn serve() -> Result<()> {
+    #[cfg(windows)]
+    {
+        crate::os::children_end_with_me()?;
+        crate::os::remove_replaced(&crate::this_program()?);
+    }
+    crate::logs::keep("oned");
+    tracing_subscriber::fmt()
+        .with_writer(crate::logs::Tee)
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
+        .init();
+    let dir = crate::home();
+    std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
+    std::fs::write(dir.join(crate::update::PID), std::process::id().to_string())?;
+    crate::update::note_running(&dir)?;
+    with_bucket_address(&dir)?;
+    let at = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
+    let kept = std::sync::Arc::new(std::sync::Mutex::new([
+        Kept::new(onet(), "onet", vec![format!("--listen={}", api::addr()), format!("--runtime={at}")]),
+        Kept::new(name(), "the app runtime", vec![crate::database::scopes::APPS_PART.into(), format!("--listen={at}")]),
+    ]));
+    let stop = stopped()?;
+    tokio::spawn({
+        let kept = kept.clone();
+        async move {
+            stop.await;
+            kept.lock().unwrap().iter_mut().for_each(Kept::stop);
+            std::process::exit(0)
+        }
+    });
+    tracing::info!("{NAME} oned {} keeping onet and its app runtime ({at}) running, from {}", crate::config::BUILD, dir.display());
+    crate::watchdog::notify("READY=1");
+    let mut pulled: Option<Instant> = None;
+    loop {
+        kept.lock().unwrap().iter_mut().for_each(Kept::keep);
+        if pulled.is_none_or(|p| p.elapsed() >= PULL_EVERY) {
+            pulled = Some(Instant::now());
+            let home = dir.clone();
+            if let Ok(Some(commit)) = tokio::task::spawn_blocking(move || crate::update::pull(&home)).await {
+                tracing::info!("put {commit} in place: starting again on it");
+                kept.lock().unwrap().iter_mut().for_each(Kept::stop);
+                return again();
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// Starts oned again, on the program now at its path: in this process, so what started it still has it. Windows can't,
+/// so there it exits, for its task to start it again within the minute.
+fn again() -> Result<()> {
+    #[cfg(unix)]
+    {
+        let err = std::os::unix::process::CommandExt::exec(&mut command(&[])?);
+        Err(err).context("start oned again")
+    }
+    #[cfg(not(unix))]
+    std::process::exit(0)
+}
+
+/// Writes the network's address beside its bucket's fields in this computer's network file, where it's S3-compatible
+/// storage and they don't say it: what a computer's onet and app runtime reach the bucket through, before either has
+/// read who's who, which names it. A computer that joined before its node kept it there has it only in the file its
+/// node kept for `one update`.
+fn with_bucket_address(home: &std::path::Path) -> Result<()> {
+    let Some(mut network) = crate::node::NetworkFile::read(home)? else { return Ok(()) };
+    let Some(bucket) = network.bucket.as_mut().filter(|b| b.contains_key("endpoint") && !b.contains_key("address")) else { return Ok(()) };
+    let Some(address) = crate::update::address(home) else { return Ok(()) };
+    bucket.insert("address".into(), address);
+    network.write(home)
 }
 
 /// When the node is asked to stop: Ctrl-C, or SIGTERM from its supervisor, an update or a node replacing it, each
@@ -769,40 +749,4 @@ fn stopped() -> Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 
     Ok(Box::pin(async {
         let _ = tokio::signal::ctrl_c().await;
     }))
-}
-
-/// The node's address, listened on. A node of this network already there (one left running outside launchd or systemd
-/// by an earlier build, or started by hand) is stopped first: the one starting is the one to keep, so its supervisor's
-/// node never waits on a stray, and an update's node replaces whatever ran before it.
-async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
-    let bind = || tokio::net::TcpListener::bind(api::addr());
-    match bind().await {
-        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {}
-        bound => return bound.with_context(|| format!("listen on {}", api::addr())),
-    }
-    // Who listens there: the pid this home's node wrote.
-    let mut pids: Vec<i32> = std::fs::read_to_string(dir.join(crate::update::PID)).ok().and_then(|p| p.trim().parse().ok()).into_iter().collect();
-    // Only a process of this program, never whatever else took the port.
-    let me = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
-    let ours = |pid: i32| crate::os::is_program(pid as u32, &me);
-    pids.sort();
-    pids.dedup();
-    pids.retain(|&pid| pid as u32 != std::process::id() && ours(pid));
-    anyhow::ensure!(!pids.is_empty(), "{} is taken, and not by {NAME}'s node", api::addr());
-    for &pid in &pids {
-        tracing::warn!("a node of this network was already running (pid {pid}): stopping it, to run this one");
-        crate::os::ask_pid_to_stop(pid);
-    }
-    for tries in 0..100 {
-        if let Ok(listener) = bind().await {
-            return Ok(listener);
-        }
-        if tries == 50 {
-            for &pid in &pids {
-                crate::os::kill(pid as u32);
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    bind().await.with_context(|| format!("listen on {}: the node there didn't stop", api::addr()))
 }

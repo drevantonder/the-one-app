@@ -270,12 +270,11 @@ impl<O: Opens> Keyring<O> {
         self.known.lock().unwrap().as_ref().map(|k| k.nodes.clone()).unwrap_or_default()
     }
 
-    /// This device's own app runtime among the nodes it may ask: itself, while it's listed as compute, or the compute
-    /// that names it as its device.
+    /// This device's own app runtime among the nodes it may ask: the compute that names it as its device.
     pub fn own_runtime(&self) -> Option<[u8; 32]> {
         let known = self.known.lock().unwrap();
         let k = known.as_ref()?;
-        k.nodes.keys().copied().find(|n| k.who().device_of(n) == self.key)
+        k.nodes.keys().copied().find(|n| *n != self.key && k.who().device_of(n) == self.key)
     }
 
     /// Where who's who is read to, `global`'s newest epoch, and the keys its steps are sealed under: what the next step

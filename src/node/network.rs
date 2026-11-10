@@ -116,7 +116,8 @@ impl Node {
         ensure!(user.is_none_or(|u| u.len() == 16 && u.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))), "a user's id is 16 hex digits, like 976091fe8c23a057");
         let user = user.map_or_else(new_id, str::to_string);
         let recovery = SigningKey::from_bytes(&rand::random());
-        let me = crate::keys::Endpoint::of(&self.0.key);
+        // Its first device is the device this node is, or the runtime of, whose onet then lists that runtime.
+        let me = crate::keys::Endpoint { key: self.0.holds.device(), seal: crate::keys::Opens::public(&self.0.holds) };
         // The network's id, which every device of it pins, and `global`'s first epoch, named by its first freeze before
         // anything is sealed under it.
         let root = Hash::from_bytes(rand::random());

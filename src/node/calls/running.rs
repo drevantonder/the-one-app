@@ -27,7 +27,7 @@ impl Node {
         Ok(used.into_inner().unwrap())
     }
 
-    /// Reads the log of the device a call names (this node's own, or one of its services'; or a client's, through the
+    /// Reads the log of the device a call names (this node's own, or its device's, or one of its services'; or a client's, through the
     /// connection it holds to this node, else `Elsewhere`: another node may hold it), for a user over the network
     /// (`one logs`): the one tool of the node's own a call asks.
     pub(in crate::node) async fn read_logs(&self, req: &CallRequest, input: &Value, me: &Caller) -> Result<Reply> {
@@ -38,7 +38,8 @@ impl Node {
         };
         let name = self.name_of(&target);
         allowed!(self.may_read_logs_of(&me.user, &target)?, "only {name}'s user, or an admin of {}, reads its logs", crate::config::YOURS);
-        if target == self.0.id {
+        // A device whose app runtime this is keeps its logs here: its onet's and oned's beside the runtime's own.
+        if target == self.0.id || target == self.0.holds.device() {
             return Ok(Reply::Ok(crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)?));
         }
         ensure!(self.with(|i| Ok(i.r.db().client(&target)?.is_some()))?, "{name} isn't a client, and a node reads its own log");

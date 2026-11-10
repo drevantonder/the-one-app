@@ -196,11 +196,7 @@ impl Services {
         let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("register {app} first"))?;
         *p.seen.lock().unwrap() = Instant::now();
         let mut rx = p.waiting.lock().await;
-        // Ended as the node hands over, so the service asks the new one.
-        let call = tokio::select! {
-            call = tokio::time::timeout(Duration::from_secs(25), rx.recv()) => call.ok().flatten(),
-            _ = crate::handoff::stopping() => None,
-        };
+        let call = tokio::time::timeout(Duration::from_secs(25), rx.recv()).await.ok().flatten();
         *p.seen.lock().unwrap() = Instant::now();
         // One its caller gave up on isn't run.
         Ok(call.filter(|c| p.replies.lock().unwrap().get_mut(&c.id).map(|w| w.taken = true).is_some()))

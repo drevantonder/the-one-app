@@ -11,7 +11,7 @@ use crate::temp;
 pub(crate) async fn start(name: &str) -> Node {
     let dir = temp(name);
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": name }).to_string()).unwrap();
-    Node::start(&dir, false).await.unwrap()
+    Node::start(&dir).await.unwrap()
 }
 
 /// A new network on `a`: its recovery key's secret.
@@ -260,7 +260,7 @@ async fn only_someone_who_may_remove_a_device_can_ask_it_to_update() {
     let secret: [u8; 32] = rand::random();
     let dir = temp("update-asked");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&secret), "name": "a" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     create(&a, "n", "Ann").await;
     let me = ed25519_dalek::SigningKey::from_bytes(&secret);
     let sam = ed25519_dalek::SigningKey::from_bytes(&rand::random());
@@ -286,7 +286,7 @@ async fn only_someone_who_may_remove_a_device_can_ask_it_to_update() {
 async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     let dir = temp("approve");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
@@ -337,7 +337,7 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     use one::keys::{Endpoint, hex, open_sealed, seal_secret, seal_to, unhex};
     let dir = temp("holders");
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let global = one::database::scopes::Scope::Global;
@@ -406,7 +406,7 @@ async fn a_holder_restores_someone_and_no_one_else_can() {
     use one::keys::{Endpoint, hex, join_code, seal_to, unhex};
     let dir = temp("restore");
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let own = Scope::User(me.user.clone());
@@ -449,7 +449,7 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     use data_encoding::BASE64URL_NOPAD as B64U;
     let dir = temp("replace");
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     let old_secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let global = one::database::scopes::Scope::Global;
@@ -540,7 +540,7 @@ async fn a_backup_keeps_a_holders_copy_of_the_recovery_key() {
 async fn a_settings_change_that_doesnt_read_is_refused() {
     let dir = temp("bodies");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = a.user().unwrap();
     let ask = async |path: &str, body: Value| one::settings::answer(&a, "POST", path, body.to_string().as_bytes()).await.unwrap();
@@ -564,7 +564,7 @@ async fn a_settings_change_that_doesnt_read_is_refused() {
 async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
     let dir = temp("kept-before");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = a.user().unwrap();
     let kept = std::path::Path::new("network/scope-kept").join(data_encoding::HEXLOWER.encode(b"global"));
@@ -581,7 +581,7 @@ async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
     before.as_object_mut().unwrap().remove("sealed").expect("what's kept says what it read");
     std::fs::write(copy.join(&kept), before.to_string()).unwrap();
 
-    let b = Node::start(&copy, false).await.unwrap();
+    let b = Node::start(&copy).await.unwrap();
     let is_admin = async || one::settings::Me::who(&b, |db| db.role_in(&me, &group)).ok().flatten() == Some(one::database::scopes::Role::Admin);
     eventually("the step it passed over", &b, is_admin).await;
 }
@@ -591,7 +591,7 @@ async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
 async fn erasing_an_app_deletes_its_keys_whoever_erases_it() {
     let dir = temp("erase");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
@@ -682,7 +682,7 @@ async fn a_refusals_words_never_reach_what_insights_keeps_and_a_failures_are_cle
 async fn only_a_devices_user_or_an_admin_reads_its_logs() {
     let dir = temp("logs");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let andre = one::node::Caller::own(a.id(), a.user().unwrap());
     let now = one::node::now_ms();
@@ -713,7 +713,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     use one::node::Build;
     let dir = temp("service-build");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
-    let a = Node::start(&dir, false).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let build = a.put_blob(b"a program").unwrap();
@@ -1120,6 +1120,72 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
     assert!(here, "its own runtime took it, asked on its loopback: {ran}");
     let lines = async |node: &one::node::Node| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("through onet")).await;
+}
+
+/// oned, started by a test as a computer's supervisor would: asked to stop as it is (SIGTERM), so it stops what it started.
+struct Oned(std::process::Child);
+
+impl Drop for Oned {
+    fn drop(&mut self) {
+        unsafe { libc::kill(self.0.id() as i32, libc::SIGTERM) };
+        let _ = self.0.wait();
+    }
+}
+
+/// A computer's home as a node that was its own device left it, started by this build's oned: its onet holds the same
+/// key and its app runtime opens what that key opened, and the only steps written are the two listings that make the
+/// runtime the device's, a compute of its own key naming the device, and the device a client alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computers_home_from_before_onet_is_the_same_device_with_its_runtime_listed() {
+    use one::database::scopes::Kind;
+    let k = start("switch-device").await;
+    create(&k, "Home", "Andre").await;
+    add_notes(&k).await;
+    k.call(notes("post", json!({ "text": "before onet" }))).await.unwrap();
+    let me = one::node::Caller::own(k.id(), k.user().unwrap());
+    let before = k.global_steps(&me, 0, None).await.unwrap()["at"].as_u64().unwrap();
+
+    // Its home, on a computer of its own: its bucket the folder in it.
+    let home = crate::temp("switch-home");
+    assert!(std::process::Command::new("cp").arg("-r").arg(k.dir().join(".")).arg(&home).status().unwrap().success());
+    let mut network: Value = serde_json::from_slice(&std::fs::read(home.join("network/network.json")).unwrap()).unwrap();
+    network["bucket"]["path"] = json!(home.join("network/bucket").display().to_string());
+    std::fs::write(home.join("network/network.json"), network.to_string()).unwrap();
+    let key = std::fs::read(home.join("device.json")).unwrap();
+    assert!(!one::node::runtime_folder(&home).join("key").exists(), "a home from before onet has no runtime key");
+
+    let at = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
+    let log = std::fs::File::create(home.join("oned.log")).unwrap();
+    let mut oned = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
+    std::os::unix::process::CommandExt::arg0(&mut oned, one::oned::name());
+    oned.env(one::config::env("HOME"), &home).env(one::config::env("ADDR"), &at).stdout(log.try_clone().unwrap()).stderr(log);
+    let _oned = Oned(oned.spawn().unwrap());
+    let token = std::fs::read_to_string(home.join(one::api::LOCAL_TOKEN)).unwrap();
+
+    // What it read before, through onet, from its runtime opening the epochs sealed to its key.
+    let read = json!({ "app": "notes", "tool": "read", "input": {} });
+    let mut lines = Value::Null;
+    polled("a call through the new onet", &home.join("oned.log"), async || {
+        let (status, answer, _) = ask(&at, "POST", "/api/call", &token, Some(read.clone())).await;
+        lines = answer;
+        status == 200
+    })
+    .await;
+    assert!(lines.to_string().contains("before onet"), "{lines}");
+    assert_eq!(std::fs::read(home.join("device.json")).unwrap(), key, "its key is the one it had");
+    assert_eq!(ask(&at, "GET", "/api/holds", &token, None).await.1["key"], one::keys::hex(&k.id()), "onet holds it");
+
+    // Who's who: the two listings, and nothing else.
+    let runtime = one::node::runtime_endpoint(&home).unwrap();
+    let listed = async || {
+        let state = ask(&at, "GET", "/api/state", &token, None).await.1;
+        let devices = state["network"]["devices"].as_array().cloned().unwrap_or_default().into_iter().chain(state["network"]["clients"].as_array().cloned().unwrap_or_default());
+        let roles = |key: &[u8; 32]| devices.clone().filter(|d| d["key"] == one::keys::hex(key)).flat_map(|d| d["roles"].as_array().cloned().unwrap_or_default()).collect::<Vec<_>>();
+        (roles(&k.id()), roles(&runtime.key))
+    };
+    polled("the runtime listed", &home.join("oned.log"), async || listed().await == (vec![json!(Kind::Client)], vec![json!(Kind::Compute)])).await;
+    let after = ask(&at, "GET", &format!("/api/steps/global?from={before}"), &token, None).await.1;
+    assert_eq!((after["at"].as_u64(), after["steps"].as_array().map(Vec::len)), (Some(before + 2), Some(2)), "no step but the two listings: {after}");
 }
 
 /// Asks `at` as one of a computer's own programs would, with `token`, for a trace too. → status, answer, and the trace

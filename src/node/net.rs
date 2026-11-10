@@ -137,9 +137,6 @@ pub fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)
 impl Node {
     /// Keeps this device's endpoint, once it's a device of a network with an address.
     pub(super) fn follow_net(&self) {
-        if self.is_handing_over() {
-            return;
-        }
         self.tell_removed();
         self.tell_roles();
         let wanted = self.with_or(None, |i| Ok(i.r.db().compute(&self.0.id)?.and(i.r.db().setting("address")?)));
@@ -157,17 +154,6 @@ impl Node {
         if let Some(address) = wanted {
             *task = Some((address.clone(), tokio::spawn(self.clone().keep_net(address))));
         }
-    }
-
-    /// Closes this device's endpoint, for good: the node taking over from this one has its own.
-    pub(super) fn close_net(&self) {
-        if let Some((_, old)) = self.0.net.task.lock().unwrap().take() {
-            old.abort();
-        }
-        if let Some((_, endpoint)) = self.0.net.endpoint.lock().unwrap().take() {
-            tokio::spawn(async move { endpoint.close().await });
-        }
-        self.0.net.conns.lock().unwrap().clear();
     }
 
     /// Where this device's endpoint is reached now: its key, its relay and the addresses it's bound to, once it has one.
@@ -218,9 +204,6 @@ impl Node {
     /// nothing, with the process running. Waits longer each time it didn't help, so one whose others are all off
     /// doesn't keep at it. Asked now and then.
     pub(super) fn check_relay(&self) {
-        if self.is_handing_over() {
-            return;
-        }
         let Some((since, n)) = *self.0.net.bound.lock().unwrap() else { return };
         let Ok((others, heard)) = self.with(|i| Ok((i.r.db().computes()?.iter().filter(|c| c.key != self.0.id).count(), i.peers.values().map(|p| p.seen).max()))) else { return };
         if heard.is_some_and(|h| h > since) {
@@ -879,8 +862,13 @@ impl Node {
         let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());
         let url = format!("{}/relay/computes", address.trim_end_matches('/'));
         let node = self.clone();
+        // What a device is on is its device's to say: an app runtime of its own key is on its device's build.
+        let mut asked = json!({ "computes": true, "reads": crate::database::READS });
+        if matches!(self.0.holds, holds::Holds::Key(_)) {
+            asked["version"] = json!(crate::protocol::version());
+        }
         tokio::spawn(async move {
-            let body = crate::keys::signed_request(&key, crate::protocol::RELAY, json!({ "computes": true, "reads": crate::database::READS, "version": crate::protocol::version() }), crate::keys::next_at(now_ms()));
+            let body = crate::keys::signed_request(&key, crate::protocol::RELAY, asked, crate::keys::next_at(now_ms()));
             let said = match post_relay(url, body).await {
                 Ok((200, said)) => said,
                 // Too old to be told anything else, it can still be asked to update.
@@ -906,19 +894,23 @@ impl Node {
         });
     }
 
-    /// Tells the relay at the network's address something, signed by this device: a device it admitted (`add`), or a
-    /// pairing code it made (`pairing`, the hash of its ticket, and `until`). Tried a few times, in the background.
+    /// Tells the relay at the network's address something, signed by this device's key (`holds`): a device it admitted
+    /// (`add`), or a pairing code it made (`pairing`, the hash of its ticket, and `until`). Tried a few times, in the
+    /// background.
     pub(super) fn tell_relay(&self, fields: Value) {
         let Some(address) = self.with_or(None, |i| Ok(i.r.db().setting("address")?)) else {
             return tracing::debug!("telling the relay: {YOURS} has no address yet");
         };
-        let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());
+        let node = self.clone();
         let url = format!("{}/relay/tell", address.trim_end_matches('/'));
         tokio::spawn(async move {
             let mut wait = Duration::from_secs(1);
             for _ in 0..5 {
                 let at = crate::keys::next_at(now_ms());
-                let body = crate::keys::signed_request(&key, crate::protocol::RELAY, fields.clone(), at);
+                let body = match crate::keys::signed_request_by(&node.0.holds, crate::protocol::RELAY, fields.clone(), at).await {
+                    Ok(body) => body,
+                    Err(err) => return tracing::debug!("telling the relay: {err:#}"),
+                };
                 match post_relay(url.clone(), body).await {
                     Ok((code, _)) if code < 300 => return,
                     // Another process of this device signed in the same millisecond: again at once, with a new `at`.

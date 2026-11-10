@@ -40,6 +40,7 @@ pub mod devices;
 mod sync;
 mod net;
 mod versions;
+pub use versions::heard;
 #[path = "onboarding/pairing.rs"]
 mod pairing;
 pub(crate) mod push;
@@ -77,13 +78,16 @@ mod home;
 mod network;
 
 pub use caller::{Caller, Credential};
-pub use holds::{HeldShare, HeldWrite, Holder};
+pub use holds::{HeldShare, HeldSign, HeldWrite, Holder, sign_request};
 use exclusive::*;
-pub use home::{device_here, device_key, load_local_token, runtime_folder};
+pub use home::{device_here, device_key, load_local_token, runtime_endpoint, runtime_folder};
 use home::*;
 use network::*;
 pub use network::NetworkFile;
 pub use pairing::{Joined, join_with};
+
+/// The folder in a node's home its app runtime's workerd keeps its files in.
+const RUNTIME_DIR: &str = "runtime";
 
 const CALL_LIMIT: Duration = Duration::from_secs(30);
 /// A device whose round trip is longer than this is far: a nearer one runs what it would have, whatever their order.
@@ -191,7 +195,6 @@ pub struct Inner {
     heard: tokio::sync::Notify,
     /// What the record at the network's address last said (`crate::latest`), and why it couldn't take it, if so.
     latest: Mutex<crate::latest::Latest>,
-    updating: Mutex<Option<String>>,
     /// The newest update's commit this process has seen, so `update.seen` is said once for each.
     update_seen: Mutex<Option<String>>,
     bundles: Mutex<BTreeMap<String, String>>,
@@ -240,8 +243,6 @@ pub struct Inner {
     erased: Mutex<BTreeSet<String>>,
     /// Whether the last settling couldn't fetch an app's deploy, so it's tried again soon, not only at the next change.
     unfetched: std::sync::atomic::AtomicBool,
-    /// Set once this node is handing over to the next: it opens nothing only one of them may hold.
-    handing_over: std::sync::atomic::AtomicBool,
     /// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, while this node serves it there (`api::serve_guide`).
     guide: Mutex<Option<String>>,
     /// What oned's thread for its parts tells it about them.
@@ -258,16 +259,13 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    /// Starts the node of the home `dir`, as its device, holding the device's key. `apart`: its app runtime is a
-    /// program of its own, which oned starts (`Apps::program`), not a thread of this process.
-    pub async fn start(dir: &Path, apart: bool) -> Result<Node> {
+    /// Starts a node of the home `dir` that is its own device, holding the device's key: the tests' devices. A
+    /// computer's is its app runtime (`runtime`), whose device is its onet.
+    pub async fn start(dir: &Path) -> Result<Node> {
         std::fs::create_dir_all(dir)?;
         let device = load_device(dir)?;
         let key = SigningKey::from(unhex(&device.secret)?);
-        let node = Node::open(dir, key.clone(), device.name, load_local_token(dir)?, holds::Holds::Key(key), apart).await?;
-        tokio::spawn(node.clone().pull_loop());
-        tokio::spawn(node.clone().invites_loop());
-        Ok(node)
+        Node::open(dir, key.clone(), device.name, load_local_token(dir)?, holds::Holds::Key(key)).await
     }
 
     /// Starts the app runtime of the device whose home is `dir`, an endpoint of its own key, listed as a compute
@@ -277,13 +275,13 @@ impl Node {
         let folder = runtime_folder(dir);
         std::fs::create_dir_all(&folder)?;
         let holds = holds::Holds::asking(holder).await?;
-        Node::open(dir, load_runtime_key(&folder)?, hostname(), load_local_token(&folder)?, holds, false).await
+        Node::open(dir, load_runtime_key(&folder)?, hostname(), load_local_token(&folder)?, holds).await
     }
 
-    async fn open(dir: &Path, key: SigningKey, name: String, local_token: String, holds: holds::Holds, apart: bool) -> Result<Node> {
+    async fn open(dir: &Path, key: SigningKey, name: String, local_token: String, holds: holds::Holds) -> Result<Node> {
         let id = *key.verifying_key().as_bytes();
         let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let apps = Apps::start(dir.join(crate::handoff::runtime()), outbound.local_addr()?.port(), apart).await?;
+        let apps = Apps::start(dir.join(RUNTIME_DIR), outbound.local_addr()?.port()).await?;
         let (events, _) = broadcast::channel(256);
         let mut built_in = BTreeMap::new();
         for (app, files) in crate::config::BUILT_IN {
@@ -304,7 +302,6 @@ impl Node {
             changed: tokio::sync::Notify::new(),
             heard: tokio::sync::Notify::new(),
             latest: Mutex::new(Default::default()),
-            updating: Mutex::new(None),
             update_seen: Mutex::new(None),
             bundles: Mutex::new(BTreeMap::new()),
             built_in,
@@ -333,7 +330,6 @@ impl Node {
             settling: tokio::sync::Mutex::new(()),
             unfetched: Default::default(),
             erased: Default::default(),
-            handing_over: Default::default(),
             guide: Default::default(),
             parts: Default::default(),
         }));
@@ -361,6 +357,8 @@ impl Node {
                 reader.share_blobs().await;
             });
         }
+        tokio::spawn(node.clone().pull_loop());
+        tokio::spawn(node.clone().invites_loop());
         tokio::spawn(node.clone().presence_loop());
         tokio::spawn(node.clone().tick_loop());
         tokio::spawn(node.clone().backup_loop());
@@ -386,51 +384,9 @@ impl Node {
         self.0.id
     }
 
-    /// Waits until it has read every scope it holds and its apps are loaded and each has answered once, so a node
-    /// taking over answers its first calls warm: before it's read them, what's added where reads as nothing, and an
-    /// app's tools as missing.
-    pub async fn warm(&self) {
-        let until = tokio::time::Instant::now() + Duration::from_secs(60);
-        let mut settled = self.0.settled.subscribe();
-        let _ = tokio::time::timeout_at(until, settled.wait_for(|n| *n > 0 && self.ready())).await;
-        let mut asked = tokio::task::JoinSet::new();
-        for app in self.0.apps.names() {
-            let apps = self.0.apps.clone();
-            asked.spawn(async move { apps.describe(&app).await });
-        }
-        let _ = tokio::time::timeout(Duration::from_secs(30), asked.join_all()).await;
-    }
-
-    /// Whether this node is handing over to the next: then it keeps its endpoint only until the next one is ready
-    /// (`handed_over`), never binding it again; and if the next one didn't start, it keeps it as before.
-    /// Handing over, it signs nothing more of its own once what it's writing is written: the next one, with the same
-    /// key, writes from where it reads the logs, so two writing at once would fork them, and its device would count as
-    /// removed.
-    pub async fn handing_over(&self, handing: bool) {
-        self.0.handing_over.store(handing, std::sync::atomic::Ordering::SeqCst);
-        if handing {
-            drop(self.0.writes.lock().await);
-        } else {
-            self.follow_net();
-        }
-    }
-
-    /// Whether this node is handing over to the next, or has: then it starts and lists no parts, and writes nothing.
-    pub fn is_handing_over(&self) -> bool {
-        self.0.handing_over.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// Holds this device's writes for one that it signs itself: none once it's handing over to the next node.
-    pub(crate) async fn own_writes(&self) -> Result<tokio::sync::MutexGuard<'_, ()>> {
-        let write = self.0.writes.lock().await;
-        ensure!(!self.is_handing_over(), "this device is starting its new build: try again in a moment");
-        Ok(write)
-    }
-
-    /// The next node is ready, with an endpoint of this device's key of its own: this one closes its own, so the relay
-    /// and other devices reach only that one.
-    pub fn handed_over(&self) {
-        self.close_net();
+    /// Holds this device's writes for one that it signs itself.
+    pub(crate) async fn own_writes(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.0.writes.lock().await
     }
 
     pub fn dir(&self) -> &Path {
@@ -457,7 +413,7 @@ impl Node {
     #[track_caller]
     fn with<R>(&self, f: impl FnOnce(&mut Network) -> Result<R>) -> Result<R> {
         let mut network = self.0.network.lock()?;
-        let _held = crate::handoff::Held::new();
+        let _held = crate::watchdog::Held::new();
         f(network.as_mut().with_context(|| not_joined(&self.device_name()))?)
     }
 
@@ -546,7 +502,8 @@ impl Node {
             tokio::time::sleep(TICK).await;
             if self.has_network() {
                 // The wall clock, which runs on while a machine sleeps, as `Instant` doesn't everywhere.
-                let refill = refilled.is_none_or(|at| at.elapsed().unwrap_or_default() >= REFILL);
+                // A runtime its device hasn't listed yet reads who's who each tick, to run things from when it has.
+                let refill = refilled.is_none_or(|at| at.elapsed().unwrap_or_default() >= REFILL) || !self.ready();
                 if refill {
                     refilled = Some(SystemTime::now());
                     if let Err(err) = self.read_scopes().await {

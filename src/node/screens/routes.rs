@@ -45,7 +45,5 @@ async fn events(State(node): State<Node>, me: Me) -> Sse<impl tokio_stream::Stre
             None => e,
         })
         .map(|e| Ok(SseEvent::default().json_data(e).unwrap_or_default()));
-    // Ended as the node hands over, so its client asks the new one.
-    let stream = futures_util::StreamExt::take_until(stream, Box::pin(crate::handoff::stopping()));
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

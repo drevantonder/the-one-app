@@ -369,6 +369,12 @@ pub fn vault_answer(id: &str, declined: bool) -> Content {
 }
 
 /// Lists a service endpoint offering `service` as `user`'s, a part of `device`, by that device.
+/// Lists a device's app runtime, by that device: a compute of its own key, naming the device, carrying its rights to
+/// run things (`ScopeDb::device_of`).
+pub fn runtime(endpoint: &crate::keys::Endpoint, user: &str, name: &str, device: &Key) -> Content {
+    node(Change::Device, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Compute], "device": hex(device) }))
+}
+
 pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, device: &Key) -> Content {
     node(Change::Device, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service, "device": hex(device) }))
 }

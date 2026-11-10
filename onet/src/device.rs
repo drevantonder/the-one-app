@@ -103,16 +103,44 @@ impl Device {
     }
 
     /// A computer's device, its onet's (`crate::computer`): its bucket the place its home's network file names, from
-    /// which it reads who's who to find the network's address; and if it has one, its own app runtime at `runtime`
-    /// (where it answers, and its token), which it asks before any other node.
+    /// which it reads who's who to find the network's address, if it has one yet (`address` is empty till then); and
+    /// its own app runtime at `runtime` (where it answers, and its token), which it asks before any other node.
     #[cfg(feature = "computer")]
     pub async fn on_computer(secret: [u8; 32], dir: &str, place: one::bucket::Place, runtime: Option<crate::computer::Runtime>) -> Result<Device, Error> {
         let mut device = Device::with(secret, String::new(), dir, Reached::Place(place));
         device.runtime = runtime;
         device.keyring.read(&device).await?;
         let address = device.keyring.who(|db| db.setting("address")).and_then(Result::ok).flatten();
-        device.address = address.ok_or_else(|| failed(format!("{YOURS} has no address yet, which this computer's onet reaches it at: an admin sets one with cloudflare use")))?.trim_end_matches('/').to_string();
+        device.address = address.unwrap_or_default().trim_end_matches('/').to_string();
         Ok(device)
+    }
+
+    /// Its keyring, as it last read who's who: what a computer's onet signs and opens with for its app runtime.
+    #[cfg(feature = "computer")]
+    pub(crate) fn keyring(&self) -> &Keyring {
+        &self.keyring
+    }
+
+    /// Reads who's who again, and asks its own app runtime first as who's who lists it now, and the rest in its order.
+    #[cfg(feature = "computer")]
+    pub(crate) async fn refresh(&self) -> Result<(), Error> {
+        self.keyring.read(self).await?;
+        if let Some(client) = self.client().await {
+            client.set_local(self.local());
+            client.set_ranks(&self.keyring.ranks())?;
+            client.set_wakes(self.keyring.cloudflare_node())?;
+            client.set_nodes(&self.ordered())?;
+        }
+        Ok(())
+    }
+
+    /// Tells the relay what this device is on, as each device does, and → what it left for this device (`asked`), if
+    /// anything: an ask to update, for a computer's onet to hear (`one::node::heard`).
+    #[cfg(feature = "computer")]
+    pub(crate) async fn told(&self) -> Result<Value, Error> {
+        let asked = json!({ "computes": true, "reads": one::database::READS, "version": one::protocol::version() });
+        let (_, out) = self.relay_computes(asked).await?;
+        Ok(out["asked"].clone())
     }
 
     fn with(secret: [u8; 32], address: String, dir: &str, bucket: Reached) -> Device {
@@ -290,7 +318,7 @@ impl Device {
     #[cfg(feature = "computer")]
     pub(crate) fn local(&self) -> Option<crate::Local> {
         let key = self.keyring.own_runtime()?;
-        Some(self.runtime.as_ref()?.local(key, &self.me.key))
+        Some(self.runtime.as_ref()?.local(key))
     }
 
     #[cfg(not(feature = "computer"))]
@@ -317,16 +345,7 @@ impl Device {
     /// Whether the relay lets this device in: → the compute endpoints on its network, which it says are there, not
     /// what they may do; and those on it now.
     async fn computes(&self) -> Result<Option<(Vec<[u8; 32]>, Vec<[u8; 32]>)>, Error> {
-        let url = format!("{}/relay/computes", self.address);
-        let asked = || json!({ "computes": true, "reads": one::database::READS, "version": one::protocol::version() });
-        // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
-        let mut at = keys::next_at(now());
-        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, asked(), at))).await?;
-        if out["code"] == one::protocol::code::REPLAYED {
-            tokio::time::sleep(keys::again_in(at)).await;
-            at = keys::next_at(now());
-            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, asked(), at))).await?;
-        }
+        let (status, out) = self.relay_computes(json!({ "computes": true, "reads": one::database::READS, "version": one::protocol::version() })).await?;
         // The relay answers 403 only for a key it doesn't let in.
         if status == 403 {
             return Ok(None);
@@ -336,6 +355,20 @@ impl Device {
         }
         let keys = |v: &Value| v.as_array().into_iter().flatten().filter_map(|c| keys::unhex(c.as_str().unwrap_or("")).ok()).collect::<Vec<_>>();
         Ok(Some((keys(&out["computes"]), keys(&out["online"]))))
+    }
+
+    /// `asked` of the relay's `/relay/computes`, signed by this device: → its status and answer.
+    async fn relay_computes(&self, asked: Value) -> Result<(u16, Value), Error> {
+        let url = format!("{}/relay/computes", self.address);
+        // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
+        let mut at = keys::next_at(now());
+        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, asked.clone(), at))).await?;
+        if out["code"] == one::protocol::code::REPLAYED {
+            tokio::time::sleep(keys::again_in(at)).await;
+            at = keys::next_at(now());
+            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, asked, at))).await?;
+        }
+        Ok((status, out))
     }
 
     fn ordered(&self) -> Vec<[u8; 32]> {

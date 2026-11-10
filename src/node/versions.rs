@@ -52,33 +52,41 @@ impl Node {
 
     /// What the relay left for this device, if anything (`asked` in its answer).
     pub(super) fn heard_ask(&self, asked: &Value) {
-        if asked.is_null() {
-            return;
-        }
-        match self.who_asked_to_update(asked).and_then(|(by, ask)| Ok((by, ask.start()?, ask))) {
-            Ok((by, (), ask)) => logs::say(&format!("asked by {by}: starting {CLI} {}", ask.command().join(" "))),
-            Err(err) => logs::say(&format!("an ask to update wasn't taken: {err:#}")),
+        if !asked.is_null() {
+            self.with_or((), |i| Ok(heard(i.r.db(), &self.0.id, asked)));
         }
     }
 
     /// The device that signed this ask, if it's one who may remove this device (an admin's, for the Workers), and it asks
     /// this device: else why not.
     pub fn who_asked_to_update(&self, asked: &Value) -> Result<(String, Ask)> {
-        let (by, fields) = crate::keys::check_request(crate::protocol::RELAY, asked, now_ms())?;
-        // The relay leaves the Workers' ask for the device they were last deployed from.
-        let ask = if fields["cloudflare"] == true { Ask::Deploy } else { Ask::Update };
-        ensure!(ask == Ask::Deploy || fields["update"] == hex(&self.0.id), "it asks another device");
-        self.with(|i| {
-            let who = i.r.db();
-            let asker = who.machine(&by)?.filter(|d| !d.removed);
-            let Some(asker) = asker else { anyhow::bail!("{YOURS} doesn't list the device that asked") };
-            match ask {
-                Ask::Update => ensure!(who.may(&asker.user, "remove", &scopes::device(&self.0.id)), "{} may not remove this device", asker.name),
-                Ask::Deploy => ensure!(who.may(&asker.user, "change-settings", scopes::NETWORK), "{} isn't an admin's device", asker.name),
-            }
-            Ok((asker.name, ask))
-        })
+        self.with(|i| who_asked(i.r.db(), &self.0.id, asked))
     }
+}
+
+/// What the relay left for the device `me` (`asked` in its answer to `POST /relay/computes`), as who's who says: taken
+/// if who signed it may ask it, said in this program's log either way. A computer's onet hears its device's.
+pub fn heard(who: &scopes::ScopeDb, me: &crate::keys::Key, asked: &Value) {
+    match who_asked(who, me, asked).and_then(|(by, ask)| Ok((by, ask.start()?, ask))) {
+        Ok((by, (), ask)) => logs::say(&format!("asked by {by}: starting {CLI} {}", ask.command().join(" "))),
+        Err(err) => logs::say(&format!("an ask to update wasn't taken: {err:#}")),
+    }
+}
+
+/// The device that signed `asked`, if it's one who may remove the device `me` (an admin's, for the Workers), and it asks
+/// that device: else why not.
+fn who_asked(who: &scopes::ScopeDb, me: &crate::keys::Key, asked: &Value) -> Result<(String, Ask)> {
+    let (by, fields) = crate::keys::check_request(crate::protocol::RELAY, asked, now_ms())?;
+    // The relay leaves the Workers' ask for the device they were last deployed from.
+    let ask = if fields["cloudflare"] == true { Ask::Deploy } else { Ask::Update };
+    ensure!(ask == Ask::Deploy || fields["update"] == hex(me), "it asks another device");
+    let asker = who.machine(&by)?.filter(|d| !d.removed);
+    let Some(asker) = asker else { anyhow::bail!("{YOURS} doesn't list the device that asked") };
+    match ask {
+        Ask::Update => ensure!(who.may(&asker.user, "remove", &scopes::device(me)), "{} may not remove this device", asker.name),
+        Ask::Deploy => ensure!(who.may(&asker.user, "change-settings", scopes::NETWORK), "{} isn't an admin's device", asker.name),
+    }
+    Ok((asker.name, ask))
 }
 
 /// What a device is asked to do.

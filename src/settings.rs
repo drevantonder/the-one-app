@@ -679,7 +679,8 @@ pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, sco
         found.retain(|s| s.is(scopes::Kind::Compute));
     }
     let key = match found.as_slice() {
-        [s] => s.key,
+        // What a device's app runtime runs is switched for the device, whose switches it reads (`ScopeDb::device_of`).
+        [s] => s.runtime_of().unwrap_or(s.key),
         // A node that was removed still has its records, which who added the app may switch off.
         _ => match unhex(device).ok() {
             Some(k) if managed(&k)? => k,

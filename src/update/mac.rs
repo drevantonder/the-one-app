@@ -12,16 +12,9 @@ use crate::config::{CLI, COMMITTED, NAME, TARGET};
 use crate::latest::{self, Thing};
 use crate::release::Version;
 
-/// The folder in a device's home an update works in: the app it unpacks, the installer and what it said.
-const FOLDER: &str = "update";
-/// What the installer says when it can't finish, for `status` to show (`why`).
-const WHY: &str = "why";
-const INSTALLER: &str = include_str!("../../client/native/mac/install-app.sh");
+use super::{FOLDER, WHY};
 
-/// Why the last install stopped, if it did.
-pub fn why(home: &Path) -> Option<String> {
-    std::fs::read_to_string(home.join(FOLDER).join(WHY)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
+const INSTALLER: &str = include_str!("../../client/native/mac/install-app.sh");
 
 /// Downloads `thing`, the app's zip at `address`, checks that what's in it is the app the record names, and starts
 /// installing it. → once it's started.

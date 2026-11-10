@@ -15,6 +15,7 @@ use one::protocol::{Coded, code};
 use serde_json::{Value, json};
 
 use super::Onet;
+use crate::keyring::Address;
 use crate::{Body, Sent};
 
 /// The most of a request's body kept in memory: a bigger one (a git push's pack, a file) goes to disk, and streams to
@@ -47,7 +48,10 @@ impl Routes {
 
 pub(super) async fn serve(onet: Arc<Onet>) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&onet.listen).await.with_context(|| format!("listen on {}", onet.listen))?;
-    let router = axum::Router::new().fallback(answer).with_state((onet, Arc::new(Routes::new())));
+    let mut router = axum::Router::new().fallback(answer).with_state((onet, Arc::new(Routes::new())));
+    if let one::mode::Mode::Throwaway(network) = one::mode::here() {
+        router = network.serve_beside(router);
+    }
     Ok(one::api::serve(listener, router).await?)
 }
 
@@ -79,6 +83,7 @@ async fn answer(State((onet, routes)): State<(Arc<Onet>, Arc<Routes>)>, req: Req
         ("GET", "/api/holds") => Ok(held(&onet)),
         ("POST", "/api/holds/shared") => shared(&onet, req).await,
         ("POST", "/api/holds/write") => write(&onet, req).await,
+        ("POST", "/api/holds/sign") => sign(&onet, req).await,
         _ => return pass_on(&onet, &routes, req).await,
     };
     match done {
@@ -108,19 +113,14 @@ async fn join(onet: &Arc<Onet>, req: Request) -> Result<Value> {
 }
 
 /// A new network, made by this device's own app runtime, which deploys its first apps: then this computer is its first
-/// device.
+/// device, and the runtime its.
 async fn create(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     anyhow::ensure!(NetworkFile::read(&onet.home)?.is_none(), "this computer is in a network already");
-    let runtime = onet.runtime.clone().context("a network is made by this computer's own app runtime, which isn't running here")?;
-    let (token, asked) = (onet.token.clone(), axum::body::to_bytes(req.into_body(), 1 << 20).await?);
-    let made: Value = tokio::task::spawn_blocking(move || -> Result<Value> {
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        let mut response = agent.post(format!("http://{runtime}/api/create")).header(one::protocol::header::LOCAL_TOKEN, token).header("content-type", "application/json").send(&asked[..])?;
-        let out: Value = response.body_mut().read_json()?;
-        anyhow::ensure!(response.status() == 200, "{}", out["error"].as_str().unwrap_or("this computer's own app runtime didn't make the network"));
-        Ok(out)
-    })
-    .await??;
+    let runtime = onet.runtime.as_ref().context("a network is made by this computer's own app runtime, which isn't running here")?;
+    let asked = axum::body::to_bytes(req.into_body(), 1 << 20).await?.to_vec();
+    let (status, _, made) = runtime.ask("POST".into(), "/api/create".into(), vec![("content-type".into(), "application/json".into())], asked).await?;
+    let made: Value = serde_json::from_slice(&made)?;
+    anyhow::ensure!(status == 200, "{}", made["error"].as_str().unwrap_or("this computer's own app runtime didn't make the network"));
     onet.start().await?;
     Ok(made)
 }
@@ -144,10 +144,18 @@ async fn shared(onet: &Onet, req: Request) -> Result<Value> {
 async fn write(onet: &Onet, req: Request) -> Result<Value> {
     let asked: one::node::HeldWrite = body(req).await?;
     let device = onet.device().await?;
-    let (keyring, _) = device.reached().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let keyring = device.keyring();
     anyhow::ensure!(keyring.user().as_deref() == Some(asked.user.as_str()), "the device writes in global only as its own user");
     keyring.write_to_bucket(&*device, &*device, &asked.user, asked.content).await.map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(json!({}))
+}
+
+/// A request to the relay or auth signed as the device (`one::node::sign_request`).
+async fn sign(onet: &Onet, req: Request) -> Result<Value> {
+    use data_encoding::BASE64URL_NOPAD as B64U;
+    let asked: one::node::HeldSign = body(req).await?;
+    let signature = one::node::sign_request(&onet.key, &B64U.decode(asked.bytes.as_bytes())?)?;
+    Ok(json!({ "signature": B64U.encode(&signature) }))
 }
 
 /// What the network's recovery key does on this computer, signed here as this device (`one::settings::recovery`).
@@ -177,15 +185,26 @@ async fn recovery(onet: &Onet, path: &str, req: Request) -> Result<Value> {
 /// machine for it, its own app runtime first, as this computer's own program. A route only this computer's own programs
 /// may ask goes nowhere else.
 async fn pass_on(onet: &Onet, routes: &Routes, req: Request) -> Response {
-    let device = match onet.device().await {
-        Ok(device) => device,
-        Err(err) => return said(StatusCode::CONFLICT, &err),
+    let device = match (onet.device().await, &onet.runtime) {
+        (Ok(device), _) if !device.address().is_empty() => device,
+        (_, Some(runtime)) => return to_runtime(runtime, req).await,
+        (Ok(_), None) => return refused(StatusCode::CONFLICT, format!("{YOURS} has no address yet, which this computer reaches it at: an admin sets one with {CLI} cloudflare use"), None),
+        (Err(err), None) => return said(StatusCode::CONFLICT, &err),
     };
     let path = req.uri().path().to_string();
+    // What its own app runtime serves itself for this computer's programs, as a node that's its own device did: a
+    // route a client answers alone, a node answers with more than that (`one::settings::on_a_node`).
+    let method = req.method().to_string();
+    if let Some(runtime) = &onet.runtime
+        && device.local().is_some()
+        && one::settings::answered(&path)
+        && !one::settings::on_a_node().any(|(m, p)| m == method && p == path)
+    {
+        return to_runtime(runtime, req).await;
+    }
     if routes.who(&path) == Who::ThisMachine && !device.local().is_some() {
         return refused(StatusCode::FORBIDDEN, format!("only this computer's own app runtime answers {path}, and it isn't running here"), None);
     }
-    let method = req.method().to_string();
     let asked = req.uri().path_and_query().map_or(path, |p| p.as_str().to_string());
     let headers: Vec<(String, String)> = req.headers().iter().filter(|(n, _)| !OWN_HEADERS.contains(&n.as_str())).filter_map(|(n, v)| Some((n.to_string(), v.to_str().ok()?.to_string()))).collect();
     let spooled = match Spooled::read(req.into_body()).await {
@@ -206,6 +225,27 @@ async fn pass_on(onet: &Onet, routes: &Routes, req: Request) -> Response {
         }
     }
     answer.body(axum::body::Body::from_stream(streamed(response.body))).unwrap_or_else(|err| said(StatusCode::BAD_GATEWAY, &err.into()))
+}
+
+/// A request passed to this device's own app runtime as this computer's own program, while this computer isn't in a
+/// network, or its network has no address: it answers what it can with none, makes the network, and sets its address.
+async fn to_runtime(runtime: &super::Runtime, req: Request) -> Response {
+    let (method, path) = (req.method().to_string(), req.uri().path_and_query().map_or_else(|| req.uri().path().to_string(), |p| p.as_str().to_string()));
+    let headers: Vec<(String, String)> = req.headers().iter().filter(|(n, _)| !OWN_HEADERS.contains(&n.as_str())).filter_map(|(n, v)| Some((n.to_string(), v.to_str().ok()?.to_string()))).collect();
+    let body = match axum::body::to_bytes(req.into_body(), IN_MEMORY).await {
+        Ok(body) => body.to_vec(),
+        Err(err) => return said(StatusCode::BAD_REQUEST, &err.into()),
+    };
+    match runtime.ask(method, path, headers, body).await {
+        Ok((status, headers, body)) => {
+            let mut answer = Response::builder().status(status);
+            for (name, value) in headers.iter().filter(|(n, _)| !["connection", "transfer-encoding", "content-length", "keep-alive"].contains(&n.as_str())) {
+                answer = answer.header(name, value);
+            }
+            answer.body(axum::body::Body::from(body)).unwrap_or_else(|err| said(StatusCode::BAD_GATEWAY, &err.into()))
+        }
+        Err(err) => said(StatusCode::BAD_GATEWAY, &err.context("this computer's own app runtime didn't answer")),
+    }
 }
 
 /// A response's body, as it comes.

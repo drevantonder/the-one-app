@@ -1,7 +1,8 @@
-//! `one update`: this device taking the newest signed build by itself, with a GET of the record at its network's address
-//! and nothing else of the network: no background program, relay, or who's who, so a device stuck on anything else can
-//! still take the fix. It imports only `latest` and `release` of what updating is (a test holds to that), then makes oned
-//! exit, for its supervisor to bring it back on the new build. A Mac takes its whole app, which `mac` puts in place.
+//! `one update`, and oned's own check: this device taking the newest signed build by itself, with a GET of the record at
+//! its network's address and nothing else of the network: no onet, app runtime, relay, or who's who, so a device stuck on
+//! anything else can still take the fix. It imports only `latest` and `release` of what updating is (a test holds to
+//! that). `one update` then makes oned exit, for its supervisor to bring it back on the new build; oned, checking by
+//! itself (`pull`), starts again on it. A Mac takes its whole app, which `mac` puts in place, only by `one update`.
 
 use std::path::Path;
 
@@ -13,7 +14,6 @@ use crate::release;
 
 pub mod cli;
 mod mac;
-pub use mac::why;
 
 /// The file in a device's home holding its network's address, the only thing an update needs that's the network's.
 /// The address itself is a setting in who's who, which this can't read: the node keeps it here, each time it checks.
@@ -23,7 +23,31 @@ const TAKEN: &str = "release";
 /// The file in a device's home holding the pid of its running oned.
 pub const PID: &str = "pid";
 /// The file in a device's home holding the build its running oned began on: its program's file may be a newer one by now.
-const RUNNING: &str = "running";
+pub const RUNNING: &str = "running";
+/// The folder in a device's home an update works in, and the file there saying why the last one stopped, if it did.
+const FOLDER: &str = "update";
+const WHY: &str = "why";
+
+/// Why this device couldn't take the newest build last time, if it couldn't: what oned's check, or on a Mac its app's
+/// install, said, for `status` to show.
+pub fn why(home: &Path) -> Option<String> {
+    std::fs::read_to_string(home.join(FOLDER).join(WHY)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// Notes why this device couldn't take the newest build, or with none, that nothing stopped it.
+fn say_why(home: &Path, why: Option<&str>) -> std::io::Result<()> {
+    let file = home.join(FOLDER).join(WHY);
+    match why {
+        Some(why) => {
+            std::fs::create_dir_all(home.join(FOLDER))?;
+            std::fs::write(file, why)
+        }
+        None => match std::fs::remove_file(file) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),
+            _ => Ok(()),
+        },
+    }
+}
 
 /// Notes that the oned running here began on this build.
 pub fn note_running(home: &Path) -> std::io::Result<()> {
@@ -36,6 +60,11 @@ pub fn keep_address(home: &Path, address: &str) -> std::io::Result<()> {
         Ok(kept) if kept == address => Ok(()),
         _ => std::fs::write(home.join(ADDRESS), address),
     }
+}
+
+/// The network's address, as kept here (`keep_address`).
+pub fn address(home: &Path) -> Option<String> {
+    std::fs::read_to_string(home.join(ADDRESS)).ok().map(|a| a.trim().to_string()).filter(|a| !a.is_empty())
 }
 
 /// The hash of the build last put in place here, as `latest::wanted` takes it.
@@ -55,7 +84,7 @@ pub fn run() -> Result<String> {
     let home = crate::home();
     let key = crate::mode::here().release_key();
     ensure!(!key.is_empty(), "this custom build has no release key, so nothing can be released to it");
-    let address = std::fs::read_to_string(home.join(ADDRESS)).ok().map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).context("this device doesn't know its network's address yet: its background program notes it once it's joined and running")?;
+    let address = address(&home).context("this device doesn't know its network's address yet: its background program notes it once it's joined and running")?;
     let Some(text) = latest::fetch(&address)? else { return Ok(format!("Nothing has been published at {address} yet.")) };
     let record = Latest::read(key, &text).with_context(|| format!("the record at {address}"))?;
     let thing = record.to_update_to(TARGET).with_context(|| format!("the record at {address} has no build for {TARGET}"))?;
@@ -78,6 +107,37 @@ pub fn run() -> Result<String> {
         eprintln!("{CLI}: couldn't note the update ({err}), so this device may fetch it again");
     }
     Ok(if restart_oned(&home) { format!("Updated this device to {}, and restarting it.", thing.commit) } else { format!("Updated this device to {}. Nothing was running here to restart.", thing.commit) })
+}
+
+/// oned's own check of the record, now and then: if it names a newer build for this computer, puts it in place, as `run`
+/// does. A Mac's app is replaced whole, and only by `one update`. → the commit now in place that this program isn't,
+/// for oned to start again on; what stopped it is kept for `why`.
+pub fn pull(home: &Path) -> Option<String> {
+    let taken = pull_once(home);
+    if let Err(err) = say_why(home, taken.as_ref().err().map(|e| format!("{e:#}")).as_deref()) {
+        eprintln!("{CLI}: couldn't note why this device didn't update: {err}");
+    }
+    taken.ok().flatten()
+}
+
+fn pull_once(home: &Path) -> Result<Option<String>> {
+    let key = crate::mode::here().release_key();
+    let Some(address) = address(home).filter(|_| !key.is_empty()) else { return Ok(None) };
+    if release::in_app_bundle() {
+        return Ok(None);
+    }
+    let Some(text) = latest::fetch(&address)? else { return Ok(None) };
+    let record = Latest::read(key, &text).with_context(|| format!("the record at {address}"))?;
+    let Some(thing) = record.to_update_to(TARGET) else { return Ok(None) };
+    let taken = taken(home);
+    if !latest::wanted(thing, BUILD, COMMITTED, &taken) {
+        // Put in place already, by `one update` or a check before this one, while this build still runs.
+        return Ok((thing.commit != BUILD && taken == thing.sha256).then(|| thing.commit.clone()));
+    }
+    let bytes = latest::download(&address, thing)?;
+    release::install_commit(&thing.commit, &bytes)?;
+    took(home, &thing.sha256)?;
+    Ok(Some(thing.commit.clone()))
 }
 
 /// Asks the oned this home's pid file names to exit, if it's still running: Replace first, then this, so being killed

@@ -556,6 +556,8 @@ fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::
                 None => m.machine(k)?.is_some_and(|d| d.user == user),
             };
         if on {
+            // A device's switch is run by its app runtime, where it has one of its own.
+            let k = &m.computes()?.into_iter().find(|c| c.runtime_of() == Some(*k)).map_or(*k, |c| c.key);
             let here = *k == node.0.id;
             let name = if Some(*k) == cloudflare { Some(crate::rank::CLOUDFLARE.to_string()) } else { m.machine(k)?.filter(|d| !d.removed).map(|d| d.name) };
             let parts = if here { Some(json!(parts_here)) } else { i.peers.get(k).and_then(|p| p.parts.clone()) };

@@ -1,41 +1,31 @@
-//! Each device taking its own updates from the signed record at the network's address (`crate::latest`): the node's, and the
-//! services' builds, and the builds of a service a deploy names, which a device runs instead of any release.
+//! What's published at the network's address, as a node reads the signed record there (`crate::latest`): the
+//! services' builds, and the builds of a service a deploy names, which a device runs instead of any release. A
+//! computer's oned takes its own build from the record (`oned`'s pull loop), needing nothing of a node.
 
 use super::*;
 use crate::insights::{Attrs, Status};
 
 pub(crate) mod routes;
 
-/// How often a device checks the record (`crate::latest`). A device that can't speak anything else reaches the network
-/// only by this, so it stays dumb: a timer, not a wake-up over anything that could stop working.
+/// How often a node reads the record (`crate::latest`).
 const PULL_EVERY: Duration = Duration::from_secs(30);
 
-/// How long after asking to hand over to a build it installed a node that still runs asks again: longer than a node
-/// taking over takes to warm.
-const HAND_OVER_AGAIN: Duration = Duration::from_secs(150);
-
 impl Node {
-    /// Checks the record at the network's address now and then and, if it says there's a newer build of this node, takes it:
-    /// nothing else of the network has to work for that. A bad or missing record means staying on what it has and saying
-    /// why (`updating`). A node in an app bundle reads the record for `status` but doesn't take it: its app is replaced whole, by `one update` when someone presses Update.
+    /// Reads the record at the network's address now and then, for what's published for this platform and its
+    /// services, and keeps the network's address in its home for oned and `one update`, which can read nothing else.
     pub(super) async fn pull_loop(self) {
         if crate::mode::here().release_key().is_empty() {
             return;
         }
-        let mut handed = Instant::now() - HAND_OVER_AGAIN;
         loop {
-            match self.pull_once(&mut handed).await {
-                Ok(()) => self.say_updating(None),
-                Err(err) => {
-                    tracing::warn!("couldn't update: {err:#}");
-                    self.say_updating(Some(format!("{err:#}")));
-                }
+            if let Err(err) = self.pull_once().await {
+                tracing::debug!("reading the record at the network's address: {err:#}");
             }
             tokio::time::sleep(PULL_EVERY).await;
         }
     }
 
-    async fn pull_once(&self, handed: &mut Instant) -> Result<()> {
+    async fn pull_once(&self) -> Result<()> {
         let Ok(address) = self.address() else { return Ok(()) };
         if let Err(err) = crate::update::keep_address(&self.0.dir, &address) {
             tracing::warn!("couldn't note the network's address for {} update: {err}", crate::config::CLI);
@@ -48,40 +38,12 @@ impl Node {
         let latest = crate::latest::Latest::read(crate::mode::here().release_key(), &text).context("the latest record")?;
         *self.0.latest.lock().unwrap() = latest.clone();
         let part = crate::latest::Thing::node_name(crate::config::TARGET);
-        let Some(thing) = latest.get(&part).cloned() else { return Ok(()) };
-        let newer = thing.commit != crate::config::BUILD;
-        if newer && self.note_update_seen(&thing.commit) {
+        if let Some(thing) = latest.get(&part)
+            && thing.commit != crate::config::BUILD
+            && self.note_update_seen(&thing.commit)
+        {
             self.device_signal("update.seen", Attrs::default().part(&part), Status::Unset);
         }
-        if release::in_app_bundle() {
-            if newer {
-                self.device_signal("update.not_taken", Attrs::default().part(&part).reason("app-bundle"), Status::Unset);
-            }
-            return Ok(());
-        }
-        let taken = crate::update::taken(&self.0.dir);
-        if !crate::latest::wanted(&thing, crate::config::BUILD, crate::config::COMMITTED, &taken) {
-            // Already installed: asked again now and then to hand over to it, as long as this build still runs.
-            if thing.commit != crate::config::BUILD && taken == thing.sha256 && handed.elapsed() > HAND_OVER_AGAIN {
-                *handed = Instant::now();
-                crate::handoff::restart();
-            }
-            return Ok(());
-        }
-        let not_taken = |reason: &'static str, err: anyhow::Error| {
-            self.device_signal("update.not_taken", Attrs::default().part(&part).reason(reason), Status::Error);
-            err
-        };
-        let bytes = {
-            let (address, thing) = (address, thing.clone());
-            tokio::task::spawn_blocking(move || crate::latest::download(&address, &thing)).await?.map_err(|e| not_taken("download", e))?
-        };
-        let exe = release::install_commit(&thing.commit, &bytes).map_err(|e| not_taken("install", e))?;
-        crate::update::took(&self.0.dir, &thing.sha256).map_err(|e| not_taken("install", e.into()))?;
-        self.device_signal("update.taken", Attrs::default().part(&part), Status::Unset);
-        tracing::info!("updated {} to {}; restarting", exe.display(), thing.commit);
-        *handed = Instant::now();
-        crate::handoff::restart();
         Ok(())
     }
 
@@ -91,17 +53,10 @@ impl Node {
         (seen.as_deref() != Some(commit)).then(|| seen.replace(commit.to_string())).is_some()
     }
 
-    /// Whether this device can't update, and why, as its hello says and `status` shows: on a Mac, what the last install
-    /// of its app said, since the node's inside the thing being replaced.
+    /// Whether this device can't update, and why, as its hello says and `status` shows: what its oned, or on a Mac its
+    /// app's install, last said.
     pub fn updating(&self) -> Option<String> {
-        if release::in_app_bundle() {
-            return crate::update::why(&self.0.dir);
-        }
-        self.0.updating.lock().unwrap().clone()
-    }
-
-    fn say_updating(&self, why: Option<String>) {
-        *self.0.updating.lock().unwrap() = why;
+        crate::update::why(&self.0.dir)
     }
 
     /// What the record last said, as this node read it.
