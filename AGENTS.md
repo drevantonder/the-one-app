@@ -1,6 +1,6 @@
 # The One App
 
-Your devices, and your team's, as one place for apps and agents. Read `ARCHITECTURE.md`, and `GLOSSARY.md` for what our words mean, before changing code. What machines say to each other is in the code that says it and its tests (`tests/contracts.rs` where two languages must agree): read those before changing anything that crosses a machine boundary.
+Your devices, and your team's, as one place for apps and agents. Read `ARCHITECTURE.md`, and `GLOSSARY.md` for what our words mean, before changing code, and `DESIGN.md` before changing what a user sees. What machines say to each other is in the code that says it and its tests (`tests/contracts.rs` where two languages must agree): read those before changing anything that crosses a machine boundary.
 
 ## Principles
 
@@ -14,12 +14,7 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 - Comments say only what the code can't: something outside it (the proxy drops websockets, so we poll). One that restates the code, even as a why, goes.
 - One name per thing. A rename reaches everything in the same change: code, files, docs, screens, CLI and MCP text, every caller and the data, rolled out to every device together. No aliases or fallbacks for old names, and no internal words (module names, "provider") where a user reads. What a user joins and uses is a network, "your One App network": "You've joined your One App network". A workplace's custom build is shared, so it's "the" with its name: "You've joined the PTC App network". Node, oned and scope are our words, not theirs.
 - The old One App and the PTC App are feature lists, not code to copy.
-
-## Design
-
-- Three layers. Principles, the same everywhere: content first; order from type size and weight, not boxes, outlines or shadows; colour is for app icons and for warn or danger ("this needs you"), never for "tap this": a button's weight says how much it matters; fine is silent (no "Connected" or green); a problem shows on the thing itself, as one problem box (symbol, title, one sentence, the action that fixes it); an empty screen is one grey line, with a button only for an obvious first step; one component per job.
-- Our look, the same on every client: shadcn's design principles, language and component names, with its neutral theme. One `default` button per view, then `secondary`, `outline` and `ghost`; red only for `destructive`. App icons as gradient tiles, external brands' real logos, red count badges, Phosphor icons. Layout by container queries: each part sizes itself, grids fill the room, lists stop at a readable width, and what a list opens shows beside it where there's room. Never a page width. Screens are React + shadcn, through `@one/ui` (`src/screen/ui`), by choice, not by rule: a screen is HTML and JS. Every screen in this repo is on it; one that doesn't opt in gets its theme and the bridge, and native UI goes once it's moved.
-- The platform's own: only what a web view can't do (passkeys, keychain, push, the scanner, files, home-screen widgets, the Mac's menu bar item). The sidebar, sheets, menus and alerts are the web's, the same everywhere.
+- What Andre decided is in the repo, where whoever changes that thing reads it: a word in GLOSSARY.md, a rule of the design in ARCHITECTURE.md, what users see in DESIGN.md, who may do what in a test. Land it there in the change that builds it. What he's only exploring stays in Agent Memory.
 
 ## Work
 
