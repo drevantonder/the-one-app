@@ -56,6 +56,9 @@ impl Answer {
     }
 }
 
+/// `refused`, in `service/wire.json` and src/protocol.rs's `code`.
+const REFUSED: &str = "refused";
+
 /// A service's answer that it can't serve this call here (a model it lacks), so the call goes on to the next device.
 #[derive(Debug)]
 pub struct Elsewhere(pub String);
@@ -67,6 +70,23 @@ impl std::fmt::Display for Elsewhere {
 }
 
 impl std::error::Error for Elsewhere {}
+
+/// A service's answer that what was asked isn't for it to do: the caller's to change, and nothing broke. Said as `refused`.
+#[derive(Debug)]
+pub struct Refused(pub String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// What a call refused returns, as `bail!`'s error would be.
+pub fn refused(why: impl std::fmt::Display) -> anyhow::Error {
+    Refused(why.to_string()).into()
+}
 
 /// A service: its name, which is its app's, and how it answers. What the app is (its title, tools and instructions) the
 /// app says; a service says only what's about its machine.
@@ -223,6 +243,7 @@ pub fn serve(service: Service) -> Result<()> {
                     Ok(Ok(answer)) if answer.blobs.is_empty() => json!({ "ok": answer.ok }),
                     Ok(Ok(answer)) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
                     Ok(Err(err)) if err.is::<Elsewhere>() => json!({ "elsewhere": err.to_string() }),
+                    Ok(Err(err)) if err.is::<Refused>() => json!({ "error": err.to_string(), "code": REFUSED }),
                     Ok(Err(err)) => json!({ "error": format!("{err:#}") }),
                     Err(_) => json!({ "error": format!("{} failed: it panicked", host.name) }),
                 };

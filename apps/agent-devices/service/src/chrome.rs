@@ -937,14 +937,14 @@ impl Devices {
     pub(super) fn borrow_chrome(&self, caller: &Caller, input: &Input) -> Result<Value> {
         let why = text(input, "for");
         if why.is_empty() {
-            bail!("say what it's for, in a few words: the user sees it");
+            return Err(one_service::refused(format!("say what it's for, in a few words: the user sees it")));
         }
         let no = self.chrome_why_not();
         if !no.is_empty() {
-            bail!("none of your devices runs chrome devices now: {no}");
+            return Err(one_service::refused(format!("none of your devices runs chrome devices now: {no}")));
         }
         if !super::kinds::room_for(GB) {
-            bail!("this machine has no memory to spare for another Chrome now: give back one you're done with");
+            return Err(one_service::refused(format!("this machine has no memory to spare for another Chrome now: give back one you're done with")));
         }
         let p = super::profiles::profile_in(input)?;
         let mut v = self.make_vm(&Chrome, &super::pool::new_pool_name(), None)?;

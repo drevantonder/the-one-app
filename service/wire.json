@@ -10,6 +10,7 @@
   "replies": {
     "ok": { "ok": [{ "title": "Lunch" }] },
     "error": { "error": "give a title" },
+    "refused": { "error": "only its owner may", "code": "refused" },
     "elsewhere": { "elsewhere": "it isn't linked here" }
   }
 }

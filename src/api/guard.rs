@@ -34,14 +34,20 @@ pub fn guarded(routes: Routes, node: Node) -> Router {
 }
 
 /// A request that asks for a trace (`x-one-trace`, a client in developer mode) gets what it did here in the same
-/// header of its answer, as base64 of its JSON (`node::trace`).
+/// header of its answer, as base64 of its JSON (`node::trace`). One that names the trace it's part of (W3C's
+/// `traceparent`) continues it, asked for or not.
 async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     use crate::node::trace;
-    if !req.headers().contains_key(crate::protocol::header::TRACE) {
+    let asked = req.headers().contains_key(crate::protocol::header::TRACE);
+    let parent = req.headers().get(crate::protocol::header::TRACEPARENT).and_then(|h| h.to_str().ok()).map(str::to_string);
+    if !asked && parent.is_none() {
         return next.run(req).await;
     }
-    let t = trace::Trace::new();
+    let t = trace::Trace::continuing(asked, parent.as_deref());
     let mut resp = trace::within(Some(t.clone()), next.run(req)).await;
+    if !asked {
+        return resp;
+    }
     let mut done = t.done(&node.device_name());
     done["names"] = node.compute_names();
     let done = data_encoding::BASE64.encode(done.to_string().as_bytes());

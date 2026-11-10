@@ -61,7 +61,7 @@ impl Kind for Iphone {
 
     fn adopt(&self, _: &Devices, v: &mut Vm) -> Result<()> {
         if simulator_of(&v.id).is_none() {
-            bail!("give id (its simulator's UDID)");
+            return Err(one_service::refused(format!("give id (its simulator's UDID)")));
         }
         Ok(())
     }

@@ -120,7 +120,9 @@ pub mod stage {
     pub const WRITE: &str = "write";
     /// It took longer than it may.
     pub const LIMIT: &str = "limit";
-    pub const ALL: &[&str] = &[CHECK, GUARD, KEYS, LEASE, RUN, PREPARE, WRITE, LIMIT];
+    /// Going from device to device to find one that will run it.
+    pub const ROUTE: &str = "route";
+    pub const ALL: &[&str] = &[CHECK, GUARD, KEYS, LEASE, RUN, PREPARE, WRITE, LIMIT, ROUTE];
 }
 
 /// What a client names itself on a call. Anything else is `other`, since a caller says it.
@@ -138,6 +140,9 @@ const REASONS: &[&str] = &["renewed", "stopped", "failed", "update", "watchdog",
 /// A name of OTEL's for an error of no known kind.
 pub const OTHER: &str = "_OTHER";
 pub const TIMEOUT: &str = "timeout";
+/// A device that couldn't be reached, and one that went away while it was being asked.
+pub const UNREACHABLE: &str = "unreachable";
+pub const LOST: &str = "lost";
 
 /// `name` if it's one of the errors the engine names, else `Error`: an app can name its own anything.
 pub fn exception_type(name: &str) -> &'static str {
@@ -163,6 +168,11 @@ impl Exception {
     /// and what the app runtime throws for it.
     pub fn thrown_by_app(&self) -> bool {
         self.kind == "Error" && self.frames.first().is_some_and(|f| !f.starts_with(RUNTIME_FRAME))
+    }
+
+    /// The frame that says what threw it: the first of the app's own, past the runtime's that carried it there.
+    pub fn top_frame(&self) -> Option<&String> {
+        self.frames.iter().find(|f| !f.starts_with(RUNTIME_FRAME)).or(self.frames.first())
     }
 }
 
@@ -314,10 +324,16 @@ impl Attrs {
         self
     }
 
-    /// `error.type`: a protocol code, an exception's type, or OTEL's own `timeout` or `_OTHER`.
+    /// `error.type`: a protocol code, an exception's type, a device that couldn't be asked, or OTEL's own `timeout` or `_OTHER`.
     pub fn error(mut self, kind: &str) -> Attrs {
-        let known = code::ALL.contains(&kind) || EXCEPTIONS.contains(&kind) || kind == TIMEOUT;
+        let known = code::ALL.contains(&kind) || EXCEPTIONS.contains(&kind) || [TIMEOUT, UNREACHABLE, LOST].contains(&kind);
         self.0.insert("error.type", json!(if known { kind } else { OTHER }));
+        self
+    }
+
+    /// OTEL's `span.kind`.
+    pub fn span_kind(mut self, kind: SpanKind) -> Attrs {
+        self.0.insert("span.kind", json!(kind.as_str()));
         self
     }
 
@@ -346,7 +362,7 @@ impl Attrs {
 
     /// The attributes a rollup groups by, as its key: those that are few.
     fn rollup_key(&self, kind: &str, fault: Option<Fault>) -> String {
-        let mut key: BTreeMap<&str, Value> = self.0.iter().filter(|(k, _)| ["one.client", "one.scope", "one.device", "one.build", "gen_ai.request.model", "gen_ai.token.type", "one.outcome"].contains(k)).map(|(k, v)| (*k, v.clone())).collect();
+        let mut key: BTreeMap<&str, Value> = self.0.iter().filter(|(k, _)| ["one.client", "one.scope", "one.device", "one.build", "gen_ai.request.model", "gen_ai.token.type", "one.outcome", "span.kind"].contains(k)).map(|(k, v)| (*k, v.clone())).collect();
         key.insert("kind", json!(kind));
         if let Some(fault) = fault {
             key.insert("fault", json!(fault.as_str()));
@@ -383,6 +399,24 @@ fn stored_step(step: &Value) -> Option<Value> {
         out["result"] = json!(result);
     }
     Some(out)
+}
+
+/// OTEL's span kinds: what a span's rates mean. A `server` span is a request: it's what counts in a service's rates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpanKind {
+    Server,
+    Client,
+    Internal,
+}
+
+impl SpanKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpanKind::Server => "server",
+            SpanKind::Client => "client",
+            SpanKind::Internal => "internal",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

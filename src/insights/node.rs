@@ -3,7 +3,7 @@
 
 use serde_json::Map;
 
-use crate::insights::{self, Ask, Attrs, Batch, Exception, Fault, Kind, Print, Signal, stage};
+use crate::insights::{self, Ask, Attrs, Batch, Exception, Fault, Kind, Print, Signal, SpanKind, stage};
 
 use super::calls::record::Destination;
 use super::*;
@@ -21,20 +21,33 @@ const MOST_REPORTED: usize = 300;
 #[derive(Default)]
 pub(super) struct State(Mutex<HashMap<Scope, Batch>>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>);
 
-/// A call as it runs here: its span, in the trace of the request that made it.
+/// A span of a call as it runs here (its run, or trying the devices that might), in the trace of the request that made
+/// it. What came before it is put back when it ends: another call's run nests in the same trace.
 pub(super) struct Call {
     pub trace: trace::Trace,
     from: usize,
+    at: u64,
     started: Instant,
     time: u64,
     span: String,
     parent: Option<String>,
+    stage: &'static str,
 }
 
 impl Call {
     /// Ends it with nothing said: it's a call for keys it wasn't handed, which the caller answers.
     pub(super) fn leave(self) {
+        self.trace.stage_is(self.stage);
         self.trace.leave(self.parent);
+    }
+
+    /// Its own steps, each timed from when it began.
+    fn steps(&self) -> Vec<Value> {
+        let mut steps = self.trace.since(self.from);
+        for step in &mut steps {
+            step["at"] = json!(step["at"].as_u64().unwrap_or(0).saturating_sub(self.at));
+        }
+        steps
     }
 }
 
@@ -43,26 +56,27 @@ impl Node {
         let trace = trace::current().unwrap_or_else(trace::Trace::quiet);
         let span = trace::ids::span();
         let parent = trace.enter(span.clone());
-        let from = trace.count();
+        let stage = trace.stage();
         trace.stage_is(stage::CHECK);
-        Call { trace, from, started: Instant::now(), time: now_ms(), span, parent }
+        Call { from: trace.count(), at: trace.at(), trace, started: Instant::now(), time: now_ms(), span, parent, stage }
     }
 
     /// A call that ran here, or failed trying: one span and a place in the rollups, and an error's fingerprint. Only a
     /// failure or a slow call keeps its span whole. Elsewhere isn't a failure, and it says nothing.
     pub(super) async fn finish_call(&self, call: Call, req: &CallRequest, me: &Caller, reply: &Reply) {
-        let Call { trace, from, started, time, span, parent } = call;
-        trace.leave(parent.clone());
         let (ok, code) = match reply {
             Reply::Ok(_) => (true, None),
             Reply::Error(_, code) => (false, code.clone()),
-            Reply::Elsewhere(_) | Reply::Needs(_) => return,
+            Reply::Elsewhere(_) | Reply::Needs(_) => return call.leave(),
         };
+        let steps = call.steps();
+        let at = call.trace.stage();
+        let Call { trace, started, time, span, parent, stage: was, .. } = call;
+        trace.stage_is(was);
+        trace.leave(parent.clone());
         let ms = started.elapsed().as_millis() as u64;
         let kept = !ok || ms >= insights::SLOW_MS || insights::sampled(&trace.trace_id());
-        let steps = trace.since(from);
         let exception = steps.iter().rev().find(|s| s["step"] == "exception").and_then(|s| Exception::from_json(&s["exception"]));
-        let at = trace.stage();
         let fault = (!ok).then(|| insights::fault(code.as_deref(), at, exception.as_ref()));
         let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
         let build = crate::config::BUILD;
@@ -71,7 +85,7 @@ impl Node {
             true => (req.app.as_str(), self.tool_named(req).await),
             false => ("", "".to_string()),
         };
-        let mut attrs = Attrs::default().device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(build);
+        let mut attrs = Attrs::default().span_kind(SpanKind::Server).device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(build);
         if destination.named {
             attrs = attrs.service(app).tool(&tool);
             if let Some(bundle) = &bundle {
@@ -85,7 +99,7 @@ impl Node {
             attrs = attrs.bytes(req.input.to_string().len() as u64 + if let Reply::Ok(v) = reply { v.to_string().len() as u64 } else { 0 });
         }
         let print = (!ok).then(|| {
-            let (frame, built) = match exception.as_ref().filter(|_| destination.named).and_then(|e| e.frames.first()) {
+            let (frame, built) = match exception.as_ref().filter(|_| destination.named).and_then(Exception::top_frame) {
                 Some(top) => (top.clone(), bundle.clone().unwrap_or_else(|| build.into())),
                 None => (format!("stage:{at}"), build.to_string()),
             };
@@ -109,6 +123,50 @@ impl Node {
                 batch.metric(time, metric, app, &about, value);
             }
         }
+    }
+
+    /// How trying the devices for a call went (`Node::route`): a span under its request, and, if no device's own run of it
+    /// says how it ended (a service answered it, or none could) and nothing an app does is above it, the call's own span.
+    pub(super) async fn finish_route(&self, call: Call, req: &CallRequest, me: &Caller, ended: &Result<Value>, run_says: bool) {
+        if ended.as_ref().err().is_some_and(|e| e.is::<crate::keys::Needs>()) {
+            return call.leave();
+        }
+        let tried = call.steps().into_iter().filter(|s| s["step"] == "device").collect::<Vec<_>>();
+        let at = call.trace.stage();
+        let Call { trace, started, time, span, parent, stage: was, .. } = call;
+        trace.stage_is(was);
+        trace.leave(parent.clone());
+        let ok = ended.is_ok();
+        let code = ended.as_ref().err().and_then(crate::protocol::Coded::of);
+        let ms = started.elapsed().as_millis() as u64;
+        let kept = !ok || ms >= insights::SLOW_MS || insights::sampled(&trace.trace_id());
+        let answers = req.from.is_none() && !run_says;
+        let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let build = crate::config::BUILD;
+        let app = if destination.named { req.app.as_str() } else { "" };
+        let name = match (answers, destination.named) {
+            (true, true) => self.tool_named(req).await,
+            (true, false) => "call".to_string(),
+            (false, _) => "route".to_string(),
+        };
+        let fault = (!ok).then(|| insights::fault(code.as_deref(), at, None));
+        let mut attrs = Attrs::default().span_kind(if answers { SpanKind::Server } else { SpanKind::Internal }).device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(build);
+        if destination.named {
+            attrs = attrs.service(app).tool(&name);
+        }
+        if kept {
+            attrs = attrs.steps(&tried);
+        }
+        let print = (!ok && answers).then(|| {
+            let kind = exception_kind(code.as_deref(), None, at);
+            attrs = std::mem::take(&mut attrs).error(&kind).stage(at);
+            Print { app: app.to_string(), tool: name.clone(), kind, frame: format!("stage:{at}"), build: build.to_string(), fault: fault.unwrap_or(Fault::Internal) }
+        });
+        if !ok && !answers {
+            attrs = attrs.error(code.as_deref().unwrap_or(insights::OTHER)).stage(at);
+        }
+        let signal = Signal { time, device: hex(&self.0.id), kind: Kind::Span, name, app: app.to_string(), trace: trace.trace_id(), span, parent, ms, ok, fault, attrs };
+        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, kept, print);
     }
 
     /// What a call of `app` spent on a model, in tokens and time: OTEL's `gen_ai.client.*` metrics. Dollars stay in `cost`.
@@ -174,10 +232,11 @@ impl Node {
         }
     }
 
-    /// `req`'s tool if its app says it has it, else `_unknown`: what a caller typed is theirs to get wrong, and may be anything.
+    /// What `req` runs, if its app says it has a tool of that name, else `_unknown`: what a caller typed is theirs to get
+    /// wrong, and may be anything.
     async fn tool_named(&self, req: &CallRequest) -> String {
-        let listed = self.0.apps.describe(&req.app).await.is_ok_and(|d| d["tools"].as_array().is_some_and(|t| t.iter().any(|t| t["name"] == req.tool.as_str())));
-        if listed { req.tool.clone() } else { "_unknown".into() }
+        let listed = self.0.apps.describe(&req.app).await.is_ok_and(|d| d["tools"].as_array().is_some_and(|t| t.iter().any(|t| t["name"] == req.runs())));
+        if listed { req.runs().to_string() } else { "_unknown".into() }
     }
 
     /// Counts what the URL signer failed at since the last write.
@@ -296,26 +355,32 @@ impl Node {
         self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, true, print);
     }
 
-    /// A service's program going through a hop's worth of a call: one child span, with its status and bytes.
-    pub(super) fn finish_hop(&self, req: &CallRequest, me: &Caller, device: Key, took: Duration, answer: Option<&Value>) {
+    /// A service's program going through a hop's worth of a call: one child span, with its status and bytes. A hop that
+    /// failed doesn't fail the call, which can go on to the next device: the call's own span says how that ended.
+    pub(super) fn finish_hop(&self, req: &CallRequest, me: &Caller, device: Key, took: Duration, asked: &Result<Value>) {
         let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
         let ms = took.as_millis() as u64;
+        let answer = asked.as_ref().ok();
         let ok = answer.is_some_and(|a| a.get("error").is_none());
         let code = answer.and_then(|a| a["code"].as_str());
+        let (error, result) = match asked {
+            Ok(_) if ok => (None, "answered"),
+            Ok(_) => (Some(code.unwrap_or(insights::OTHER)), "failed"),
+            Err(err) => hop_failed(err),
+        };
         let fault = (!ok).then(|| insights::fault(code, stage::RUN, None));
         let (parent_trace, parent) = trace::parent_now();
         let trace = parent_trace.unwrap_or_else(trace::ids::trace);
         let kept = !ok || ms >= insights::SLOW_MS || insights::sampled(&trace);
-        let mut attrs = Attrs::default().device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(crate::config::BUILD);
-        attrs = attrs.tried(&hex(&device), if ok { "answered" } else if answer.is_some() { "failed" } else { "unreachable" });
+        let mut attrs = Attrs::default().span_kind(SpanKind::Client).device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(crate::config::BUILD).tried(&hex(&device), result);
         if destination.named {
             attrs = attrs.service(&req.app);
         }
         if kept {
             attrs = attrs.bytes(req.input.to_string().len() as u64 + answer.map_or(0, |a| a.to_string().len() as u64));
         }
-        if !ok {
-            attrs = attrs.error(code.unwrap_or(insights::OTHER));
+        if let Some(error) = error {
+            attrs = attrs.error(error);
         }
         let app = if destination.named { req.app.clone() } else { String::new() };
         let signal = Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: "service.hop".into(), app, trace, span: trace::ids::span(), parent, ms, ok, fault, attrs };
@@ -332,7 +397,7 @@ impl Node {
         let steps = traced.since(0);
         let exception = steps.iter().rev().find(|s| s["step"] == "exception").and_then(|s| Exception::from_json(&s["exception"]));
         let fault = (!ok).then(|| insights::fault(code.as_deref(), stage::RUN, None));
-        let mut attrs = Attrs::default().device(&hex(&self.0.id)).client("schedule").scope(destination.kind).build(crate::config::BUILD);
+        let mut attrs = Attrs::default().span_kind(SpanKind::Internal).device(&hex(&self.0.id)).client("schedule").scope(destination.kind).build(crate::config::BUILD);
         if destination.named {
             attrs = attrs.service(app).schedule(schedule);
         }
@@ -366,6 +431,9 @@ impl Node {
         }
         for span in insights::otlp::spans(&body["otlp"]) {
             let mut attrs = base();
+            if span.kind == Kind::Span {
+                attrs = attrs.span_kind(span.span_kind);
+            }
             if destination.named {
                 attrs = attrs.service(&app);
             }
@@ -475,6 +543,17 @@ impl Node {
     }
 }
 
+/// Why a device couldn't be asked, as `error.type` and `one.result`.
+fn hop_failed(err: &anyhow::Error) -> (Option<&'static str>, &'static str) {
+    if err.is::<net::NotThere>() {
+        (Some(insights::UNREACHABLE), "unreachable")
+    } else if err.to_string() == "timed out" {
+        (Some(insights::TIMEOUT), "no answer")
+    } else {
+        (Some(insights::LOST), "lost")
+    }
+}
+
 /// `error.type`: the code it carries, or the type of what was thrown, or that it ran out of time, or none known.
 fn exception_kind(code: Option<&str>, exception: Option<&Exception>, stage: &str) -> String {
     code.map(str::to_string).or(exception.map(|e| e.kind.clone())).unwrap_or_else(|| if stage == insights::stage::LIMIT { insights::TIMEOUT } else { insights::OTHER }.to_string())
@@ -490,7 +569,7 @@ fn with_steps(mut span: Value) -> Vec<Value> {
     let steps = span["attrs"].as_object_mut().and_then(|a| a.remove("one.steps")).and_then(|s| s.as_array().cloned()).unwrap_or_default();
     let mut all = Vec::with_capacity(steps.len() + 1);
     for (i, step) in steps.iter().enumerate() {
-        let mut attrs = Map::new();
+        let mut attrs = Map::from_iter([("span.kind".to_string(), json!(SpanKind::Internal.as_str()))]);
         for (key, value) in step.as_object().into_iter().flatten().filter(|(k, _)| !["step", "at", "ms"].contains(&k.as_str())) {
             attrs.insert(format!("one.{key}"), value.clone());
         }

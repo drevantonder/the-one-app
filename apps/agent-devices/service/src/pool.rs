@@ -320,7 +320,7 @@ impl Devices {
         let d = if let Some(d) = free.first() {
             d.clone()
         } else if !room_for_one() {
-            bail!("this device has no memory to spare for another agent device: give back one you're done with");
+            return Err(one_service::refused(format!("this device has no memory to spare for another agent device: give back one you're done with")));
         } else {
             self.create(&new_pool_name(), SIZES[0], true, false)?
         };

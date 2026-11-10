@@ -35,6 +35,8 @@ pub mod header {
     pub const ELSEWHERE: &str = "x-one-elsewhere";
     /// A request that asks for a trace of what it did, answered in the same header.
     pub const TRACE: &str = "x-one-trace";
+    /// W3C's: the trace and span a request is part of.
+    pub const TRACEPARENT: &str = "traceparent";
     /// Whose request it is, which a node checks against the device's key.
     pub const USER: &str = "x-one-user";
     /// A signed request that has no body to carry it (a GET's or DELETE's).

@@ -129,7 +129,7 @@ function re(e) {
 			root: r[0] || t[0],
 			start: i,
 			ms: a - i,
-			errors: t.filter((e) => e.status === "error").length,
+			errors: t.filter((e) => e.status === "error" && e.attrs?.["span.kind"] !== "client").length,
 			services: q(t.map((e) => e.service))
 		};
 	}).sort((e, t) => t.start - e.start);
@@ -1979,7 +1979,7 @@ function It() {
 				}, e))] })
 			}) }),
 			p === "Services" && /* @__PURE__ */ E(Ne, {
-				rows: R.get("span") || [],
+				rows: (R.get("span") || []).filter((e) => e.key["span.kind"] === "server"),
 				traces: z,
 				from: V,
 				to: B,

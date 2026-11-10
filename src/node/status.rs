@@ -50,6 +50,15 @@ update rollups set key = json_set(key, '$.kind', case
     else 'span' end);
 update or replace rollups set name = substr(name, length(app) + 2) where app != '' and substr(name, 1, length(app) + 1) = app || '.';
 update signals set name = substr(name, length(app) + 2) where app != '' and substr(name, 1, length(app) + 1) = app || '.';
+", "
+update rollups set key = json_set(key, '$.\"span.kind\"', case
+    when name = 'service.hop' then 'client'
+    when name = 'schedule.run' or json_extract(key, '$.\"one.client\"') is null then 'internal'
+    else 'server' end) where json_extract(key, '$.kind') = 'span';
+update signals set attrs = json_set(attrs, '$.\"span.kind\"', case
+    when name = 'service.hop' then 'client'
+    when name = 'schedule.run' or json_extract(attrs, '$.\"one.client\"') is null then 'internal'
+    else 'server' end) where kind = 'span';
 "];
 
 pub const RUNS_KEPT: usize = 20;
@@ -350,7 +359,7 @@ mod tests {
     #[test]
     fn rollups_gain_their_kind_and_lose_their_service_in_the_name() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
-        let before = SCHEMA.len() - 1;
+        let before = SCHEMA.iter().position(|s| s.contains("substr(name, length(app) + 2)")).unwrap();
         db.execute_batch(&SCHEMA[..before].concat()).unwrap();
         db.execute_batch("insert into rollups values (1, 'repos.list', 'repos', '{}', 3, 0, 9, 3, 0, 0, 0, 0), (1, 'bucket.ms', '', '{}', 2, 0, 9, 2, 0, 0, 0, 0), (1, 'node.start', '', '{}', 1, 0, 0, 1, 0, 0, 0, 0);").unwrap();
         db.execute_batch(SCHEMA[before]).unwrap();
@@ -358,6 +367,23 @@ mod tests {
         assert_eq!(of("list"), ("span".to_string(), 3));
         assert_eq!(of("bucket.ms"), ("metric".to_string(), 2));
         assert_eq!(of("node.start"), ("event".to_string(), 1));
+    }
+
+    /// A span kept before kinds says what kind it is, so only requests count in a service's rates, and none is lost.
+    #[test]
+    fn spans_kept_before_span_kinds_gain_theirs() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let before = SCHEMA.len() - 1;
+        db.execute_batch(&SCHEMA[..before].concat()).unwrap();
+        let span = r#"{"kind":"span","one.client":"cli"}"#;
+        db.execute_batch(&format!("insert into rollups values (1, 'list', 'repos', '{span}', 3, 0, 9, 3, 0, 0, 0, 0), (1, 'service.hop', 'shell', '{span}', 2, 1, 9, 2, 0, 0, 0, 0), (1, 'schedule.run', 'a', '{span}', 1, 0, 9, 1, 0, 0, 0, 0), (1, 'ping', 'a', '{{\"kind\":\"span\"}}', 1, 0, 2, 1, 0, 0, 0, 0), (1, 'node.start', '', '{{\"kind\":\"event\"}}', 1, 0, 0, 1, 0, 0, 0, 0);")).unwrap();
+        db.execute_batch(SCHEMA[before]).unwrap();
+        let of = |name: &str| -> (Option<String>, i64) { db.query_row(r#"select json_extract(key, '$."span.kind"'), count from rollups where name = ?"#, [name], |r| Ok((r.get(0)?, r.get(1)?))).unwrap() };
+        assert_eq!(of("list"), (Some("server".to_string()), 3));
+        assert_eq!(of("service.hop"), (Some("client".to_string()), 2));
+        assert_eq!(of("schedule.run"), (Some("internal".to_string()), 1));
+        assert_eq!(of("ping"), (Some("internal".to_string()), 1));
+        assert_eq!(of("node.start"), (None, 1));
     }
 
     /// A failure kept before fingerprints keeps its app, tool, count and times, and never what it said.

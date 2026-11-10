@@ -529,14 +529,14 @@ impl Devices {
     pub(super) fn make_vm(&self, k: &dyn Kind, name: &str, from: Option<&Vm>) -> Result<Vm> {
         let why = k.can();
         if !why.is_empty() {
-            bail!("{why}");
+            return Err(one_service::refused(format!("{why}")));
         }
         if !valid_name(name) {
-            bail!("a device's name is lowercase letters, digits and dashes");
+            return Err(one_service::refused(format!("a device's name is lowercase letters, digits and dashes")));
         }
         let _creating = self.creating.lock().unwrap();
         if self.taken(name) {
-            bail!("there's already a device named {name}");
+            return Err(one_service::refused(format!("there's already a device named {name}")));
         }
         let mut v = Vm { name: name.into(), kind: k.name().into(), made: super::now(), of: from.map(|f| f.name.clone()).unwrap_or_default(), ..Default::default() };
         let (first, step) = k.port();
@@ -561,13 +561,13 @@ impl Devices {
     fn borrow_vm(&self, k: &dyn Kind, name: &str, copy: bool, mut l: Loan) -> Result<Vm> {
         let why = k.can();
         if !why.is_empty() {
-            bail!("{why}");
+            return Err(one_service::refused(format!("{why}")));
         }
         let take = self.take.lock().unwrap();
         let lent = self.loans();
         let lasting: Vec<Vm> = self.vms().into_iter().filter(|v| v.kind == k.name() && v.of.is_empty() && (name.is_empty() || v.name == name)).collect();
         if !name.is_empty() && lasting.is_empty() {
-            bail!("there's no {} device named {name} here", k.title());
+            return Err(one_service::refused(format!("there's no {} device named {name} here", k.title())));
         }
         let mut got = None;
         let mut carries_on = false;
@@ -976,13 +976,13 @@ impl Devices {
         let k = kind_named(kind_name)?;
         let why = k.can();
         if !why.is_empty() {
-            bail!("{why}");
+            return Err(one_service::refused(format!("{why}")));
         }
         if !valid_name(name) {
-            bail!("a device's name is lowercase letters, digits and dashes");
+            return Err(one_service::refused(format!("a device's name is lowercase letters, digits and dashes")));
         }
         if self.taken(name) {
-            bail!("there's already a device named {name}");
+            return Err(one_service::refused(format!("there's already a device named {name}")));
         }
         let mut v = Vm {
             name: name.into(),

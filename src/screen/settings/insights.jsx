@@ -71,7 +71,7 @@ function tracesOf(rows) {
     const roots = spans.filter((s) => !s.parent || !ids.has(s.parent)).sort((a, b) => a.time - b.time)
     const start = Math.min(...spans.map((s) => s.time))
     const end = Math.max(...spans.map((s) => s.time + s.ms))
-    return { id, spans, root: roots[0] || spans[0], start, ms: end - start, errors: spans.filter((s) => s.status === "error").length, services: sorted(spans.map((s) => s.service)) }
+    return { id, spans, root: roots[0] || spans[0], start, ms: end - start, errors: spans.filter((s) => s.status === "error" && s.attrs?.["span.kind"] !== "client").length, services: sorted(spans.map((s) => s.service)) }
   }).sort((a, b) => b.start - a.start)
 }
 
@@ -726,7 +726,7 @@ function Insights() {
           <TabsList><TabsTrigger value="Services">Services</TabsTrigger>{Object.keys(queries).map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>
         </Tabs>
       </div>
-      {tab === "Services" && <Services rows={kinds.get("span") || []} traces={traces} from={from} to={to} open={service} colour={colour} showTrace={setTraceId} showTraces={toTraces} />}
+      {tab === "Services" && <Services rows={(kinds.get("span") || []).filter((r) => r.key["span.kind"] === "server")} traces={traces} from={from} to={to} open={service} colour={colour} showTrace={setTraceId} showTraces={toTraces} />}
       {tab === "Traces" && <Traces traces={traces} filters={filters} query={queries.Traces} open={setTraceId} colour={colour} more={data.more_signals} />}
       {tab === "Logs" && <Logs rows={logs} more={data.more_signals} query={queries.Logs} />}
       {tab === "Metrics" && <Metrics rows={kinds.get("metric") || []} from={from} to={to} more={data.more_rollups} query={queries.Metrics} />}

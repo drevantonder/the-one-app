@@ -453,7 +453,10 @@ impl Service {
         Ok(match self.services().call(&self.0.name, call["function"].as_str().unwrap_or(""), input, caller, from).await {
             Ok(answer) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
             Err(err) if err.is::<crate::services::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
-            Err(err) => json!({ "error": format!("{err:#}") }),
+            Err(err) => match crate::protocol::Coded::of(&err) {
+                Some(code) => json!({ "error": format!("{err:#}"), "code": code }),
+                None => json!({ "error": format!("{err:#}") }),
+            },
         })
     }
 

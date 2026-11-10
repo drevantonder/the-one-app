@@ -59,7 +59,7 @@ impl std::fmt::Debug for Signer {
     }
 }
 
-/// The URL signer's failures since `take_failures` last read them.
+/// The times the URL signer couldn't be reached or broke, since `take_failures` last read them: a refusal isn't one.
 static FAILURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// The URL signer's failures since this last asked, for insights.
@@ -94,7 +94,7 @@ impl Signer {
         let status = resp.status().as_u16();
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         let said = out["error"].as_str().unwrap_or("nothing").to_string();
-        if status != 200 {
+        if status >= 500 {
             FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         match status {

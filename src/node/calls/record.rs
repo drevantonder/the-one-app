@@ -71,7 +71,7 @@ impl Node {
                     }
                 }
                 for (key, e) in &ins.errors {
-                    let x = errors.entry(key.clone()).or_insert_with(|| status::Fingerprint { first: u64::MAX, ..e.clone() });
+                    let x = errors.entry(key.clone()).or_insert_with(|| status::Fingerprint { count: 0, first: u64::MAX, ..e.clone() });
                     x.count += e.count;
                     x.first = x.first.min(e.first);
                     x.last = x.last.max(e.last);

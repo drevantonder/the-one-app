@@ -92,6 +92,11 @@ impl Trace {
     pub fn stage_is(&self, stage: &'static str) {
         *self.0.stage.lock().unwrap() = stage;
     }
+
+    /// How long ago, in ms, it started: where a span begun now sits in it.
+    pub fn at(&self) -> u64 {
+        self.0.start.elapsed().as_millis() as u64
+    }
 }
 
 /// `traceparent`'s trace and span, if it's W3C's and has them: what another device sent, so nothing else is kept.

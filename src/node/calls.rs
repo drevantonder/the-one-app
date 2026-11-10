@@ -269,12 +269,24 @@ impl Node {
     /// or says to go elsewhere.
     pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let req = self.identified(req)?;
+        let span = self.begin_call();
+        let mut run_says = false;
+        let ended = trace::within(Some(span.trace.clone()), Box::pin(self.try_devices(&req, &me, &mut run_says))).await;
+        self.finish_route(span, &req, &me, &ended, run_says).await;
+        ended
+    }
+
+    /// What `route` does: `run_says` once a device's run of the call has recorded how it went.
+    async fn try_devices(&self, req: &CallRequest, me: &Caller, run_says: &mut bool) -> Result<Value> {
         if req.device.as_deref() == Some("all") {
-            return self.everywhere(req, me).await;
+            return self.everywhere(req.clone(), me.clone()).await;
         }
-        let req = self.reaching(req, &me)?;
+        let req = self.reaching(req.clone(), me)?;
+        let me = me.clone();
         let mut why = Vec::new();
-        for device in self.candidates(&req, &me)? {
+        let candidates = self.candidates(&req, &me)?;
+        trace::stage(crate::insights::stage::ROUTE);
+        for device in candidates {
             let started = Instant::now();
             let name = self.name_of(&device);
             // Each device tried, for a trace: how long it took, and why the next was tried.
@@ -298,6 +310,7 @@ impl Node {
                 false => self.ask_device(device, &req, &me).await,
             };
             let here = device == self.0.id;
+            *run_says = matches!(reply, Ok((Reply::Ok(_) | Reply::Error(..), _))) && (here || !self.is_service(&device));
             match reply {
                 Ok((Reply::Ok(v), theirs)) => {
                     tried("ran", json!({ "here": here, "trace": theirs }));
@@ -542,7 +555,7 @@ impl Node {
         let hop = Instant::now();
         let asked = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await;
         if service {
-            self.finish_hop(&resolved, me, device, hop.elapsed(), asked.as_ref().ok());
+            self.finish_hop(&resolved, me, device, hop.elapsed(), &asked);
         }
         let mut reply = asked?;
         if let Some(ok) = reply.get_mut("ok") {

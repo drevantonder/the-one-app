@@ -93,7 +93,7 @@ impl Kind for Windows {
 
     fn adopt(&self, _: &Devices, v: &mut Vm) -> Result<()> {
         if !v.file("disk.qcow2").exists() || v.port == 0 || v.display == 0 {
-            bail!("give dir (its folder, with its disk.qcow2, OVMF_VARS.fd, tpm and monitor.sock), port (its SSH, forwarded here) and display (its VNC display)");
+            return Err(one_service::refused(format!("give dir (its folder, with its disk.qcow2, OVMF_VARS.fd, tpm and monitor.sock), port (its SSH, forwarded here) and display (its VNC display)")));
         }
         Ok(())
     }

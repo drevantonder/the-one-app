@@ -202,7 +202,7 @@ impl Kind for Android {
 
     fn adopt(&self, _: &Devices, v: &mut Vm) -> Result<()> {
         if avd_dir(&v.id).is_err() || v.port == 0 {
-            bail!("give id (its AVD's name) and port (its console port, like 5554)");
+            return Err(one_service::refused(format!("give id (its AVD's name) and port (its console port, like 5554)")));
         }
         Ok(())
     }
@@ -217,7 +217,7 @@ impl Kind for Android {
         let dst = avd_home().join(format!("{}.avd", v.id));
         // The machine's AVDs are every network's (a `one-dev throwaway` beside the real one): never another's.
         if dst.exists() || avd_home().join(format!("{}.ini", v.id)).exists() {
-            bail!("there's an Android device called {} on this machine already: pick another name", v.name);
+            return Err(one_service::refused(format!("there's an Android device called {} on this machine already: pick another name", v.name)));
         }
         // Stopped, and done saving its snapshot, which it does after adb stops answering.
         match from.filter(|from| !self.running(ds, from) && emulators(from).is_empty()) {

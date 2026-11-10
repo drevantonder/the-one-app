@@ -19,7 +19,7 @@ fn call(host: &Host, call: &Call) -> Result<Answer> {
     }
     let command = call.input["command"].as_str().unwrap_or("").to_string();
     if command.trim().is_empty() {
-        bail!("give a command");
+        return Err(one_service::refused(format!("give a command")));
     }
     let dir = call.input["dir"].as_str().map(str::to_string).unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".into()));
     let timeout = call.input["timeout"].as_u64().unwrap_or(60).clamp(1, 600);

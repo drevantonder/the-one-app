@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use super::{Kind, token};
+use super::{Kind, SpanKind, token};
 
 /// The most spans one OTLP request adds.
 const MOST: usize = 200;
@@ -13,6 +13,7 @@ const MOST: usize = 200;
 pub struct Span {
     pub name: String,
     pub kind: Kind,
+    pub span_kind: SpanKind,
     pub ms: u64,
     pub ok: bool,
     /// `error.type`, unchecked here: `Attrs::error` holds it to its set.
@@ -40,13 +41,18 @@ fn span(s: &Value) -> Span {
     let trace = s["traceId"].as_str().filter(|t| hex(t, 32));
     let id = s["spanId"].as_str().filter(|t| hex(t, 16));
     let ids = trace.zip(id).map(|(t, i)| (t.to_string(), i.to_string(), s["parentSpanId"].as_str().filter(|p| hex(p, 16)).map(str::to_string)));
-    Span { name, kind: Kind::Span, ms, ok, error: attribute(s, "error.type").unwrap_or_default(), status_code: number(s, "http.response.status_code"), ids }
+    let span_kind = match (s["kind"].as_u64(), s["kind"].as_str()) {
+        (Some(2), _) | (_, Some("SPAN_KIND_SERVER")) => SpanKind::Server,
+        (Some(3), _) | (_, Some("SPAN_KIND_CLIENT")) => SpanKind::Client,
+        _ => SpanKind::Internal,
+    };
+    Span { name, kind: Kind::Span, span_kind, ms, ok, error: attribute(s, "error.type").unwrap_or_default(), status_code: number(s, "http.response.status_code"), ids }
 }
 
 fn record(r: &Value) -> Span {
     let name = r["eventName"].as_str().filter(|n| token(n)).unwrap_or("log").to_string();
     let ok = r["severityNumber"].as_u64().is_none_or(|n| n < 17);
-    Span { name, kind: Kind::Event, ms: 0, ok, error: attribute(r, "error.type").unwrap_or_default(), status_code: None, ids: None }
+    Span { name, kind: Kind::Event, span_kind: SpanKind::Internal, ms: 0, ok, error: attribute(r, "error.type").unwrap_or_default(), status_code: None, ids: None }
 }
 
 fn hex(value: &str, length: usize) -> bool {
