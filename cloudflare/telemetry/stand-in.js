@@ -9,7 +9,7 @@ import { TABLES } from "./worker.js";
 // A JavaScript number comes to SQLite as a float, and these are divided as integers.
 const INTEGERS = ["time", "duration", "severity_number", "count"];
 const store = (env) => env.STORE.get(env.STORE.idFromName("telemetry"));
-const sqlite = (sql) => sql.replace(/__ingest_ts >= '[^']*' AND /g, "").replace(/\bFROM telemetry\./g, "FROM ").replace(/json_get_str\(attrs, '([^']+)'\)/g, `json_extract(attrs, '$."$1"')`).replace(/json_get_int\(buckets, (\d+)\)/g, "json_extract(buckets, '$[$1]')");
+const sqlite = (sql) => sql.replace(/__ingest_ts >= '[^']*' AND /g, "").replace(/\bFROM telemetry\./g, "FROM ").replace(/json_get_(?:str|int)\(attrs, '([^']+)'\)/g, `json_extract(attrs, '$."$1"')`).replace(/json_get_int\(buckets, (\d+)\)/g, "json_extract(buckets, '$[$1]')");
 
 export class Store extends DurableObject {
   constructor(ctx, env) {

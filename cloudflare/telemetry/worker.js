@@ -111,35 +111,88 @@ const nanos = (v) => Number(BigInt(v ?? 0) / 1000000n);
 const OTLP_PATH = "/telemetry/otlp";
 /// Who it's from isn't a device, so a Worker's own spans have no device of their own.
 const NOBODY = "0".repeat(64);
-/// As a device's: a request always, and the rest of a trace if it failed, was slow or is one in 20 (src/insights.rs).
+/// As OTEL's tail sampling does: a trace is kept whole if it failed or was slow, or is one in 20 of a Worker's requests
+/// (src/insights.rs). Every server span is counted first, kept or not, so rates come from counts.
 const SLOW_MS = 1000;
 const SAMPLED_ONE_IN = 20;
 /// What a Worker answers as a request. Its other events (each WebSocket message the relay takes is one, some 200,000 an hour)
-/// have no caller to report to: they're kept only if they failed or were slow.
+/// have no caller to report to: they're kept only if they failed or were slow, and counted all the same.
 const REQUEST = /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/;
 const sampledTrace = (trace) => parseInt(trace.slice(-8), 16) % SAMPLED_ONE_IN === 0;
+/// What every Worker's server spans add up to, kept or not, as OTEL's span metrics connector names it.
+const SPAN_METRIC = "traces.span.metrics.duration";
+/// The errors a JavaScript engine names (src/insights.rs's `EXCEPTIONS`): any other name is `Error`.
+export const EXCEPTIONS = ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];
 
-/// OTLP/JSON from Cloudflare, each Worker's spans as rows for the spans table: only its name if that's a plain token, its
-/// ids, timing, kind and status, and a status code. Its other attributes are Cloudflare's, and may name a URL: none are kept.
+/// What a Worker's exception said, kept to its plain words: Cloudflare's own ("internal error; reference = …", "Network
+/// connection lost.") are what explains a failure there. Any other word, a value of any kind, is `<value>`, which also
+/// makes failures that differ only by one read the same. It never passes through a node, so this is its cleaner.
+function plainWords(said) {
+  const words = String(said ?? "").slice(0, 2048).split(/(\s+)/).map((w) => (!w || /^\s+$/.test(w) || /^[A-Za-z][A-Za-z'-]*[.,;:!?]?$/.test(w) || /^[=:;,.()-]+$/.test(w) ? w : "<value>"));
+  const kept = words.join("").trim();
+  return kept.length > 512 ? `${kept.slice(0, 512)}…` : kept;
+}
+
+const attribute = (attrs, key) => {
+  const v = (attrs ?? []).find((a) => a.key === key)?.value;
+  return v?.stringValue ?? v?.intValue;
+};
+
+/// A span's exception event, as OTEL's: its type, the first frame of its stack (`file:line:col`), and its plain words.
+function exceptionOf(s) {
+  const event = (s.events ?? []).find((e) => e.name === "exception");
+  if (!event) return null;
+  const named = String(attribute(event.attributes, "exception.type") ?? "");
+  const at = /([A-Za-z0-9_.\/-]+\.js):(\d+):(\d+)/.exec(String(attribute(event.attributes, "exception.stacktrace") ?? ""));
+  return { type: EXCEPTIONS.includes(named) ? named : "Error", frame: at ? `${at[1].split("/").pop()}:${at[2]}:${at[3]}` : "", message: plainWords(attribute(event.attributes, "exception.message")) };
+}
+
+/// OTLP/JSON from Cloudflare, each Worker's spans as rows for the spans table, `spans`: only its name if that's a plain
+/// token, its ids, timing, kind and status, a status code, and an exception's type, frame and plain words. Its other
+/// attributes are Cloudflare's, and may name a URL: none are kept. And `metrics`, what every server span adds up to, a
+/// minute at a time, kept or not.
 export function workerSpans(request, cli) {
   const spans = [];
   for (const resource of request.resourceSpans ?? []) {
     const named = (resource.resource?.attributes ?? []).find((a) => a.key === "service.name")?.value?.stringValue ?? "";
     const job = String(named).replace(`${cli}-`, "");
     if (!TRACED.includes(job)) continue;
-    for (const scope of resource.scopeSpans ?? []) spans.push(...(scope.spans ?? []).map((s) => ({ s, job })));
+    for (const scope of resource.scopeSpans ?? []) spans.push(...(scope.spans ?? []).filter((s) => hex(s.traceId, 32) && hex(s.spanId, 16)).map((s) => ({ s, job })));
   }
   const failed = ({ s }) => s.status?.code === 2 || s.status?.code === "STATUS_CODE_ERROR";
-  const took = ({ s }) => nanos(s.endTimeUnixNano) - nanos(s.startTimeUnixNano);
+  const took = ({ s }) => Math.max(0, nanos(s.endTimeUnixNano) - nanos(s.startTimeUnixNano));
+  const server = ({ s }) => s.kind === 2 || s.kind === "SPAN_KIND_SERVER";
+  const nameOf = ({ s }) => (token(s.name) ? s.name : "span");
+  const counts = new Map();
+  for (const x of spans.filter(server)) {
+    const minute = nanos(x.s.startTimeUnixNano) - (nanos(x.s.startTimeUnixNano) % 60_000);
+    const status = failed(x) ? "STATUS_CODE_ERROR" : "STATUS_CODE_UNSET";
+    const key = `${minute}|${x.job}|${nameOf(x)}|${status}`;
+    const had = counts.get(key) ?? { time: minute, name: SPAN_METRIC, type: "histogram", unit: "ms", service: `worker.${x.job}`, instance: NOBODY, count: 0, sum: 0, buckets: Array(BOUNDS.length + 1).fill(0), attrs: { "span.name": nameOf(x), "span.kind": "SPAN_KIND_SERVER", "status.code": status } };
+    const ms = took(x), bucket = BOUNDS.findIndex((b) => ms <= b);
+    had.count += 1;
+    had.sum += ms;
+    had.buckets[bucket < 0 ? BOUNDS.length : bucket] += 1;
+    counts.set(key, had);
+  }
+  const metrics = [...counts.values()].map((m) => ({ ...m, buckets: JSON.stringify(m.buckets), attrs: JSON.stringify(m.attrs) })).filter((row) => kept(row, TABLES.metrics, NOBODY, false));
   const worth = new Set(spans.filter((x) => failed(x) || took(x) >= SLOW_MS).map(({ s }) => s.traceId));
   const requests = new Set(spans.filter(({ s }) => !hex(s.parentSpanId, 16) && REQUEST.test(s.name)).map(({ s }) => s.traceId));
-  return spans.filter(({ s }) => hex(s.traceId, 32) && hex(s.spanId, 16) && (worth.has(s.traceId) || (requests.has(s.traceId) && (!hex(s.parentSpanId, 16) || sampledTrace(s.traceId))))).map((x) => {
+  const rows = spans.filter(({ s }) => worth.has(s.traceId) || (requests.has(s.traceId) && sampledTrace(s.traceId))).map((x) => {
     const { s, job } = x;
-    const code = s.attributes?.find((a) => a.key === "http.response.status_code")?.value?.intValue;
-    const kind = s.kind === 2 || s.kind === "SPAN_KIND_SERVER" ? "server" : s.kind === 3 || s.kind === "SPAN_KIND_CLIENT" ? "client" : "internal";
-    const attrs = { ...(code !== undefined ? { "http.response.status_code": Number(code) } : {}), ...(failed(x) ? { "error.type": "_OTHER" } : {}) };
-    return { time: nanos(s.startTimeUnixNano), trace: s.traceId, span: s.spanId, ...(hex(s.parentSpanId, 16) ? { parent: s.parentSpanId } : {}), name: token(s.name) ? s.name : "span", service: `worker.${job}`, instance: NOBODY, kind, status: failed(x) ? "error" : "unset", duration: took(x), attrs: JSON.stringify(attrs) };
+    const code = attribute(s.attributes, "http.response.status_code");
+    const kind = server(x) ? "server" : s.kind === 3 || s.kind === "SPAN_KIND_CLIENT" ? "client" : "internal";
+    const thrown = failed(x) ? exceptionOf(s) : null;
+    // Kept whole for failing or being slow, it stands for itself alone; sampled, for each of the 20 it was one of.
+    const attrs = { ...(code !== undefined ? { "http.response.status_code": Number(code) } : {}), "one.sampled": worth.has(s.traceId) ? 1 : SAMPLED_ONE_IN };
+    if (failed(x)) attrs["error.type"] = thrown?.type ?? "_OTHER";
+    if (thrown) {
+      attrs.events = [{ name: "exception", attributes: { "exception.type": thrown.type, ...(thrown.frame ? { "exception.stacktrace": `at ${thrown.frame}` } : {}) } }];
+      attrs["one.fingerprint"] = `${thrown.type}|${thrown.frame}|`;
+    }
+    return { time: nanos(s.startTimeUnixNano), trace: s.traceId, span: s.spanId, ...(hex(s.parentSpanId, 16) ? { parent: s.parentSpanId } : {}), name: nameOf(x), service: `worker.${job}`, instance: NOBODY, kind, status: failed(x) ? "error" : "unset", duration: took(x), ...(thrown?.message ? { message: thrown.message } : {}), attrs: JSON.stringify(attrs) };
   }).filter((row) => kept(row, TABLES.spans, NOBODY, false));
+  return { spans: rows, metrics };
 }
 
 /// How often this path says what it was handed, each way that can go, as a device's canary does: an export that's refused
@@ -175,8 +228,9 @@ async function otlp(request, env) {
     refuse(400, "OTLP here is JSON, gzipped or not");
   }
   const found = (parsed.resourceSpans ?? []).reduce((n, r) => n + (r.scopeSpans ?? []).reduce((m, s) => m + (s.spans ?? []).length, 0), 0);
-  const rows = workerSpans(parsed, env.CLI).slice(0, MOST_ROWS);
-  if (rows.length) await env.SPANS.send(rows);
+  const { spans, metrics } = workerSpans(parsed, env.CLI);
+  const rows = spans.slice(0, MOST_ROWS);
+  await Promise.all([rows.length && env.SPANS.send(rows), metrics.length && env.METRICS.send(metrics.slice(0, MOST_ROWS))]);
   await sayExport(env, "read", found, rows.length);
   return new Response(null, { status: 204 });
 }
@@ -192,6 +246,8 @@ async function write(request, env) {
 }
 
 const attr = (key) => `json_get_str(attrs, '${key}')`;
+/// A server span counted by its own row: one sampled where it was recorded (`one.sampled`) is counted in `SPAN_METRIC` instead.
+const UNSAMPLED = `json_get_int(attrs, 'one.sampled') IS NULL`;
 const buckets = () => BOUNDS.map((high, i) => `SUM(CASE WHEN "duration" <= ${high}${i ? ` AND "duration" > ${BOUNDS[i - 1]}` : ""} THEN 1 ELSE 0 END) AS b${i}`).concat(`SUM(CASE WHEN "duration" > ${BOUNDS.at(-1)} THEN 1 ELSE 0 END) AS b${BOUNDS.length}`).join(", ");
 const summed = () => [...BOUNDS, null].map((_, i) => `SUM(json_get_int(buckets, ${i})) AS b${i}`).join(", ");
 const hour = `("time" / 3600000)`;
@@ -229,7 +285,7 @@ const errorOnly = (a, key) => (a.status === "error" ? [key] : a.status === "unse
 /// The reads there are, each the table it reads, from what's asked to its SQL, and what it gives.
 const QUERIES = {
   // Every request, an hour at a time: what rates and durations add up from.
-  requests: { table: "spans", sql: (a) => `SELECT ${hour} AS hour, service, name, COUNT(*) AS "count", SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors, SUM("duration") AS "sum", ${buckets()} FROM ${NAMESPACE}.spans ${where(a, [`kind = 'server'`])} GROUP BY ${hour}, service, name ORDER BY hour DESC LIMIT ${a.limit}`, rows: asBuckets },
+  requests: { table: "spans", sql: (a) => `SELECT ${hour} AS hour, service, name, COUNT(*) AS "count", SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors, SUM("duration") AS "sum", ${buckets()} FROM ${NAMESPACE}.spans ${where(a, [`kind = 'server'`, UNSAMPLED])} GROUP BY ${hour}, service, name ORDER BY hour DESC LIMIT ${a.limit}`, rows: asBuckets, counted: true },
   spans: { table: "spans", sql: (a) => newest("spans", SPAN, where(a, errorOnly(a, `status = 'error'`)), a.limit) },
   logs: { table: "logs", sql: (a) => newest("logs", LOG, where({ ...a, named: "body" }, errorOnly(a, `severity_number >= 17`)), a.limit) },
   metrics: { table: "metrics", sql: (a) => `SELECT ${hour} AS hour, name, "type", unit, service, instance, attrs, SUM("count") AS "count", SUM("sum") AS "sum", ${summed()} FROM ${NAMESPACE}.metrics ${where(a)} GROUP BY ${hour}, name, "type", unit, service, instance, attrs ORDER BY hour DESC LIMIT ${a.limit}`, rows: asBuckets },
@@ -243,24 +299,33 @@ const QUERIES = {
 
 // `requests` and `errors` read the same spans, so a view that shows both is one trip to Basin: each is split out here, its
 // `status` applied only to `errors`, as it is when they're separate. Each kept row is a kind of span at a status in an hour.
-const SUMMARY = (a) => `SELECT ${hour} AS hour, service, name, kind, status, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", SUM("duration") AS "sum", ${buckets()}, MIN("time") AS first_seen, MAX("time") AS last_seen, ${NEWEST} FROM ${NAMESPACE}.spans ${where(a, [`(kind = 'server' OR ${attr("one.fingerprint")} IS NOT NULL)`])} GROUP BY ${hour}, service, name, kind, status, ${attr("one.fingerprint")} ORDER BY hour DESC LIMIT ${a.limit}`;
+// A server span sampled where it was recorded counts in neither: `counted` adds what its `SPAN_METRIC` says.
+const COUNTED_KIND = `CASE WHEN ${UNSAMPLED} THEN kind ELSE 'sampled' END`;
+const SUMMARY = (a) => `SELECT ${hour} AS hour, service, name, ${COUNTED_KIND} AS kind, status, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", SUM("duration") AS "sum", ${buckets()}, MIN("time") AS first_seen, MAX("time") AS last_seen, ${NEWEST} FROM ${NAMESPACE}.spans ${where(a, [`(kind = 'server' OR ${attr("one.fingerprint")} IS NOT NULL)`])} GROUP BY ${hour}, service, name, ${COUNTED_KIND}, status, ${attr("one.fingerprint")} ORDER BY hour DESC LIMIT ${a.limit}`;
 
-function summary(rows, a) {
+// What the server spans sampled where they were recorded add up to, an hour at a time, as `requests` are.
+const COUNTED = (a) => `SELECT ${hour} AS hour, service, ${attr("span.name")} AS name, ${attr("status.code")} AS status, SUM("count") AS "count", SUM("sum") AS "sum", ${summed()} FROM ${NAMESPACE}.metrics ${where({ ...a, named: attr("span.name") }, [`name = '${SPAN_METRIC}'`])} GROUP BY ${hour}, service, ${attr("span.name")}, ${attr("status.code")} ORDER BY hour DESC LIMIT ${a.limit}`;
+
+/// Adds an hour's requests of an operation to `requests`, by hour, service and name.
+function add(requests, { hour, service, name, count, errors, sum, buckets }) {
+  const key = `${hour}|${service}|${name}`;
+  const had = requests.get(key);
+  if (!had) return requests.set(key, { hour, service, name, count, errors, sum, buckets });
+  had.count += count;
+  had.errors += errors;
+  had.sum += sum;
+  had.buckets = had.buckets.map((n, i) => n + buckets[i]);
+}
+
+/// `counted` (`COUNTED`'s rows) as requests.
+const countedRequests = (counted) => asBuckets(counted).map((r) => ({ hour: r.hour, service: r.service, name: r.name, count: Number(r.count), errors: r.status === "STATUS_CODE_ERROR" ? Number(r.count) : 0, sum: Number(r.sum), buckets: r.buckets }));
+
+function summary(rows, counted, a) {
   const requests = new Map(), errors = new Map();
+  for (const row of countedRequests(counted)) add(requests, row);
   for (const row of asBuckets(rows).map(newestOf)) {
     const count = Number(row.count), sum = Number(row.sum);
-    if (row.kind === "server") {
-      const key = `${row.hour}|${row.service}|${row.name}`;
-      const had = requests.get(key);
-      if (had) {
-        had.count += count;
-        had.errors += row.status === "error" ? count : 0;
-        had.sum += sum;
-        had.buckets = had.buckets.map((n, i) => n + row.buckets[i]);
-      } else {
-        requests.set(key, { hour: row.hour, service: row.service, name: row.name, count, errors: row.status === "error" ? count : 0, sum, buckets: row.buckets });
-      }
-    }
+    if (row.kind === "server") add(requests, { hour: row.hour, service: row.service, name: row.name, count, errors: row.status === "error" ? count : 0, sum, buckets: row.buckets });
     if (row.fingerprint && (!a.status || (a.status !== "error" && a.status !== "unset") || row.status === a.status)) {
       const key = `${row.service}|${row.name}|${row.status}|${row.fingerprint}`;
       const had = errors.get(key);
@@ -284,7 +349,7 @@ async function summaryOf(env, a) {
   const had = remembered.get(key);
   if (had && Date.now() - had.at < SUMMARY_FOR) return had.rows;
   if (remembered.size >= MOST_SUMMARIES) remembered.clear();
-  const rows = query(env, sql).then((r) => summary(r, a));
+  const rows = Promise.all([query(env, sql), query(env, COUNTED(a))]).then(([r, counted]) => summary(r, counted, a));
   remembered.set(key, { at: Date.now(), rows });
   rows.catch(() => remembered.delete(key));
   return rows;
@@ -318,10 +383,14 @@ async function read(request, env) {
   if (!a.services.length) return Response.json(Object.fromEntries(names.map((n) => [n, []])));
   const together = names.includes("requests") && names.includes("errors") && !a.trace;
   const results = await Promise.all(names.filter((n) => !together || (n !== "requests" && n !== "errors")).map(async (name) => {
-    const { table, sql, rows = (r) => r } = QUERIES[name];
+    const { table, sql, rows = (r) => r, counted } = QUERIES[name];
     // A metric belongs to no trace: asked for one, a table without the column has none of it.
     if (a.trace && !TABLES[table].trace) return [name, []];
-    return [name, rows(await query(env, sql(a)))];
+    if (!counted || a.trace) return [name, rows(await query(env, sql(a)))];
+    const [own, more] = await Promise.all([query(env, sql(a)), query(env, COUNTED(a))]);
+    const all = new Map();
+    for (const row of [...rows(own).map((r) => ({ ...r, count: Number(r.count), errors: Number(r.errors), sum: Number(r.sum) })), ...countedRequests(more)]) add(all, row);
+    return [name, [...all.values()]];
   }).concat(together ? [summaryOf(env, a).then((s) => [["requests", s.requests], ["errors", s.errors]])] : []));
   return Response.json(Object.fromEntries(results.flatMap((r) => (typeof r[0] === "string" ? [r] : r))));
 }

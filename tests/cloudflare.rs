@@ -354,7 +354,11 @@ fn telemetry_takes_the_networks_devices_and_only_what_its_tables_hold() {
     let at = |path: &str| format!("{}/telemetry/{path}", k.relay_address());
     let ask = |by: &ed25519_dalek::SigningKey, path: &str, fields: Value| post(&at(path), &[], one::keys::signed_request(by, one::protocol::TELEMETRY, fields, now()));
     let span = |name: &str, status: &str, ms: u64| json!({ "time": now(), "trace": "a".repeat(32), "span": "b".repeat(16), "name": name, "service": "notes", "instance": key, "kind": "server", "status": status, "duration": ms, "attrs": json!({ "one.fingerprint": "TypeError|app.js:1:1|b1" }).to_string() });
-    let rows = json!({ "spans": [span("get", "error", 3), span("get", "unset", 700), { "name": "no time or anything else" }], "logs": [{ "time": now(), "severity_number": 9, "severity_text": "INFO", "body": "node.start", "service": "one", "instance": key, "attrs": "{}" }], "metrics": [{ "time": now(), "name": "write.seen", "type": "histogram", "unit": "ms", "service": "one", "instance": key, "count": 2, "sum": 9, "buckets": json!([0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).to_string(), "attrs": "{}" }] });
+    // One sampled where it was recorded, which stands for the 20 it's one of: what they add up to is counted beside it.
+    let mut sampled = span("get", "unset", 3);
+    (sampled["span"], sampled["attrs"]) = (json!("c".repeat(16)), json!(json!({ "one.sampled": 20 }).to_string()));
+    let counted = json!({ "time": now(), "name": "traces.span.metrics.duration", "type": "histogram", "unit": "ms", "service": "notes", "instance": key, "count": 3, "sum": 30, "buckets": json!([0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).to_string(), "attrs": json!({ "span.name": "get", "span.kind": "SPAN_KIND_SERVER", "status.code": "STATUS_CODE_ERROR" }).to_string() });
+    let rows = json!({ "spans": [span("get", "error", 3), span("get", "unset", 700), sampled, { "name": "no time or anything else" }], "logs": [{ "time": now(), "severity_number": 9, "severity_text": "INFO", "body": "node.start", "service": "one", "instance": key, "attrs": "{}" }], "metrics": [{ "time": now(), "name": "write.seen", "type": "histogram", "unit": "ms", "service": "one", "instance": key, "count": 2, "sum": 9, "buckets": json!([0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).to_string(), "attrs": "{}" }, counted] });
     assert_eq!(ask(&stranger, "write", rows.clone()).0, 403, "only the network's devices write");
     assert_eq!(ask(&device, "write", rows).0, 204);
     let read = |fields: Value| ask(&device, "read", fields);
@@ -362,14 +366,18 @@ fn telemetry_takes_the_networks_devices_and_only_what_its_tables_hold() {
     let everything = json!({ "queries": ["requests", "spans", "logs", "metrics", "errors"], "services": ["notes", "one"], "since": 0, "limit": 100 });
     let (status, said) = read(everything);
     assert_eq!(status, 200, "{said}");
-    assert_eq!(said["spans"].as_array().unwrap().len(), 2, "what isn't a span is left out: {said}");
-    let hour = &said["requests"][0];
-    assert_eq!((hour["count"].as_u64(), hour["errors"].as_u64(), hour["sum"].as_u64()), (Some(2), Some(1), Some(703)), "{said}");
-    assert_eq!(hour["buckets"][1], 1, "3 ms is in (0, 5]: {said}");
-    assert_eq!(hour["buckets"][8], 0, "{said}");
-    assert_eq!(hour["buckets"][9], 1, "700 ms is in (500, 750]: {said}");
+    assert_eq!(said["spans"].as_array().unwrap().len(), 3, "what isn't a span is left out: {said}");
+    let requests = |said: &Value| said["requests"].as_array().unwrap().iter().find(|r| r["service"] == "notes").cloned().unwrap();
+    for hour in [requests(&said), requests(&read(json!({ "queries": ["requests"], "services": ["notes"], "since": 0, "limit": 100 })).1)] {
+        assert_eq!((hour["count"].as_u64(), hour["errors"].as_u64(), hour["sum"].as_u64()), (Some(5), Some(4), Some(733)), "the rows counted by themselves, and what the sampled ones add up to, never the sampled row: {said}");
+        assert_eq!(hour["buckets"][1], 1, "3 ms is in (0, 5]: {said}");
+        assert_eq!(hour["buckets"][2], 3, "{said}");
+        assert_eq!(hour["buckets"][8], 0, "{said}");
+        assert_eq!(hour["buckets"][9], 1, "700 ms is in (500, 750]: {said}");
+    }
     assert_eq!(said["logs"][0]["body"], "node.start", "{said}");
-    assert_eq!((said["metrics"][0]["sum"].as_u64(), said["metrics"][0]["buckets"][2].as_u64()), (Some(9), Some(1)), "{said}");
+    let seen = said["metrics"].as_array().unwrap().iter().find(|m| m["name"] == "write.seen").unwrap();
+    assert_eq!((seen["sum"].as_u64(), seen["buckets"][2].as_u64()), (Some(9), Some(1)), "{said}");
     assert_eq!((said["errors"][0]["fingerprint"].as_str(), said["errors"][0]["count"].as_u64()), (Some("TypeError|app.js:1:1|b1"), Some(1)), "{said}");
     assert_eq!(said["errors"].as_array().unwrap().len(), 2, "what broke and what was refused aren't one line: {said}");
     let (status, said) = read(json!({ "queries": ["requests", "spans", "logs", "metrics", "errors", "builds", "build_errors"], "services": ["notes"], "service": "notes", "name": "get", "status": "error", "trace": "a".repeat(32), "since": 0, "limit": 100 }));

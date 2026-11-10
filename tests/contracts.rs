@@ -1065,7 +1065,9 @@ fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
 }
 
 /// Cloudflare's export of the Workers' traces is held to what a program's OTLP is on a device: nothing but a plain name, the
-/// ids, timing and status of each span; and it only ever keeps the Workers that open nothing.
+/// ids, timing and status of each span, and what an exception was, where, and its plain words; and it only ever keeps the
+/// Workers that open nothing. Every server span is counted, kept or not, and a trace is kept whole only if it failed, was
+/// slow, or is one in 20 of the requests.
 #[test]
 fn a_workers_traces_are_clamped_as_a_programs_are() {
     let formats = Formats::start();
@@ -1074,17 +1076,27 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     let start = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() * 1_000_000;
     let span = |name: &str, trace: char, status: i64, parent: Option<&str>| json!({ "name": name, "traceId": trace.to_string().repeat(32), "spanId": "1".repeat(16), "parentSpanId": parent, "startTimeUnixNano": start.to_string(), "endTimeUnixNano": (start + 500_000_000).to_string(), "status": { "code": status }, "kind": 2, "attributes": [{ "key": "url.full", "value": { "stringValue": "https://x/anna@example.org" } }, { "key": "http.response.status_code", "value": { "intValue": "500" } }] });
     let of = |worker: &str, spans: Vec<Value>| json!({ "resource": { "attributes": [{ "key": "service.name", "value": { "stringValue": worker } }] }, "scopeSpans": [{ "spans": spans }] });
-    let request = json!({ "resourceSpans": [of("one-gateway", vec![span("GET /users/anna@example.org", 'a', 2, None), span("GET", 'd', 0, None)]), of("one-relay", vec![span("hibernatableWebSocket", 'e', 0, None)]), of("one-telemetry", vec![span("fetch", 'c', 2, None)]), of("one-mcp", vec![span("fetch", 'b', 2, None)]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
-    let rows = formats.js(json!({ "op": "telemetryWorkerSpans", "request": request, "cli": "one" }));
-    let rows = rows.as_array().unwrap();
-    assert_eq!(rows.len(), 2, "the gateway's failure and its request: not a WebSocket message, nor what mcp, node or telemetry did: {rows:?}");
+    let mut failed = span("GET /users/anna@example.org", 'a', 2, None);
+    failed["events"] = json!([{ "name": "exception", "attributes": [{ "key": "exception.type", "value": { "stringValue": "TypeError" } }, { "key": "exception.message", "value": { "stringValue": "internal error; reference = l1kprhha71iut801 for anna@example.org" } }, { "key": "exception.stacktrace", "value": { "stringValue": "    at async worker_default.ask (worker.js:474:18)" } }] }]);
+    // Trace `0…` is one in 20; trace `d…` isn't.
+    let request = json!({ "resourceSpans": [of("one-gateway", vec![failed, span("GET", 'd', 0, None), span("GET", '0', 0, None)]), of("one-relay", vec![span("hibernatableWebSocket", 'e', 0, None)]), of("one-telemetry", vec![span("fetch", 'c', 2, None)]), of("one-mcp", vec![span("fetch", 'b', 2, None)]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
+    let read = formats.js(json!({ "op": "telemetryWorkerSpans", "request": request, "cli": "one" }));
+    let rows = read["spans"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "the gateway's failure and the one request in 20: not another request, a WebSocket message, nor what mcp, node or telemetry did: {rows:?}");
     let stored = rows[0].to_string();
-    assert!(!stored.contains("anna") && !stored.contains("example") && !stored.contains("url.full"), "{stored}");
+    assert!(!stored.contains("anna") && !stored.contains("example") && !stored.contains("url.full") && !stored.contains("l1kp"), "{stored}");
     let attrs: Value = serde_json::from_str(rows[0]["attrs"].as_str().unwrap()).unwrap();
     assert_eq!((rows[0]["name"].as_str(), rows[0]["service"].as_str(), rows[0]["duration"].as_u64(), rows[0]["status"].as_str()), (Some("span"), Some("worker.gateway"), Some(500), Some("error")));
-    assert_eq!((&attrs["error.type"], &attrs["http.response.status_code"]), (&json!("_OTHER"), &json!(500)));
+    assert_eq!((&attrs["error.type"], &attrs["http.response.status_code"], &attrs["one.sampled"]), (&json!(one::insights::exception_type("TypeError")), &json!(500), &json!(1)));
+    assert_eq!((rows[0]["message"].as_str(), attrs["one.fingerprint"].as_str()), (Some("internal error; reference = <value> for <value>"), Some("TypeError|worker.js:474:18|")), "an exception's plain words, and what the Errors list groups it by");
+    assert_eq!((rows[1]["trace"].as_str(), serde_json::from_str::<Value>(rows[1]["attrs"].as_str().unwrap()).unwrap()["one.sampled"].as_u64()), (Some("0".repeat(32).as_str()), Some(20)), "a sampled request stands for the 20 it's one of");
+    let counted: Vec<(String, String, String, u64)> = read["metrics"].as_array().unwrap().iter().map(|m| { let a: Value = serde_json::from_str(m["attrs"].as_str().unwrap()).unwrap(); (m["service"].as_str().unwrap().to_string(), a["span.name"].as_str().unwrap().to_string(), a["status.code"].as_str().unwrap().to_string(), m["count"].as_u64().unwrap()) }).collect();
+    let want = |s: &str, n: &str, st: &str, c: u64| (s.to_string(), n.to_string(), st.to_string(), c);
+    assert_eq!(counted, [want("worker.gateway", "span", "STATUS_CODE_ERROR", 1), want("worker.gateway", "GET", "STATUS_CODE_UNSET", 2), want("worker.relay", "hibernatableWebSocket", "STATUS_CODE_UNSET", 1)], "every server span is counted, kept or not");
     let program = one::insights::otlp::items(&json!({ "resourceSpans": [{ "scopeSpans": [{ "spans": [span("GET /users/anna@example.org", 'a', 2, None)] }] }] }));
     assert_eq!((program[0].name.as_str(), program[0].ms, program[0].ok, program[0].status_code), ("span", 500, false, Some(500)), "the same span reads the same on a device");
+    let named: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryExceptions" }))).unwrap();
+    assert!(named.iter().all(|n| one::insights::exception_type(n) == n) && one::insights::exception_type("Nope") == "Error", "a Worker's exception is named as a program's is: {named:?}");
 }
 
 /// The body a device sends `POST /relay/computes`, what it's answered, and the signed ask it hears are frozen, as the
