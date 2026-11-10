@@ -8,15 +8,30 @@ use super::*;
 
 /// How often a device sends what it has to say.
 const FLUSH_EVERY: Duration = Duration::from_secs(60);
+/// How often a device sends a known signal down telemetry's own path, and reads back the last one it sent. Longer than what
+/// a row takes to be read (a minute or two), so a check only ever asks about what ought to have arrived.
+const CANARY_EVERY: Duration = Duration::from_secs(15 * 60);
+/// How many checks in a row have to fail before that's a problem: telemetry may be lost, so one isn't.
+const CANARY_FAILS: u32 = 2;
+/// What the known signal is named, in each of the three tables.
+const CANARY: &str = "telemetry.canary";
 /// How far back an app's own screens look for what broke.
 const ERRORS_SHOWN: u64 = 7 * 86_400_000;
 /// The most reports a client's device may make a minute, and events a report may hold.
 const REPORTS_A_MINUTE: u32 = 10;
 const MOST_REPORTED: usize = 300;
 
-/// What this device hasn't sent yet.
+/// What this device hasn't sent yet, and how its check of telemetry's own path is going.
 #[derive(Default)]
-pub(super) struct State(Mutex<Batch>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>);
+pub(super) struct State(Mutex<Batch>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>, Mutex<Canary>);
+
+/// Telemetry checking itself: what it last sent, and how many checks in a row failed, how and since when.
+#[derive(Default)]
+struct Canary {
+    sent: Option<u64>,
+    failed: u32,
+    failing: Option<(&'static str, u64)>,
+}
 
 /// A span of a call as it runs here (its run, or trying the devices that might), in the trace of the request that made
 /// it. What came before it is put back when it ends: another call's run nests in the same trace.
@@ -260,20 +275,88 @@ impl Node {
         std::mem::take(&mut *self.0.insights.0.lock().unwrap())
     }
 
-    /// Sends what this device has to say to the telemetry Worker. Telemetry may be lost, so what doesn't go is dropped.
-    pub async fn flush_insights(&self) {
+    /// Sends what this device has to say to the telemetry Worker, and says whether it went. Telemetry may be lost, so what
+    /// doesn't go is dropped.
+    pub async fn flush_insights(&self) -> bool {
         self.say_signer();
         let batch = self.take_insights();
         if batch.is_empty() {
-            return;
+            return true;
         }
-        let Ok(address) = self.address() else { return tracing::debug!("insights: {YOURS} has no address to send them to") };
+        let Ok(address) = self.address() else {
+            tracing::debug!("insights: {YOURS} has no address to send them to");
+            return false;
+        };
         let key = self.0.key.clone();
         match tokio::task::spawn_blocking(move || insights::worker::write(&address, &key, &batch)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => tracing::debug!("insights weren't sent: {err:#}"),
-            Err(err) => tracing::debug!("insights weren't sent: {err}"),
+            Ok(Ok(())) => true,
+            Ok(Err(err)) => {
+                tracing::debug!("insights weren't sent: {err:#}");
+                false
+            }
+            Err(err) => {
+                tracing::debug!("insights weren't sent: {err}");
+                false
+            }
         }
+    }
+
+    /// Telemetry checking itself, a dumb test of the whole path and nothing else: did what this device sent last time come
+    /// back through a read, and can it send another? A failure is the path's, not this device's to explain.
+    pub async fn check_telemetry(&self) {
+        if self.address().is_err() {
+            return;
+        }
+        let sent = self.0.insights.3.lock().unwrap().sent;
+        let back = match sent {
+            Some(sent) => self.canary_back(sent).await.unwrap_or_else(|err| {
+                tracing::debug!("the canary couldn't be read: {err:#}");
+                Some("read")
+            }),
+            None => None,
+        };
+        let now = now_ms();
+        self.send_canary(now);
+        let wrote = self.flush_insights().await;
+        let mut canary = self.0.insights.3.lock().unwrap();
+        canary.sent = wrote.then_some(now);
+        let failure = (!wrote).then_some("write").or(back);
+        match failure {
+            None => *canary = Canary { sent: canary.sent, failed: 0, failing: None },
+            Some(kind) => {
+                canary.failed += 1;
+                canary.failing = Some((kind, canary.failing.map_or(now, |(_, since)| since)));
+            }
+        }
+    }
+
+    /// One of each kind of signal, as any signal goes: the batch carries them.
+    fn send_canary(&self, now: u64) {
+        let instance = hex(&self.0.id);
+        let attrs = Attrs::default().scope("everyone").build(crate::config::BUILD);
+        self.device_signal(CANARY, Attrs::default(), Status::Unset);
+        let mut batch = self.0.insights.0.lock().unwrap();
+        batch.metric(now, insights::CANARY, insights::own(), &instance, &attrs, 1);
+        batch.span(Span { time: now, trace: trace::ids::trace(), span: trace::ids::span(), parent: None, name: CANARY.into(), service: insights::own().into(), version: None, instance, kind: SpanKind::Internal, status: Status::Unset, duration: 0, message: None, attrs }, true, &[]);
+    }
+
+    /// Whether what was `sent` came back: none if it did, or what's wrong.
+    async fn canary_back(&self, sent: u64) -> Result<Option<&'static str>> {
+        let (address, key) = (self.address()?, self.0.key.clone());
+        // A metric's time is the start of its minute.
+        let ask = Ask { queries: vec!["spans", "logs", "metrics"], service: Some(insights::own().to_string()), name: Some(CANARY.into()), since: Some(sent.saturating_sub(60_000)), limit: 200, ..Default::default() };
+        let fields = insights::worker::asked(&ask, vec![insights::own().to_string()]);
+        let rows = tokio::task::spawn_blocking(move || insights::worker::read(&address, &key, fields)).await??;
+        let me = hex(&self.0.id);
+        let arrived = |table: &str| rows[table].as_array().is_some_and(|got| got.iter().any(|row| row["instance"] == me));
+        Ok((!["spans", "logs", "metrics"].iter().all(|t| arrived(t))).then_some("arriving"))
+    }
+
+    /// What's wrong with telemetry's own path, once it's more than one check: how it failed and since when. Only an admin's
+    /// to see (the network's own program is theirs).
+    pub(super) fn telemetry_problem(&self) -> Option<Value> {
+        let canary = self.0.insights.3.lock().unwrap();
+        canary.failing.filter(|_| canary.failed >= CANARY_FAILS).map(|(kind, since)| json!({ "kind": kind, "since": since }))
     }
 
     /// What a client says went wrong on it (a screen that threw or never drew, its page's own errors) and what it did
@@ -442,9 +525,14 @@ impl Node {
     }
 
     pub(super) async fn insights_loop(self) {
+        let mut checked = Instant::now();
         loop {
             tokio::time::sleep(FLUSH_EVERY).await;
             self.flush_insights().await;
+            if checked.elapsed() >= CANARY_EVERY {
+                checked = Instant::now();
+                self.check_telemetry().await;
+            }
         }
     }
 
@@ -452,13 +540,14 @@ impl Node {
     /// deploy it, and what's the network's own program's only for an admin. What this device hasn't sent yet is sent first.
     pub async fn insights(&self, viewer: &Caller, ask: &Ask) -> Result<Value> {
         self.flush_insights().await;
-        let services = self.with(|i| {
+        let (services, admin) = self.with(|i| {
             let m = i.r.db();
             let mut seen: Vec<String> = m.apps()?.into_iter().map(|a| a.name).filter(|app| app != insights::own() && m.may(&viewer.user, "deploy", &scopes::app(app))).collect();
-            if m.may(&viewer.user, "change-settings", scopes::NETWORK) {
+            let admin = m.may(&viewer.user, "change-settings", scopes::NETWORK);
+            if admin {
                 seen.push(insights::own().to_string());
             }
-            Ok(seen)
+            Ok((seen, admin))
         })?;
         let (address, key) = (self.address()?, self.0.key.clone());
         let fields = insights::worker::asked(ask, services);
@@ -470,6 +559,9 @@ impl Node {
         }
         for row in rows["errors"].as_array_mut().into_iter().flatten() {
             read_error(row);
+        }
+        if let Some(problem) = self.telemetry_problem().filter(|_| admin) {
+            rows["problem"] = problem;
         }
         Ok(rows)
     }

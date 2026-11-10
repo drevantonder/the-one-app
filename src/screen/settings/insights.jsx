@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { quantile } from "./quantile.js"
-import { Button, Empty, Icon, Input, LargeTitle, ListSkeleton, LoadFailure, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sparkline, Split, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
+import { Button, Empty, Icon, Input, LargeTitle, ListSkeleton, LoadFailure, Problem, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sparkline, Split, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
 
 const HOUR = 3600000
 const ALL = "*"
@@ -649,6 +649,9 @@ function Errors({ rows, showTraces, query: [query, setQuery] }) {
   )
 }
 
+// What's failing of telemetry's own path, for an admin (the `insights` tool's `problem`): as `load` shows it.
+const CANARY = { write: "This device can't send what it records.", read: "What's recorded can't be read back.", arriving: "What this device sends isn't coming back." }
+
 function Insights() {
   const [data, setData] = useState(null)
   const [problem, setProblem] = useState(null)
@@ -661,11 +664,11 @@ function Insights() {
   const queries = { Traces: useState(""), Logs: useState(""), Metrics: useState(""), Errors: useState("") }
   const asked = useRef(0)
 
-  async function load() {
+  async function load({ check } = {}) {
     const mine = ++asked.current
     setLoading(true)
     try {
-      const got = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: MOST_ROWS })
+      const got = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: MOST_ROWS, check: !!check })
       if (mine !== asked.current) return
       setData({ ...got, at: Date.now() })
       setProblem(null)
@@ -709,6 +712,7 @@ function Insights() {
         }
       >Insights</LargeTitle>
       {problem && <LoadFailure problem={problem} retry={load} />}
+      {data.problem && <Problem title="Insights has stopped arriving" text={`${CANARY[data.problem.kind] || CANARY.arriving} Since ${when(data.problem.since)}.`} action={{ label: "Check Again", run: () => load({ check: true }) }} />}
       <div>
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList><TabsTrigger value="Services">Services</TabsTrigger>{Object.keys(queries).map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>

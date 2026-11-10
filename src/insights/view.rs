@@ -157,6 +157,17 @@ pub fn service(rows: &Value, service: &str, status: &str, since: u64, now: u64, 
     out
 }
 
+/// `text`, after a line saying telemetry itself is failing if it is: only an admin's answer says so.
+pub fn with_problem(rows: &Value, now: u64, text: String) -> String {
+    let said = match rows["problem"]["kind"].as_str() {
+        Some("write") => "this device can't send what it records",
+        Some("read") => "what's recorded can't be read back",
+        Some(_) => "what this device sends isn't coming back",
+        None => return text,
+    };
+    format!("Telemetry is failing: {said} ({}).\n\n{text}", ago(now, rows["problem"]["since"].as_u64().unwrap_or(now)))
+}
+
 /// One trace, each span under the one that made it.
 pub fn trace(rows: &Value, id: &str, limit: usize) -> String {
     let mut spans: Vec<&Value> = rows["spans"].as_array().into_iter().flatten().filter(|s| s["trace"] == id).collect();

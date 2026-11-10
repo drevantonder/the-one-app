@@ -506,6 +506,7 @@ pub const BUCKET_DURATION: Metric = Metric { name: "bucket.duration", histogram:
 pub const STEPS_BEHIND: Metric = Metric { name: "steps.behind", histogram: false, unit: "{step}" };
 pub const WRITE_SEEN: Metric = Metric { name: "write.seen", histogram: true, unit: "ms" };
 pub const SIGNER_FAILURES: Metric = Metric { name: "signer.failures", histogram: false, unit: "{failure}" };
+pub const CANARY: Metric = Metric { name: "telemetry.canary", histogram: false, unit: "{check}" };
 pub const TOKEN_USAGE: Metric = Metric { name: "gen_ai.client.token.usage", histogram: true, unit: "{token}" };
 pub const OPERATION_DURATION: Metric = Metric { name: "gen_ai.client.operation.duration", histogram: true, unit: "ms" };
 

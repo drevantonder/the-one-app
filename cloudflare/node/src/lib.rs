@@ -661,6 +661,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
             waiting: one::state::waiting(m, me, read(), now),
             arrangements,
             backups: None,
+            telemetry: false,
             guide: None,
             // No throwaway network has a Cloudflare node.
             throwaway: false,

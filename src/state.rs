@@ -385,6 +385,8 @@ pub struct Here<'a> {
     pub arrangements: BTreeMap<String, Value>,
     /// What's wrong with backups, for an admin.
     pub backups: Option<Value>,
+    /// Whether telemetry's own check is failing: for an admin, the badge on Insights.
+    pub telemetry: bool,
     /// Where an agent reads how to connect itself, when the network has no address.
     pub guide: Option<String>,
     /// Whether this is a throwaway network, whose sign-in lets its user in with no passkey. Every other network's users
@@ -401,7 +403,7 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<State> {
     let address = settings.get("address").filter(|a| !a.is_empty());
     let passkeys = address.filter(|_| !here.throwaway).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
     let store = settings["store"].clone();
-    let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), &store, passkeys.as_deref())).transpose()?.unwrap_or_default();
+    let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), here.telemetry, &store, passkeys.as_deref())).transpose()?.unwrap_or_default();
     let me = m.map(|m| m.user(user)).transpose()?.flatten();
     Ok(State {
         config: Config { name: crate::config::NAME.into(), cli: crate::config::CLI.into(), store, install: install_line() },
@@ -624,8 +626,9 @@ pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
 }
 
 /// What Settings shows `user`, in order, with a badge on Requests for `items_asked` and their other requests, and on
-/// Backups when `backups` are failing. Passkeys opens `passkeys` in a browser, where they're kept.
-fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, store: &str, passkeys: Option<&str>) -> Result<Vec<SettingsItem>> {
+/// Backups when `backups` are failing, and for an admin on Insights when `telemetry`'s own check is. Passkeys opens
+/// `passkeys` in a browser, where they're kept.
+fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, telemetry: bool, store: &str, passkeys: Option<&str>) -> Result<Vec<SettingsItem>> {
     let Some(me) = m.user(user)? else { return Ok(Vec::new()) };
     let item = |name: &str, title: &str, icon: &str, color: &str| SettingsItem { name: name.into(), title: title.into(), icon: icon.into(), color: color.into(), url: None, badge: None, app: None };
     let invites = m.groups()?.iter().filter(|g| g.invited.contains_key(user)).count();
@@ -643,7 +646,7 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, st
         item("users", "Users", "user-gear", "#30b0c7"),
         item("groups", "Groups", "users-three", "#34c759"),
         item("devices", "Devices", "devices", "#8e8e93"),
-        item("insights", "Insights", "chart-line", "#5ac8fa"),
+        SettingsItem { badge: (telemetry && m.may(&me.id, "change-settings", NETWORK)).then_some(1), ..item("insights", "Insights", "chart-line", "#5ac8fa") },
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);
     if m.may(&me.id, "change-settings", NETWORK) {

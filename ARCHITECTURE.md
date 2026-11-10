@@ -45,6 +45,7 @@ A removed device's later steps fail rule 3, because they come after its removal 
 
 Recorded by the network itself, in OpenTelemetry's data model and names, with no SDK or Collector (`src/insights.rs`). It's in Cloudflare Basin, not the sealed databases (Andre, 11-10), through the telemetry Worker (`cloudflare/telemetry/`): telemetry may be lost, and reading it needs no keys.
 
+- **The path is checked by what goes down it** (Andre, 11-10). Every node, every 15 minutes, sends a span, a log and a metric named `telemetry.canary` and reads the last ones back through the same read. Two checks failing in a row is a problem for the network's admins: on Insights itself, as a badge and a problem box, and first in `one insights`. Telemetry may be lost, so one isn't.
 - **Three tables that can't change.** A Basin stream's schema and a sink's table are fixed once made, so spans, logs and metrics have few fixed columns and everything else in a JSON `attrs` string. A new column means a new stream, sink, pipeline and table.
 - **Every device sends its own.** Each keeps one batch and sends it about once a minute and on a clean stop; failing to is dropped. Every server span goes, since rates are read from them; steps, as real child spans, and client hops only for failures, slow calls and one trace in 20.
 - **Each device names itself.** The Worker takes only rows that fit their table, and holds `service.instance.id` to the signer unless it's a node, which also writes what its clients report.

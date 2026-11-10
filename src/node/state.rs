@@ -113,6 +113,7 @@ impl Node {
             waiting,
             arrangements,
             backups,
+            telemetry: self.telemetry_problem().is_some(),
             guide: self.guide(),
             throwaway: matches!(crate::mode::here(), crate::mode::Mode::Throwaway(_)),
             device_now: &device_now,
