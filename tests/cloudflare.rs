@@ -372,6 +372,9 @@ fn telemetry_takes_the_networks_devices_and_only_what_its_tables_hold() {
     assert_eq!((said["metrics"][0]["sum"].as_u64(), said["metrics"][0]["buckets"][2].as_u64()), (Some(9), Some(1)), "{said}");
     assert_eq!((said["errors"][0]["fingerprint"].as_str(), said["errors"][0]["count"].as_u64()), (Some("TypeError|app.js:1:1|b1"), Some(1)), "{said}");
     assert_eq!(said["errors"].as_array().unwrap().len(), 2, "what broke and what was refused aren't one line: {said}");
+    let (status, said) = read(json!({ "queries": ["requests", "spans", "logs", "metrics", "errors", "builds", "build_errors"], "services": ["notes"], "service": "notes", "name": "get", "status": "error", "trace": "a".repeat(32), "since": 0, "limit": 100 }));
+    assert_eq!(status, 200, "every read runs with every filter, each only on a table with what it's filtered by: {said}");
+    assert_eq!((said["spans"].as_array().unwrap().len(), said["metrics"].clone()), (1, json!([])), "a metric is in no trace: {said}");
     assert_eq!(read(json!({ "queries": ["spans"], "services": ["other"] })).1["spans"], json!([]), "only the services asked for: {said}");
     assert_eq!(read(json!({ "queries": ["spans"], "services": ["notes'; DROP TABLE spans; --"] })).0, 400, "a value that isn't a name never reaches the SQL");
     assert_eq!(read(json!({ "queries": ["DROP TABLE spans"], "services": ["notes"] })).1, json!({}), "only its own reads");
