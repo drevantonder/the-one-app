@@ -70,7 +70,9 @@ fn lines(rows: Vec<&Value>, name: fn(&Value) -> String) -> Vec<Line> {
         let sum: f64 = rows.iter().map(|r| r["sum"].as_f64().unwrap_or(0.0)).sum();
         Line { name, requests, errors: rows.iter().map(|r| r["errors"].as_u64().unwrap_or(0)).sum(), p95: quantile(&rows, 0.95), average: (requests > 0).then(|| sum / requests as f64) }
     }).collect();
-    lines.sort_by_key(|l| std::cmp::Reverse(l.requests));
+    // What's failing most first, as an APM's tables open: by error rate, then by how much it answered.
+    let failed = |l: &Line| l.errors as f64 / l.requests.max(1) as f64;
+    lines.sort_by(|a, b| failed(b).total_cmp(&failed(a)).then(b.requests.cmp(&a.requests)));
     lines
 }
 
@@ -155,14 +157,19 @@ fn table(lines: &[Line], limit: usize, label: &str) -> String {
     format!("  {label:<width$}  {:>7}  {:<16}  P95\n{rows}", "requests", "errors")
 }
 
-/// What's going on across the network: each service, and the top errors.
+/// What's going on across the network: each service on its own, and the top errors. Never a total of them: one request
+/// is a server span in each service it goes through, and a busy one would hide the others.
 pub fn overview(rows: &Value, status: &str, since: u64, now: u64, limit: usize) -> String {
     let services = lines(requests(rows), |r| r["service"].as_str().unwrap_or("").to_string());
     if services.is_empty() {
         return format!("Nothing recorded in {}.", since_said(since, now));
     }
-    let (count, failed) = services.iter().fold((0, 0), |(c, f), l| (c + l.requests, f + l.errors));
-    let mut out = format!("{} in {}, {:.1}% failed.\n\n{}", plural(count, "request"), since_said(since, now), failed as f64 * 100.0 / count.max(1) as f64, table(&services, limit, "service"));
+    let failing = services.iter().filter(|l| l.errors > 0).count();
+    let head = match failing {
+        0 => format!("No service had an error in {}.", since_said(since, now)),
+        n => format!("{n} of {} had errors in {}.", plural(services.len() as u64, "service"), since_said(since, now)),
+    };
+    let mut out = format!("{head} Each counts the requests it answered, so one that went through several is in each.\n\n{}", table(&services, limit, "service"));
     if let Some(errors) = errors(rows, status, since, now, limit) {
         out.push_str("\n\n");
         out.push_str(&errors);

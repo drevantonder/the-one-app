@@ -265,7 +265,7 @@ function Table({ columns, rows, open, start, label }) {
 const redColumns = (name, trend) => [
   { key: "name", label: name, value: (r) => r.name, cell: (r) => <span className="font-medium break-all">{r.name}</span> },
   { key: "count", label: "Requests", right: true, value: (r) => r.count, cell: (r) => number(r.count) },
-  { key: "errors", label: "Errors", right: true, value: (r) => r.errors, cell: (r) => <span className={r.errors ? "text-destructive" : "text-muted-foreground"}>{percent(r.rate)}</span> },
+  { key: "errors", label: "Errors", right: true, value: (r) => r.rate, cell: (r) => <span className={r.errors ? "text-destructive" : "text-muted-foreground"}>{percent(r.rate)}</span> },
   { key: "avg", label: "Average", right: true, wide: true, value: (r) => r.avg, cell: (r) => took(r.avg) },
   { key: "p95", label: "P95", right: true, value: (r) => r.p95, cell: (r) => p95(r.p95) },
   ...(trend ? [{ key: "trend", label: "", wide: true, value: (r) => r.count, cell: (r) => <Sparkline values={r.trend} className="h-5 w-24 text-muted-foreground" /> }] : []),
@@ -333,10 +333,10 @@ function Services({ rows, errors, traces, from, to, open: [service, setService],
     )
   }
   if (!rows.length) return <Empty>Nothing recorded in this range.</Empty>
+  // Each service on its own, never a total: one request is a server span in each service it goes through.
   return (
     <div className="flex flex-col gap-6">
       <Failing rows={errors} to={to} open={showFailure} />
-      <Health rows={rows} from={from} to={to} />
       <Table label="Services" columns={redColumns("Service", true)} rows={grouped(rows, (r) => r.service, hours)} start={{ key: "errors", down: true }} open={(r) => setService(r.name)} />
     </div>
   )

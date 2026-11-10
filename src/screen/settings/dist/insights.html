@@ -82,7 +82,7 @@ var M = 36e5, N = "*", P = [
 	"unit",
 	"buckets",
 	"instance"
-], H = [
+], ee = [
 	"name",
 	"body",
 	"service",
@@ -92,7 +92,7 @@ var M = 36e5, N = "*", P = [
 	"severity_number",
 	"severity_text",
 	"id"
-], ee = [
+], te = [
 	["#2a78d6", "#3987e5"],
 	["#eb6834", "#d95926"],
 	["#1baf7a", "#199e70"],
@@ -101,23 +101,23 @@ var M = 36e5, N = "*", P = [
 	["#008300", "#008300"],
 	["#6250d6", "#9085e9"],
 	["#e34948", "#e66767"]
-], U = (e) => ee[e % ee.length][+!!matchMedia("(prefers-color-scheme: dark)").matches], W = "var(--destructive)", G = "var(--muted-foreground)", K = (e) => new Date(e).toLocaleString(void 0, {
+], H = (e) => te[e % te.length][+!!matchMedia("(prefers-color-scheme: dark)").matches], U = "var(--destructive)", W = "var(--muted-foreground)", G = (e) => new Date(e).toLocaleString(void 0, {
 	month: "short",
 	day: "numeric",
 	hour: "numeric",
 	minute: "2-digit",
 	second: "2-digit"
-}), q = (e) => new Date(e).toLocaleString(void 0, {
+}), K = (e) => new Date(e).toLocaleString(void 0, {
 	month: "short",
 	day: "numeric",
 	hour: "numeric"
-}), J = (e) => e == null ? "–" : new Intl.NumberFormat(void 0, {
+}), q = (e) => e == null ? "–" : new Intl.NumberFormat(void 0, {
 	notation: "compact",
 	maximumFractionDigits: 1
-}).format(e), te = (e) => e == null ? "–" : e === 0 ? "0%" : e < .001 ? "<0.1%" : `${(e * 100).toFixed(+(e < .1))}%`, Y = (e) => e == null ? "–" : e >= 6e4 ? `${(e / 6e4).toFixed(1)}m` : e >= 1e3 ? `${(e / 1e3).toFixed(e >= 1e4 ? 0 : 1)}s` : `${Math.round(e)}ms`, ne = (e) => e > A ? `>${Y(A)}` : Y(e), re = (e) => {
+}).format(e), ne = (e) => e == null ? "–" : e === 0 ? "0%" : e < .001 ? "<0.1%" : `${(e * 100).toFixed(+(e < .1))}%`, J = (e) => e == null ? "–" : e >= 6e4 ? `${(e / 6e4).toFixed(1)}m` : e >= 1e3 ? `${(e / 1e3).toFixed(e >= 1e4 ? 0 : 1)}s` : `${Math.round(e)}ms`, re = (e) => e > A ? `>${J(A)}` : J(e), ie = (e) => {
 	let t = Math.max(0, Math.round((Date.now() - e) / 1e3));
 	return t < 60 ? `${t}s ago` : t < 3600 ? `${Math.round(t / 60)}m ago` : t < 86400 ? `${Math.round(t / 3600)}h ago` : `${Math.round(t / 86400)}d ago`;
-}, ie = (e) => typeof e == "string" ? e : JSON.stringify(e), X = (e) => [...new Set(e)].sort((e, t) => String(e).localeCompare(String(t))), ae = (e, t) => `${J(e)} ${t}${e === 1 ? "" : "s"}`;
+}, Y = (e) => typeof e == "string" ? e : JSON.stringify(e), X = (e) => [...new Set(e)].sort((e, t) => String(e).localeCompare(String(t))), ae = (e, t) => `${q(e)} ${t}${e === 1 ? "" : "s"}`;
 function oe(e) {
 	let t = /^\s*([\d.]+)\s*(ms|s|m)?\s*$/.exec(e);
 	return t ? Number(t[1]) * {
@@ -136,7 +136,7 @@ var se = (e) => {
 function ce(e) {
 	let t = e.split(/\s+/).filter(Boolean).map((e) => e.toLowerCase());
 	return (e) => {
-		let n = Object.entries(se(e)).map(([e, t]) => [e.toLowerCase(), ie(t).toLowerCase()]);
+		let n = Object.entries(se(e)).map(([e, t]) => [e.toLowerCase(), Y(t).toLowerCase()]);
 		return t.every((e) => {
 			let t = e.indexOf("=");
 			return t > 0 ? n.some(([n, r]) => n === e.slice(0, t) && r === e.slice(t + 1)) : n.some(([t, n]) => t.includes(e) || n.includes(e));
@@ -157,7 +157,7 @@ function le(e) {
 		};
 	}).sort((e, t) => t.start - e.start);
 }
-var ue = (e) => Object.fromEntries(X(e).map((e, t) => [e, U(t)]));
+var ue = (e) => Object.fromEntries(X(e).map((e, t) => [e, H(t)]));
 function de(e) {
 	let t = e.reduce((e, t) => e + t.count, 0), n = e.reduce((e, t) => e + (t.errors || 0), 0), r = e.reduce((e, t) => e + t.sum, 0);
 	return {
@@ -209,7 +209,7 @@ function he({ ticks: e, width: t, left: n, top: r, height: i }) {
 		y: r + e * i + 4,
 		textAnchor: "end",
 		fontSize: "11",
-		fill: G,
+		fill: W,
 		children: a
 	})] }, a));
 }
@@ -219,7 +219,7 @@ var Z = 44, Q = 8, ge = 20, _e = (t) => {
 		x: c,
 		y: l,
 		fontSize: "11",
-		fill: G,
+		fill: W,
 		children: r
 	}), n[0] = r, n[1] = c, n[2] = l, n[3] = u) : u = n[3];
 	let d = a - 4, f = o - 5, p;
@@ -228,14 +228,14 @@ var Z = 44, Q = 8, ge = 20, _e = (t) => {
 		y: f,
 		fontSize: "11",
 		textAnchor: "end",
-		fill: G,
+		fill: W,
 		children: i
 	}), n[4] = i, n[5] = d, n[6] = f, n[7] = p) : p = n[7];
 	let m;
 	return n[8] !== u || n[9] !== p ? (m = /* @__PURE__ */ O(E, { children: [u, p] }), n[8] = u, n[9] = p, n[10] = m) : m = n[10], m;
 };
 function ve(t) {
-	let n = e(69), { hours: r, stacks: a, height: o, axis: s, format: c } = t, l = o === void 0 ? 96 : o, u = s === void 0 || s, d = c === void 0 ? J : c, [f, p] = T(), [m, h] = i(null), g = u ? Z : 0, _ = u ? Q : 2, v = u ? ge : 2, y = l - _ - v, b;
+	let n = e(69), { hours: r, stacks: a, height: o, axis: s, format: c } = t, l = o === void 0 ? 96 : o, u = s === void 0 || s, d = c === void 0 ? q : c, [f, p] = T(), [m, h] = i(null), g = u ? Z : 0, _ = u ? Q : 2, v = u ? ge : 2, y = l - _ - v, b;
 	if (n[0] !== r || n[1] !== a) {
 		let e;
 		n[3] === a ? e = n[4] : (e = (e, t) => a.reduce((e, n) => e + (n.values[t] || 0), 0), n[3] = a, n[4] = e);
@@ -264,8 +264,8 @@ function ve(t) {
 	}), n[12] = u, n[13] = d, n[14] = g, n[15] = x, n[16] = y, n[17] = _, n[18] = p, n[19] = j) : j = n[19];
 	let N;
 	n[20] !== u || n[21] !== l || n[22] !== r || n[23] !== p ? (N = u && /* @__PURE__ */ D(_e, {
-		first: q(r[0] * M),
-		last: q(r.at(-1) * M),
+		first: K(r[0] * M),
+		last: K(r.at(-1) * M),
 		width: p,
 		height: l
 	}), n[20] = u, n[21] = l, n[22] = r, n[23] = p, n[24] = N) : N = n[24];
@@ -317,7 +317,7 @@ function ve(t) {
 		x: g + m * S + S / 2,
 		y: _ + 12,
 		flip: m > r.length / 2,
-		lines: [q(r[m] * M), ...a.map((e) => `${e.name}: ${d(e.values[m] || 0)}`)]
+		lines: [K(r[m] * M), ...a.map((e) => `${e.name}: ${d(e.values[m] || 0)}`)]
 	} }), n[57] = m, n[58] = d, n[59] = r, n[60] = g, n[61] = S, n[62] = a, n[63] = _, n[64] = L) : L = n[64];
 	let R;
 	return n[65] !== f || n[66] !== I || n[67] !== L ? (R = /* @__PURE__ */ O("div", {
@@ -330,7 +330,7 @@ function ye(e) {
 	return e.name;
 }
 function be(t) {
-	let n = e(72), { hours: r, series: a, height: o, format: s } = t, c = o === void 0 ? 96 : o, l = s === void 0 ? J : s, [u, d] = T(), [f, p] = i(null), m = c - Q - ge, h;
+	let n = e(72), { hours: r, series: a, height: o, format: s } = t, c = o === void 0 ? 96 : o, l = s === void 0 ? q : s, [u, d] = T(), [f, p] = i(null), m = c - Q - ge, h;
 	n[0] === a ? h = n[1] : (h = Math.max(1, ...a.flatMap(Te)), n[0] = a, n[1] = h);
 	let g = h, _;
 	n[2] !== r.length || n[3] !== d ? (_ = (e) => Z + (e + .5) / r.length * Math.max(1, d - Z - 4), n[2] = r.length, n[3] = d, n[4] = _) : _ = n[4];
@@ -381,9 +381,9 @@ function be(t) {
 			ticks: _
 		}), n[39] = m, n[40] = _, n[41] = d, n[42] = y) : y = n[42];
 		let x = r[0] * M, w;
-		n[43] === x ? w = n[44] : (w = q(x), n[43] = x, n[44] = w);
+		n[43] === x ? w = n[44] : (w = K(x), n[43] = x, n[44] = w);
 		let T = r.at(-1) * M, A;
-		n[45] === T ? A = n[46] : (A = q(T), n[45] = T, n[46] = A);
+		n[45] === T ? A = n[46] : (A = K(T), n[45] = T, n[46] = A);
 		let j;
 		n[47] !== c || n[48] !== w || n[49] !== A || n[50] !== d ? (j = /* @__PURE__ */ D(_e, {
 			first: w,
@@ -421,7 +421,7 @@ function be(t) {
 			x2: v(f),
 			y1: Q,
 			y2: Q + m,
-			stroke: G
+			stroke: W
 		}), n[64] = f, n[65] = m, n[66] = v, n[67] = F) : F = n[67];
 		let I;
 		n[68] !== f || n[69] !== v || n[70] !== b ? (I = (e) => /* @__PURE__ */ D("circle", {
@@ -453,7 +453,7 @@ function be(t) {
 				x: v(f) + (f > r.length / 2 ? -10 : 10),
 				y: 42,
 				flip: f > r.length / 2,
-				lines: [q(r[f] * M), ...e.map((e) => `${e.name}: ${l(e.v)}`)]
+				lines: [K(r[f] * M), ...e.map((e) => `${e.name}: ${l(e.v)}`)]
 			} })]
 		}), n[14] = f, n[15] = l, n[16] = c, n[17] = r, n[18] = E, n[19] = g, n[20] = S, n[21] = m, n[22] = u, n[23] = a, n[24] = d, n[25] = v, n[26] = b, n[27] = k;
 	} else k = n[27];
@@ -514,28 +514,28 @@ function Oe(t) {
 		let e = fe(r, i, a), t = Map.groupBy(r, Me), y = (n) => e.map((e) => t.has(e) ? n(de(t.get(e))) : null), b = de(r), x = y(je);
 		v = "grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-x-8 gap-y-5", l = /* @__PURE__ */ D(De, {
 			title: "Requests",
-			value: J(b.count),
+			value: q(b.count),
 			children: /* @__PURE__ */ D(ve, {
 				hours: e,
 				stacks: [{
 					name: "Requests",
-					colour: U(0),
+					colour: H(0),
 					values: y(Ae)
 				}]
 			})
 		}), u = /* @__PURE__ */ D(De, {
 			title: "Errors",
-			value: te(b.rate),
+			value: ne(b.rate),
 			note: ae(b.errors, "error"),
 			children: /* @__PURE__ */ D(ve, {
 				hours: e,
 				stacks: [{
 					name: "Errors",
-					colour: W,
+					colour: U,
 					values: x
 				}]
 			})
-		}), s = De, h = "Duration", g = ne(b.p95), _ = "P95", o = be, p = e, m = Y, c = "P95", n[16] === Symbol.for("react.memo_cache_sentinel") ? (d = U(0), n[16] = d) : d = n[16], f = y(ke), n[0] = i, n[1] = r, n[2] = a, n[3] = o, n[4] = s, n[5] = c, n[6] = l, n[7] = u, n[8] = d, n[9] = f, n[10] = p, n[11] = m, n[12] = h, n[13] = g, n[14] = _, n[15] = v;
+		}), s = De, h = "Duration", g = re(b.p95), _ = "P95", o = be, p = e, m = J, c = "P95", n[16] === Symbol.for("react.memo_cache_sentinel") ? (d = H(0), n[16] = d) : d = n[16], f = y(ke), n[0] = i, n[1] = r, n[2] = a, n[3] = o, n[4] = s, n[5] = c, n[6] = l, n[7] = u, n[8] = d, n[9] = f, n[10] = p, n[11] = m, n[12] = h, n[13] = g, n[14] = _, n[15] = v;
 	} else o = n[3], s = n[4], c = n[5], l = n[6], u = n[7], d = n[8], f = n[9], p = n[10], m = n[11], h = n[12], g = n[13], _ = n[14], v = n[15];
 	let y;
 	n[17] !== c || n[18] !== d || n[19] !== f ? (y = [{
@@ -658,16 +658,16 @@ var Fe = (e, t) => [
 		label: "Requests",
 		right: !0,
 		value: (e) => e.count,
-		cell: (e) => J(e.count)
+		cell: (e) => q(e.count)
 	},
 	{
 		key: "errors",
 		label: "Errors",
 		right: !0,
-		value: (e) => e.errors,
+		value: (e) => e.rate,
 		cell: (e) => /* @__PURE__ */ D("span", {
 			className: e.errors ? "text-destructive" : "text-muted-foreground",
-			children: te(e.rate)
+			children: ne(e.rate)
 		})
 	},
 	{
@@ -676,14 +676,14 @@ var Fe = (e, t) => [
 		right: !0,
 		wide: !0,
 		value: (e) => e.avg,
-		cell: (e) => Y(e.avg)
+		cell: (e) => J(e.avg)
 	},
 	{
 		key: "p95",
 		label: "P95",
 		right: !0,
 		value: (e) => e.p95,
-		cell: (e) => ne(e.p95)
+		cell: (e) => re(e.p95)
 	},
 	...t ? [{
 		key: "trend",
@@ -768,7 +768,7 @@ var Re = [
 		label: "Count",
 		right: !0,
 		value: (e) => e.count,
-		cell: (e) => J(e.count)
+		cell: (e) => q(e.count)
 	},
 	{
 		key: "last",
@@ -777,8 +777,8 @@ var Re = [
 		value: (e) => e.last,
 		cell: (e) => /* @__PURE__ */ D("span", {
 			className: "whitespace-nowrap text-muted-foreground",
-			title: K(e.last),
-			children: re(e.last)
+			title: G(e.last),
+			children: ie(e.last)
 		})
 	}
 ];
@@ -808,62 +808,62 @@ function Be(e, t) {
 	return t.count - e.count;
 }
 function Ve(t) {
-	let n = e(87), { rows: r, errors: i, traces: a, from: l, to: u, open: d, colour: f, showTrace: p, showTraces: h, showFailure: g } = t, [_, v] = d, y, b, x, S, C, w, T, E;
+	let n = e(81), { rows: r, errors: i, traces: a, from: l, to: u, open: d, colour: f, showTrace: p, showTraces: h, showFailure: g } = t, [_, v] = d, y, b, x, S, C, w, T;
 	if (n[0] !== f || n[1] !== i || n[2] !== l || n[3] !== r || n[4] !== _ || n[5] !== v || n[6] !== g || n[7] !== p || n[8] !== h || n[9] !== u || n[10] !== a) {
-		E = Symbol.for("react.early_return_sentinel");
+		T = Symbol.for("react.early_return_sentinel");
 		bb0: {
 			let e = fe(r, l, u);
 			if (_) {
 				let t;
-				if (n[19] !== r || n[20] !== _) {
+				if (n[18] !== r || n[19] !== _) {
 					let e;
-					n[22] === _ ? e = n[23] : (e = (e) => e.service === _, n[22] = _, n[23] = e), t = r.filter(e), n[19] = r, n[20] = _, n[21] = t;
-				} else t = n[21];
+					n[21] === _ ? e = n[22] : (e = (e) => e.service === _, n[21] = _, n[22] = e), t = r.filter(e), n[18] = r, n[19] = _, n[20] = t;
+				} else t = n[20];
 				let s = t, d;
-				if (n[24] !== _ || n[25] !== a) {
+				if (n[23] !== _ || n[24] !== a) {
 					let e;
-					n[27] === _ ? e = n[28] : (e = (e) => e.services.includes(_), n[27] = _, n[28] = e), d = a.filter(e).slice(0, 12), n[24] = _, n[25] = a, n[26] = d;
-				} else d = n[26];
+					n[26] === _ ? e = n[27] : (e = (e) => e.services.includes(_), n[26] = _, n[27] = e), d = a.filter(e).slice(0, 12), n[23] = _, n[24] = a, n[25] = d;
+				} else d = n[25];
 				let y = d, b;
-				n[29] === v ? b = n[30] : (b = () => v(null), n[29] = v, n[30] = b);
+				n[28] === v ? b = n[29] : (b = () => v(null), n[28] = v, n[29] = b);
 				let x;
-				n[31] === Symbol.for("react.memo_cache_sentinel") ? (x = /* @__PURE__ */ D(c, { name: "caret-left" }), n[31] = x) : x = n[31];
+				n[30] === Symbol.for("react.memo_cache_sentinel") ? (x = /* @__PURE__ */ D(c, { name: "caret-left" }), n[30] = x) : x = n[30];
 				let S;
-				n[32] === b ? S = n[33] : (S = /* @__PURE__ */ D("div", { children: /* @__PURE__ */ O(o, {
+				n[31] === b ? S = n[32] : (S = /* @__PURE__ */ D("div", { children: /* @__PURE__ */ O(o, {
 					variant: "ghost",
 					onClick: b,
 					children: [x, "Services"]
-				}) }), n[32] = b, n[33] = S);
+				}) }), n[31] = b, n[32] = S);
 				let C;
-				n[34] === _ ? C = n[35] : (C = /* @__PURE__ */ D("h2", {
+				n[33] === _ ? C = n[34] : (C = /* @__PURE__ */ D("h2", {
 					className: "m-0 break-all text-xl font-semibold",
 					children: _
-				}), n[34] = _, n[35] = C);
+				}), n[33] = _, n[34] = C);
 				let w;
-				n[36] !== i || n[37] !== _ || n[38] !== g || n[39] !== u ? (w = /* @__PURE__ */ D(ze, {
+				n[35] !== i || n[36] !== _ || n[37] !== g || n[38] !== u ? (w = /* @__PURE__ */ D(ze, {
 					rows: i,
 					to: u,
 					service: _,
 					open: g
-				}), n[36] = i, n[37] = _, n[38] = g, n[39] = u, n[40] = w) : w = n[40];
-				let T;
-				n[41] !== l || n[42] !== s || n[43] !== u ? (T = /* @__PURE__ */ D(Oe, {
+				}), n[35] = i, n[36] = _, n[37] = g, n[38] = u, n[39] = w) : w = n[39];
+				let E;
+				n[40] !== l || n[41] !== s || n[42] !== u ? (E = /* @__PURE__ */ D(Oe, {
 					rows: s,
 					from: l,
 					to: u
-				}), n[41] = l, n[42] = s, n[43] = u, n[44] = T) : T = n[44];
+				}), n[40] = l, n[41] = s, n[42] = u, n[43] = E) : E = n[43];
 				let k;
-				n[45] === Symbol.for("react.memo_cache_sentinel") ? (k = Fe("Operation", !0), n[45] = k) : k = n[45];
+				n[44] === Symbol.for("react.memo_cache_sentinel") ? (k = Fe("Operation", !0), n[44] = k) : k = n[44];
 				let A;
-				n[46] === Symbol.for("react.memo_cache_sentinel") ? (A = {
+				n[45] === Symbol.for("react.memo_cache_sentinel") ? (A = {
 					key: "errors",
 					down: !0
-				}, n[46] = A) : A = n[46];
+				}, n[45] = A) : A = n[45];
 				let j;
-				n[47] !== _ || n[48] !== h ? (j = (e) => h({
+				n[46] !== _ || n[47] !== h ? (j = (e) => h({
 					service: _,
 					operation: e.name
-				}), n[47] = _, n[48] = h, n[49] = j) : j = n[49];
+				}), n[46] = _, n[47] = h, n[48] = j) : j = n[48];
 				let M = /* @__PURE__ */ D(m, {
 					title: "Operations",
 					children: /* @__PURE__ */ D(Ne, {
@@ -874,7 +874,7 @@ function Ve(t) {
 						open: j
 					})
 				}), P;
-				n[50] !== f || n[51] !== y || n[52] !== _ || n[53] !== p || n[54] !== h ? (P = y.length > 0 && /* @__PURE__ */ D(m, {
+				n[49] !== f || n[50] !== y || n[51] !== _ || n[52] !== p || n[53] !== h ? (P = y.length > 0 && /* @__PURE__ */ D(m, {
 					title: "Recent Traces",
 					action: /* @__PURE__ */ D(o, {
 						variant: "ghost",
@@ -889,63 +889,55 @@ function Ve(t) {
 						open: p,
 						colour: f
 					})
-				}), n[50] = f, n[51] = y, n[52] = _, n[53] = p, n[54] = h, n[55] = P) : P = n[55];
+				}), n[49] = f, n[50] = y, n[51] = _, n[52] = p, n[53] = h, n[54] = P) : P = n[54];
 				let F;
-				n[56] !== S || n[57] !== C || n[58] !== w || n[59] !== T || n[60] !== M || n[61] !== P ? (F = /* @__PURE__ */ O("div", {
+				n[55] !== S || n[56] !== C || n[57] !== w || n[58] !== E || n[59] !== M || n[60] !== P ? (F = /* @__PURE__ */ O("div", {
 					className: "flex flex-col gap-6",
 					children: [
 						S,
 						C,
 						w,
-						T,
+						E,
 						M,
 						P
 					]
-				}), n[56] = S, n[57] = C, n[58] = w, n[59] = T, n[60] = M, n[61] = P, n[62] = F) : F = n[62], E = F;
+				}), n[55] = S, n[56] = C, n[57] = w, n[58] = E, n[59] = M, n[60] = P, n[61] = F) : F = n[61], T = F;
 				break bb0;
 			}
 			if (!r.length) {
 				let e;
-				n[63] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ D(s, { children: "Nothing recorded in this range." }), n[63] = e) : e = n[63], E = e;
+				n[62] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ D(s, { children: "Nothing recorded in this range." }), n[62] = e) : e = n[62], T = e;
 				break bb0;
 			}
-			C = "flex flex-col gap-6", n[64] !== i || n[65] !== g || n[66] !== u ? (w = /* @__PURE__ */ D(ze, {
+			C = "flex flex-col gap-6", n[63] !== i || n[64] !== g || n[65] !== u ? (w = /* @__PURE__ */ D(ze, {
 				rows: i,
 				to: u,
 				open: g
-			}), n[64] = i, n[65] = g, n[66] = u, n[67] = w) : w = n[67], n[68] !== l || n[69] !== r || n[70] !== u ? (T = /* @__PURE__ */ D(Oe, {
-				rows: r,
-				from: l,
-				to: u
-			}), n[68] = l, n[69] = r, n[70] = u, n[71] = T) : T = n[71], y = Ne, b = "Services", n[72] === Symbol.for("react.memo_cache_sentinel") ? (x = Fe("Service", !0), n[72] = x) : x = n[72], S = Ie(r, He, e);
+			}), n[63] = i, n[64] = g, n[65] = u, n[66] = w) : w = n[66], y = Ne, b = "Services", n[67] === Symbol.for("react.memo_cache_sentinel") ? (x = Fe("Service", !0), n[67] = x) : x = n[67], S = Ie(r, He, e);
 		}
-		n[0] = f, n[1] = i, n[2] = l, n[3] = r, n[4] = _, n[5] = v, n[6] = g, n[7] = p, n[8] = h, n[9] = u, n[10] = a, n[11] = y, n[12] = b, n[13] = x, n[14] = S, n[15] = C, n[16] = w, n[17] = T, n[18] = E;
-	} else y = n[11], b = n[12], x = n[13], S = n[14], C = n[15], w = n[16], T = n[17], E = n[18];
-	if (E !== Symbol.for("react.early_return_sentinel")) return E;
-	let k;
-	n[73] === Symbol.for("react.memo_cache_sentinel") ? (k = {
+		n[0] = f, n[1] = i, n[2] = l, n[3] = r, n[4] = _, n[5] = v, n[6] = g, n[7] = p, n[8] = h, n[9] = u, n[10] = a, n[11] = y, n[12] = b, n[13] = x, n[14] = S, n[15] = C, n[16] = w, n[17] = T;
+	} else y = n[11], b = n[12], x = n[13], S = n[14], C = n[15], w = n[16], T = n[17];
+	if (T !== Symbol.for("react.early_return_sentinel")) return T;
+	let E;
+	n[68] === Symbol.for("react.memo_cache_sentinel") ? (E = {
 		key: "errors",
 		down: !0
-	}, n[73] = k) : k = n[73];
+	}, n[68] = E) : E = n[68];
+	let k;
+	n[69] === v ? k = n[70] : (k = (e) => v(e.name), n[69] = v, n[70] = k);
 	let A;
-	n[74] === v ? A = n[75] : (A = (e) => v(e.name), n[74] = v, n[75] = A);
-	let j;
-	n[76] !== y || n[77] !== A || n[78] !== b || n[79] !== x || n[80] !== S ? (j = /* @__PURE__ */ D(y, {
+	n[71] !== y || n[72] !== b || n[73] !== x || n[74] !== S || n[75] !== k ? (A = /* @__PURE__ */ D(y, {
 		label: b,
 		columns: x,
 		rows: S,
-		start: k,
-		open: A
-	}), n[76] = y, n[77] = A, n[78] = b, n[79] = x, n[80] = S, n[81] = j) : j = n[81];
-	let M;
-	return n[82] !== j || n[83] !== C || n[84] !== w || n[85] !== T ? (M = /* @__PURE__ */ O("div", {
+		start: E,
+		open: k
+	}), n[71] = y, n[72] = b, n[73] = x, n[74] = S, n[75] = k, n[76] = A) : A = n[76];
+	let j;
+	return n[77] !== A || n[78] !== C || n[79] !== w ? (j = /* @__PURE__ */ O("div", {
 		className: C,
-		children: [
-			w,
-			T,
-			j
-		]
-	}), n[82] = j, n[83] = C, n[84] = w, n[85] = T, n[86] = M) : M = n[86], M;
+		children: [w, A]
+	}), n[77] = A, n[78] = C, n[79] = w, n[80] = j) : j = n[80], j;
 }
 function He(e) {
 	return e.service;
@@ -965,7 +957,7 @@ function We(t) {
 			className: "flex min-w-0 items-center gap-2",
 			children: [/* @__PURE__ */ D("span", {
 				className: "size-2 shrink-0 rounded-full",
-				style: { background: e.errors ? W : a[e.root.service] }
+				style: { background: e.errors ? U : a[e.root.service] }
 			}), /* @__PURE__ */ O("span", {
 				className: "min-w-0 break-all",
 				children: [
@@ -1005,12 +997,12 @@ function We(t) {
 					className: "block h-1 rounded-sm",
 					style: {
 						width: `${Math.max(2, e.ms / s * 100)}%`,
-						background: e.errors ? W : G
+						background: e.errors ? U : W
 					}
 				})
 			}), /* @__PURE__ */ D("span", {
 				className: e.errors ? "text-destructive" : "",
-				children: Y(e.ms)
+				children: J(e.ms)
 			})]
 		})
 	}, n[5] = s, n[6] = u);
@@ -1056,8 +1048,8 @@ function Ge(e) {
 function Ke(e) {
 	return /* @__PURE__ */ D("span", {
 		className: "text-muted-foreground",
-		title: K(e.start),
-		children: re(e.start)
+		title: G(e.start),
+		children: ie(e.start)
 	});
 }
 function qe(e) {
@@ -1081,7 +1073,7 @@ function Qe(e) {
 function $e({ traces: e, open: t, colour: n }) {
 	let [r, a] = T(), [o, s] = i(null), c = e.map((e) => e.start), l = Math.min(...c), u = Math.max(...c, l + 6e4), d = e.map((e) => Math.max(1, e.ms)), f = Math.floor(Math.log10(Math.min(...d))), p = Math.max(f + 1, Math.ceil(Math.log10(Math.max(...d)))), m = (e) => 50 + (e - l) / (u - l) * Math.max(1, a - Z - 14), h = (e) => 130 - (Math.log10(Math.max(1, e)) - f) / (p - f) * 122, g = Array.from({ length: p - f + 1 }, (e, t) => ({
 		y: t / (p - f),
-		label: Y(10 ** (p - t))
+		label: J(10 ** (p - t))
 	}));
 	return /* @__PURE__ */ O("div", {
 		ref: r,
@@ -1100,8 +1092,8 @@ function $e({ traces: e, open: t, colour: n }) {
 					ticks: g
 				}),
 				/* @__PURE__ */ D(_e, {
-					first: K(l),
-					last: K(u),
+					first: G(l),
+					last: G(u),
 					width: a,
 					height: 150
 				}),
@@ -1114,8 +1106,8 @@ function $e({ traces: e, open: t, colour: n }) {
 						flip: m(e.start) > a / 2,
 						lines: [
 							`${e.root.service} ${e.root.name}`,
-							Y(e.ms),
-							K(e.start)
+							J(e.ms),
+							G(e.start)
 						]
 					}),
 					onMouseLeave: () => s(null),
@@ -1128,7 +1120,7 @@ function $e({ traces: e, open: t, colour: n }) {
 						cx: m(e.start),
 						cy: h(e.ms),
 						r: "4",
-						fill: e.errors ? W : n[e.root.service],
+						fill: e.errors ? U : n[e.root.service],
 						stroke: "var(--background)",
 						strokeWidth: "1.5"
 					})]
@@ -1288,7 +1280,7 @@ function ot(e, t) {
 		"time",
 		"first",
 		"last"
-	].includes(e) && typeof t == "number" ? K(t) : ie(t);
+	].includes(e) && typeof t == "number" ? G(t) : Y(t);
 }
 var st = (e) => e.attrs?.events?.[0]?.attributes?.["exception.stacktrace"];
 function ct(t) {
@@ -1327,9 +1319,9 @@ function ct(t) {
 			children: T
 		}), n[28] = T, n[29] = E);
 		let k;
-		n[30] === r.start ? k = n[31] : (k = K(r.start), n[30] = r.start, n[31] = k);
+		n[30] === r.start ? k = n[31] : (k = G(r.start), n[30] = r.start, n[31] = k);
 		let A;
-		n[32] === r.ms ? A = n[33] : (A = Y(r.ms), n[32] = r.ms, n[33] = A);
+		n[32] === r.ms ? A = n[33] : (A = J(r.ms), n[32] = r.ms, n[33] = A);
 		let j;
 		n[34] === r.spans.length ? j = n[35] : (j = ae(r.spans.length, "span"), n[34] = r.spans.length, n[35] = j);
 		let M;
@@ -1374,7 +1366,7 @@ function ct(t) {
 			className: "grid grid-cols-1 gap-x-3 @2xl:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] border-0 border-b border-solid border-border pb-1 text-xs text-muted-foreground",
 			children: [F, /* @__PURE__ */ D("div", {
 				className: "flex justify-between font-mono",
-				children: I.map((e) => /* @__PURE__ */ D("span", { children: Y(e * x) }, e))
+				children: I.map((e) => /* @__PURE__ */ D("span", { children: J(e * x) }, e))
 			})]
 		}), n[51] = x, n[52] = g), _ = i.map((t) => {
 			let { s: n, depth: i } = t, a = (e.get(n.span) || []).length > 0, o = p === n.span;
@@ -1409,21 +1401,21 @@ function ct(t) {
 							style: {
 								left: `${(n.time - r.start) / x * 100}%`,
 								width: `max(2px, ${n.duration / x * 100}%)`,
-								background: n.status === "error" ? W : s[n.service]
+								background: n.status === "error" ? U : s[n.service]
 							}
 						}), (() => {
 							let e = (n.time - r.start) / x * 100, t = (n.time - r.start + n.duration) / x * 100;
 							return t <= 80 ? /* @__PURE__ */ D("span", {
 								className: "absolute inset-y-0 flex items-center px-1 text-xs tabular-nums text-muted-foreground",
 								style: { left: `${t}%` },
-								children: Y(n.duration)
+								children: J(n.duration)
 							}) : e >= 20 ? /* @__PURE__ */ D("span", {
 								className: "absolute inset-y-0 flex items-center px-1 text-xs tabular-nums text-muted-foreground",
 								style: { right: `${100 - e}%` },
-								children: Y(n.duration)
+								children: J(n.duration)
 							}) : /* @__PURE__ */ D("span", {
 								className: "absolute inset-y-0 right-0 flex items-center px-1 text-xs tabular-nums text-primary-foreground",
-								children: Y(n.duration)
+								children: J(n.duration)
 							});
 						})()]
 					})]
@@ -1441,7 +1433,7 @@ function ct(t) {
 						/* @__PURE__ */ D(at, {
 							row: n,
 							skip: [
-								...H,
+								...ee,
 								"message",
 								"events"
 							]
@@ -1510,7 +1502,7 @@ function gt(t) {
 			y: 48 - i,
 			height: Math.max(1, i - a - 1),
 			rx: "2",
-			fill: G,
+			fill: W,
 			opacity: ".5"
 		}), r > 0 && /* @__PURE__ */ D("rect", {
 			x: t * p + 1,
@@ -1518,7 +1510,7 @@ function gt(t) {
 			y: 48 - a,
 			height: a,
 			rx: "2",
-			fill: W
+			fill: U
 		})] }, t);
 	}), n[11] = u, n[12] = f, n[13] = p, n[14] = m) : m = n[14];
 	let h;
@@ -1561,7 +1553,7 @@ function xt({ rows: e, more: t, query: [r, a] }) {
 		r
 	]), p = n(() => {
 		let e = {};
-		for (let t of f) for (let [n, r] of Object.entries(t.attrs || {})) (e[n] ||= /* @__PURE__ */ new Set()).add(ie(r));
+		for (let t of f) for (let [n, r] of Object.entries(t.attrs || {})) (e[n] ||= /* @__PURE__ */ new Set()).add(Y(r));
 		return new Set(Object.keys(e).filter((t) => e[t].size > 1));
 	}, [f]);
 	return /* @__PURE__ */ O("div", {
@@ -1597,7 +1589,7 @@ function xt({ rows: e, more: t, query: [r, a] }) {
 						children: [
 							/* @__PURE__ */ D("span", {
 								className: "shrink-0 tabular-nums text-muted-foreground",
-								children: K(e.time)
+								children: G(e.time)
 							}),
 							/* @__PURE__ */ D("span", {
 								className: `w-10 shrink-0 ${ht(e) ? "text-destructive" : "text-muted-foreground"}`,
@@ -1612,7 +1604,7 @@ function xt({ rows: e, more: t, query: [r, a] }) {
 									" ",
 									/* @__PURE__ */ D("span", {
 										className: "text-muted-foreground",
-										children: Object.entries(e.attrs || {}).filter(([e]) => p.has(e)).map(([e, t]) => `${e}=${ie(t)}`).join(" ")
+										children: Object.entries(e.attrs || {}).filter(([e]) => p.has(e)).map(([e, t]) => `${e}=${Y(t)}`).join(" ")
 									})
 								]
 							})
@@ -1621,7 +1613,7 @@ function xt({ rows: e, more: t, query: [r, a] }) {
 						className: "px-1 pb-3 pt-1",
 						children: /* @__PURE__ */ D(at, {
 							row: e,
-							skip: H
+							skip: ee
 						})
 					})]
 				}, e.id))
@@ -1640,15 +1632,15 @@ function St(e, t) {
 }
 var Ct = (e) => e === "avg" || e === "p95" ? null : 0;
 function wt(e, t, n, r) {
-	let i = Map.groupBy(e, (e) => r === N ? "All" : ie(se(e)[r] ?? "–")), a = (e) => e.reduce((e, t) => e + t.count, 0), o = [...i.entries()].sort((e, t) => a(t[1]) - a(e[1])), s = X([...i.keys()]), c = (e, r, i) => {
+	let i = Map.groupBy(e, (e) => r === N ? "All" : Y(se(e)[r] ?? "–")), a = (e) => e.reduce((e, t) => e + t.count, 0), o = [...i.entries()].sort((e, t) => a(t[1]) - a(e[1])), s = X([...i.keys()]), c = (e, r, i) => {
 		let a = Map.groupBy(r, (e) => e.hour);
 		return {
 			name: e,
 			colour: i,
 			values: t.map((e) => a.has(e) ? St(a.get(e), n) : Ct(n))
 		};
-	}, l = o.slice(0, L).map(([e, t]) => c(e, t, U(s.indexOf(e))));
-	return o.length > L && l.push(c(z, o.slice(L).flatMap(([, e]) => e), G)), l;
+	}, l = o.slice(0, L).map(([e, t]) => c(e, t, H(s.indexOf(e))));
+	return o.length > L && l.push(c(z, o.slice(L).flatMap(([, e]) => e), W)), l;
 }
 function Tt(t) {
 	let n = e(58), { rows: r, from: a, to: u, more: d, query: f } = t, [p, m] = f, [_, b] = i(null), [x, S] = i("sum"), [C, w] = i(N), T;
@@ -1784,7 +1776,7 @@ function Tt(t) {
 									children: t
 								}), /* @__PURE__ */ D("span", {
 									className: "tabular-nums text-sm",
-									children: J(St(n, "sum"))
+									children: q(St(n, "sum"))
 								})]
 							}), /* @__PURE__ */ D(ve, {
 								hours: r,
@@ -1792,7 +1784,7 @@ function Tt(t) {
 								height: 44,
 								stacks: [{
 									name: t,
-									colour: U(0),
+									colour: H(0),
 									values: wt(n, r, "sum", N)[0].values
 								}]
 							})]
@@ -1830,11 +1822,11 @@ function Ot(e) {
 			}),
 			/* @__PURE__ */ D("td", {
 				className: "py-1.5 text-right tabular-nums",
-				children: J(t.length ? Math.max(...t) : null)
+				children: q(t.length ? Math.max(...t) : null)
 			}),
 			/* @__PURE__ */ D("td", {
 				className: "py-1.5 text-right tabular-nums",
-				children: J(t.at(-1))
+				children: q(t.at(-1))
 			})
 		]
 	}, e.name);
@@ -2013,13 +2005,13 @@ function Lt() {
 			retry: B
 		}) : /* @__PURE__ */ D(d, { rows: 3 })]
 	});
-	let H = e.at, ee = H - P.find(([e]) => e === x)[2], U = ue((e.spans || []).map((e) => e.service)), W = A && V.find((e) => e.id === A);
-	if (W) return /* @__PURE__ */ D(ct, {
-		trace: W,
+	let ee = e.at, te = ee - P.find(([e]) => e === x)[2], H = ue((e.spans || []).map((e) => e.service)), U = A && V.find((e) => e.id === A);
+	if (U) return /* @__PURE__ */ D(ct, {
+		trace: U,
 		back: () => j(null),
-		colour: U
+		colour: H
 	});
-	let G = (e) => (F[1](e), b("Traces")), q = (e) => e.length >= I;
+	let W = (e) => (F[1](e), b("Traces")), K = (e) => e.length >= I;
 	return /* @__PURE__ */ O("div", {
 		className: "flex flex-col gap-4",
 		children: [
@@ -2053,7 +2045,7 @@ function Lt() {
 			}),
 			e.problem && /* @__PURE__ */ D(p, {
 				title: "Insights has stopped arriving",
-				text: `${It[e.problem.kind] || It.arriving} Since ${K(e.problem.since)}.`,
+				text: `${It[e.problem.kind] || It.arriving} Since ${G(e.problem.since)}.`,
 				action: {
 					label: "Check Again",
 					run: () => B({ check: !0 })
@@ -2075,12 +2067,12 @@ function Lt() {
 				errors: e.errors,
 				showFailure: (e) => (L[1](e.id), b("Errors")),
 				traces: V,
-				from: ee,
-				to: H,
+				from: te,
+				to: ee,
 				open: M,
-				colour: U,
+				colour: H,
 				showTrace: j,
-				showTraces: G
+				showTraces: W
 			}),
 			m !== "Services" && m !== "Errors" && !e.spans && /* @__PURE__ */ D(d, { rows: 3 }),
 			m === "Traces" && e.spans && /* @__PURE__ */ D(tt, {
@@ -2088,19 +2080,19 @@ function Lt() {
 				filters: F,
 				query: R.Traces,
 				open: j,
-				colour: U,
-				more: q(e.spans)
+				colour: H,
+				more: K(e.spans)
 			}),
 			m === "Logs" && e.logs && /* @__PURE__ */ D(xt, {
 				rows: e.logs,
-				more: q(e.logs),
+				more: K(e.logs),
 				query: R.Logs
 			}),
 			m === "Metrics" && e.metrics && /* @__PURE__ */ D(Tt, {
 				rows: e.metrics,
-				from: ee,
-				to: H,
-				more: q(e.metrics),
+				from: te,
+				to: ee,
+				more: K(e.metrics),
 				query: R.Metrics
 			}),
 			m === "Errors" && /* @__PURE__ */ D(Nt, {
@@ -2111,7 +2103,7 @@ function Lt() {
 					known: (e) => V.some((t) => t.id === e),
 					open: j
 				},
-				showTraces: (e) => (R.Traces[1](`error.type=${e.type}`), G({
+				showTraces: (e) => (R.Traces[1](`error.type=${e.type}`), W({
 					service: e.service,
 					operation: N
 				}))
