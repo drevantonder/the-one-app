@@ -556,20 +556,33 @@ fn usual_path() {
     }
 }
 
-/// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`).
+/// What oned says it is, for `--help` and for an argument it doesn't take.
+fn usage() -> String {
+    format!("{} runs this device, or with a service's name, that service, as its oned starts it; --version says which build", name())
+}
+
+/// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`). It takes only the
+/// arguments its own starts give it (`--handoff=` to take over a node, `--sandboxed=`, `--runtime=` and the
+/// `--socket-fd=` that comes with it): any other (`--version` typed to see the build) never starts a node, which would
+/// replace the one running.
 pub fn run(args: &[String]) -> Result<()> {
-    let named: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    match named.as_slice() {
+    let flags: Vec<&str> = args.iter().filter(|a| a.starts_with('-')).map(String::as_str).collect();
+    let words: Vec<&str> = args.iter().filter(|a| !a.starts_with('-')).map(String::as_str).collect();
+    let flag = |prefix: &str| flags.iter().find_map(|f| f.strip_prefix(prefix));
+    match (words.as_slice(), flags.as_slice()) {
+        ([], ["--version"]) => println!("{}", crate::release::Version::this().json()),
+        ([], ["--help"]) => println!("{}", usage()),
         #[cfg(target_os = "linux")]
-        [] if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--sandboxed=")) => crate::services::sandbox::launch(std::path::Path::new(dir)),
-        [] => {
+        ([], [_]) if let Some(dir) = flag("--sandboxed=") => return crate::services::sandbox::launch(std::path::Path::new(dir)),
+        ([], _) if flags.iter().all(|f| f.starts_with("--handoff=")) => {
             usual_path();
-            serve(args)
+            return serve(args);
         }
-        [name] if *name == crate::database::scopes::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => crate::app::runtime::run(std::path::Path::new(dir)),
-        [name] => crate::services::endpoint::run(name),
-        _ => bail!("{} runs this device, or with a service's name, that service, as its oned starts it", name()),
+        ([crate::database::scopes::APPS_PART], _) if let Some(dir) = flag("--runtime=") && flags.iter().all(|f| f.starts_with("--runtime=") || f.starts_with("--socket-fd=")) => return crate::app::runtime::run(std::path::Path::new(dir)),
+        ([name], []) if crate::database::scopes::valid_app_name(name) => return crate::services::endpoint::run(name),
+        _ => bail!("{}", usage()),
     }
+    Ok(())
 }
 
 /// How long a node stopping waits for its last insights to be written: they may be lost, and stopping may not wait.
