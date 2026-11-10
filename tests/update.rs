@@ -266,6 +266,33 @@ fn it_makes_oned_exit_and_leaves_a_stranger_alone() {
     stranger.wait().unwrap();
 }
 
+/// The program may already be the newest while the oned running is the one before it (the device's own check put it in
+/// place and hasn't restarted onto it): Update restarts that one, and says so, instead of "current" and nothing.
+#[test]
+fn update_restarts_an_oned_still_on_the_build_before() {
+    let device = device();
+    let build = one::config::BUILD;
+    device.published(build, COMMITTED, self::build(build, TARGET, COMMITTED));
+    let mut oned = sleeping_as(&device.dir.join("as-oned"), &one::oned::name());
+    std::fs::write(device.home.join(one::update::PID), oned.id().to_string()).unwrap();
+    std::fs::write(device.home.join("running"), "the build before").unwrap();
+    let (ok, said, err) = device.update();
+    assert!(ok, "{err}");
+    assert!(said.contains("restarting"), "{said}");
+    assert!(exits(&mut oned), "oned didn't exit");
+
+    // One that began on this build is left running.
+    let mut oned = sleeping_as(&device.dir.join("as-oned"), &one::oned::name());
+    std::fs::write(device.home.join(one::update::PID), oned.id().to_string()).unwrap();
+    one::update::note_running(&device.home).unwrap();
+    let (ok, said, err) = device.update();
+    assert!(ok, "{err}");
+    assert!(said.contains("current"), "{said}");
+    assert!(oned.try_wait().unwrap().is_none(), "it stopped an oned that was current");
+    oned.kill().unwrap();
+    oned.wait().unwrap();
+}
+
 /// What `one update` runs on must work with the network gone: so nothing of it may reach for the node, the relay or who's who.
 #[test]
 fn updating_imports_nothing_of_the_network() {

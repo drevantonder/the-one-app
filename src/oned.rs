@@ -642,6 +642,7 @@ async fn serve(args: &[String]) -> Result<()> {
         node.warm().await;
     }
     std::fs::write(dir.join(crate::update::PID), std::process::id().to_string())?;
+    crate::update::note_running(&dir)?;
     tracing::info!("{NAME} node {} serving {} from {}", &crate::keys::hex(&node.id())[..8], api::addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     let mut routes = api::guarded(api::routes(), node.clone());

@@ -20,6 +20,13 @@ const ADDRESS: &str = "address";
 const TAKEN: &str = "release";
 /// The file in a device's home holding the pid of its running oned.
 pub const PID: &str = "pid";
+/// The file in a device's home holding the build its running oned began on: its program's file may be a newer one by now.
+const RUNNING: &str = "running";
+
+/// Notes that the oned running here began on this build.
+pub fn note_running(home: &Path) -> std::io::Result<()> {
+    std::fs::write(home.join(RUNNING), BUILD)
+}
 
 /// Notes the network's address where a device can read it with nothing running: until then `one update` can't start.
 pub fn keep_address(home: &Path, address: &str) -> std::io::Result<()> {
@@ -52,6 +59,11 @@ pub fn run() -> Result<String> {
     let record = Latest::read(key, &text).with_context(|| format!("the record at {address}"))?;
     let thing = record.get(&Thing::node_name(TARGET)).with_context(|| format!("the record at {address} has no build for {TARGET}"))?;
     if !latest::wanted(thing, BUILD, COMMITTED, "") {
+        // The program may be the newest while the oned running is still the one before it: the device's own check put it
+        // in place, or an update before this couldn't stop it. Update must never say "current" and leave that as it is.
+        if std::fs::read_to_string(home.join(RUNNING)).unwrap_or_default().trim() != BUILD && restart_oned(&home) {
+            return Ok(format!("This device's program is on {BUILD} already; restarting it, which still runs the build before."));
+        }
         return Ok(format!("This device is current, on {BUILD}. The newest published is {}.", thing.commit));
     }
     let bytes = latest::download(&address, thing)?;
