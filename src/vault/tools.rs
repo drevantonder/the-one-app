@@ -66,7 +66,7 @@ fn tools() -> Vec<Tool> {
         Tool::route(
             json!({
                 "name": "grant", "title": "Let a machine open a Vault",
-                "description": format!("Let a machine of {} open a Vault's secrets and fill them into requests (or, with on false, no longer). Only the Vault's admins say which: the user for their own, a group's admins, the network's for everyone's. Nobody else reads a secret back, not even on their own device.", crate::config::YOURS),
+                "description": format!("Let a machine of {} open a Vault's secrets and fill them into requests (or, with on false, no longer). Only the Vault's admins say which: the user for their own, a group's admins, the network's for everyone's. A Vault no machine opens keeps no secret, so grant before you set one. Nobody else reads a secret back, not even on their own device.", crate::config::YOURS),
                 "input": { "type": "object", "required": ["device"], "properties": { "device": { "type": "string", "description": "the machine's name" }, "on": { "type": "boolean", "description": "false: it no longer opens it" }, "scope": scope } },
                 "output": said("which machine opens the Vault now"),
             }),

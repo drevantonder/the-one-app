@@ -620,6 +620,7 @@ async fn vault_grant(m: &impl Me, body: body::VaultGrant) -> Result<Value> {
     new_vault_key(m, &scope, current.n + 1, &to).await?;
     Ok(json!({ "said": match body.on {
         true => format!("{name} opens this Vault now, and fills its items into requests to their sites."),
+        false if to.is_empty() => format!("{name} no longer opens this Vault, and no machine does: nothing secret can be set there until one is granted."),
         false => format!("{name} no longer opens this Vault: what's set from now on is sealed to a key it doesn't have."),
     } }))
 }

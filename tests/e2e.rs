@@ -769,6 +769,33 @@ async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_doe
     assert!(a.fill_for_service("shell", &mut input, &me, Some("notes")).await.is_err() || !input.to_string().contains("s3cret"), "a service its item doesn't name gets none of it");
 }
 
+/// A secret is kept only under a Vault key some machine opens, so what's made while none does is refused, never sealed
+/// where no grant afterwards opens it; what's made once one does opens, and still does after the next grant.
+#[tokio::test(flavor = "multi_thread")]
+async fn nothing_secret_is_kept_where_no_machine_opens_the_vault_and_what_is_kept_opens_after_a_grant() {
+    use one::database::scopes::Scope;
+    let a = start("vault-grant").await;
+    create(&a, "Home", "Andre").await;
+    add_notes(&a).await;
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let own = Scope::User(me.user.clone());
+    let grant = async |on: bool| one::settings::answer(&a, "POST", "/api/vault/grant", json!({ "device": a.device_name(), "on": on }).to_string().as_bytes()).await.unwrap().unwrap();
+    let item = |title: &str| json!({ "title": title, "type": "Token", "hosts": ["notes"], "apps": ["notes"], "fields": { "_key": { "value": "s3cret", "secret": true } } });
+    let opens = async |id: &str| {
+        let mut input = json!({ "key": format!("{{{{{id}:_key}}}}") });
+        a.fill_for_service("notes", &mut input, &me, Some("notes")).await.is_ok_and(|_| input["key"] == "s3cret")
+    };
+    let before = a.set_item(&me, &own, item("Before")).await.unwrap();
+    grant(false).await;
+    let refused = a.set_item(&me, &own, item("While none opens")).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("vault grant"), "it says to grant a machine: {refused:#}");
+    assert!(a.set_item(&me, &own, json!({ "title": "Plain", "type": "Note", "fields": { "text": { "value": "hello" } } })).await.is_ok(), "an item with no secret needs no key");
+    grant(true).await;
+    let after = a.set_item(&me, &own, item("After")).await.unwrap();
+    grant(true).await;
+    assert!(opens(&before).await && opens(&after).await, "what was kept while a machine opened the Vault opens after each grant");
+}
+
 /// An app's schedules run on what a call of it is handed and no more, in their scope, only while they're set: its own
 /// databases and the Vault's, so a scheduled run sees the items switched on for it, as a call does, and no other app's.
 #[tokio::test(flavor = "multi_thread")]

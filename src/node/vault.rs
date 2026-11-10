@@ -306,10 +306,13 @@ impl Node {
             ensure!(i.r.holds(scope), "This device can’t open {} yet.", scope_name(i, &scope.to_string())?);
             let v = m.vault(scope)?;
             let mut machines: Vec<String> = Vec::new();
+            let mut opened = false;
             for k in v.iter().flat_map(|v| v.to.iter()) {
                 machines.extend(m.machine(k)?.map(|d| d.name));
+                opened |= m.opens_vault(k, scope)?;
             }
-            Ok((m.apps()?.into_iter().filter(|a| a.erased).map(|a| a.name).collect::<BTreeSet<String>>(), m.may(&me.user, "add-apps", &scopes::object(&scope)), v.map(|v| (v.n, v.public)), machines.join(", ")))
+            // A key no machine opens is no key to seal to: nothing sealed to it would open, whoever is granted later.
+            Ok((m.apps()?.into_iter().filter(|a| a.erased).map(|a| a.name).collect::<BTreeSet<String>>(), m.may(&me.user, "add-apps", &scopes::object(&scope)), v.filter(|_| opened).map(|v| (v.n, v.public)), machines.join(", ")))
         })?;
         let keys = self.vault_secrets(scope).await?;
         let scope_said = self.with(|i| scope_name(i, &scope.to_string()))?;
