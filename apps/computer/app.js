@@ -7,7 +7,18 @@
 
 import main from "./dist/main.html" with { type: "text" };
 
-const act = (ctx, fn, input) => ctx.apps["agent-devices"]._act({ function: fn, input });
+/// An agent device's tool. A name that's one of the user's own devices only gets here when that device can't take the call,
+/// and Agent Devices, which knows only its own, would say there's no such device.
+async function act(ctx, fn, input) {
+  try {
+    return await ctx.apps["agent-devices"]._act({ function: fn, input });
+  } catch (err) {
+    const n = String(input?.device || "").toLowerCase();
+    const own = n && (await ctx.devices()).find((s) => s.name.toLowerCase() === n);
+    if (!own) throw err;
+    throw new Error(`${own.name} ${own.online ? "can't be used right now: it's still starting, or Computer Use isn't on there" : "is offline right now"}. Try again once it's back.`);
+  }
+}
 
 /// The caller's devices whose computer service serves them, by device name: `{ device, on, title, kind, using,
 /// permissions, missing }`, or `{ device, why }` for one that didn't answer.
@@ -32,6 +43,12 @@ async function device(ctx, name) {
   const s = (await ctx.devices()).find((s) => s.name.toLowerCase() === n && (s.services || []).includes("computer"));
   return s ? s.name : null;
 }
+
+/// A browser tool: on the user's own device when one is named, else an agent device.
+const browser = (tool) => async (ctx, { device: name, ...args }) => {
+  const d = await device(ctx, name);
+  return d ? ctx.services.computer._use({ tool, args }, { device: d }) : act(ctx, tool, name ? { device: name, ...args } : args);
+};
 
 const asListed = (d) => ({ name: d.device, on: d.device, own: true, kind: d.kind, title: d.title, state: "running", use: d.using ? `${d.using.agent} is using it` : "agents may use it" });
 
@@ -205,7 +222,7 @@ export default {
         "window_id": {"description": "the browser window's id, from computer_use list_windows: with pid, on the first call", "type": "integer"},
       }, "type": "object"},
       output: CONTENT,
-      run: (ctx, input) => act(ctx, "get_browser_state", input),
+      run: browser("get_browser_state"),
     },
     browser_prepare: {
       title: "Start or attach a browser",
@@ -222,7 +239,7 @@ export default {
         "window_id": {"description": "the browser window's id, from computer_use list_windows; needed with strategy", "type": "integer"},
       }, "required": [], "type": "object"},
       output: CONTENT,
-      run: (ctx, input) => act(ctx, "browser_prepare", input),
+      run: browser("browser_prepare"),
     },
     browser_navigate: {
       title: "Open a web address in a tab",
@@ -230,7 +247,7 @@ export default {
       description: "Open a web address in a browser tab. Refs from earlier reads stop working: read the page again with computer_get_browser_state.",
       input: {"additionalProperties": true, "properties": {"device": DEVICE, "session": SESSION, "tab_id": TAB, "target_id": TARGET, "url": {"description": "an http, https or about address, like https://example.com", "type": "string"}}, "required": ["target_id", "tab_id", "url"], "type": "object"},
       output: CONTENT,
-      run: (ctx, input) => act(ctx, "browser_navigate", input),
+      run: browser("browser_navigate"),
     },
     browser_click: {
       title: "Click on a web page",
@@ -245,7 +262,7 @@ export default {
         "y": {"description": "instead of ref: a point in the tab, in CSS pixels from its top", "type": "number"},
       }, "required": ["target_id", "tab_id"], "type": "object"},
       output: CONTENT,
-      run: (ctx, input) => act(ctx, "browser_click", input),
+      run: browser("browser_click"),
     },
     browser_type: {
       title: "Type into a web page",
@@ -260,7 +277,7 @@ export default {
         "text": {"description": "what to type", "type": "string"},
       }, "required": ["target_id", "tab_id", "ref", "text"], "type": "object"},
       output: CONTENT,
-      run: (ctx, input) => act(ctx, "browser_type", input),
+      run: browser("browser_type"),
     },
     browser_select: {
       title: "Pick a drop-down option",
@@ -273,7 +290,7 @@ export default {
         "value": {"description": "instead of label: the option's value", "type": "string"},
       }, "required": ["target_id", "tab_id", "ref"], "type": "object"},
       output: CONTENT,
-      run: (ctx, input) => act(ctx, "browser_select", input),
+      run: browser("browser_select"),
     },
     browser_dialog: {
       title: "See or answer a page's dialog",
@@ -288,7 +305,7 @@ export default {
         "session": SESSION, "tab_id": TAB, "target_id": TARGET,
       }, "required": ["target_id", "tab_id", "action"], "type": "object"},
       output: CONTENT,
-      run: (ctx, input) => act(ctx, "browser_dialog", input),
+      run: browser("browser_dialog"),
     },
     browser_pointer: {
       title: "Hover, scroll or drag on a web page",
@@ -311,7 +328,7 @@ export default {
         "y": {"description": "where to start, in CSS pixels from the tab's top", "type": "number"},
       }, "required": ["target_id", "tab_id", "session", "action"], "type": "object"},
       output: CONTENT,
-      run: (ctx, input) => act(ctx, "browser_pointer", input),
+      run: browser("browser_pointer"),
     },
     _devices: {
       title: "Your devices agents may use (for the page)",
