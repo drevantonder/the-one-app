@@ -299,6 +299,7 @@ impl Node {
     /// background: one already waiting for its turn for the same database is only raised, so a burst of writes asks the
     /// bucket about it once or twice. A hint that fails is the next write's to make.
     fn hint_after(&self, bucket: Copied, (prefix, at, copy, epoch): (String, u64, u64, u32)) {
+        self.hint_changed(&prefix);
         let waiting = {
             let mut hints = self.0.databases.hints.lock().unwrap();
             hints.insert(prefix.clone(), (at, copy, epoch)).is_some()

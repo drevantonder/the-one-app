@@ -371,24 +371,31 @@ impl Node {
             return Ok(());
         }
         // A caller handed every epoch from the oldest it needs needs none. The oldest is as each database's hint said when
-        // this device last read it, which says the same or older than it says now as copies are made under newer epochs,
-        // so it's read from the bucket again only when the caller lacks one of those, or a call found one older needed.
+        // this device last read it, which holds until the database is written (`hint_changed`) or a call finds one older
+        // needed: a caller that lacks keys it can't hand (an app with no key in the newest epoch) asks again and again,
+        // and the bucket would say the same each time.
         let covered = |(scope, app, database): &(Scope, &str, &str)| -> Result<bool> {
             let newest = self.with(|i| Ok(i.r.db().epoch(scope)?))?.max(1);
             let oldest = self.0.sessions.oldest.lock().unwrap().get(&hint_name(scope, app, database)).copied().unwrap_or(1).min(newest);
             let handed = self.handed(me, scope, app, database);
             Ok((oldest..=newest).all(|n| handed.contains_key(&n)))
         };
-        let mut lacking = Vec::new();
+        let mut need = Vec::new();
+        let mut unknown = Vec::new();
         for w in want {
-            if !covered(w)? {
-                lacking.push(w.clone());
+            if covered(w)? {
+                continue;
+            }
+            let (scope, app, database) = w;
+            match self.0.sessions.oldest.lock().unwrap().get(&hint_name(scope, app, database)).copied() {
+                Some(oldest) => {
+                    let (newest, handed) = (self.with(|i| Ok(i.r.db().epoch(scope)?))?.max(1), self.handed(me, scope, app, database));
+                    need.extend((oldest.min(newest)..=newest).filter(|n| !handed.contains_key(n)).map(|epoch| Need { scope: scope.to_string(), epoch, app: app.to_string(), database: database.to_string() }));
+                }
+                None => unknown.push(w.clone()),
             }
         }
-        if lacking.is_empty() {
-            return Ok(());
-        }
-        let want = &lacking[..];
+        let want = &unknown[..];
         let bucket = self.bucket()?;
         // Each database's newest hint, a few at once as a page asks for dozens. R2 now and then holds a read of one for half a minute
         // and resets it: a hint only says how old a key it needs, so without one it asks for the newest, and the page goes on.
@@ -414,7 +421,6 @@ impl Node {
                 .collect()
                 .await
         };
-        let mut need = Vec::new();
         for ((scope, app, database), hint) in want.iter().zip(hints) {
             let newest = self.newest_epoch(scope).await?.max(1);
             let oldest = crate::keys::oldest_needed(database, hint.as_ref().and_then(|h| h.as_ref()).map(|o| &o.bytes[..]), newest);
@@ -426,6 +432,12 @@ impl Node {
             need.extend((oldest..=newest).filter(|n| !handed.contains_key(n)).map(|epoch| Need { scope: scope.to_string(), epoch, app: app.to_string(), database: database.to_string() }));
         }
         if need.is_empty() { Ok(()) } else { Err(self.need(need).into()) }
+    }
+
+    /// Forgets what a database's newest hint said, once it's written here or another device says it wrote it: a
+    /// caller's next request reads it again.
+    pub(super) fn hint_changed(&self, prefix: &str) {
+        self.0.sessions.oldest.lock().unwrap().remove(&crate::database::stored::newest_name(prefix));
     }
 
     pub(super) fn need(&self, need: Vec<Need>) -> Needs {

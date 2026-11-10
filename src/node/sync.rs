@@ -111,6 +111,7 @@ impl Node {
             });
             return;
         };
+        self.hint_changed(&crate::bucket::database_prefix(&scope.to_string(), &app, &database));
         let id = (scope, format!("{app}/{database}"));
         self.0.databases.behind.lock().unwrap().insert(id.clone());
         let open = self.open_dbs().iter().any(|(open, _)| *open == id);
