@@ -13,6 +13,9 @@ use crate::keys::hex;
 use super::signed::pooled;
 use super::{Ask, Bucket, Failed, Object, Trouble};
 
+/// How long an ask of the bucket may take before its device's log says so.
+const SLOW_ASK: std::time::Duration = std::time::Duration::from_secs(5);
+
 fn requests() -> ureq::Agent {
     static POOL: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
     pooled(&POOL, 300)
@@ -503,11 +506,18 @@ impl S3 {
             builder = builder.header(*k, *v);
         }
         let host = self.host();
+        let asked = std::time::Instant::now();
         let mut resp = match method {
             "PUT" => agent.run(builder.body(body.to_vec())?),
             _ => agent.run(builder.body(())?),
         }
-        .map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({host}: {e})")))?;
+        .map_err(|e| {
+            tracing::warn!("{method} {name}: {host} failed after {} ms: {e}", asked.elapsed().as_millis());
+            Failed(Trouble::Unreachable, format!("couldn't be reached ({host}: {e})"))
+        })?;
+        if asked.elapsed() >= SLOW_ASK {
+            tracing::warn!("{method} {name}: {host} took {} ms", asked.elapsed().as_millis());
+        }
         let tag = resp.headers().get("etag").and_then(|t| t.to_str().ok()).map(str::to_string);
         // An answer cut short says nothing of what the request did.
         let bytes = resp.body_mut().with_config().limit(4 << 30).read_to_vec().map_err(|e| Failed(Trouble::Unreachable, format!("cut its answer short ({host}: {e})")))?;
