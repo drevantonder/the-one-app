@@ -16,7 +16,8 @@ pub(super) struct State {
     /// Wakes the backups to run now, and whether they run whether or not an hour passed.
     now: tokio::sync::Notify,
     forced: Mutex<bool>,
-    /// When this device last tried telling admins about each place's problem and reached none, so it tries hourly.
+    /// When this device last tried telling admins about each place's problem without it being marked as told (it
+    /// reached none, or the mark didn't save), so it tries hourly rather than every tick.
     alert_tried: Mutex<HashMap<String, u64>>,
     /// The newest snapshot this device knows of each (place, scope), with its key's id.
     backed: Mutex<HashMap<(String, String), (crate::backups::Snapshot, String)>>,
@@ -292,8 +293,12 @@ impl Node {
         })?;
         for p in due {
             // Said only once an admin was told, so a push that didn't go is tried again, hourly.
-            if self.0.backups.alert_tried.lock().unwrap().get(&p.place).is_some_and(|t| now < t + 3_600_000) {
-                continue;
+            {
+                let mut tried = self.0.backups.alert_tried.lock().unwrap();
+                if tried.get(&p.place).is_some_and(|t| now < t + 3_600_000) {
+                    continue;
+                }
+                tried.insert(p.place.clone(), now);
             }
             let mut told = false;
             for admin in &admins {
@@ -307,10 +312,8 @@ impl Node {
                 }
             }
             if told {
-                self.0.backups.alert_tried.lock().unwrap().remove(&p.place);
                 self.say(&Scope::Global, Said::Alerted { place: p.place.clone() }).await?;
-            } else {
-                self.0.backups.alert_tried.lock().unwrap().insert(p.place.clone(), now);
+                self.0.backups.alert_tried.lock().unwrap().remove(&p.place);
             }
         }
         Ok(())
