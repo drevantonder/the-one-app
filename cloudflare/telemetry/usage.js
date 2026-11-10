@@ -17,8 +17,8 @@ const R2_CLASS_A = ["ListBuckets", "PutBucket", "ListObjects", "PutObject", "Cop
 const R2_CLASS_B = ["HeadBucket", "HeadObject", "GetObject", "UsageSummary", "GetBucketEncryption", "GetBucketLocation", "GetBucketCors", "GetBucketLifecycleConfiguration"];
 const r2Class = (operation) => (R2_CLASS_A.includes(operation) ? "A" : R2_CLASS_B.includes(operation) ? "B" : "free");
 
-/// `filter` names the GraphQL filter on the resource's dimension, `of` which of `USAGE`'s lists it takes, and `named` a
-/// resource as the rows name it. `more` is a dimension besides the resource, if any, and what it adds to the row's attrs.
+/// `dimension` is what a product's resource is filtered and grouped by and `of` which of `USAGE`'s lists names them; `more`
+/// a dimension besides, if any, and what it adds to a row's attrs; `only` a filter of Cloudflare's own, if it needs one.
 export const PRODUCTS = [
   {
     product: "workers", dataset: "workersInvocationsAdaptive", dimension: "scriptName", of: "scripts", fields: "sum { requests cpuTimeUs }",
@@ -48,7 +48,8 @@ export const PRODUCTS = [
     metrics: [{ name: "cloudflare.durable_objects.duration", unit: "s", type: "counter", value: (g) => g.sum.activeTime / 1e6 }],
   },
   {
-    product: "pipelines", dataset: "pipelinesOperatorAdaptiveGroups", dimension: "pipelineId", of: "pipelines", fields: "sum { bytesIn }",
+    // Read from its streams: a row with no stream is the same bytes again, further on.
+    product: "pipelines", dataset: "pipelinesOperatorAdaptiveGroups", dimension: "pipelineId", of: "pipelines", only: 'streamId_neq: ""', fields: "sum { bytesIn }",
     metrics: [{ name: "cloudflare.pipelines.processed", unit: "By", type: "counter", value: (g) => g.sum.bytesIn }],
   },
   {
@@ -73,7 +74,7 @@ export const PRODUCTS = [
 export function query(usage) {
   const parts = PRODUCTS.map((p, i) => {
     const dimensions = [p.dimension, p.more?.dimension].filter(Boolean).join(" ");
-    return `p${i}: ${p.dataset}(limit: ${MOST_GROUPS}, filter: { datetime_geq: $from, datetime_lt: $to, ${p.dimension}_in: ${JSON.stringify(Object.keys(usage[p.of] ?? {}))} }) { dimensions { ${dimensions} } ${p.fields} }`;
+    return `p${i}: ${p.dataset}(limit: ${MOST_GROUPS}, filter: { datetime_geq: $from, datetime_lt: $to, ${p.dimension}_in: ${JSON.stringify(Object.keys(usage[p.of] ?? {}))}${p.only ? `, ${p.only}` : ""} }) { dimensions { ${dimensions} } ${p.fields} }`;
   });
   return `query($account: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: { accountTag: $account }) { ${parts.join(" ")} } } }`;
 }
