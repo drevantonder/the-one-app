@@ -715,12 +715,9 @@ function Grid({ page, editing, leaving, refreshing }) {
   )
 }
 
-/// A page: its title, with Edit Home Page beside it (while arranging, Add and Done), then one grid, as a home screen's.
-function Page({ page, editing, leaving, undone, refreshing, bottom }) {
-  const { scope, title, subtitle, arrange } = page
+/// Edit Home Page (while arranging: Undo, Add and Done), which comes and goes with arranging.
+function Controls({ page, editing, leaving, undone }) {
   const changing = editing || leaving
-  // Arranging, the title keeps the lines it had, cut short rather than wrapping again, so the grid under it stays still.
-  const heading = useRef(null), lines = useRef(1)
   // Edit Home Page and Done replace each other, so the one pressed is gone and focus would fall to the page's start.
   const doneButton = useRef(null), editButton = useRef(null), was = useRef(changing)
   useEffect(() => {
@@ -728,34 +725,48 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
     was.current = changing
     if (document.activeElement === document.body) (changing ? doneButton : editButton).current?.focus()
   }, [changing])
+  const undoButton = undone && <Button data-undo variant="ghost" size="sm" className={COMES} onClick={undo}>Undo</Button>
+  const add = changing && page.addable && <Button variant="outline" size="sm" className={editing ? COMES : GOES} onClick={() => (S.dialog = { kind: "add", p: home.page(page.scope) }, S.render())}>Add</Button>
+  const done = changing && <Button ref={doneButton} size="sm" className={editing ? COMES : GOES} onClick={() => edit(false)}>Done</Button>
+  // On a phone the page has no title to sit beside, so they float at its top corners, and it makes room for them.
+  if (swipe) return changing && (
+    <div data-ctl className="pointer-events-none fixed inset-x-4 top-2.5 z-10 flex items-start justify-between [&>*]:pointer-events-auto">
+      <div className="flex gap-2">{undoButton}{add}</div>
+      {done}
+    </div>
+  )
+  return (
+    <div data-ctl className="mt-0.5 flex shrink-0 gap-2">
+      {undoButton}
+      {changing ? <>{add}{done}</> : <Button ref={editButton} variant="ghost" size="icon-sm" className={COMES} aria-label={editHomePage.title} onClick={() => edit(true)}><Icon name={editHomePage.icon} /></Button>}
+    </div>
+  )
+}
+
+/// A page: on a computer its title, with its controls beside it; on a phone the dots name it. Then one grid, as a home screen's.
+function Page({ page, editing, leaving, undone, refreshing, bottom }) {
+  const { scope, title, subtitle, arrange } = page
+  const changing = editing || leaving
+  // Arranging, the title keeps the lines it had, cut short rather than wrapping again, so the grid under it stays still.
+  const heading = useRef(null), lines = useRef(1)
   useLayoutEffect(() => {
     if (!changing && heading.current) lines.current = Math.max(1, Math.round(heading.current.offsetHeight / parseFloat(getComputedStyle(heading.current).lineHeight)))
   })
   return (
     <section
       data-page={scope}
-      className={cn("h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-4 [scroll-snap-stop:always]", swipe ? "pt-5" : "pt-4")}
-      style={{ paddingBottom: bottom }}
+      className={cn("h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-4 [scroll-snap-stop:always]", swipe ? (changing && arrange && !page.empty ? "pt-[60px]" : "pt-5") : "pt-4")}
+      style={{ paddingBottom: bottom, transition: swipe ? "padding-top var(--move-settle) var(--ease-settle)" : undefined }}
     >
-      <div className="flex items-start gap-3 pb-5">
-        <div className="min-w-0 flex-1">
-          <h1 ref={heading} className={cn("large-title text-3xl font-bold tracking-tight [overflow-wrap:anywhere]", changing && "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:var(--lines)]")} style={{ "--lines": lines.current }}>{title}</h1>
-          {subtitle && <Hint>{subtitle}</Hint>}
-        </div>
-        {arrange && !page.empty && (
-          <div data-ctl className="mt-0.5 flex shrink-0 gap-2">
-            {undone && <Button data-undo variant="ghost" size="sm" className={COMES} onClick={undo}>Undo</Button>}
-            {changing ? (
-              <>
-                {page.addable && <Button variant="outline" size="sm" className={editing ? COMES : GOES} onClick={() => (S.dialog = { kind: "add", p: home.page(scope) }, S.render())}>Add</Button>}
-                <Button ref={doneButton} size="sm" className={editing ? COMES : GOES} onClick={() => edit(false)}>Done</Button>
-              </>
-            ) : (
-              <Button ref={editButton} variant="ghost" size="icon-sm" className={COMES} aria-label={editHomePage.title} onClick={() => edit(true)}><Icon name={editHomePage.icon} /></Button>
-            )}
+      {!swipe && (
+        <div className="flex items-start gap-3 pb-5">
+          <div className="min-w-0 flex-1">
+            <h1 ref={heading} className={cn("large-title text-3xl font-bold tracking-tight [overflow-wrap:anywhere]", changing && "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:var(--lines)]")} style={{ "--lines": lines.current }}>{title}</h1>
+            {subtitle && <Hint>{subtitle}</Hint>}
           </div>
-        )}
-      </div>
+          {arrange && !page.empty && <Controls page={page} editing={editing} leaving={leaving} undone={undone} />}
+        </div>
+      )}
       {page.missing ? (
         <Empty action={{ label: "Go to Home", run: () => one.open("pages", { scope: "user" }) }}>This page isn’t here. The link may be old or mistyped.</Empty>
       ) : (
@@ -773,8 +784,8 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
   )
 }
 
-/// Under the pages: a dot for each, with a cog for Settings. Slide along it to change page.
-function Dots({ scopes, at, strip, attention }) {
+/// Under the pages: the one shown's name, then a dot for each, with a cog for Settings. Slide along it to change page.
+function Dots({ scopes, at, strip, attention, editable }) {
   const [sliding, setSliding] = useState(false)
   const go = (scope, now = false) => {
     const el = strip.current, i = scopes.indexOf(scope)
@@ -806,13 +817,17 @@ function Dots({ scopes, at, strip, attention }) {
   }
   const page = scopes.indexOf(at) + 1
   return (
-    <nav data-ctl className="pointer-events-none fixed inset-x-0 bottom-[calc(10px+env(safe-area-inset-bottom))] flex flex-col items-center">
+    <nav data-ctl className="pointer-events-none fixed inset-x-0 bottom-[calc(10px+env(safe-area-inset-bottom))] flex flex-col items-center gap-1.5">
+      <div className="max-w-[70%] text-center text-[13px] font-semibold text-muted-foreground">{titleOf(at)}</div>
       <div onPointerDown={slide} className={cn("pointer-events-auto flex h-11 touch-none items-center rounded-full border bg-background/90 shadow-lg backdrop-blur-xl transition-transform", sliding && "scale-[1.08]")}>
         <button
           type="button"
           aria-label={`${titleOf(at)}, page ${page} of ${scopes.length}`}
           className="flex h-11 items-center gap-1.5 pl-[18px] pr-1.5"
-          onClick={(e) => !quiet() && home.menu(scopes.map((s) => ({ title: titleOf(s), checked: s === at, run: () => go(s) })), e.currentTarget.parentElement)}
+          onClick={(e) => !quiet() && home.menu([
+            ...scopes.map((s) => ({ title: titleOf(s), checked: s === at, run: () => go(s) })),
+            ...(editable ? [{ ...editHomePage, section: true }] : []),
+          ], e.currentTarget.parentElement)}
         >
           {scopes.slice(0, -1).map((s) => <i key={s} className={cn("block h-[7px] rounded-full bg-muted-foreground/40 transition-[width]", s === at ? "w-4 bg-foreground" : "w-[7px]")} />)}
         </button>
@@ -1014,6 +1029,7 @@ function Pages() {
   const strip = useRef(null)
   const { view, phase, editing, leaving, undo: undone, at, dialog, refreshing, attention } = snap
   const scopes = view.map((v) => v.scope)
+  const current = view.find((v) => v.scope === at)
 
   // What draws the screen again: with `now`, at once, for what a finger is carrying.
   useLayoutEffect(() => {
@@ -1112,7 +1128,8 @@ function Pages() {
       >
         {view.map((page) => <Page key={page.scope} page={page} editing={editing && page.scope === at && !page.empty} leaving={leaving && page.scope === at} undone={undone && page.scope === at} refreshing={refreshing} bottom={swipe ? "calc(88px + env(safe-area-inset-bottom))" : 20} />)}
       </div>
-      {swipe && <Dots scopes={scopes} at={at} strip={strip} attention={attention} />}
+      {swipe && current?.arrange && !current.empty && <Controls page={current} editing={editing} leaving={leaving} undone={undone} />}
+      {swipe && <Dots scopes={scopes} at={at} strip={strip} attention={attention} editable={!!current?.arrange && !current.empty} />}
       <Dialogs dialog={dialog} />
     </div>
   )
