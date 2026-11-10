@@ -91,7 +91,7 @@ pub fn unpaired(local: Option<&Value>) -> bool {
 /// Its own node approves the window by its code, as one of the Mac's own programs, if it's a device of the same user
 /// (as the Mac app's did): else the code waits for another of theirs.
 pub fn approve_here(code: String) {
-    std::thread::spawn(move || crate::local("/v1/devices/approve", Some(json!({ "code": crate::device_code(&code), "confirm": true })), 30));
+    std::thread::spawn(move || crate::local("/api/devices/approve", Some(json!({ "code": crate::device_code(&code), "confirm": true })), 30));
 }
 
 /// This Mac's node kept running; the Mac app's menus, with its keys; the widgets' own items, as last kept, until the

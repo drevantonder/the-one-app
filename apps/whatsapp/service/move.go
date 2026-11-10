@@ -83,7 +83,7 @@ func (l *link) devices() (devices, error) {
 			}
 		}
 	}
-	body, err := request(&http.Client{Timeout: 5 * time.Second, Transport: toNode}, l.node+"/v1/state", nil)
+	body, err := request(&http.Client{Timeout: 5 * time.Second, Transport: toNode}, l.node+"/api/state", nil)
 	if err == nil {
 		err = json.Unmarshal(body, &state)
 	}

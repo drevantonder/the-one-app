@@ -237,15 +237,15 @@ function Devices() {
 
   async function load() {
     try {
-      const [state, device] = await Promise.all([api("GET", "/v1/state"), one.device()])
+      const [state, device] = await Promise.all([api("GET", "/api/state"), one.device()])
       // Who waits, from a node or the web client itself; one with no code to compare is an older node's, not shown.
       let waiting = [], seen = null
       const asks = [
-        !apps.current.length ? api("GET", "/v1/apps").then((a) => (apps.current = a), () => {}) : null,
-        api("POST", "/v1/devices/requests", {}).then((w) => (waiting = w.filter((r) => r.code)), () => {}),
+        !apps.current.length ? api("GET", "/api/apps").then((a) => (apps.current = a), () => {}) : null,
+        api("POST", "/api/devices/requests", {}).then((w) => (waiting = w.filter((r) => r.code)), () => {}),
       ]
       if (device.keys) {
-        asks.push(api("GET", "/v1/devices/seen").then((s) => (seen = s || {}), () => {}))
+        asks.push(api("GET", "/api/devices/seen").then((s) => (seen = s || {}), () => {}))
       }
       await Promise.all(asks)
       // Not while they're dragging.
@@ -288,7 +288,7 @@ function Devices() {
   async function approveScanned(typed) {
     const code = String(typed).toUpperCase().replace(/[^A-Z2-7]/g, "")
     try {
-      const r = await api("POST", "/v1/devices/approve", { code })
+      const r = await api("POST", "/api/devices/approve", { code })
       setScan({ code, r })
     } catch (err) {
       setScan({ error: said(err) })
@@ -305,7 +305,7 @@ function Devices() {
     bump((n) => n + 1)
     for (const after of retried ? [AGAIN, LATE] : [LATE]) setTimeout(() => asked[k]?.at === at && load(), after + 500)
     try {
-      await api("POST", "/v1/service", { device: part.device, name: part.name ?? part.service, on })
+      await api("POST", "/api/service", { device: part.device, name: part.name ?? part.service, on })
       if (asked[k]?.at === at) asked[k].state = "written"
     } catch (err) {
       if (asked[k]?.at === at) asked[k] = { ...asked[k], state: "failed", error: said(err) }
@@ -355,7 +355,7 @@ function Devices() {
       },
     })
     one.tap()
-    act(() => api("POST", "/v1/settings", { name: "priority", value }))
+    act(() => api("POST", "/api/settings", { name: "priority", value }))
   }
 
   /// The way to move a device without dragging: 1st, 2nd…, New, Last.
@@ -389,7 +389,7 @@ function Devices() {
     if (i == null) return
     if (items[i].title === "Rename") show({ rename: item })
     else if (items[i].title === "Sign-Ins…") show({ signIns: signedIn, me: item.me })
-    else if (items[i].title === "This Device’s Code") act(async () => one.alert({ title: "This Device’s Code", text: (await api("GET", "/v1/devices/code")).code }))
+    else if (items[i].title === "This Device’s Code") act(async () => one.alert({ title: "This Device’s Code", text: (await api("GET", "/api/devices/code")).code }))
     else if (item.me) signOut()
     else remove(item.name, passkey ? [item.key] : item.keys, !passkey && item.node && item.online ? item.node.key : null)
   }
@@ -401,7 +401,7 @@ function Devices() {
     if (!(await one.alert({ title: `Remove ${name}?`, action: "Remove", danger: true }))) return
     one.tap("medium")
     act(async () => {
-      for (const key of keys) await api("POST", "/v1/devices/remove", { device: key })
+      for (const key of keys) await api("POST", "/api/devices/remove", { device: key })
     })
   }
   async function removeOld(card) {
@@ -409,7 +409,7 @@ function Devices() {
     const of = card.name ? ` of ${card.name}` : ""
     if (!(await one.alert({ title: `Remove ${n} old sign-in${n > 1 ? "s" : ""}${of}?`, action: "Remove", danger: true }))) return
     act(async () => {
-      for (const c of card.old) await api("POST", "/v1/devices/remove", { device: c.key })
+      for (const c of card.old) await api("POST", "/api/devices/remove", { device: c.key })
     })
   }
   async function signOut() {
@@ -559,8 +559,8 @@ function Waiting({ r, busy, answer }) {
         {r.code.length > 9 && <div>{r.code.slice(10)}</div>}
       </div>
       <div className="flex gap-2 @xl:justify-end">
-        <Button variant="outline" className="flex-1 @xl:flex-none" disabled={busy} onClick={() => answer(r.code, () => api("POST", "/v1/devices/refuse", { code: r.code }))}>{r.yours ? "Not Me" : "Not Them"}</Button>
-        <Button className="flex-1 @xl:flex-none" disabled={busy} onClick={() => answer(r.code, () => api("POST", "/v1/devices/approve", { code: r.code, confirm: true }))}>
+        <Button variant="outline" className="flex-1 @xl:flex-none" disabled={busy} onClick={() => answer(r.code, () => api("POST", "/api/devices/refuse", { code: r.code }))}>{r.yours ? "Not Me" : "Not Them"}</Button>
+        <Button className="flex-1 @xl:flex-none" disabled={busy} onClick={() => answer(r.code, () => api("POST", "/api/devices/approve", { code: r.code, confirm: true }))}>
           {busy && <Spinner className="text-primary-foreground" />}Approve
         </Button>
       </div>
@@ -589,7 +589,7 @@ function Scanned({ scan, done, cancel }) {
     setBusy(true)
     setError("")
     try {
-      await api("POST", "/v1/devices/approve", { code, confirm: true })
+      await api("POST", "/api/devices/approve", { code, confirm: true })
       done()
     } catch (e) {
       setError(said(e))
@@ -692,7 +692,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
                         <span className="block font-medium">{(on && shown(on.name)) || "A device"} runs {m.appTitle(g.app)}’s schedules for {m.forWhom(g.scope)}</span>
                         <span className="block text-muted-foreground">Until {until}, and longer as {g.scope === `user:${m.me}` ? "you use it" : "it’s used"}</span>
                       </span>
-                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => act(() => api("POST", "/v1/devices/stop_schedules", { device: g.endpoint, app: g.app, scope: g.scope }))}>Stop</Button>
+                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => act(() => api("POST", "/api/devices/stop_schedules", { device: g.endpoint, app: g.app, scope: g.scope }))}>Stop</Button>
                     </div>
                   )
                 })}
@@ -974,11 +974,11 @@ function Restore({ open, setOpen, done }) {
     setError("")
     try {
       if (!asked) {
-        setAsked((await api("POST", "/v1/devices/restore", { code })).said)
+        setAsked((await api("POST", "/api/devices/restore", { code })).said)
         setBusy(false)
         return
       }
-      await api("POST", "/v1/devices/restore", { code, confirm: true })
+      await api("POST", "/api/devices/restore", { code, confirm: true })
       one.tap("success")
       done()
     } catch (e) {
@@ -1009,7 +1009,7 @@ function Rename({ card, open, setOpen, done }) {
     setBusy(true)
     setError("")
     try {
-      for (const key of keys) await api("POST", "/v1/name", { key, name: name.trim() })
+      for (const key of keys) await api("POST", "/api/name", { key, name: name.trim() })
       one.tap("success")
       done()
     } catch (e) {
@@ -1036,8 +1036,8 @@ function RemoveDevice({ name, keys, erasable, open, setOpen, done }) {
     setBusy(true)
     setError("")
     try {
-      if (erase) await api("POST", "/v1/erase", { key: erasable })
-      for (const key of keys) await api("POST", "/v1/devices/remove", { device: key })
+      if (erase) await api("POST", "/api/erase", { key: erasable })
+      for (const key of keys) await api("POST", "/api/devices/remove", { device: key })
       one.tap("success")
       done()
     } catch (e) {
@@ -1072,7 +1072,7 @@ function SignIns({ clients, me, open, setOpen, done }) {
     setBusy(r.id)
     setError("")
     try {
-      await api("POST", "/v1/devices/forget-sign-in", { key: r.key, ...(r.account ? { account: r.account } : {}) })
+      await api("POST", "/api/devices/forget-sign-in", { key: r.key, ...(r.account ? { account: r.account } : {}) })
       one.tap("success")
       done()
     } catch (e) {
@@ -1082,14 +1082,14 @@ function SignIns({ clients, me, open, setOpen, done }) {
   }
   const look = async () => {
     try {
-      setLinked((await api("POST", "/v1/devices/record-sign-in", {})).account || null)
+      setLinked((await api("POST", "/api/devices/record-sign-in", {})).account || null)
     } catch (e) { setError(said(e)) }
   }
   async function keep() {
     setBusy("linked")
     setError("")
     try {
-      await api("POST", "/v1/devices/record-sign-in", { confirm: true })
+      await api("POST", "/api/devices/record-sign-in", { confirm: true })
       one.tap("success")
       setLinked(null)
       done()
@@ -1106,7 +1106,7 @@ function SignIns({ clients, me, open, setOpen, done }) {
   // Asked for as the dialog opens, so the button is a plain link, which every browser and app opens.
   const [url, setUrl] = useState("")
   useEffect(() => {
-    if (me && open) api("POST", "/v1/devices/link-sign-in", {}).then((r) => setUrl(r.url), (e) => setError(said(e)))
+    if (me && open) api("POST", "/api/devices/link-sign-in", {}).then((r) => setUrl(r.url), (e) => setError(said(e)))
   }, [me, open])
   return (
     <ResponsiveDialog open={open} onOpenChange={setOpen} title="Sign-Ins" action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Done</Button>}>
@@ -1156,7 +1156,7 @@ function AddDevice({ data, open, setOpen }) {
   const [line, setLine] = useState(state.config?.install ? { loading: true } : null)
   useEffect(() => {
     if (!state.config?.install) return
-    api("POST", "/v1/pair", {}).then(
+    api("POST", "/api/pair", {}).then(
       ({ code }) => setLine({ text: `${state.config.install} && ~/.local/bin/${state.config.cli} join ${code}` }),
       (err) => setLine({ error: said(err) }),
     )
@@ -1202,7 +1202,7 @@ function AppSchedules({ m, asked, open, setOpen, done }) {
   async function choose(d) {
     setError("")
     try {
-      await api("POST", "/v1/devices/run_schedules", { device: d.key, app, scope })
+      await api("POST", "/api/devices/run_schedules", { device: d.key, app, scope })
       done()
     } catch (err) {
       setError(said(err))

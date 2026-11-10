@@ -6,20 +6,20 @@ import { platform } from "./platform.js";
 import { api, developer, shared } from "./request.js";
 import { keeping, leave, refreshState, screensKey, withWaiting } from "./store.js";
 
-/// `one.api` for a client's own screen: the node's /v1 at this origin, as this user; nothing else here. What
+/// `one.api` for a client's own screen: the node's /api at this origin, as this user; nothing else here. What
 /// changes who can do what, and letting devices in, this device answers itself, as its keyring signs it
 /// (onet's `settings`), at the same paths.
 async function clientApi(m) {
   const url = new URL(String(m.path || ""), location.origin);
-  if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn’t on your devices.");
+  if (url.origin !== location.origin || !url.pathname.startsWith("/api/") || url.pathname.startsWith("/api/auth/")) throw new Error("That isn’t on your devices.");
   const method = String(m.method || "GET").toUpperCase();
   let body = method === "GET" ? undefined : m.body ?? {};
-  if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = platform.client();
-  if (method === "GET" && !url.search && url.pathname === "/v1/state") return withWaiting(await shared(url.pathname));
-  if (method === "GET" && !url.search && url.pathname === "/v1/apps") return shared(url.pathname);
+  if (url.pathname === "/api/call" && body && typeof body === "object") body.client = platform.client();
+  if (method === "GET" && !url.search && url.pathname === "/api/state") return withWaiting(await shared(url.pathname));
+  if (method === "GET" && !url.search && url.pathname === "/api/apps") return shared(url.pathname);
   const out = await api(url.pathname + url.search, { method, body });
   if (method !== "GET") {
-    if (url.pathname === "/v1/devices/refuse") (notMine.add(String(body?.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "")), localStorage.setItem(NOT_MINE, JSON.stringify([...notMine].slice(-50))));
+    if (url.pathname === "/api/devices/refuse") (notMine.add(String(body?.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "")), localStorage.setItem(NOT_MINE, JSON.stringify([...notMine].slice(-50))));
     await refreshState().catch(() => {});
   }
   return out;

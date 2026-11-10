@@ -1,4 +1,4 @@
-//! Where the network keeps its data, `/v1/storage`: this machine's own programs' alone.
+//! Where the network keeps its data, `/api/storage`: this machine's own programs' alone.
 
 use axum::Json;
 use axum::extract::State;
@@ -9,7 +9,7 @@ use crate::api::{Body, Reply, Routes, Who};
 use crate::node::{Caller, Node};
 
 pub fn routes() -> Routes {
-    Routes::default().route("/v1/storage", Who::ThisMachine, get(storage).post(set))
+    Routes::default().route("/api/storage", Who::ThisMachine, get(storage).post(set))
 }
 
 async fn storage(State(node): State<Node>) -> Reply {

@@ -118,7 +118,7 @@ pub fn publish_latest(node: &crate::api::Client, key: &ssh_key::PrivateKey, thin
         let (sha256, size) = match path {
             None => ("-".to_string(), 0),
             Some(path) => {
-                let put = node.post("/v1/latest/put", json!({ "path": path }))?;
+                let put = node.post("/api/latest/put", json!({ "path": path }))?;
                 (put["sha256"].as_str().context("no hash")?.to_string(), put["size"].as_u64().unwrap_or(0))
             }
         };
@@ -126,10 +126,10 @@ pub fn publish_latest(node: &crate::api::Client, key: &ssh_key::PrivateKey, thin
     }
     let public = key.public_key().to_openssh()?;
     for _ in 0..16 {
-        let now = node.get("/v1/latest")?;
+        let now = node.get("/api/latest")?;
         let here = now["text"].as_str().and_then(|t| Latest::read(&public, t).ok()).unwrap_or_default();
         let text = here.merged(made.iter().cloned()).signed(key)?;
-        if node.post("/v1/latest", json!({ "text": text, "tag": now["tag"] }))?["replaced"] == true {
+        if node.post("/api/latest", json!({ "text": text, "tag": now["tag"] }))?["replaced"] == true {
             return Ok(());
         }
     }

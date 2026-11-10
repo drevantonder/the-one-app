@@ -237,8 +237,8 @@ function Y() {
 	].includes(one.params?.tab) ? one.params.tab : "devices"), [p, m] = r({}), [h, y] = r(""), [x, S] = r(null), [E, P, F] = D(), [L, R] = r(""), [, z] = r(0), B = n([]), V = n(!1);
 	async function H() {
 		try {
-			let [e, t] = await Promise.all([j("GET", "/v1/state"), one.device()]), n = [], r = null, a = [B.current.length ? null : j("GET", "/v1/apps").then((e) => B.current = e, () => {}), j("POST", "/v1/devices/requests", {}).then((e) => n = e.filter((e) => e.code), () => {})];
-			return t.keys && a.push(j("GET", "/v1/devices/seen").then((e) => r = e || {}, () => {})), await Promise.all(a), V.current ? void 0 : (i({
+			let [e, t] = await Promise.all([j("GET", "/api/state"), one.device()]), n = [], r = null, a = [B.current.length ? null : j("GET", "/api/apps").then((e) => B.current = e, () => {}), j("POST", "/api/devices/requests", {}).then((e) => n = e.filter((e) => e.code), () => {})];
+			return t.keys && a.push(j("GET", "/api/devices/seen").then((e) => r = e || {}, () => {})), await Promise.all(a), V.current ? void 0 : (i({
 				state: e,
 				device: t,
 				apps: B.current,
@@ -276,7 +276,7 @@ function Y() {
 	async function W(e) {
 		let t = String(e).toUpperCase().replace(/[^A-Z2-7]/g, "");
 		try {
-			let e = await j("POST", "/v1/devices/approve", { code: t });
+			let e = await j("POST", "/api/devices/approve", { code: t });
 			S({
 				code: t,
 				r: e
@@ -295,7 +295,7 @@ function Y() {
 		}, z((e) => e + 1);
 		for (let e of n ? [te, ee] : [ee]) setTimeout(() => J[r]?.at === i && H(), e + 500);
 		try {
-			await j("POST", "/v1/service", {
+			await j("POST", "/api/service", {
 				device: e.device,
 				name: e.name ?? e.service,
 				on: t
@@ -342,7 +342,7 @@ function Y() {
 					}
 				}
 			}
-		}), one.tap(), U(() => j("POST", "/v1/settings", {
+		}), one.tap(), U(() => j("POST", "/api/settings", {
 			name: "priority",
 			value: f
 		})));
@@ -398,7 +398,7 @@ function Y() {
 			me: e.me
 		}) : r[a].title === "This Device’s Code" ? U(async () => one.alert({
 			title: "This Device’s Code",
-			text: (await j("GET", "/v1/devices/code")).code
+			text: (await j("GET", "/api/devices/code")).code
 		})) : e.me ? le() : Z(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null));
 	}
 	async function Z(e, t, n) {
@@ -412,7 +412,7 @@ function Y() {
 			action: "Remove",
 			danger: !0
 		}) && (one.tap("medium"), U(async () => {
-			for (let e of t) await j("POST", "/v1/devices/remove", { device: e });
+			for (let e of t) await j("POST", "/api/devices/remove", { device: e });
 		}));
 	}
 	async function Q(e) {
@@ -422,7 +422,7 @@ function Y() {
 			action: "Remove",
 			danger: !0
 		}) && U(async () => {
-			for (let t of e.old) await j("POST", "/v1/devices/remove", { device: t.key });
+			for (let t of e.old) await j("POST", "/api/devices/remove", { device: t.key });
 		});
 	}
 	async function le() {
@@ -717,7 +717,7 @@ function ae(t) {
 		children: [S, C]
 	}), n[33] = S, n[34] = C, n[35] = w) : w = n[35];
 	let T;
-	n[36] !== a || n[37] !== r.code ? (T = () => a(r.code, () => j("POST", "/v1/devices/refuse", { code: r.code })), n[36] = a, n[37] = r.code, n[38] = T) : T = n[38];
+	n[36] !== a || n[37] !== r.code ? (T = () => a(r.code, () => j("POST", "/api/devices/refuse", { code: r.code })), n[36] = a, n[37] = r.code, n[38] = T) : T = n[38];
 	let E = r.yours ? "Not Me" : "Not Them", D;
 	n[39] !== i || n[40] !== T || n[41] !== E ? (D = /* @__PURE__ */ k(o, {
 		variant: "outline",
@@ -727,7 +727,7 @@ function ae(t) {
 		children: E
 	}), n[39] = i, n[40] = T, n[41] = E, n[42] = D) : D = n[42];
 	let O;
-	n[43] !== a || n[44] !== r.code ? (O = () => a(r.code, () => j("POST", "/v1/devices/approve", {
+	n[43] !== a || n[44] !== r.code ? (O = () => a(r.code, () => j("POST", "/api/devices/approve", {
 		code: r.code,
 		confirm: !0
 	})), n[43] = a, n[44] = r.code, n[45] = O) : O = n[45];
@@ -785,7 +785,7 @@ function se(t) {
 	n[0] !== c || n[1] !== a ? (m = async function() {
 		one.tap(), d(!0), p("");
 		try {
-			await j("POST", "/v1/devices/approve", {
+			await j("POST", "/api/devices/approve", {
 				code: c,
 				confirm: !0
 			}), a();
@@ -978,7 +978,7 @@ function ce(t) {
 									variant: "ghost",
 									size: "sm",
 									className: "text-destructive",
-									onClick: () => g(() => j("POST", "/v1/devices/stop_schedules", {
+									onClick: () => g(() => j("POST", "/api/devices/stop_schedules", {
 										device: e.endpoint,
 										app: e.app,
 										scope: e.scope
@@ -1346,10 +1346,10 @@ function we(t) {
 			p(!0), h("");
 			try {
 				if (!l) {
-					d((await j("POST", "/v1/devices/restore", { code: s })).said), p(!1);
+					d((await j("POST", "/api/devices/restore", { code: s })).said), p(!1);
 					return;
 				}
-				await j("POST", "/v1/devices/restore", {
+				await j("POST", "/api/devices/restore", {
 					code: s,
 					confirm: !0
 				}), one.tap("success"), o();
@@ -1415,7 +1415,7 @@ function Te(t) {
 		if (b && !p) {
 			m(!0), g("");
 			try {
-				for (let e of l) await j("POST", "/v1/name", {
+				for (let e of l) await j("POST", "/api/name", {
 					key: e,
 					name: d.trim()
 				});
@@ -1471,8 +1471,8 @@ function De(t) {
 	n[0] !== l || n[1] !== o || n[2] !== u || n[3] !== a ? (b = async function() {
 		h(!0), _("");
 		try {
-			u && await j("POST", "/v1/erase", { key: o });
-			for (let e of a) await j("POST", "/v1/devices/remove", { device: e });
+			u && await j("POST", "/api/erase", { key: o });
+			for (let e of a) await j("POST", "/api/devices/remove", { device: e });
 			one.tap("success"), l();
 		} catch (e) {
 			_(M(e)), h(!1);
@@ -1518,7 +1518,7 @@ function Oe(n) {
 	i[0] === u ? x = i[1] : (x = async function(e) {
 		f(e.id), h("");
 		try {
-			await j("POST", "/v1/devices/forget-sign-in", {
+			await j("POST", "/api/devices/forget-sign-in", {
 				key: e.key,
 				...e.account ? { account: e.account } : {}
 			}), one.tap("success"), u();
@@ -1529,7 +1529,7 @@ function Oe(n) {
 	let S = x, C;
 	i[2] === Symbol.for("react.memo_cache_sentinel") ? (C = async () => {
 		try {
-			_((await j("POST", "/v1/devices/record-sign-in", {})).account || null);
+			_((await j("POST", "/api/devices/record-sign-in", {})).account || null);
 		} catch (e) {
 			h(M(e));
 		}
@@ -1538,7 +1538,7 @@ function Oe(n) {
 	i[3] === u ? T = i[4] : (T = async function() {
 		f("linked"), h("");
 		try {
-			await j("POST", "/v1/devices/record-sign-in", { confirm: !0 }), one.tap("success"), _(null), u();
+			await j("POST", "/api/devices/record-sign-in", { confirm: !0 }), one.tap("success"), _(null), u();
 		} catch (e) {
 			h(M(e));
 		}
@@ -1553,7 +1553,7 @@ function Oe(n) {
 	}, O = [s, c], i[5] = s, i[6] = c, i[7] = D, i[8] = O) : (D = i[7], O = i[8]), t(D, O);
 	let [N, P] = r(""), F, I;
 	i[9] !== s || i[10] !== c ? (F = () => {
-		s && c && j("POST", "/v1/devices/link-sign-in", {}).then((e) => P(e.url), (e) => h(M(e)));
+		s && c && j("POST", "/api/devices/link-sign-in", {}).then((e) => P(e.url), (e) => h(M(e)));
 	}, I = [s, c], i[9] = s, i[10] = c, i[11] = F, i[12] = I) : (F = i[11], I = i[12]), t(F, I);
 	let L = y, R;
 	i[13] === l ? R = i[14] : (R = /* @__PURE__ */ k(o, {
@@ -1663,7 +1663,7 @@ function je(n) {
 	i[0] === l.config?.install ? d = i[1] : (d = l.config?.install ? { loading: !0 } : null, i[0] = l.config?.install, i[1] = d);
 	let [f, m] = r(d), h;
 	i[2] === l.config ? h = i[3] : (h = () => {
-		l.config?.install && j("POST", "/v1/pair", {}).then((e) => {
+		l.config?.install && j("POST", "/api/pair", {}).then((e) => {
 			let { code: t } = e;
 			return m({ text: `${l.config.install} && ~/.local/bin/${l.config.cli} join ${t}` });
 		}, (e) => m({ error: M(e) }));
@@ -1746,7 +1746,7 @@ function Ne(t) {
 	n[2] !== d || n[3] !== l || n[4] !== u ? (x = async function(e) {
 		g("");
 		try {
-			await j("POST", "/v1/devices/run_schedules", {
+			await j("POST", "/api/devices/run_schedules", {
 				device: e.key,
 				app: d,
 				scope: u

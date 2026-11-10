@@ -47,7 +47,7 @@ pub trait Me: Signs {
     fn write(&self, content: Content) -> impl Future<Output = Result<()>>;
     /// Each epoch of `scope` sealed to it, opened, each the one its entry names.
     fn held(&self, scope: &Scope) -> impl Future<Output = Result<Vec<(u32, [u8; 32])>>>;
-    /// Keeps a key it sealed, as `POST /v1/keys` takes it: one there already fails with `code::ALREADY`.
+    /// Keeps a key it sealed, as `POST /api/keys` takes it: one there already fails with `code::ALREADY`.
     fn keep_key(&self, sealed: Value) -> impl Future<Output = Result<()>>;
     /// `app`'s key in epoch `n` of `scope`.
     fn app_key(&self, scope: &Scope, app: &str, n: u32) -> impl Future<Output = Result<[u8; 32]>>;
@@ -110,33 +110,33 @@ enum Route {
 /// it with this alone (`on_a_node`), false where the node serves that path itself: its own name, and services, which it serves for
 /// more than its own programs, and a tool that is a route (`core_tools::Runs::Route`), which asks `answer_as_mine` itself.
 const ROUTES: &[(&str, &str, Route, bool)] = &[
-    ("POST", "/v1/role", Route::Role, true),
-    ("POST", "/v1/devices/remove", Route::Remove, false),
-    ("POST", "/v1/settings", Route::Settings, true),
-    ("POST", "/v1/group", Route::Group, true),
-    ("POST", "/v1/invite", Route::Invite, true),
-    ("POST", "/v1/accept", Route::Accept, true),
-    ("POST", "/v1/member", Route::Member, true),
-    ("POST", "/v1/groups/handle", Route::Handle, false),
-    ("POST", "/v1/name", Route::Name, false),
-    ("POST", "/v1/service", Route::Service, false),
-    ("POST", "/v1/retire", Route::Retire, true),
-    ("POST", "/v1/devices/forget-sign-in", Route::ForgetSignIn, true),
-    ("POST", "/v1/devices/link-sign-in", Route::LinkSignIn, true),
-    ("POST", "/v1/devices/record-sign-in", Route::RecordSignIn, true),
-    ("POST", "/v1/devices/invite", Route::InviteLink, false),
-    ("POST", "/v1/devices/invite/withdraw", Route::WithdrawInvite, true),
-    ("POST", "/v1/devices/run_schedules", Route::RunSchedules, false),
-    ("POST", "/v1/devices/stop_schedules", Route::StopSchedules, false),
-    ("POST", "/v1/devices/requests", Route::Requests, false),
-    ("POST", "/v1/devices/approve", Route::Approve, false),
-    ("POST", "/v1/devices/refuse", Route::Refuse, true),
-    ("GET", "/v1/devices/seen", Route::Seen, true),
+    ("POST", "/api/role", Route::Role, true),
+    ("POST", "/api/devices/remove", Route::Remove, false),
+    ("POST", "/api/settings", Route::Settings, true),
+    ("POST", "/api/group", Route::Group, true),
+    ("POST", "/api/invite", Route::Invite, true),
+    ("POST", "/api/accept", Route::Accept, true),
+    ("POST", "/api/member", Route::Member, true),
+    ("POST", "/api/groups/handle", Route::Handle, false),
+    ("POST", "/api/name", Route::Name, false),
+    ("POST", "/api/service", Route::Service, false),
+    ("POST", "/api/retire", Route::Retire, true),
+    ("POST", "/api/devices/forget-sign-in", Route::ForgetSignIn, true),
+    ("POST", "/api/devices/link-sign-in", Route::LinkSignIn, true),
+    ("POST", "/api/devices/record-sign-in", Route::RecordSignIn, true),
+    ("POST", "/api/devices/invite", Route::InviteLink, false),
+    ("POST", "/api/devices/invite/withdraw", Route::WithdrawInvite, true),
+    ("POST", "/api/devices/run_schedules", Route::RunSchedules, false),
+    ("POST", "/api/devices/stop_schedules", Route::StopSchedules, false),
+    ("POST", "/api/devices/requests", Route::Requests, false),
+    ("POST", "/api/devices/approve", Route::Approve, false),
+    ("POST", "/api/devices/refuse", Route::Refuse, true),
+    ("GET", "/api/devices/seen", Route::Seen, true),
     // A machine with a node that opens the Vault seals what's in it to the new key at once.
-    ("POST", "/v1/vault/grant", Route::VaultGrant, false),
-    ("POST", "/v1/devices/recovery-holder", Route::RecoveryHolder, true),
-    ("GET", "/v1/devices/code", Route::Code, true),
-    ("POST", "/v1/devices/restore", Route::Restore, true),
+    ("POST", "/api/vault/grant", Route::VaultGrant, false),
+    ("POST", "/api/devices/recovery-holder", Route::RecoveryHolder, true),
+    ("GET", "/api/devices/code", Route::Code, true),
+    ("POST", "/api/devices/restore", Route::Restore, true),
 ];
 
 /// What the OpenAPI document says of a route: a line for whoever reads it (`Tool`'s own, for a tool's route), and the body
@@ -242,8 +242,8 @@ pub struct Invited {
     until: u64,
 }
 
-/// The answer to a request a device answers itself, as a node's route of the same path would (`/v1/role`, `/v1/remove`,
-/// `/v1/devices/approve`, …): none for any other, which goes to a node. Its body is the route's own (`body`), every
+/// The answer to a request a device answers itself, as a node's route of the same path would (`/api/role`, `/api/remove`,
+/// `/api/devices/approve`, …): none for any other, which goes to a node. Its body is the route's own (`body`), every
 /// field known and of its kind, or it's refused.
 pub async fn answer(m: &impl Me, method: &str, path: &str, body: &[u8]) -> Option<Result<Value>> {
     let path = path.split('?').next().unwrap_or(path);
@@ -1239,7 +1239,7 @@ async fn approve_code(m: &impl Me, code: &str, confirm: bool) -> Result<Value> {
     approve(m, &r, &joining).await
 }
 
-/// Whether what `POST /v1/devices/approve` said of a device without `confirm` lets it in from its notification, with no
+/// Whether what `POST /api/devices/approve` said of a device without `confirm` lets it in from its notification, with no
 /// card read: only one of this user's own, taking none out, that signed in on itself. A sign-in finished from a link may be
 /// someone else's device, so it waits for the card that says so.
 pub fn approves_from_a_note(about: &Value) -> bool {

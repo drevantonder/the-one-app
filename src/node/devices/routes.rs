@@ -13,19 +13,19 @@ use crate::node::Node;
 
 pub fn routes() -> Routes {
     Routes::default()
-        .route("/v1/pair", Who::Clients, post(pair))
+        .route("/api/pair", Who::Clients, post(pair))
         .says(Op::post("A pairing code for a new device or someone new").body::<Pair>().answers_as(json!({
             "type": "object",
             "required": ["code", "user"],
             "properties": { "code": { "type": "string", "description": "to give the new device" }, "user": { "type": "string", "description": "whose it will be" } }
         })))
-        .route("/v1/name", Who::ThisMachine, post(name))
-        .route("/v1/erase", Who::Clients, post(erase))
+        .route("/api/name", Who::ThisMachine, post(name))
+        .route("/api/erase", Who::Clients, post(erase))
         .says(Op::post("Erase what a device keeps").body::<Device>().answers_as(json!({ "type": "object", "required": ["erasing"], "properties": { "erasing": { "type": "string", "description": "the device's name" } } })))
-        .route("/v1/devices/approve-with-recovery", Who::ThisMachine, post(approve_with_recovery))
-        .route("/v1/devices/recovery-key/replace", Who::ThisMachine, post(replace_recovery))
-        .route("/v1/devices/recovery-holders", Who::Clients, get(recovery_holders))
-        .route("/v1/devices/recovery-holders/seal", Who::ThisMachine, post(seal_recovery))
+        .route("/api/devices/approve-with-recovery", Who::ThisMachine, post(approve_with_recovery))
+        .route("/api/devices/recovery-key/replace", Who::ThisMachine, post(replace_recovery))
+        .route("/api/devices/recovery-holders", Who::Clients, get(recovery_holders))
+        .route("/api/devices/recovery-holders/seal", Who::ThisMachine, post(seal_recovery))
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]

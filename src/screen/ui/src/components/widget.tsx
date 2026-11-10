@@ -1,4 +1,4 @@
-// A widget drawn from its tree (`GET /v1/widgets`): a card under its title, the same on the pages (src/screen/home)
+// A widget drawn from its tree (`GET /api/widgets`): a card under its title, the same on the pages (src/screen/home)
 // and in a chat's view (src/mcp_view.html). The Apple, Android and Windows widgets draw the same trees natively. A
 // tree is the app's, so nothing in it is ever markup: what's drawn is text, a number (`num`), or one of the names here.
 // `host` is what buttons, toggles and links act through: `run(app, tool, input, widget)` → the error's text for users if

@@ -13,7 +13,7 @@ use crate::node::{Caller, Node};
 
 pub fn routes() -> Routes {
     Routes::default()
-        .route("/v1/apps", Who::Clients, get(apps))
+        .route("/api/apps", Who::Clients, get(apps))
         .says(Op::get("Every app the caller can see, with its tools where it's added for them").answers_as(json!({
             "type": "array",
             "items": {
@@ -37,12 +37,12 @@ pub fn routes() -> Routes {
                 "additionalProperties": true
             }
         })))
-        .route("/v1/labs", Who::Clients, get(labs))
+        .route("/api/labs", Who::Clients, get(labs))
         .says(Op::get("Every lab, for an admin").answers_as(json!({
             "type": "array",
             "items": { "type": "object", "required": ["title", "description", "on", "setting"], "properties": { "title": { "type": "string" }, "description": { "type": "string" }, "on": { "type": "boolean" }, "setting": { "type": "string" } }, "additionalProperties": true }
         })))
-        .route("/v1/deploy", Who::Clients, post(deploy))
+        .route("/api/deploy", Who::Clients, post(deploy))
         .says(Op::post("Deploy an app, making it first if there's none by that name").body::<Deploy>().answers_as(json!({
             "type": "object",
             "required": ["bundle", "made", "here"],
@@ -56,11 +56,11 @@ pub fn routes() -> Routes {
                 "failed": { "type": "string", "description": "why it doesn't start" }
             }
         })))
-        .route("/v1/schedule", Who::ThisMachine, post(schedule))
-        .route("/v1/arrange", Who::Clients, post(arrange))
+        .route("/api/schedule", Who::ThisMachine, post(schedule))
+        .route("/api/arrange", Who::Clients, post(arrange))
         .says(Op::post("Arrange one of the caller's pages").body::<Arrange>().done())
-        .route("/v1/fork", Who::ThisMachine, post(fork))
-        .route("/v1/source/{app}", Who::ThisMachine, get(source))
+        .route("/api/fork", Who::ThisMachine, post(fork))
+        .route("/api/source/{app}", Who::ThisMachine, get(source))
 }
 
 /// Who owns an app, as a request names them: `user:<id>`, `group:<id>`, `admins`, or a group's name.

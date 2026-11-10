@@ -19,7 +19,7 @@ function named(method, path, body) {
   try {
     const { id, client, ...rest } = JSON.parse(body);
     said = JSON.stringify(rest);
-    if (path === "/v1/call") return { exact: `${method} ${path} ${said}`, loose: `${rest.app}/${rest.tool}` };
+    if (path === "/api/call") return { exact: `${method} ${path} ${said}`, loose: `${rest.app}/${rest.tool}` };
   } catch {}
   return { exact: `${method} ${path} ${said ?? ""}`, loose: `${method} ${path.split("?")[0]}` };
 }
@@ -31,7 +31,7 @@ export function replaying(calls) {
   let stage = 0;
   const all = calls.map((c) => ({ ...c, ...named(c.method, c.path, c.body) }));
   return async (method, path, headers, body) => {
-    if (path.startsWith("/v1/events")) return new Response(null, { status: 204 });
+    if (path.startsWith("/api/events")) return new Response(null, { status: 204 });
     const { exact, loose } = named(method, path, body);
     let found = all.filter((c) => c.exact === exact);
     if (!found.length) found = all.filter((c) => c.loose === loose);
@@ -50,7 +50,7 @@ export const recording = {
   calls: [],
   async fetch(send, method, path, headers, body, ...rest) {
     const r = await send(method, path, headers, body, ...rest);
-    if (path.startsWith("/v1/events")) return r;
+    if (path.startsWith("/api/events")) return r;
     const call = { method, path, body, status: r.status, headers: Object.fromEntries(r.headers) };
     recording.calls.push(call);
     const bytes = new Uint8Array(await r.clone().arrayBuffer());
@@ -62,12 +62,12 @@ export const recording = {
     return r;
   },
   saved() {
-    const apps = recording.calls.findLast((c) => c.path.split("?")[0] === "/v1/apps");
+    const apps = recording.calls.findLast((c) => c.path.split("?")[0] === "/api/apps");
     const listed = JSON.parse(apps?.text || "[]");
     const reads = (app, tool) => (Array.isArray(listed) ? listed : listed.apps || []).find((a) => a.name === app)?.tools?.some((t) => t.name === tool && t.reads === true);
     let stage = 0;
     return JSON.stringify(recording.calls.map((c) => {
-      const { app, tool } = c.path === "/v1/call" ? JSON.parse(c.body) : {};
+      const { app, tool } = c.path === "/api/call" ? JSON.parse(c.body) : {};
       const write = !!tool && !reads(app, tool);
       if (write) stage++;
       return { ...c, write, stage };

@@ -676,7 +676,7 @@ function Insights() {
     const mine = ++asked.current
     setLoading(true)
     try {
-      const got = await one.api("POST", "/v1/insights/insights", { since: range, limit: 2000 })
+      const got = await one.api("POST", "/api/insights/insights", { since: range, limit: 2000 })
       if (mine !== asked.current) return
       setData({ ...got, at: Date.now() })
       setProblem(null)

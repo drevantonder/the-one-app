@@ -23,7 +23,7 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function api(path, { method = "GET", body, query, raw, signal, since } = {}) {
   const url = new URL(path, location.origin);
   for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
-  if (url.pathname === "/v1/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
+  if (url.pathname === "/api/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
   const trace = developer.on() ? developer.start(url.pathname, body, since) : null;
   try {
     const out = await sending(url, method, body, raw, signal, trace);
@@ -104,8 +104,8 @@ export const developer = {
   /// Never its input or query. `since` (`{ at, perf, first }`) is when what it's for began, if earlier: a screen's
   /// page waits for this device to be let in, and the screen the window opened on from the page's start.
   start(path, body, since) {
-    const what = path === "/v1/call" ? { what: "call", app: body?.app, tool: body?.tool }
-      : path.startsWith("/v1/screens/") ? { what: "page", app: decodeURIComponent(path.split("/")[3] || ""), screen: decodeURIComponent(path.split("/")[4] || "") }
+    const what = path === "/api/call" ? { what: "call", app: body?.app, tool: body?.tool }
+      : path.startsWith("/api/screens/") ? { what: "page", app: decodeURIComponent(path.split("/")[3] || ""), screen: decodeURIComponent(path.split("/")[4] || "") }
       : { what: "request", path };
     const now = performance.now();
     return { ...what, at: Math.round(since ? since.at : Date.now()), started: since ? since.perf : now, waited: since ? Math.round(now - since.perf) : 0, first: !!since?.first, keys: 0, fetches: [] };
@@ -191,7 +191,7 @@ export async function call(app, tool, input = {}, reads = false) {
   if (reads && reading.has(same)) return reading.get(same);
   // A write no node answered may have run: asked again, it's the same call, so it runs once.
   const id = reads ? callId() : unanswered.get(same) || callId();
-  const asked = api("/v1/call", { method: "POST", body: { id, app, tool, input, client: platform.client() } }).then((r) => r.ok);
+  const asked = api("/api/call", { method: "POST", body: { id, app, tool, input, client: platform.client() } }).then((r) => r.ok);
   if (reads) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
   else asked.then(() => unanswered.delete(same), (err) => (err.unanswered ? unanswered.set(same, id) : unanswered.delete(same)));
   const out = await asked;

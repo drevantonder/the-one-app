@@ -612,7 +612,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
     assert!(missing.is_empty(), "{}", missing.join("\n"));
 }
 
-/// Every `state.<field>` the screens, the web client and the Workers read of `GET /v1/state` is a field the node says
+/// Every `state.<field>` the screens, the web client and the Workers read of `GET /api/state` is a field the node says
 /// (`one::state::State`): a field renamed or dropped there shows as a screen that reads nothing, which no one sees fail.
 /// The sample has a value in every field, so a field added to the Rust is added here (it won't compile otherwise).
 #[test]
@@ -757,7 +757,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
             (route.len() == asked.len() || (tail && asked.len() >= route.len() - 1)) && route.iter().zip(asked).all(|(r, a)| r.starts_with('{') || r == a || a.contains("${") || a.contains('{'))
         })
     };
-    const UNLISTED: [&str; 3] = ["/v1/keys", "/v1/steps", "/v1/steps/global"];
+    const UNLISTED: [&str; 4] = ["/api/keys", "/api/steps", "/api/steps/global", "/api/openapi.json"];
     let document = one::api::openapi::document(&[], true);
     let listed: Vec<Vec<String>> = document["paths"].as_object().unwrap().keys().map(|path| path.trim_start_matches('/').split('/').map(str::to_string).collect()).collect();
     for path in document["paths"].as_object().unwrap().keys() {
@@ -770,7 +770,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
         let mut stack = vec![root.join(dir)];
         while let Some(dir) = stack.pop() {
             let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-            if matches!(name, "node_modules" | "dist" | "target" | "test" | "relay" | "service") {
+            if matches!(name, "node_modules" | "dist" | "target" | "test" | "tests" | "relay" | "service") {
                 continue;
             }
             for f in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -790,7 +790,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
             if line.trim_start().starts_with("//") {
                 continue;
             }
-            for (at, _) in line.match_indices("/v1/") {
+            for (at, _) in line.match_indices("/api/") {
                 // A literal: the quote before it is its own start.
                 let start = line[..at].chars().next_back();
                 if !matches!(start, Some('"' | '\'' | '`')) {
@@ -798,6 +798,10 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
                 }
                 let end = line[at..].find(['"', '\'', '`', '?', ' ', '\\']).map_or(line.len(), |e| at + e);
                 let literal = &line[at..end];
+                // Auth's, at the gateway, not a node's.
+                if literal.starts_with("/api/auth") {
+                    continue;
+                }
                 let asked: Vec<&str> = literal.trim_start_matches('/').split('/').collect();
                 // A start of a path, which more is added to.
                 let place = format!("{}:{}: {}", path.strip_prefix(root).unwrap().display(), n + 1, &line[at..end]);
@@ -822,6 +826,7 @@ fn the_apis_paths_are_never_taken_for_an_apps() {
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
         if segments.len() > 1 && !segments[0].starts_with('{') {
             assert!(one::protocol::path::ROOTS.contains(&segments[0]), "{path} would be an app's: add {} to protocol::path::ROOTS", segments[0]);
+            assert!(segments[..2] != ["api", "auth"], "{path}: /api/auth/ is auth's at the gateway, so no node would ever be asked it");
         }
     }
 }

@@ -19,8 +19,8 @@ const IMAGE_MOST: usize = 2 << 20;
 pub async fn refresh(device: &onet::Device, dir: &Path) -> Result<(), String> {
     static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _one = ONE.lock().await;
-    let state: one::state::State = serde_json::from_value(crate::node(device, "GET", "/v1/state", None).await?).map_err(|e| e.to_string())?;
-    let apps = crate::node(device, "GET", "/v1/apps", None).await?;
+    let state: one::state::State = serde_json::from_value(crate::node(device, "GET", "/api/state", None).await?).map_err(|e| e.to_string())?;
+    let apps = crate::node(device, "GET", "/api/apps", None).await?;
     let apps: Vec<Value> = apps.as_array().cloned().unwrap_or_default();
     if state.user.is_none() {
         return Ok(());
@@ -36,7 +36,7 @@ pub async fn refresh(device: &onet::Device, dir: &Path) -> Result<(), String> {
     for (scope, title) in &pages {
         // An app's widgets show on a page it's added to.
         let here: Vec<&Value> = apps.iter().filter(|a| a["added"].as_array().is_some_and(|s| s.iter().any(|s| in_scope(s.as_str().unwrap_or(""), scope)))).collect();
-        let query = |extra: &str| format!("/v1/widgets?scope={}{extra}", url::form_urlencoded::byte_serialize(scope.as_bytes()).collect::<String>());
+        let query = |extra: &str| format!("/api/widgets?scope={}{extra}", url::form_urlencoded::byte_serialize(scope.as_bytes()).collect::<String>());
         let widgets = match crate::node(device, "GET", &query(""), None).await {
             Ok(Value::Array(w)) => w,
             _ => {

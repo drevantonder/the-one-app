@@ -15,7 +15,7 @@ use crate::api::Client;
 use crate::core_tools::Reader;
 use crate::tools;
 
-/// The core's tools, then every app added for this user that has tools, as `GET /v1/apps` gives them, with each
+/// The core's tools, then every app added for this user that has tools, as `GET /api/apps` gives them, with each
 /// tool's input as MCP takes it (files explained, `device` and `confirm` where they apply).
 pub fn catalog(node: &Client) -> Result<Vec<Value>> {
     Ok(catalogs(node)?.0)

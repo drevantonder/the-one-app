@@ -25,7 +25,7 @@ import kotlinx.serialization.json.longOrNull
 
 val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true; isLenient = true }
 
-/** A widget as `GET /v1/widgets` gives it: its tree at each size it draws. */
+/** A widget as `GET /api/widgets` gives it: its tree at each size it draws. */
 @Serializable
 data class WidgetInfo(
     val app: String,

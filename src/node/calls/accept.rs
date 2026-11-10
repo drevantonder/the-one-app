@@ -25,7 +25,7 @@ impl Node {
     }
 
     /// Runs a call one of the network's services asked for, as its user, wherever it runs: a service writes nothing
-    /// itself, and asks for the calls the program it offers makes (`/v1/call` where it's hosted).
+    /// itself, and asks for the calls the program it offers makes (`/api/call` where it's hosted).
     pub(in crate::node) async fn accept_service_call(&self, remote: Key, request: &Value) -> Reply {
         match self.accept_service(remote, request) {
             // Its own service on another of its user's devices: sent there.

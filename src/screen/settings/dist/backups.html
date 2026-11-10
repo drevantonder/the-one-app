@@ -47,7 +47,7 @@ function j() {
 	let [C, D] = r(S), [k, A] = r(null), [j, P] = r(""), [F, I] = r(!1), [L, R] = r(null), [ce, le] = r(!1), z = n(0), B;
 	i[1] === Symbol.for("react.memo_cache_sentinel") ? (B = async function() {
 		try {
-			let [e, t] = await Promise.all([te("POST", "/v1/backups/status", {}), te("GET", "/v1/state")]);
+			let [e, t] = await Promise.all([te("POST", "/api/backups/status", {}), te("GET", "/api/state")]);
 			u(e), x(t.user?.role === "admin"), D(t.network || {}), A(null);
 		} catch (e) {
 			let t = e;
@@ -64,7 +64,7 @@ function j() {
 	i[4] === Symbol.for("react.memo_cache_sentinel") ? (U = async function() {
 		I(!0), P("");
 		try {
-			await te("POST", "/v1/backups/now", {});
+			await te("POST", "/api/backups/now", {});
 		} catch (e) {
 			P(re(e)), I(!1);
 		}
@@ -74,7 +74,7 @@ function j() {
 	i[5] === Symbol.for("react.memo_cache_sentinel") ? (G = async function() {
 		P("");
 		try {
-			await te("POST", "/v1/backups/check", {});
+			await te("POST", "/api/backups/check", {});
 		} catch (e) {
 			P(re(e));
 		}
@@ -240,7 +240,7 @@ function ae(t) {
 		})) {
 			one.tap("medium"), p(!0), u("");
 			try {
-				await te("POST", "/v1/backups/remove_place", { place: i.id }), c();
+				await te("POST", "/api/backups/remove_place", { place: i.id }), c();
 			} catch (e) {
 				u(re(e)), p(!1);
 			}
@@ -423,7 +423,7 @@ function se(t) {
 		] : ["path"]).map((e) => [e, j[e]]));
 		I("title") && (e.title = j.title);
 		try {
-			let t = await te("POST", "/v1/backups/place", e);
+			let t = await te("POST", "/api/backups/place", e);
 			if (t.id) return u(), l(!1);
 			O(re(t.tried.find(ce).error));
 		} catch (e) {

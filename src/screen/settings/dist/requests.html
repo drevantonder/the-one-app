@@ -21,9 +21,9 @@ function S() {
 	r[1] === Symbol.for("react.memo_cache_sentinel") ? (M = async function() {
 		try {
 			let [e, t, n] = await Promise.all([
-				b("GET", "/v1/state"),
-				b("GET", "/v1/apps"),
-				b("GET", "/v1/vault/requests")
+				b("GET", "/api/state"),
+				b("GET", "/api/apps"),
+				b("GET", "/api/vault/requests")
 			]);
 			S({
 				state: e,
@@ -91,7 +91,7 @@ function S() {
 						variant: "ghost",
 						size: "sm",
 						disabled: !!A,
-						onClick: () => L(`join:${e.id}`, async () => (await b("POST", "/v1/member", {
+						onClick: () => L(`join:${e.id}`, async () => (await b("POST", "/api/member", {
 							group: e.id,
 							user: f,
 							role: null
@@ -101,7 +101,7 @@ function S() {
 						variant: "secondary",
 						size: "sm",
 						disabled: !!A,
-						onClick: () => L(`join:${e.id}`, async () => (one.tap(), await b("POST", "/v1/accept", { group: e.id }), !1), !0),
+						onClick: () => L(`join:${e.id}`, async () => (one.tap(), await b("POST", "/api/accept", { group: e.id }), !1), !0),
 						children: "Join"
 					})]
 				})

@@ -11,7 +11,7 @@ function iconBackground(app: App) {
     ? `${app.image_kind === "icon" ? "" : "white "}center / ${app.image_kind === "icon" ? "cover" : "70%"} no-repeat url(${JSON.stringify(image)})`
     : `linear-gradient(color-mix(in srgb, ${color} 80%, white), ${color})`
 }
-const iconImage = (app: App) => (/^(https:|data:image\/|\/v1\/images\/[0-9a-f]+$)/.test(app.image || "") ? app.image! : "")
+const iconImage = (app: App) => (/^(https:|data:image\/|\/api\/images\/[0-9a-f]+$)/.test(app.image || "") ? app.image! : "")
 
 /// An app's icon: a tile in the app's own colour (its `color`, as its app.js says), with its icon, or its first letter,
 /// in white; or its picture, a finished icon edge to edge, else a logo inset on white.

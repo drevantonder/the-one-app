@@ -110,7 +110,7 @@ export function app(native) {
     took: () => net.took(),
     removed: async () => (await net.still().catch(() => null)) === false,
     async leave(api) {
-      if (keys) await Promise.race([api("/v1/devices/remove", { method: "POST", body: { device: keys.key } }), new Promise((r) => setTimeout(r, 20_000))]).catch((err) => console.warn("leaving your devices:", err));
+      if (keys) await Promise.race([api("/api/devices/remove", { method: "POST", body: { device: keys.key } }), new Promise((r) => setTimeout(r, 20_000))]).catch((err) => console.warn("leaving your devices:", err));
     },
     nodes: (state) => net.ordered(state),
     settle: () => net.settle().catch((err) => console.warn("making this user's own keys:", err)),

@@ -63,7 +63,7 @@ var l = (() => {
 		from: i
 	}), { press: () => one.opening(e, t, n, r) }), k = (e, t, n = "main", r = {}) => O(n, r, e.name, t ? { scope: t.scope } : {}), A = (e, t, n) => s(e, "settings") ? k(e, t, "settings", n ? { add: !0 } : {}) : null, j = (e) => D() && s(D(), "app") && (e.deploys || 0) > 0 ? k(D(), null, "app", { app: e.name }) : null, M = () => D() ? k(D(), null, "main", { accounts: !0 }) : null, N = () => D() && k(D(), null)();
 	async function P(e, t, n = {}) {
-		return (await one.api("POST", "/v1/call", {
+		return (await one.api("POST", "/api/call", {
 			app: e,
 			tool: t,
 			input: n
@@ -97,7 +97,7 @@ var l = (() => {
 			icon: "minus-circle",
 			danger: !0,
 			section: !0,
-			run: () => I(() => one.api("POST", "/v1/remove/remove", {
+			run: () => I(() => one.api("POST", "/api/remove/remove", {
 				app: e.name,
 				scope: t.scope
 			}), (n) => n.map((n) => n.name === e.name ? {
@@ -116,7 +116,7 @@ var l = (() => {
 		n != null && e[n]?.run();
 	}
 	async function z(t) {
-		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await V(null, t);
+		[e.state, e.apps] = await Promise.all([one.api("GET", "/api/state"), one.api("GET", "/api/apps")]), t?.(), await V(null, t);
 	}
 	function B(t, n, r) {
 		let i = e.widgets[t] || [], a = Date.now(), o = (e) => (t) => t.app === e.app && t.widget === e.widget;
@@ -126,7 +126,7 @@ var l = (() => {
 		}]);
 		for (let i of n.filter((n) => n.late && !e.late.has(w(t, n)))) {
 			let n = w(t, i);
-			e.late.add(n), one.api("GET", `/v1/widgets?scope=${encodeURIComponent(t)}&kind=${encodeURIComponent(`${i.app}.${i.widget}`)}`).then(([n]) => {
+			e.late.add(n), one.api("GET", `/api/widgets?scope=${encodeURIComponent(t)}&kind=${encodeURIComponent(`${i.app}.${i.widget}`)}`).then(([n]) => {
 				n && (e.widgets[t] = [...(e.widgets[t] || []).filter((e) => !o(n)(e)), {
 					...n,
 					fetched: Date.now()
@@ -138,11 +138,11 @@ var l = (() => {
 	}
 	async function V(t, n) {
 		let r = (e) => `scope=${encodeURIComponent(e.scope)}`;
-		await Promise.all(d().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((r) => {
+		await Promise.all(d().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/api/widgets?${r(t)}`).then((r) => {
 			B(t.scope, r, n), e.failed.delete(t.scope);
 		}, () => void e.failed.add(t.scope)).then(() => {
 			e.read.add(t.scope), n?.();
-		}), one.api("GET", `/v1/badges?${r(t)}`).then((n) => {
+		}), one.api("GET", `/api/badges?${r(t)}`).then((n) => {
 			e.badges[t.scope] = n;
 		}, () => {}).then(() => n?.())]));
 	}
@@ -150,7 +150,7 @@ var l = (() => {
 	function U(t) {
 		let n, r, i = !1, a = /* @__PURE__ */ new Set(), o = (r) => {
 			r ? r.forEach((e) => a.add(e)) : i = !0, clearTimeout(n), n = setTimeout(() => {
-				let n = i ? z(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
+				let n = i ? z(t) : Promise.all([one.api("GET", "/api/apps").then((t) => {
 					e.apps = t;
 				}), V([...a], t)]);
 				i = !1, a.clear(), n.then(() => {

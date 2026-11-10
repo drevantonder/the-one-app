@@ -4,7 +4,7 @@ use super::*;
 
 /// This user's own devices, as this one sees them now: none while its node restarts.
 pub(super) fn devices() -> Vec<Value> {
-    let state = crate::node().get("/v1/state").unwrap_or_default();
+    let state = crate::node().get("/api/state").unwrap_or_default();
     let me = state["network"]["user"].clone();
     state["network"]["devices"].as_array().into_iter().flatten().filter(|d| d["user"] == me).cloned().collect()
 }
@@ -36,7 +36,7 @@ pub(super) fn limit(g: &one::cli::Given, default: u64) -> Result<Duration> {
 pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     keep_history()?;
     // Says so when no node answers, which later polls (a node restarting on the new build) never do.
-    crate::node().get("/v1/state")?;
+    crate::node().get("/api/state")?;
     let all: Vec<Value> = devices();
     ensure!(!all.is_empty(), "no devices are listed here yet");
     for n in names {

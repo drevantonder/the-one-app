@@ -16,7 +16,7 @@ export const home = (() => {
   // The tool that lists an app's accounts, the one it says does (`accounts: true`): none for an app without.
   const accountsTool = (a) => a?.tools?.find((o) => o.accounts)?.name;
   const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
-  /// Every page this user can read, as the node lists them (`pages` in `/v1/state`): theirs, their groups' in the
+  /// Every page this user can read, as the node lists them (`pages` in `/api/state`): theirs, their groups' in the
   /// order they chose, everyone's last. The ones they hid are marked, and left out of `pages`.
   const allPages = () => h.state?.pages || [];
   const pages = () => allPages().filter((p) => !p.hidden);
@@ -97,7 +97,7 @@ export const home = (() => {
   // MARK: Changing things
 
   async function call(a, tool, input = {}) {
-    return (await one.api("POST", "/v1/call", { app: a, tool, input })).ok;
+    return (await one.api("POST", "/api/call", { app: a, tool, input })).ok;
   }
 
   /// Says what went wrong, in the shell's own alert.
@@ -123,7 +123,7 @@ export const home = (() => {
     if (settings(a, p)) out.push({ title: "Settings", icon: "gear-six", run: settings(a, p) });
     if (inStore(a)) out.push({ title: "Open in App Store", icon: "bag", run: inStore(a) });
     if (canArrange(p.scope) && (a.deploys || 0) > 0) {
-      out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/v1/remove/remove", { app: a.name, scope: p.scope }),
+      out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/api/remove/remove", { app: a.name, scope: p.scope }),
         (apps) => apps.map((x) => (x.name === a.name ? { ...x, added: (x.added || []).filter((s) => (s.startsWith("user:") ? "user" : s) !== p.scope) } : x))) });
     }
     return out;
@@ -143,7 +143,7 @@ export const home = (() => {
   /// soon as there's something new to draw: the state and apps, then each page's widgets and badges as they come, so
   /// a slow one holds up only itself.
   async function load(drawn) {
-    [h.state, h.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]);
+    [h.state, h.apps] = await Promise.all([one.api("GET", "/api/state"), one.api("GET", "/api/apps")]);
     drawn?.();
     await loadWidgets(null, drawn);
   }
@@ -157,7 +157,7 @@ export const home = (() => {
     for (const w of read.filter((w) => w.late && !h.late.has(lateKey(scope, w)))) {
       const key = lateKey(scope, w);
       h.late.add(key);
-      one.api("GET", `/v1/widgets?scope=${encodeURIComponent(scope)}&kind=${encodeURIComponent(`${w.app}.${w.widget}`)}`).then(([fresh]) => {
+      one.api("GET", `/api/widgets?scope=${encodeURIComponent(scope)}&kind=${encodeURIComponent(`${w.app}.${w.widget}`)}`).then(([fresh]) => {
         if (fresh) h.widgets[scope] = [...(h.widgets[scope] || []).filter((x) => !same(fresh)(x)), { ...fresh, fetched: Date.now() }];
       }, () => void h.failed.add(scope)).then(() => {
         h.late.delete(key);
@@ -170,9 +170,9 @@ export const home = (() => {
   async function loadWidgets(only, drawn) {
     const q = (p) => `scope=${encodeURIComponent(p.scope)}`;
     await Promise.all(allPages().filter((p) => !only || only.includes(p.scope)).flatMap((p) => [
-      one.api("GET", `/v1/widgets?${q(p)}`).then((w) => { took(p.scope, w, drawn); h.failed.delete(p.scope); }, () => void h.failed.add(p.scope)).then(() => { h.read.add(p.scope); drawn?.(); }),
+      one.api("GET", `/api/widgets?${q(p)}`).then((w) => { took(p.scope, w, drawn); h.failed.delete(p.scope); }, () => void h.failed.add(p.scope)).then(() => { h.read.add(p.scope); drawn?.(); }),
       // Badges that couldn't be read stay as they were.
-      one.api("GET", `/v1/badges?${q(p)}`).then((b) => { h.badges[p.scope] = b; }, () => {}).then(() => drawn?.()),
+      one.api("GET", `/api/badges?${q(p)}`).then((b) => { h.badges[p.scope] = b; }, () => {}).then(() => drawn?.()),
     ]));
   }
 
@@ -191,7 +191,7 @@ export const home = (() => {
       clearTimeout(soon);
       soon = setTimeout(() => {
         // The apps too, for their icons.
-        const work = all ? load(draw) : Promise.all([one.api("GET", "/v1/apps").then((a) => { h.apps = a; }), loadWidgets([...only], draw)]);
+        const work = all ? load(draw) : Promise.all([one.api("GET", "/api/apps").then((a) => { h.apps = a; }), loadWidgets([...only], draw)]);
         all = false;
         only.clear();
         work.then(() => { draw(); schedule(); retry(); }).catch(() => {});

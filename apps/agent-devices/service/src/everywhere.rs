@@ -68,16 +68,16 @@ impl Devices {
         if !on.is_empty() {
             req["device"] = json!(on);
         }
-        Ok(self.host.post("/v1/call", &req)?["ok"].clone())
+        Ok(self.host.post("/api/call", &req)?["ok"].clone())
     }
 
     fn call_node_within(&self, on: &str, function: &str, input: &Value, limit: Duration) -> Result<Value> {
         let req = json!({ "app": NAME, "service": NAME, "function": function, "input": input, "device": on });
-        Ok(self.host.post_within("/v1/call", &req, limit)?["ok"].clone())
+        Ok(self.host.post_within("/api/call", &req, limit)?["ok"].clone())
     }
 
     pub(super) fn call_app(&self, tool: &str, input: &Value) -> Result<Value> {
-        Ok(self.host.post("/v1/call", &json!({ "app": NAME, "tool": tool, "input": input }))?["ok"].clone())
+        Ok(self.host.post("/api/call", &json!({ "app": NAME, "tool": tool, "input": input }))?["ok"].clone())
     }
 
     /// This device's name and the user's other online devices that run agent devices, as the node says.
@@ -90,7 +90,7 @@ impl Devices {
     /// This device's name and every online device that runs agent devices, this one too, in where things run first
     /// (the network's order).
     pub(super) fn ordered(&self) -> Result<(String, Vec<String>)> {
-        let st = self.host.get("/v1/state")?;
+        let st = self.host.get("/api/state")?;
         let mut devices: Vec<&Value> = st["network"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
         devices.sort_by_key(|d| d["order"].as_i64().unwrap_or(0));
         let all = devices

@@ -48,7 +48,7 @@ func main() {
 func serve(node string, w *whatsapp) {
 	poll := &http.Client{Timeout: 40 * time.Second, Transport: toNode}
 	for {
-		if err := post(node+"/v1/services/"+app, describe); err != nil {
+		if err := post(node+"/api/services/"+app, describe); err != nil {
 			log.Printf("registering: %v", err)
 			time.Sleep(3 * time.Second)
 			continue
@@ -73,7 +73,7 @@ func serve(node string, w *whatsapp) {
 				case err != nil:
 					reply = map[string]any{"error": err.Error()}
 				}
-				if err := post(fmt.Sprintf("%s/v1/services/%s/calls/%d", node, app, c.ID), reply); err != nil {
+				if err := post(fmt.Sprintf("%s/api/services/%s/calls/%d", node, app, c.ID), reply); err != nil {
 					log.Printf("answering %s: %v", c.Function, err)
 				}
 			}()
@@ -82,7 +82,7 @@ func serve(node string, w *whatsapp) {
 }
 
 func next(client *http.Client, node string) (*call, error) {
-	resp, err := client.Get(node + "/v1/services/" + app + "/calls")
+	resp, err := client.Get(node + "/api/services/" + app + "/calls")
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func request(client *http.Client, url string, body any) ([]byte, error) {
 }
 
 func callOn(node, device, function string, input, out any) error {
-	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toNode}, node+"/v1/call",
+	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toNode}, node+"/api/call",
 		map[string]any{"app": app, "service": app, "function": function, "input": input, "device": device})
 	if err != nil {
 		return err

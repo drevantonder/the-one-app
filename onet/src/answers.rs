@@ -27,7 +27,7 @@ pub trait Shelf {
 
 pub struct Answers<S> {
     shelf: S,
-    /// Each app's tools that only read, as `/v1/apps` last said, once it has.
+    /// Each app's tools that only read, as `/api/apps` last said, once it has.
     reads: Mutex<Option<HashMap<String, Vec<String>>>>,
 }
 
@@ -49,12 +49,12 @@ impl<S: Shelf> Answers<S> {
     /// A node's answer to a request, as it passes: the apps' list, to learn which calls only read, and what such a
     /// call answered, kept. Each is read whole first.
     pub async fn passing(&self, method: &str, path: &str, sent: &[u8], response: Response) -> Result<Response, Error> {
-        if response.status != 200 || !matches!((method, path), ("GET", "/v1/apps") | ("POST", "/v1/call")) {
+        if response.status != 200 || !matches!((method, path), ("GET", "/api/apps") | ("POST", "/api/call")) {
             return Ok(response);
         }
         let bytes = response.body.bytes().await?;
         match path {
-            "/v1/apps" => self.learn(&bytes),
+            "/api/apps" => self.learn(&bytes),
             _ => self.keep(sent, &bytes).await,
         }
         Ok(Response { body: Body::whole(bytes), ..response })
@@ -159,13 +159,13 @@ mod tests {
         let apps = serde_json::to_vec(&serde_json::json!([{ "name": "tally", "tools": [{ "name": "topics", "reads": true }, { "name": "post", "reads": false }] }])).unwrap();
         let call = |tool: &str, input: serde_json::Value| serde_json::to_vec(&serde_json::json!({ "id": "1", "app": "tally", "tool": tool, "input": input, "client": "mac" })).unwrap();
         let mine = Answers::new(Files::new(&dir, &SigningKey::from_bytes(&andre)));
-        mine.passing("GET", "/v1/apps", b"", response(&apps)).await.unwrap();
+        mine.passing("GET", "/api/apps", b"", response(&apps)).await.unwrap();
         for (sent, answer) in [
             (call("topics", serde_json::json!({ "scope": "user", "format": "json" })), &br#"{"ok":[{"path":"kitchen-reno"}]}"#[..]),
             (call("post", serde_json::json!({ "text": "hi" })), br#"{"ok":{"n":1}}"#),
             (call("topics", serde_json::json!({ "scope": "global" })), br#"{"error":"no"}"#),
         ] {
-            mine.passing("POST", "/v1/call", &sent, response(answer)).await.unwrap();
+            mine.passing("POST", "/api/call", &sent, response(answer)).await.unwrap();
         }
 
         // The same call, its input's fields in any order, gets what it answered; a write, or a failure, was never kept.

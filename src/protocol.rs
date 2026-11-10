@@ -51,17 +51,17 @@ pub mod header {
 /// The paths of the local API that more than one place names: what is kept apart by what a request runs (`keys::Route`),
 /// and what is the API's own, not an app's (`/<app>/…` is an app's, reached by git).
 pub mod path {
-    pub const CALL: &str = "/v1/call";
-    pub const SCREENS: &str = "/v1/screens/";
+    pub const CALL: &str = "/api/call";
+    pub const SCREENS: &str = "/api/screens/";
     pub const MCP: &str = "/mcp";
-    pub const WIDGETS: &str = "/v1/widgets";
-    pub const BADGES: &str = "/v1/badges";
-    pub const APPS: &str = "/v1/apps";
-    pub const VAULT: &str = "/v1/vault";
+    pub const WIDGETS: &str = "/api/widgets";
+    pub const BADGES: &str = "/api/badges";
+    pub const APPS: &str = "/api/apps";
+    pub const VAULT: &str = "/api/vault";
     pub const OPENAPI: &str = "/api/openapi.json";
     pub const HOOKS_PROMPT: &str = "/hooks/prompt";
     /// The first segments of the API's own routes with more under them (`routes()` holds to it: `api::tests`).
-    pub const ROOTS: [&str; 5] = ["v1", "api", "mcp", "hooks", "skills"];
+    pub const ROOTS: [&str; 4] = ["api", "mcp", "hooks", "skills"];
 
     /// The app an app's own request (`/<app>/…`, with something after) is for: none for the API's own.
     pub fn app_request(path: &str) -> Option<&str> {

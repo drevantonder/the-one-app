@@ -10,7 +10,7 @@ use crate::api::{Body, Me, Reply, Routes, Who, done};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
-    Routes::default().route("/v1/insights/report", Who::Clients, post(report)).says(Op::post("What went wrong on a client, and what it did before that").body::<Report>().done())
+    Routes::default().route("/api/insights/report", Who::Clients, post(report)).says(Op::post("What went wrong on a client, and what it did before that").body::<Report>().done())
 }
 
 /// `events`: what the client's timeline holds (`cloudflare/web/insights.js`), each `{ name, time, … }`.

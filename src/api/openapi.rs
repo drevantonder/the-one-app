@@ -1,5 +1,5 @@
 //! The node's API as one OpenAPI 3.2 document, for whoever asks, at `/api/openapi.json`: its tools (src/openapi.rs), the
-//! routes that say what they are (`Routes::says`), and what a client answers itself (`settings`). Not in it: a client's keys and signed steps (`/v1/keys`, `/v1/steps`), and what isn't the
+//! routes that say what they are (`Routes::says`), and what a client answers itself (`settings`). Not in it: a client's keys and signed steps (`/api/keys`, `/api/steps`), and what isn't the
 //! product's API, an app's own requests (`/<app>/…`, Repos' git among them).
 
 use axum::extract::State;
@@ -107,7 +107,7 @@ impl Op {
     }
 }
 
-/// The document for a caller who has `apps`, as `GET /v1/apps` gives them. Only this machine's own programs see what only
+/// The document for a caller who has `apps`, as `GET /api/apps` gives them. Only this machine's own programs see what only
 /// they may ask.
 pub fn document(apps: &[Value], this_machine: bool) -> Value {
     let mut doc = crate::openapi::document(apps);
@@ -141,7 +141,7 @@ pub fn document(apps: &[Value], this_machine: bool) -> Value {
     doc
 }
 
-/// A tool as an app lists it (`GET /v1/apps`), and the core's as `core_tools` do.
+/// A tool as an app lists it (`GET /api/apps`), and the core's as `core_tools` do.
 pub fn tool_spec() -> Value {
     json!({
         "type": "object",
@@ -195,9 +195,9 @@ mod tests {
         let apps = [json!({ "name": "notes", "added": ["user:a"], "tools": [{ "name": "add", "input": { "type": "object", "properties": {} } }, { "name": "_http" }] }), json!({ "name": "gone", "deleted": { "time": 1 }, "tools": [{ "name": "run" }] })];
         let theirs = super::document(&apps, false);
         let paths = theirs["paths"].as_object().unwrap();
-        assert!(paths.contains_key("/v1/call/notes/add") && !paths.contains_key("/v1/call/notes/_http"), "their app's tools, not its own");
-        assert!(!paths.keys().any(|p| p.starts_with("/v1/call/gone/")), "a deleted app's");
-        assert!(!paths.contains_key("/v1/join") && super::document(&apps, true)["paths"].get("/v1/join").is_some(), "only this machine's programs join");
+        assert!(paths.contains_key("/api/call/notes/add") && !paths.contains_key("/api/call/notes/_http"), "their app's tools, not its own");
+        assert!(!paths.keys().any(|p| p.starts_with("/api/call/gone/")), "a deleted app's");
+        assert!(!paths.contains_key("/api/join") && super::document(&apps, true)["paths"].get("/api/join").is_some(), "only this machine's programs join");
     }
 
     /// What a command line and MCP read of a document is what the app lists: each tool whole, a file it takes still a
@@ -224,7 +224,7 @@ mod tests {
         let vault = of("vault");
         assert_eq!(vault["runs"], "client");
         let list = vault["tools"].as_array().unwrap().iter().find(|t| t["id"] == "vault_list").unwrap();
-        assert_eq!(list["route"], "/v1/vault/list");
+        assert_eq!(list["route"], "/api/vault/list");
     }
 
     /// A route in the document says what it answers: one left to say anything is one a client can't read the shape of.

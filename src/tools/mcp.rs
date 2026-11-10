@@ -54,7 +54,7 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
     schema
 }
 
-/// A tool of `app` (as `GET /v1/apps` lists them) as MCP lists it, by `name`.
+/// A tool of `app` (as `GET /api/apps` lists them) as MCP lists it, by `name`.
 pub fn mcp_tool(app: &Value, tool: &Value, name: String) -> Value {
     let mut listed = json!({ "name": name, "description": tool["description"], "inputSchema": mcp_schema(app, tool), "annotations": crate::skills::hints(tool["reads"] == true, tool["confirm"] == true) });
     if tool["title"].is_string() {
@@ -88,7 +88,7 @@ fn mcp_file(node: &Client, v: &Value) -> Result<Value> {
         ensure!(bytes.len() <= MCP_FILE_LIMIT, "a file given as base64 is at most 1 MiB; give a file id or URL for a bigger one");
         (bytes, v["type"].as_str().or(v["mimeType"].as_str()).map(str::to_string), name)
     } else if let Some(id) = v["file"].as_str().or(v["blob"].as_str()) {
-        let blob = node.open(&format!("/v1/blobs/{id}"), None)?;
+        let blob = node.open(&format!("/api/blobs/{id}"), None)?;
         ensure!(blob.status == 200, "no file {id} for you");
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(&mut std::io::Read::take(blob.body, FILE_LIMIT as u64 + 1), &mut bytes)?;

@@ -239,7 +239,7 @@ fn cloudflare_node(dir: &Path) -> Result<()> {
     }
     let addr = running(dir).context("the throwaway network didn't start again")?;
     let key = settings.cloudflare_node_endpoint().context("the throwaway network's Workers have no Cloudflare node key")?;
-    node_at(dir, &addr).post("/v1/settings", json!({ "name": one::database::scopes::CLOUDFLARE_NODE, "value": key }))?;
+    node_at(dir, &addr).post("/api/settings", json!({ "name": one::database::scopes::CLOUDFLARE_NODE, "value": key }))?;
     println!("The throwaway network's Cloudflare node runs beside its Workers, its endpoint {}.", &key[..8]);
     Ok(())
 }

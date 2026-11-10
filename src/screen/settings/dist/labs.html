@@ -18,7 +18,7 @@ function y() {
 	async function E() {
 		let e = ++T.current;
 		try {
-			let t = await one.api("GET", "/v1/labs");
+			let t = await one.api("GET", "/api/labs");
 			if (e !== T.current) return;
 			i(t), y(null);
 		} catch (t) {
@@ -34,7 +34,7 @@ function y() {
 			[e.setting]: t
 		}));
 		try {
-			await one.api("POST", "/v1/settings", {
+			await one.api("POST", "/api/settings", {
 				name: e.setting,
 				value: t ? "on" : null
 			});

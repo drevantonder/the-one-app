@@ -36,7 +36,7 @@ function Groups() {
 
   async function load() {
     try {
-      setState(await api("GET", "/v1/state"))
+      setState(await api("GET", "/api/state"))
       setProblem(null)
     } catch (e) {
       setProblem(one.plain(e))
@@ -68,7 +68,7 @@ function Groups() {
     setError("")
     setPending((p) => ({ ...p, [key]: role }))
     try {
-      await api("POST", "/v1/member", { group, user, role })
+      await api("POST", "/api/member", { group, user, role })
       // Leaving, there's nothing left to show here.
       if (user === me && role === null) setOpenId(null)
     } catch (e) {
@@ -84,7 +84,7 @@ function Groups() {
     setJoining(id)
     setError("")
     try {
-      await api("POST", "/v1/accept", { group: id })
+      await api("POST", "/api/accept", { group: id })
       one.tap("success")
     } catch (e) {
       setError(said(e))
@@ -100,7 +100,7 @@ function Groups() {
     setSent((all) => [...all, item])
     one.tap("success")
     try {
-      await api("POST", "/v1/invite", { group, user, role })
+      await api("POST", "/api/invite", { group, user, role })
     } catch (e) {
       setError(said(e))
     }
@@ -282,7 +282,7 @@ function NewGroup({ open, setOpen, made }) {
     setBusy(true)
     setError("")
     try {
-      const group = await api("POST", "/v1/group", { name: name.trim() })
+      const group = await api("POST", "/api/group", { name: name.trim() })
       setOpen(false)
       one.tap("success")
       made(group.group)
@@ -367,7 +367,7 @@ function Handle({ g, open, setOpen, saved }) {
     setBusy(true)
     setError("")
     try {
-      await api("POST", "/v1/groups/handle", { handle: value, group: g.id })
+      await api("POST", "/api/groups/handle", { handle: value, group: g.id })
       setOpen(false)
       one.tap("success")
       saved()

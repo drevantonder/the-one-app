@@ -82,7 +82,7 @@ pub struct Device {
     /// Held while it connects, so it connects once.
     stage: tokio::sync::Mutex<Stage>,
     keyring: Keyring,
-    /// The order things run in, as the node last said (`/v1/state`): only ever used to sort nodes it knows.
+    /// The order things run in, as the node last said (`/api/state`): only ever used to sort nodes it knows.
     order: Mutex<Vec<[u8; 32]>>,
     /// The device it's on, as its app says (`on`): signing in there again replaces this sign-in.
     on: Mutex<Option<String>>,
@@ -396,7 +396,7 @@ impl Device {
     }
 
     /// A request to its network's nodes as its user (`Keyring::request`), given up on once the relay says this device
-    /// is out. `/v1/state` is read for the order things run in, and a screen's calls that only read are kept.
+    /// is out. `/api/state` is read for the order things run in, and a screen's calls that only read are kept.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: impl Into<Sent>) -> Result<Response, Error> {
         let body = body.into();
         let traced = self.developer().then(|| (now(), std::time::Instant::now(), what(path, body.bytes())));
@@ -452,7 +452,7 @@ impl Device {
     async fn request(&self, client: &Client, method: &str, path: &str, headers: Vec<(String, String)>, body: Sent, fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
         let request = Request { method: method.into(), path: path.into(), headers, body: body.clone() };
         let response = self.keyring.request(client, self, request, now() + HANDED_FOR, fetches).await?;
-        if response.status == 200 && path.split('?').next() == Some("/v1/state") {
+        if response.status == 200 && path.split('?').next() == Some("/api/state") {
             let bytes = response.body.bytes().await?;
             self.learn_order(&bytes).await;
             return Ok(Response { body: Body::whole(bytes), ..response });
@@ -464,7 +464,7 @@ impl Device {
         }
     }
 
-    /// The order things run in, from the node's `/v1/state`; a node it lists that this device didn't know of has it
+    /// The order things run in, from the node's `/api/state`; a node it lists that this device didn't know of has it
     /// read `global` again (now and then), and only nodes its own reading lists are asked.
     async fn learn_order(&self, bytes: &[u8]) {
         let Ok(state) = serde_json::from_slice::<one::state::State>(bytes) else { return };
@@ -554,11 +554,11 @@ impl Address for Device {
 /// its input or query.
 fn what(path: &str, body: &[u8]) -> Value {
     let at = path.split('?').next().unwrap_or(path);
-    if at == "/v1/call" {
+    if at == "/api/call" {
         let b = serde_json::from_slice::<Value>(body).unwrap_or_default();
         return json!({ "what": "call", "app": b["app"], "tool": b["tool"] });
     }
-    match at.strip_prefix("/v1/screens/").map(|s| s.split('/')) {
+    match at.strip_prefix("/api/screens/").map(|s| s.split('/')) {
         Some(mut s) => json!({ "what": "page", "app": s.next(), "screen": s.next() }),
         None => json!({ "what": "request", "path": at }),
     }

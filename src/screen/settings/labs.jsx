@@ -24,7 +24,7 @@ function Labs() {
   async function load() {
     const n = ++latest.current
     try {
-      const list = await one.api("GET", "/v1/labs")
+      const list = await one.api("GET", "/api/labs")
       if (n !== latest.current) return
       setLabs(list)
       setProblem(null)
@@ -41,7 +41,7 @@ function Labs() {
     setError("")
     setAsked((all) => ({ ...all, [l.setting]: on }))
     try {
-      await one.api("POST", "/v1/settings", { name: l.setting, value: on ? "on" : null })
+      await one.api("POST", "/api/settings", { name: l.setting, value: on ? "on" : null })
     } catch (e) {
       setError(one.plain(e).title)
     }

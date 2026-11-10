@@ -127,13 +127,13 @@ pub fn call(node: &Client, name: &str, input: &Value) -> Option<Value> {
 
 /// What threw in a screen on a chat's page, to its node.
 fn thrown(node: &Client, input: &Value) -> anyhow::Result<Value> {
-    node.post("/v1/insights/report", json!({ "platform": "mcp", "events": [{ "name": "screen.exception", "app": input["app"], "screen": input["screen"], "exception": input["exception"] }] }))?;
+    node.post("/api/insights/report", json!({ "platform": "mcp", "events": [{ "name": "screen.exception", "app": input["app"], "screen": input["screen"], "exception": input["exception"] }] }))?;
     Ok(json!({ "content": [] }))
 }
 
 /// `widgets_show` as a chat that draws them answers it: with what to draw, and in words for what can't.
 fn shown(node: &Client, input: &Value) -> anyhow::Result<Value> {
-    let shown = node.post("/v1/widgets/show", input.clone())?;
+    let shown = node.post("/api/widgets/show", input.clone())?;
     Ok(json!({ "content": [{ "type": "text", "text": shown["said"] }], "structuredContent": { "widgets": shown["widgets"] } }))
 }
 
@@ -146,7 +146,7 @@ fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     let screens = found.map(|a| a["screens"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
     anyhow::ensure!(found.is_some(), "no app named {app}: apps_list lists them");
     anyhow::ensure!(screens.iter().any(|s| s["name"] == screen), "no screen {screen} in {app}: it has {}", screens.iter().filter_map(|s| s["name"].as_str()).collect::<Vec<_>>().join(", "));
-    let mut url = format!("/v1/screens/{app}/{screen}");
+    let mut url = format!("/api/screens/{app}/{screen}");
     let params = if input["params"].is_object() { input["params"].to_string() } else { "{}".into() };
     let mut query = vec![("params", params)];
     if let Some(scope) = input["scope"].as_str() {
@@ -194,7 +194,7 @@ fn changes(node: &Client, input: &Value) -> anyhow::Result<Value> {
     const WAIT: std::time::Duration = std::time::Duration::from_secs(25);
     let apps: Vec<&str> = input["apps"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     let mut events = vec![];
-    let resp = node.open("/v1/events", Some(WAIT))?;
+    let resp = node.open("/api/events", Some(WAIT))?;
     if resp.status == 204 {
         // A node with none to say (the Cloudflare node, while no machine is on): the view asks again after the wait.
         std::thread::sleep(WAIT);

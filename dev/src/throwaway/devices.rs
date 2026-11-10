@@ -16,7 +16,7 @@ pub(crate) fn devices(dir: &Path) -> serde_json::Map<String, Value> {
 /// One of this machine's network's Agent Devices tools (not the throwaway network's, which has none). When the node
 /// restarts during it (an update), or its service is still coming back, it's asked again once they answer.
 pub(crate) fn agent_devices(tool: &str, input: Value) -> Result<Value> {
-    Ok(again(|| crate::node().post("/v1/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one-dev throwaway" })))?["ok"].clone())
+    Ok(again(|| crate::node().post("/api/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one-dev throwaway" })))?["ok"].clone())
 }
 
 /// What `ask` gives, asking again for up to 3 minutes while this machine's node or a service of its restarts.
@@ -107,7 +107,7 @@ pub(crate) fn didnt_sign_in(what: &str, said: &[(&str, String)], elsewhere: &str
 /// A native client's code, approved by the throwaway network's machine, as its user's device: then it's let in.
 pub(crate) fn approve_code(dir: &Path, code: &str) -> Result<()> {
     eprintln!("Approving the device that shows {code}…");
-    let approved = super::network::node_in(dir)?.post("/v1/devices/approve", json!({ "code": code.replace(' ', ""), "confirm": true }));
+    let approved = super::network::node_in(dir)?.post("/api/devices/approve", json!({ "code": code.replace(' ', ""), "confirm": true }));
     // Let in already, by an invite naming their email, by that same machine: nothing waits.
     match approved {
         Err(err) if format!("{err:#}").contains("No device is waiting") => Ok(()),

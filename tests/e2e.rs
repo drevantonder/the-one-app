@@ -292,7 +292,7 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
 
     // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the notes go on.
     let laptop_key = json!({ "device": one::keys::hex(&laptop.verifying_key().to_bytes()) });
-    let removed = one::settings::answer(&a, "POST", "/v1/devices/remove", laptop_key.to_string().as_bytes()).await.unwrap().unwrap();
+    let removed = one::settings::answer(&a, "POST", "/api/devices/remove", laptop_key.to_string().as_bytes()).await.unwrap().unwrap();
     assert_eq!(removed["not_renewed"], json!([]), "{removed}");
     assert_eq!(opens(&laptop, &global).await, vec![1]);
     for f in walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_epochs/2/")) {
@@ -326,7 +326,7 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
         let sealed = seal_to(&Endpoint::of(key).seal, &secret).unwrap();
         B64U.encode(&one::keys::held_copy(&recovery, &hex(&key.verifying_key().to_bytes()), &sealed))
     };
-    let name = async |holds: bool| one::settings::answer(&a, "POST", "/v1/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
+    let name = async |holds: bool| one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
     let (phone, browser) = (new_device("iphone").await, new_device("browser").await);
     let opens = async |key: &ed25519_dalek::SigningKey| a.sealed_keys(&me, &global, Some(&hex(&key.verifying_key().to_bytes())), None).await.unwrap()["sealed"].clone();
     let before = opens(&phone).await;
@@ -392,8 +392,8 @@ async fn a_holder_restores_someone_and_no_one_else_can() {
     let to = hex(&e.key);
     let code = one::keys::spaced_code(&join_code(&e));
     let opens = async || a.sealed_keys(&me, &own, Some(&to), None).await.unwrap()["sealed"].as_object().unwrap().len();
-    let name = async |holds: bool| one::settings::answer(&a, "POST", "/v1/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
-    let restore = async |confirm: bool| one::settings::answer(&a, "POST", "/v1/devices/restore", json!({ "code": code, "confirm": confirm }).to_string().as_bytes()).await.unwrap();
+    let name = async |holds: bool| one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
+    let restore = async |confirm: bool| one::settings::answer(&a, "POST", "/api/devices/restore", json!({ "code": code, "confirm": confirm }).to_string().as_bytes()).await.unwrap();
 
     assert!(restore(true).await.is_err(), "no one is named yet");
     name(true).await;
@@ -407,7 +407,7 @@ async fn a_holder_restores_someone_and_no_one_else_can() {
     let done = restore(true).await.unwrap();
     assert!(done["given"].as_array().unwrap().iter().any(|s| s.as_str() == Some(&own.to_string())), "{done}");
     assert_eq!(opens().await, 1, "their own scope reaches them");
-    let wrong = one::settings::answer(&a, "POST", "/v1/devices/restore", json!({ "code": "AAAA AAAA AAAA AAAA", "confirm": true }).to_string().as_bytes()).await.unwrap();
+    let wrong = one::settings::answer(&a, "POST", "/api/devices/restore", json!({ "code": "AAAA AAAA AAAA AAAA", "confirm": true }).to_string().as_bytes()).await.unwrap();
     assert!(wrong.is_err(), "a code no listed device shows does nothing");
     name(false).await;
     assert!(restore(true).await.is_err(), "taken off the list, they restore no one");
@@ -431,7 +431,7 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     let e = Endpoint::of(&phone);
     let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "phone", "user": me.user, "platform": "iphone" })).unwrap();
     one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
-    one::settings::answer(&a, "POST", "/v1/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
+    one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
     a.seal_recovery(&hex(&e.key), &B64U.encode(&one::keys::held_copy(&old, &hex(&e.key), &seal_to(&e.seal, &old_secret).unwrap()))).await.unwrap();
     assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], true);
 
@@ -489,7 +489,7 @@ async fn a_backup_keeps_a_holders_copy_of_the_recovery_key() {
     let e = Endpoint::of(&phone);
     let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "phone", "user": me.user, "platform": "iphone" })).unwrap();
     one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
-    one::settings::answer(&a, "POST", "/v1/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
+    one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
     let to = hex(&e.key);
     let sealed = seal_to(&e.seal, &secret).unwrap();
     a.seal_recovery(&to, &B64U.encode(&one::keys::held_copy(&recovery, &to, &sealed))).await.unwrap();
@@ -517,16 +517,16 @@ async fn a_settings_change_that_doesnt_read_is_refused() {
     create(&a, "Home", "Andre").await;
     let me = a.user().unwrap();
     let ask = async |path: &str, body: Value| one::settings::answer(&a, "POST", path, body.to_string().as_bytes()).await.unwrap();
-    let group = ask("/v1/group", json!({ "name": "Team" })).await.unwrap()["group"].as_str().unwrap().to_string();
-    let refused = ask("/v1/member", json!({ "group": group, "user": me, "role": "admn" })).await.unwrap_err();
+    let group = ask("/api/group", json!({ "name": "Team" })).await.unwrap()["group"].as_str().unwrap().to_string();
+    let refused = ask("/api/member", json!({ "group": group, "user": me, "role": "admn" })).await.unwrap_err();
     assert!(format!("{refused:#}").contains("admn"), "{refused:#}");
-    assert!(ask("/v1/invite", json!({ "group": group, "user": me, "role": "owner" })).await.is_err());
-    assert!(ask("/v1/role", json!({ "user": me, "role": "admin", "extra": true })).await.is_err());
+    assert!(ask("/api/invite", json!({ "group": group, "user": me, "role": "owner" })).await.is_err());
+    assert!(ask("/api/role", json!({ "user": me, "role": "admin", "extra": true })).await.is_err());
     let role = one::settings::Me::who(&a, |db| db.role_in(&me, &one::database::scopes::Scope::Group(group.clone()))).unwrap();
     assert_eq!(role, Some(one::database::scopes::Role::Admin), "still the group's admin");
 
     std::fs::write(dir.join("invites.json"), b"{ not json").unwrap();
-    let refused = ask("/v1/devices/invite", json!({ "name": "Sam" })).await.unwrap_err();
+    let refused = ask("/api/devices/invite", json!({ "name": "Sam" })).await.unwrap_err();
     assert!(format!("{refused:#}").contains("can't be read"), "{refused:#}");
     assert_eq!(std::fs::read(dir.join("invites.json")).unwrap(), b"{ not json");
 }
@@ -543,7 +543,7 @@ async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
     let kept = std::path::Path::new("network/scope-kept").join(data_encoding::HEXLOWER.encode(b"global"));
     let read = |dir: &std::path::Path| serde_json::from_slice::<Value>(&std::fs::read(dir.join(&kept)).unwrap()).unwrap();
     let mut before = read(&dir);
-    let answer = one::settings::answer(&a, "POST", "/v1/group", json!({ "name": "Team" }).to_string().as_bytes()).await.unwrap().unwrap();
+    let answer = one::settings::answer(&a, "POST", "/api/group", json!({ "name": "Team" }).to_string().as_bytes()).await.unwrap().unwrap();
     let group = one::database::scopes::Scope::Group(answer["group"].as_str().unwrap().to_string());
     let after = read(&dir);
     assert!(after["at"].as_u64() > before["at"].as_u64(), "making a group is a step");
@@ -571,7 +571,7 @@ async fn erasing_an_app_deletes_its_keys_whoever_erases_it() {
     let keys = || walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/notes/_key/")).count();
     assert!(keys() > 0, "notes has keys");
     for how in ["deleted", "erased"] {
-        one::settings::answer(&a, "POST", "/v1/retire", json!({ "app": "notes", "how": how }).to_string().as_bytes()).await.unwrap().unwrap();
+        one::settings::answer(&a, "POST", "/api/retire", json!({ "app": "notes", "how": how }).to_string().as_bytes()).await.unwrap().unwrap();
     }
     assert_eq!(keys(), 0, "notes' keys are gone");
 }
@@ -779,7 +779,7 @@ async fn a_client_devices_mcp_runs_as_its_user() {
     assert!(devices["result"]["isError"] == true, "{devices}");
     // The recovery key is used only by this machine's own programs: no device hands it to a node.
     let asked = from.clone();
-    let recovered = tokio::task::spawn_blocking(move || asked.send("POST", "/v1/devices/approve-with-recovery", &[("content-type", "application/json")], Some(json!({ "code": "ABCDEFGH", "recovery": "00".repeat(32) }).to_string().into_bytes()), None).unwrap().status).await.unwrap();
+    let recovered = tokio::task::spawn_blocking(move || asked.send("POST", "/api/devices/approve-with-recovery", &[("content-type", "application/json")], Some(json!({ "code": "ABCDEFGH", "recovery": "00".repeat(32) }).to_string().into_bytes()), None).unwrap().status).await.unwrap();
     assert_eq!(recovered, 403);
     let (status, needs) = mcp(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "notes_post", "arguments": { "text": "from Sam" } } })).await;
     assert_eq!(status, 428, "{needs}");
@@ -797,7 +797,7 @@ async fn a_tool_answers_what_its_output_says() {
     let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("answers/app.js").to_vec())]).unwrap()).unwrap();
     let deployed = a.deploy_making(&me, "answers", &bundle, Some("admins"), true).await.unwrap();
     assert_eq!(deployed["lacking"], json!(["unsaid"]), "the deploy names the tool that says nothing of its answer: {deployed}");
-    let schema = &one::api::openapi::document(&[], true)["paths"]["/v1/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
+    let schema = &one::api::openapi::document(&[], true)["paths"]["/api/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
     one::tools::check(schema, &deployed).unwrap_or_else(|err| panic!("a deploy answers what the document doesn't say: {err:#}\n{deployed}"));
     a.add(&me, "answers", &one::database::scopes::Scope::Global, true, None).await.unwrap();
     let call = |tool: &str| CallRequest { app: "answers".into(), tool: tool.into(), input: json!({}), ..Default::default() };
@@ -847,14 +847,14 @@ async fn a_routes_answer_is_what_the_document_says() {
     let from = std::sync::Arc::new(InProcess::new(a.clone(), None, Some(axum::extract::ConnectInfo("127.0.0.1:1".parse().unwrap())), &headers));
     let mut asked = 0;
     for (method, path, body) in [
-        ("GET", "/v1/state", None),
-        ("GET", "/v1/apps", None),
-        ("GET", "/v1/labs", None),
-        ("GET", "/v1/widgets", None),
-        ("GET", "/v1/badges", None),
-        ("GET", "/v1/vault", None),
-        ("GET", "/v1/vault/requests", None),
-        ("POST", "/v1/call", Some(json!({ "app": "notes", "tool": "read", "input": {} }))),
+        ("GET", "/api/state", None),
+        ("GET", "/api/apps", None),
+        ("GET", "/api/labs", None),
+        ("GET", "/api/widgets", None),
+        ("GET", "/api/badges", None),
+        ("GET", "/api/vault", None),
+        ("GET", "/api/vault/requests", None),
+        ("POST", "/api/call", Some(json!({ "app": "notes", "tool": "read", "input": {} }))),
     ] {
         let schema = document["paths"][path][method.to_lowercase()]["responses"]["200"]["content"]["application/json"]["schema"].clone();
         assert!(schema.is_object(), "{method} {path} says what it answers");

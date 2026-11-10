@@ -64,7 +64,7 @@ var y = (() => {
 		from: i
 	}), { press: () => one.opening(e, t, n, r) }), O = (e, t, n = "main", r = {}) => D(n, r, e.name, t ? { scope: t.scope } : {}), k = (e, t, n) => o(e, "settings") ? O(e, t, "settings", n ? { add: !0 } : {}) : null, A = (e) => E() && o(E(), "app") && (e.deploys || 0) > 0 ? O(E(), null, "app", { app: e.name }) : null, j = () => E() ? O(E(), null, "main", { accounts: !0 }) : null, te = () => E() && O(E(), null)();
 	async function M(e, t, n = {}) {
-		return (await one.api("POST", "/v1/call", {
+		return (await one.api("POST", "/api/call", {
 			app: e,
 			tool: t,
 			input: n
@@ -98,7 +98,7 @@ var y = (() => {
 			icon: "minus-circle",
 			danger: !0,
 			section: !0,
-			run: () => P(() => one.api("POST", "/v1/remove/remove", {
+			run: () => P(() => one.api("POST", "/api/remove/remove", {
 				app: e.name,
 				scope: t.scope
 			}), (n) => n.map((n) => n.name === e.name ? {
@@ -117,7 +117,7 @@ var y = (() => {
 		n != null && e[n]?.run();
 	}
 	async function L(t) {
-		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await z(null, t);
+		[e.state, e.apps] = await Promise.all([one.api("GET", "/api/state"), one.api("GET", "/api/apps")]), t?.(), await z(null, t);
 	}
 	function R(t, n, r) {
 		let i = e.widgets[t] || [], a = Date.now(), o = (e) => (t) => t.app === e.app && t.widget === e.widget;
@@ -127,7 +127,7 @@ var y = (() => {
 		}]);
 		for (let i of n.filter((n) => n.late && !e.late.has(w(t, n)))) {
 			let n = w(t, i);
-			e.late.add(n), one.api("GET", `/v1/widgets?scope=${encodeURIComponent(t)}&kind=${encodeURIComponent(`${i.app}.${i.widget}`)}`).then(([n]) => {
+			e.late.add(n), one.api("GET", `/api/widgets?scope=${encodeURIComponent(t)}&kind=${encodeURIComponent(`${i.app}.${i.widget}`)}`).then(([n]) => {
 				n && (e.widgets[t] = [...(e.widgets[t] || []).filter((e) => !o(n)(e)), {
 					...n,
 					fetched: Date.now()
@@ -139,11 +139,11 @@ var y = (() => {
 	}
 	async function z(t, n) {
 		let r = (e) => `scope=${encodeURIComponent(e.scope)}`;
-		await Promise.all(u().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((r) => {
+		await Promise.all(u().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/api/widgets?${r(t)}`).then((r) => {
 			R(t.scope, r, n), e.failed.delete(t.scope);
 		}, () => void e.failed.add(t.scope)).then(() => {
 			e.read.add(t.scope), n?.();
-		}), one.api("GET", `/v1/badges?${r(t)}`).then((n) => {
+		}), one.api("GET", `/api/badges?${r(t)}`).then((n) => {
 			e.badges[t.scope] = n;
 		}, () => {}).then(() => n?.())]));
 	}
@@ -151,7 +151,7 @@ var y = (() => {
 	function V(t) {
 		let n, r, i = !1, a = /* @__PURE__ */ new Set(), o = (r) => {
 			r ? r.forEach((e) => a.add(e)) : i = !0, clearTimeout(n), n = setTimeout(() => {
-				let n = i ? L(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
+				let n = i ? L(t) : Promise.all([one.api("GET", "/api/apps").then((t) => {
 					e.apps = t;
 				}), z([...a], t)]);
 				i = !1, a.clear(), n.then(() => {
@@ -215,7 +215,7 @@ var y = (() => {
 	};
 })();
 async function b() {
-	[y.data.state, y.data.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]);
+	[y.data.state, y.data.apps] = await Promise.all([one.api("GET", "/api/state"), one.api("GET", "/api/apps")]);
 }
 function x() {
 	let e = y.pages(), t = /* @__PURE__ */ new Set(), n = [];
@@ -231,13 +231,13 @@ function x() {
 	};
 }
 async function S(e, t, n, r, i) {
-	let a = y.settings(e, t, !0), o = Object.values(e.vault || {}).filter((e) => e.accounts).map((e) => e.type), s = (o.length ? await one.api("GET", "/v1/vault").catch(() => []) : []).filter((t) => o.includes(t.type) && (t.wanted_by || []).includes(e.name) && !(t.apps || []).includes(e.name));
+	let a = y.settings(e, t, !0), o = Object.values(e.vault || {}).filter((e) => e.accounts).map((e) => e.type), s = (o.length ? await one.api("GET", "/api/vault").catch(() => []) : []).filter((t) => o.includes(t.type) && (t.wanted_by || []).includes(e.name) && !(t.apps || []).includes(e.name));
 	if (!s.length) return a();
 	let c = s.map((t) => ({
 		title: t.title,
 		run: async () => {
 			try {
-				await one.api("POST", "/v1/vault", {
+				await one.api("POST", "/api/vault", {
 					scope: t.scope,
 					id: t.id,
 					apps: [...t.apps, e.name]

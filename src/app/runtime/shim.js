@@ -252,7 +252,7 @@ function context(ask, body, appends, later) {
     /// Pushes a notification to each of the caller's devices that gets them, { title, body?, screen?, params? };
     /// tapping it opens this app's screen. → { sent, devices, why? }: how many it went to, and why none, if none.
     notify: async (push) => (await post("notify", push)).ok,
-    /// Every app in the network, as `GET /v1/apps` gives them to the caller.
+    /// Every app in the network, as `GET /api/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),
     /// An app's code as deployed (the release's, for a built-in app no one has added): `{ files: [{ path, size }] }`, or
     /// with `path`, `{ path, text }` for that file.
@@ -260,7 +260,7 @@ function context(ask, body, appends, later) {
     /// The schedules the caller may switch, of the apps they may use, that are on and failed their last run, each as
     /// `catalog` gives an app's `schedules`, with its `app`.
     failing: async () => (await ask("failing")).json(),
-    /// The network's devices, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
+    /// The network's devices, as `GET /api/state` gives them to the caller: online or not, and each one's load.
     devices: async () => (await ask("devices")).json(),
     /// Run priority (src/rank.rs): `{ order, admin }`, every device and the Cloudflare node (key "cloudflare") in the
     /// order things go to them, each with its `kind` and its `priority` (a number from 1, or "last"), and whether the

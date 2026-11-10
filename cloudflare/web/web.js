@@ -99,7 +99,7 @@ async function start() {
   }
   if (handedOver) {
     const code = location.hash.slice(1);
-    const asked = await api("/v1/devices/requests", { method: "POST", body: {} }).catch(() => []);
+    const asked = await api("/api/devices/requests", { method: "POST", body: {} }).catch(() => []);
     // A request names its device by as much of its code as its sign-in leaves to check (`JOIN_CODE_SHORT`), the app by all of it.
     if (!asked.some((r) => r.code && code.startsWith(r.code.replaceAll(" ", "")))) return show(signedIn());
     history.replaceState(null, "", href(own("devices", { approve: code })));

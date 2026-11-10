@@ -265,9 +265,9 @@ impl Registry {
         }
 
         axum::Router::new()
-            .route("/v1/services/{app}", routing::post(register))
-            .route("/v1/services/{app}/calls", routing::get(next_call))
-            .route("/v1/services/{app}/calls/{id}", routing::post(reply))
+            .route("/api/services/{app}", routing::post(register))
+            .route("/api/services/{app}/calls", routing::get(next_call))
+            .route("/api/services/{app}/calls/{id}", routing::post(reply))
             .with_state(self.clone())
     }
 }

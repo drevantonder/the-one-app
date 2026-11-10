@@ -11,7 +11,7 @@ function ConnectAI() {
 
   async function load() {
     try {
-      setText((await one.api("GET", "/v1/state")).agent_prompt)
+      setText((await one.api("GET", "/api/state")).agent_prompt)
       setProblem(null)
     } catch (e) {
       setProblem(one.plain(e))

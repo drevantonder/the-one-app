@@ -42,7 +42,7 @@ pub fn commands() -> Command {
                 }
                 ["deploy", app] if g.has("version") => {
                     let version = g.flag("version").context("give --version <hash>")?;
-                    let deployed = g.node.post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?;
+                    let deployed = g.node.post("/api/deploy", json!({ "app": app, "bundle": version, "wait": true }))?;
                     deployed_said(g.node, app, &deployed, "")?;
                 }
                 ["deploy", dir] => deploy(g, std::path::Path::new(dir))?,
@@ -62,7 +62,7 @@ pub fn commands() -> Command {
                     if let [path] = rest {
                         q.push(format!("path={path}"));
                     }
-                    let r = g.node.get(&format!("/v1/source/{app}?{}", q.join("&")))?;
+                    let r = g.node.get(&format!("/api/source/{app}?{}", q.join("&")))?;
                     match (&r["text"], &r["files"]) {
                         (Value::String(text), _) => print!("{text}"),
                         (_, Value::Array(files)) => files.iter().for_each(|f| println!("{:>8}  {}", f["size"], f["path"].as_str().unwrap_or(""))),
@@ -71,15 +71,15 @@ pub fn commands() -> Command {
                 }
                 ["remove", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    println!("{}", g.node.post("/v1/remove/remove", json!({ "app": app, "scope": scope }))?["said"].as_str().unwrap_or_default());
+                    println!("{}", g.node.post("/api/remove/remove", json!({ "app": app, "scope": scope }))?["said"].as_str().unwrap_or_default());
                 }
                 ["fork", app, name] => {
-                    g.node.post("/v1/fork", json!({ "app": app, "name": name, "owner": g.flag("owner") }))?;
+                    g.node.post("/api/fork", json!({ "app": app, "name": name, "owner": g.flag("owner") }))?;
                     println!("Forked {app} as {name}; deploy your changes with {CLI} deploy <dir> --name {name}.");
                 }
                 ["add", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    println!("{}", g.node.post("/v1/add/add", json!({ "app": app, "scope": scope, "node": g.flag("node") }))?["said"].as_str().unwrap_or_default());
+                    println!("{}", g.node.post("/api/add/add", json!({ "app": app, "scope": scope, "node": g.flag("node") }))?["said"].as_str().unwrap_or_default());
                 }
                 ["schedules"] => {
                     for app in &g.node.apps()? {
@@ -101,7 +101,7 @@ pub fn commands() -> Command {
                 }
                 ["schedule", on @ ("on" | "off"), app, name] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    g.node.post("/v1/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
+                    g.node.post("/api/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
                     println!("{app}'s schedule {name} is {on} in {scope}.");
                 }
                 _ => return Ok(false),
@@ -121,7 +121,7 @@ fn deploy(g: &Given, dir: &std::path::Path) -> Result<()> {
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
     };
     let (blob, service) = build::built_with_service(node, dir)?;
-    let deployed = node.post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": g.flag("owner"), "wait": true }))?;
+    let deployed = node.post("/api/deploy", json!({ "app": name, "bundle": blob, "owner": g.flag("owner"), "wait": true }))?;
     deployed_said(node, &name, &deployed, &service)?;
     Ok(())
 }

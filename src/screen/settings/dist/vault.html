@@ -13,11 +13,11 @@ var M = {
 	title: "Agents",
 	icon: "robot",
 	color: "#8e8e93"
-}, N = (e, t) => t === M.name ? M : e.find((e) => e.name === t), P = one.api, F = async (e, t, n) => (await P("POST", "/v1/call", {
+}, N = (e, t) => t === M.name ? M : e.find((e) => e.name === t), P = one.api, F = async (e, t, n) => (await P("POST", "/api/call", {
 	app: e,
 	tool: t,
 	input: n
-})).ok, I = (e) => P("GET", `/v1/vault?scope=${encodeURIComponent(e)}`), L = (e, t, n) => P("POST", "/v1/vault", {
+})).ok, I = (e) => P("GET", `/api/vault?scope=${encodeURIComponent(e)}`), L = (e, t, n) => P("POST", "/api/vault", {
 	...n,
 	scope: e,
 	...t ? { id: t } : {}
@@ -106,8 +106,8 @@ function J() {
 	async function K(e = U.current) {
 		try {
 			let [t, n, r] = await Promise.all([
-				P("GET", "/v1/state"),
-				P("GET", "/v1/apps"),
+				P("GET", "/api/state"),
+				P("GET", "/api/apps"),
 				I(e)
 			]), a = G(t);
 			if (!a.some((t) => t.scope === e)) return void (i(U.current = "user"), K("user"));

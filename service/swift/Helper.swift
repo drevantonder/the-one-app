@@ -28,7 +28,7 @@ public func serve(_ service: some Service) -> Never {
         exit(1)
     }
     Node.home = URL(filePath: home)
-    let url = URL(string: "http://\(at)/v1/services/\(service.app)")!
+    let url = URL(string: "http://\(at)/api/services/\(service.app)")!
     NSApplication.shared.setActivationPolicy(.accessory)
     // Stopped with what started it, even when that was made to stop: two mustn't register as one.
     let parent = getppid()

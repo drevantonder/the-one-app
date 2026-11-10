@@ -1,5 +1,5 @@
 //! Backups' tools, each its own route (`core_tools::Runs::Route`): how they're going, backing up now, and the places
-//! they go. Settings' Backups screen asks the same routes, and `/v1/backups/place` besides, which takes the key of a
+//! they go. Settings' Backups screen asks the same routes, and `/api/backups/place` besides, which takes the key of a
 //! place its user types and so is not a tool.
 
 use serde_json::json;

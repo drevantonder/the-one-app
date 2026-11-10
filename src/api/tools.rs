@@ -1,4 +1,4 @@
-//! The core's tools, each their own route (`core_tools::Tool`), each at `POST /v1/<feature>/<tool>`: its
+//! The core's tools, each their own route (`core_tools::Tool`), each at `POST /api/<feature>/<tool>`: its
 //! body is held to the tool's input schema before it runs, and its answer to its output schema before it goes.
 
 use axum::Json;

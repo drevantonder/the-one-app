@@ -2,7 +2,7 @@
 //! feature's others and listed here, the one list. Agents use them as they use apps' tools, by the same kind of name
 //! (`vault_list`, `logs`), on the command line and over MCP; but they're not apps, so no list of apps has them. Every
 //! client lists and runs the same ones: who may do what is the user's rules, and the device's keys. Each is its own
-//! route, defined once, beside what serves it: `POST /v1/<feature>/<tool>` takes its input as its body and answers its
+//! route, defined once, beside what serves it: `POST /api/<feature>/<tool>` takes its input as its body and answers its
 //! output, and `api::tools` mounts every one. A client asks its node as its user; one that changes who can do what is
 //! answered by the client itself (`settings::answered`), signing that as its user's device, so the remote MCP server's
 //! devices answer those themselves (cloudflare/node/src/clients.rs).
@@ -82,7 +82,7 @@ macro_rules! serves {
 pub(crate) use serves;
 
 pub struct Tool {
-    /// As an app lists a tool (`GET /v1/apps`): named after `<feature>_`, or as the feature, for its one tool with a
+    /// As an app lists a tool (`GET /api/apps`): named after `<feature>_`, or as the feature, for its one tool with a
     /// command of its own (`logs`). `name`, `title`, `description`, `input`, `reads`, `confirm`, `words`, and `output`,
     /// JSON Schema of its answer.
     pub spec: Value,
@@ -115,7 +115,7 @@ impl Feature {
 
     /// The route of a tool.
     pub fn path(&self, tool: &Value) -> String {
-        format!("/v1/{}/{}", self.name, tool["name"].as_str().unwrap_or(""))
+        format!("/api/{}/{}", self.name, tool["name"].as_str().unwrap_or(""))
     }
 
     /// The request its tool at `at` makes of this input, `confirmed` if the user agreed to what it sends or can't undo.

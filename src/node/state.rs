@@ -233,7 +233,7 @@ impl Node {
     }
 }
 
-/// What a device says of each service serving there, as `GET /v1/state` lists it.
+/// What a device says of each service serving there, as `GET /api/state` lists it.
 fn installed_services(m: &ScopeDb, device: &scopes::Machine, services: &[Service], build: Option<&str>) -> Result<Vec<InstalledService>> {
     let name_of = |u: &String| -> Result<Option<String>> { Ok(m.user_ever(u)?.map(|u| u.name)) };
     let text = |v: &Value| v.as_str().map(str::to_string);

@@ -433,7 +433,7 @@ impl Node {
                         // What it sends is read in a while and up to a size, but a file's and an app's own requests',
                         // which stream to disk within their user's room (`Node::put_blob_from`).
                         let path = req.uri().path();
-                        if !(path == "/v1/blobs" || path.starts_with("/v1/blobs/") || crate::api::app_route(path)) {
+                        if !(path == "/api/blobs" || path.starts_with("/api/blobs/") || crate::api::app_route(path)) {
                             let (parts, body) = req.into_parts();
                             let Ok(Ok(bytes)) = tokio::time::timeout(CLIENT_BODY_TIME, axum::body::to_bytes(body, CLIENT_BODY)).await else {
                                 let said = format!("a request sends at most {} MiB, within {} s", CLIENT_BODY >> 20, CLIENT_BODY_TIME.as_secs());

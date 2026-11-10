@@ -17,7 +17,7 @@ function F() {
 	let [e, r] = n(null), [o, s] = n(null), [c, l] = n({}), [u, d] = n(""), [f, h, g] = E(), [_, w, P] = E();
 	async function F() {
 		try {
-			r(await A("GET", "/v1/state")), s(null);
+			r(await A("GET", "/api/state")), s(null);
 		} catch (e) {
 			s(one.plain(e));
 		}
@@ -37,7 +37,7 @@ function F() {
 				[e.id]: t
 			}));
 			try {
-				await (t === null ? A("POST", "/v1/devices/remove", { user: e.id }) : A("POST", "/v1/role", {
+				await (t === null ? A("POST", "/api/devices/remove", { user: e.id }) : A("POST", "/api/role", {
 					user: e.id,
 					role: t
 				}));
@@ -50,7 +50,7 @@ function F() {
 	async function B(e) {
 		d("");
 		try {
-			await A("POST", "/v1/devices/invite/withdraw", { user: e.user });
+			await A("POST", "/api/devices/invite/withdraw", { user: e.user });
 		} catch (e) {
 			d(M(e));
 		}
@@ -191,7 +191,7 @@ function L(t) {
 		if (e && !g) {
 			v(!0), h("");
 			try {
-				let { link: t, until: n } = await A("POST", "/v1/devices/invite", {
+				let { link: t, until: n } = await A("POST", "/api/devices/invite", {
 					name: e,
 					...u.trim() ? { email: u.trim() } : {}
 				});
@@ -295,7 +295,7 @@ function z(t) {
 		if (v && !p) {
 			m(!0), f("");
 			try {
-				await A("POST", "/v1/groups/handle", { handle: l }), s(!1), one.tap("success"), c();
+				await A("POST", "/api/groups/handle", { handle: l }), s(!1), one.tap("success"), c();
 			} catch (e) {
 				f(M(e)), m(!1);
 			}

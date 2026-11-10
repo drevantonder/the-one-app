@@ -787,7 +787,7 @@ fn may_choose(caller: &str, owner: &str, machine: &str) -> Result<()> {
     Ok(())
 }
 
-/// One of the network's devices, as its node's /v1/state says.
+/// One of the network's devices, as its node's /api/state says.
 #[derive(Clone, Default)]
 struct Machine {
     name: String,
@@ -826,7 +826,7 @@ impl Devices {
     }
 
     fn machines(&self) -> Result<(Machine, Vec<Machine>)> {
-        Ok(machines_in(&self.host.get("/v1/state")?))
+        Ok(machines_in(&self.host.get("/api/state")?))
     }
 
     /// This machine's row of chrome: whether it runs chrome devices, and why.

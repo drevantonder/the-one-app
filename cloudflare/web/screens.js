@@ -92,7 +92,7 @@ function screenPage(r) {
   // Asked now, whether or not Developer mode is on yet: only the screen the window opened on counts from its start.
   const since = developer.since();
   if (r.kind === "own") return ownPage(r);
-  const path = `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
+  const path = `/api/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
   return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope, linked: true }, raw: true, since: developer.on() ? since : undefined }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
 }
 
@@ -578,12 +578,12 @@ export function openSheet(r) {
 /// answered at once.
 export async function openRequest(scope, id) {
   const answer = await openSheet(own("request", { scope, id }));
-  if (answer === null) await api("/v1/vault/answer", { method: "POST", body: { scope, id, declined: true } }).catch(() => {});
+  if (answer === null) await api("/api/vault/answer", { method: "POST", body: { scope, id, declined: true } }).catch(() => {});
   refreshState().catch(() => {});
   return answer === true;
 }
 
-export const sendReport = (events) => api("/v1/insights/report", { method: "POST", body: { platform: platform.client(), events } });
+export const sendReport = (events) => api("/api/insights/report", { method: "POST", body: { platform: platform.client(), events } });
 
 /// The bridge's messages (src/screen/bridge.js), from the screens' frames only, each acting as its screen's app; and
 /// the client's own screens', as the user, which no app's may.
@@ -678,7 +678,7 @@ addEventListener("message", async (e) => {
       },
       vault: async (need) => {
         if (mine) throw new Error("Settings has no app to ask for.");
-        const out = await api("/v1/vault/request", { method: "POST", body: { scope: r.scope || "user", app: r.app, need } });
+        const out = await api("/api/vault/request", { method: "POST", body: { scope: r.scope || "user", app: r.app, need } });
         if (!out?.id) throw new Error("The Vault didn’t take the request");
         return openRequest(out.scope, out.id);
       },
@@ -690,7 +690,7 @@ addEventListener("message", async (e) => {
         return null;
       },
       icons: iconPaths,
-      blob: async (id) => (await api(`/v1/blobs/${encodeURIComponent(id)}`, { raw: true })).blob(),
+      blob: async (id) => (await api(`/api/blobs/${encodeURIComponent(id)}`, { raw: true })).blob(),
       ...platform.bridge(f.frame),
       traces: () => (developer.on() ? developer.kept : null),
       thrown: (m) => report(sendReport, mine ? { name: "page.exception", exception: m.exception } : { name: "screen.exception", app: r.app, screen: r.screen, exception: m.exception }),

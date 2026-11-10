@@ -15,7 +15,7 @@ export function note(event) {
 export const timeline = () => kept.slice();
 
 let sending = null;
-/// Adds `event`, something that went wrong, and writes out the timeline through `send` (`/v1/insights/report`'s), soon: what
+/// Adds `event`, something that went wrong, and writes out the timeline through `send` (`/api/insights/report`'s), soon: what
 /// goes wrong together goes in one report.
 export function report(send, event) {
   note(event);

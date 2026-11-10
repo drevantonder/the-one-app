@@ -21,7 +21,7 @@ function W() {
 	let [e, r] = n(null), [a, s] = n(null), [c, l] = n(one.params?.group || null), [u, d] = n({}), [f, p] = n([]), [_, v] = n(null), [y, E] = n(""), [D, A, j] = N(), [M, z, B] = N(), [W, G, K] = N();
 	async function q() {
 		try {
-			r(await L("GET", "/v1/state")), s(null);
+			r(await L("GET", "/api/state")), s(null);
 		} catch (e) {
 			s(one.plain(e));
 		}
@@ -50,7 +50,7 @@ function W() {
 			[r]: n
 		}));
 		try {
-			await L("POST", "/v1/member", {
+			await L("POST", "/api/member", {
 				group: e,
 				user: t,
 				role: n
@@ -64,7 +64,7 @@ function W() {
 		if (!_) {
 			v(e), E("");
 			try {
-				await L("POST", "/v1/accept", { group: e }), one.tap("success");
+				await L("POST", "/api/accept", { group: e }), one.tap("success");
 			} catch (e) {
 				E(R(e));
 			}
@@ -79,7 +79,7 @@ function W() {
 		};
 		E(""), p((e) => [...e, r]), one.tap("success");
 		try {
-			await L("POST", "/v1/invite", {
+			await L("POST", "/api/invite", {
 				group: e,
 				user: t,
 				role: n
@@ -378,7 +378,7 @@ function te(t) {
 		if (c.trim() && !f) {
 			p(!0), d("");
 			try {
-				let e = await L("POST", "/v1/group", { name: c.trim() });
+				let e = await L("POST", "/api/group", { name: c.trim() });
 				a(!1), one.tap("success"), s(e.group);
 			} catch (e) {
 				d(R(e)), p(!1);
@@ -526,7 +526,7 @@ function re(t) {
 		if (g && !p) {
 			m(!0), f("");
 			try {
-				await L("POST", "/v1/groups/handle", {
+				await L("POST", "/api/groups/handle", {
 					handle: l,
 					group: i.id
 				}), s(!1), one.tap("success"), c();

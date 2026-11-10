@@ -551,7 +551,7 @@ class User {
 
   /// Asks the network's nodes on machines that run every scope `call` reaches for its user (`runners`), in Where
   /// Things Run's order until one is reached, to run it as them, with only the keys of those scopes they handed this
-  /// node, sealed to that node: → its answer, `{ ok }` or what failed as `/v1/call` says it; or null
+  /// node, sealed to that node: → its answer, `{ ok }` or what failed as `/api/call` says it; or null
   /// if none was reached. Keys it says it needs that this node holds go with the call again; the rest are its caller's
   /// to hand this node, with 428.
   async onMachine(who, view, req, wait) {
@@ -976,7 +976,7 @@ const IDLE = 30_000;
 async function route(p, request) {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (request.method === "POST" && path === "/v1/call") {
+  if (request.method === "POST" && path === "/api/call") {
     const who = p.whom(request);
     const req = await bodyOf(request);
     if (typeof req !== "object" || req === null || Array.isArray(req)) refuse(400, "a call is an object");
@@ -992,7 +992,7 @@ async function route(p, request) {
     if (!d || !servedHere(run.view, d)) refuse(503, named ? `the Cloudflare node can't run ${req.app} for you` : needsDevice(d, req.app));
     return json(await run.call(req));
   }
-  const screenAt = path.match(/^\/v1\/screens\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)$/);
+  const screenAt = path.match(/^\/api\/screens\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)$/);
   if (request.method === "GET" && screenAt) {
     const who = p.whom(request);
     const view = await p.networkFor(who);
@@ -1003,29 +1003,29 @@ async function route(p, request) {
     return screenOf(request, p, who, view, app, screenAt[2], JSON.parse(url.searchParams.get("params") || "{}"), url.searchParams.get("scope"));
   }
   // A scope's keys, as sealed in the bucket, where every endpoint the relay lets in may read them anyway.
-  if (request.method === "GET" && path === "/v1/keys") {
+  if (request.method === "GET" && path === "/api/keys") {
     p.whom(request);
     return json(await sealedKeys(p.bucket, url.searchParams.get("scope") || "", url.searchParams.get("to"), url.searchParams.get("app")));
   }
   // Who's who as the bucket holds it, for a device that checks it all itself (`steps::Reader`): `global`'s scope
   // database's steps, sealed.
-  if (request.method === "GET" && path === "/v1/steps/global") {
+  if (request.method === "GET" && path === "/api/steps/global") {
     const who = p.whom(request);
     await p.readScopes(who, ["global"]);
     p.forgetLost(who);
     return json(JSON.parse(await sealed_global_steps(p.owner, who.user, p.bucket, Number(url.searchParams.get("from") || 0), url.searchParams.get("welcome") ?? undefined)));
   }
-  if ((request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events", "/api/openapi.json"].includes(path))) {
+  if ((request.method === "GET" && ["/api/state", "/api/apps", "/api/widgets", "/api/badges", "/api/events", "/api/openapi.json"].includes(path))) {
     const who = p.whom(request);
     const run = new Run(p, who, await p.networkFor(who));
     // Nothing here changes but what devices write, which they'll say once one is on: no events, so the client asks again
     // in a while, and this node sleeps meanwhile.
-    if (path === "/v1/events") return new Response(null, { status: 204 });
+    if (path === "/api/events") return new Response(null, { status: 204 });
     const scope = url.searchParams.get("scope");
-    if (path === "/v1/state") return json(run.view.state);
-    if (path === "/v1/apps") return tagged(request, JSON.stringify(await run.apps()), "application/json");
+    if (path === "/api/state") return json(run.view.state);
+    if (path === "/api/apps") return tagged(request, JSON.stringify(await run.apps()), "application/json");
     if (path === "/api/openapi.json") return tagged(request, openapi(JSON.stringify(await run.apps())), "application/json");
-    if (path === "/v1/widgets") return json(await run.widgets(scope, url.searchParams.get("kind")));
+    if (path === "/api/widgets") return json(await run.widgets(scope, url.searchParams.get("kind")));
     return json(await run.badges(scope));
   }
   // Anything else only a machine does: to a client that asks one itself (`x-one-elsewhere`), the machines of its

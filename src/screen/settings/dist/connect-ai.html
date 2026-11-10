@@ -12,7 +12,7 @@ function f() {
 	let r = e(8), [f, p] = n(null), [m, h] = n(null), g;
 	r[0] === Symbol.for("react.memo_cache_sentinel") ? (g = async function() {
 		try {
-			p((await one.api("GET", "/v1/state")).agent_prompt), h(null);
+			p((await one.api("GET", "/api/state")).agent_prompt), h(null);
 		} catch (e) {
 			let t = e;
 			h(one.plain(t));

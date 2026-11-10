@@ -11,8 +11,8 @@ use crate::node::Node;
 
 pub fn routes() -> Routes {
     Routes::default()
-        .route("/v1/latest/put", Who::ThisMachine, post(put))
-        .route("/v1/latest", Who::ThisMachine, axum::routing::get(latest).post(replace))
+        .route("/api/latest/put", Who::ThisMachine, post(put))
+        .route("/api/latest", Who::ThisMachine, axum::routing::get(latest).post(replace))
 }
 
 #[derive(Deserialize)]

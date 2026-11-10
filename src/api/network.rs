@@ -16,14 +16,14 @@ use super::reply::{Body, Reply, done, given};
 pub(super) fn routes() -> Routes {
     use Who::*;
     Routes::default()
-        .route("/v1/state", Clients, get(state))
+        .route("/api/state", Clients, get(state))
         .says(Op::get("Who's who and what this device reads of the network").answers::<crate::state::State>())
-        .route("/v1/keys", Clients, get(keys_get).post(keys_post))
-        .route("/v1/create", ThisMachine, post(create))
-        .route("/v1/join", ThisMachine, post(join))
+        .route("/api/keys", Clients, get(keys_get).post(keys_post))
+        .route("/api/create", ThisMachine, post(create))
+        .route("/api/join", ThisMachine, post(join))
         .says(Op::post("Join a network with a pairing code").body::<Join>().done())
-        .route("/v1/steps", Clients, post(steps))
-        .route("/v1/steps/global", Clients, get(global_steps))
+        .route("/api/steps", Clients, post(steps))
+        .route("/api/steps/global", Clients, get(global_steps))
 }
 
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
@@ -84,7 +84,7 @@ async fn join(State(node): State<Node>, Body(body): Body<Join>) -> Reply {
     done()
 }
 
-/// A step as `POST /v1/steps` takes it, each part base64url.
+/// A step as `POST /api/steps` takes it, each part base64url.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SignedStep {

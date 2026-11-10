@@ -57,11 +57,11 @@ impl Client {
         Client { via: self.via.clone(), elsewhere: self.elsewhere, needed: Mutex::new(None), apps: Mutex::new(None), sets: Mutex::new(None) }
     }
 
-    /// Every app, the node's own among them, as `GET /v1/apps` gives them: asked once, the first time.
+    /// Every app, the node's own among them, as `GET /api/apps` gives them: asked once, the first time.
     pub fn apps(&self) -> Result<Vec<Value>> {
         let mut kept = self.apps.lock().unwrap();
         if kept.is_none() {
-            *kept = Some(self.get("/v1/apps")?.as_array().cloned().unwrap_or_default());
+            *kept = Some(self.get("/api/apps")?.as_array().cloned().unwrap_or_default());
         }
         Ok(kept.clone().unwrap_or_default())
     }
@@ -84,9 +84,9 @@ impl Client {
         self.json(self.via.send("GET", path, &[], None, None)?)
     }
 
-    /// The network as this node says it (`GET /v1/state`).
+    /// The network as this node says it (`GET /api/state`).
     pub fn state(&self) -> Result<crate::state::State> {
-        serde_json::from_value(self.get("/v1/state")?).context("the node's answer isn't a state: it may be a different build than this one")
+        serde_json::from_value(self.get("/api/state")?).context("the node's answer isn't a state: it may be a different build than this one")
     }
 
     pub fn post(&self, path: &str, body: Value) -> Result<Value> {
@@ -103,7 +103,7 @@ impl Client {
 
     /// Keeps `bytes` as a blob on the node: → its hash.
     pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
-        Ok(self.json(self.via.send("POST", "/v1/blobs", &[], Some(bytes.to_vec()), None)?)?["blob"].as_str().unwrap_or("").to_string())
+        Ok(self.json(self.via.send("POST", "/api/blobs", &[], Some(bytes.to_vec()), None)?)?["blob"].as_str().unwrap_or("").to_string())
     }
 
     /// What `path` answers, as it comes, whatever its status: a screen's page, a blob, the node's events.
@@ -111,13 +111,13 @@ impl Client {
         self.via.send("GET", path, &[], None, wait)
     }
 
-    /// Runs a call (`/v1/call`'s body), with what it did when `trace` asks: after its answer, or the reason it failed.
+    /// Runs a call (`/api/call`'s body), with what it did when `trace` asks: after its answer, or the reason it failed.
     pub fn call(&self, body: &Value, trace: bool) -> Called {
         let mut headers = vec![("content-type", "application/json")];
         if trace {
             headers.push((crate::protocol::header::TRACE, "1"));
         }
-        let (ok, node) = match self.via.send("POST", "/v1/call", &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None) {
+        let (ok, node) = match self.via.send("POST", "/api/call", &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None) {
             Ok(mut answer) => {
                 let node = answer.trace.take().and_then(|h| data_encoding::BASE64.decode(h.as_bytes()).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok());
                 (self.json(answer), node)

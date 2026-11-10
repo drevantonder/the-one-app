@@ -1312,7 +1312,7 @@ mod relay {
             let client = onet::Client::start(secret, None, &address, &[*slow.public().as_bytes(), *quick.public().as_bytes()]).await.unwrap();
             let sealed: Arc<Mutex<Vec<String>>> = Arc::default();
             let ask = || {
-                let request = onet::Request { method: "GET".into(), path: "/v1/state".into(), headers: Vec::new(), body: Vec::new().into() };
+                let request = onet::Request { method: "GET".into(), path: "/api/state".into(), headers: Vec::new(), body: Vec::new().into() };
                 client.fetch_with(request, |node| {
                     let node = data_encoding::HEXLOWER.encode(node);
                     sealed.lock().unwrap().push(node.clone());

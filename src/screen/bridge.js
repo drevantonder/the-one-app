@@ -382,7 +382,7 @@
       if (!ctx.app || (e.type === "changed" && (e.apps || []).includes(ctx.app))) landed.clear(), handlers.changed.forEach((f) => f(e));
     },
     // For Settings screens only (no app's: a client answers these for its own Settings screens and refuses an app
-    // screen). `api` asks the node's /v1 API as the user looking ("POST", "/v1/group", { name }) and gives its JSON,
+    // screen). `api` asks the node's /api API as the user looking ("POST", "/api/group", { name }) and gives its JSON,
     // failing with its `error`. `signOut` signs this client out. `appearance` gives this client's ("automatic",
     // "light" or "dark"), first setting it to `value` if given. `device` is this client:
     // `{ name ("mac", "Chrome on Mac"), signOut (whether it can sign out), notify? }`, `notify` a browser's notifications

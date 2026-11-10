@@ -115,7 +115,7 @@ export async function listen() {
   for (let misses = 0; !mine.signal.aborted; ) {
     const started = Date.now();
     try {
-      const r = await api("/v1/events", { raw: true, signal: mine.signal });
+      const r = await api("/api/events", { raw: true, signal: mine.signal });
       // Heard from a node again: whatever else is waiting on one is asked now, not when its turn comes.
       offline.done("events");
       if (offline.waiting.size) offline.now();
@@ -142,7 +142,7 @@ export async function listen() {
     }
     if (Date.now() - started > 10_000) misses = 0;
     // What shows may be out of date from here on, with nothing to say so until it's asked for again.
-    if (!mine.signal.aborted) offline.add("events", () => api("/v1/state"));
+    if (!mine.signal.aborted) offline.add("events", () => api("/api/state"));
     if (!mine.signal.aborted) await sleep(retryWait(misses++));
   }
 }
@@ -173,7 +173,7 @@ export async function watchWaiting() {
   }
 }
 async function waitingNow() {
-  const now = (await api("/v1/devices/requests", { method: "POST", body: {} })).map((r) => ({ ...r, key: r.code.replaceAll(" ", "") })).filter((r) => !notMine.has(r.key));
+  const now = (await api("/api/devices/requests", { method: "POST", body: {} })).map((r) => ({ ...r, key: r.code.replaceAll(" ", "") })).filter((r) => !notMine.has(r.key));
   if (setWaiting(now)) tell({ oneEvent: { type: "devices" } });
   const fresh = now.filter((r) => !seen.has(r.key));
   fresh.forEach((r) => seen.add(r.key));

@@ -1,5 +1,5 @@
 //! The tools of a network's API as an OpenAPI 3.2 document, made from what's defined already: the core's tools and each
-//! app's as `GET /v1/apps` gives them to this caller. What OpenAPI has no word for goes in `x-one-` extensions, which `ABOUT`
+//! app's as `GET /api/apps` gives them to this caller. What OpenAPI has no word for goes in `x-one-` extensions, which `ABOUT`
 //! says. Every node serves it, a node on a machine with its own routes added (src/api/openapi.rs); what lists tools
 //! reads it back (`sets`).
 
@@ -8,12 +8,12 @@ use serde_json::{Map, Value, json};
 use crate::keys::{self, Route};
 use crate::settings;
 
-const ABOUT: &str = "Your network's API, as you can use it now: your apps, the core's tools and routes. Its extensions: `x-one-who`, who may ask (clients, this-machine); `x-one-runs: client`, the caller's client answers it itself, with its own keys, and no node runs it; `x-one-keys`, which keys a client may hand a node with it; `x-one-call`, an app's tool, with no route of its own yet: a client asks POST /v1/call with `{ app, tool, input }`, answered `{ ok: <this operation's answer> }`; `x-one-device`, the call can name the device it runs on; `x-one-confirm`, it sends or can't be undone, and each client decides how its user agrees; `x-one-reads`, it only reads; `x-one-accounts`, it lists the accounts signed in to the app; `x-one-words`, the inputs a command line takes as bare words; an input's `x-one-file`, the file it takes, which it's sent as; a tag's `x-one-guide`, how to use it, and `x-one-app`, what a client needs to say of the app: how it runs (`runs`), the services it needs (`uses`) and what setting those up takes (`needs`), `tagline`, and for one with no operations here, `deleted` or `not_added`.";
+const ABOUT: &str = "Your network's API, as you can use it now: your apps, the core's tools and routes. Its extensions: `x-one-who`, who may ask (clients, this-machine); `x-one-runs: client`, the caller's client answers it itself, with its own keys, and no node runs it; `x-one-keys`, which keys a client may hand a node with it; `x-one-call`, an app's tool, with no route of its own yet: a client asks POST /api/call with `{ app, tool, input }`, answered `{ ok: <this operation's answer> }`; `x-one-device`, the call can name the device it runs on; `x-one-confirm`, it sends or can't be undone, and each client decides how its user agrees; `x-one-reads`, it only reads; `x-one-accounts`, it lists the accounts signed in to the app; `x-one-words`, the inputs a command line takes as bare words; an input's `x-one-file`, the file it takes, which it's sent as; a tag's `x-one-guide`, how to use it, and `x-one-app`, what a client needs to say of the app: how it runs (`runs`), the services it needs (`uses`) and what setting those up takes (`needs`), `tagline`, and for one with no operations here, `deleted` or `not_added`.";
 
-/// What OpenAPI calls what a tool says of itself, as a tool (`GET /v1/apps`) and an operation say it.
+/// What OpenAPI calls what a tool says of itself, as a tool (`GET /api/apps`) and an operation say it.
 const TOOL_AS_OPERATION: [(&str, &str); 6] = [("title", "summary"), ("description", "description"), ("words", "x-one-words"), ("reads", "x-one-reads"), ("confirm", "x-one-confirm"), ("accounts", "x-one-accounts")];
 
-/// The document for a caller who has `apps`, as `GET /v1/apps` gives them.
+/// The document for a caller who has `apps`, as `GET /api/apps` gives them.
 pub fn document(apps: &[Value]) -> Value {
     let (mut paths, mut tags) = (Map::new(), Vec::new());
     let mut add = |path: &str, method: &str, op: Value| {
@@ -67,7 +67,7 @@ fn tag(name: &str, title: &str, description: &str, guide: &str, app: Value) -> V
     json!({ "name": name, "summary": title, "description": description, "x-one-guide": guide, "x-one-app": app })
 }
 
-/// A tag's `x-one-app`, of an app as `GET /v1/apps` gives it.
+/// A tag's `x-one-app`, of an app as `GET /api/apps` gives it.
 fn about_app(app: &Value) -> Value {
     let mut about = Map::new();
     for key in ["runs", "needs", "tagline", "deleted"].into_iter().filter(|k| !app[*k].is_null()) {
@@ -82,7 +82,7 @@ fn about_app(app: &Value) -> Value {
     Value::Object(about)
 }
 
-/// The sets of tools a document lists, each as `GET /v1/apps` shapes an app, for whoever makes commands or MCP tools of
+/// The sets of tools a document lists, each as `GET /api/apps` shapes an app, for whoever makes commands or MCP tools of
 /// them: each tool also with the name MCP calls it (`id`) and, when it's its own route, that route (`route`). A set the
 /// caller can't use yet has no `tools`.
 pub fn sets(doc: &Value) -> Vec<Value> {

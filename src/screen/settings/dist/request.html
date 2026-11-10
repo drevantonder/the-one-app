@@ -13,7 +13,7 @@ var S = {
 	title: "Agents",
 	icon: "robot",
 	color: "#8e8e93"
-}, C = (e, t) => t === S.name ? S : e.find((e) => e.name === t), w = (e, t) => e.app !== S.name && C(t, e.app)?.title || e.agent || e.by, T = one.api, { scope: E, id: D } = one.params || {}, O = () => T("GET", `/v1/vault/requests?scope=${encodeURIComponent(E || "")}&id=${encodeURIComponent(D || "")}`).then((e) => e[0]);
+}, C = (e, t) => t === S.name ? S : e.find((e) => e.name === t), w = (e, t) => e.app !== S.name && C(t, e.app)?.title || e.agent || e.by, T = one.api, { scope: E, id: D } = one.params || {}, O = () => T("GET", `/api/vault/requests?scope=${encodeURIComponent(E || "")}&id=${encodeURIComponent(D || "")}`).then((e) => e[0]);
 function k(e) {
 	return String(e).replace(/[_-]+/g, " ").trim().split(/\s+/).map((e, t) => /^(api|url|id|ssh|pem|aws|s3|ip)$/i.test(e) ? e.toUpperCase() : t ? e.toLowerCase() : e[0].toUpperCase() + e.slice(1).toLowerCase()).join(" ");
 }
@@ -36,7 +36,7 @@ function N() {
 	};
 	async function V() {
 		try {
-			let [e, t] = await Promise.all([O(), T("GET", "/v1/apps").catch(() => [])]);
+			let [e, t] = await Promise.all([O(), T("GET", "/api/apps").catch(() => [])]);
 			if (!e) throw Error("Can’t find this request: it may be for someone else.");
 			i(e), c(t), E(M(e)), S(null), one.title(`${w(e, t)} needs a key`);
 		} catch (e) {
@@ -62,7 +62,7 @@ function N() {
 		};
 		C === j ? n.fields = D : n.item = C;
 		try {
-			await T("POST", "/v1/vault/answer", n), N({}), one.tap("success"), one.close(!0);
+			await T("POST", "/api/vault/answer", n), N({}), one.tap("success"), one.close(!0);
 		} catch (e) {
 			L(one.plain(e).title), z(!1);
 		}

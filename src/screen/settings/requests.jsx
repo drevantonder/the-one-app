@@ -21,7 +21,7 @@ function Requests() {
 
   async function load() {
     try {
-      const [state, apps, asked] = await Promise.all([api("GET", "/v1/state"), api("GET", "/v1/apps"), api("GET", "/v1/vault/requests")])
+      const [state, apps, asked] = await Promise.all([api("GET", "/api/state"), api("GET", "/api/apps"), api("GET", "/api/vault/requests")])
       setData({ state, apps, asked })
       setProblem(null)
     } catch (e) {
@@ -83,8 +83,8 @@ function Requests() {
               sub={names(g.members.map((m) => userName(m.user)))}
               trailing={
                 <div className="flex gap-1">
-                  <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => answer(`join:${g.id}`, async () => (await api("POST", "/v1/member", { group: g.id, user: me, role: null }), false), true)}>Decline</Button>
-                  <Button variant="secondary" size="sm" disabled={!!busy} onClick={() => answer(`join:${g.id}`, async () => (one.tap(), await api("POST", "/v1/accept", { group: g.id }), false), true)}>Join</Button>
+                  <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => answer(`join:${g.id}`, async () => (await api("POST", "/api/member", { group: g.id, user: me, role: null }), false), true)}>Decline</Button>
+                  <Button variant="secondary" size="sm" disabled={!!busy} onClick={() => answer(`join:${g.id}`, async () => (one.tap(), await api("POST", "/api/accept", { group: g.id }), false), true)}>Join</Button>
                 </div>
               }
             />

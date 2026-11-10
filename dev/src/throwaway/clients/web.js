@@ -48,7 +48,7 @@ if (command === "picture") {
 if (command === "approve") {
   await until(`!!self.oneNet?.net?.fetch && !!document.querySelector("[data-slot=shell-screen]")`, "this browser isn't let in");
   const asked = JSON.stringify(JSON.stringify({ code: invite.replaceAll(" ", ""), confirm: true }));
-  const said = await evaluate(`self.oneNet.net.fetch("POST", "/v1/devices/approve", { "content-type": "application/json" }, ${asked}).then(async (r) => ({ ok: r.ok, text: await r.text() }))`);
+  const said = await evaluate(`self.oneNet.net.fetch("POST", "/api/devices/approve", { "content-type": "application/json" }, ${asked}).then(async (r) => ({ ok: r.ok, text: await r.text() }))`);
   if (!said?.ok) throw new Error(`it wasn't let in: ${said?.text}`);
   ws.close();
   process.exit(0);

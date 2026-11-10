@@ -115,27 +115,27 @@ mod serve {
     }
 
     pub async fn requests(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/v1/devices/requests", &input).await
+        as_mine(&node, "/api/devices/requests", &input).await
     }
 
     /// Lets in the device showing `code`, once the user agreed.
     pub async fn approve(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/v1/devices/approve", &input).await
+        as_mine(&node, "/api/devices/approve", &input).await
     }
 
     pub async fn remove(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/v1/devices/remove", &input).await
+        as_mine(&node, "/api/devices/remove", &input).await
     }
 
     pub async fn run_schedules(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/v1/devices/run_schedules", &input).await
+        as_mine(&node, "/api/devices/run_schedules", &input).await
     }
 
     pub async fn stop_schedules(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/v1/devices/stop_schedules", &input).await
+        as_mine(&node, "/api/devices/stop_schedules", &input).await
     }
 
     pub async fn invite(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/v1/devices/invite", &input).await
+        as_mine(&node, "/api/devices/invite", &input).await
     }
 }

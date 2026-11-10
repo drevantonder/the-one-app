@@ -1,4 +1,4 @@
-//! The routes that run a call: `/v1/call`, one the Cloudflare node passes on, and an app's own requests.
+//! The routes that run a call: `/api/call`, one the Cloudflare node passes on, and an app's own requests.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -27,7 +27,7 @@ pub fn app_route(path: &str) -> bool {
 
 pub(super) fn routes() -> Routes {
     Routes::default()
-        .route("/v1/call", Who::Clients, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
+        .route("/api/call", Who::Clients, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .says(Op::post("Run one call of an app's tool or a service's function").body::<CallRequest>().answers_as(json!({ "type": "object", "required": ["ok"], "properties": { "ok": { "description": "the tool's or function's answer, as its output schema says" } } })))
         // An app's own requests, run as its tool `_http` for its user, whose checks are the app's: git's, to Repos.
         .route(APP_ROUTE, Who::Clients, any(app_http))
@@ -37,7 +37,7 @@ async fn call(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, 
     Ok(Json(call_for(&node, me, req, headers.contains_key(crate::protocol::header::ELSEWHERE)).await?))
 }
 
-/// A call as `/v1/call` takes it, for `me`: → `{ ok }`. A client that `picks` its node has it run here, or told where.
+/// A call as `/api/call` takes it, for `me`: → `{ ok }`. A client that `picks` its node has it run here, or told where.
 async fn call_for(node: &Node, me: Me, mut req: CallRequest, picks: bool) -> anyhow::Result<Value> {
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);

@@ -137,7 +137,7 @@ pub fn read(apps: &[Value], name: &str) -> Option<String> {
     all(apps).into_iter().find(|s| s.name == skill)?.file(file)
 }
 
-/// The skills under the root, for `apps` (as `GET /v1/apps` gives them, those added for the user having their
+/// The skills under the root, for `apps` (as `GET /api/apps` gives them, those added for the user having their
 /// tools): the areas of their own, then one for each of the core's features and each app with a guide.
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     let code = match REPO.is_empty() {

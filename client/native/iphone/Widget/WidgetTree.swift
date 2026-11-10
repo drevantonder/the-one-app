@@ -1,7 +1,7 @@
 import Charts
 import SwiftUI
 
-/// A rendered widget, as `GET /v1/widgets` gives it.
+/// A rendered widget, as `GET /api/widgets` gives it.
 struct WidgetInfo: Codable, Sendable, Equatable, Identifiable {
     var app: String
     var widget: String

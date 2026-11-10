@@ -200,7 +200,7 @@ async function save(p, items, hidden = hiddenOf(p), { reload = false } = {}) {
   const after = state.arrangements
   draw()
   try {
-    await one.api("POST", "/v1/arrange", { page: p.scope, items, hidden, ...(was.pages ? { pages: was.pages } : {}) })
+    await one.api("POST", "/api/arrange", { page: p.scope, items, hidden, ...(was.pages ? { pages: was.pages } : {}) })
     if (reload) await home.loadWidgets([p.scope]), draw()
     keep()
   } catch (err) {
@@ -293,7 +293,7 @@ function keepPages(pages) {
   state.pages = [listed[0], ...pages.order.map((scope) => ({ ...listed.find((p) => p.scope === scope), hidden: pages.hidden.includes(scope) })), listed.at(-1)]
   const after = state.arrangements
   draw()
-  one.api("POST", "/v1/arrange", { page: "user", items, hidden: mine?.hidden || [], pages }).then(keep, (err) => {
+  one.api("POST", "/api/arrange", { page: "user", items, hidden: mine?.hidden || [], pages }).then(keep, (err) => {
     if (home.data.state.arrangements === after) home.data.state.arrangements = before, home.data.state.pages = listed, draw()
     home.failed(err)
   })

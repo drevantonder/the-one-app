@@ -54,7 +54,7 @@ fn say(answered: Option<(Value, bool)>) -> std::io::Result<()> {
 /// MCP over Streamable HTTP, at `/mcp`: for a client device over iroh, as its user (the remote MCP server,
 /// cloudflare/mcp/, is remote MCP clients' device), or for a program on this machine, as its user. Each POST is
 /// answered with JSON; the server sends nothing unasked, so there's no stream to GET. A tool that needs keys it wasn't
-/// handed is answered 428 with what it needs, as `/v1/call` is, for its caller to hand them and ask again. Nothing is
+/// handed is answered 428 with what it needs, as `/api/call` is, for its caller to hand them and ask again. Nothing is
 /// kept between requests, since the next may reach another node: the session id carries only the client's name,
 /// credited on its calls.
 pub async fn http(
@@ -150,7 +150,7 @@ pub fn answer(node: &Client, msg: &Value, session: &mut Session) -> Option<(Valu
     Some((reply, changed))
 }
 
-/// Every app's tools by name, as `GET /v1/apps` gives them: what a session's list of tools is made of.
+/// Every app's tools by name, as `GET /api/apps` gives them: what a session's list of tools is made of.
 fn tool_names(apps: &[Value]) -> Vec<String> {
     let mut names: Vec<String> = apps.iter().flat_map(|a| a["tools"].as_array().into_iter().flatten().map(move |o| format!("{}_{}", a["name"].as_str().unwrap_or(""), o["name"].as_str().unwrap_or("")))).collect();
     names.sort();
@@ -170,7 +170,7 @@ fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bo
     let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
     let mut out = call_tool(node, params, session);
     let Some(before) = before else { return (out, false) };
-    let Ok(after) = node.get("/v1/apps").map(|a| tool_names(a.as_array().map(Vec::as_slice).unwrap_or_default())) else { return (out, false) };
+    let Ok(after) = node.get("/api/apps").map(|a| tool_names(a.as_array().map(Vec::as_slice).unwrap_or_default())) else { return (out, false) };
     if after == before {
         return (out, false);
     }
@@ -333,7 +333,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
                 (None, Some(version)) => json!({ "app": app, "bundle": version, "wait": true }),
                 _ => return failed("give files, the app's files, or version, an earlier one to put back".into()),
             };
-            match node.post("/v1/deploy", body) {
+            match node.post("/api/deploy", body) {
                 Ok(r) => {
                     let text = format!("{}{service}", crate::app::deploy::said(node, app, &r, crate::core_tools::Reader::Mcp));
                     json!({ "isError": r["failed"].is_string(), "content": [{ "type": "text", "text": text }] })

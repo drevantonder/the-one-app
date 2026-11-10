@@ -58,7 +58,7 @@ pub(crate) fn joined(dir: &Path, settings: &one::cloudflare::Settings, name: &st
     let marker = folder.join("joined");
     if !marker.exists() {
         eprintln!("Inviting {name}…");
-        let invited = node_in(dir)?.post("/v1/devices/invite", json!({ "name": name }))?;
+        let invited = node_in(dir)?.post("/api/devices/invite", json!({ "name": name }))?;
         args.push(invited["link"].as_str().context("the throwaway network made no invite link")?.to_string());
     }
     let code = web_script(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;

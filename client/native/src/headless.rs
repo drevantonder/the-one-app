@@ -133,7 +133,7 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<onet::Device>>) -> Resu
             let device = device(mine).await?;
             let id = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 8]>());
             let asked = json!({ "id": id, "app": text("app")?, "tool": text("tool")?, "input": input["input"], "client": crate::platform::CLIENT });
-            let out = crate::node(&device, "POST", "/v1/call", Some(asked)).await?;
+            let out = crate::node(&device, "POST", "/api/call", Some(asked)).await?;
             // What a tool did shows on the widgets.
             crate::widgets_changed(&device).await;
             Ok(json!({ "ok": out["ok"] }))
@@ -160,13 +160,13 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<onet::Device>>) -> Resu
             let device = device(mine).await?;
             match input["approve"] == true {
                 true => {
-                    let about = crate::node(&device, "POST", "/v1/devices/approve", Some(json!({ "code": code }))).await?;
+                    let about = crate::node(&device, "POST", "/api/devices/approve", Some(json!({ "code": code }))).await?;
                     if !one::settings::approves_from_a_note(&about) {
                         return Err("Open Settings › Devices to answer it.".to_string());
                     }
-                    crate::node(&device, "POST", "/v1/devices/approve", Some(json!({ "code": code, "confirm": true }))).await?
+                    crate::node(&device, "POST", "/api/devices/approve", Some(json!({ "code": code, "confirm": true }))).await?
                 }
-                false => crate::node(&device, "POST", "/v1/devices/refuse", Some(json!({ "code": code }))).await?,
+                false => crate::node(&device, "POST", "/api/devices/refuse", Some(json!({ "code": code }))).await?,
             };
             Ok(json!({ "ok": null }))
         }

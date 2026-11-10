@@ -5,7 +5,7 @@
 //! the network's root (which oned gives it, so nothing on the way can make it another network's), from which it works out who's who and
 //! checks each caller by itself: a compute endpoint of the network that runs the calls of a user it serves. The program offering it, its
 //! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
-//! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its user's runs (`/v1/call` on the loopback).
+//! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its user's runs (`/api/call` on the loopback).
 
 use crate::protocol::allowed;
 use crate::config::YOURS;
@@ -390,7 +390,7 @@ impl Service {
     }
 
     /// Takes `global`'s scope database's steps a node of the network brought (`{ at, step }` each, as
-    /// `GET /v1/steps/global` gives them): those after the ones it has, each checked as from anyone, then who's who
+    /// `GET /api/steps/global` gives them): those after the ones it has, each checked as from anyone, then who's who
     /// from them.
     fn take_steps(&self, remote: &Key, given: &Value) -> Result<()> {
         let root = Hash::from_hex(&self.0.network.root)?;
@@ -526,14 +526,14 @@ impl Service {
     }
 
     /// The loopback the program offering it registers at, with the local token in its folder: the services' API, its
-    /// machine as `/v1/state` says, and `/v1/call`, which a node of its user's runs.
+    /// machine as `/api/state` says, and `/api/call`, which a node of its user's runs.
     fn loopback(&self) -> Router {
         Router::new()
-            .route("/v1/state", get(state))
-            .route("/v1/call", post(call))
+            .route("/api/state", get(state))
+            .route("/api/call", post(call))
             // A file is as big as it is (a browser profile is hundreds of MB): the node gives each user their room.
-            .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::disable()))
-            .route("/v1/blobs/{hash}", get(get_blob))
+            .route("/api/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::disable()))
+            .route("/api/blobs/{hash}", get(get_blob))
             // Standard OTLP/JSON from its program, as `OTEL_EXPORTER_OTLP_ENDPOINT` says (`program_env`).
             .route("/v1/traces", post(otlp))
             .route("/v1/logs", post(otlp))
@@ -544,7 +544,7 @@ impl Service {
             .merge(self.0.registry.routes())
     }
 
-    /// What `/v1/state` says here: this service as the device, and the others offering it, as far as it knows.
+    /// What `/api/state` says here: this service as the device, and the others offering it, as far as it knows.
     fn state(&self) -> Result<Value> {
         let known = self.0.known.lock().unwrap();
         let m = &*known;
@@ -657,14 +657,14 @@ async fn call(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Val
     }
 }
 
-/// A blob its program keeps (`POST /v1/blobs`) or reads (`GET /v1/blobs/<hash>`), through its own device's oned, as
+/// A blob its program keeps (`POST /api/blobs`) or reads (`GET /api/blobs/<hash>`), through its own device's oned, as
 /// a service in oned's own process does: one it keeps is named in its call's answer, which the call's node keeps.
 async fn put_blob(State(s): State<Service>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    blobs(&s, &headers, "POST", "/v1/blobs", Some(body.to_vec())).await
+    blobs(&s, &headers, "POST", "/api/blobs", Some(body.to_vec())).await
 }
 
 async fn get_blob(State(s): State<Service>, headers: HeaderMap, UrlPath(hash): UrlPath<String>) -> Response {
-    blobs(&s, &headers, "GET", &format!("/v1/blobs/{hash}"), None).await
+    blobs(&s, &headers, "GET", &format!("/api/blobs/{hash}"), None).await
 }
 
 async fn blobs(s: &Service, headers: &HeaderMap, method: &'static str, path: &str, body: Option<Vec<u8>>) -> Response {

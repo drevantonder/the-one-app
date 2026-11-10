@@ -1,4 +1,4 @@
-// What the window shows, as the user's nodes say it: their state (`/v1/state`), their apps and their badges, kept
+// What the window shows, as the user's nodes say it: their state (`/api/state`), their apps and their badges, kept
 // here as the window was last so it draws at once; the devices waiting to be let in; and signing out, which forgets it.
 // The window draws it again whenever it changes (`whenChanged`).
 import { platform } from "./platform.js";
@@ -20,7 +20,7 @@ const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
 const keepsAccounts = (a) => !!a?.tools?.some((t) => t.accounts);
 const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
 
-/// Every page this user can read, as the sidebar lists them: the node's (`pages` in `/v1/state`).
+/// Every page this user can read, as the sidebar lists them: the node's (`pages` in `/api/state`).
 export const pages = () => store.state?.pages || [];
 const page = (scope) => pages().find((p) => p.scope === scope);
 export const appsOn = (p) => store.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
@@ -129,7 +129,7 @@ const draw = () => changes.forEach((fn) => fn());
 /// Loads what the sidebar shows: the node's state and its apps together (its apps only if `apps`, or if who's in
 /// which group changed), drawn as soon as they're in; then the badges, drawn as they come.
 export async function refreshState({ apps = false } = {}) {
-  const [state, list] = await Promise.all([shared("/v1/state"), apps && !joining ? shared("/v1/apps").catch(() => null) : null]);
+  const [state, list] = await Promise.all([shared("/api/state"), apps && !joining ? shared("/api/apps").catch(() => null) : null]);
   if (state.user) platform.nodes(state);
   const regrouped = JSON.stringify([state.user, state.network?.groups]) !== JSON.stringify([store.state?.user, store.state?.network?.groups]);
   store.state = state;
@@ -144,14 +144,14 @@ export async function refreshState({ apps = false } = {}) {
 
 export async function refreshApps() {
   if (!network()) return draw();
-  store.apps = await shared("/v1/apps");
+  store.apps = await shared("/api/apps");
   draw();
   keepWindow();
   badges();
 }
 
 async function badges() {
-  await Promise.all(pages().map(async (p) => (store.badges[p.scope] = await api("/v1/badges", { query: { scope: p.scope } }).catch(() => store.badges[p.scope] || {}))));
+  await Promise.all(pages().map(async (p) => (store.badges[p.scope] = await api("/api/badges", { query: { scope: p.scope } }).catch(() => store.badges[p.scope] || {}))));
   draw();
   keepWindow();
 }

@@ -9,7 +9,7 @@ use crate::node::Node;
 
 pub fn routes() -> Routes {
     Routes::default()
-        .route("/v1/service", Who::ThisMachine, post(service))
+        .route("/api/service", Who::ThisMachine, post(service))
 }
 
 /// Removes a service from a device (this one by default, for this machine's own programs), or with `on` lets it

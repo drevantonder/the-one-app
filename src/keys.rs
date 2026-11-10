@@ -675,7 +675,7 @@ pub struct Need {
 /// request needed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
-    /// An app's call: `/v1/call` for it, or its own request (`/<app>/…`).
+    /// An app's call: `/api/call` for it, or its own request (`/<app>/…`).
     Call(String),
     /// An app's screens.
     Screens(String),
@@ -684,7 +684,7 @@ pub enum Route {
 }
 
 impl Route {
-    /// The route of a request for `path` (a query is left off); `call_app` names the app of a `/v1/call`, from its body.
+    /// The route of a request for `path` (a query is left off); `call_app` names the app of a `/api/call`, from its body.
     pub fn of(path: &str, call_app: impl FnOnce() -> String) -> Route {
         use crate::protocol::path;
         let at = path.split('?').next().unwrap_or(path);
@@ -773,7 +773,7 @@ pub fn oldest_needed(database: &str, hint: Option<&[u8]>, newest: u32) -> u32 {
 }
 
 /// The most keys a node's 428 may ask one request to hand, once each: a request that reads every app on a page
-/// (`/v1/badges`, `/v1/widgets`, `/mcp`) needs each one's, in each epoch from the oldest it needs. More is a node asking
+/// (`/api/badges`, `/api/widgets`, `/mcp`) needs each one's, in each epoch from the oldest it needs. More is a node asking
 /// for everything.
 pub const MOST_NEEDED: usize = 64;
 
@@ -930,14 +930,14 @@ mod tests {
     fn a_node_is_handed_only_the_keys_a_kind_of_request_uses() {
         let need = |app: &str, database: &str| Need { scope: "global".into(), epoch: 1, app: app.into(), database: database.into() };
         assert!(may_hand(&call("tally"), &need("tally", "main")) && !may_hand(&call("tally"), &need("notes", "main")));
-        assert!(may_hand(&at("/v1/steps"), &need("node", "log")) && !may_hand(&at("/v1/steps"), &need("tally", "main")) && !may_hand(&at("/v1/state"), &need("node", "vault")));
-        assert!(may_hand(&at("/v1/vault"), &need("node", "vault")) && !may_hand(&at("/v1/vault"), &need("tally", "main")));
+        assert!(may_hand(&at("/api/steps"), &need("node", "log")) && !may_hand(&at("/api/steps"), &need("tally", "main")) && !may_hand(&at("/api/state"), &need("node", "vault")));
+        assert!(may_hand(&at("/api/vault"), &need("node", "vault")) && !may_hand(&at("/api/vault"), &need("tally", "main")));
         // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
         // blobs, its users' files, never.
         let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
-        assert!(may_hand(&call("tally"), &blobs("global")) && may_hand(&Route::Screens("tally".into()), &blobs("global")) && may_hand(&at("/v1/badges"), &blobs("global")) && may_hand(&at("/v1/widgets/show"), &blobs("global")) && may_hand(&at("/v1/apps"), &blobs("global")) && may_hand(&at(crate::protocol::path::OPENAPI), &blobs("global")));
-        assert!(!may_hand(&at("/v1/apps"), &need("tally", "main")) && !may_hand(&at("/v1/apps"), &blobs("user:ab")));
-        assert!(!may_hand(&call("tally"), &blobs("user:ab")) && !may_hand(&at("/mcp"), &blobs("group:cd")) && !may_hand(&at("/v1/state"), &blobs("global")));
+        assert!(may_hand(&call("tally"), &blobs("global")) && may_hand(&Route::Screens("tally".into()), &blobs("global")) && may_hand(&at("/api/badges"), &blobs("global")) && may_hand(&at("/api/widgets/show"), &blobs("global")) && may_hand(&at("/api/apps"), &blobs("global")) && may_hand(&at(crate::protocol::path::OPENAPI), &blobs("global")));
+        assert!(!may_hand(&at("/api/apps"), &need("tally", "main")) && !may_hand(&at("/api/apps"), &blobs("user:ab")));
+        assert!(!may_hand(&call("tally"), &blobs("user:ab")) && !may_hand(&at("/mcp"), &blobs("group:cd")) && !may_hand(&at("/api/state"), &blobs("global")));
         assert_eq!(oldest_needed("main", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
         assert_eq!(oldest_needed("log", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 1, "a scope's steps are read from the first");
         assert_eq!(oldest_needed("log", None, 3), 1, "a scope's steps are read from the first, before any hint");
@@ -958,8 +958,8 @@ mod tests {
         assert!(asked_for(&call("tally"), &node, &json!({ "to": node, "need": [need("notes", "main")] })).is_none(), "another app's");
         assert!(asked_for(&call("tally"), &node, &json!({ "to": node, "need": [need("tally", "main"), { "scope": "global", "epoch": "1", "app": "tally", "database": "main" }] })).is_none());
         assert!(asked_for(&call("tally"), &node, &json!({ "to": node, "need": [{ "scope": "global", "epoch": -1, "app": "tally", "database": "main" }] })).is_none());
-        assert!(asked_for(&at("/v1/badges"), &node, &json!({ "to": node, "need": every(MOST_NEEDED) })).is_some());
-        assert!(asked_for(&at("/v1/badges"), &node, &json!({ "to": node, "need": every(MOST_NEEDED + 1) })).is_none());
+        assert!(asked_for(&at("/api/badges"), &node, &json!({ "to": node, "need": every(MOST_NEEDED) })).is_some());
+        assert!(asked_for(&at("/api/badges"), &node, &json!({ "to": node, "need": every(MOST_NEEDED + 1) })).is_none());
     }
 
     #[test]

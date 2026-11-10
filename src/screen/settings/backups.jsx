@@ -53,7 +53,7 @@ function Backups() {
 
   async function load() {
     try {
-      const [got, state] = await Promise.all([api("POST", "/v1/backups/status", {}), api("GET", "/v1/state")])
+      const [got, state] = await Promise.all([api("POST", "/api/backups/status", {}), api("GET", "/api/state")])
       setBackups(got)
       setAdmin(state.user?.role === "admin")
       setNetwork(state.network || {})
@@ -74,7 +74,7 @@ function Backups() {
     setWaiting(true)
     setError("")
     try {
-      await api("POST", "/v1/backups/now", {})
+      await api("POST", "/api/backups/now", {})
     } catch (e) {
       setError(said(e))
       setWaiting(false)
@@ -88,7 +88,7 @@ function Backups() {
   async function checkAgain() {
     setError("")
     try {
-      await api("POST", "/v1/backups/check", {})
+      await api("POST", "/api/backups/check", {})
     } catch (e) {
       setError(said(e))
     }
@@ -199,7 +199,7 @@ function Place({ place: p, admin, stopped }) {
     setBusy(true)
     setError("")
     try {
-      await api("POST", "/v1/backups/remove_place", { place: p.id })
+      await api("POST", "/api/backups/remove_place", { place: p.id })
       stopped()
     } catch (e) {
       setError(said(e))
@@ -266,7 +266,7 @@ function AddPlace({ backups, open, setOpen, done }) {
     const body = Object.fromEntries(keys.map((k) => [k, v[k]]))
     if (filled("title")) body.title = v.title
     try {
-      const reply = await api("POST", "/v1/backups/place", body)
+      const reply = await api("POST", "/api/backups/place", body)
       if (reply.id) {
         done()
         return setOpen(false)

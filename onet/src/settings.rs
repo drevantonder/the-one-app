@@ -76,7 +76,7 @@ impl<O: Opens, D: Address + Keep + Signs> one::settings::Me for Mine<'_, O, D> {
 
     /// Each sealed to it, as a node keeps them, opened and checked against the hash who's who names.
     async fn held(&self, scope: &Scope) -> anyhow::Result<Vec<(u32, [u8; 32])>> {
-        let mine = self.keyring.asked(self.client, self.on, "GET", &format!("/v1/keys?scope={}&to={}", query(&scope.to_string()), hex(&self.on.public())), None).await.map_err(to_one)?;
+        let mine = self.keyring.asked(self.client, self.on, "GET", &format!("/api/keys?scope={}&to={}", query(&scope.to_string()), hex(&self.on.public())), None).await.map_err(to_one)?;
         let mut out = Vec::new();
         for (n, sealed) in mine["sealed"].as_object().into_iter().flatten() {
             let n: u32 = n.parse()?;
@@ -89,7 +89,7 @@ impl<O: Opens, D: Address + Keep + Signs> one::settings::Me for Mine<'_, O, D> {
     }
 
     async fn keep_key(&self, sealed: Value) -> anyhow::Result<()> {
-        self.keyring.asked(self.client, self.on, "POST", "/v1/keys", Some(sealed)).await.map(|_| ()).map_err(to_one)
+        self.keyring.asked(self.client, self.on, "POST", "/api/keys", Some(sealed)).await.map(|_| ()).map_err(to_one)
     }
 
     async fn app_key(&self, scope: &Scope, app: &str, n: u32) -> anyhow::Result<[u8; 32]> {
@@ -156,12 +156,12 @@ impl<O: Opens> Keyring<O> {
     /// writes it, signing it again for the one after while another device's goes first.
     pub(crate) async fn write(&self, client: &Client, on: &(impl Address + Keep + Signs), content: Content) -> Result<(), Error> {
         let user = self.user().ok_or_else(refused)?;
-        let newest = format!("/v1/steps/global?from={}", one::database::steps::NUMBER_MAX);
+        let newest = format!("/api/steps/global?from={}", one::database::steps::NUMBER_MAX);
         let mut steps = self.asked(client, on, "GET", &newest, None).await?;
         for _ in 0..5 {
             let (at, epoch) = (steps["at"].as_u64().unwrap_or(0), steps["epoch"].as_u64().unwrap_or(0) as u32);
             let step = one::database::steps::sign_by(on, &Scope::Global, at + 1, &user, epoch, now(), content.clone()).await.map_err(unsent)?;
-            match self.asked(client, on, "POST", "/v1/steps", Some(json!([step.to_json()]))).await {
+            match self.asked(client, on, "POST", "/api/steps", Some(json!([step.to_json()]))).await {
                 Ok(_) => return Ok(()),
                 Err(err) if err.code.as_deref() == Some(code::TAKEN) => steps = self.asked(client, on, "GET", &newest, None).await?,
                 Err(err) => return Err(err),

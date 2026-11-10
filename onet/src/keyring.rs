@@ -519,8 +519,8 @@ impl<O: Opens> Keyring<O> {
         let apps: BTreeSet<(&str, &str)> = need.iter().filter(|n| !self.app_keys.lock().unwrap().contains_key(&(n.scope.clone(), n.app.clone(), n.epoch))).map(|n| (n.scope.as_str(), n.app.as_str())).collect();
         let me = hex(&self.key);
         let asked = |path: String, step: Value| async move { noted(notes, step, self.json(client, "GET", &path, None)).await };
-        let epochs = n0_future::join_all(scopes.iter().map(|scope| asked(format!("/v1/keys?scope={}&to={me}", query(scope)), json!({ "step": "keys", "of": "epochs", "scope": kind(scope) }))));
-        let sealed = n0_future::join_all(apps.iter().map(|(scope, app)| asked(format!("/v1/keys?scope={}&app={}", query(scope), query(app)), json!({ "step": "keys", "of": app, "scope": kind(scope) }))));
+        let epochs = n0_future::join_all(scopes.iter().map(|scope| asked(format!("/api/keys?scope={}&to={me}", query(scope)), json!({ "step": "keys", "of": "epochs", "scope": kind(scope) }))));
+        let sealed = n0_future::join_all(apps.iter().map(|(scope, app)| asked(format!("/api/keys?scope={}&app={}", query(scope), query(app)), json!({ "step": "keys", "of": app, "scope": kind(scope) }))));
         let (epochs, sealed) = n0_future::future::zip(epochs, sealed).await;
         for (scope, kept) in scopes.iter().zip(epochs) {
             if let Ok(kept) = kept {
@@ -540,7 +540,7 @@ impl<O: Opens> Keyring<O> {
         Ok(())
     }
 
-    /// Opens each of a scope's epochs in `kept` (what `/v1/keys` gave, sealed to this device) whose hash is the one
+    /// Opens each of a scope's epochs in `kept` (what `/api/keys` gave, sealed to this device) whose hash is the one
     /// who's who names.
     async fn open_epochs(&self, scope: &str, kept: &Value) -> Result<(), Error> {
         let Ok(parsed) = Scope::parse(scope) else { return Ok(()) };
@@ -572,13 +572,13 @@ impl<O: Opens> Keyring<O> {
             return Ok(*key);
         }
         let epoch = self.epoch(client, on, scope, n).await?;
-        let kept = self.json(client, "GET", &format!("/v1/keys?scope={}&app={}", query(scope), query(app)), None).await?;
+        let kept = self.json(client, "GET", &format!("/api/keys?scope={}&app={}", query(scope), query(app)), None).await?;
         let sealed = match kept["sealed"][n.to_string()].as_str() {
             Some(s) => s.to_string(),
             None => {
                 let made: [u8; 32] = rand::random();
                 let sealed = B64U.encode(&keys::seal_app_key(&epoch, app, &made));
-                let out = self.json(client, "POST", "/v1/keys", Some(json!({ "scope": scope, "n": n, "app": app, "sealed": sealed }))).await?;
+                let out = self.json(client, "POST", "/api/keys", Some(json!({ "scope": scope, "n": n, "app": app, "sealed": sealed }))).await?;
                 out["sealed"].as_str().unwrap_or_default().to_string()
             }
         };
@@ -595,7 +595,7 @@ impl<O: Opens> Keyring<O> {
             return Ok(*key);
         }
         Scope::parse(scope).map_err(failed)?;
-        let kept = self.json(client, "GET", &format!("/v1/keys?scope={}&to={}", query(scope), hex(&self.key)), None).await?;
+        let kept = self.json(client, "GET", &format!("/api/keys?scope={}&to={}", query(scope), hex(&self.key)), None).await?;
         for fresh in [false, true] {
             if fresh {
                 self.read(on).await?;

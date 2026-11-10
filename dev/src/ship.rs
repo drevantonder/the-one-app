@@ -333,7 +333,7 @@ fn run_here(command: &str) -> Result<Value> {
 }
 
 fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
-    let r = crate::node().post("/v1/call", json!({ "device": device["name"], "service": "shell", "app": "shell", "function": "run", "input": { "command": command, "timeout": timeout } }))?;
+    let r = crate::node().post("/api/call", json!({ "device": device["name"], "service": "shell", "app": "shell", "function": "run", "input": { "command": command, "timeout": timeout } }))?;
     Ok(r["ok"].clone())
 }
 

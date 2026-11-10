@@ -70,7 +70,7 @@ pub fn commands() -> Command {
                         return Err(Failed::Typed(format!("no service called {name}: {}", names.into_iter().collect::<Vec<_>>().join(", "))).into());
                     }
                     let device = g.flag("device");
-                    g.node.post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
+                    g.node.post("/api/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
                     let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
                     match (*how, *name == crate::database::scopes::APPS_PART) {
                         _ if device.is_some_and(|d| d.eq_ignore_ascii_case(crate::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),

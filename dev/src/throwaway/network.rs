@@ -60,7 +60,7 @@ pub(crate) fn running(dir: &Path) -> Option<String> {
     let addr = std::fs::read_to_string(dir.join("addr")).ok()?.trim().to_string();
     let node: i32 = std::fs::read_to_string(dir.join("pid")).ok()?.trim().parse().ok()?;
     programs(dir, false).contains(&node).then_some(())?;
-    node_at(dir, &addr).get("/v1/state").is_ok().then_some(addr)
+    node_at(dir, &addr).get("/api/state").is_ok().then_some(addr)
 }
 
 /// Whether the throwaway network's node started before this build was made: it runs the build it started as, Workers and screens
@@ -146,7 +146,7 @@ pub(crate) fn start_new(dir: &Path) -> Result<String> {
 fn create(dir: &Path) -> Result<String> {
     // Called what the user is called in their own network, if this machine is in one.
     let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
-    let mine = quick.get(format!("http://{}/v1/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<one::state::State>().ok());
+    let mine = quick.get(format!("http://{}/api/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<one::state::State>().ok());
     let me = mine.map(|s| s.looking().to_string());
     let me = me.or_else(|| std::env::var("USER").ok()).unwrap_or_else(|| "You".into());
     std::fs::create_dir_all(dir)?;
@@ -156,7 +156,7 @@ fn create(dir: &Path) -> Result<String> {
     // want first, which another's would hold when this one starts again.
     let addr = spawn_node(dir, None)?;
     let node = node_at(dir, &addr);
-    let created = node.post("/v1/create", json!({ "name": "Throwaway", "user_name": me }))?;
+    let created = node.post("/api/create", json!({ "name": "Throwaway", "user_name": me }))?;
     let recovery = created["recovery"].as_str().context("the throwaway network gave no recovery key")?;
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
     let user = (node.state()?.user.context("the throwaway network has no user")?.id, me);
@@ -165,15 +165,15 @@ fn create(dir: &Path) -> Result<String> {
     // Read back as `cloudflare deploy` reads it, with its secrets.
     let settings = Settings::load_in(dir)?;
     spawn_cloudflare(dir, &settings, &addr)?;
-    node.post("/v1/settings", json!({ "name": "address", "value": &settings.address }))?;
+    node.post("/api/settings", json!({ "name": "address", "value": &settings.address }))?;
     // Its sign-in signs its own ID tokens, as a provider would, for this client: the one its users sign in with.
     let clients = format!("{}/api/auth one-throwaway", settings.address);
-    node.post("/v1/settings", json!({ "name": one::onboarding::sign_in_proof::CLIENTS, "value": clients }))?;
+    node.post("/api/settings", json!({ "name": one::onboarding::sign_in_proof::CLIENTS, "value": clients }))?;
     // Its data moves to the throwaway bucket, which its node reaches only through its URL signer from then on.
-    let moved = node.post("/v1/storage", json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" }))?;
+    let moved = node.post("/api/storage", json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" }))?;
     anyhow::ensure!(moved["kept"] == true, "the throwaway network's node couldn't reach its bucket through the URL signer: {moved}");
     let started = std::time::Instant::now();
-    while node.get("/v1/storage")?["kind"] != "s3" {
+    while node.get("/api/storage")?["kind"] != "s3" {
         anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the throwaway network's node didn't move to its bucket: node.log says why");
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -213,7 +213,7 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
         std::fs::write(dir.join(name), text).with_context(|| format!("writing {}", dir.join(name).display()))?;
     }
     let node = node_at(dir, &addr);
-    wait_for(|| node.get("/v1/state").is_ok(), node_program, &dir.join("node.log"))?;
+    wait_for(|| node.get("/api/state").is_ok(), node_program, &dir.join("node.log"))?;
     Ok(addr)
 }
 

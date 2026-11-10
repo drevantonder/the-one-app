@@ -12,7 +12,7 @@ use crate::api::{Body, Me, Reply, Routes, Who};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
-    Routes::default().route("/v1/backups/place", Who::Clients, post(place)).says(Op::post("Add a place backups go, after trying it").body::<Place>().answers_as(json!({
+    Routes::default().route("/api/backups/place", Who::Clients, post(place)).says(Op::post("Add a place backups go, after trying it").body::<Place>().answers_as(json!({
         "type": "object",
         "required": ["tried"],
         "properties": {

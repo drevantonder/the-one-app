@@ -1,4 +1,4 @@
-//! Devices' keys and parts: the keys sealed to each (`GET`/`POST /v1/keys`, which any of the network's devices may read,
+//! Devices' keys and parts: the keys sealed to each (`GET`/`POST /api/keys`, which any of the network's devices may read,
 //! sealed as they are), new keys a scope is owed, a device's services listed as its parts, and erasing what a device
 //! keeps. Letting devices in and taking them out is what this machine signs as its own device (`settings.rs`).
 

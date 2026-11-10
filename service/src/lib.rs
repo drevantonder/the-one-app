@@ -114,7 +114,7 @@ impl Host {
     /// Keeps bytes, read from `body` as they come, as a blob the caller's scope keeps once the call names it in its
     /// answer: its hash and size.
     pub fn put_blob(&self, body: impl std::io::Read + Send + 'static) -> Result<(String, u64)> {
-        let resp = self.agent.post(format!("{}/v1/blobs", self.node)).header("content-type", "application/octet-stream").send(ureq::SendBody::from_owned_reader(body));
+        let resp = self.agent.post(format!("{}/api/blobs", self.node)).header("content-type", "application/octet-stream").send(ureq::SendBody::from_owned_reader(body));
         let put = answer(resp)?.unwrap_or_default();
         let blob = put["blob"].as_str().filter(|b| !b.is_empty()).ok_or_else(|| anyhow!("the node kept no blob"))?;
         Ok((blob.to_string(), put["size"].as_u64().unwrap_or(0)))
@@ -122,7 +122,7 @@ impl Host {
 
     /// A blob's bytes, as they come, from whichever device has it.
     pub fn get_blob(&self, hash: &str) -> Result<impl std::io::Read + Send + 'static> {
-        let resp = self.agent.get(format!("{}/v1/blobs/{hash}", self.node)).call()?;
+        let resp = self.agent.get(format!("{}/api/blobs/{hash}", self.node)).call()?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.into_body().read_to_string().unwrap_or_default();
@@ -195,13 +195,13 @@ pub fn serve(service: Service) -> Result<()> {
     let prefer: Value = service.prefer_here.iter().map(|f| (f.to_string(), json!("here"))).collect::<serde_json::Map<_, _>>().into();
     let describe = json!({ "version": BUILD, "prefer": prefer });
     loop {
-        if let Err(err) = host.post(&format!("/v1/services/{name}"), &describe) {
+        if let Err(err) = host.post(&format!("/api/services/{name}"), &describe) {
             eprintln!("registering: {err:#}");
             std::thread::sleep(Duration::from_secs(3));
             continue;
         }
         loop {
-            let call = match answer(poll.get(format!("{}/v1/services/{name}/calls", host.node)).call()) {
+            let call = match answer(poll.get(format!("{}/api/services/{name}/calls", host.node)).call()) {
                 Ok(Some(call)) => match serde_json::from_value::<Call>(call) {
                     Ok(call) => call,
                     Err(err) => {
@@ -226,7 +226,7 @@ pub fn serve(service: Service) -> Result<()> {
                     Ok(Err(err)) => json!({ "error": format!("{err:#}") }),
                     Err(_) => json!({ "error": format!("{} failed: it panicked", host.name) }),
                 };
-                if let Err(err) = host.post(&format!("/v1/services/{}/calls/{}", host.name, call.id), &reply) {
+                if let Err(err) = host.post(&format!("/api/services/{}/calls/{}", host.name, call.id), &reply) {
                     eprintln!("answering {}: {err:#}", call.function);
                 }
             });

@@ -274,8 +274,8 @@ mod tests {
         assert!(read(&home, &ask(Some("whatsapp"), None, None, 10)).is_err(), "a service that never ran has no log");
         assert!(since("soon").is_err());
         assert_eq!([0, 951_868_799_999, 1_762_468_500_000, 4_107_542_400_000].map(utc), ["1970-01-01T00:00:00Z", "2000-02-29T23:59:59Z", "2025-11-06T22:35:00Z", "2100-03-01T00:00:00Z"]);
-        let kept = plain("\x1b[31mWARN\x1b[0m asked https://bucket.example/a/b?X-Amz-Signature=abc123&k=v Bearer s3cr3t and http://127.0.0.1:4747/v1/state ok");
-        assert_eq!(kept, "WARN asked https://bucket.example/a/b?… Bearer … and http://127.0.0.1:4747/v1/state ok");
+        let kept = plain("\x1b[31mWARN\x1b[0m asked https://bucket.example/a/b?X-Amz-Signature=abc123&k=v Bearer s3cr3t and http://127.0.0.1:4747/api/state ok");
+        assert_eq!(kept, "WARN asked https://bucket.example/a/b?… Bearer … and http://127.0.0.1:4747/api/state ok");
         std::fs::remove_dir_all(&home).unwrap();
     }
 }

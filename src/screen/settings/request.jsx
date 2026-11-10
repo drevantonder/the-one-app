@@ -12,7 +12,7 @@ import { AGENTS, appNamed, asking } from "./agents.js"
 
 const api = one.api
 const { scope, id } = one.params || {}
-const find = () => api("GET", `/v1/vault/requests?scope=${encodeURIComponent(scope || "")}&id=${encodeURIComponent(id || "")}`).then((l) => l[0])
+const find = () => api("GET", `/api/vault/requests?scope=${encodeURIComponent(scope || "")}&id=${encodeURIComponent(id || "")}`).then((l) => l[0])
 
 /// A field's name as a user reads it: "api_key" → "API key".
 function fieldLabel(name) {
@@ -48,7 +48,7 @@ function Request() {
 
   async function load() {
     try {
-      const [r, a] = await Promise.all([find(), api("GET", "/v1/apps").catch(() => [])])
+      const [r, a] = await Promise.all([find(), api("GET", "/api/apps").catch(() => [])])
       if (!r) throw new Error("Can’t find this request: it may be for someone else.")
       setRequest(r)
       setApps(a)
@@ -82,7 +82,7 @@ function Request() {
     if (picked !== NEW) body.item = picked
     else body.fields = values
     try {
-      await api("POST", "/v1/vault/answer", body)
+      await api("POST", "/api/vault/answer", body)
       setValues({})
       one.tap("success")
       one.close(true)

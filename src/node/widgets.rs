@@ -13,9 +13,9 @@ pub(crate) mod routes {
 
     pub fn routes() -> Routes {
         Routes::default()
-            .route("/v1/widgets", Who::Clients, get(widgets))
+            .route("/api/widgets", Who::Clients, get(widgets))
             .says(Op::get("The caller's widgets, drawn by their apps").query::<WidgetsAsked>().answers_as(json!({ "type": "array", "items": { "type": "object", "required": ["app", "widget"], "properties": { "app": { "type": "string" }, "widget": { "type": "string" }, "late": { "type": "boolean", "description": "took too long to draw beside the rest: ask for it alone, with kind" } }, "additionalProperties": true } })))
-            .route("/v1/badges", Who::Clients, get(badges))
+            .route("/api/badges", Who::Clients, get(badges))
             .says(Op::get("The caller's badges").query::<WidgetsQuery>().answers_as(json!({ "type": "object", "description": "each app's name → its badge, a number above 0; an app with none is left out", "additionalProperties": { "type": "number" } })))
     }
 

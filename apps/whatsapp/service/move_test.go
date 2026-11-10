@@ -30,13 +30,13 @@ type fakeNodes struct {
 func (f *fakeNodes) node(t *testing.T, name string) string {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/state":
+		case "/api/state":
 			json.NewEncoder(w).Encode(map[string]any{"device": map[string]any{"key": name, "name": name},
 				"network": map[string]any{"devices": []map[string]any{
 					{"key": "a", "name": "a", "online": true, "services": []string{app}},
 					{"key": "b", "name": "b", "online": true, "services": []string{app}},
 				}}})
-		case "/v1/call":
+		case "/api/call":
 			var c struct {
 				Function string `json:"function"`
 				Device   string

@@ -25,7 +25,7 @@ function Users() {
 
   async function load() {
     try {
-      setState(await api("GET", "/v1/state"))
+      setState(await api("GET", "/api/state"))
       setProblem(null)
     } catch (e) {
       setProblem(one.plain(e))
@@ -46,7 +46,7 @@ function Users() {
     }
     setPending((p) => ({ ...p, [u.id]: role }))
     try {
-      await (role === null ? api("POST", "/v1/devices/remove", { user: u.id }) : api("POST", "/v1/role", { user: u.id, role }))
+      await (role === null ? api("POST", "/api/devices/remove", { user: u.id }) : api("POST", "/api/role", { user: u.id, role }))
     } catch (e) {
       setError(said(e))
     }
@@ -57,7 +57,7 @@ function Users() {
   async function withdraw(i) {
     setError("")
     try {
-      await api("POST", "/v1/devices/invite/withdraw", { user: i.user })
+      await api("POST", "/api/devices/invite/withdraw", { user: i.user })
     } catch (e) {
       setError(said(e))
     }
@@ -158,7 +158,7 @@ function AddSomeone({ open, setOpen, providers }) {
     setBusy(true)
     setError("")
     try {
-      const { link, until } = await api("POST", "/v1/devices/invite", { name: who, ...(email.trim() ? { email: email.trim() } : {}) })
+      const { link, until } = await api("POST", "/api/devices/invite", { name: who, ...(email.trim() ? { email: email.trim() } : {}) })
       one.tap("success")
       setMade({ who, link, email: email.trim(), days: Math.max(1, Math.round((until - Date.now()) / 86_400_000)) })
     } catch (e) {
@@ -217,7 +217,7 @@ function Handle({ was, open, setOpen, saved }) {
     setBusy(true)
     setError("")
     try {
-      await api("POST", "/v1/groups/handle", { handle: value })
+      await api("POST", "/api/groups/handle", { handle: value })
       setOpen(false)
       one.tap("success")
       saved()

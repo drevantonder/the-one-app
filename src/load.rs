@@ -1,4 +1,4 @@
-//! How loaded this machine is: memory, CPU, GPU, disk, and the containers it hosts, as `GET /v1/state` and sync's `Hello`
+//! How loaded this machine is: memory, CPU, GPU, disk, and the containers it hosts, as `GET /api/state` and sync's `Hello`
 //! say it (`sample`, on a node, takes it by a thread). Device info, like `build`: never an entry.
 
 use serde::{Deserialize, Serialize};

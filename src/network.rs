@@ -35,15 +35,15 @@ pub fn commands() -> Command {
                 ["status"] => status(g.node, &g.node.state()?),
                 ["create", name @ ..] if !name.is_empty() => {
                     let user_name = g.flag("as").context("say what to call you with --as <your name>")?;
-                    let r = g.node.post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": g.flag("user") }))?;
+                    let r = g.node.post("/api/create", json!({ "name": name.join(" "), "user_name": user_name, "user": g.flag("user") }))?;
                     println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
                 }
                 ["pair"] => {
-                    let r = g.node.post("/v1/pair", json!({ "user": g.flag("user") }))?;
+                    let r = g.node.post("/api/pair", json!({ "user": g.flag("user") }))?;
                     println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
                 }
                 ["join", code] => {
-                    g.node.post("/v1/join", json!({ "code": code }))?;
+                    g.node.post("/api/join", json!({ "code": code }))?;
                     println!("Joined. Syncing now; {CLI} status shows progress.");
                 }
                 ["settings"] => {
@@ -58,16 +58,16 @@ pub fn commands() -> Command {
                         return Err(one::cli::Failed::Typed(format!("no setting called {name}: {}", names.join(", "))).into());
                     }
                     let value = if g.has("default") { Value::Null } else { json!(value.join(" ")) };
-                    g.node.post("/v1/settings", json!({ "name": name, "value": value }))?;
+                    g.node.post("/api/settings", json!({ "name": name, "value": value }))?;
                     println!("Set {name}.");
                 }
                 ["role", _, role] if !matches!(*role, "admin" | "member") => return Err(one::cli::Failed::Typed(format!("a role is admin or member, not {role}")).into()),
                 ["role", user, role] => {
-                    g.node.post("/v1/role", json!({ "user": user, "role": role }))?;
+                    g.node.post("/api/role", json!({ "user": user, "role": role }))?;
                     println!("{user} is now {role}.");
                 }
                 ["rename", name @ ..] if !name.is_empty() => {
-                    g.node.post("/v1/name", json!({ "name": name.join(" ") }))?;
+                    g.node.post("/api/name", json!({ "name": name.join(" ") }))?;
                     println!("This device is now {}.", name.join(" "));
                 }
                 _ => return Ok(false),

@@ -1,4 +1,4 @@
-//! `GET /v1/state`: the network as one user sees it, from `global`'s scope database, the same from a node on a
+//! `GET /api/state`: the network as one user sees it, from `global`'s scope database, the same from a node on a
 //! machine and from the Cloudflare node. What only the node answering knows (which devices are online and how loaded,
 //! who is looking) it says in `Here`.
 
@@ -14,7 +14,7 @@ use crate::database::scopes;
 use crate::database::scopes::{App, Kind, Machine, Role, Scope, ScopeState};
 use crate::rank::{self, Priority};
 
-/// `GET /v1/state`'s answer, as every reader (the screens, the web client, widgets, the CLI, the Cloudflare node's
+/// `GET /api/state`'s answer, as every reader (the screens, the web client, widgets, the CLI, the Cloudflare node's
 /// Worker) reads it: the field names are the wire's.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct State {
@@ -29,7 +29,7 @@ pub struct State {
     pub network: Option<Network>,
     /// The pages this user can read, as every client lists them (see `pages`).
     pub pages: Vec<Page>,
-    /// Requests for an item waiting for this user to answer (see GET /v1/vault/requests).
+    /// Requests for an item waiting for this user to answer (see GET /api/vault/requests).
     pub vault_requests: usize,
     /// How this user arranged each of their pages (see `arrange`).
     pub arrangements: BTreeMap<String, Value>,
@@ -753,7 +753,7 @@ pub fn added<'a>(m: &ScopeDb, app: &str, viewer: &str, states: impl IntoIterator
     added
 }
 
-/// What `GET /v1/apps` says of `a`, of every app in the network (`every`), to `viewer`, from who's who alone: owner,
+/// What `GET /api/apps` says of `a`, of every app in the network (`every`), to `viewer`, from who's who alone: owner,
 /// `from`, forks, deploys, bundle, history, the scopes it's `added` in (`added`), its source if it was deployed from
 /// one, and, deleted, when and by whom, added nowhere.
 pub fn app_info(m: &ScopeDb, a: &App, every: &[App], viewer: &str, added: Vec<String>) -> Result<Value> {

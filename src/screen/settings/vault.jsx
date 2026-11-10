@@ -13,9 +13,9 @@ import {
 import { appNamed } from "./agents.js"
 
 const api = one.api
-const call = async (app, tool, input) => (await api("POST", "/v1/call", { app, tool, input })).ok
-const listItems = (s) => api("GET", `/v1/vault?scope=${encodeURIComponent(s)}`)
-const setItem = (s, id, change) => api("POST", "/v1/vault", { ...change, scope: s, ...(id ? { id } : {}) })
+const call = async (app, tool, input) => (await api("POST", "/api/call", { app, tool, input })).ok
+const listItems = (s) => api("GET", `/api/vault?scope=${encodeURIComponent(s)}`)
+const setItem = (s, id, change) => api("POST", "/api/vault", { ...change, scope: s, ...(id ? { id } : {}) })
 const has = (a, tool) => (Array.isArray(a?.tools) ? a.tools.some((o) => (o.name ?? o) === tool) : !!a?.tools?.[tool])
 const shown = (item) => item.fields.filter((f) => !f.name.startsWith("_"))
 // Its one short line: what it is, else its first plain field; none when what it is is its title.
@@ -120,7 +120,7 @@ function Vault() {
 
   async function load(s = now.current) {
     try {
-      const [state, all, list] = await Promise.all([api("GET", "/v1/state"), api("GET", "/v1/apps"), listItems(s)])
+      const [state, all, list] = await Promise.all([api("GET", "/api/state"), api("GET", "/api/apps"), listItems(s)])
       const p = pagesFrom(state)
       if (!p.some((x) => x.scope === s)) return void (setScope((now.current = "user")), load("user"))
       if (s !== now.current) return

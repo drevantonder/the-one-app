@@ -66,7 +66,7 @@ def phase(name, inp):
 
 def waited_for(c):
     for kind, p in [("the Mac", r"ssh mac|xcode|simctl|idb"), ("an update", r"one(-dev)? (update|build|publish)"),
-                    ("a node or the Workers", r"curl|healthz|one status|cloudflare|/v1/"),
+                    ("a node or the Workers", r"curl|healthz|one status|cloudflare|/api/"),
                     ("an agent device", r"adb|vnc|agent-devices|emulator|qemu|VM ready"), ("one-dev throwaway", r"one(-dev)? (try|throwaway)"),
                     ("tests or builds", r"cargo|gradle|build")]:
         if re.search(p, c, re.I):

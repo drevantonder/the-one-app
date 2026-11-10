@@ -108,7 +108,7 @@ pub fn said(node: &crate::api::Client, app: &str, r: &serde_json::Value, reader:
     use crate::config::CLI;
     use crate::core_tools::Reader;
     let short = |b: &serde_json::Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
-    let added = node.get("/v1/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["added"].as_array().is_some_and(|i| !i.is_empty()))) == Some(true);
+    let added = node.get("/api/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["added"].as_array().is_some_and(|i| !i.is_empty()))) == Some(true);
     let tools: Vec<String> = r["tools"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(|t| match reader { Reader::Cli => format!("{CLI} {app} {t}"), _ => format!("{app}_{t}") }).collect();
     let add = match reader { Reader::Cli => format!("{CLI} add {app}"), _ => format!("add {{ app: \"{app}\", scope: \"user\" }}") };
     let mut out = vec![format!("Deployed {app} ({}){}.", short(&r["bundle"]), if r["made"] == true { ", a new app of yours" } else { "" })];

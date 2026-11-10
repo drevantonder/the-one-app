@@ -13,7 +13,7 @@ pub fn commands() -> Command {
             g.takes_only(&["app", "name", "since", "status", "fault", "limit"])?;
             let schema = super::tools::feature().tools.remove(0).spec["input"].clone();
             let input = crate::tools::input(&schema, &[], vec![], g.flags.clone(), &[]).map_err(|e| crate::cli::Failed::Typed(format!("{e:#}")))?;
-            let said = g.node.post_for(g.agent, "/v1/insights/insights", Value::Object(input)).map_err(|e| crate::tools::in_cli_error(g.node, e))?;
+            let said = g.node.post_for(g.agent, "/api/insights/insights", Value::Object(input)).map_err(|e| crate::tools::in_cli_error(g.node, e))?;
             println!("{}", serde_json::to_string_pretty(&said)?);
             Ok(true)
         },

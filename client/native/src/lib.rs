@@ -56,7 +56,7 @@ fn env(name: &str) -> Option<String> {
 
 /// What this computer's own node says of itself, where one runs here.
 fn local_state() -> Option<Value> {
-    local("/v1/state", None, 2).ok().filter(|(ok, _)| *ok).map(|(_, out)| out)
+    local("/api/state", None, 2).ok().filter(|(ok, _)| *ok).map(|(_, out)| out)
 }
 
 /// Asks this computer's own node as one of its programs (by its local token): `body` posted, or a GET, waiting at
@@ -779,7 +779,7 @@ async fn pair(code: String) -> Result<String, String> {
         return Err("This Mac's node isn't running.".into());
     }
     let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
-    let said = tauri::async_runtime::spawn_blocking(move || local("/v1/join", Some(json!({ "code": code })), 60)).await.map_err(|e| e.to_string())?;
+    let said = tauri::async_runtime::spawn_blocking(move || local("/api/join", Some(json!({ "code": code })), 60)).await.map_err(|e| e.to_string())?;
     // An answer from the node says why by its code; none came when its own answer didn't (it was too slow: the device that made the code is off).
     let failed = match said {
         Ok((true, _)) => None,

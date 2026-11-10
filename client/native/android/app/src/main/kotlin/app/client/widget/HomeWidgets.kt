@@ -55,7 +55,7 @@ data class Kept(
     val at get() = fetched?.times(1000)?.toLong() ?: 0L
 }
 
-/** A widget on one of the pages, its tree at each size as `GET /v1/widgets` gave it. */
+/** A widget on one of the pages, its tree at each size as `GET /api/widgets` gave it. */
 @Serializable
 data class KeptWidget(
     /** What a home-screen widget's choice is found again by. */

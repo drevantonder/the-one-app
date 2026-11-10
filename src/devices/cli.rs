@@ -31,21 +31,21 @@ fn run(g: &Given) -> Result<bool> {
             let Some(file) = g.flag("recovery-key") else { return Ok(false) };
             let code = code.first().copied().or(g.flag("code")).context("give the code the new device shows")?;
             let recovery = keys::recovery_key_in(file)?;
-            let answer = g.node.post_for(g.agent, "/v1/devices/approve-with-recovery", json!({ "code": code, "confirm": g.has("confirm"), "recovery": recovery }))?;
+            let answer = g.node.post_for(g.agent, "/api/devices/approve-with-recovery", json!({ "code": code, "confirm": g.has("confirm"), "recovery": recovery }))?;
             println!("{}", answer["said"].as_str().unwrap_or(""));
         }
-        ["devices", "holders"] => holders(&g.node.get("/v1/devices/recovery-holders")?),
+        ["devices", "holders"] => holders(&g.node.get("/api/devices/recovery-holders")?),
         ["devices", "holders", how @ ("add" | "remove"), user] => {
-            let answer = g.node.post_for(g.agent, "/v1/devices/recovery-holder", json!({ "user": user, "holds": *how == "add" }))?;
+            let answer = g.node.post_for(g.agent, "/api/devices/recovery-holder", json!({ "user": user, "holds": *how == "add" }))?;
             println!("{}", answer["said"].as_str().unwrap_or(""));
         }
         ["devices", "holders", "seal", code @ ..] => seal(g, code.first().copied())?,
         ["devices", "restore", code] => {
-            let answer = g.node.post_for(g.agent, "/v1/devices/restore", json!({ "code": code, "confirm": g.has("confirm") }))?;
+            let answer = g.node.post_for(g.agent, "/api/devices/restore", json!({ "code": code, "confirm": g.has("confirm") }))?;
             println!("{}", answer["said"].as_str().unwrap_or(""));
         }
         ["devices", "recovery-key", "replace"] => replace(g)?,
-        ["devices", "code"] => println!("{}", g.node.get("/v1/devices/code")?["code"].as_str().unwrap_or("")),
+        ["devices", "code"] => println!("{}", g.node.get("/api/devices/code")?["code"].as_str().unwrap_or("")),
         _ => return Ok(false),
     }
     Ok(true)
@@ -75,7 +75,7 @@ fn replace(g: &Given) -> Result<()> {
     let at = g.flag("new-key-file").context("give --new-key-file: a file for the new key, which goes in your admins' password manager")?;
     let confirm = g.has("confirm");
     let next = keys::next_recovery_key(at, confirm)?;
-    let answer = g.node.post_for(g.agent, "/v1/devices/recovery-key/replace", json!({ "recovery": recovery, "next": next, "confirm": confirm }))?;
+    let answer = g.node.post_for(g.agent, "/api/devices/recovery-key/replace", json!({ "recovery": recovery, "next": next, "confirm": confirm }))?;
     println!("{}", answer["said"].as_str().unwrap_or(""));
     if confirm {
         println!("The new recovery key is in {at}.");
@@ -90,7 +90,7 @@ fn replace(g: &Given) -> Result<()> {
 fn seal(g: &Given, code: Option<&str>) -> Result<()> {
     let file = g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?;
     let secret = keys::unhex(&keys::recovery_key_in(file)?)?;
-    let said = g.node.get("/v1/devices/recovery-holders")?;
+    let said = g.node.get("/api/devices/recovery-holders")?;
     let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
     ensure!(said["recovery"].as_str() == Some(keys::hex(&recovery.verifying_key().to_bytes()).as_str()), "That file doesn't hold {YOURS}'s recovery key.");
     let mut owed = Vec::new();
@@ -126,7 +126,7 @@ fn seal(g: &Given, code: Option<&str>) -> Result<()> {
     let to = keys::hex(&to);
     let sealed = keys::seal_to(&seal, &secret)?;
     let copy = keys::held_copy(&recovery, &to, &sealed);
-    g.node.post_for(g.agent, "/v1/devices/recovery-holders/seal", json!({ "to": to, "copy": B64U.encode(&copy) }))?;
+    g.node.post_for(g.agent, "/api/devices/recovery-holders/seal", json!({ "to": to, "copy": B64U.encode(&copy) }))?;
     println!("Sealed it to {label}, {name}'s device.");
     Ok(())
 }

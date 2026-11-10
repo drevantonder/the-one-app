@@ -239,7 +239,7 @@ mod serve {
     /// Asked of this machine's node by its own programs, which answers it as its own device (`settings`), then seals
     /// what's in that Vault to the new key if it opens it.
     pub async fn grant(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {
-        let said = node.answer_as_mine("POST", "/v1/vault/grant", &serde_json::to_vec(&input)?).await.map_err(|e| e.0)?.0;
+        let said = node.answer_as_mine("POST", "/api/vault/grant", &serde_json::to_vec(&input)?).await.map_err(|e| e.0)?.0;
         let scope = scope(&node, &me, &input)?;
         if let Err(err) = node.reseal_vault(&scope).await {
             tracing::warn!("sealing {scope}'s Vault to its new key: {err:#}");

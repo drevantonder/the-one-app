@@ -145,7 +145,7 @@ pub fn commands() -> Command {
                     if let Some(clients) = settings.sign_in_clients() {
                         let had = node.state().ok().and_then(|s| s.network?.settings.get(crate::onboarding::sign_in_proof::CLIENTS).cloned());
                         if had.as_deref() != Some(clients.as_str())
-                            && let Err(err) = node.post("/v1/settings", json!({ "name": crate::onboarding::sign_in_proof::CLIENTS, "value": clients }))
+                            && let Err(err) = node.post("/api/settings", json!({ "name": crate::onboarding::sign_in_proof::CLIENTS, "value": clients }))
                         {
                             eprintln!("A new device's sign-in can't be checked until an admin's device runs {CLI} settings {} {clients}: {err:#}", crate::onboarding::sign_in_proof::CLIENTS);
                         }
@@ -169,7 +169,7 @@ pub fn commands() -> Command {
                     }
                     // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
                     // things run in.
-                    node.post("/v1/settings", json!({ "name": crate::database::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
+                    node.post("/api/settings", json!({ "name": crate::database::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
                     println!("The Cloudflare node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
                 }
                 ["cloudflare", "set", name, value] => {
@@ -200,7 +200,7 @@ pub fn commands() -> Command {
                     println!("Set {name}. {CLI} cloudflare serve takes it at its next start, and {CLI} cloudflare deploy when it next runs.");
                 }
                 ["cloudflare", "use", address] => {
-                    node.post("/v1/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
+                    node.post("/api/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
                     println!("This network is at {address}: its nodes take sign-ins made there.");
                 }
                 _ => return Ok(false),

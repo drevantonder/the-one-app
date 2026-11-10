@@ -12,7 +12,7 @@ import { home } from "./lib/model.js"
 
 /// Only what this screen shows: the user's pages and the apps on them, not the widgets Home draws.
 async function load() {
-  ;[home.data.state, home.data.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")])
+  ;[home.data.state, home.data.apps] = await Promise.all([one.api("GET", "/api/state"), one.api("GET", "/api/apps")])
 }
 
 /// What the screen draws from, as the apps are now: every page's apps that keep accounts, each once (on the first
@@ -36,14 +36,14 @@ async function addAccount(a, p, at, stale, reload) {
   const signIn = home.settings(a, p, true)
   // Only its accounts: not what it needs besides (Google's apps' sign-in client).
   const types = Object.values(a.vault || {}).filter((need) => need.accounts).map((need) => need.type)
-  const items = types.length ? await one.api("GET", "/v1/vault").catch(() => []) : []
+  const items = types.length ? await one.api("GET", "/api/vault").catch(() => []) : []
   const there = items.filter((i) => types.includes(i.type) && (i.wanted_by || []).includes(a.name) && !(i.apps || []).includes(a.name))
   if (!there.length) return signIn()
   const pick = there.map((i) => ({
     title: i.title,
     run: async () => {
       try {
-        await one.api("POST", "/v1/vault", { scope: i.scope, id: i.id, apps: [...i.apps, a.name] })
+        await one.api("POST", "/api/vault", { scope: i.scope, id: i.id, apps: [...i.apps, a.name] })
         stale.add(a.name)
         await reload()
       } catch (err) {

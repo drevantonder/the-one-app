@@ -22,7 +22,7 @@ pub fn feature() -> Feature {
                 } },
                 "output": { "type": "object", "required": ["said", "widgets"], "properties": {
                     "said": { "type": "string", "description": "the widgets, in words" },
-                    "widgets": { "type": "array", "items": { "type": "object" }, "description": "each as `GET /v1/widgets` gives it, to draw" },
+                    "widgets": { "type": "array", "items": { "type": "object" }, "description": "each as `GET /api/widgets` gives it, to draw" },
                 } },
             }),
             serves!(serve::show),

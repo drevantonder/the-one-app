@@ -18,9 +18,9 @@ use crate::node::Node;
 
 pub fn routes() -> Routes {
     Routes::default()
-        .route("/v1/events", Who::Clients, get(events))
+        .route("/api/events", Who::Clients, get(events))
         .says(Op::get("What changed, as it happens").events::<crate::node::Event>())
-        .route("/v1/screens/{app}/{screen}", Who::Clients, get(screen))
+        .route("/api/screens/{app}/{screen}", Who::Clients, get(screen))
         .says(Op::get("An app's screen, as a page").query::<ScreenQuery>().html())
 }
 

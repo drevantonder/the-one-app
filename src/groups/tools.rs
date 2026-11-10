@@ -53,7 +53,7 @@ mod serve {
 
     /// Asked of this machine's node by its own programs, which answers it as its own device (`settings`).
     pub async fn handle(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        node.answer_as_mine("POST", "/v1/groups/handle", &serde_json::to_vec(&input)?).await.map_err(|e| e.0)?.0;
+        node.answer_as_mine("POST", "/api/groups/handle", &serde_json::to_vec(&input)?).await.map_err(|e| e.0)?.0;
         let handle = input.get("handle").and_then(Value::as_str).unwrap_or("");
         Ok(json!({ "said": match input.get("group").and_then(Value::as_str) {
             Some(group) => format!("{group}'s handle is now {handle}."),
@@ -68,7 +68,7 @@ mod serve {
         }
     }
 
-    /// The users in the network (`/v1/state`'s), you first, each with their role; then every group in words: its users
+    /// The users in the network (`/api/state`'s), you first, each with their role; then every group in words: its users
     /// with their roles, and who's invited.
     fn said(state: &State) -> String {
         let Some(i) = &state.network else { return format!("Users in {YOURS}: none.\nNo groups yet.\n") };
