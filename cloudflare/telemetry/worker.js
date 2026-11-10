@@ -7,7 +7,7 @@
 // cleaned message (src/insights/message.rs).
 //
 //   POST /telemetry/write { spans, logs, metrics, at, by, sig } → 204
-//   POST /telemetry/otlp  Cloudflare's export of the Workers' own traces (`otlp`) → 204
+//   POST /telemetry/otlp  Cloudflare's export of the Workers' own traces (`otlp`), gzipped or not → 204
 //   POST /telemetry/read  { queries: [name], since, services, service?, name?, status?, trace?, limit?, at, by, sig }
 //                         → { <name>: [row] }
 //
@@ -137,19 +137,38 @@ export function workerSpans(request, cli) {
   }).filter((row) => kept(row, TABLES.spans, NOBODY, false));
 }
 
-/// Cloudflare's export of the Workers' traces: it can't sign, so it's a header only the deploy that made it knows.
+/// How often this path says what it was handed, as a device's canary does: an export that's all dropped leaves no span
+/// to show it ever came.
+const EXPORT_SAID_EVERY = 15 * 60_000;
+let exportSaid = 0;
+
+/// One log record of an export: how many spans it held and how many were kept, or that it couldn't be read.
+async function sayExport(env, result, found, kept) {
+  const now = Date.now();
+  if (now - exportSaid < EXPORT_SAID_EVERY) return;
+  exportSaid = now;
+  const attrs = { "one.result": result, "one.found": found, "one.new": kept };
+  await env.LOGS.send([{ time: now, severity_number: result === "read" ? 9 : 17, severity_text: result === "read" ? "INFO" : "ERROR", body: "telemetry.export", service: "worker.telemetry", instance: NOBODY, attrs: JSON.stringify(attrs) }]);
+}
+
+/// Cloudflare's export of the Workers' traces: it can't sign, so it's a header only the deploy that made it knows. A log
+/// export of Cloudflare's is gzipped, which nothing here unpacks unasked.
 async function otlp(request, env) {
   if (!env.OTLP_TOKEN || request.headers.get("authorization") !== `Bearer ${env.OTLP_TOKEN}`) refuse(401, "only Cloudflare's export of the Workers' traces, with its token");
-  const body = await textOf(request, MOST_BYTES);
+  const gzipped = request.headers.get("content-encoding") === "gzip" && request.body;
+  const body = await textOf(gzipped ? new Response(request.body.pipeThrough(new DecompressionStream("gzip"))) : request, MOST_BYTES).catch(() => undefined);
   if (body === null) refuse(413, "that's too big");
   let parsed;
   try {
     parsed = JSON.parse(body);
   } catch {
-    refuse(400, "OTLP here is JSON");
+    await sayExport(env, "unreadable", 0, 0);
+    refuse(400, "OTLP here is JSON, gzipped or not");
   }
+  const found = (parsed.resourceSpans ?? []).reduce((n, r) => n + (r.scopeSpans ?? []).reduce((m, s) => m + (s.spans ?? []).length, 0), 0);
   const rows = workerSpans(parsed, env.CLI).slice(0, MOST_ROWS);
   if (rows.length) await env.SPANS.send(rows);
+  await sayExport(env, "read", found, rows.length);
   return new Response(null, { status: 204 });
 }
 
@@ -296,7 +315,9 @@ const ROUTES = { "/telemetry/write": write, "/telemetry/read": read, [OTLP_PATH]
 
 export default {
   async fetch(request, env) {
-    const route = ROUTES[new URL(request.url).pathname];
+    const path = new URL(request.url).pathname;
+    // An OTLP exporter may add its signal's own path (`/v1/traces`) to the address it's given.
+    const route = path.startsWith(`${OTLP_PATH}/`) ? otlp : ROUTES[path];
     if (!route || request.method !== "POST") return refusal(404, "telemetry answers only POST /telemetry/write and /telemetry/read");
     try {
       return await route(request, env);
