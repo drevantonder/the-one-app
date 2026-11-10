@@ -99,6 +99,10 @@ impl Credential {
     }
 }
 
+/// How many hints of a request's databases are read from the bucket at once.
+const HINTS_AT_ONCE: usize = 8;
+/// How long a hint may take before the request goes on without it.
+const HINT_WITHIN: Duration = Duration::from_secs(8);
 /// How many of a scope database's last steps a key handed for it is checked against, newest first.
 const STEPS_CHECKED: usize = 64;
 
@@ -376,13 +380,30 @@ impl Node {
         }
         let want = &lacking[..];
         let bucket = self.bucket()?;
-        // Each database's newest hint, all at once.
-        let hints = futures_util::future::try_join_all(want.iter().map(|(scope, app, database)| {
-            let prefix = crate::bucket::database_prefix(&scope.to_string(), app, database);
+        // Each database's newest hint, a few at once as a page asks for dozens. R2 now and then holds a read of one for half a minute
+        // and resets it: a hint only says how old a key it needs, so without one it asks for the newest, and the page goes on.
+        let hints: Vec<Option<crate::bucket::Object>> = {
+            use futures_util::StreamExt;
             let bucket = &bucket;
-            async move { crate::bucket::Bucket::get(bucket, &crate::database::stored::newest_name(&prefix)).await }
-        }))
-        .await?;
+            let names: Vec<String> = want.iter().map(|(scope, app, database)| crate::database::stored::newest_name(&crate::bucket::database_prefix(&scope.to_string(), app, database))).collect();
+            futures_util::stream::iter(names)
+                .map(|name| async move {
+                    match tokio::time::timeout(HINT_WITHIN, crate::bucket::Bucket::get(bucket, &name)).await {
+                        Ok(Ok(hint)) => hint,
+                        Ok(Err(err)) => {
+                            tracing::warn!("{name}: {err:#}");
+                            None
+                        }
+                        Err(_) => {
+                            tracing::warn!("{name}: no answer in {} s", HINT_WITHIN.as_secs());
+                            None
+                        }
+                    }
+                })
+                .buffered(HINTS_AT_ONCE)
+                .collect()
+                .await
+        };
         let mut need = Vec::new();
         for ((scope, app, database), hint) in want.iter().zip(hints) {
             let newest = self.newest_epoch(scope).await?.max(1);
