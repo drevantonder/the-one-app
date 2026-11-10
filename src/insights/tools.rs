@@ -16,7 +16,7 @@ pub fn feature() -> Feature {
                 "description": "Read what the network recorded of how things went, from what you may see: an app's only if you may deploy it; a device's only if you're an admin. Failures and slow calls as signals, every call in hourly rollups, and each error once as a fingerprint. Never holds a call's arguments or answer, or an app's error text. `fault` tells a caller's mistake (refused, invalid input, no such thing) from something that broke (`internal`): filter by it. Times are milliseconds since 1970.",
                 "input": { "type": "object", "properties": {
                     "app": { "type": "string", "description": "only this app's" },
-                    "name": { "type": "string", "description": "only signals of this name, like gmail.search" },
+                    "name": { "type": "string", "description": "only signals of this name, like search" },
                     "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d" },
                     "status": { "type": "string", "enum": ["ok", "error"], "description": "only these signals; only rollups with errors if error" },
                     "fault": { "type": "string", "enum": ["caller", "internal"] },

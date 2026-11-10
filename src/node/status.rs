@@ -43,6 +43,13 @@ create table fingerprints (app text not null, tool text not null, fingerprint te
                            fault text, count integer not null, first integer not null, last integer not null, primary key (app, tool, fingerprint));
 insert into fingerprints select app, tool, 'Error|migrated|', 'Error', 'migrated', '', null, sum(count), min(first), max(last) from errors group by app, tool;
 drop table errors;
+", "
+update rollups set key = json_set(key, '$.kind', case
+    when name in ('bucket.asks', 'bucket.ms', 'steps.behind', 'write.seen', 'signer.failures', 'gen_ai.client.token.usage', 'gen_ai.client.operation.duration') then 'metric'
+    when name in ('device.online', 'device.offline', 'node.start', 'service.start', 'service.exit', 'screen.exception', 'screen.undrawn', 'page.exception', 'client.try') or name like 'update.%' then 'event'
+    else 'span' end);
+update or replace rollups set name = substr(name, length(app) + 2) where app != '' and substr(name, 1, length(app) + 1) = app || '.';
+update signals set name = substr(name, length(app) + 2) where app != '' and substr(name, 1, length(app) + 1) = app || '.';
 "];
 
 pub const RUNS_KEPT: usize = 20;
@@ -339,11 +346,25 @@ fn stored<T: serde::de::DeserializeOwned>(v: &Value, empty: &str) -> Result<T> {
 mod tests {
     use super::*;
 
+    /// A rollup kept before kinds says what it's of, and a span's name no longer repeats its service, and none is lost.
+    #[test]
+    fn rollups_gain_their_kind_and_lose_their_service_in_the_name() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let before = SCHEMA.len() - 1;
+        db.execute_batch(&SCHEMA[..before].concat()).unwrap();
+        db.execute_batch("insert into rollups values (1, 'repos.list', 'repos', '{}', 3, 0, 9, 3, 0, 0, 0, 0), (1, 'bucket.ms', '', '{}', 2, 0, 9, 2, 0, 0, 0, 0), (1, 'node.start', '', '{}', 1, 0, 0, 1, 0, 0, 0, 0);").unwrap();
+        db.execute_batch(SCHEMA[before]).unwrap();
+        let of = |name: &str| -> (String, i64) { db.query_row("select json_extract(key, '$.kind'), count from rollups where name = ?", [name], |r| Ok((r.get(0)?, r.get(1)?))).unwrap() };
+        assert_eq!(of("list"), ("span".to_string(), 3));
+        assert_eq!(of("bucket.ms"), ("metric".to_string(), 2));
+        assert_eq!(of("node.start"), ("event".to_string(), 1));
+    }
+
     /// A failure kept before fingerprints keeps its app, tool, count and times, and never what it said.
     #[test]
     fn errors_move_to_fingerprints_without_their_text() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
-        let before = SCHEMA.len() - 1;
+        let before = SCHEMA.iter().position(|s| s.contains("drop table errors")).unwrap();
         db.execute_batch(&SCHEMA[..before].concat()).unwrap();
         db.execute_batch("insert into errors values ('repos', 'get', 'no repo anna/secret', 2, 5, 9, 'u1'), ('repos', 'get', 'other', 1, 3, 4, 'u2');").unwrap();
         db.execute_batch(SCHEMA[before]).unwrap();

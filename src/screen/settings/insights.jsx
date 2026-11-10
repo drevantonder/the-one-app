@@ -1,33 +1,45 @@
-// Insights: an OpenTelemetry viewer, laid out as Jaeger's and Grafana's are. It knows OTEL's shapes (a span's id, parent,
-// name, time, duration and status; a histogram's count, sum and errors; attributes as keys and values) and no particular
-// signal: services, operations, filters, metrics and group-bys all come from what the `insights` tool gives it.
+// Insights: an OpenTelemetry viewer, opening as an APM does: every service's rate, errors and duration, then a service's
+// operations, then their traces. It knows OTEL's shapes (a span's id, parent, name, service, time, duration and status; a
+// histogram's count, sum, errors and buckets; attributes as keys and values) and no particular signal: everything it
+// lists, filters by and groups by comes from what the `insights` tool gives it.
 //
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/insights.html.
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Icon, Input, LargeTitle, ListSkeleton, LoadFailure, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
+import { Button, Empty, Icon, Input, LargeTitle, ListSkeleton, LoadFailure, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sparkline, Split, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
 
 const HOUR = 3600000
 const ALL = "*"
 const RANGES = [["1h", "1 Hour", HOUR], ["6h", "6 Hours", 6 * HOUR], ["1d", "24 Hours", 24 * HOUR], ["7d", "7 Days", 168 * HOUR], ["30d", "30 Days", 720 * HOUR], ["90d", "90 Days", 2160 * HOUR]]
-const STATS = { count: "Count", errors: "Errors", sum: "Sum", avg: "Average" }
+const STATS = { sum: "Sum", count: "Count", avg: "Average", p95: "P95", errors: "Errors" }
 const MOST_SERIES = 8
 const OTHER = "Other"
+// The most places a time chart stretches a short history over, so a few hours of data still reads as a chart.
+const LEAST_HOURS = 12
+// A histogram's bucket columns and the upper bound of each; the last has none, so it's drawn as a minute.
+const BUCKETS = [["under_10", 10], ["under_100", 100], ["under_1000", 1000], ["under_10000", 10000], ["over", 60000]]
+// A rollup's own columns, which aren't attributes to group by.
+const COLUMNS = ["count", "errors", "ms", "hour", "name", "app", "over", "kind", ...BUCKETS.map(([k]) => k)]
+// A span's or log's columns the row itself shows.
+const SHOWN = ["name", "service", "app", "kind", "ms", "status"]
 // Categorical hues in a fixed order, each validated for its own theme (light, dark).
 const HUES = [["#2a78d6", "#3987e5"], ["#eb6834", "#d95926"], ["#1baf7a", "#199e70"], ["#eda100", "#c98500"], ["#e87ba4", "#d55181"], ["#008300", "#008300"], ["#6250d6", "#9085e9"], ["#e34948", "#e66767"]]
 const hue = (i) => HUES[i % HUES.length][matchMedia("(prefers-color-scheme: dark)").matches ? 1 : 0]
 const ERROR = "var(--destructive)"
+const MUTED = "var(--muted-foreground)"
 
 const when = (ms) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })
 const hourOf = (ms) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric" })
 const number = (n) => (n == null ? "–" : new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n))
-const took = (ms) => (ms >= 60000 ? `${(ms / 60000).toFixed(1)}m` : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`)
+const percent = (r) => (r == null ? "–" : r === 0 ? "0%" : r < 0.001 ? "<0.1%" : `${(r * 100).toFixed(r < 0.1 ? 1 : 0)}%`)
+const took = (ms) => (ms == null ? "–" : ms >= 60000 ? `${(ms / 60000).toFixed(1)}m` : ms >= 1000 ? `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s` : `${Math.round(ms)}ms`)
 const ago = (ms) => {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
   return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`
 }
 const text = (v) => (typeof v === "string" ? v : JSON.stringify(v))
 const sorted = (values) => [...new Set(values)].sort((a, b) => String(a).localeCompare(String(b)))
+const plural = (n, one) => `${number(n)} ${one}${n === 1 ? "" : "s"}`
 
 // "1.5s", "200ms" or "2m" as milliseconds.
 function duration(s) {
@@ -35,7 +47,6 @@ function duration(s) {
   return m ? Number(m[1]) * { ms: 1, s: 1000, m: 60000 }[m[2] || "ms"] : 0
 }
 
-// A row's own columns and attributes as one set of fields, what search looks through.
 const fields = (row) => {
   const { attrs, key, ...own } = row
   return Object.fromEntries(Object.entries({ ...own, ...(attrs || {}), ...(key || {}) }).filter(([, v]) => v !== null && v !== ""))
@@ -45,8 +56,7 @@ const fields = (row) => {
 function matcher(query) {
   const terms = query.split(/\s+/).filter(Boolean).map((t) => t.toLowerCase())
   return (row) => {
-    const all = fields(row)
-    const lower = Object.entries(all).map(([k, v]) => [k.toLowerCase(), text(v).toLowerCase()])
+    const lower = Object.entries(fields(row)).map(([k, v]) => [k.toLowerCase(), text(v).toLowerCase()])
     return terms.every((t) => {
       const at = t.indexOf("=")
       if (at > 0) return lower.some(([k, v]) => k === t.slice(0, at) && v === t.slice(at + 1))
@@ -55,7 +65,6 @@ function matcher(query) {
   }
 }
 
-// Spans by trace, each trace with its tree, its time and whether anything in it failed.
 function tracesOf(rows) {
   return [...Map.groupBy(rows, (s) => s.trace).entries()].map(([id, spans]) => {
     const ids = new Set(spans.map((s) => s.span))
@@ -66,13 +75,39 @@ function tracesOf(rows) {
   }).sort((a, b) => b.start - a.start)
 }
 
-// Each service keeps its colour wherever it shows, whatever is filtered.
 const colours = (services) => Object.fromEntries(sorted(services).map((s, i) => [s, hue(i)]))
+
+// The quantile of histograms added together, interpolated within its bucket as Prometheus does.
+function quantile(rows, q) {
+  const counts = BUCKETS.map(([k]) => rows.reduce((n, r) => n + (r[k] || 0), 0))
+  const total = counts.reduce((a, b) => a + b, 0)
+  if (!total) return null
+  let seen = 0, low = 0
+  for (let i = 0; i < counts.length; i++) {
+    if (counts[i] && seen + counts[i] >= q * total) return low + ((q * total - seen) / counts[i]) * (BUCKETS[i][1] - low)
+    seen += counts[i]
+    low = BUCKETS[i][1]
+  }
+  return low
+}
+
+function red(rows) {
+  const count = rows.reduce((n, r) => n + r.count, 0), errors = rows.reduce((n, r) => n + r.errors, 0), sum = rows.reduce((n, r) => n + r.ms, 0)
+  return { count, errors, sum, rate: count ? errors / count : null, avg: count ? sum / count : null, p95: quantile(rows, 0.95) }
+}
+
+// Each hour worth drawing: from the first with data, to now.
+function hoursOf(rows, from, to) {
+  const last = Math.floor(to / HOUR), first = Math.floor(from / HOUR)
+  const earliest = Math.min(last, ...rows.map((r) => r.hour))
+  const start = Math.max(first, Math.min(earliest, last - LEAST_HOURS + 1))
+  return Array.from({ length: last - start + 1 }, (_, i) => start + i)
+}
 
 function Tip({ tip }) {
   if (!tip) return null
   return (
-    <div className="pointer-events-none absolute z-10 max-w-64 rounded-md bg-popover px-2 py-1.5 text-xs text-popover-foreground shadow-md" style={{ left: tip.x, top: tip.y, transform: `translate(${tip.flip ? "-100%" : "0"}, -100%)` }}>
+    <div className="pointer-events-none absolute z-10 max-w-72 rounded-md bg-popover px-2 py-1.5 text-xs whitespace-nowrap text-popover-foreground shadow-md" style={{ left: tip.x, top: tip.y, transform: `translate(${tip.flip ? "-100%" : "0"}, -100%)` }}>
       {tip.lines.map((l, i) => <div key={i} className={i ? "text-muted-foreground" : "font-medium"}>{l}</div>)}
     </div>
   )
@@ -82,48 +117,59 @@ function Axis({ ticks, width, left, top, height }) {
   return ticks.map(({ y, label }) => (
     <g key={label}>
       <line x1={left} x2={width} y1={top + y * height} y2={top + y * height} stroke="var(--border)" />
-      <text x={left - 6} y={top + y * height + 4} textAnchor="end" fontSize="11" fill="var(--muted-foreground)">{label}</text>
+      <text x={left - 6} y={top + y * height + 4} textAnchor="end" fontSize="11" fill={MUTED}>{label}</text>
     </g>
   ))
 }
 
-const LEFT = 48, TOP = 8, BOTTOM = 22
+const LEFT = 44, TOP = 8, BOTTOM = 20
+const TimeLabels = ({ first, last, width, height, left = LEFT }) => (
+  <>
+    <text x={left} y={height - 5} fontSize="11" fill={MUTED}>{first}</text>
+    <text x={width - 4} y={height - 5} fontSize="11" textAnchor="end" fill={MUTED}>{last}</text>
+  </>
+)
 
-// Duration against time, one dot a trace: Jaeger's search results.
-function Scatter({ traces, from, to, open, colour }) {
+// Hourly bars, each `stacks` entry `{ name, colour, values }` one on another; `axis` to draw its scale and times.
+function Bars({ hours, stacks, height = 96, axis = true, format = number }) {
   const [ref, width] = useWidth()
-  const [tip, setTip] = useState(null)
-  const height = 140, plot = height - TOP - BOTTOM
-  const most = Math.max(1, ...traces.map((t) => t.ms))
-  const x = (t) => LEFT + ((t - from) / Math.max(1, to - from)) * Math.max(1, width - LEFT - 8)
-  const y = (ms) => TOP + plot - (ms / most) * plot
+  const [at, setAt] = useState(null)
+  const left = axis ? LEFT : 0, top = axis ? TOP : 2, bottom = axis ? BOTTOM : 2, plot = height - top - bottom
+  const totals = hours.map((_, i) => stacks.reduce((n, s) => n + (s.values[i] || 0), 0))
+  const most = Math.max(1, ...totals)
+  const place = Math.max(1, width - left - 4) / hours.length
+  const bar = Math.max(1, Math.min(place - 2, 20))
+  const hover = (e) => setAt(Math.max(0, Math.min(hours.length - 1, Math.floor((e.clientX - e.currentTarget.getBoundingClientRect().left - left) / place))))
   return (
     <div ref={ref} className="relative">
-      <svg width={width} height={height} role="img" aria-label="Traces by time and duration">
-        <Axis width={width} left={LEFT} top={TOP} height={plot} ticks={[{ y: 0, label: took(most) }, { y: 0.5, label: took(Math.round(most / 2)) }, { y: 1, label: "0" }]} />
-        <text x={LEFT} y={height - 6} fontSize="11" fill="var(--muted-foreground)">{hourOf(from)}</text>
-        <text x={width - 8} y={height - 6} fontSize="11" textAnchor="end" fill="var(--muted-foreground)">{hourOf(to)}</text>
-        {traces.map((t) => (
-          <g key={t.id} className="cursor-pointer" onClick={() => open(t.id)} onMouseEnter={() => setTip({ x: x(t.start), y: y(t.ms) - 8, flip: x(t.start) > width / 2, lines: [`${t.root.service}: ${t.root.name}`, took(t.ms), when(t.start)] })} onMouseLeave={() => setTip(null)}>
-            <circle cx={x(t.start)} cy={y(t.ms)} r="10" fill="transparent" />
-            <circle cx={x(t.start)} cy={y(t.ms)} r="4" fill={t.errors ? ERROR : colour[t.root.service]} stroke="var(--background)" strokeWidth="2" />
-          </g>
-        ))}
+      <svg width={width} height={height} onMouseMove={hover} onMouseLeave={() => setAt(null)} role="img" aria-label={stacks.map((s) => s.name).join(", ")}>
+        {axis && <Axis width={width} left={left} top={top} height={plot} ticks={[{ y: 0, label: format(most) }, { y: 1, label: "0" }]} />}
+        {axis && <TimeLabels first={hourOf(hours[0] * HOUR)} last={hourOf(hours.at(-1) * HOUR)} width={width} height={height} />}
+        {at != null && <rect x={left + at * place} y={top} width={place} height={plot} fill="var(--muted)" />}
+        {hours.map((_, i) => {
+          let y = top + plot
+          return stacks.map((s) => {
+            const v = s.values[i] || 0
+            if (!v) return null
+            const h = Math.max(2, (v / most) * plot)
+            y -= h
+            return <rect key={s.name} x={left + i * place + (place - bar) / 2} y={y} width={bar} height={Math.max(1, h - 1)} rx="2" fill={s.colour} />
+          })
+        })}
       </svg>
-      <Tip tip={tip} />
+      {at != null && <Tip tip={{ x: left + at * place + place / 2, y: top + 12, flip: at > hours.length / 2, lines: [hourOf(hours[at] * HOUR), ...stacks.map((s) => `${s.name}: ${format(s.values[at] || 0)}`)] }} />}
     </div>
   )
 }
 
-// Lines over time, with a crosshair. `series`: `[{ name, colour, values }]`, one value per place on `times`.
-function Lines({ times, series, height = 240, plain }) {
+// Lines over the hours, `null` a gap, a lone point a dot, with a crosshair.
+function Lines({ hours, series, height = 96, format = number }) {
   const [ref, width] = useWidth()
   const [at, setAt] = useState(null)
-  const top = plain ? 4 : TOP, bottom = plain ? 4 : BOTTOM, left = plain ? 0 : LEFT
-  const plot = height - top - bottom
+  const plot = height - TOP - BOTTOM
   const most = Math.max(1, ...series.flatMap((s) => s.values.filter((v) => v != null)))
-  const x = (i) => left + (i / Math.max(1, times.length - 1)) * Math.max(1, width - left - 8)
-  const y = (v) => top + plot - (v / most) * plot
+  const x = (i) => LEFT + ((i + 0.5) / hours.length) * Math.max(1, width - LEFT - 4)
+  const y = (v) => TOP + plot - (v / most) * plot
   const path = (values) => {
     let d = "", pen = false
     values.forEach((v, i) => {
@@ -133,103 +179,232 @@ function Lines({ times, series, height = 240, plain }) {
     })
     return d
   }
+  const lone = (values, i) => values[i] != null && values[i - 1] == null && values[i + 1] == null
   function hover(e) {
-    if (plain) return
     const r = e.currentTarget.getBoundingClientRect()
-    setAt(Math.max(0, Math.min(times.length - 1, Math.round(((e.clientX - r.left - left) / Math.max(1, width - left - 8)) * (times.length - 1)))))
+    setAt(Math.max(0, Math.min(hours.length - 1, Math.floor(((e.clientX - r.left - LEFT) / Math.max(1, width - LEFT - 4)) * hours.length))))
   }
-  const listed = at == null ? [] : series.map((s) => ({ ...s, v: s.values[at] })).filter((s) => s.v != null).sort((a, b) => b.v - a.v).slice(0, MOST_SERIES)
+  const listed = at == null ? [] : series.map((s) => ({ ...s, v: s.values[at] })).filter((s) => s.v != null).sort((a, b) => b.v - a.v).slice(0, MOST_SERIES + 1)
   return (
     <div ref={ref} className="relative">
       <svg width={width} height={height} onMouseMove={hover} onMouseLeave={() => setAt(null)} role="img" aria-label={series.map((s) => s.name).join(", ")}>
-        {!plain && <Axis width={width} left={left} top={top} height={plot} ticks={[{ y: 0, label: number(most) }, { y: 0.5, label: number(most / 2) }, { y: 1, label: "0" }]} />}
-        {!plain && times.length > 1 && <text x={left} y={height - 6} fontSize="11" fill="var(--muted-foreground)">{hourOf(times[0])}</text>}
-        {!plain && <text x={width - 8} y={height - 6} fontSize="11" textAnchor="end" fill="var(--muted-foreground)">{hourOf(times.at(-1))}</text>}
+        <Axis width={width} left={LEFT} top={TOP} height={plot} ticks={[{ y: 0, label: format(most) }, { y: 1, label: "0" }]} />
+        <TimeLabels first={hourOf(hours[0] * HOUR)} last={hourOf(hours.at(-1) * HOUR)} width={width} height={height} />
         {series.map((s) => <path key={s.name} d={path(s.values)} fill="none" stroke={s.colour} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />)}
-        {at != null && <line x1={x(at)} x2={x(at)} y1={top} y2={top + plot} stroke="var(--muted-foreground)" />}
+        {series.flatMap((s) => s.values.map((v, i) => (lone(s.values, i) ? <circle key={`${s.name}${i}`} cx={x(i)} cy={y(v)} r="4" fill={s.colour} stroke="var(--background)" strokeWidth="2" /> : null)))}
+        {at != null && <line x1={x(at)} x2={x(at)} y1={TOP} y2={TOP + plot} stroke={MUTED} />}
         {listed.map((s) => <circle key={s.name} cx={x(at)} cy={y(s.v)} r="4" fill={s.colour} stroke="var(--background)" strokeWidth="2" />)}
       </svg>
-      {at != null && <Tip tip={{ x: x(at) + (x(at) > width / 2 ? -10 : 10), y: top + 40, flip: x(at) > width / 2, lines: [hourOf(times[at]), ...listed.map((s) => `${s.name}: ${number(s.v)}`)] }} />}
+      {at != null && <Tip tip={{ x: x(at) + (at > hours.length / 2 ? -10 : 10), y: TOP + 34, flip: at > hours.length / 2, lines: [hourOf(hours[at] * HOUR), ...listed.map((s) => `${s.name}: ${format(s.v)}`)] }} />}
     </div>
   )
 }
 
-// How many in each slice of time, red for the failed: the volume bar above a log search.
-function Volume({ rows, from, to }) {
-  const [ref, width] = useWidth()
-  const slices = 48, height = 56
-  const buckets = Array.from({ length: slices }, () => [0, 0])
-  for (const r of rows) {
-    const i = Math.min(slices - 1, Math.max(0, Math.floor(((r.time - from) / Math.max(1, to - from)) * slices)))
-    buckets[i][r.status === "error" ? 1 : 0]++
-  }
-  const most = Math.max(1, ...buckets.map(([a, b]) => a + b))
-  const w = width / slices
+function Panel({ title, value, note, children }) {
   return (
-    <div ref={ref}>
-      <svg width={width} height={height} role="img" aria-label="How many over time">
-        {buckets.map(([ok, bad], i) => (
-          <g key={i}>
-            {ok > 0 && <rect x={i * w + 1} width={Math.max(1, w - 2)} y={height - ((ok + bad) / most) * height} height={(ok / most) * height} rx="2" fill="var(--muted-foreground)" opacity=".5" />}
-            {bad > 0 && <rect x={i * w + 1} width={Math.max(1, w - 2)} y={height - (bad / most) * height} height={(bad / most) * height} rx="2" fill={ERROR} />}
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="text-sm text-muted-foreground">{title}</div>
+      <div className="flex items-baseline gap-2"><span className="text-2xl font-semibold tabular-nums">{value}</span>{note && <span className="text-sm text-muted-foreground">{note}</span>}</div>
+      {children}
+    </div>
+  )
+}
+
+// Rate, errors and duration of some spans, over the hours they ran.
+function Health({ rows, from, to }) {
+  const hours = hoursOf(rows, from, to)
+  const byHour = Map.groupBy(rows, (r) => r.hour)
+  const at = (f) => hours.map((h) => (byHour.has(h) ? f(red(byHour.get(h))) : null))
+  const all = red(rows)
+  const failed = at((r) => r.errors)
+  return (
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-x-8 gap-y-5">
+      <Panel title="Requests" value={number(all.count)}>
+        <Bars hours={hours} stacks={[{ name: "Requests", colour: hue(0), values: at((r) => r.count) }]} />
+      </Panel>
+      <Panel title="Errors" value={percent(all.rate)} note={plural(all.errors, "error")}>
+        <Bars hours={hours} stacks={[{ name: "Errors", colour: ERROR, values: failed }]} />
+      </Panel>
+      <Panel title="Duration" value={took(all.p95)} note="P95">
+        <Lines hours={hours} format={took} series={[{ name: "P95", colour: hue(0), values: at((r) => r.p95) }, { name: "Average", colour: hue(1), values: at((r) => r.avg) }]} />
+      </Panel>
+    </div>
+  )
+}
+
+// A table whose columns sort, as APMs' are. A column: `{ key, label, cell, value, right, wide }`, `wide` only where there's room.
+function Table({ columns, rows, open, start, label }) {
+  const [sort, setSort] = useState(start)
+  const by = columns.find((c) => c.key === sort.key)
+  const ordered = [...rows].sort((a, b) => {
+    const x = by.value(a) ?? -Infinity, y = by.value(b) ?? -Infinity
+    return (x < y ? -1 : x > y ? 1 : 0) * (sort.down ? -1 : 1)
+  })
+  const hide = (c) => (c.wide ? "hidden @2xl:table-cell" : "")
+  return (
+    <div className="@container">
+      <table className="w-full border-collapse text-sm" aria-label={label}>
+        <thead>
+          <tr className="text-muted-foreground">
+            {columns.map((c) => (
+              <th key={c.key} aria-sort={sort.key === c.key ? (sort.down ? "descending" : "ascending") : undefined} className={`px-2 py-1.5 font-normal ${c.right ? "text-right" : "text-left"} ${hide(c)}`}>
+                {c.label && <button type="button" className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-inherit" onClick={() => setSort({ key: c.key, down: sort.key === c.key ? !sort.down : c.right })}>
+                  {c.label}{sort.key === c.key && <Icon name={sort.down ? "caret-down" : "caret-up"} className="size-3" />}
+                </button>}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {ordered.map((r) => (
+            <tr key={r.id} onClick={() => open(r)} className="cursor-pointer border-0 border-t border-solid border-border hover:bg-muted">
+              {columns.map((c, i) => (
+                <td key={c.key} className={`px-2 py-2 ${c.right ? "text-right tabular-nums" : ""} ${hide(c)}`}>
+                  {i === 0 ? <button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-left text-inherit">{c.cell(r)}</button> : c.cell(r)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const redColumns = (name, trend) => [
+  { key: "name", label: name, value: (r) => r.name, cell: (r) => <span className="font-medium break-all">{r.name}</span> },
+  { key: "count", label: "Requests", right: true, value: (r) => r.count, cell: (r) => number(r.count) },
+  { key: "rate", label: "Errors", right: true, value: (r) => r.rate, cell: (r) => <span className={r.errors ? "text-destructive" : "text-muted-foreground"}>{percent(r.rate)}</span> },
+  { key: "avg", label: "Average", right: true, wide: true, value: (r) => r.avg, cell: (r) => took(r.avg) },
+  { key: "p95", label: "P95", right: true, value: (r) => r.p95, cell: (r) => took(r.p95) },
+  ...(trend ? [{ key: "trend", label: "", wide: true, value: (r) => r.count, cell: (r) => <Sparkline values={r.trend} className="h-5 w-24 text-muted-foreground" /> }] : []),
+]
+
+function grouped(rows, key, hours) {
+  return [...Map.groupBy(rows, key).entries()].map(([name, g]) => {
+    const byHour = Map.groupBy(g, (r) => r.hour)
+    const counts = hours.map((h) => (byHour.get(h) || []).reduce((n, r) => n + r.count, 0))
+    const most = Math.max(1, ...counts)
+    return { id: name, name, ...red(g), trend: counts.map((c) => (c / most) * 100) }
+  })
+}
+
+function Services({ rows, traces, from, to, open: [service, setService], colour, showTrace, showTraces }) {
+  const hours = hoursOf(rows, from, to)
+  if (service) {
+    const mine = rows.filter((r) => r.service === service)
+    const recent = traces.filter((t) => t.services.includes(service)).slice(0, 12)
+    return (
+      <div className="flex flex-col gap-6">
+        <div><Button variant="ghost" onClick={() => setService(null)}><Icon name="caret-left" />Services</Button></div>
+        <h2 className="m-0 break-all text-xl font-semibold">{service}</h2>
+        <Health rows={mine} from={from} to={to} />
+        <Section title="Operations">
+          <Table label="Operations" columns={redColumns("Operation", true)} rows={grouped(mine, (r) => r.name, hours)} start={{ key: "count", down: true }} open={(r) => showTraces({ service, operation: r.name })} />
+        </Section>
+        {recent.length > 0 && (
+          <Section title="Recent Traces" action={<Button variant="ghost" onClick={() => showTraces({ service, operation: ALL })}>All Traces</Button>}>
+            <TraceTable traces={recent} open={showTrace} colour={colour} />
+          </Section>
+        )}
+      </div>
+    )
+  }
+  if (!rows.length) return <Empty>Nothing recorded in this range.</Empty>
+  return (
+    <div className="flex flex-col gap-6">
+      <Health rows={rows} from={from} to={to} />
+      <Table label="Services" columns={redColumns("Service", true)} rows={grouped(rows, (r) => r.service, hours)} start={{ key: "count", down: true }} open={(r) => setService(r.name)} />
+    </div>
+  )
+}
+
+function TraceTable({ traces, open, colour }) {
+  const longest = Math.max(1, ...traces.map((t) => t.ms))
+  const columns = [
+    { key: "name", label: "Trace", value: (t) => t.name, cell: (t) => <span className="flex min-w-0 items-center gap-2"><span className="size-2 shrink-0 rounded-full" style={{ background: t.errors ? ERROR : colour[t.root.service] }} /><span className="min-w-0 break-all"><span className="text-muted-foreground">{t.root.service}</span> <span className="font-medium">{t.root.name}</span></span></span> },
+    { key: "spans", label: "Spans", right: true, wide: true, value: (t) => t.spans.length, cell: (t) => t.spans.length },
+    { key: "ms", label: "Duration", right: true, value: (t) => t.ms, cell: (t) => <span className="inline-flex items-center justify-end gap-2"><span className="hidden h-1 w-20 overflow-hidden rounded-sm bg-muted @2xl:block"><span className="block h-1 rounded-sm" style={{ width: `${Math.max(2, (t.ms / longest) * 100)}%`, background: t.errors ? ERROR : MUTED }} /></span><span className={t.errors ? "text-destructive" : ""}>{took(t.ms)}</span></span> },
+    { key: "start", label: "Started", right: true, value: (t) => t.start, cell: (t) => <span className="text-muted-foreground" title={when(t.start)}>{ago(t.start)}</span> },
+  ]
+  return <Table label="Traces" columns={columns} rows={traces.map((t) => ({ ...t, name: `${t.root.service} ${t.root.name}` }))} start={{ key: "start", down: true }} open={(t) => open(t.id)} />
+}
+
+// Duration against time on a log scale, as durations differ by orders of magnitude: one dot a trace.
+function Scatter({ traces, open, colour }) {
+  const [ref, width] = useWidth()
+  const [tip, setTip] = useState(null)
+  const height = 150, plot = height - TOP - BOTTOM
+  const times = traces.map((t) => t.start)
+  const first = Math.min(...times), last = Math.max(...times, first + 60000)
+  const lows = traces.map((t) => Math.max(1, t.ms))
+  const floor = Math.floor(Math.log10(Math.min(...lows))), ceil = Math.max(floor + 1, Math.ceil(Math.log10(Math.max(...lows))))
+  const x = (t) => LEFT + 6 + ((t - first) / (last - first)) * Math.max(1, width - LEFT - 14)
+  const y = (ms) => TOP + plot - ((Math.log10(Math.max(1, ms)) - floor) / (ceil - floor)) * plot
+  const ticks = Array.from({ length: ceil - floor + 1 }, (_, i) => ({ y: i / (ceil - floor), label: took(10 ** (ceil - i)) }))
+  return (
+    <div ref={ref} className="relative">
+      <svg width={width} height={height} role="img" aria-label="Traces by time and duration">
+        <Axis width={width} left={LEFT} top={TOP} height={plot} ticks={ticks} />
+        <TimeLabels first={when(first)} last={when(last)} width={width} height={height} />
+        {traces.map((t) => (
+          <g key={t.id} className="cursor-pointer" onClick={() => open(t.id)} onMouseEnter={() => setTip({ x: x(t.start), y: y(t.ms) - 8, flip: x(t.start) > width / 2, lines: [`${t.root.service} ${t.root.name}`, took(t.ms), when(t.start)] })} onMouseLeave={() => setTip(null)}>
+            <circle cx={x(t.start)} cy={y(t.ms)} r="10" fill="transparent" />
+            <circle cx={x(t.start)} cy={y(t.ms)} r="4" fill={t.errors ? ERROR : colour[t.root.service]} stroke="var(--background)" strokeWidth="1.5" />
           </g>
         ))}
       </svg>
+      <Tip tip={tip} />
     </div>
   )
 }
 
-function Fields({ row }) {
-  const all = fields(row)
+function Pick({ label, value, set, all, options }) {
   return (
-    <dl className="m-0 grid grid-cols-[minmax(0,14rem)_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono text-xs">
-      {Object.keys(all).sort().map((k) => [<dt key={k} className="break-all text-muted-foreground">{k}</dt>, <dd key={`${k}=`} className="m-0 whitespace-pre-wrap break-all">{text(all[k])}</dd>])}
-    </dl>
+    <Select value={value} onValueChange={set}>
+      <SelectTrigger aria-label={label}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL}>{all}</SelectItem>
+        {options.map((o) => <SelectItem key={o} value={String(o)}>{String(o)}</SelectItem>)}
+      </SelectContent>
+    </Select>
   )
 }
 
-function Traces({ rows, from, to, open, colour, more, query: [query, setQuery] }) {
-  const [service, setService] = useState(ALL)
-  const [operation, setOperation] = useState(ALL)
+function Traces({ traces, filters: [filters, setFilters], query: [query, setQuery], open, colour, more }) {
   const [least, setLeast] = useState("")
-  const services = sorted(rows.map((s) => s.service))
-  const operations = sorted(rows.filter((s) => service === ALL || s.service === service).map((s) => s.name))
+  const spans = traces.flatMap((t) => t.spans)
+  const { service, operation } = filters
   const found = useMemo(() => {
     const matches = matcher(query), floor = duration(least)
-    const byTrace = tracesOf(rows)
-    return byTrace.filter((t) => t.ms >= floor && t.spans.some((s) => (service === ALL || s.service === service) && (operation === ALL || s.name === operation) && matches(s)))
-  }, [rows, service, operation, query, least])
-  const longest = Math.max(1, ...found.map((t) => t.ms))
+    return traces.filter((t) => t.ms >= floor && t.spans.some((s) => (service === ALL || s.service === service) && (operation === ALL || s.name === operation) && matches(s)))
+  }, [traces, service, operation, query, least])
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Pick label="Service" value={service} set={(v) => (setService(v), setOperation(ALL))} all="All Services" options={services} />
-        <Pick label="Operation" value={operation} set={setOperation} all="All Operations" options={operations} />
+        <Pick label="Service" value={service} set={(v) => setFilters({ service: v, operation: ALL })} all="All Services" options={sorted(spans.map((s) => s.service))} />
+        <Pick label="Operation" value={operation} set={(v) => setFilters({ service, operation: v })} all="All Operations" options={sorted(spans.filter((s) => service === ALL || s.service === service).map((s) => s.name))} />
         <Input className="w-28" aria-label="Minimum duration" placeholder="Min 1.2s" value={least} onChange={(e) => setLeast(e.target.value)} />
-        <Input className="min-w-52 flex-1" aria-label="Tags" placeholder="Tags: error.type=timeout one.device=…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Input className="min-w-52 flex-1" aria-label="Tags" placeholder="Tags, like error.type=timeout" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
       {found.length ? (
         <>
-          <Scatter traces={found} from={from} to={to} open={open} colour={colour} />
-          <p className="m-0 text-sm text-muted-foreground">{found.length} {found.length === 1 ? "Trace" : "Traces"}{more ? ", newest only" : ""}</p>
-          <div className="flex flex-col">
-            {found.map((t) => (
-              <button key={t.id} type="button" onClick={() => open(t.id)} className="flex cursor-pointer flex-col gap-1 border-0 border-b border-solid border-border bg-transparent px-1 py-2.5 text-left text-foreground hover:bg-muted">
-                <span className="flex items-baseline justify-between gap-3">
-                  <span className="min-w-0 truncate font-medium">{t.root.service}: {t.root.name}</span>
-                  <span className="shrink-0 tabular-nums text-sm">{took(t.ms)}</span>
-                </span>
-                <span className="block h-1 rounded-sm bg-muted"><span className="block h-1 rounded-sm" style={{ width: `${Math.max(1, (t.ms / longest) * 100)}%`, background: t.errors ? ERROR : colour[t.root.service] }} /></span>
-                <span className="flex flex-wrap justify-between gap-x-3 text-sm text-muted-foreground">
-                  <span>{t.spans.length} {t.spans.length === 1 ? "Span" : "Spans"}{t.errors ? <span className="text-destructive"> · {t.errors} {t.errors === 1 ? "Error" : "Errors"}</span> : null}{t.services.length > 1 ? ` · ${t.services.join(", ")}` : ""}</span>
-                  <span title={when(t.start)}>{ago(t.start)}</span>
-                </span>
-              </button>
-            ))}
-          </div>
+          <Scatter traces={found} open={open} colour={colour} />
+          {more && <p className="m-0 text-sm text-muted-foreground">The newest only.</p>}
+          <TraceTable traces={found} open={open} colour={colour} />
         </>
       ) : <Empty>No traces match.</Empty>}
     </div>
+  )
+}
+
+function Fields({ row, skip = [] }) {
+  const all = fields(row)
+  const shown = (k, v) => (["time", "first", "last"].includes(k) && typeof v === "number" ? when(v) : text(v))
+  return (
+    <dl className="m-0 grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono text-xs">
+      {Object.keys(all).filter((k) => !skip.includes(k)).sort().map((k) => [<dt key={k} className="break-all text-muted-foreground">{k}</dt>, <dd key={`${k}=`} className="m-0 whitespace-pre-wrap break-all">{shown(k, all[k])}</dd>])}
+    </dl>
   )
 }
 
@@ -248,38 +423,40 @@ function Trace({ trace, back, colour }) {
   trace.spans.filter((s) => !s.parent || !known.has(s.parent)).sort((a, b) => a.time - b.time).forEach((s) => walk(s, 0))
   const whole = Math.max(1, trace.ms)
   const toggle = (id) => setClosed((c) => { const n = new Set(c); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const grid = "grid grid-cols-1 gap-x-3 @2xl:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]"
   return (
-    <div className="flex flex-col gap-4">
-      <div><Button variant="ghost" onClick={back}><Icon name="caret-left" />Traces</Button></div>
+    <div className="@container flex flex-col gap-4">
+      <LargeTitle action={<Button variant="ghost" onClick={back}><Icon name="caret-left" />Back</Button>}>{trace.root.name}</LargeTitle>
       <div>
-        <h2 className="m-0 break-words text-xl font-semibold">{trace.root.service}: {trace.root.name}</h2>
-        <p className="m-0 text-sm text-muted-foreground">{when(trace.start)} · {took(trace.ms)} · {trace.spans.length} {trace.spans.length === 1 ? "Span" : "Spans"} · {trace.services.join(", ")}{trace.errors ? ` · ${trace.errors} failed` : ""}</p>
+        <p className="m-0 text-sm">{trace.services.join(", ")}</p>
+        <p className="m-0 text-sm text-muted-foreground">{when(trace.start)} · {took(trace.ms)} · {plural(trace.spans.length, "span")}{trace.errors ? <span className="text-destructive"> · {plural(trace.errors, "error")}</span> : null}</p>
         <p className="m-0 break-all font-mono text-xs text-muted-foreground">{trace.id}</p>
       </div>
-      <div className="flex justify-between font-mono text-xs text-muted-foreground @container">
-        {[0, 0.25, 0.5, 0.75, 1].map((p) => <span key={p}>{took(Math.round(p * whole))}</span>)}
-      </div>
       <div className="flex flex-col">
+        <div className={`${grid} border-0 border-b border-solid border-border pb-1 text-xs text-muted-foreground`}>
+          <span className="hidden @2xl:block">Span</span>
+          <div className="flex justify-between font-mono">{[0, 0.25, 0.5, 0.75, 1].map((p) => <span key={p}>{took(p * whole)}</span>)}</div>
+        </div>
         {flat.map(({ s, depth }) => {
           const parent = (kids.get(s.span) || []).length > 0
           const shown = open === s.span
           return (
             <div key={s.span} className="border-0 border-b border-solid border-border">
-              <div className="flex cursor-pointer flex-col gap-1 py-1.5 hover:bg-muted" onClick={() => setOpen(shown ? null : s.span)}>
-                <div className="flex items-center gap-1 text-sm" style={{ paddingLeft: Math.min(depth, 8) * 14 }}>
+              <div className={`${grid} cursor-pointer items-center py-1 hover:bg-muted`} onClick={() => setOpen(shown ? null : s.span)}>
+                <div className="flex min-w-0 items-center gap-1 text-sm" style={{ paddingLeft: Math.min(depth, 8) * 14 }}>
                   {parent ? (
-                    <button type="button" aria-label={closed.has(s.span) ? "Expand" : "Collapse"} onClick={(e) => (e.stopPropagation(), toggle(s.span))} className="grid size-5 cursor-pointer place-items-center border-0 bg-transparent p-0 text-muted-foreground">
+                    <button type="button" aria-label={closed.has(s.span) ? "Expand" : "Collapse"} onClick={(e) => (e.stopPropagation(), toggle(s.span))} className="grid size-5 shrink-0 cursor-pointer place-items-center border-0 bg-transparent p-0 text-muted-foreground">
                       <Icon name={closed.has(s.span) ? "caret-right" : "caret-down"} />
                     </button>
-                  ) : <span className="size-5" />}
-                  <span className="min-w-0 truncate"><span className="text-muted-foreground">{s.service}</span> {s.name}</span>
-                  <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{took(s.ms)}</span>
+                  ) : <span className="size-5 shrink-0" />}
+                  <span className="min-w-0 truncate"><span className={s.status === "error" ? "text-destructive" : ""}>{s.name}</span>{s.service !== trace.root.service && <span className="text-muted-foreground"> {s.service}</span>}</span>
                 </div>
-                <div className="relative h-2.5 rounded-sm bg-muted/60">
-                  <div className="absolute inset-y-0 min-w-0.5 rounded-sm" style={{ left: `${((s.time - trace.start) / whole) * 100}%`, width: `${(s.ms / whole) * 100}%`, background: s.status === "error" ? ERROR : colour[s.service] }} />
+                <div className="relative h-4">
+                  <div className="absolute inset-y-1 rounded-sm" style={{ left: `${((s.time - trace.start) / whole) * 100}%`, width: `max(2px, ${(s.ms / whole) * 100}%)`, background: s.status === "error" ? ERROR : colour[s.service] }} />
+                  <span className="absolute inset-y-0 flex items-center px-1 text-xs tabular-nums text-muted-foreground" style={s.time - trace.start + s.ms > whole * 0.8 ? { right: `${100 - ((s.time - trace.start) / whole) * 100}%` } : { left: `${((s.time - trace.start + s.ms) / whole) * 100}%` }}>{took(s.ms)}</span>
                 </div>
               </div>
-              {shown && <div className="px-1 pb-3 pt-1"><Fields row={s} /></div>}
+              {shown && <div className="px-1 pb-3 pt-1"><Fields row={s} skip={SHOWN} /></div>}
             </div>
           )
         })}
@@ -288,25 +465,45 @@ function Trace({ trace, back, colour }) {
   )
 }
 
-function Pick({ label, value, set, all, options }) {
+// How many in each slice of time, red for the failed: the volume bar above a log search.
+function Volume({ rows }) {
+  const [ref, width] = useWidth()
+  const slices = 48, height = 48
+  const first = Math.min(...rows.map((r) => r.time)), last = Math.max(first + 60000, ...rows.map((r) => r.time))
+  const buckets = Array.from({ length: slices }, () => [0, 0])
+  for (const r of rows) buckets[Math.min(slices - 1, Math.floor(((r.time - first) / (last - first)) * slices))][r.status === "error" ? 1 : 0]++
+  const most = Math.max(1, ...buckets.map(([a, b]) => a + b))
+  const w = width / slices
   return (
-    <Select value={value} onValueChange={set}>
-      <SelectTrigger aria-label={label}><SelectValue /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value={ALL}>{all}</SelectItem>
-        {options.map((o) => <SelectItem key={o} value={String(o)}>{String(o)}</SelectItem>)}
-      </SelectContent>
-    </Select>
+    <div ref={ref}>
+      <svg width={width} height={height} role="img" aria-label="How many over time">
+        {buckets.map(([ok, bad], i) => {
+          const total = ((ok + bad) / most) * height, red = (bad / most) * height
+          return (
+            <g key={i}>
+              {ok > 0 && <rect x={i * w + 1} width={Math.max(1, w - 2)} y={height - total} height={Math.max(1, total - red - 1)} rx="2" fill={MUTED} opacity=".5" />}
+              {bad > 0 && <rect x={i * w + 1} width={Math.max(1, w - 2)} y={height - red} height={red} rx="2" fill={ERROR} />}
+            </g>
+          )
+        })}
+      </svg>
+    </div>
   )
 }
 
-function Logs({ rows, from, to, more, query: [query, setQuery] }) {
+function Logs({ rows, more, query: [query, setQuery] }) {
   const [service, setService] = useState(ALL)
   const [open, setOpen] = useState(null)
   const found = useMemo(() => {
     const matches = matcher(query)
     return rows.filter((r) => (service === ALL || r.service === service) && matches(r))
   }, [rows, service, query])
+  // Only what differs from row to row is worth a place on the line.
+  const varying = useMemo(() => {
+    const seen = {}
+    for (const r of found) for (const [k, v] of Object.entries(r.attrs || {})) (seen[k] ||= new Set()).add(text(v))
+    return new Set(Object.keys(seen).filter((k) => seen[k].size > 1))
+  }, [found])
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -315,17 +512,17 @@ function Logs({ rows, from, to, more, query: [query, setQuery] }) {
       </div>
       {found.length ? (
         <>
-          <Volume rows={found} from={from} to={to} />
-          <p className="m-0 text-sm text-muted-foreground">{found.length} {found.length === 1 ? "Log" : "Logs"}{more ? ", newest only" : ""}</p>
+          <Volume rows={found} />
+          <p className="m-0 text-sm text-muted-foreground">{plural(found.length, "log")}{more ? ", the newest only" : ""}</p>
           <div className="flex flex-col font-mono text-xs">
             {found.map((r) => (
               <div key={r.span} className="border-0 border-b border-solid border-border">
                 <div className="flex cursor-pointer gap-3 py-1.5 hover:bg-muted" onClick={() => setOpen(open === r.span ? null : r.span)}>
                   <span className="shrink-0 tabular-nums text-muted-foreground">{when(r.time)}</span>
                   <span className={`w-10 shrink-0 ${r.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>{r.status === "error" ? "ERROR" : "INFO"}</span>
-                  <span className="min-w-0 truncate">{r.service} {r.name} <span className="text-muted-foreground">{Object.entries(r.attrs || {}).map(([k, v]) => `${k}=${text(v)}`).join(" ")}</span></span>
+                  <span className="min-w-0 truncate">{r.service} {r.name} <span className="text-muted-foreground">{Object.entries(r.attrs || {}).filter(([k]) => varying.has(k)).map(([k, v]) => `${k}=${text(v)}`).join(" ")}</span></span>
                 </div>
-                {open === r.span && <div className="px-1 pb-3 pt-1"><Fields row={r} /></div>}
+                {open === r.span && <div className="px-1 pb-3 pt-1"><Fields row={r} skip={SHOWN} /></div>}
               </div>
             ))}
           </div>
@@ -335,21 +532,11 @@ function Logs({ rows, from, to, more, query: [query, setQuery] }) {
   )
 }
 
-// Hourly places from `from` to `to`, and each rollup's numbers for a stat.
-function hoursOf(from, to) {
-  const out = []
-  for (let h = Math.floor(from / HOUR); h <= Math.floor(to / HOUR); h++) out.push(h)
-  return out
-}
 function statOver(rows, stat) {
-  const count = rows.reduce((n, r) => n + r.count, 0)
-  const sum = rows.reduce((n, r) => n + r.ms, 0)
-  if (stat === "count") return count
-  if (stat === "errors") return rows.reduce((n, r) => n + r.errors, 0)
-  if (stat === "sum") return sum
-  return count ? sum / count : null
+  const r = red(rows)
+  return { sum: r.sum, count: r.count, errors: r.errors, avg: r.avg, p95: r.p95 }[stat]
 }
-const zeroAt = (stat) => (stat === "avg" ? null : 0)
+const zeroAt = (stat) => (stat === "avg" || stat === "p95" ? null : 0)
 function seriesOf(rows, hours, stat, split) {
   const named = (r) => (split === ALL ? "All" : text(fields(r)[split] ?? "–"))
   const groups = Map.groupBy(rows, named)
@@ -361,24 +548,20 @@ function seriesOf(rows, hours, stat, split) {
     return { name, colour, values: hours.map((h) => (byHour.has(h) ? statOver(byHour.get(h), stat) : zeroAt(stat))) }
   }
   const lines = ranked.slice(0, MOST_SERIES).map(([name, g]) => line(name, g, hue(stable.indexOf(name))))
-  if (ranked.length > MOST_SERIES) lines.push(line(OTHER, ranked.slice(MOST_SERIES).flatMap(([, g]) => g), "var(--muted-foreground)"))
+  if (ranked.length > MOST_SERIES) lines.push(line(OTHER, ranked.slice(MOST_SERIES).flatMap(([, g]) => g), MUTED))
   return lines
 }
 
 function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
   const [open, setOpen] = useState(null)
-  const [stat, setStat] = useState("count")
+  const [stat, setStat] = useState("sum")
   const [split, setSplit] = useState(ALL)
-  const hours = hoursOf(from, to)
-  const times = hours.map((h) => h * HOUR)
-  const shown = useMemo(() => {
-    const matches = matcher(query)
-    return rows.filter(matches)
-  }, [rows, query])
-  const search = <Input className="min-w-52 flex-1" aria-label="Filter" placeholder="Filter: one.device=…  or a name" value={query} onChange={(e) => setQuery(e.target.value)} />
+  const shown = useMemo(() => rows.filter(matcher(query)), [rows, query])
+  const search = <Input className="min-w-52 flex-1" aria-label="Filter" placeholder="Filter, or key=value" value={query} onChange={(e) => setQuery(e.target.value)} />
   if (open) {
     const these = shown.filter((r) => r.name === open)
-    const keys = sorted(rows.filter((r) => r.name === open).flatMap((r) => Object.keys(fields(r)))).filter((k) => !["count", "errors", "ms", "hour", "name"].includes(k) && !k.startsWith("under_") && k !== "over")
+    const hours = hoursOf(these, from, to)
+    const keys = sorted(rows.filter((r) => r.name === open).flatMap((r) => Object.keys(fields(r)))).filter((k) => !COLUMNS.includes(k))
     const series = seriesOf(these, hours, stat, split)
     return (
       <div className="flex flex-col gap-4">
@@ -394,9 +577,9 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
         </div>
         {these.length ? (
           <>
-            <Lines times={times} series={series} />
-            <table className="w-full border-collapse text-sm">
-              <thead><tr className="text-left text-muted-foreground"><th className="py-1 font-normal">Series</th><th className="py-1 text-right font-normal">Peak</th><th className="py-1 text-right font-normal">Last</th></tr></thead>
+            <Lines hours={hours} series={series} height={260} />
+            <table className="w-full max-w-2xl border-collapse text-sm">
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1 font-normal">Series</th><th className="py-1 text-right font-normal">Peak</th><th className="py-1 text-right font-normal">Latest</th></tr></thead>
               <tbody>
                 {series.map((s) => {
                   const known = s.values.filter((v) => v != null)
@@ -419,15 +602,18 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">{search}</div>
-      {more && <p className="m-0 text-sm text-muted-foreground">Newest only</p>}
+      {more && <p className="m-0 text-sm text-muted-foreground">The newest only.</p>}
       {names.length ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-x-6 gap-y-4">
-          {names.map(([name, g]) => (
-            <button key={name} type="button" onClick={() => setOpen(name)} className="flex cursor-pointer flex-col gap-1 border-0 bg-transparent p-0 text-left text-foreground">
-              <span className="flex items-baseline justify-between gap-2"><span className="min-w-0 truncate text-sm font-medium">{name}</span><span className="tabular-nums text-sm">{number(statOver(g, "count"))}</span></span>
-              <Lines plain height={56} times={times} series={[{ name, colour: hue(0), values: seriesOf(g, hours, "count", ALL)[0].values }]} />
-            </button>
-          ))}
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-x-8 gap-y-5">
+          {names.map(([name, g]) => {
+            const hours = hoursOf(g, from, to)
+            return (
+              <button key={name} type="button" onClick={() => setOpen(name)} className="flex min-w-0 cursor-pointer flex-col gap-1 border-0 bg-transparent p-0 text-left text-foreground">
+                <span className="flex items-baseline justify-between gap-2"><span className="min-w-0 truncate text-sm font-medium">{name}</span><span className="tabular-nums text-sm">{number(statOver(g, "sum"))}</span></span>
+                <Bars hours={hours} axis={false} height={44} stacks={[{ name, colour: hue(0), values: seriesOf(g, hours, "sum", ALL)[0].values }]} />
+              </button>
+            )
+          })}
         </div>
       ) : <Empty>No metrics match.</Empty>}
     </div>
@@ -436,52 +622,53 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
 
 function Errors({ rows, showTraces, query: [query, setQuery] }) {
   const [service, setService] = useState(ALL)
+  const [fault, setFault] = useState(ALL)
   const [open, setOpen] = useState(null)
   const found = useMemo(() => {
     const matches = matcher(query)
-    return rows.filter((r) => (service === ALL || r.app === service) && matches(r))
-  }, [rows, service, query])
+    return rows.filter((r) => (service === ALL || r.service === service) && (fault === ALL || r.fault === fault) && matches(r)).map((r) => ({ ...r, id: `${r.service}|${r.tool}|${r.fingerprint}` }))
+  }, [rows, service, fault, query])
+  const chosen = found.find((r) => r.id === open)
+  const columns = [
+    { key: "type", label: "Error", value: (p) => p.type, cell: (p) => <span className="break-all"><span className="font-medium">{p.type}</span> <span className="text-muted-foreground">{p.frame}</span></span> },
+    { key: "service", label: "Service", value: (p) => p.service, cell: (p) => <span className="break-all">{p.service}</span> },
+    { key: "tool", label: "Operation", wide: true, value: (p) => p.tool, cell: (p) => <span className="break-all">{p.tool}</span> },
+    { key: "count", label: "Count", right: true, value: (p) => p.count, cell: (p) => number(p.count) },
+    { key: "last", label: "Last", right: true, value: (p) => p.last, cell: (p) => <span className="text-muted-foreground" title={when(p.last)}>{ago(p.last)}</span> },
+  ]
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Pick label="Service" value={service} set={setService} all="All Services" options={sorted(rows.map((r) => r.app).filter(Boolean))} />
-        <Input className="min-w-52 flex-1" aria-label="Search" placeholder="Search, or key=value" value={query} onChange={(e) => setQuery(e.target.value)} />
-      </div>
-      {found.length ? (
-        <div className="flex flex-col">
-          {found.map((p) => {
-            const id = `${p.app}|${p.tool}|${p.fingerprint}`
-            return (
-              <div key={id} className="border-0 border-b border-solid border-border">
-                <div className="flex cursor-pointer items-baseline justify-between gap-3 px-1 py-2.5 hover:bg-muted" onClick={() => setOpen(open === id ? null : id)}>
-                  <span className="min-w-0">
-                    <span className="block break-all font-medium">{p.type} <span className="font-normal text-muted-foreground">{p.frame}</span></span>
-                    <span className="block text-sm text-muted-foreground">{[p.app, p.tool, p.fault].filter(Boolean).join(" · ")} · {ago(p.last)}</span>
-                  </span>
-                  <span className="shrink-0 tabular-nums">{number(p.count)}</span>
-                </div>
-                {open === id && (
-                  <div className="flex flex-col items-start gap-2 px-1 pb-3 pt-1">
-                    <Fields row={p} />
-                    <Button variant="secondary" onClick={() => showTraces(`error.type=${p.type}`)}>Show Traces</Button>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+    <Split
+      title={chosen && `${chosen.type} ${chosen.frame}`}
+      onClose={() => setOpen(null)}
+      list={
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Pick label="Service" value={service} set={setService} all="All Services" options={sorted(rows.map((r) => r.service))} />
+            <Pick label="Fault" value={fault} set={setFault} all="All Faults" options={sorted(rows.map((r) => r.fault).filter(Boolean))} />
+            <Input className="min-w-52 flex-1" aria-label="Search" placeholder="Search, or key=value" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          {found.length ? <Table label="Errors" columns={columns} rows={found} start={{ key: "last", down: true }} open={(r) => setOpen(r.id)} /> : <Empty>No errors match.</Empty>}
         </div>
-      ) : <Empty>No errors match.</Empty>}
-    </div>
+      }
+      detail={chosen && (
+        <div className="flex flex-col items-start gap-3">
+          <Fields row={chosen} skip={["id"]} />
+          <Button variant="secondary" onClick={() => showTraces(chosen)}>Show Traces</Button>
+        </div>
+      )}
+    />
   )
 }
 
 function Insights() {
   const [data, setData] = useState(null)
   const [problem, setProblem] = useState(null)
-  const [tab, setTab] = useState("Traces")
+  const [tab, setTab] = useState("Services")
   const [range, setRange] = useState("1d")
   const [loading, setLoading] = useState(false)
   const [traceId, setTraceId] = useState(null)
+  const service = useState(null)
+  const filters = useState({ service: ALL, operation: ALL })
   const queries = { Traces: useState(""), Logs: useState(""), Metrics: useState(""), Errors: useState("") }
   const asked = useRef(0)
 
@@ -501,6 +688,9 @@ function Insights() {
   }
   useEffect(() => void load(), [range])
 
+  const kinds = useMemo(() => (data ? Map.groupBy(data.rollups, (r) => r.key?.kind) : new Map()), [data])
+  const traces = useMemo(() => (data ? tracesOf(data.signals.filter((s) => s.kind === "span")) : []), [data])
+
   if (!data) {
     return (
       <div className="flex flex-col gap-6">
@@ -511,11 +701,11 @@ function Insights() {
   }
 
   const to = data.at, from = to - RANGES.find(([v]) => v === range)[2]
-  const spans = data.signals.filter((s) => s.kind === "span")
-  const logs = data.signals.filter((s) => s.kind !== "span")
   const colour = colours(data.signals.map((s) => s.service))
-  const opened = traceId && tracesOf(spans).find((t) => t.id === traceId)
+  const opened = traceId && traces.find((t) => t.id === traceId)
   if (opened) return <Trace trace={opened} back={() => setTraceId(null)} colour={colour} />
+  const toTraces = (next) => (filters[1](next), setTab("Traces"))
+  const logs = data.signals.filter((s) => s.kind !== "span")
 
   return (
     <div className="flex flex-col gap-4">
@@ -523,7 +713,7 @@ function Insights() {
         action={
           <span className="flex items-center gap-2">
             <Select value={range} onValueChange={setRange}>
-              <SelectTrigger aria-label="Lookback"><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label="Time range"><SelectValue /></SelectTrigger>
               <SelectContent>{RANGES.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
             </Select>
             <Button variant="ghost" size="icon" aria-label="Refresh" disabled={loading} onClick={load}><Icon name="arrow-clockwise" /></Button>
@@ -533,13 +723,14 @@ function Insights() {
       {problem && <LoadFailure problem={problem} retry={load} />}
       <div>
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>{Object.keys(queries).map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>
+          <TabsList><TabsTrigger value="Services">Services</TabsTrigger>{Object.keys(queries).map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>
         </Tabs>
       </div>
-      {tab === "Traces" && <Traces rows={spans} query={queries.Traces} from={from} to={to} open={setTraceId} colour={colour} more={data.more_signals} />}
-      {tab === "Logs" && <Logs rows={logs} from={from} to={to} more={data.more_signals} query={queries.Logs} />}
-      {tab === "Metrics" && <Metrics rows={data.rollups} from={from} to={to} more={data.more_rollups} query={queries.Metrics} />}
-      {tab === "Errors" && <Errors rows={data.fingerprints} query={queries.Errors} showTraces={(q) => (queries.Traces[1](q), setTab("Traces"))} />}
+      {tab === "Services" && <Services rows={kinds.get("span") || []} traces={traces} from={from} to={to} open={service} colour={colour} showTrace={setTraceId} showTraces={toTraces} />}
+      {tab === "Traces" && <Traces traces={traces} filters={filters} query={queries.Traces} open={setTraceId} colour={colour} more={data.more_signals} />}
+      {tab === "Logs" && <Logs rows={logs} more={data.more_signals} query={queries.Logs} />}
+      {tab === "Metrics" && <Metrics rows={kinds.get("metric") || []} from={from} to={to} more={data.more_rollups} query={queries.Metrics} />}
+      {tab === "Errors" && <Errors rows={data.fingerprints} query={queries.Errors} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
     </div>
   )
 }

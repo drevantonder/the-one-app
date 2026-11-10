@@ -345,8 +345,9 @@ impl Attrs {
     }
 
     /// The attributes a rollup groups by, as its key: those that are few.
-    fn rollup_key(&self, fault: Option<Fault>) -> String {
+    fn rollup_key(&self, kind: &str, fault: Option<Fault>) -> String {
         let mut key: BTreeMap<&str, Value> = self.0.iter().filter(|(k, _)| ["one.client", "one.scope", "one.device", "one.build", "gen_ai.request.model", "gen_ai.token.type", "one.outcome"].contains(k)).map(|(k, v)| (*k, v.clone())).collect();
+        key.insert("kind", json!(kind));
         if let Some(fault) = fault {
             key.insert("fault", json!(fault.as_str()));
         }
@@ -485,12 +486,12 @@ impl Batch {
 
     /// Adds to a metric's rollup: for a metric, `ms` is the sum of its values and `count` how many were added.
     pub fn metric(&mut self, time: u64, name: &str, app: &str, attrs: &Attrs, value: u64) {
-        self.rollups.entry((time / 3_600_000, name.to_string(), app.to_string(), attrs.rollup_key(None))).or_default().add(value, true);
+        self.rollups.entry((time / 3_600_000, name.to_string(), app.to_string(), attrs.rollup_key("metric", None))).or_default().add(value, true);
     }
 
     /// Adds a finished signal: to the rollups always, and in full only if it's `kept`.
     pub fn add(&mut self, signal: Signal, kept: bool, print: Option<Print>) {
-        let key = (signal.time / 3_600_000, signal.name.clone(), signal.app.clone(), signal.attrs.rollup_key(signal.fault));
+        let key = (signal.time / 3_600_000, signal.name.clone(), signal.app.clone(), signal.attrs.rollup_key(signal.kind.as_str(), signal.fault));
         self.rollups.entry(key).or_default().add(signal.ms, signal.ok);
         if let Some(print) = print {
             let at = signal.time;

@@ -96,7 +96,7 @@ impl Node {
             }
             Print { app: app.to_string(), tool: tool.clone(), kind, frame, build: built, fault: fault.unwrap_or(Fault::Internal) }
         });
-        let name = if destination.named { format!("{app}.{tool}") } else { "call".into() };
+        let name = if destination.named { tool.clone() } else { "call".into() };
         let bucket_of = |field: &str| steps.iter().filter(|s| s["step"] == "bucket").map(|s| s[field].as_u64().unwrap_or(0)).sum::<u64>();
         let (asks, took, behind) = (bucket_of("asks"), bucket_of("ms"), steps.iter().filter(|s| s["step"] == "data").map(|s| s["new"].as_u64().unwrap_or(0)).sum::<u64>());
         let about = Attrs::default().device(&hex(&self.0.id)).scope(destination.kind).build(build);
@@ -375,7 +375,7 @@ impl Node {
             if !span.ok {
                 attrs = attrs.error(&span.error);
             }
-            let name = if destination.named { format!("{app}.{}", span.name) } else { "span".into() };
+            let name = if destination.named { span.name.clone() } else { "span".into() };
             let mut built = signal(&name, span.ms, span.ok, attrs);
             built.kind = span.kind;
             if let Some(ids) = span.ids {
@@ -422,10 +422,15 @@ impl Node {
             }
             let errors_only = i64::from(ask.status.as_deref() == Some("error"));
             for row in db.query("select * from rollups where hour >= ?1 and (?2 is null or app = ?2) and (?3 is null or name = ?3) and (?4 = 0 or errors > 0) and (?5 is null or json_extract(key, '$.fault') = ?5) order by hour desc limit ?6", &[json!(since / 3_600_000), app.clone(), name.clone(), json!(errors_only), fault.clone(), json!(MOST_ROLLUPS_READ)])?.into_iter().filter(may) {
-                rollups.push(row_read(row, "key"));
+                let mut rollup = row_read(row, "key");
+                rollup["service"] = service_of(&rollup);
+                self.name_devices(&mut rollup["key"]);
+                rollups.push(rollup);
             }
             for row in db.query("select * from fingerprints where last >= ?1 and (?2 is null or app = ?2) and (?3 is null or fault = ?3) order by last desc limit ?4", &[json!(since), app, fault, json!(MOST_PRINTS_READ)])?.into_iter().filter(may) {
-                prints.push(Value::Object(row));
+                let mut print = Value::Object(row);
+                print["service"] = service_of(&print);
+                prints.push(print);
             }
         }
         let newest = |rows: &mut Vec<Value>, key: &str, most: usize| {
@@ -455,14 +460,29 @@ impl Node {
         let device = unhex(row["device"].as_str().unwrap_or("")).map_or_else(|_| "a device".to_string(), |k| self.name_of(&k));
         let mut read = row_read(row, "attrs");
         read["device"] = json!(device);
-        read["service"] = if read["app"] == "" { json!(crate::config::CLI) } else { read["app"].clone() };
+        read["service"] = service_of(&read);
+        self.name_devices(&mut read["attrs"]);
         read
+    }
+
+    /// A device's key among `attrs`, as a reader knows it: its name.
+    fn name_devices(&self, attrs: &mut Value) {
+        for key in ["one.device", "one.node"] {
+            if let Some(device) = attrs[key].as_str().and_then(|k| unhex(k).ok()) {
+                attrs[key] = json!(self.name_of(&device));
+            }
+        }
     }
 }
 
 /// `error.type`: the code it carries, or the type of what was thrown, or that it ran out of time, or none known.
 fn exception_kind(code: Option<&str>, exception: Option<&Exception>, stage: &str) -> String {
     code.map(str::to_string).or(exception.map(|e| e.kind.clone())).unwrap_or_else(|| if stage == insights::stage::LIMIT { insights::TIMEOUT } else { insights::OTHER }.to_string())
+}
+
+/// OTEL's `service.name` of a row: its app, or the network's own program for what isn't an app's.
+fn service_of(row: &Value) -> Value {
+    if row["app"] == "" { json!(crate::config::CLI) } else { row["app"].clone() }
 }
 
 /// A span and, as OTEL's readers expect them, each step it went through as a child span.
