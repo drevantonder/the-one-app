@@ -16,6 +16,8 @@ const STATS = { sum: "Sum", count: "Count", avg: "Average", p95: "P95" }
 // As much as the store gives of each table at once.
 const MOST_ROWS = 10000
 const MOST_SERIES = 8
+// The most things Insights opens by saying are failing.
+const MOST_FAILING = 3
 const OTHER = "Other"
 // The most places a time chart stretches a short history over, so a few hours of data still reads as a chart.
 const LEAST_HOURS = 12
@@ -72,7 +74,8 @@ function tracesOf(rows) {
     const roots = spans.filter((s) => !s.parent || !ids.has(s.parent)).sort((a, b) => a.time - b.time)
     const start = Math.min(...spans.map((s) => s.time))
     const end = Math.max(...spans.map((s) => s.time + s.duration))
-    return { id, spans, root: roots[0] || spans[0], start, ms: end - start, errors: spans.filter((s) => s.status === "error" && s.kind !== "client").length, services: sorted(spans.map((s) => s.service)) }
+    // Named by the request it was, which a span of trying devices can sit above.
+    return { id, spans, root: spans.filter((s) => s.kind === "server").sort((a, b) => a.time - b.time)[0] || roots[0] || spans[0], start, ms: end - start, errors: spans.filter((s) => s.status === "error" && s.kind !== "client").length, services: sorted(spans.map((s) => s.service)) }
   }).sort((a, b) => b.start - a.start)
 }
 
@@ -213,7 +216,7 @@ function Health({ rows, from, to }) {
         <Bars hours={hours} stacks={[{ name: "Errors", colour: ERROR, values: failed }]} />
       </Panel>
       <Panel title="Duration" value={took(all.p95)} note="P95">
-        <Lines hours={hours} format={took} series={[{ name: "P95", colour: hue(0), values: at((r) => r.p95) }, { name: "Average", colour: hue(1), values: at((r) => r.avg) }]} />
+        <Lines hours={hours} format={took} series={[{ name: "P95", colour: hue(0), values: at((r) => r.p95) }]} />
       </Panel>
     </div>
   )
@@ -261,7 +264,7 @@ function Table({ columns, rows, open, start, label }) {
 const redColumns = (name, trend) => [
   { key: "name", label: name, value: (r) => r.name, cell: (r) => <span className="font-medium break-all">{r.name}</span> },
   { key: "count", label: "Requests", right: true, value: (r) => r.count, cell: (r) => number(r.count) },
-  { key: "rate", label: "Errors", right: true, value: (r) => r.rate, cell: (r) => <span className={r.errors ? "text-destructive" : "text-muted-foreground"}>{percent(r.rate)}</span> },
+  { key: "errors", label: "Errors", right: true, value: (r) => r.errors, cell: (r) => <span className={r.errors ? "text-destructive" : "text-muted-foreground"}>{percent(r.rate)}</span> },
   { key: "avg", label: "Average", right: true, wide: true, value: (r) => r.avg, cell: (r) => took(r.avg) },
   { key: "p95", label: "P95", right: true, value: (r) => r.p95, cell: (r) => took(r.p95) },
   ...(trend ? [{ key: "trend", label: "", wide: true, value: (r) => r.count, cell: (r) => <Sparkline values={r.trend} className="h-5 w-24 text-muted-foreground" /> }] : []),
@@ -273,10 +276,40 @@ function grouped(rows, key, hours) {
     const counts = hours.map((h) => (byHour.get(h) || []).reduce((n, r) => n + r.count, 0))
     const most = Math.max(1, ...counts)
     return { id: name, name, ...red(g), trend: counts.map((c) => (c / most) * 100) }
+  }).sort((a, b) => b.count - a.count)
+}
+
+// What broke, one row for each thing that broke where it did, whichever builds it ran in: the newest of its message and trace.
+function failures(rows) {
+  return [...Map.groupBy(rows, (r) => `${r.service}|${r.name}|${r.status}|${r.type}|${r.frame}`).entries()].map(([id, group]) => {
+    const newest = group.reduce((a, b) => (b.last > a.last ? b : a))
+    return { ...newest, id, count: group.reduce((n, r) => n + r.count, 0), first: Math.min(...group.map((r) => r.first)) }
   })
 }
 
-function Services({ rows, traces, from, to, open: [service, setService], colour, showTrace, showTraces }) {
+// What a failure said, as what's read first: its type and where only if it said nothing.
+const failureCell = (p) => (
+  <span className="wrap-anywhere">
+    <span className="block font-medium">{p.message || p.type}</span>
+    <span className="block text-muted-foreground"><span className="@2xl:hidden">{p.service} {p.name} · </span>{p.message ? `${p.type} ` : ""}{p.frame}</span>
+  </span>
+)
+const failureColumns = [
+  { key: "failure", label: "Failure", value: (p) => p.message || p.type, cell: failureCell },
+  { key: "service", label: "Service", wide: true, value: (p) => p.service, cell: (p) => <span className="wrap-anywhere">{p.service}</span> },
+  { key: "name", label: "Operation", wide: true, value: (p) => p.name, cell: (p) => <span className="wrap-anywhere">{p.name}</span> },
+  { key: "count", label: "Count", right: true, value: (p) => p.count, cell: (p) => number(p.count) },
+  { key: "last", label: "Last", right: true, value: (p) => p.last, cell: (p) => <span className="whitespace-nowrap text-muted-foreground" title={when(p.last)}>{ago(p.last)}</span> },
+]
+
+// What's breaking now, first of all: nothing, when nothing is.
+function Failing({ rows, to, service, open }) {
+  const now = failures(rows.filter((r) => r.status === "error" && (!service || r.service === service) && to - r.last <= HOUR)).sort((a, b) => b.count - a.count).slice(0, MOST_FAILING)
+  if (!now.length) return null
+  return <Table label="Failing now" columns={failureColumns} rows={now} start={{ key: "count", down: true }} open={open} />
+}
+
+function Services({ rows, errors, traces, from, to, open: [service, setService], colour, showTrace, showTraces, showFailure }) {
   const hours = hoursOf(rows, from, to)
   if (service) {
     const mine = rows.filter((r) => r.service === service)
@@ -285,9 +318,10 @@ function Services({ rows, traces, from, to, open: [service, setService], colour,
       <div className="flex flex-col gap-6">
         <div><Button variant="ghost" onClick={() => setService(null)}><Icon name="caret-left" />Services</Button></div>
         <h2 className="m-0 break-all text-xl font-semibold">{service}</h2>
+        <Failing rows={errors} to={to} service={service} open={showFailure} />
         <Health rows={mine} from={from} to={to} />
         <Section title="Operations">
-          <Table label="Operations" columns={redColumns("Operation", true)} rows={grouped(mine, (r) => r.name, hours)} start={{ key: "count", down: true }} open={(r) => showTraces({ service, operation: r.name })} />
+          <Table label="Operations" columns={redColumns("Operation", true)} rows={grouped(mine, (r) => r.name, hours)} start={{ key: "errors", down: true }} open={(r) => showTraces({ service, operation: r.name })} />
         </Section>
         {recent.length > 0 && (
           <Section title="Recent Traces" action={<Button variant="ghost" onClick={() => showTraces({ service, operation: ALL })}>All Traces</Button>}>
@@ -300,8 +334,9 @@ function Services({ rows, traces, from, to, open: [service, setService], colour,
   if (!rows.length) return <Empty>Nothing recorded in this range.</Empty>
   return (
     <div className="flex flex-col gap-6">
+      <Failing rows={errors} to={to} open={showFailure} />
       <Health rows={rows} from={from} to={to} />
-      <Table label="Services" columns={redColumns("Service", true)} rows={grouped(rows, (r) => r.service, hours)} start={{ key: "count", down: true }} open={(r) => setService(r.name)} />
+      <Table label="Services" columns={redColumns("Service", true)} rows={grouped(rows, (r) => r.service, hours)} start={{ key: "errors", down: true }} open={(r) => setService(r.name)} />
     </div>
   )
 }
@@ -395,10 +430,13 @@ function Fields({ row, skip = [] }) {
   )
 }
 
+const stackOf = (s) => s.attrs?.events?.[0]?.attributes?.["exception.stacktrace"]
+
 // One trace, as a waterfall: each span under its parent, its bar where it ran, and what it says under it when opened.
 function Trace({ trace, back, colour }) {
   const [closed, setClosed] = useState(() => new Set())
-  const [open, setOpen] = useState(null)
+  // A failed trace opens at what failed.
+  const [open, setOpen] = useState(() => trace.spans.find((s) => s.status === "error" && s.message)?.span ?? null)
   const kids = Map.groupBy(trace.spans, (s) => s.parent || "")
   const known = new Set(trace.spans.map((s) => s.span))
   const flat = []
@@ -448,7 +486,13 @@ function Trace({ trace, back, colour }) {
                   })()}
                 </div>
               </div>
-              {shown && <div className="px-1 pb-3 pt-1"><Fields row={s} skip={SHOWN} /></div>}
+              {shown && (
+                <div className="flex flex-col gap-2 px-1 pb-3 pt-1">
+                  {s.message && <p className="m-0 text-sm font-medium wrap-anywhere">{s.message}</p>}
+                  {stackOf(s) && <pre className="m-0 font-mono text-xs whitespace-pre-wrap text-muted-foreground">{stackOf(s)}</pre>}
+                  <Fields row={s} skip={[...SHOWN, "message", "events"]} />
+                </div>
+              )}
             </div>
           )
         })}
@@ -614,22 +658,14 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
   )
 }
 
-function Errors({ rows, showTraces, query: [query, setQuery] }) {
+function Errors({ rows, showTraces, showTrace, open: [open, setOpen], query: [query, setQuery] }) {
   const [service, setService] = useState(ALL)
   const [status, setStatus] = useState("error")
-  const [open, setOpen] = useState(null)
   const found = useMemo(() => {
     const matches = matcher(query)
-    return rows.filter((r) => (service === ALL || r.service === service) && (status === ALL || r.status === status) && matches(r)).map((r) => ({ ...r, id: `${r.service}|${r.name}|${r.status}|${r.fingerprint}` }))
+    return failures(rows.filter((r) => (service === ALL || r.service === service) && (status === ALL || r.status === status) && matches(r)))
   }, [rows, service, status, query])
   const chosen = found.find((r) => r.id === open)
-  const columns = [
-    { key: "type", label: "Error", value: (p) => p.type, cell: (p) => <span className="wrap-anywhere"><span className="font-medium">{p.type}</span> <span className="text-muted-foreground">{p.frame}</span>{p.message && <span className="block text-muted-foreground wrap-anywhere">{p.message}</span>}</span> },
-    { key: "service", label: "Service", value: (p) => p.service, cell: (p) => <span className="wrap-anywhere">{p.service}</span> },
-    { key: "name", label: "Operation", wide: true, value: (p) => p.name, cell: (p) => <span className="break-all">{p.name}</span> },
-    { key: "count", label: "Count", right: true, value: (p) => p.count, cell: (p) => number(p.count) },
-    { key: "last", label: "Last", right: true, value: (p) => p.last, cell: (p) => <span className="text-muted-foreground" title={when(p.last)}>{ago(p.last)}</span> },
-  ]
   return (
     <Split
       title={chosen && `${chosen.type} ${chosen.frame}`}
@@ -641,13 +677,13 @@ function Errors({ rows, showTraces, query: [query, setQuery] }) {
             <Pick label="Status" value={status} set={setStatus} all="All Statuses" options={sorted(rows.map((r) => r.status))} />
             <Input className="min-w-52 flex-1" aria-label="Search" placeholder="Search, or key=value" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
-          {found.length ? <Table label="Errors" columns={columns} rows={found} start={{ key: "last", down: true }} open={(r) => setOpen(r.id)} /> : <Empty>No errors match.</Empty>}
+          {found.length ? <Table label="Errors" columns={failureColumns} rows={found} start={{ key: "count", down: true }} open={(r) => setOpen(r.id)} /> : <Empty>No errors match.</Empty>}
         </div>
       }
       detail={chosen && (
         <div className="flex flex-col items-start gap-3">
           <Fields row={chosen} skip={["id"]} />
-          <Button variant="secondary" onClick={() => showTraces(chosen)}>Show Traces</Button>
+          {chosen.trace && showTrace.known(chosen.trace) ? <Button variant="secondary" onClick={() => showTrace.open(chosen.trace)}>Open Latest Trace</Button> : <Button variant="secondary" onClick={() => showTraces(chosen)}>Show Traces</Button>}
         </div>
       )}
     />
@@ -666,6 +702,7 @@ function Insights() {
   const [traceId, setTraceId] = useState(null)
   const service = useState(null)
   const filters = useState({ service: ALL, operation: ALL })
+  const failure = useState(null)
   const queries = { Traces: useState(""), Logs: useState(""), Metrics: useState(""), Errors: useState("") }
   const asked = useRef(0)
 
@@ -726,12 +763,12 @@ function Insights() {
           <TabsList><TabsTrigger value="Services">Services</TabsTrigger>{Object.keys(queries).map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>
         </Tabs>
       </div>
-      {tab === "Services" && <Services rows={data.requests} traces={traces} from={from} to={to} open={service} colour={colour} showTrace={setTraceId} showTraces={toTraces} />}
+      {tab === "Services" && <Services rows={data.requests} errors={data.errors} showFailure={(p) => (failure[1](p.id), setTab("Errors"))} traces={traces} from={from} to={to} open={service} colour={colour} showTrace={setTraceId} showTraces={toTraces} />}
       {tab !== "Services" && tab !== "Errors" && !data.spans && <ListSkeleton rows={3} />}
       {tab === "Traces" && data.spans && <Traces traces={traces} filters={filters} query={queries.Traces} open={setTraceId} colour={colour} more={more(data.spans)} />}
       {tab === "Logs" && data.logs && <Logs rows={data.logs} more={more(data.logs)} query={queries.Logs} />}
       {tab === "Metrics" && data.metrics && <Metrics rows={data.metrics} from={from} to={to} more={more(data.metrics)} query={queries.Metrics} />}
-      {tab === "Errors" && <Errors rows={data.errors} query={queries.Errors} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
+      {tab === "Errors" && <Errors rows={data.errors} open={failure} query={queries.Errors} showTrace={{ known: (id) => traces.some((t) => t.id === id), open: setTraceId }} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
     </div>
   )
 }
