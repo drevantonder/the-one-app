@@ -99,7 +99,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   who can read everything and restore anyone; it's sealed to their devices that are only clients, never a node or a browser.
 - **Database**: one SQLite database, kept sealed in the bucket as steps at numbered positions, the bucket deciding their
   order. A scope has three kinds: **an app's database**, its data and the truth; **the node's database**, how things
-  went (usage, runs, insights); and **the scope database**, who's who, permissions and keys.
+  went (usage, runs); and **the scope database**, who's who, permissions and keys.
 - **Blob**: bytes a database's step names, kept in the bucket sealed with their scope's key.
 
 ## At the network's address
@@ -113,6 +113,8 @@ These run on Cloudflare, each named by its job, with no name for them together. 
   endpoints. It reads nothing.
 - **URL signer**: the only holder of the bucket's credentials. It hands the network's endpoints signed URLs, which open
   nothing, since everything in the bucket is sealed.
+- **Telemetry Worker**: where the network's spans, logs and metrics go and are read back, in Cloudflare Basin. It opens no
+  user data: telemetry is operational, and unsealed.
 - **Remote MCP server**: the client for MCP clients that aren't on a user's devices (claude.ai, ChatGPT). It opens
   keys, but only while an MCP client calls, under that client's own tokens. The **local MCP server** is `one mcp`, which
   agents on a computer start themselves. Avoid: MCP Worker.
