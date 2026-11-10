@@ -30,6 +30,7 @@ use serde_json::{Value, json};
 
 use crate::keys::{Hash, Key, hex, short, unhex};
 use crate::database::scopes::{self, ScopeDb};
+use crate::database::steps::{Reader, Truth};
 use crate::services::{Registry, Services, refused};
 
 /// The most an ask or its answer may carry, as between nodes.
@@ -83,9 +84,9 @@ struct Inner {
     network: Network,
     /// Who's who, once a node brought `global`'s steps.
     known: Mutex<ScopeDb>,
-    /// Once `global`'s log is frozen, its scope database's steps nodes brought, by position from the first
-    /// (`database::steps`), kept in its folder as `steps`.
-    steps: Mutex<Vec<Option<crate::database::steps::Given>>>,
+    /// Reads who's who from the steps of `global`'s scope database nodes bring, kept in its folder (`KEPT`) to start again
+    /// from: reading every step again costs a restart seconds of CPU for each of its device's services.
+    reader: Mutex<Reader>,
     /// Where the program offering it registers and waits for calls.
     registry: Arc<Registry>,
     endpoint: Mutex<Option<Endpoint>>,
@@ -97,6 +98,11 @@ struct Inner {
     /// What its app declares its program may reach, as oned gave it (`declared.json`), if it did.
     declared: Option<crate::services::sandbox::Declared>,
 }
+
+/// Where it keeps what its reader of who's who read to, in its folder.
+const KEPT: &str = "whos-who.json";
+/// What `KEPT` replaced, which nodes bring again.
+const STEPS_BEFORE: &str = "steps";
 
 /// How many things it tells insights it holds on to before a node has told it who's who.
 const MOST_UNTOLD: usize = 32;
@@ -143,15 +149,15 @@ impl Service {
             }
         };
         let root = Hash::from_hex(&network.root)?;
-        let steps = read_steps(&dir.join("steps"));
-        let members = placed(root, &steps);
+        let _ = std::fs::remove_file(dir.join(STEPS_BEFORE));
+        let (reader, members) = reader_kept(root, &dir.join(KEPT));
         Ok(Service(Arc::new(Inner {
             name: name.to_string(),
             dir: dir.to_path_buf(),
             key,
             network,
             known: Mutex::new(members),
-            steps: Mutex::new(steps),
+            reader: Mutex::new(reader),
             registry: Registry::new(name, &token),
             endpoint: Mutex::new(None),
             conns: Mutex::new(HashMap::new()),
@@ -372,7 +378,7 @@ impl Service {
             let known = self.0.known.lock().unwrap();
             known.compute(&remote)?.is_some() && known.service(&self.key())?.is_some()
         };
-        if steps > self.0.steps.lock().unwrap().len() {
+        if steps as u64 > self.0.reader.lock().unwrap().at() {
             return Ok(json!({ "behind": true }));
         }
         if !may {
@@ -393,22 +399,22 @@ impl Service {
     /// `GET /api/steps/global` gives them): those after the ones it has, each checked as from anyone, then who's who
     /// from them.
     fn take_steps(&self, remote: &Key, given: &Value) -> Result<()> {
-        let root = Hash::from_hex(&self.0.network.root)?;
         let mut known = self.0.known.lock().unwrap();
         // Anyone's while it knows of no node yet: who's who is the first freeze naming the network's root, signed by the
         // recovery key it names (`Truth::first`).
         ensure!(known.computes()?.is_empty() || known.compute(remote)?.is_some(), "only {YOURS}'s devices bring its steps");
-        let mut steps = self.0.steps.lock().unwrap();
+        let mut reader = self.0.reader.lock().unwrap();
+        let now = now_ms();
         for s in given.as_array().into_iter().flatten() {
             let at = s["at"].as_u64().unwrap_or(0);
-            if at == steps.len() as u64 + 1 {
+            if at == reader.at() + 1 {
                 let bytes = s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
-                steps.push(crate::database::steps::given(&crate::database::scopes::Scope::Global, at, bytes.as_deref()));
+                reader.take(crate::database::steps::given(&scopes::Scope::Global, at, bytes.as_deref()).as_ref(), now)?;
             }
         }
-        let kept: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
-        write_private(&self.0.dir.join("steps"), &serde_json::to_vec(&kept)?)?;
-        *known = placed(root, &steps);
+        let kept = reader.kept()?;
+        write_private(&self.0.dir.join(KEPT), &serde_json::to_vec(&kept)?)?;
+        *known = whos_who(&kept)?;
         drop(known);
         self.tell_untold();
         Ok(())
@@ -609,13 +615,27 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
     Ok(asked)
 }
 
-/// Who's who in the network `root`: the scope database from its first freeze (`Truth::first`), and the steps after.
-fn placed(root: Hash, steps: &[Option<crate::database::steps::Given>]) -> ScopeDb {
-    let built = crate::database::steps::Truth::read(steps, Some(root), now_ms()).and_then(|t| t.map(|t| t.db).context("who's who has no freeze yet"));
-    built.unwrap_or_else(|err| {
-        tracing::warn!("building the scope database: {err:#}");
-        ScopeDb::empty(&crate::database::scopes::Scope::Global, 0).expect("an empty scope database builds")
-    })
+/// A reader of who's who in the network `root`, from what it kept at `path`, and who's who as it read. One it can't read
+/// starts over, and nodes bring the steps again.
+fn reader_kept(root: Hash, path: &Path) -> (Reader, ScopeDb) {
+    let kept: Value = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let mut reader = Reader::new(Some(root));
+    let restarted = if kept.is_null() { Ok(()) } else { reader.restart(&kept, now_ms()) };
+    match restarted.and_then(|_| whos_who(&kept)) {
+        Ok(members) => (reader, members),
+        Err(err) => {
+            tracing::warn!("reading who's who as it was kept: {err:#}");
+            (Reader::new(Some(root)), ScopeDb::empty(&scopes::Scope::Global, 0).expect("an empty scope database builds"))
+        }
+    }
+}
+
+/// Who's who, from what a reader `kept` (`Reader::kept`): no one, before it's read its freeze.
+fn whos_who(kept: &Value) -> Result<ScopeDb> {
+    match kept.get("truth").filter(|t| !t.is_null()) {
+        Some(truth) => Ok(Truth::kept(truth, now_ms())?.db),
+        None => ScopeDb::empty(&scopes::Scope::Global, 0),
+    }
 }
 
 fn now_ms() -> u64 {
@@ -1055,12 +1075,4 @@ fn end(child: &mut std::process::Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
-}
-
-fn read_steps(path: &Path) -> Vec<Option<crate::database::steps::Given>> {
-    let kept: Vec<Value> = crate::files::read_json(path);
-    kept.iter()
-        .enumerate()
-        .map(|(i, s)| crate::database::steps::given(&crate::database::scopes::Scope::Global, i as u64 + 1, s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()).as_deref()))
-        .collect()
 }

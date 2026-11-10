@@ -15,6 +15,8 @@ use anyhow::{Context, Result, bail};
 const ARG: &str = "--handoff=";
 /// The two folders the node's app runtime alternates between, so the old one's keeps running while the new one starts.
 const RUNTIMES: [&str; 2] = ["runtime", "runtime-next"];
+/// How many times in a row the watchdog has restarted this node, kept in its home.
+const RESTARTS: &str = "watchdog-restarts";
 /// How long the new build may take to be ready, and the old one to finish what it's answering: as long as an app may take.
 const READY_WITHIN: Duration = Duration::from_secs(120);
 const DRAIN_WITHIN: Duration = Duration::from_secs(30);
@@ -155,12 +157,16 @@ fn stuck_on(runtime: &tokio::runtime::Handle, now: u64) -> String {
 /// A node whose runtime has made no progress for a minute says so and exits, for its supervisor to start it again. A node
 /// whose every thread is stuck still listens, and what's asked of it would otherwise wait unanswered, every agent and the
 /// CLI with it, until someone restarts it by hand. Progress is a task on the runtime that ticks every few seconds, not a
-/// request answered in time: a busy node (an update building on its machine) answers slowly, and is not stuck.
+/// request answered in time: a busy node (an update building on its machine) answers slowly, and is not stuck. Starting a
+/// node costs its machine enough to stall what comes next, so each restart in a row waits longer before the next, up to
+/// `MOST_STUCK_FOR`: a real hang still recovers, and a node that stays up (`SETTLED`) has none in a row.
 pub fn watch() {
     if !supervised() {
         return;
     }
     const STUCK_FOR: u64 = 60;
+    const MOST_STUCK_FOR: u64 = 480;
+    const SETTLED: u64 = 15 * 60;
     const CHECK_EVERY: Duration = Duration::from_secs(10);
     const LATE: Duration = Duration::from_secs(5);
     let runtime = tokio::runtime::Handle::current();
@@ -175,6 +181,8 @@ pub fn watch() {
             }
         }
     });
+    let restarted = crate::home().join(RESTARTS);
+    let mut in_a_row: u32 = std::fs::read_to_string(&restarted).ok().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
     std::thread::spawn(move || {
         let mut counting_from = 0;
         loop {
@@ -191,10 +199,15 @@ pub fn watch() {
                 tracing::warn!("this node was held up for {} seconds by the machine it's on", late.as_secs());
                 continue;
             }
+            if in_a_row > 0 && up() >= SETTLED {
+                in_a_row = 0;
+                let _ = std::fs::remove_file(&restarted);
+            }
             let silent = up().saturating_sub(beat.load(std::sync::atomic::Ordering::SeqCst).max(counting_from));
-            if silent >= STUCK_FOR {
+            if silent >= (STUCK_FOR << in_a_row.min(3)).min(MOST_STUCK_FOR) {
                 tracing::error!("this node's runtime has done nothing for {silent} seconds: exiting, to be started again. {}", stuck_on(&runtime, up()));
                 crate::insights::Ended::Watchdog.write(&crate::home());
+                let _ = std::fs::write(&restarted, (in_a_row + 1).to_string());
                 std::process::exit(1);
             }
         }

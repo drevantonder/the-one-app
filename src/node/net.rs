@@ -774,16 +774,14 @@ impl Node {
     /// it answers what it offers once it lists this device as one that may call it; until then, that it's behind, and
     /// is sent them, which it checks itself. → what it offers, and whom it serves.
     pub(super) async fn hello_service(&self, to: Key) -> Result<Option<(Value, Vec<String>)>> {
-        // `global`'s scope database's steps (`database::steps`), its freeze among them.
-        let mut steps = Vec::new();
-        if self.frozen() {
+        let at = self.with(|i| Ok(i.r.at()))?.unwrap_or(0);
+        let hello = json!({ "steps": at });
+        let mut answer = self.send(&to, M::HELLO, &hello, true, CONNECT).await?;
+        if answer["behind"] == true && at > 0 {
+            // `global`'s scope database's steps (`database::steps`), its freeze among them.
             let (bucket, keys) = (self.bucket()?, self.step_keys(&Scope::Global).await?);
             let made = self.with(|i| Ok(i.r.db().epoch(&Scope::Global)?))?;
-            steps = crate::database::steps::read(&bucket, &keys, &Scope::Global, 0, made).await?.steps;
-        }
-        let hello = json!({ "steps": steps.len() });
-        let mut answer = self.send(&to, M::HELLO, &hello, true, CONNECT).await?;
-        if answer["behind"] == true && !steps.is_empty() {
+            let steps = crate::database::steps::read(&bucket, &keys, &Scope::Global, 0, made).await?.steps;
             let list: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
             let taken = self.send(&to, M::STEPS, &json!({ "steps": list }), true, CONNECT).await?;
             if let Some(err) = taken["error"].as_str() {
