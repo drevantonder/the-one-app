@@ -117,14 +117,14 @@ func (l *link) linkedElsewhere(s devices) (device, phone string) {
 func (w *whatsapp) move(l *link, to string) (string, error) {
 	to = strings.TrimSpace(to)
 	if to == "" {
-		return "", errors.New("give to: the device to move WhatsApp to")
+		return "", refused("give to: the device to move WhatsApp to")
 	}
 	s, err := l.devices()
 	if err != nil {
 		return "", err
 	}
 	if strings.EqualFold(to, s.here) {
-		return "", fmt.Errorf("WhatsApp is linked here, on %s, already", s.here)
+		return "", refused("WhatsApp is linked here, on %s, already", s.here)
 	}
 	mine := l.holder().Phone
 	var there holding
@@ -132,16 +132,16 @@ func (w *whatsapp) move(l *link, to string) (string, error) {
 		return "", fmt.Errorf("not moved: %s didn't answer (it needs WhatsApp installed and to be online): %w", to, err)
 	}
 	if mine != "" && there.has(mine) {
-		return "", fmt.Errorf("not moved: %s is linked to WhatsApp already, as +%s", to, mine)
+		return "", refused("not moved: %s is linked to WhatsApp already, as +%s", to, mine)
 	}
 	if !there.Moves {
-		return "", fmt.Errorf("not moved: WhatsApp on %s is older than here, and can't say whether it took it: update it there first", to)
+		return "", refused("not moved: WhatsApp on %s is older than here, and can't say whether it took it: update it there first", to)
 	}
 
 	l.mu.Lock()
 	if l.client.Store.ID == nil {
 		l.mu.Unlock()
-		return "", errors.New("WhatsApp isn't linked here")
+		return "", refused("WhatsApp isn't linked here")
 	}
 	if l.st.State != "" {
 		l.mu.Unlock()

@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
+use one_service::refuse;
 use serde::{Deserialize, Serialize};
 
 use super::linux::{Device, HOME, Size};
@@ -83,7 +84,7 @@ impl Devices {
 
     pub(super) fn restore(&self, name: &str, rec: &Record, size: Size) -> Result<Device> {
         if self.find(name).is_ok() {
-            bail!("device {name} already exists: give as another name for the restored one");
+            refuse!("device {name} already exists: give as another name for the restored one");
         }
         // Another device serves the blob once the entry naming it reaches it, which takes a moment after a backup.
         let mut tries = 0;
@@ -120,10 +121,9 @@ impl Devices {
         if !blob.is_empty() {
             return Ok(Record { device: device.into(), blob: blob.into(), ..Default::default() });
         }
-        let mut msg = format!("no backup of device {device}");
-        if !failed.is_empty() {
-            msg += &format!(" (couldn't ask {} devices)", failed.len());
+        if failed.is_empty() {
+            refuse!("no backup of device {device}");
         }
-        bail!("{msg}")
+        bail!("no backup of device {device}: couldn't ask {} devices", failed.len())
     }
 }

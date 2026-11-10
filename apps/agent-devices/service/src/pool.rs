@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
+use one_service::refuse;
 use serde::{Deserialize, Serialize};
 
 use super::linux::{Device, HOME, SIZES};
@@ -221,9 +222,9 @@ impl Devices {
     /// Starts giving back a loan, preparing or lent: the loan as it was, which only one caller gets.
     pub(super) fn returning(&self, name: &str) -> Result<Loan> {
         let mut pool = self.pool.lock().unwrap();
-        let Some(l) = pool.lent.get_mut(name) else { bail!("device {name} isn't borrowed") };
+        let Some(l) = pool.lent.get_mut(name) else { refuse!("device {name} isn't borrowed") };
         if l.state == LoanState::Returning {
-            bail!("device {name} is being given back already");
+            refuse!("device {name} is being given back already");
         }
         let was = l.clone();
         l.state = LoanState::Returning;
@@ -320,7 +321,7 @@ impl Devices {
         let d = if let Some(d) = free.first() {
             d.clone()
         } else if !room_for_one() {
-            return Err(one_service::refused(format!("this device has no memory to spare for another agent device: give back one you're done with")));
+            refuse!("this device has no memory to spare for another agent device: give back one you're done with");
         } else {
             self.create(&new_pool_name(), SIZES[0], true, false)?
         };
@@ -370,10 +371,10 @@ impl Devices {
 
     /// Deletes a borrowed device; a sign-in's profile is saved first.
     pub(super) fn give_back(&self, name: &str, why: &str) -> Result<()> {
-        let Some(l) = self.loans().get(name).cloned() else { bail!("device {name} isn't borrowed") };
+        let Some(l) = self.loans().get(name).cloned() else { refuse!("device {name} isn't borrowed") };
         let late = l.late();
         if l.waits_for_key() {
-            bail!("not given back: the {} profile's key went when this program restarted, so it's saved by save_profile", l.profile);
+            refuse!("not given back: the {} profile's key went when this program restarted, so it's saved by save_profile", l.profile);
         }
         let mut l = self.returning(name)?;
         if let Ok(d) = self.find(name) {
@@ -401,7 +402,7 @@ impl Devices {
 
     /// Saves the device's copy of a profile as its newest save, recorded on its Vault item by the app.
     pub(super) fn save_profile(&self, d: &Device, p: Option<&mut Profile>) -> Result<()> {
-        let Some(p) = p else { bail!("its profile's key is gone, as after this device restarted: save it with save_profile") };
+        let Some(p) = p else { refuse!("its profile's key is gone, as after this device restarted: save it with save_profile") };
         match d.state.as_str() {
             "paused" => self.rt()?.unpause(d)?,
             "stopped" => self.start_device(d)?,
@@ -422,7 +423,7 @@ impl Devices {
         if let Some((name, l)) = self.loans().into_iter().find(|(_, l)| l.signing_in && l.item == p.item) {
             drop(take);
             if l.state != LoanState::Lent {
-                bail!("the {} profile's sign-in is starting or closing: try again in a moment", p.name);
+                refuse!("the {} profile's sign-in is starting or closing: try again in a moment", p.name);
             }
             let d = self.running(&name)?;
             let p2 = p.clone();

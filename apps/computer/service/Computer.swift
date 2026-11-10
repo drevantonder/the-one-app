@@ -61,7 +61,7 @@ struct ComputerApp: Service {
             let args = try JSONSerialization.data(withJSONObject: input.value("args") as? [String: Any] ?? [:])
             return json(try await computer.driver.call(tool, args))
         default:
-            throw Refusal("no function \(function)")
+            throw Failure("no function \(function)")
         }
     }
 
@@ -283,7 +283,7 @@ actor CuaDriver {
         let r = try await rpc("tools/call", ["name": tool, "arguments": arguments])
         if r["isError"] as? Bool == true {
             let texts = (r["content"] as? [[String: Any]] ?? []).compactMap { $0["text"] as? String }
-            throw Refusal(texts.isEmpty ? "\(tool) failed" : texts.joined(separator: "\n"))
+            throw Failure(texts.isEmpty ? "\(tool) failed" : texts.joined(separator: "\n"))
         }
         return try JSONSerialization.data(withJSONObject: r)
     }
@@ -368,7 +368,7 @@ actor CuaDriver {
             }
         }
         let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        if let error = reply["error"] as? [String: Any] { throw Refusal(error["message"] as? String ?? "Cua Driver refused") }
+        if let error = reply["error"] as? [String: Any] { throw Failure(error["message"] as? String ?? "Cua Driver refused") }
         return reply["result"] as? [String: Any] ?? [:]
     }
 

@@ -13,6 +13,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
+use one_service::refuse;
 
 use super::Devices;
 use super::kinds::{ADB_PORT, Action, Kind, TimedOut, Vm, capture, fetch, outliving, run, run_within, upstream_dns};
@@ -202,7 +203,7 @@ impl Kind for Android {
 
     fn adopt(&self, _: &Devices, v: &mut Vm) -> Result<()> {
         if avd_dir(&v.id).is_err() || v.port == 0 {
-            return Err(one_service::refused(format!("give id (its AVD's name) and port (its console port, like 5554)")));
+            refuse!("give id (its AVD's name) and port (its console port, like 5554)");
         }
         Ok(())
     }
@@ -217,7 +218,7 @@ impl Kind for Android {
         let dst = avd_home().join(format!("{}.avd", v.id));
         // The machine's AVDs are every network's (a `one-dev throwaway` beside the real one): never another's.
         if dst.exists() || avd_home().join(format!("{}.ini", v.id)).exists() {
-            return Err(one_service::refused(format!("there's an Android device called {} on this machine already: pick another name", v.name)));
+            refuse!("there's an Android device called {} on this machine already: pick another name", v.name);
         }
         // Stopped, and done saving its snapshot, which it does after adb stops answering.
         match from.filter(|from| !self.running(ds, from) && emulators(from).is_empty()) {
@@ -342,7 +343,7 @@ impl Kind for Android {
             // input text takes no spaces, and the device's shell reads the rest.
             "type" => adb(v, &["shell", "input", "text", &quote(&a.text.replace(' ', "%s"))]),
             "key" => adb(v, &["shell", "input", "keyevent", &android_key(&a.key)]),
-            other => bail!("no action {other:?}"),
+            other => refuse!("no action {other:?}"),
         }
         .map(|_| ())
     }
@@ -353,7 +354,7 @@ impl Kind for Android {
 
     fn install(&self, _: &Devices, v: &Vm, app: &str) -> Result<String> {
         if app.is_empty() {
-            bail!("install what? an .apk file here or its URL");
+            refuse!("install what? an .apk file here or its URL");
         }
         if !app.contains('/') {
             // A package: only the Play Store installs it, signed in, by the user or an agent tapping Install.

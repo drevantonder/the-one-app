@@ -4,6 +4,7 @@
 //! lasting one running, a new simulator of the same model.
 
 use anyhow::{Result, bail};
+use one_service::refuse;
 use serde_json::Value;
 
 use super::Devices;
@@ -61,7 +62,7 @@ impl Kind for Iphone {
 
     fn adopt(&self, _: &Devices, v: &mut Vm) -> Result<()> {
         if simulator_of(&v.id).is_none() {
-            return Err(one_service::refused(format!("give id (its simulator's UDID)")));
+            refuse!("give id (its simulator's UDID)");
         }
         Ok(())
     }
@@ -129,7 +130,7 @@ impl Kind for Iphone {
     }
 
     fn act(&self, _: &Devices, _: &Vm, _: &Action) -> Result<()> {
-        bail!("Simulator takes no clicks, typing or keys from agents: open_url, install_app and run_command work, and the user uses it in Simulator on the Mac")
+        refuse!("Simulator takes no clicks, typing or keys from agents: open_url, install_app and run_command work, and the user uses it in Simulator on the Mac")
     }
 
     fn open(&self, _: &Devices, v: &Vm, url: &str) -> Result<()> {
@@ -138,7 +139,7 @@ impl Kind for Iphone {
 
     fn install(&self, _: &Devices, v: &Vm, app: &str) -> Result<String> {
         if !app.trim_end_matches('/').ends_with(".app") {
-            bail!("an iPhone simulator installs an .app built for the simulator, given as its folder on the Mac");
+            refuse!("an iPhone simulator installs an .app built for the simulator, given as its folder on the Mac");
         }
         simctl(&["install", &v.id, app])?;
         Ok(format!("Installed {}.", std::path::Path::new(app.trim_end_matches('/')).file_name().unwrap_or_default().to_string_lossy()))
@@ -152,7 +153,7 @@ impl Kind for Iphone {
         // The simulator has no shell: the command's first word is a program in it, the rest its arguments.
         let args: Vec<&str> = command.split_whitespace().collect();
         if args.is_empty() {
-            bail!("run what? a program in the simulator, like launchctl list");
+            refuse!("run what? a program in the simulator, like launchctl list");
         }
         let mut all = vec!["spawn", v.id.as_str()];
         all.extend(args);

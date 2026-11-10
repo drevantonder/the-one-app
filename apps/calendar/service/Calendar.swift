@@ -49,7 +49,7 @@ struct CalendarApp: Service {
             try store.remove(e, span: input.bool("future") == true ? .futureEvents : .thisEvent, commit: true)
             return "Deleted \(e.title ?? "the event")."
         default:
-            throw Refusal("calendar has no function \(function)")
+            throw Failure("calendar has no function \(function)")
         }
     }
 

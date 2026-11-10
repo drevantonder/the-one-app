@@ -88,6 +88,14 @@ pub fn refused(why: impl std::fmt::Display) -> anyhow::Error {
     Refused(why.to_string()).into()
 }
 
+/// `bail!` for what's the caller's to change: ends the call refused.
+#[macro_export]
+macro_rules! refuse {
+    ($($said:tt)+) => {
+        return Err($crate::refused(format!($($said)+)))
+    };
+}
+
 /// A service: its name, which is its app's, and how it answers. What the app is (its title, tools and instructions) the
 /// app says; a service says only what's about its machine.
 pub struct Service {
@@ -161,7 +169,7 @@ pub fn input<T: serde::de::DeserializeOwned + Default>(input: &Value) -> Result<
             v => v.clone(),
         }
     }
-    Ok(if input.is_null() { T::default() } else { serde_json::from_value(given(input)).map_err(|err| anyhow!("bad input: {err}"))? })
+    Ok(if input.is_null() { T::default() } else { serde_json::from_value(given(input)).map_err(|err| refused(format!("bad input: {err}")))? })
 }
 
 fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Option<Value>> {
@@ -171,7 +179,7 @@ fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result
     }
     let body: Value = resp.body_mut().read_json().unwrap_or_default();
     if let Some(err) = body["error"].as_str().filter(|e| !e.is_empty()) {
-        bail!("{err}");
+        return Err(if body["code"] == REFUSED { refused(err) } else { anyhow!("{err}") });
     }
     if !resp.status().is_success() {
         bail!("{}", resp.status());

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
+use one_service::refuse;
 use serde_json::{Map, Value, json};
 
 use super::chrome::{Browser, DialogOpened, live_browser, tab_id, target_of};
@@ -188,7 +189,7 @@ impl Devices {
             "browser_navigate" => {
                 let url = t("url").trim().to_string();
                 if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("about:") {
-                    bail!("browser_navigate only accepts http/https/about URLs, got: {url}");
+                    refuse!("browser_navigate only accepts http/https/about URLs, got: {url}");
                 }
                 b.navigate(&session, &url)?;
                 Ok(answer(&format!("navigated {tab} to {url}"), &with(json!({ "refs_invalidated": true, "status": "ok", "url": url })), Vec::new()))
@@ -247,12 +248,12 @@ impl Devices {
                         } else {
                             match (number("to_x"), number("to_y")) {
                                 (Some(x), Some(y)) => (x, y),
-                                _ => bail!("drag to where? destination_ref, or to_x and to_y"),
+                                _ => refuse!("drag to where? destination_ref, or to_x and to_y"),
                             }
                         };
                         b.drag(&session, x, y, to_x, to_y)
                     }
-                    _ => bail!("action is hover, right_click, double_click, scroll or drag"),
+                    _ => refuse!("action is hover, right_click, double_click, scroll or drag"),
                 };
                 Ok(acted(&b, &session, &format!("dispatched {action} at ({x:.0}, {y:.0}) in {tab}"), "trusted_input", &mode, done, &ids))
             }
@@ -323,7 +324,7 @@ impl Devices {
                 let (label, value) = match (input.get("label").and_then(Value::as_str), input.get("value").and_then(Value::as_str)) {
                     (Some(l), _) => (json!(l), Value::Null),
                     (None, Some(v)) => (Value::Null, json!(v)),
-                    _ => bail!("select which option? give label or value"),
+                    _ => refuse!("select which option? give label or value"),
                 };
                 let Ok(got) = on(&b, &session, id, SELECT_OPTION, &[label, value]) else { return Ok(gone(&r)) };
                 let options: Vec<String> = got["options"].as_array().into_iter().flatten().filter_map(|o| o.as_str().map(str::to_string)).collect();
@@ -371,7 +372,7 @@ impl Devices {
                         Vec::new(),
                     ))
                 }
-                _ => bail!("action is inspect, accept or dismiss"),
+                _ => refuse!("action is inspect, accept or dismiss"),
             },
             function => bail!("no browser tool {function}"),
         }
@@ -505,7 +506,7 @@ fn outline(b: &Browser, session: &str, id: &str, scope: &str, query: &str) -> Re
     } else {
         match b.page(session).and_then(|p| p.refs.get(scope).copied()) {
             Some(id) => id,
-            None => bail!("scope_ref {scope} is stale: read the page again"),
+            None => refuse!("scope_ref {scope} is stale: read the page again"),
         }
     };
     let words: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();

@@ -69,7 +69,7 @@ struct MessagesApp: Service {
             try await tell("chat", chat.guid, input.text("text"))
             return "Sent to \(chat.name)."
         default:
-            throw Refusal("imessage has no function \(function)")
+            throw Failure("imessage has no function \(function)")
         }
     }
 
@@ -125,7 +125,7 @@ struct MessagesApp: Service {
         if error.contains("-1743") {
             throw Refusal("macOS doesn't let \(thisApp) control Messages. Allow it in System Settings → Privacy & Security → Automation: under \(thisApp), turn on Messages.")
         }
-        throw Refusal("Messages couldn't send it: \(error)")
+        throw Failure("Messages couldn't send it: \(error)")
     }
 }
 
@@ -247,7 +247,7 @@ final class ChatDB {
 
     private func query(_ sql: String, _ binds: [Any] = []) throws -> [[Any?]] {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw Refusal("reading Messages failed: \(String(cString: sqlite3_errmsg(db)))") }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw Failure("reading Messages failed: \(String(cString: sqlite3_errmsg(db)))") }
         defer { sqlite3_finalize(stmt) }
         for (i, b) in binds.enumerated() {
             switch b {

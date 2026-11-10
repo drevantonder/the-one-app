@@ -111,7 +111,7 @@ fn write_skill(dir: &Path, files: &BTreeMap<String, String>) -> Result<()> {
     }
     for path in files.keys() {
         if path.starts_with('/') || path.contains('\\') || path.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
-            bail!("{path} isn't a path inside the skill");
+            one_service::refuse!("{path} isn't a path inside the skill");
         }
     }
     let tmp = dir.with_extension("syncing");

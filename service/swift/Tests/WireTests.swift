@@ -21,8 +21,10 @@ private func wire() -> [String: Any] { try! JSONSerialization.jsonObject(with: D
     let replies = wire()["replies"] as! [String: Any]
     let ok = await Wire.reply { [["title": "Lunch"]] }
     #expect(NSDictionary(dictionary: ok).isEqual(to: replies["ok"] as! [String: Any]))
-    let error = await Wire.reply { throw Refusal("give a title") }
+    let error = await Wire.reply { throw Failure("give a title") }
     #expect(NSDictionary(dictionary: error).isEqual(to: replies["error"] as! [String: Any]))
+    let refused = await Wire.reply { throw Refusal("only its owner may") }
+    #expect(NSDictionary(dictionary: refused).isEqual(to: replies["refused"] as! [String: Any]))
 }
 
 @Test func registersOnlyWhatIsAboutItsMac() {

@@ -9,7 +9,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
+use one_service::refuse;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 
@@ -121,7 +122,7 @@ impl Devices {
     pub(super) fn may_start(&self, name: &str) -> Result<()> {
         let m = self.moved_away(name)?;
         if m.done {
-            bail!("device {name} moved to {} on {}: use it there; it's kept stopped here until you delete it here", m.to, super::local(m.at, "%-d %b %H:%M"));
+            refuse!("device {name} moved to {} on {}: use it there; it's kept stopped here until you delete it here", m.to, super::local(m.at, "%-d %b %H:%M"));
         }
         Ok(())
     }

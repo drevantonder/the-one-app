@@ -67,9 +67,12 @@ func serve(node string, w *whatsapp) {
 				result, err := w.run(context.Background(), c.Function, c.Input)
 				reply := map[string]any{"ok": result}
 				var away elsewhere
+				var no refusal
 				switch {
 				case errors.As(err, &away):
 					reply = map[string]any{"elsewhere": err.Error()}
+				case errors.As(err, &no):
+					reply = map[string]any{"error": err.Error(), "code": "refused"}
 				case err != nil:
 					reply = map[string]any{"error": err.Error()}
 				}
@@ -103,6 +106,16 @@ func next(client *http.Client, node string) (*call, error) {
 type elsewhere string
 
 func (e elsewhere) Error() string { return string(e) }
+
+// refusal is an error saying the caller has to change what it asked; nothing
+// broke.
+type refusal string
+
+func (r refusal) Error() string { return string(r) }
+
+func refused(format string, args ...any) error {
+	return refusal(fmt.Sprintf(format, args...))
+}
 
 func post(url string, body any) error {
 	_, err := request(http.DefaultClient, url, body)

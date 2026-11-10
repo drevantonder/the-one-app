@@ -65,7 +65,7 @@ func (w *whatsapp) run(ctx context.Context, function string, raw json.RawMessage
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
+			return nil, refused("bad input: %v", err)
 		}
 	}
 	switch function {
@@ -145,7 +145,7 @@ func (w *whatsapp) pick(account string, named bool) (*link, error) {
 			for _, l := range all {
 				numbers = append(numbers, "+"+l.holder().Phone)
 			}
-			return nil, fmt.Errorf("give account: which of %s", strings.Join(numbers, ", "))
+			return nil, refused("give account: which of %s", strings.Join(numbers, ", "))
 		}
 		return all[0], nil
 	}

@@ -123,7 +123,7 @@ func (l *link) run(ctx context.Context, function string, raw json.RawMessage) (a
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
+			return nil, refused("bad input: %v", err)
 		}
 	}
 	in.Limit = cmp.Or(in.Limit, 30)
@@ -142,7 +142,7 @@ func (l *link) run(ctx context.Context, function string, raw json.RawMessage) (a
 		return l.lines(ctx, ms, false), err
 	case "search":
 		if strings.TrimSpace(in.Query) == "" {
-			return nil, errors.New("give a query")
+			return nil, refused("give a query")
 		}
 		chat := ""
 		if in.Chat != "" {
@@ -206,10 +206,10 @@ func pairingPhone(number string) (string, error) {
 		return -1
 	}, number)
 	if !phone.MatchString(number) || len(digits) < 7 {
-		return "", fmt.Errorf("%q isn't a phone number", number)
+		return "", refused("%q isn't a phone number", number)
 	}
 	if !strings.HasPrefix(number, "+") || strings.HasPrefix(digits, "0") {
-		return "", fmt.Errorf("give %q with its country code, e.g. +61…", number)
+		return "", refused("give %q with its country code, e.g. +61…", number)
 	}
 	return digits, nil
 }
@@ -287,10 +287,10 @@ func (l *link) signOut(ctx context.Context) (string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.client.Store.ID == nil {
-		return "", errors.New("WhatsApp isn't linked here")
+		return "", refused("WhatsApp isn't linked here")
 	}
 	if l.st.State == handingOff {
-		return "", fmt.Errorf("WhatsApp is being handed to %s: sign it out there once it's there", l.st.To)
+		return "", refused("WhatsApp is being handed to %s: sign it out there once it's there", l.st.To)
 	}
 	if err := l.client.Logout(ctx); err != nil {
 		return "", fmt.Errorf("not signed out, and nothing deleted: %w", err)
@@ -469,7 +469,7 @@ var phone = regexp.MustCompile(`^\+?[\d\s().-]{7,}$`)
 func (l *link) find(ctx context.Context, want string, contacts bool) (chat, error) {
 	want = strings.TrimSpace(want)
 	if want == "" {
-		return chat{}, errors.New("give a chat")
+		return chat{}, refused("give a chat")
 	}
 	if strings.Contains(want, "@") {
 		jid, err := types.ParseJID(want)
@@ -487,14 +487,14 @@ func (l *link) find(ctx context.Context, want string, contacts bool) (chat, erro
 			return -1
 		}, want)
 		if !strings.HasPrefix(want, "+") || strings.HasPrefix(digits, "0") {
-			return chat{}, fmt.Errorf("give %q with its country code, e.g. +61…", want)
+			return chat{}, refused("give %q with its country code, e.g. +61…", want)
 		}
 		found, err := l.client.IsOnWhatsApp(ctx, []string{"+" + digits})
 		if err != nil {
 			return chat{}, err
 		}
 		if len(found) == 0 || !found[0].IsIn {
-			return chat{}, fmt.Errorf("%s isn't on WhatsApp", want)
+			return chat{}, refused("%s isn't on WhatsApp", want)
 		}
 		jid := found[0].JID.ToNonAD().String()
 		return chat{l.name(ctx, jid, "", ""), jid}, nil
@@ -528,20 +528,20 @@ func (l *link) find(ctx context.Context, want string, contacts bool) (chat, erro
 		case len(exact) == 1:
 			return exact[0], nil
 		case len(exact) > 1:
-			return chat{}, fmt.Errorf("several contacts are called %q: give a phone number instead", want)
+			return chat{}, refused("several contacts are called %q: give a phone number instead", want)
 		}
 	}
 	switch len(partial) {
 	case 1:
 		return partial[0], nil
 	case 0:
-		return chat{}, fmt.Errorf("no chat called %q", want)
+		return chat{}, refused("no chat called %q", want)
 	}
 	var names []string
 	for _, c := range partial {
 		names = append(names, c.name)
 	}
-	return chat{}, fmt.Errorf("%q matches several chats: %s", want, strings.Join(names, "; "))
+	return chat{}, refused("%q matches several chats: %s", want, strings.Join(names, "; "))
 }
 
 func (l *link) lines(ctx context.Context, ms []stored, withChat bool) string {
@@ -572,14 +572,14 @@ func (l *link) lines(ctx context.Context, ms []stored, withChat bool) string {
 
 func (l *link) send(ctx context.Context, to, msg string) (string, error) {
 	if strings.TrimSpace(msg) == "" {
-		return "", errors.New("give the text to send")
+		return "", refused("give the text to send")
 	}
 	l.mu.Lock()
 	st := l.st
 	l.mu.Unlock()
 	switch st.State {
 	case handingOff:
-		return "", fmt.Errorf("not sent: WhatsApp is being handed to %s; send once it's there", st.To)
+		return "", refused("not sent: WhatsApp is being handed to %s; send once it's there", st.To)
 	case replaced:
 		return "", errors.New("not sent: another copy of this link connected, so it stopped here (whatsapp_status says more)")
 	}

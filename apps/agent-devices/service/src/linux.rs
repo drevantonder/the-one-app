@@ -15,6 +15,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
+use one_service::refuse;
 use serde_json::Value;
 
 use super::Devices;
@@ -84,7 +85,7 @@ pub fn size_named(name: &str) -> Result<Size> {
     if name.is_empty() {
         return Ok(SIZES[0]);
     }
-    SIZES.iter().find(|s| s.name.eq_ignore_ascii_case(name)).copied().ok_or_else(|| anyhow!("no size {name:?}: there's {}", SIZES.map(|s| s.name).join(", ")))
+    SIZES.iter().find(|s| s.name.eq_ignore_ascii_case(name)).copied().ok_or_else(|| one_service::refused(format!("no size {name:?}: there's {}", SIZES.map(|s| s.name).join(", "))))
 }
 
 impl Size {
@@ -736,7 +737,7 @@ impl Containers for Apple {
     }
 
     fn resize(&self, _: &Device, _: Size) -> Result<()> {
-        Err(anyhow!("{Cant}: back it up and restore it with another size"))
+        refuse!("{Cant}: back it up and restore it with another size")
     }
 
     /// Reads memory and, since the last reading, CPU.
@@ -837,14 +838,14 @@ impl Devices {
     /// Makes a device and starts it, waiting for its server to answer if `wait`.
     pub(super) fn create(&self, name: &str, size: Size, pool: bool, wait: bool) -> Result<Device> {
         if !valid_name(name) {
-            bail!("a device's name is lowercase letters, digits and dashes");
+            refuse!("a device's name is lowercase letters, digits and dashes");
         }
         let rt = self.rt()?;
         let image = self.ensure_image()?;
         let _creating = self.creating.lock().unwrap();
         let all = rt.list()?;
         if pick(&all, name).is_ok() {
-            bail!("device {name} already exists");
+            refuse!("device {name} already exists");
         }
         let port = all.iter().map(|d| d.port + 1).max().unwrap_or(FIRST_PORT).max(FIRST_PORT);
         let d = Device { name: name.to_string(), state: "running".into(), pool, port, token: super::random_hex(24), ..Default::default() };
@@ -892,7 +893,7 @@ impl Devices {
         let mut d = self.find(name)?;
         self.may_start(&d.name)?;
         match d.state.as_str() {
-            "stopped" => bail!("device {} is stopped: start it first", d.name),
+            "stopped" => refuse!("device {} is stopped: start it first", d.name),
             "paused" => {
                 self.rt()?.unpause(&d)?;
                 d.state = "running".into();
@@ -973,12 +974,12 @@ pub fn pick(all: &[Device], name: &str) -> Result<Device> {
     }
     let names: Vec<&str> = all.iter().map(|d| d.name.as_str()).collect();
     if all.is_empty() {
-        bail!("no devices: make one with create");
+        refuse!("no devices: make one with create");
     }
     if name.is_empty() {
-        bail!("which device? pass device: {}", names.join(", "));
+        refuse!("which device? pass device: {}", names.join(", "));
     }
-    bail!("no device named {name:?}: there's {}", names.join(", "))
+    refuse!("no device named {name:?}: there's {}", names.join(", "))
 }
 
 /// Waits for a device's server to answer.

@@ -238,6 +238,7 @@ impl Devices {
         }
         let pass = Value::Object(pass);
         let mut tried = Vec::new();
+        let mut all_refused = true;
         for on in can {
             if on == me {
                 return None;
@@ -246,14 +247,16 @@ impl Devices {
                 Ok(r) => return Some(Ok(r)),
                 Err(err) => {
                     tracing::info!("{function} on {on}: {err:#}");
+                    all_refused &= err.is::<one_service::Refused>();
                     tried.push(format!("{on}: {err:#}"));
                 }
             }
         }
-        if !tried.is_empty() {
-            return Some(Err(anyhow!("{}", tried.join("; "))));
+        if tried.is_empty() {
+            return None;
         }
-        None
+        let said = tried.join("; ");
+        Some(Err(if all_refused { one_service::refused(said) } else { anyhow!("{said}") }))
     }
 
     /// The other device with an agent device signing in to the profile, or "".

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use one_service::{Answer, Call, Elsewhere, Host, Service};
 use serde_json::{Value, json};
 
@@ -35,7 +35,7 @@ fn call(_: &Host, call: &Call) -> Result<Answer> {
                 messages.push(m);
             }
             if messages.is_empty() {
-                bail!("give a prompt or messages");
+                one_service::refuse!("give a prompt or messages");
             }
             if let Some(s) = input["system"].as_str() {
                 messages.insert(0, json!({ "role": "system", "content": s }));
@@ -55,7 +55,9 @@ fn call(_: &Host, call: &Call) -> Result<Answer> {
         "decide" => {
             let model = input["model"].as_str().context("give a decision model, like clef-flash")?;
             here(model)?;
-            ensure!(input["questions"].is_object(), "give questions");
+            if !input["questions"].is_object() {
+                one_service::refuse!("give questions");
+            }
             let mut body = json!({ "model": model, "state": input.get("state").cloned().unwrap_or(json!({})), "questions": input["questions"] });
             // Ollama takes each image as its base64; [{ content_type, base64 }] (Workers AI's way) works too.
             if let Some(images) = input["images"].as_array() {

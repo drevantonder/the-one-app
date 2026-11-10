@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Map, Value, json};
 
-use one_service::{Answer, Call, Host, Service};
+use one_service::{Answer, Call, Host, Service, refuse};
 use latest::{Latest, Pictures};
 use linux::{Containers, Device};
 use mcp::{Conn, Tool};
@@ -171,7 +171,7 @@ fn call(host: &Host, call: &Call) -> Result<Answer> {
     let input = match &call.input {
         Value::Null => Map::new(),
         Value::Object(o) => o.clone(),
-        _ => bail!("bad input: an object"),
+        _ => refuse!("bad input: an object"),
     };
     ds.run(&caller, &call.function, input)
 }
@@ -364,7 +364,7 @@ impl Devices {
                     return r.map(Answer::new);
                 }
                 if self.vm_named(name).is_some() {
-                    return Err(one_service::refused(format!("there's already a device named {name}")));
+                    refuse!("there's already a device named {name}");
                 }
                 let d = self.create(name, size, false, true)?;
                 self.touch(&d.name);
@@ -413,7 +413,7 @@ impl Devices {
             "view" => {
                 let d = self.running(name)?;
                 if self.loans().get(&d.name).is_some_and(|l| l.no_screen) {
-                    return Err(one_service::refused(format!("device {} was made without a screen: there's nothing to watch", d.name)));
+                    refuse!("device {} was made without a screen: there's nothing to watch", d.name);
                 }
                 let minutes = minutes(&input, 60, 1440);
                 let url = self.view_url(&d, minutes)?;
@@ -433,7 +433,7 @@ impl Devices {
             "borrow" => {
                 let why = text(&input, "for");
                 if why.is_empty() {
-                    return Err(one_service::refused(format!("say what it's for, in a few words: the user sees it")));
+                    refuse!("say what it's for, in a few words: the user sees it");
                 }
                 let p = profiles::profile_in(&input)?;
                 if !here && let Some(r) = self.first(function, kinds::LINUX, "", &input) {
@@ -453,7 +453,7 @@ impl Devices {
             }
             "give_back" => {
                 if name.is_empty() {
-                    return Err(one_service::refused(format!("which device? pass the one you borrowed")));
+                    refuse!("which device? pass the one you borrowed");
                 }
                 let l = self.loans().get(name).cloned();
                 if let Some(l) = l.as_ref().filter(|l| l.waits_for_key()) {
@@ -540,7 +540,7 @@ impl Devices {
                 }
             }
             if name.is_empty() {
-                return Err(one_service::refused(format!("nobody is signing in to the {} profile: there's nothing to save", p.name)));
+                refuse!("nobody is signing in to the {} profile: there's nothing to save", p.name);
             }
         }
         let loan = self.loans().get(&name).cloned();
@@ -567,11 +567,11 @@ impl Devices {
 
     fn move_device(&self, name: &str, to: &str) -> Result<Value> {
         if to.is_empty() {
-            return Err(one_service::refused(format!("move it to which of your devices? pass to")));
+            refuse!("move it to which of your devices? pass to");
         }
         let d = self.running(name)?;
         if self.loans().contains_key(&d.name) {
-            return Err(one_service::refused(format!("a borrowed device can't be moved: borrow one on the device you'd move it to")));
+            refuse!("a borrowed device can't be moved: borrow one on the device you'd move it to");
         }
         self.close_browsers(&d, true);
         // Backed up through the node, so the entry naming the backup's blob is written before the other device asks
@@ -606,7 +606,7 @@ impl Devices {
 
     fn use_tool(&self, name: &str, tool: &str, args: Input) -> Result<Value> {
         if tool.is_empty() {
-            return Err(one_service::refused(format!("which tool? computer_tools lists them")));
+            refuse!("which tool? computer_tools lists them");
         }
         let d = self.running(name)?;
         let r = self.tool_call(&d, tool, args)?;
@@ -626,7 +626,7 @@ impl Devices {
                 return Ok(json!(format!("{}\n\nInput: {}", t.description, t.input_schema)));
             }
             let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-            return Err(one_service::refused(format!("no tool {name}: there's {}", names.join(", "))));
+            refuse!("no tool {name}: there's {}", names.join(", "));
         }
         let lines: Vec<String> = tools.iter().filter(|t| !BROWSING.contains(&t.name.as_str())).map(|t| format!("{}: {}", t.name, gist(&t.description))).collect();
         Ok(json!(lines.join("\n").trim()))
@@ -666,7 +666,7 @@ impl Devices {
     fn screen_now(&self, name: &str, width: u32) -> Result<Value> {
         if let Some(mut v) = self.vm_named(name) {
             if !v.kind().running(self, &v) {
-                return Err(one_service::refused(format!("{} is stopped: start it first", v.name)));
+                refuse!("{} is stopped: start it first", v.name);
             }
             self.awake(&mut v)?;
             return self.screen_vm(&v, width);

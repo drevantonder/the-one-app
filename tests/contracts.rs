@@ -474,8 +474,9 @@ mod service_protocol {
         program: PathBuf,
         /// A call it answers, and a field of its answer (a JSON pointer) with what it says there.
         ok: (&'static str, Value, &'static str, Value),
-        /// What it can't run: why, and the code it gives that as, if any.
-        error: (&'static str, Value, &'static str, Option<&'static str>),
+        /// What broke, and what's the caller's to change: each a call, and what it says of it.
+        error: (&'static str, Value, &'static str),
+        refused: (&'static str, Value, &'static str),
         elsewhere: Option<(&'static str, Value)>,
         prefer: Value,
     }
@@ -495,7 +496,8 @@ mod service_protocol {
                 name: "shell",
                 program: Path::new(env!("CARGO_BIN_EXE_one")).with_file_name("one-shell"),
                 ok: ("run", json!({ "command": "printf hi" }), "/stdout", json!("hi")),
-                error: ("run", json!({}), "give a command", Some("refused")),
+                error: ("nope", json!({}), "has no function"),
+                refused: ("run", json!({}), "give a command"),
                 elsewhere: None,
                 prefer: json!({ "run": "here" }),
             },
@@ -503,7 +505,8 @@ mod service_protocol {
                 name: "whatsapp",
                 program: built.made[0].1.clone(),
                 ok: ("_pairing", json!({}), "", json!({})),
-                error: ("accounts", json!(["not an object"]), "cannot unmarshal", None),
+                error: ("_take", json!({}), "names no move"),
+                refused: ("accounts", json!(["not an object"]), "cannot unmarshal"),
                 elsewhere: Some(("chats", json!({}))),
                 prefer: Value::Null,
             },
@@ -553,10 +556,11 @@ mod service_protocol {
             let (function, input, field, says) = case.ok.clone();
             let out = ask(&registry, name, function, input.clone()).await.unwrap_or_else(|err| panic!("{name} answers {function}: {err:#}"));
             assert_eq!(out.ok.pointer(field), Some(&says), "{name} reads the call's input and answers it");
-            let (function, input, why, code) = case.error.clone();
-            let err = ask(&registry, name, function, input).await.unwrap_err();
-            assert!(err.downcast_ref::<Elsewhere>().is_none() && format!("{err:#}").contains(why), "{name} answers a call it can't run with its error: {err:#}");
-            assert_eq!(one::protocol::Coded::of(&err).as_deref(), code, "{name} says what kind of error it is, as wire.json's refused does");
+            for ((function, input, why), code) in [(case.error.clone(), None), (case.refused.clone(), Some("refused"))] {
+                let err = ask(&registry, name, function, input).await.unwrap_err();
+                assert!(err.downcast_ref::<Elsewhere>().is_none() && format!("{err:#}").contains(why), "{name} answers {function} with why: {err:#}");
+                assert_eq!(one::protocol::Coded::of(&err).as_deref(), code, "{name} says what kind of error it is, as wire.json's replies do");
+            }
             if let Some((function, input)) = case.elsewhere.clone() {
                 let err = ask(&registry, name, function, input).await.unwrap_err();
                 assert!(err.downcast_ref::<Elsewhere>().is_some(), "{name} says a call goes on to another device: {err:#}");

@@ -54,7 +54,7 @@ struct RemindersApp: Service {
             try store.remove(r, commit: true)
             return "Deleted \(r.title ?? "the reminder")."
         default:
-            throw Refusal("reminders has no function \(function)")
+            throw Failure("reminders has no function \(function)")
         }
     }
 

@@ -9,6 +9,7 @@ use std::io::Read;
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
 use anyhow::{Result, anyhow, bail};
+use one_service::refuse;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -39,7 +40,7 @@ pub fn profile_in(input: &Input) -> Result<Option<Profile>> {
     let mut p: Profile = serde_json::from_value(strip_nulls(raw)).ok().filter(|p: &Profile| !p.item.is_empty()).ok_or_else(|| anyhow!("profile is a browser profile as the app gives it"))?;
     p.name = folder(&p.name);
     if p.key.contains("{{") || p.key.is_empty() {
-        bail!("the profile's key wasn't filled in: the app isn't switched on for it in the Vault");
+        refuse!("the profile's key wasn't filled in: the app isn't switched on for it in the Vault");
     }
     Ok(Some(p))
 }
@@ -129,7 +130,7 @@ impl Devices {
 
     pub(super) fn pack(&self, d: &Device, p: &Profile) -> Result<Save> {
         if self.sh(d, &format!("test -d {PROFILES}{}", p.name)).is_err() {
-            bail!("device {}'s browser has no {} profile", d.name, p.name);
+            refuse!("device {}'s browser has no {} profile", d.name, p.name);
         }
         self.close_browsers(d, true);
         let dir = format!("{PROFILES}{}", p.name);

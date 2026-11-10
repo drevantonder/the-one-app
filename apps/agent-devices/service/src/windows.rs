@@ -18,6 +18,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
+use one_service::refuse;
 
 use super::Devices;
 use super::kinds::{Action, Kind, Vm, fetch, outliving, run, run_in, run_outliving, upstream_dns};
@@ -93,13 +94,13 @@ impl Kind for Windows {
 
     fn adopt(&self, _: &Devices, v: &mut Vm) -> Result<()> {
         if !v.file("disk.qcow2").exists() || v.port == 0 || v.display == 0 {
-            return Err(one_service::refused(format!("give dir (its folder, with its disk.qcow2, OVMF_VARS.fd, tpm and monitor.sock), port (its SSH, forwarded here) and display (its VNC display)")));
+            refuse!("give dir (its folder, with its disk.qcow2, OVMF_VARS.fd, tpm and monitor.sock), port (its SSH, forwarded here) and display (its VNC display)");
         }
         Ok(())
     }
 
     fn make(&self, ds: &Devices, v: &mut Vm, from: Option<&Vm>) -> Result<()> {
-        let Some(from) = from else { bail!("a new Windows device is made from scratch only by installing Windows, which isn't built yet: borrow a copy of one instead") };
+        let Some(from) = from else { refuse!("a new Windows device is made from scratch only by installing Windows, which isn't built yet: borrow a copy of one instead") };
         v.dir = ds.dir.join("windows").join(&v.name).to_string_lossy().to_string();
         v.display = v.port - 22220 + 10;
         (v.cpus, v.gb) = (from.cpus, from.gb);
@@ -213,7 +214,7 @@ impl Kind for Windows {
 
     fn install(&self, _: &Devices, v: &Vm, app: &str) -> Result<String> {
         if app.is_empty() {
-            bail!("install what? a file, a URL or a winget id");
+            refuse!("install what? a file, a URL or a winget id");
         }
         if !app.contains(['/', '\\']) {
             return self.ssh(v, &format!("winget install --silent --accept-package-agreements --accept-source-agreements --id {}", ps_quote(app)));

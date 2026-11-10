@@ -19,6 +19,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
+use one_service::refuse;
 use serde_json::{Value, json};
 
 use super::kinds::{Action, Kind, Vm};
@@ -76,7 +77,7 @@ impl Kind for Chrome {
     }
 
     fn adopt(&self, _: &Devices, _: &mut Vm) -> Result<()> {
-        bail!("chrome devices are only borrowed: there's nothing to adopt")
+        refuse!("chrome devices are only borrowed: there's nothing to adopt")
     }
 
     fn make(&self, _: &Devices, v: &mut Vm, _: Option<&Vm>) -> Result<()> {
@@ -148,7 +149,7 @@ impl Kind for Chrome {
             "key" => b.key(&p, &a.key).map(|_| ()),
             "scroll" => b.input(&p, "Input.dispatchMouseEvent", json!({ "type": "mouseWheel", "x": a.x, "y": a.y, "deltaX": a.x - a.to_x, "deltaY": a.y - a.to_y })).map(|_| ()),
             "swipe" => b.drag(&p, a.x, a.y, a.to_x, a.to_y),
-            other => bail!("no action {other:?}"),
+            other => refuse!("no action {other:?}"),
         }
     }
 
@@ -159,15 +160,15 @@ impl Kind for Chrome {
     }
 
     fn install(&self, _: &Devices, _: &Vm, _: &str) -> Result<String> {
-        bail!("a chrome device is only a browser: nothing installs on it; borrow a linux one for that")
+        refuse!("a chrome device is only a browser: nothing installs on it; borrow a linux one for that")
     }
 
     fn run(&self, _: &Devices, _: &Vm, _: &str) -> Result<String> {
-        bail!("a chrome device is only a browser: it runs no commands; borrow a linux one for that")
+        refuse!("a chrome device is only a browser: it runs no commands; borrow a linux one for that")
     }
 
     fn reach(&self, _: &Devices, _: &Vm, _: u16) -> Result<String> {
-        bail!("a chrome device already reaches what this machine reaches")
+        refuse!("a chrome device already reaches what this machine reaches")
     }
 }
 
@@ -569,7 +570,7 @@ impl Browser {
     pub fn key(&self, session: &str, combo: &str) -> Result<Value> {
         let lower = combo.to_lowercase();
         let parts: Vec<&str> = lower.split(['-', '+']).filter(|p| !p.is_empty()).collect();
-        let Some((name, mods_named)) = parts.split_last() else { bail!("press which key?") };
+        let Some((name, mods_named)) = parts.split_last() else { refuse!("press which key?") };
         let mut mods = 0;
         for m in mods_named {
             mods |= match *m {
@@ -577,7 +578,7 @@ impl Browser {
                 "ctrl" | "control" => 2,
                 "cmd" | "meta" | "win" | "super" => 4,
                 "shift" => 8,
-                m => bail!("no modifier {m:?}: there's ctrl, alt, shift and cmd"),
+                m => refuse!("no modifier {m:?}: there's ctrl, alt, shift and cmd"),
             };
         }
         let (key, code, vk, text): (String, String, i64, String) = match *name {
@@ -597,7 +598,7 @@ impl Browser {
             "pagedown" => ("PageDown".into(), "PageDown".into(), 34, String::new()),
             name => {
                 let mut chars = name.chars();
-                let (Some(c), None) = (chars.next(), chars.next()) else { bail!("no key {name:?}") };
+                let (Some(c), None) = (chars.next(), chars.next()) else { refuse!("no key {name:?}") };
                 if c.is_ascii_lowercase() {
                     let up = c.to_ascii_uppercase();
                     (name.into(), format!("Key{up}"), up as i64, name.into())
@@ -662,7 +663,7 @@ impl Browser {
         }
         let mut s = self.now.lock().unwrap();
         let Some((session, target)) = s.pages.values().find(|p| tab_id(&p.target) == id.to_lowercase()).map(|p| (p.session.clone(), p.target.clone())) else {
-            bail!("no tab {id}: it closed, or is another device's; get_browser_state lists the tabs")
+            refuse!("no tab {id}: it closed, or is another device's; get_browser_state lists the tabs")
         };
         s.current = target;
         Ok(session)
@@ -782,7 +783,7 @@ fn may_choose(caller: &str, owner: &str, machine: &str) -> Result<()> {
         bail!("whose {machine} is isn't known here yet: try again in a moment");
     }
     if caller != owner {
-        bail!("only {machine}'s owner may allow Chrome on it");
+        refuse!("only {machine}'s owner may allow Chrome on it");
     }
     Ok(())
 }
@@ -874,7 +875,7 @@ impl Devices {
             return Ok(out);
         }
         let mut on = or(&text(input, "on"), &me.name);
-        let Some(allowed) = input.get("allowed").and_then(Value::as_bool) else { bail!("allowed: true or false") };
+        let Some(allowed) = input.get("allowed").and_then(Value::as_bool) else { refuse!("allowed: true or false") };
         let mut owner = String::new();
         for d in &all {
             if d.name.eq_ignore_ascii_case(&on) {
@@ -937,14 +938,14 @@ impl Devices {
     pub(super) fn borrow_chrome(&self, caller: &Caller, input: &Input) -> Result<Value> {
         let why = text(input, "for");
         if why.is_empty() {
-            return Err(one_service::refused(format!("say what it's for, in a few words: the user sees it")));
+            refuse!("say what it's for, in a few words: the user sees it");
         }
         let no = self.chrome_why_not();
         if !no.is_empty() {
-            return Err(one_service::refused(format!("none of your devices runs chrome devices now: {no}")));
+            refuse!("none of your devices runs chrome devices now: {no}");
         }
         if !super::kinds::room_for(GB) {
-            return Err(one_service::refused(format!("this machine has no memory to spare for another Chrome now: give back one you're done with")));
+            refuse!("this machine has no memory to spare for another Chrome now: give back one you're done with");
         }
         let p = super::profiles::profile_in(input)?;
         let mut v = self.make_vm(&Chrome, &super::pool::new_pool_name(), None)?;

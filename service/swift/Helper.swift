@@ -128,12 +128,17 @@ enum Wire {
         return d
     }
 
-    /// The answer to a call: `{ ok }`, or `{ error }` in words for whoever asked.
+    /// The answer to a call: `{ ok }`, `{ error, code: "refused" }` for what's the caller's to change, or `{ error }`
+    /// in words for whoever asked.
     static func reply(_ run: () async throws -> Any) async -> [String: Any] {
         do {
             return ["ok": try await run()]
+        } catch let no as Refusal {
+            return ["error": no.description, "code": "refused"]
+        } catch let failed as Failure {
+            return ["error": failed.description]
         } catch {
-            return ["error": (error as? Refusal)?.description ?? error.localizedDescription]
+            return ["error": error.localizedDescription]
         }
     }
 }
@@ -143,8 +148,14 @@ public var thisApp: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? ""
 }
 
-/// What a call answers instead of a result, in words for whoever asked.
+/// What's the caller's to change, in words for whoever asked: nothing broke.
 public struct Refusal: Error, CustomStringConvertible {
+    public var description: String
+    public init(_ description: String) { self.description = description }
+}
+
+/// What broke, in words for whoever asked.
+public struct Failure: Error, CustomStringConvertible {
     public var description: String
     public init(_ description: String) { self.description = description }
 }

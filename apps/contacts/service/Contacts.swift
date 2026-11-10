@@ -35,7 +35,7 @@ struct ContactsApp: Service {
                 throw Refusal("this Mac has no card set as the user's own: choose one in Contacts → Card → Make This My Card")
             }
         default:
-            throw Refusal("contacts has no function \(function)")
+            throw Failure("contacts has no function \(function)")
         }
     }
 

@@ -15,6 +15,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
+use one_service::refuse;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -212,7 +213,7 @@ pub struct Action {
 }
 
 pub fn kind_named(name: &str) -> Result<&'static dyn Kind> {
-    RUNTIMES.iter().copied().find(|k| k.name() == name).ok_or_else(|| anyhow!("no kind {name:?}: there's {LINUX} and {}", RUNTIMES.map(|k| k.name()).join(", ")))
+    RUNTIMES.iter().copied().find(|k| k.name() == name).ok_or_else(|| one_service::refused(format!("no kind {name:?}: there's {LINUX} and {}", RUNTIMES.map(|k| k.name()).join(", "))))
 }
 
 /// Runs a command here, its error carrying what it said: what it said, stdout and stderr together.
@@ -509,7 +510,7 @@ impl Devices {
         let k = v.kind();
         if !k.running(self, v) {
             if !room_for(gb_of(Some(v))) {
-                bail!("{} is stopped, and this machine has no memory to spare to start it now", v.name);
+                refuse!("{} is stopped, and this machine has no memory to spare to start it now", v.name);
             }
             v.paused = false;
             self.remember(v);
@@ -529,14 +530,14 @@ impl Devices {
     pub(super) fn make_vm(&self, k: &dyn Kind, name: &str, from: Option<&Vm>) -> Result<Vm> {
         let why = k.can();
         if !why.is_empty() {
-            return Err(one_service::refused(format!("{why}")));
+            refuse!("{why}");
         }
         if !valid_name(name) {
-            return Err(one_service::refused(format!("a device's name is lowercase letters, digits and dashes")));
+            refuse!("a device's name is lowercase letters, digits and dashes");
         }
         let _creating = self.creating.lock().unwrap();
         if self.taken(name) {
-            return Err(one_service::refused(format!("there's already a device named {name}")));
+            refuse!("there's already a device named {name}");
         }
         let mut v = Vm { name: name.into(), kind: k.name().into(), made: super::now(), of: from.map(|f| f.name.clone()).unwrap_or_default(), ..Default::default() };
         let (first, step) = k.port();
@@ -561,13 +562,13 @@ impl Devices {
     fn borrow_vm(&self, k: &dyn Kind, name: &str, copy: bool, mut l: Loan) -> Result<Vm> {
         let why = k.can();
         if !why.is_empty() {
-            return Err(one_service::refused(format!("{why}")));
+            refuse!("{why}");
         }
         let take = self.take.lock().unwrap();
         let lent = self.loans();
         let lasting: Vec<Vm> = self.vms().into_iter().filter(|v| v.kind == k.name() && v.of.is_empty() && (name.is_empty() || v.name == name)).collect();
         if !name.is_empty() && lasting.is_empty() {
-            return Err(one_service::refused(format!("there's no {} device named {name} here", k.title())));
+            refuse!("there's no {} device named {name} here", k.title());
         }
         let mut got = None;
         let mut carries_on = false;
@@ -592,7 +593,7 @@ impl Devices {
             Some(v) => v,
             None => {
                 if lasting.is_empty() && k.name() != "android" && k.name() != "iphone" {
-                    bail!("there's no {} device here to borrow or copy: the user makes one with create", k.title());
+                    refuse!("there's no {} device here to borrow or copy: the user makes one with create", k.title());
                 }
                 let from = lasting.first();
                 if !copy
@@ -600,7 +601,7 @@ impl Devices {
                     && !room_for(gb_of(Some(from)))
                 {
                     let b = lent.get(&from.name).cloned().unwrap_or_default();
-                    bail!(
+                    refuse!(
                         "{} is borrowed by {} for {}, since {}, and this machine has no room for a copy: ask them, or wait",
                         from.name,
                         b.by,
@@ -609,7 +610,7 @@ impl Devices {
                     );
                 }
                 if let Some(from) = from.filter(|f| !room_for(gb_of(Some(f)))) {
-                    bail!("this machine has no memory to spare for a copy of {}", from.name);
+                    refuse!("this machine has no memory to spare for a copy of {}", from.name);
                 }
                 self.make_vm(k, &super::pool::new_pool_name(), from)?
             }
@@ -620,7 +621,7 @@ impl Devices {
         } else {
             let r#for = l.r#for.clone();
             if !self.change(&got.name, |b| b.r#for = r#for) {
-                bail!("{} is being given back: borrow again", got.name);
+                refuse!("{} is being given back: borrow again", got.name);
             }
         }
         drop(take);
@@ -710,7 +711,7 @@ impl Devices {
     fn use_vm(&self, v: &mut Vm, tool: &str, args: &Input) -> Result<Value> {
         let k = v.kind();
         if !k.running(self, v) {
-            bail!("{} is stopped: start it first", v.name);
+            refuse!("{} is stopped: start it first", v.name);
         }
         self.awake(v)?;
         let t = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
@@ -723,14 +724,14 @@ impl Devices {
             "press_key" => "key".into(),
             "open_url" => {
                 if t("url").is_empty() {
-                    bail!("open which url?");
+                    refuse!("open which url?");
                 }
                 k.open(self, v, &t("url"))?;
                 return Ok(json!("Opened."));
             }
             "install_app" => return Ok(json!(k.install(self, v, &or(&t("app"), &t("file")))?)),
             "run_command" => return Ok(json!(k.run(self, v, &t("command"))?)),
-            _ => bail!("no tool {tool:?} on {}: there's\n{}", v.name, vm_tools(k)),
+            _ => refuse!("no tool {tool:?} on {}: there's\n{}", v.name, vm_tools(k)),
         };
         k.act(self, v, &a)?;
         Ok(json!("Done: take a screenshot to see what it did."))
@@ -883,7 +884,7 @@ impl Devices {
                 }
                 "give_back" => {
                     if !self.loans().contains_key(&v.name) {
-                        bail!("{} isn't borrowed", v.name);
+                        refuse!("{} isn't borrowed", v.name);
                     }
                     self.give_back_vm(&v, &format!("given back by {}", caller.name()))?;
                     Ok(json!(format!("Gave back {}.", v.name)))
@@ -907,19 +908,19 @@ impl Devices {
                 "reach" => {
                     let port = number(input, "port").unwrap_or(0.0);
                     if !(1.0..=65535.0).contains(&port) {
-                        bail!("reach which port? a number from 1 to 65535");
+                        refuse!("reach which port? a number from 1 to 65535");
                     }
                     let port = port as u16;
                     let mine = self.local_only(port);
                     if !mine.is_empty() {
-                        bail!("no device reaches port {port}: it's {mine}, for this machine's own programs only");
+                        refuse!("no device reaches port {port}: it's {mine}, for this machine's own programs only");
                     }
                     if !k.running(self, &v) {
-                        bail!("{} is stopped: start it first", v.name);
+                        refuse!("{} is stopped: start it first", v.name);
                     }
                     Ok(json!(k.reach(self, &v, port)?))
                 }
-                _ => bail!("{} is a {} device: {function} works on Linux devices only, for now", v.name, k.title()),
+                _ => refuse!("{} is a {} device: {function} works on Linux devices only, for now", v.name, k.title()),
             }
         })())
     }
@@ -928,7 +929,7 @@ impl Devices {
     fn create_or_borrow(&self, caller: &Caller, function: &str, name: &str, here: bool, kind_name: &str, named: bool, input: &Input) -> Result<Value> {
         let k = kind_named(kind_name)?;
         if k.name() == super::chrome::NAME && function == "create" {
-            bail!("chrome devices are only borrowed, each by one agent: borrow one with kind chrome");
+            refuse!("chrome devices are only borrowed, each by one agent: borrow one with kind chrome");
         }
         if !named && !here && let Some(r) = self.first(function, k.name(), name, input) {
             return r;
@@ -938,11 +939,11 @@ impl Devices {
         }
         let why = k.can();
         if !why.is_empty() {
-            bail!("none of your devices runs {} agent devices (here: {why})", k.title());
+            refuse!("none of your devices runs {} agent devices (here: {why})", k.title());
         }
         if function == "create" {
             if name.is_empty() {
-                bail!("name it: lowercase letters, digits and dashes");
+                refuse!("name it: lowercase letters, digits and dashes");
             }
             let mut v = self.make_vm(k, name, None)?;
             self.awake(&mut v).map_err(|err| anyhow!("made {}, but it didn't start: {err:#}", v.name))?;
@@ -950,7 +951,7 @@ impl Devices {
         }
         let why = text(input, "for");
         if why.is_empty() {
-            bail!("say what it's for, in a few words: the user sees it");
+            refuse!("say what it's for, in a few words: the user sees it");
         }
         let got = self.borrow_vm(k, name, flag(input, "copy"), Loan { by: or(&text(input, "by"), &caller.name()), r#for: why, ..Default::default() })?;
         let me = self.me();
@@ -976,13 +977,13 @@ impl Devices {
         let k = kind_named(kind_name)?;
         let why = k.can();
         if !why.is_empty() {
-            return Err(one_service::refused(format!("{why}")));
+            refuse!("{why}");
         }
         if !valid_name(name) {
-            return Err(one_service::refused(format!("a device's name is lowercase letters, digits and dashes")));
+            refuse!("a device's name is lowercase letters, digits and dashes");
         }
         if self.taken(name) {
-            return Err(one_service::refused(format!("there's already a device named {name}")));
+            refuse!("there's already a device named {name}");
         }
         let mut v = Vm {
             name: name.into(),
@@ -1011,14 +1012,14 @@ impl Devices {
             "open" => {
                 let url = text(input, "url");
                 if url.is_empty() {
-                    bail!("open which url?");
+                    refuse!("open which url?");
                 }
                 format!("runuser -u cua -- env DISPLAY=:1 HOME={HOME} setsid google-chrome --no-first-run --no-default-browser-check --password-store=basic {} >/dev/null 2>&1 </dev/null &", quote(&url))
             }
             "install" => {
                 let app = or(&text(input, "app"), &text(input, "file"));
                 if app.is_empty() {
-                    bail!("install what? a package's name, or a .deb's URL");
+                    refuse!("install what? a package's name, or a .deb's URL");
                 } else if app.starts_with("http://") || app.starts_with("https://") {
                     format!("set -e; curl -fsSLo /tmp/app.deb {} && apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /tmp/app.deb; rm -f /tmp/app.deb", quote(&app))
                 } else {
@@ -1028,7 +1029,7 @@ impl Devices {
             _ => text(input, "command"),
         };
         if script.is_empty() {
-            bail!("run what? pass command");
+            refuse!("run what? pass command");
         }
         let mut out = Vec::new();
         if let Err(err) = self.exec(&d, Some(&mut script.as_bytes()), Some(&mut out), &["sh", "-s"]) {
