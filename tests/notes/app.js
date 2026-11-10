@@ -36,6 +36,14 @@ export default {
         throw Object.assign(new Error(text), { code: "refused" });
       },
     },
+    vault: {
+      reads: true,
+      description: "The titles of the Vault's items it's switched on for.",
+      input: { type: "object", properties: {} },
+      async run(ctx) {
+        return (await ctx.vault.items()).map((i) => i.title);
+      },
+    },
     read: {
       reads: true,
       description: "Every line, oldest first.",

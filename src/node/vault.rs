@@ -44,12 +44,12 @@ impl Node {
         Ok(items)
     }
 
-    /// The Vault secret keys of `scope` this machine holds, by number, if it's granted the scope's Vault now: each
-    /// sealed to it in the bucket whose public half is the one its `vault` step names. None if it isn't granted.
+    /// The Vault secret keys of `scope` this machine holds, by number, if its device is granted the scope's Vault now:
+    /// those its holder opens (`Holds::vault_keys`). None if it isn't granted.
     pub(super) async fn vault_secrets(&self, scope: &Scope) -> Result<Option<BTreeMap<u32, [u8; 32]>>> {
         let publics: Vec<(u32, [u8; 32])> = self.with(|i| {
             let m = i.r.db();
-            Ok(match m.opens_vault(&self.0.id, scope)? {
+            Ok(match m.opens_vault(&self.0.holds.device(), scope)? {
                 true => m.vault_publics(scope)?.into_iter().collect(),
                 false => Vec::new(),
             })
@@ -57,30 +57,24 @@ impl Node {
         if publics.is_empty() {
             return Ok(None);
         }
-        let (secret, me) = (self.seal_secret(), hex(&self.with_or(self.0.id, |i| Ok(i.r.db().device_of(&self.0.id)))));
         let mut out = BTreeMap::new();
+        let mut missing = Vec::new();
         for (n, public) in publics {
-            if let Some(key) = self.0.app_schedules.vault.lock().unwrap().get(&(scope.clone(), n)) {
-                out.insert(n, *key);
-                continue;
-            }
-            let name = crate::keys::vault_key_name(&scope.to_string(), n, &me);
-            let Some(o) = crate::bucket::Bucket::get(&self.bucket()?, &name).await? else { continue };
-            match crate::keys::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::public_of(k) == public) {
-                Some(key) => {
-                    self.0.app_schedules.vault.lock().unwrap().insert((scope.clone(), n), key);
-                    out.insert(n, key);
-                }
-                None => tracing::warn!("{name} isn't the Vault key its step names: passed over"),
+            match self.0.app_schedules.vault.lock().unwrap().get(&(scope.clone(), n)) {
+                Some(key) => drop(out.insert(n, *key)),
+                None => missing.push((n, public)),
             }
         }
+        let opened = self.0.holds.vault_keys(&self.bucket()?, scope, &missing).await?;
+        self.0.app_schedules.vault.lock().unwrap().extend(opened.iter().map(|(n, k)| ((scope.clone(), *n), *k)));
+        out.extend(opened);
         Ok(Some(out))
     }
 
     /// Seals what's in `scope`'s Vault to its newest key, if this machine opens it and another before it: a write that
     /// changes nothing else, done at once after this machine's own user changed which machines open it.
     pub(crate) async fn reseal_vault(&self, scope: &Scope) -> Result<()> {
-        if self.with(|i| i.r.db().opens_vault(&self.0.id, scope))? && self.vault_secrets(scope).await?.is_some_and(|k| k.len() > 1) {
+        if self.with(|i| i.r.db().opens_vault(&self.0.holds.device(), scope))? && self.vault_secrets(scope).await?.is_some_and(|k| k.len() > 1) {
             self.write_item(&Caller::local(self)?, scope, |items| Ok(items.iter().next().map(|(id, _)| json!({ "id": id })).unwrap_or(Value::Null))).await?;
         }
         Ok(())

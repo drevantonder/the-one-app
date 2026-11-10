@@ -1,9 +1,9 @@
 //! What the device's own key opens and signs, which a node asks of its holder rather than taking for its own: the
-//! epochs of the scopes the device opens and anything else sealed to it, and its steps in `global`'s scope database,
-//! which only a user's own devices sign. A computer's node is its device today, so its holder is its own key. A
-//! device's app runtime, an endpoint of its own key, asks its device's holder on this machine's loopback (`Holder`),
-//! with the token the device's own programs ask with; the holder answers `/api/holds`, and a runtime asked them asks
-//! its own holder in turn.
+//! epochs of the scopes the device opens, the Vault keys and app schedules' keys and anything else sealed to it, and
+//! its steps in `global`'s scope database, which only a user's own devices sign. A computer's node is its device
+//! today, so its holder is its own key. A device's app runtime, an endpoint of its own key, asks its device's holder on
+//! this machine's loopback (`Holder`), with the token the device's own programs ask with; the holder answers
+//! `/api/holds`, and a runtime asked them asks its own holder in turn.
 
 use axum::extract::State;
 use axum::routing::{get, post};
@@ -85,6 +85,44 @@ impl Holds {
             match crate::keys::open_sealed_by(self, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == *hash) {
                 Some(key) => drop(out.insert(*n, key)),
                 None => tracing::warn!("{name} isn't the key {scope}'s epoch {n} entry made: passed over"),
+            }
+        }
+        Ok(out)
+    }
+
+    /// The Vault secret keys of `scope` sealed to the device in the bucket, of those `publics` names by number, each
+    /// kept only if its public half is the one its `vault` step names.
+    pub(super) async fn vault_keys(&self, bucket: &Copied, scope: &Scope, publics: &[(u32, [u8; 32])]) -> Result<BTreeMap<u32, [u8; 32]>> {
+        let mut out = BTreeMap::new();
+        for (n, public) in publics {
+            let name = crate::keys::vault_key_name(&scope.to_string(), *n, &hex(&self.device()));
+            let Some(o) = crate::bucket::Bucket::get(bucket, &name).await? else { continue };
+            match crate::keys::open_sealed_by(self, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::public_of(k) == *public) {
+                Some(key) => drop(out.insert(*n, key)),
+                None => tracing::warn!("{name} isn't the Vault key its step names: passed over"),
+            }
+        }
+        Ok(out)
+    }
+
+    /// `app`'s keys in `scope` that app schedules sealed to the device, of those `hashes` names by epoch, each kept only
+    /// if its hash is the one they name.
+    pub(super) async fn app_schedules_keys(&self, bucket: &Copied, scope: &Scope, app: &str, hashes: &BTreeMap<u32, String>) -> Result<Keys> {
+        let (scope, me) = (scope.to_string(), hex(&self.device()));
+        let mut out = Keys::new();
+        for (n, hash) in hashes {
+            let name = crate::keys::app_schedules_key_name(&scope, app, &me, *n);
+            let found = match crate::bucket::Bucket::get(bucket, &name).await? {
+                Some(o) => Some(o),
+                None => crate::bucket::Bucket::get(bucket, &crate::keys::app_schedules_key_name_before(&scope, app, &me, *n)).await?,
+            };
+            let Some(o) = found else {
+                tracing::warn!("{name} isn't in the bucket yet");
+                continue;
+            };
+            match crate::keys::open_sealed_by(self, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == *hash) {
+                Some(key) => drop(out.insert(*n, key)),
+                None => tracing::warn!("{name} isn't the key its app schedules name: passed over"),
             }
         }
         Ok(out)

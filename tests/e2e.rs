@@ -769,6 +769,28 @@ async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_doe
     assert!(a.fill_for_service("shell", &mut input, &me, Some("notes")).await.is_err() || !input.to_string().contains("s3cret"), "a service its item doesn't name gets none of it");
 }
 
+/// An app's schedules run on what a call of it is handed and no more, in their scope, only while they're set: its own
+/// databases and the Vault's, so a scheduled run sees the items switched on for it, as a call does, and no other app's.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_apps_schedules_see_its_vault_items_as_its_calls_do_while_theyre_set() {
+    use one::database::scopes::Scope;
+    let a = start("schedules-vault").await;
+    create(&a, "Home", "Andre").await;
+    add_notes(&a).await;
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    for (title, app) in [("For notes", "notes"), ("For another", "another")] {
+        a.set_item(&me, &Scope::Global, json!({ "title": title, "type": "Token", "hosts": ["api.example.com"], "apps": [app], "fields": { "token": { "value": "s3cret", "secret": true } } })).await.unwrap();
+    }
+    let run = || a.app_schedules_call(&Scope::Global, "notes", &me.user, "vault", json!({}), "schedule");
+    assert!(run().await.is_err(), "nothing runs notes' schedules yet");
+    let body = json!({ "app": "notes", "device": one::keys::hex(&a.id()), "scope": "global" }).to_string();
+    let set = async |path: &str| one::settings::answer(&a, "POST", path, body.as_bytes()).await.unwrap().unwrap();
+    set("/api/devices/run_schedules").await;
+    assert_eq!(run().await.unwrap(), json!(["For notes"]), "a scheduled run sees its own items, and no other app's");
+    set("/api/devices/stop_schedules").await;
+    assert!(run().await.is_err(), "stopped, they run nothing");
+}
+
 /// A client device's MCP request (the remote MCP server's, say) is answered as its user, never as the node's own: it
 /// lists every tool any client does, its tools run as them, with what they may do and the keys they hand, and a tool
 /// needing keys they didn't hand is answered 428 with what it needs, for them to hand and ask again.

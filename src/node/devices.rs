@@ -99,13 +99,15 @@ impl Node {
     /// now, which every device then uses); or with both, an app's key in epoch `n` sealed to `to`, an endpoint of the
     /// network that will run the app's schedules there (`keys::app_schedules_key_name`), by one who may set them (→ `{}`,
     /// there already or not: the app schedules name the hash of the one they mean); or with `vault`, a Vault's newest key
-    /// sealed to a machine it opens on, or the recovery key, by one who may say which those are.
+    /// sealed to a machine it opens on, or the recovery key, by one who may say which those are; or with `vault` and an
+    /// app, the Vault's database's key in epoch `n` sealed under that app's, for its app schedules
+    /// (`keys::app_schedules_vault_name`), by one who may set them (→ `{}`, there already or not: only the app's key opens it).
     pub async fn seal_key(&self, caller: &Caller, scope: &Scope, n: u32, to: Option<&str>, app: Option<&str>, vault: bool, sealed: &str) -> Result<Value> {
         let sealed = B64U.decode(sealed.trim().as_bytes()).map_err(|_| anyhow!("sealed is base64url"))?;
         ensure!(!sealed.is_empty() && sealed.len() <= SEALED_MAX, "a sealed key is at most {SEALED_MAX} bytes");
         let bucket = self.bucket()?;
-        if vault {
-            let (Some(to), None) = (to, app) else { bail!("a Vault key is sealed to a machine, or recovery, and is no app's") };
+        if vault && app.is_none() {
+            let Some(to) = to else { bail!("a Vault key is sealed to a machine, or recovery") };
             self.with(|i| {
                 let db = i.r.db();
                 allowed!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s user, or its admins, say which machines open its Vault");
@@ -121,6 +123,14 @@ impl Node {
         let newest = self.newest_epoch(scope).await?;
         let name = scope.to_string();
         match (to, app) {
+            (None, Some(app)) if vault => {
+                ensure!(scopes::valid_app_name(app), "{app} isn't an app's name");
+                allowed!(self.with(|i| Ok(i.r.db().may(&caller.user, "choose-devices", &scopes::object(scope))))?, "only {scope}'s user, or its group's admins, choose where its apps' schedules run");
+                ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
+                crate::database::stored::created(&bucket, &crate::keys::app_schedules_vault_name(&name, app, n), &sealed).await?;
+                Ok(json!({}))
+            }
+            (Some(_), Some(_)) if vault => bail!("the Vault's key for an app's schedules is kept under the app's, and sealed to no device"),
             (Some(to), None) => {
                 sealed_to(to)?;
                 self.with(|i| {

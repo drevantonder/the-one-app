@@ -16,6 +16,7 @@
 //! <folder>/_epochs/<n>/recovery             and to the network's recovery key
 //! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`keys::seal_app_key`)
 //! <folder>/<app>/_app_schedules/<endpoint>/<n>  and sealed to an endpoint that runs its app schedules (`keys::seal_to`)
+//! <folder>/<app>/_app_schedules/vault/<n>    the scope's Vault database's key in epoch n, under the app's (`keys::seal`)
 //! <folder>/_vault/<n>/<endpoint key hex>     the scope's Vault secret key n, sealed to a machine its `vault` entry grants
 //! <folder>/_vault/<n>/recovery               and to the network's recovery key
 //! global/_recovery/<recovery key hex>/<endpoint key hex>   the recovery key, sealed to a device of someone who holds it
@@ -505,6 +506,12 @@ pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
 /// key in hex.
 pub fn app_schedules_key_name(scope: &str, app: &str, endpoint: &str, n: u32) -> String {
     format!("{}/{}/_app_schedules/{endpoint}/{n}", crate::bucket::folder(scope), permanent(app, "").app)
+}
+
+/// Where the Vault's database's key in epoch `n` of a scope is kept for app schedules of `app`, sealed under the app's
+/// key in that epoch: what opens the Vault's items for whatever runs them, as a call of the app is handed them.
+pub fn app_schedules_vault_name(scope: &str, app: &str, n: u32) -> String {
+    format!("{}/{}/_app_schedules/vault/{n}", crate::bucket::folder(scope), permanent(app, "").app)
 }
 
 /// Where a build from before app schedules had their name sealed it: read when it isn't under its own name.

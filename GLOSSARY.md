@@ -85,8 +85,9 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   which expire within the hour.
 - **Deploy**: a version of an app put into a scope. **Built-in apps** are the folders in `apps/` with an `app.js`, shipped with every
   release; every other one is made in the network.
-- **App schedules**: a user choosing a node to keep an app running there, holding that app's keys in that scope (for
-  up to 30 days, and longer as they use it), so its schedules run while no one has it open. Avoid: keep, grant, standing
+- **App schedules**: a user choosing a node to keep an app running there, holding that app's keys in that scope, and
+  its Vault's, as a call of the app is handed them (for up to 30 days, and longer as they use it), so its schedules run
+  while no one has it open. Avoid: keep, grant, standing
   work.
 - **Vault**: secrets apps use without anyone seeing them: a secret leaves a node only inside a request to one of its
   hosts.

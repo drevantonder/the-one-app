@@ -207,7 +207,7 @@ fn places(i: &Network) -> Result<Vec<PlaceItem>> {
             let shown = fields.remove("where").unwrap_or_default();
             fields.remove("path");
             let place = match device {
-                Some(d) if d == i.r.id => i.folders.get(id).map(|path| Place::Folder(path.into())).context("this device keeps no folder for it"),
+                Some(d) if d == i.r.db().device_of(&i.r.id) => i.folders.get(id).map(|path| Place::Folder(path.into())).context("this device keeps no folder for it"),
                 Some(_) => Err(anyhow!("a folder on another device")),
                 None => Place::from_fields(&fields).and_then(|p| match &p {
                     // Secrets stay put: the key goes only to the item's own hosts.
@@ -337,7 +337,7 @@ impl Node {
     /// `force`), and writes how each place's run went.
     async fn back_up(&self, force: bool) -> Result<()> {
         let now = now_ms();
-        let me = self.0.id;
+        let (me, device) = (self.0.id, self.0.holds.device());
         let keys = self.held_keys().await;
         let (network, plan) = self.with(|i| {
             let m = i.r.db();
@@ -355,7 +355,7 @@ impl Node {
                     continue;
                 }
                 let folder = p.device.is_some();
-                if folder && p.device != Some(me) {
+                if folder && p.device != Some(device) {
                     continue;
                 }
                 // Every device prunes each scope it holds the key of, so pruning needs no one device.
@@ -623,7 +623,7 @@ impl Node {
         let (title, item_fields, hosts) = match &place {
             Place::Folder(path) => {
                 let title = text("title").unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.display().to_string()));
-                (title, json!({ "where": { "value": path.display().to_string() }, "device": { "value": hex(&self.0.id) } }), json!([]))
+                (title, json!({ "where": { "value": path.display().to_string() }, "device": { "value": hex(&self.0.holds.device()) } }), json!([]))
             }
             Place::S3(s3) => {
                 let host = s3.endpoint.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or("").to_string();
@@ -704,7 +704,7 @@ impl Node {
         if now < started + CHECK_SETTLE {
             return Ok(());
         }
-        let me = self.0.id;
+        let (me, device) = (self.0.id, self.0.holds.device());
         let due: Vec<String> = self.with(|i| {
             let m = i.r.db();
             let Some(status) = i.status.get("global") else { return Ok(Vec::new()) };
@@ -713,7 +713,7 @@ impl Node {
                 let last = status.checks.iter().rev().find(|c| c.place == p.id);
                 let next = last.map_or(0, |c| c.time + if c.error.is_some() { CHECK_AGAIN } else { CHECK_EVERY });
                 let is_due = match p.device {
-                    Some(d) => d == me && now >= next,
+                    Some(d) => d == device && now >= next,
                     None => line(m, &Scope::Global, &format!("{}/check", p.id))?.iter().position(|k| *k == me).is_some_and(|at| now >= next && b::takes_over(at, Some(next), 0, now)),
                 };
                 if is_due {

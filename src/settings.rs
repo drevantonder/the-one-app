@@ -1485,8 +1485,9 @@ async fn app_schedules_asked(m: &impl Me, app: String, device: &str, scope: Opti
 }
 
 /// Runs `app`'s schedules in `scope` on one of its user's devices (`endpoint`) for `days`, 30 at most (0 stops
-/// them): the app's key in each epoch of the scope sealed to it first, then the app schedules naming each one's
-/// hash. Stopping them starts a new epoch of the scope, which the device isn't sealed, so the keys it held open
+/// them): the Vault's database's key in each epoch of the scope kept under the app's, and the app's sealed to it
+/// first, as a call of the app is handed both (`keys::may_hand`), then the app schedules naming the hash of each app's
+/// key. Stopping them starts a new epoch of the scope, which the device isn't sealed, so the keys it held open
 /// nothing written after. → until when.
 async fn set_app_schedules(m: &impl Me, endpoint: &[u8; 32], app: &str, scope: &Scope, days: u64) -> Result<u64> {
     let (seal, made) = m.who(|who| {
@@ -1498,6 +1499,9 @@ async fn set_app_schedules(m: &impl Me, endpoint: &[u8; 32], app: &str, scope: &
     if until > 0 {
         for n in if made.is_empty() { vec![1] } else { made } {
             let key = m.app_key(scope, app, n).await?;
+            let vault = keys::database_key(&m.app_key(scope, scopes::APP, n).await?, scopes::APP, scopes::CoreDb::Vault.name());
+            let name = keys::app_schedules_vault_name(&scope.to_string(), app, n);
+            m.keep_key(json!({ "scope": scope.to_string(), "n": n, "app": app, "vault": true, "sealed": B64U.encode(&keys::seal(n, &key, &name, &vault)) })).await?;
             m.keep_key(json!({ "scope": scope.to_string(), "n": n, "app": app, "to": hex(endpoint), "sealed": B64U.encode(&keys::seal_to(&seal, &key)?) })).await?;
             hashes.insert(n, keys::epoch_hash(&key));
         }

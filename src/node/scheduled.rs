@@ -39,7 +39,7 @@ impl Node {
             if m.compute(&self.0.id)?.is_none() {
                 return Ok(due);
             }
-            let me = m.device_of(&self.0.id);
+            let me = self.0.holds.device();
             for ((_, scope, app), _) in m.app_schedules_at(now)?.into_iter().filter(|((k, ..), _)| *k == me) {
                 let Some(state) = i.views.get(&scope.to_string()).filter(|s| s.added.contains(&app)) else { continue };
                 let Some((_, list)) = declared.iter().find(|(a, _)| *a == app) else { continue };
