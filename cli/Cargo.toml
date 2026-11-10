@@ -1,4 +1,4 @@
-# The `one` program: the CLI, MCP and the node it serves (src/main.rs and the modules beside it). A package of its own,
+# The `one` program: its CLI and MCP (src/), and the node it serves, which is the root crate `one`. A package of its own,
 # not the root's, since its tests run clients (`onet`), which depends on `one` itself, and Cargo allows no package to
 # depend on its own dependent.
 [package]
@@ -11,7 +11,7 @@ autotests = false
 
 [[bin]]
 name = "one"
-path = "../src/main.rs"
+path = "src/main.rs"
 doctest = false
 
 # The tests are one binary, here so they can run the program (CARGO_BIN_EXE_one) and `cargo test` builds it.

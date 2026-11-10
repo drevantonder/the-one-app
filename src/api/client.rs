@@ -1,5 +1,5 @@
 //! How a client asks its node's local API: the CLI and its MCP server over HTTP, as one of this machine's own programs
-//! (src/main.rs), and the node's own MCP in the node itself (`InProcess`), with the proof of who asks that the request it
+//! (cli/src/main.rs), and the node's own MCP in the node itself (`InProcess`), with the proof of who asks that the request it
 //! answers came with.
 
 use std::io::Read;

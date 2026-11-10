@@ -1,3 +1,6 @@
+//! `one`, what the agents of a network's users and admins run: each feature's commands, asked of this machine's node over
+//! its API. Run as `<cli>d` it's the node (src/oned.rs), and as `git-remote-<cli>` git's remote helper (git_remote.rs).
+
 
 use anyhow::Result;
 use one::config::{CLI, NAME, YOURS};

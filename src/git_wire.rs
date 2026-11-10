@@ -1,5 +1,5 @@
 //! Telling git on this machine to reach the network's apps' git (`<address>/<app>/…`) through this program, as `git-remote-<CLI>`
-//! (src/git_remote.rs), which a node does as it starts, and `one-dev throwaway git` does for its own network only.
+//! (cli/src/git_remote.rs), which a node does as it starts, and `one-dev throwaway git` does for its own network only.
 
 use anyhow::{Context, Result, bail};
 

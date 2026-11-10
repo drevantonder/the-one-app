@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-const ROOTS: [&str; 5] = ["src", "onet", "client", "cloudflare", "apps"];
+const ROOTS: [&str; 6] = ["src", "cli", "onet", "client", "cloudflare", "apps"];
 const CODE: [&str; 9] = ["rs", "js", "jsx", "ts", "tsx", "go", "swift", "cs", "kt"];
 const PACKAGES: [&str; 4] = ["Cargo.toml", "package.json", "go.mod", "Package.swift"];
 const SKIPPED: [&str; 4] = ["dist", "node_modules", "target", "vendor"];

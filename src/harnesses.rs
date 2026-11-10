@@ -191,7 +191,7 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
 
 /// Git reaches Repos at the node (`git clone http://localhost:<port>/repos/<owner>/<repo>.git`) as one of this machine's own
 /// programs: the user's git config includes one of the node's, which only they can read, sending its token there and telling
-/// the remote helper (src/git_remote.rs) the node's home.
+/// the remote helper (cli/src/git_remote.rs) the node's home.
 fn git(node_home: &Path, addr: &str) {
     let Some(token) = crate::api::local_token(node_home) else { return };
     let port = crate::api::port_of(addr);
