@@ -1,4 +1,4 @@
-//! The core's own tools: add's and remove's, the Vault's, Backups', Groups', Devices', Widgets', Push's and logs', each defined beside its
+//! The core's own tools: add's and remove's, the Vault's, Backups', Groups', Devices', Widgets', Push's, logs' and insights', each defined beside its
 //! feature's others and listed here, the one list. Agents use them as they use apps' tools, by the same kind of name
 //! (`vault_list`, `logs`), on the command line and over MCP; but they're not apps, so no list of apps has them. Every
 //! client lists and runs the same ones: who may do what is the user's rules, and the device's keys. Each is its own
@@ -135,7 +135,7 @@ impl Feature {
 
 /// Every feature's, in the order they're listed.
 pub fn all() -> Vec<Feature> {
-    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), crate::vault::tools::feature(), crate::backups::tools::feature(), crate::groups::tools::feature(), crate::devices::tools::feature(), crate::widgets::tools::feature(), crate::push::tools::feature(), crate::logs::tools::feature()]
+    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), crate::vault::tools::feature(), crate::backups::tools::feature(), crate::groups::tools::feature(), crate::devices::tools::feature(), crate::widgets::tools::feature(), crate::push::tools::feature(), crate::logs::tools::feature(), crate::insights::tools::feature()]
 }
 
 /// The feature with the tool `name` (as MCP names it), and the tool's place in it.

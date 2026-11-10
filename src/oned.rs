@@ -574,6 +574,9 @@ pub fn run(args: &[String]) -> Result<()> {
     }
 }
 
+/// How long a node stopping waits for its last insights to be written: they may be lost, and stopping may not wait.
+const LAST_SAY: std::time::Duration = std::time::Duration::from_secs(3);
+
 #[tokio::main]
 async fn serve(args: &[String]) -> Result<()> {
     // What it says is kept too, for `one logs`.
@@ -585,8 +588,12 @@ async fn serve(args: &[String]) -> Result<()> {
     // Asked to stop, even while it starts: its workerd first, then at once, rather than once every blocking task
     // ends, which a stuck request would hold up.
     let stop = stopped()?;
+    let (ready_node, node_ready) = tokio::sync::oneshot::channel::<Node>();
     tokio::spawn(async move {
         stop.await;
+        if let Ok(Ok(node)) = tokio::time::timeout(LAST_SAY, node_ready).await {
+            let _ = tokio::time::timeout(LAST_SAY, node.flush_insights()).await;
+        }
         crate::app::runtime::stop_all();
         std::process::exit(0)
     });
@@ -601,6 +608,7 @@ async fn serve(args: &[String]) -> Result<()> {
     };
     // Its app runtime is a program of its own, which oned starts as its parts.
     let node = Node::start(&dir, true).await?;
+    let _ = ready_node.send(node.clone());
     // Its parts that run as processes of their own, as its steps switch them.
     crate::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
     // Git here reaches the network's repos at their address, as on every computer of its user's, and the harnesses
@@ -643,6 +651,7 @@ async fn serve(args: &[String]) -> Result<()> {
             loop {
                 crate::handoff::wanted().await;
                 tracing::info!("handing over to {}", crate::this_program().unwrap_or_default().display());
+                let _ = tokio::time::timeout(LAST_SAY, node.flush_insights()).await;
                 node.handing_over(true).await;
                 match crate::handoff::hand_over(fd, &args).await {
                     Ok(()) => return node.handed_over(),

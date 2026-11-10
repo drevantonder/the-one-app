@@ -18,6 +18,14 @@ export default {
         return "Added.";
       },
     },
+    fail: {
+      reads: true,
+      description: "Throws what it's given, as an app's error would carry it.",
+      input: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+      async run(ctx, { text }) {
+        throw new Error(text);
+      },
+    },
     read: {
       reads: true,
       description: "Every line, oldest first.",

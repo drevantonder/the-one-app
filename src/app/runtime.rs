@@ -201,6 +201,7 @@ impl Apps {
                         tracing::warn!("the app runtime is stuck; starting it again");
                         runtime.restart();
                     }
+                    crate::node::trace::stage(crate::insights::stage::LIMIT);
                     bail!("the app took longer than {}s", limit.as_secs())
                 }
                 Err(err) => Err(err.into()),
@@ -208,6 +209,9 @@ impl Apps {
         })
         .await??;
         if let Some(err) = reply.get("error") {
+            if reply["exception"].is_object() {
+                crate::node::trace::note(json!({ "step": "exception", "exception": reply["exception"] }), Duration::ZERO);
+            }
             return Err(crate::protocol::Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("the app failed")));
         }
         Ok(reply)

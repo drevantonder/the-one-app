@@ -29,6 +29,7 @@ fn commands() -> Vec<Command> {
         storage::cli::commands(),
         services::cli::commands(),
         one::logs::cli::commands(),
+        one::insights::cli::commands(),
         one::build::commands(),
         blobs::cli::commands(),
         own(),

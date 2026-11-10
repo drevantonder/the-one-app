@@ -922,7 +922,13 @@ fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
         ("fails", json!({ "error": "sign in first", "code": "not_signed_in" })),
         ("asks", json!({ "ok": { "error": "not yours to call", "code": "refused" }, "appends": [], "later": false })),
     ] {
-        let both = ask(tool);
+        let mut both = ask(tool);
+        for side in ["machine", "cloudflare"] {
+            if let Some(thrown) = both[side].as_object_mut().and_then(|o| o.remove("exception")) {
+                assert_eq!(thrown["type"], "Error", "what's thrown, by type and where, on {side}");
+                assert!(thrown["frames"].is_array(), "{thrown}");
+            }
+        }
         assert_eq!(both["machine"], expected, "{tool} on a machine");
         assert_eq!(both["cloudflare"], expected, "{tool} on the Cloudflare node");
     }

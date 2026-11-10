@@ -62,7 +62,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **App**: code deployed into a scope, run in the app runtime. It publishes any of four things: **screens** (pages
   users open), **widgets** (what it shows on a home page), **tools** (what agents use, through MCP and the CLI), and
   **services**. An app with only tools is still an app (Gmail, Shell). The core's own features (the Vault, Backups,
-  Groups, Devices, Widgets, Push, logs) have tools too, named the same way (`vault_list`), but are not apps: no list of
+  Groups, Devices, Widgets, Push, logs, Insights) have tools too, named the same way (`vault_list`), but are not apps: no list of
   apps has them. Avoid: worker, connector, operation (for a tool).
 - **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
   linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,
@@ -97,7 +97,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   who can read everything and restore anyone; it's sealed to their devices that are only clients, never a node or a browser.
 - **Database**: one SQLite database, kept sealed in the bucket as steps at numbered positions, the bucket deciding their
   order. A scope has three kinds: **an app's database**, its data and the truth; **the node's database**, how things
-  went (usage, errors, runs); and **the scope database**, who's who, permissions and keys.
+  went (usage, runs, insights); and **the scope database**, who's who, permissions and keys.
 - **Blob**: bytes a database's step names, kept in the bucket sealed with their scope's key.
 
 ## At the network's address

@@ -1,5 +1,5 @@
-//! How things went, as devices say it: who used each app, its errors and its AI cost; schedules' runs; the build each
-//! device runs; backups' runs. Rows each scope's node database changes in place, not steps of their own: written often, and
+//! How things went, as devices say it: who used each app, its AI cost and insights' tables (`crate::insights`); schedules'
+//! runs; the build each device runs; backups' runs. Rows each scope's node database changes in place, not steps of their own: written often, and
 //! needed only as they are now. Each device reads them back into `Status`, which the rest of the node looks at.
 
 use super::*;
@@ -32,6 +32,17 @@ create table reads (device text primary key, reads integer not null, build text 
 alter table errors rename column op to tool;
 ", "
 update runs set spec = json_remove(json_set(spec, '$.tool', json_extract(spec, '$.op')), '$.op') where json_valid(spec) and json_extract(spec, '$.op') is not null;
+", "
+create table signals (time integer not null, device text not null, kind text not null, name text not null, app text not null, trace text not null,
+                      span text not null, parent text, ms integer not null, status text not null, fault text, attrs text not null);
+create index signals_time on signals (time);
+create table rollups (hour integer not null, name text not null, app text not null, key text not null, count integer not null, errors integer not null,
+                      ms integer not null, under_10 integer not null, under_100 integer not null, under_1000 integer not null, under_10000 integer not null,
+                      over integer not null, primary key (hour, name, app, key));
+create table fingerprints (app text not null, tool text not null, fingerprint text not null, type text not null, frame text not null, build text not null,
+                           fault text, count integer not null, first integer not null, last integer not null, primary key (app, tool, fingerprint));
+insert into fingerprints select app, tool, 'Error|migrated|', 'Error', 'migrated', '', null, sum(count), min(first), max(last) from errors group by app, tool;
+drop table errors;
 "];
 
 pub const RUNS_KEPT: usize = 20;
@@ -42,7 +53,7 @@ pub const CHECKS_KEPT: usize = 20;
 /// A scope's rows, as this device last read them.
 #[derive(Clone, Debug, Default)]
 pub struct Status {
-    /// What each app's owners see of it here: who used it, its errors, its AI cost.
+    /// What each app's owners see of it here: who used it, its error fingerprints, its AI cost.
     pub insights: BTreeMap<String, Insights>,
     /// Each schedule's latest runs here, oldest first, by (app, schedule).
     pub runs: BTreeMap<(String, String), Vec<Run>>,
@@ -65,8 +76,8 @@ pub struct Status {
 pub struct Insights {
     /// By (user, client): the days they used it, when last, and the agent last named.
     pub used: BTreeMap<(String, String), Used>,
-    /// By (tool, error): how often, first and last, and by whom last.
-    pub errors: BTreeMap<(String, String), Failed>,
+    /// By (tool, fingerprint).
+    pub errors: BTreeMap<(String, String), Fingerprint>,
     /// By model: dollars, tokens in and out, and calls.
     pub cost: BTreeMap<String, Cost>,
 }
@@ -79,11 +90,15 @@ pub struct Used {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Failed {
+pub struct Fingerprint {
+    pub kind: String,
+    pub frame: String,
+    pub build: String,
+    /// `caller` or `internal`; none for what was kept before faults were.
+    pub fault: Option<String>,
     pub count: u64,
     pub first: u64,
     pub last: u64,
-    pub user: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -143,20 +158,21 @@ pub struct CheckRun {
 pub enum Said {
     /// A call of `app` by `user` from `client` (`agent` naming who asked through it), on `day`.
     Used { app: String, user: String, client: String, agent: Option<String>, day: u64 },
-    Failed { app: String, tool: String, error: String, user: String },
     Cost { app: String, model: String, usd: f64, input: u64, output: u64 },
     Ran { app: String, schedule: String, run: Run },
     Build { device: Key, build: String, target: String },
     BackedUp(BackupRun),
     Alerted { place: String },
     Checked(CheckRun),
+    /// What this device has to say of how things went, and the builds still running, whose fingerprints stay.
+    Insights { batch: crate::insights::Batch, live: Vec<String> },
 }
 
 impl Node {
     /// Changes a scope's rows, then reads them back.
     pub(super) async fn say(&self, scope: &Scope, said: Said) -> Result<()> {
         let now = now_ms();
-        let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await?;
+        let db = self.node_database(scope).await?;
         // As every write is, so a step that says the log may be frozen is answered, not the end of every row here.
         self.write_in(scope, &mut *db.lock().await, &self.bucket()?, |c| {
             let ex = |sql: &str, params: &[Value]| crate::database::stored::execute(c, sql, params).map(|_| ());
@@ -165,11 +181,6 @@ impl Node {
                     "insert into used values (?, ?, ?, 1, ?, ?, ?) on conflict (app, user, client) do update set
                        days = days + (excluded.day > day), day = max(day, excluded.day), last = max(last, excluded.last), agent = coalesce(excluded.agent, agent)",
                     &[json!(app), json!(user), json!(client), json!(day), json!(now), json!(agent)],
-                ),
-                Said::Failed { app, tool, error, user } => ex(
-                    "insert into errors values (?, ?, ?, 1, ?, ?, ?) on conflict (app, tool, error) do update set
-                       count = count + 1, first = min(first, excluded.first), last = max(last, excluded.last), user = excluded.user",
-                    &[json!(app), json!(tool), json!(error), json!(now), json!(now), json!(user)],
                 ),
                 Said::Cost { app, model, usd, input, output } => ex(
                     "insert into cost values (?, ?, ?, ?, ?, 1) on conflict (app, model) do update set
@@ -205,14 +216,20 @@ impl Node {
                     ex("insert or replace into checks values (?, ?, ?, ?, ?)", &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.report.to_string())])?;
                     ex("delete from checks where place = ? and time not in (select time from checks where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(CHECKS_KEPT)])
                 }
+                Said::Insights { batch, live } => crate::insights::store::write(c, batch, now, live),
             }
         })
         .await?;
         self.read_status(scope).await
     }
 
+    /// A scope's node database, brought to its schema: what `say` and insights write and read.
+    pub(super) async fn node_database(&self, scope: &Scope) -> Result<Arc<tokio::sync::Mutex<Db>>> {
+        self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await
+    }
+
     pub(super) async fn read_status(&self, scope: &Scope) -> Result<()> {
-        let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await?;
+        let db = self.node_database(scope).await?;
         let mut db = db.lock().await;
         db.catch_up(&self.bucket()?).await?;
         let rows = |sql: &str| db.query(sql, &[]);
@@ -224,9 +241,9 @@ impl Node {
             let used = Used { days: n(&r["days"]), last: n(&r["last"]), agent: r["agent"].as_str().map(str::to_string) };
             s.insights.entry(text(&r["app"])).or_default().used.insert((text(&r["user"]), text(&r["client"])), used);
         }
-        for r in rows("select * from errors")? {
-            let failed = Failed { count: n(&r["count"]), first: n(&r["first"]), last: n(&r["last"]), user: text(&r["user"]) };
-            s.insights.entry(text(&r["app"])).or_default().errors.insert((text(&r["tool"]), text(&r["error"])), failed);
+        for r in rows("select * from fingerprints")? {
+            let print = Fingerprint { kind: text(&r["type"]), frame: text(&r["frame"]), build: text(&r["build"]), fault: r["fault"].as_str().map(str::to_string), count: n(&r["count"]), first: n(&r["first"]), last: n(&r["last"]) };
+            s.insights.entry(text(&r["app"])).or_default().errors.insert((text(&r["tool"]), text(&r["fingerprint"])), print);
         }
         for r in rows("select * from cost")? {
             let cost = Cost { usd: r["usd"].as_f64().unwrap_or(0.0), input: n(&r["input"]), output: n(&r["output"]), calls: n(&r["calls"]) };
@@ -316,4 +333,22 @@ impl Node {
 /// A JSON column of a status row, `empty` when it's null.
 fn stored<T: serde::de::DeserializeOwned>(v: &Value, empty: &str) -> Result<T> {
     serde_json::from_str(v.as_str().unwrap_or(empty)).context("a stored status field isn't JSON: the status can't be read")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A failure kept before fingerprints keeps its app, tool, count and times, and never what it said.
+    #[test]
+    fn errors_move_to_fingerprints_without_their_text() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let before = SCHEMA.len() - 1;
+        db.execute_batch(&SCHEMA[..before].concat()).unwrap();
+        db.execute_batch("insert into errors values ('repos', 'get', 'no repo anna/secret', 2, 5, 9, 'u1'), ('repos', 'get', 'other', 1, 3, 4, 'u2');").unwrap();
+        db.execute_batch(SCHEMA[before]).unwrap();
+        let (kept, first, last): (i64, i64, i64) = db.query_row("select count, first, last from fingerprints where app = 'repos' and tool = 'get'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((kept, first, last), (3, 3, 9));
+        assert!(db.prepare("select * from errors").is_err(), "the table with the text in it is gone");
+    }
 }

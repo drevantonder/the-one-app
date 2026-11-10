@@ -153,7 +153,7 @@ impl Drop for Granted {
 }
 
 mod accept;
-mod record;
+pub(super) mod record;
 mod running;
 mod writes;
 
@@ -175,8 +175,6 @@ const PER_MIB: Duration = Duration::from_secs(1);
 const STOPPED_FOR: u64 = 15 * 60_000;
 /// How long a call's work may carry on after it returns (`ctx.waitUntil`).
 const LATER_LIMIT: Duration = Duration::from_secs(600);
-/// How many of an app's failures a device records an hour; the rest are only counted on the next hour's.
-const FAILURES_KEPT: u32 = 30;
 /// How many app-to-app calls deep a call may be: a user's call of A, A's of B, B's of C, C's of D.
 pub const MAX_DEPTH: u32 = 3;
 /// How many calls an app may make of other apps, or runs of its schedules, a minute on one device.
@@ -190,8 +188,6 @@ pub(super) struct State {
     later: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     /// Who used which app today from which client, as recorded here: (app, user, client, day).
     seen: Mutex<std::collections::HashSet<(String, String, String, u64)>>,
-    /// How many failures of each app were recorded here each hour.
-    failures: Mutex<HashMap<(String, u64), u32>>,
 }
 
 /// How long an app's prompt hook may take before it's left out: the agent's harness waits for them all.
@@ -653,15 +649,24 @@ impl Node {
         let req = &self.resolve(req.clone());
         let limit = self.limit(req).await;
         let writing = AtomicBool::new(false);
-        let result = unless_writing(tokio::time::Instant::now() + limit, &writing, self.run_here(req, me, limit, &writing)).await;
-        Ok(match result {
+        let call = self.begin_call();
+        let result = trace::within(Some(call.trace.clone()), unless_writing(tokio::time::Instant::now() + limit, &writing, Box::pin(self.run_here(req, me, limit, &writing)))).await;
+        let reply = match result {
             Some(Ok(reply)) => reply,
             Some(Err(err)) => match err.downcast::<crate::keys::Needs>() {
-                Ok(need) => return Err(need),
+                Ok(need) => {
+                    call.leave();
+                    return Err(need);
+                }
                 Err(err) => Reply::failed(&err),
             },
-            None => Reply::error(stopped(limit)),
-        })
+            None => {
+                call.trace.stage_is(crate::insights::stage::LIMIT);
+                Reply::error(stopped(limit))
+            }
+        };
+        self.finish_call(call, req, me, &reply).await;
+        Ok(reply)
     }
 
     /// How long a call may run: an app's, CALL_LIMIT; a service's, and that of an app that uses services or other apps
@@ -709,10 +714,10 @@ impl Node {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest version yet", req.app)));
         }
         if self.deleted(&req.app) {
-            return Ok(Reply::error(format!("{title} was deleted: its owners can restore it from Recently Deleted in the App Store")));
+            return Ok(Reply::Error(format!("{title} was deleted: its owners can restore it from Recently Deleted in the App Store"), Some(crate::protocol::code::APP_DELETED.into())));
         }
         if let Some(why) = self.stopped(&req.app) {
-            self.record(&req.app, req, me, Some(&why));
+            trace::stage(crate::insights::stage::GUARD);
             return Ok(Reply::error(why));
         }
         // A tool of a lab that's off isn't there.
@@ -730,6 +735,7 @@ impl Node {
             want.extend(scopes.iter().map(|s| (s.clone(), scopes::APP, scopes::CoreDb::Vault.name())));
         }
         let checking = Instant::now();
+        trace::stage(crate::insights::stage::KEYS);
         self.needs(me, &want).await?;
         trace::note(json!({ "step": "keys" }), checking.elapsed());
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
@@ -739,10 +745,11 @@ impl Node {
             if !reads {
                 let base = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
                 let leasing = Instant::now();
+                trace::stage(crate::insights::stage::LEASE);
                 let taken = self.take_lease(&base).await?;
                 trace::note(json!({ "step": "lease" }), leasing.elapsed());
                 let Some(taken) = taken else {
-                    return Ok(Reply::error("This may already be done: it ran on another device, whose answer was lost. Check before trying again."));
+                    return Ok(Reply::Error("This may already be done: it ran on another device, whose answer was lost. Check before trying again.".into(), Some(crate::protocol::code::ALREADY.into())));
                 };
                 lease = Some(taken);
             }
@@ -754,15 +761,18 @@ impl Node {
         // stopped; then its steps are written whatever happens to whoever's waiting.
         let running = Instant::now();
         let answered = AtomicBool::new(false);
+        trace::stage(crate::insights::stage::RUN);
         let ran = unless_writing(deadline, writing, async {
             let ran = self.0.apps.call(&req.app, &req.tool, input, &ctx, deadline.saturating_duration_since(tokio::time::Instant::now())).await;
             answered.store(true, Ordering::Relaxed);
             let mut outcome = ran?;
             trace::note(req.named(json!({ "step": "run" })), running.elapsed());
             let preparing = Instant::now();
+            trace::stage(crate::insights::stage::PREPARE);
             let prepared = self.prepare_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
             trace::note(json!({ "step": "prepare" }), preparing.elapsed());
             writing.store(true, Ordering::Relaxed);
+            trace::stage(crate::insights::stage::WRITE);
             let writing_at = Instant::now();
             let (node, app, scopes, me) = (self.clone(), req.app.clone(), scopes.clone(), me.clone());
             let traced = trace::current();
@@ -771,7 +781,10 @@ impl Node {
             anyhow::Ok(outcome)
         })
         .await
-        .unwrap_or_else(|| Err(anyhow!(stopped(limit))));
+        .unwrap_or_else(|| {
+            trace::stage(crate::insights::stage::LIMIT);
+            Err(anyhow!(stopped(limit)))
+        });
         let outcome = match ran {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -782,11 +795,10 @@ impl Node {
                 {
                     tracing::warn!("saying a call failed, so it may run again: {err:#}");
                 }
-                self.record(&req.app, req, me, Some(&format!("{err:#}")));
                 return Err(err);
             }
         };
-        self.record(&req.app, req, me, None);
+        self.record(&req.app, req, me);
         // Its user using it here renews the app schedules that run it for them, as their other devices do themselves.
         if self.this_machine(me) {
             self.renew_app_schedules(&req.app);

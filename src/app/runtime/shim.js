@@ -342,8 +342,22 @@ async function handle(what, name, body, send, waitUntil, out) {
     return reply;
   } catch (err) {
     // An error with a `code` (`not_signed_in`, `refused`…: src/protocol.rs) says what kind it is, which callers act on.
-    return { error: String(err?.message ?? err), ...(typeof err?.code === "string" ? { code: err.code } : {}) };
+    return { error: String(err?.message ?? err), ...(typeof err?.code === "string" ? { code: err.code } : {}), exception: exception(err) };
   }
+}
+
+/// What insights keeps of a thrown error: its type and where it was thrown. Its message is what the app said and may hold
+/// anything, as the top of its stack repeats it, so frames are only read after that.
+function exception(err) {
+  const stack = String(err?.stack ?? "");
+  const message = String(err?.message ?? "");
+  const after = message && stack.includes(message) ? stack.slice(stack.indexOf(message) + message.length) : stack;
+  const frames = [];
+  for (const line of after.split("\n")) {
+    const at = /^\s+at (?:.*\()?([\w./-]+):(\d+):(\d+)\)?$/.exec(line);
+    if (at) frames.push({ file: at[1], line: Number(at[2]), col: Number(at[3]) });
+  }
+  return { type: String(err?.name ?? "Error"), frames: frames.slice(0, 8) };
 }
 
 export default {

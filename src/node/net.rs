@@ -301,13 +301,15 @@ impl Node {
                     Err(err) => return tracing::debug!("what {} sent: {err:#}", short(&remote)),
                 };
                 let answer = match msg["kind"].as_str() {
-                    Some(M::ASK) if msg["body"]["trace"] == true => {
-                        let t = trace::Trace::new();
+                    Some(M::ASK) => {
+                        let asked = msg["body"]["trace"] == true;
+                        let t = trace::Trace::continuing(asked, msg["body"]["traceparent"].as_str());
                         let mut answer = trace::within(Some(t.clone()), node.accept_call(remote, &msg["body"]["call"])).await.json();
-                        answer["trace"] = t.done(&node.device_name());
+                        if asked {
+                            answer["trace"] = t.done(&node.device_name());
+                        }
                         answer
                     }
-                    Some(M::ASK) => node.accept_call(remote, &msg["body"]["call"]).await.json(),
                     Some(M::HELLO) => node.hello_from(&remote, &msg["body"]).map(|()| Value::Null).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
                     Some(M::CHANGED) => {
                         node.changed_from(&msg["body"]);
@@ -741,8 +743,14 @@ impl Node {
     /// Asks another device to run a call, waiting `limit` for its answer. An error that's a `NotThere` means it never
     /// reached that device.
     pub(super) async fn ask(&self, to: Key, call: Value, limit: Duration) -> Result<Value> {
-        // A traced request asks that device for its own part too.
-        let body = if trace::on() { json!({ "call": call, "trace": true }) } else { json!({ "call": call }) };
+        // A traced request asks that device for its own part too, and any call says whose span it's under.
+        let mut body = json!({ "call": call });
+        if trace::on() {
+            body["trace"] = json!(true);
+        }
+        if let Some(parent) = trace::traceparent() {
+            body["traceparent"] = json!(parent);
+        }
         self.send(&to, M::ASK, &body, true, limit).await
     }
 

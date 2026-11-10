@@ -44,6 +44,8 @@ pub(crate) mod releases;
 mod scheduled;
 pub(crate) mod screens;
 mod sessions;
+#[path = "insights/node.rs"]
+mod insights;
 pub use databases::NotGiven;
 pub use net::{alpn, relay, service_alpn};
 pub use calls::{CallRequest, Elsewhere, Grant};
@@ -191,6 +193,7 @@ pub struct Inner {
     /// The port apps' requests go out through.
     outbound: u16,
     calls: calls::State,
+    insights: insights::State,
     backups: backups::State,
     blobs: blobs::State,
     databases: databases::State,
@@ -278,6 +281,7 @@ impl Node {
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             calls: Default::default(),
+            insights: Default::default(),
             backups: Default::default(),
             blobs: Default::default(),
             databases: Default::default(),
@@ -331,6 +335,7 @@ impl Node {
         tokio::spawn(node.clone().schedule_loop());
         tokio::spawn(node.clone().pull_loop());
         tokio::spawn(node.clone().invites_loop());
+        tokio::spawn(node.clone().insights_loop());
         let worker = node.clone();
         tokio::spawn(async move {
             loop {

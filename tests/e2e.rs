@@ -622,6 +622,25 @@ async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
     assert!(!said.contains("private thought") && !said.contains(&a.user().unwrap()), "a trace holds names and timings alone: {said}");
 }
 
+/// What insights keeps is names and numbers: a call's arguments, and what an app says when it fails, are the caller's and
+/// the app's own, and go nowhere it can be read.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_calls_arguments_and_an_apps_error_never_reach_what_insights_keeps() {
+    let a = start("insights").await;
+    create(&a, "Home", "Andre").await;
+    add_notes(&a).await;
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "a private thought" }))).await.is_ok()).await;
+    let failed = a.call(notes("fail", json!({ "text": "a private thought" }))).await.unwrap_err();
+    assert!(format!("{failed:#}").contains("a private thought"), "the caller still reads it: {failed:#}");
+    let kept = a.insights(&me, &one::insights::Ask { limit: 500, ..Default::default() }).await.unwrap();
+    let said = kept.to_string();
+    assert!(kept["signals"].as_array().unwrap().iter().any(|s| s["name"] == "notes.fail" && s["status"] == "error" && s["fault"] == "caller"), "{said}");
+    assert!(kept["fingerprints"].as_array().unwrap().iter().any(|p| p["app"] == "notes" && p["tool"] == "fail" && p["count"] == 1), "{said}");
+    assert!(kept["rollups"].as_array().unwrap().iter().any(|r| r["name"] == "notes.post" && r["count"] == 1), "{said}");
+    assert!(!said.contains("private thought") && !said.contains(&a.user().unwrap()), "only names and numbers: {said}");
+}
+
 /// A device's log is read over the network by whoever may remove the device (its user, and the network's admins), never
 /// by another member, and what's returned is capped.
 #[tokio::test(flavor = "multi_thread")]

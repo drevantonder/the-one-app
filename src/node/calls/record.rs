@@ -1,52 +1,44 @@
-//! How each app's calls went here: loop guards that stop an app, its failures recorded, and what its users see of them.
+//! How each app's calls went here: loop guards that stop an app, who used it, and what its users see of that.
 
 use super::*;
 
 impl Node {
-    /// Records, for an app's owners, a call that ran here: the first each day by each user from each client
-    /// (`used`), and every failure (`failed`), at most `FAILURES_KEPT` an hour per app on this device. They go in the
-    /// owner's scope when the caller may use it and this device holds it, else in `global`; in the background.
-    pub(in crate::node) fn record(&self, app: &str, req: &CallRequest, me: &Caller, error: Option<&str>) {
-        let now = now_ms();
+    /// Records, for an app's owners, who used it: the first call each day by each user from each client (`used`).
+    pub(in crate::node) fn record(&self, app: &str, req: &CallRequest, me: &Caller) {
         let client = req.client.clone().unwrap_or_else(|| "api".into());
-        let said = match error {
-            None => {
-                let day = now / 86_400_000;
-                if !self.0.calls.seen.lock().unwrap().insert((app.to_string(), me.user.clone(), client.clone(), day)) {
-                    return;
-                }
-                status::Said::Used { app: app.into(), user: me.user.clone(), client, agent: me.agent.clone(), day }
-            }
-            Some(error) => {
-                let hour = now / 3_600_000;
-                let mut failures = self.0.calls.failures.lock().unwrap();
-                let n = failures.entry((app.to_string(), hour)).or_default();
-                *n += 1;
-                if *n > FAILURES_KEPT {
-                    return;
-                }
-                let error: String = error.lines().next().unwrap_or("").chars().take(300).collect();
-                status::Said::Failed { app: app.into(), tool: req.runs().to_string(), error, user: me.user.clone() }
-            }
-        };
-        self.write_insight(app, me, said);
+        let day = now_ms() / 86_400_000;
+        if !self.0.calls.seen.lock().unwrap().insert((app.to_string(), me.user.clone(), client.clone(), day)) {
+            return;
+        }
+        self.write_insight(app, me, status::Said::Used { app: app.into(), user: me.user.clone(), client, agent: me.agent.clone(), day });
     }
 
-    /// Writes an insight about `app` for `me`'s call: in the app owner's scope when `me` may use it and this device
-    /// holds it, else in `global`; in the background.
-    pub(in crate::node) fn write_insight(&self, app: &str, me: &Caller, said: status::Said) {
-        let Ok(scope) = self.with(|i| {
+    /// Where what's said of `me`'s call of `app` goes: the owner's scope when `me` may use it and this device holds it, else
+    /// `global`, where a private app can't be named. `None` for no such app.
+    pub(in crate::node) fn destination(&self, app: &str, me: &Caller) -> Option<Destination> {
+        self.with(|i| {
             let m = i.r.db();
-            let owner = m.app(app)?.map(|a| a.owner).context("no such app")?;
+            let Some(owner) = m.app(app)?.map(|a| a.owner) else { return Ok(None) };
             let own = match owner {
                 Principal::User(u) => Scope::User(u),
                 Principal::Group(g) => Scope::Group(g),
                 _ => Scope::Global,
             };
-            Ok(if m.may(&me.user, "use", &scopes::object(&own)) && i.r.holds(&own) { own } else { Scope::Global })
-        }) else {
-            return;
-        };
+            let kind = trace::kind(&own);
+            Ok(Some(if m.may(&me.user, "use", &scopes::object(&own)) && i.r.holds(&own) {
+                Destination { scope: own, named: true, kind }
+            } else {
+                Destination { named: own == Scope::Global, scope: Scope::Global, kind }
+            }))
+        })
+        .ok()
+        .flatten()
+    }
+
+    /// Writes an insight about `app` for `me`'s call, in the background: one that names a user or a private app, where
+    /// `destination` says, and nowhere else, as `global` holds neither.
+    pub(in crate::node) fn write_insight(&self, app: &str, me: &Caller, said: status::Said) {
+        let Some(Destination { scope, named: true, .. }) = self.destination(app, me) else { return };
         let node = self.clone();
         tokio::spawn(async move {
             if let Err(err) = node.say(&scope, said).await {
@@ -66,7 +58,7 @@ impl Node {
             }
             let name = |u: &str| user_name(m, u);
             let mut users: BTreeMap<(String, String), (u64, u64, Option<String>)> = BTreeMap::new();
-            let mut errors: BTreeMap<(String, String), (u64, u64, u64, String)> = BTreeMap::new();
+            let mut errors: BTreeMap<(String, String), status::Fingerprint> = BTreeMap::new();
             let mut cost: BTreeMap<String, (f64, u64, u64, u64)> = BTreeMap::new();
             for (log, status) in &i.status {
                 let Ok(scope) = Scope::parse(log) else { continue };
@@ -80,13 +72,10 @@ impl Node {
                     }
                 }
                 for (key, e) in &ins.errors {
-                    let x = errors.entry(key.clone()).or_insert((0, u64::MAX, 0, String::new()));
-                    x.0 += e.count;
-                    x.1 = x.1.min(e.first);
-                    if e.last >= x.2 {
-                        x.2 = e.last;
-                        x.3 = name(&e.user)?;
-                    }
+                    let x = errors.entry(key.clone()).or_insert_with(|| status::Fingerprint { first: u64::MAX, ..e.clone() });
+                    x.count += e.count;
+                    x.first = x.first.min(e.first);
+                    x.last = x.last.max(e.last);
                 }
                 for (model, c) in &ins.cost {
                     let x = cost.entry(model.clone()).or_default();
@@ -101,7 +90,7 @@ impl Node {
                 usage.push(json!({ "user": name(&u)?, "client": client, "agent": agent, "days": days, "last": last }));
             }
             usage.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
-            let mut errors: Vec<Value> = errors.into_iter().map(|((tool, error), (count, first, last, user))| json!({ "tool": tool, "error": error, "count": count, "first": first, "last": last, "user": user })).collect();
+            let mut errors: Vec<Value> = errors.into_iter().map(|((tool, _), e)| json!({ "tool": tool, "error": if e.frame == "migrated" { e.kind.clone() } else { format!("{} at {}", e.kind, e.frame) }, "build": e.build, "fault": e.fault, "count": e.count, "first": e.first, "last": e.last })).collect();
             errors.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
             let cost: Vec<Value> = cost.into_iter().map(|(model, (usd, input, output, calls))| json!({ "model": model, "usd": usd, "input": input, "output": output, "calls": calls })).collect();
             Ok(Some(json!({ "usage": usage, "errors": errors, "cost": cost })))
@@ -145,6 +134,15 @@ impl Node {
         g.stopped.remove(app);
         None
     }
+}
+
+/// Where what's said of a call goes.
+pub(in crate::node) struct Destination {
+    pub scope: Scope,
+    /// Whether it may name the app there.
+    pub named: bool,
+    /// The kind of the app's owner's scope.
+    pub kind: &'static str,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
