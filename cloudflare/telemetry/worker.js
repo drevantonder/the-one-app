@@ -20,6 +20,8 @@ import { TELEMETRY } from "../shared/protocol.js";
 
 /// What Basin's own limit on a request (5 MB) leaves room for.
 const MOST_BYTES = 4 << 20;
+/// Cloudflare's export hands over ~5 MB of OTLP/JSON at a time, unpacked by the time it's read, and resends the same batch for as long as it's refused.
+const MOST_EXPORT = 32 << 20;
 const MOST_ROWS = 5000;
 const MOST_ATTRS = 16 * 1024;
 const MOST_SERVICES = 1000;
@@ -160,7 +162,7 @@ async function otlp(request, env) {
     refuse(401, "only Cloudflare's export of the Workers' traces, with its token");
   }
   const gzipped = request.headers.get("content-encoding") === "gzip" && request.body;
-  const body = await textOf(gzipped ? new Response(request.body.pipeThrough(new DecompressionStream("gzip"))) : request, MOST_BYTES).catch(() => undefined);
+  const body = await textOf(gzipped ? new Response(request.body.pipeThrough(new DecompressionStream("gzip"))) : request, MOST_EXPORT).catch(() => undefined);
   if (body === null) refuse(413, "that's too big");
   let parsed;
   try {
