@@ -131,6 +131,8 @@ export function browser() {
     panel: false,
     client: () => "web",
     behind: () => false,
+    label: () => "",
+    mac: () => false,
     phone: () => false,
     address: () => location.origin,
     /// Back from signing in (`/callback`): its code becomes tokens, and the page goes where it was. → the problem, if

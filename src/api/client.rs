@@ -153,6 +153,7 @@ pub fn answered(status: u16, body: Value, home: &std::path::Path) -> Result<Valu
     let code = body.get("code").and_then(Value::as_str).map(str::to_string);
     let err = match code.as_deref() {
         Some(crate::protocol::code::NOT_THIS_MACHINE) => super::token_refused(home),
+        Some(crate::protocol::code::UPDATE) => format!("{} Run {} update.", err.as_str().unwrap_or("failed"), crate::config::CLI),
         _ => err.as_str().unwrap_or("failed").to_string(),
     };
     Err(match matches!(status, 401 | 403) || code.as_deref() == Some(crate::protocol::code::REFUSED) {

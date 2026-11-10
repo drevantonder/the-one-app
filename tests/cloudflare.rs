@@ -1384,7 +1384,7 @@ mod relay {
             // And which of them are on the relay's network now, which a client races first.
             for body in [by_session.clone(), asked.clone()] {
                 let (status, said) = computes(body);
-                assert_eq!((status, said), (200, json!({ "computes": [hex(&first)], "online": [hex(&first)] })));
+                assert_eq!((status, said), (200, json!({ "computes": [hex(&first)], "online": [hex(&first)], "versions": {} })));
             }
             // Each request is taken once; a certificate alone, or one signed by a key it doesn't name, gets nothing; a
             // clock that's off isn't told it's out (403), so it keeps the nodes it knows.

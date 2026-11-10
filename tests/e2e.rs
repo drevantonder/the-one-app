@@ -256,6 +256,26 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// A device is approved only by its user's own device, or a newcomer's by the admin whose invite their proof was made
 /// with; a device removed opens no epoch made after.
 #[tokio::test(flavor = "multi_thread")]
+async fn only_someone_who_may_remove_a_device_can_ask_it_to_update() {
+    let secret: [u8; 32] = rand::random();
+    let dir = temp("update-asked");
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&secret), "name": "a" }).to_string()).unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
+    create(&a, "n", "Ann").await;
+    let me = ed25519_dalek::SigningKey::from_bytes(&secret);
+    let sam = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let_sam_in(&a, &sam).await;
+    let stranger = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let ask = |by: &ed25519_dalek::SigningKey, of: [u8; 32]| one::keys::signed_request(by, one::protocol::RELAY, json!({ "update": one::keys::hex(&of) }), one::node::now_ms());
+    assert_eq!(a.who_asked_to_update(&ask(&me, a.id())).unwrap(), "a", "its own user may");
+    assert!(a.who_asked_to_update(&ask(&sam, a.id())).is_err(), "someone else's device may not");
+    assert!(a.who_asked_to_update(&ask(&stranger, a.id())).is_err(), "nor a device who's who doesn't list");
+    assert!(a.who_asked_to_update(&ask(&me, sam.verifying_key().to_bytes())).is_err(), "an ask for another device isn't for this one");
+    let forged = { let mut f = ask(&me, a.id()); f["update"] = json!(one::keys::hex(&rand::random::<[u8; 32]>())); f };
+    assert!(a.who_asked_to_update(&forged).is_err(), "a change to the ask breaks its signature");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     let dir = temp("approve");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();

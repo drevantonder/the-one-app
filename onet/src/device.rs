@@ -272,13 +272,14 @@ impl Device {
     /// what they may do; and those on it now.
     async fn computes(&self) -> Result<Option<(Vec<[u8; 32]>, Vec<[u8; 32]>)>, Error> {
         let url = format!("{}/relay/computes", self.address);
+        let asked = || json!({ "computes": true, "reads": one::database::READS, "version": one::protocol::version() });
         // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
         let mut at = keys::next_at(now());
-        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, json!({ "computes": true, "reads": one::database::READS }), at))).await?;
+        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, asked(), at))).await?;
         if out["code"] == one::protocol::code::REPLAYED {
             tokio::time::sleep(keys::again_in(at)).await;
             at = keys::next_at(now());
-            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, json!({ "computes": true, "reads": one::database::READS }), at))).await?;
+            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, asked(), at))).await?;
         }
         // The relay answers 403 only for a key it doesn't let in.
         if status == 403 {

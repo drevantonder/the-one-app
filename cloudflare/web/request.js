@@ -1,12 +1,22 @@
 // The request path: a request to the user's nodes, as this device (the platform's `fetch`: in a browser, onet's
 // keyring in the SharedWorker, net.js; in the app, its own client), asked again while no node answers, watched for
 // this device being taken out, and traced in Developer mode.
-import { HEADER } from "../shared/protocol.js";
+import { CODES, HEADER } from "../shared/protocol.js";
 import { platform } from "./platform.js";
 import { recording } from "./demo.js";
 import { tried } from "./insights.js";
 
 export class NodeError extends Error {}
+
+/// Whether a node has refused this client as too old to read what the network has moved on to, and who to tell.
+export const tooOld = {
+  now: false,
+  set() {
+    if (this.now) return;
+    this.now = true;
+    this.changed?.();
+  },
+};
 export const UNANSWERED = "Your devices aren’t answering. Check that one is on and online.";
 /// How long a request is asked again after no node answered. It doesn't limit one a node is working on.
 const ASKED_AGAIN_FOR = 20_000;
@@ -84,6 +94,7 @@ async function sending(url, method, body, raw, signal, trace) {
     }
     if (raw && r.ok) return r;
     const out = await r.json().catch(() => null);
+    if (out?.code === CODES.update) tooOld.set();
     if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again.")), { status: r.status, code: out?.code });
     return out;
   }

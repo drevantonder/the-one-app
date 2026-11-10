@@ -74,11 +74,13 @@ function signInLabel(a) {
 const asked = {}
 // Try Again's restart can come and go between two draws, so the same problem a few seconds on is its answer.
 const LATE = 30_000, AGAIN = 10_000
+// How long a device has to come back on a new version before it counts as not having.
+const UPDATE_WITHIN = 5 * 60_000
 
 // What the screen knows of the devices, from what the node says: each of theirs with what's on it, their passkeys, and
 // what each part of a device is doing. `again` gives what Try Again runs.
 function model(x, again) {
-  const { state, device, apps, seen, seenRead } = x
+  const { state, device, apps, seen, seenRead, versions } = x
   const me = state.user?.id
   const admin = state.user?.role === "admin"
   const appOf = (name) => apps.find((a) => a.name === name)
@@ -129,6 +131,7 @@ function model(x, again) {
       c.signIn = now[0] || null
       c.old = now.slice(1)
       c.seen = Math.max(0, ...c.keys.map((k) => seen[k] || 0))
+      c.version = versions[c.node?.key] || versions[c.signIn?.key] || null
       c.icon = c.node
         ? glyph(c.node.kind === "laptop" ? "laptop" : /apple|windows/.test(c.node.target || "") ? "desktop" : "hard-drives", osOf(c.node.target, c.name), !c.online)
         : iconOf({ ...c.signIn, name: c.signIn?.name || c.name })
@@ -231,6 +234,8 @@ function Devices() {
   // Each time one opens it starts afresh.
   const [dialog, show, setDialogOpen] = useDialog()
   const [busyCode, setBusyCode] = useState("")
+  // The devices being asked to update.
+  const [updating, setUpdating] = useState({})
   const [, bump] = useState(0)
   const apps = useRef([])
   const dragging = useRef(false)
@@ -239,8 +244,9 @@ function Devices() {
     try {
       const [state, device] = await Promise.all([api("GET", "/api/state"), one.device()])
       // Who waits, from a node or the web client itself; one with no code to compare is an older node's, not shown.
-      let waiting = [], seen = null
+      let waiting = [], seen = null, versions = {}
       const asks = [
+        api("POST", "/api/devices/versions", {}).then((v) => (versions = v), () => {}),
         !apps.current.length ? api("GET", "/api/apps").then((a) => (apps.current = a), () => {}) : null,
         api("POST", "/api/devices/requests", {}).then((w) => (waiting = w.filter((r) => r.code)), () => {}),
       ]
@@ -250,7 +256,7 @@ function Devices() {
       await Promise.all(asks)
       // Not while they're dragging.
       if (dragging.current) return
-      setData({ state, device, apps: apps.current, waiting, seen: seen || {}, seenRead: seen !== null })
+      setData({ state, device, apps: apps.current, waiting, seen: seen || {}, seenRead: seen !== null, versions })
       setProblem(null)
       return { device, waiting }
     } catch (e) {
@@ -416,6 +422,42 @@ function Devices() {
     if (await one.alert({ title: `Sign Out of ${yours} on this device?`, action: "Sign Out", danger: true })) one.signOut()
   }
 
+  /// Asks each of `cards` in turn to take the newest version, going on only once the one before is back on it: one that
+  /// doesn't come back stops the rest, as whatever's wrong with it may be wrong with what they'd take too.
+  async function update(cards) {
+    setError("")
+    one.tap("medium")
+    for (const c of cards) {
+      setUpdating({ [c.node.key]: true })
+      try {
+        await api("POST", "/api/devices/update", { device: c.node.key })
+        if (!(await cameBack(c.node.key))) {
+          setError(`${c.name} didn’t come back on the new version.`)
+          one.tap("error")
+          break
+        }
+      } catch (err) {
+        setError(said(err))
+        one.tap("error")
+        break
+      }
+    }
+    setUpdating({})
+    await load()
+  }
+
+  /// Whether a device reports the version it was updated to within `UPDATE_WITHIN`. It's away while it restarts, and
+  /// this device too if it's the one updating, so a question that fails only means it isn't back yet.
+  async function cameBack(key) {
+    const until = Date.now() + UPDATE_WITHIN
+    while (Date.now() < until) {
+      await new Promise((done) => setTimeout(done, 3000))
+      const now = await api("POST", "/api/devices/versions", {}).catch(() => null)
+      if (now?.[key] && !now[key].behind) return true
+    }
+    return false
+  }
+
   /// A dot tapped: its problem opened or closed, or its part switched.
   function tapCell(key) {
     const ci = key.slice(0, key.indexOf(" ")), name = key.slice(key.indexOf(" ") + 1)
@@ -477,6 +519,8 @@ function Devices() {
             schedule={() => show({ schedules: {} })}
             restore={() => show({ restore: {} })}
             act={act}
+            updating={updating}
+            update={update}
           />
         )}
         {error && <Problem title={error} />}
@@ -615,7 +659,15 @@ function Scanned({ scan, done, cancel }) {
 
 // ---- Devices ----
 
-function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule, restore, act }) {
+// A phone's app comes from its store, so it says so instead of offering Update.
+const STORE = { iphone: "the App Store", android: "Google Play" }
+// A device's version, as a grey line says it.
+const versionLine = (c) => {
+  const store = STORE[c.signIn?.platform]
+  return [c.version && `Version ${c.version.version.slice(0, 7)}`, store && `Updates from ${store}`].filter(Boolean).join(" · ")
+}
+
+function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule, restore, act, updating, update }) {
   const { device, state } = data
   const { cards, passkeys, stale } = m.drawn
   const mine = cards.filter((c) => c.user === m.me)
@@ -630,9 +682,14 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
   }
   const holder = !!device.keys && !!state.network?.users?.find((u) => u.me)?.recovery_holder
   const side = scheduling || passkeys.length > 0 || recovery.length > 0 || holder
+  // Those a newer version is published for and that can hear the ask, this device first: a bad version is best found on the machine in front of you.
+  const behind = mine.filter((c) => c.node && c.online && c.version?.behind).sort((a, b) => b.me - a.me)
   return (
     <div className={cn("grid max-w-5xl items-start gap-x-8 gap-y-8", side && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]")}>
       <div className="flex min-w-0 flex-col gap-4">
+        {behind.length > 1 && (
+          <Button variant="outline" className="self-start" disabled={Object.keys(updating).length > 0} onClick={() => update(behind)}>Update All</Button>
+        )}
         {!!mine.length && (
           <List>
             {mine.map((c) => {
@@ -644,7 +701,12 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
                   key={c.id}
                   onContextMenu={(e) => (e.preventDefault(), menu(c, false, { x: e.clientX, y: e.clientY }))}
                 >
-                  <DeviceRow icon={c.icon} title={c.name} sub={sub}>
+                  <DeviceRow icon={c.icon} title={c.name} sub={[sub, versionLine(c)].filter(Boolean).join(" · ")}>
+                    {behind.includes(c) && (
+                      <Button variant="outline" size="sm" disabled={Object.keys(updating).length > 0} onClick={() => update([c])}>
+                        {updating[c.node.key] && <Spinner />}Update
+                      </Button>
+                    )}
                     {!!problems.length && (
                       <Button
                         variant="ghost"

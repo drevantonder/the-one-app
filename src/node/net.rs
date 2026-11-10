@@ -890,12 +890,16 @@ impl Node {
         let url = format!("{}/relay/computes", address.trim_end_matches('/'));
         let node = self.clone();
         tokio::spawn(async move {
-            let body = crate::keys::signed_request(&key, crate::protocol::RELAY, json!({ "computes": true, "reads": crate::database::READS }), crate::keys::next_at(now_ms()));
+            let body = crate::keys::signed_request(&key, crate::protocol::RELAY, json!({ "computes": true, "reads": crate::database::READS, "version": crate::protocol::version() }), crate::keys::next_at(now_ms()));
             let said = match post_relay(url, body).await {
                 Ok((200, said)) => said,
+                // Too old to be told anything else, it can still be asked to update.
+                Ok((426, said)) => return node.heard_ask(&said["asked"]),
                 Ok((code, _)) => return tracing::debug!("reading who's connected: the relay answered {code}"),
                 Err(err) => return tracing::debug!("reading who's connected: {err:#}"),
             };
+            node.heard_ask(&said["asked"]);
+            node.with_or((), |i| Ok(i.versions = said["versions"].clone()));
             let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| crate::keys::unhex(k.as_str()?).ok()).collect();
             let was = node.with_or(None, |i| {
                 let was = std::mem::replace(&mut i.connected, connected.clone());

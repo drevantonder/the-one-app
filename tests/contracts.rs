@@ -1021,3 +1021,46 @@ fn a_screens_error_crosses_from_the_bridge_without_what_it_said() {
     assert_eq!(kept[1].frames, ["app.js:1:2"]);
     assert_eq!(kept[2].frames, ["b.js:4:5", "srcdoc:6:7"]);
 }
+
+/// The body a device sends `POST /relay/computes`, what it's answered, and the signed ask it hears are frozen, as the
+/// signed record is: a device left behind must still be able to tell the relay what it's on and hear that it's been
+/// asked to update, whatever else has changed.
+#[test]
+fn the_relay_keeps_its_word_to_a_device_left_behind() {
+    use iroh::SecretKey;
+    let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
+    let hex = |k: &SecretKey| data_encoding::HEXLOWER.encode(k.public().as_bytes());
+    let (admin, device) = (SecretKey::generate(), SecretKey::generate());
+    let k = crate::cloudflare::Workers::for_devices(vec![hex(&admin)]);
+    let address = k.address.replace("localhost", "127.0.0.1");
+    let clock = std::sync::atomic::AtomicU64::new(one::node::now_ms());
+    let at = || clock.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let tell = |by: &SecretKey, fields: Value| crate::cloudflare::post(&format!("{address}/relay/tell"), &[], keys::signed_request(&signer(by), "one/relay", fields, at()));
+    let computes = |by: &SecretKey, fields: Value| crate::cloudflare::post(&format!("{address}/relay/computes"), &[], keys::signed_request(&signer(by), "one/relay", fields, at()));
+    let hex_device = hex(&device);
+
+    assert_eq!(tell(&admin, json!({ "add": hex_device, "role": "client" })).0, 204);
+    let version = "abcdef123456 1700000000 x86_64-unknown-linux-gnu";
+    let (status, said) = computes(&device, json!({ "computes": true, "reads": one::database::READS, "version": version }));
+    assert_eq!((status, said.as_object().unwrap().keys().cloned().collect::<Vec<_>>()), (200, ["computes", "online", "versions"].map(String::from).to_vec()));
+    assert_eq!(said["versions"][&hex_device], version);
+
+    // The ask is left whole, signed by the asker, and heard once, even by a device too old to be told anything else.
+    let ask = keys::signed_request(&signer(&admin), "one/relay", json!({ "update": hex_device }), at());
+    assert_eq!(crate::cloudflare::post(&format!("{address}/relay/tell"), &[], ask.clone()).0, 204);
+    let older = "000000000000 1600000000 x86_64-unknown-linux-gnu";
+    let (status, said) = computes(&device, json!({ "computes": true, "reads": 0, "version": older }));
+    assert_eq!(status, 426, "{said}");
+    assert_eq!(said["code"], "update", "{said}");
+    assert_eq!(said["asked"], ask, "the ask as it was signed");
+    let (by, fields) = keys::check_request("one/relay", &said["asked"], at()).unwrap();
+    assert_eq!((data_encoding::HEXLOWER.encode(&by), fields["update"].clone()), (hex(&admin), json!(hex_device)));
+
+    // Its version was noted before it was told it's too old, and the ask is gone.
+    let (status, said) = computes(&admin, json!({ "computes": true, "reads": one::database::READS }));
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["versions"][&hex_device], older, "kept before the reads check");
+    assert!(said.get("asked").is_none());
+    assert!(computes(&device, json!({ "computes": true, "reads": one::database::READS, "version": version })).1.get("asked").is_none(), "heard once");
+    assert_eq!(tell(&device, json!({ "update": data_encoding::HEXLOWER.encode(&[9u8; 32]) })).0, 403, "an ask for no one on the list");
+}

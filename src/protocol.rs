@@ -99,6 +99,13 @@ pub const STEP_DIGITS: usize = 12;
 /// `/relay`, to the relay.
 pub const IROH_PATHS: [(&str, &str); 3] = [("relay", "/relay"), ("ping", "/ping"), ("portal", "/generate_204")];
 
+/// What this build says it is, in `POST /relay/computes` (`version`, frozen with it in `tests/contracts.rs`), so every
+/// client can show each device's version: `<commit> <committed> <target>`, the words a published build goes by in the
+/// signed record.
+pub fn version() -> String {
+    format!("{} {} {}", crate::config::BUILD, crate::config::COMMITTED, crate::config::TARGET)
+}
+
 /// What a request from a device that reads less of who's who than this build (`database::READS`) is refused with, status 426:
 /// `{yours}` is the network's name as users say it.
 pub const UPDATE_REFUSAL: &str = "Update this device: {yours}'s other devices have moved on to what this one doesn't read yet.";

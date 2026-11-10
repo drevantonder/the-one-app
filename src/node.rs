@@ -38,6 +38,7 @@ mod databases;
 pub mod devices;
 mod sync;
 mod net;
+mod versions;
 #[path = "onboarding/pairing.rs"]
 mod pairing;
 pub(crate) mod push;
@@ -115,6 +116,8 @@ struct Network {
     peers: HashMap<Key, Peer>,
     /// The devices connected to the relay, as it last said: `Network::online`.
     connected: std::collections::HashSet<Key>,
+    /// What each device told the relay it's on, as it last said: its key → `protocol::version`.
+    versions: Value,
     builds: HashMap<Key, release::Running>,
     /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
     /// last position read, and the database, once its anchor checked out here.

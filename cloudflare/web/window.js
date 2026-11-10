@@ -5,7 +5,7 @@
 import { offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { qrSvg } from "./qr.js";
-import { api, developer, fresh, retryWait, sleep } from "./request.js";
+import { api, developer, fresh, retryWait, sleep, tooOld } from "./request.js";
 import { back, closeTop, go, home, linked, own, route, setSection, sidebar, whenMoved } from "./routes.js";
 import { detail, devtools, hasScreen, openSheet, replacing, screen, setBarStart, tabWaiting, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
@@ -57,8 +57,19 @@ function countBadges(drawn) {
 /// A newer version of the client needs a newer app than this one, which stays on what it has.
 const barBackAt = (r) => (platform.phone() ? !home(r) : !!history.state?.back);
 
-const appBehind = () =>
-  platform.behind() ? h(ui.Problem, { quiet: true, title: `Update ${config().name}`, className: "max-w-none rounded-none border-0 border-b" }) : null;
+const appBehind = () => {
+  if (!platform.behind() && !tooOld.now) return null;
+  const device = (store.state?.network?.clients || []).find((c) => c.key === store.state?.me?.key)?.device;
+  const storeName = { iPhone: "the App Store", Android: "Google Play" }[platform.label()];
+  const action = platform.client() === "web" ? { label: "Update", run: () => location.reload() }
+    : device && !platform.mac() ? { label: "Update", run: () => api("/api/devices/update", { method: "POST", body: { device } }) }
+    : null;
+  const text = storeName ? `Update it from ${storeName}.` : action ? "It can’t read what your other devices have moved on to." : "Its next build is on the way.";
+  return h(ui.Problem, { quiet: true, title: "This device needs updating", text, action, className: "max-w-none rounded-none border-0 border-b" });
+};
+tooOld.changed = () => {
+  if (windowShown && !platform.panel) drawWindow();
+};
 
 function drawWindow() {
   windowShown = true;

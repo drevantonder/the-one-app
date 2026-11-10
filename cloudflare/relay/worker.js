@@ -26,12 +26,16 @@
 //
 // `POST /relay/computes` answers a request signed by a key on the list, or by a session's key with its certificate
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
-// endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; and `online`, those
-// of them connected here now and heard from lately, which a client races first and every node shows as online. 403 is only for a key that isn't let in; a request
+// endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; `online`, those
+// of them connected here now and heard from lately, which a client races first and every node shows as online; and
+// `versions`, each key's that said one, for every client to show. 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows. A device's own request
 // that says it reads less of who's who than this build (`reads`, protocol.js's `READS`; an older build's says
 // nothing) is 426, telling it to update. A browser's session runs the code the address serves, the newest, so it isn't
-// asked.
+// asked. A device's own request can carry `version` (`<commit> <committed> <target>`), kept here, and it's answered
+// with `asked`, what was left for it (`update` below), taken once. Both happen before the `reads` check, so a device
+// too old to be told anything else still hears. That body, and the signed ask, are frozen, as the signed record is
+// (`tests/contracts.rs`): a device left behind has to be able to read them.
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
 // shared/crypto.js, domain `one/relay`, each `(by, at)` taken once) with one of:
@@ -45,6 +49,9 @@
 // - `{ admins: { <key>: bool } }`: whether each key is an admin's now, by an admin's device, as who's who says (`Node::tell_roles`).
 // - `{ pairing: { hash, until } }`: the SHA-256 (hex) of a pairing code's ticket and until when it works (ms).
 // - `{ unpair }`: a pairing code's hash, to end it, by its maker or an admin.
+// - `{ update }`: a key on the list, whose device this signed ask is left for, whole, until it next asks for the computes:
+//   any key on the list may leave one, the receiver checks who signed it and that they may remove it, and it can only
+//   ever bring the signed record's newest build. Another replaces it.
 //
 // One endpoint isn't a socket: the Cloudflare node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
@@ -69,6 +76,7 @@ initSync({ module: wasm });
 /// The WebSocket subprotocol iroh's endpoints ask for: version 2 of its relay protocol.
 const PROTOCOL = "iroh-relay-v2";
 const TELL_BYTES = 4096;
+const VERSION_BYTES = 128;
 const PROVE_WITHIN = 30_000;
 const UNPROVEN_PER_PLACE = 8;
 const UNPROVEN_PER_SITE = 32;
@@ -133,7 +141,8 @@ export default class extends WorkerEntrypoint {
       if (body.byteLength > TELL_BYTES) throw new Error("that's too big");
       const { by, fields } = await checkRequest(RELAY, JSON.parse(new TextDecoder().decode(body)));
       if (fields[what] !== true) throw new Error(`ask with { ${what}: true }, signed`);
-      asked = { by, at: fields.at, reads: Number.isSafeInteger(fields.reads) ? fields.reads : 0 };
+      if (fields.version !== undefined && (typeof fields.version !== "string" || fields.version.length > VERSION_BYTES)) throw new Error("a version is short text");
+      asked = { by, at: fields.at, reads: Number.isSafeInteger(fields.reads) ? fields.reads : 0, version: fields.version };
       if (fields.certificate !== undefined) {
         const session = await checkCertificate(fields.certificate);
         if (session.endpoint !== by) throw new Error("sign with the key your certificate names");
@@ -143,8 +152,8 @@ export default class extends WorkerEntrypoint {
       return refusal(400, String(e.message || e));
     }
     const said = await this.relay()[what](asked.by, asked);
-    if (said?.update) return refusal(426, updateRefusal(this.env.YOURS));
-    if (what === "computes" && Array.isArray(said)) return Response.json({ computes: said, online: await this.relay().connected(said) });
+    if (said?.update) return refusal(426, { error: updateRefusal(this.env.YOURS), code: CODES.update, ...(said.asked && { asked: said.asked }) });
+    if (what === "computes" && said?.computes) return Response.json({ ...said, online: await this.relay().connected(said.computes) });
     if (said?.code) return refusal(400, said);
     if (said && typeof said === "object") return Response.json({ [what]: said });
     return said === null ? refusal(403, `the relay takes only ${this.env.YOURS}'s devices`) : refusal(400, said);
@@ -209,10 +218,6 @@ export class McpDevices extends WorkerEntrypoint {
     return isKey(key) ? relay(this.env).allowed(key) : null;
   }
 
-  computes(by) {
-    return relay(this.env).computes(by);
-  }
-
   connected(keys) {
     return Array.isArray(keys) ? relay(this.env).connected(keys.filter(isKey)) : [];
   }
@@ -232,15 +237,18 @@ export class Relay extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, by TEXT NOT NULL, admin INTEGER NOT NULL, role TEXT NOT NULL);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, by TEXT NOT NULL, admin INTEGER NOT NULL, role TEXT NOT NULL, version TEXT);
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, until INTEGER NOT NULL, by TEXT NOT NULL, key TEXT);
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
       CREATE TABLE IF NOT EXISTS proofs (nonce TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');
-      CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS asks (key TEXT PRIMARY KEY, signed TEXT NOT NULL);`);
+    // A network's relay from before devices said their versions has no column for them.
+    if (!this.sql.exec("PRAGMA table_info(keys)").toArray().some((c) => c.name === "version")) this.sql.exec("ALTER TABLE keys ADD COLUMN version TEXT");
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
       for (const { key, role, admin } of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
-        if (isKey(key) && rolesOf(role).every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'network', ?, ?)", key, admin === true ? 1 : 0, role);
+        if (isKey(key) && rolesOf(role).every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys (key, by, admin, role) VALUES (?, 'network', ?, ?)", key, admin === true ? 1 : 0, role);
       }
     }
     // The recovery key, as each deploy says (a network from before had it as any client).
@@ -337,9 +345,19 @@ export class Relay extends DurableObject {
   computes(by, asked) {
     const may = this.asks(by, asked);
     if (may !== true) return may;
-    if (asked && !asked.session && behind(asked.reads)) return { update: true };
+    // A device's own request says what it's on and hears what's been left for it, whatever else it's told.
+    const heard = asked && !asked.session && asked.version !== undefined ? this.heard(by, asked.version) : {};
+    if (asked && !asked.session && behind(asked.reads)) return { update: true, ...heard };
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
-    return this.env.BOUND ? [...keys, this.env.BOUND] : keys;
+    const versions = Object.fromEntries(this.sql.exec("SELECT key, version FROM keys WHERE version IS NOT NULL").toArray().map((r) => [r.key, r.version]));
+    return { computes: this.env.BOUND ? [...keys, this.env.BOUND] : keys, versions, ...heard };
+  }
+
+  /// Keeps what `by` says it's on, and gives it what was left for it, once: → `{ asked }`, or nothing.
+  heard(by, version) {
+    this.sql.exec("UPDATE keys SET version = ? WHERE key = ? AND version IS NOT ?", version, by, version);
+    const ask = this.sql.exec("DELETE FROM asks WHERE key = ? RETURNING signed", by).toArray()[0];
+    return ask ? { asked: JSON.parse(ask.signed) } : {};
   }
 
   /// When each endpoint on the list was last let in here (ms), a session's as the device that vouched for it, for whom
@@ -698,7 +716,7 @@ export class Relay extends DurableObject {
         if (told.role !== "client" && (it.role !== told.role || it.admin !== (wants ? 1 : 0))) this.endSessionsOf(told.add);
       } else if (!it) {
         if (told.role !== "client" && !admin && !is(by, "compute")) return "only an admin's device or a compute adds a compute or a service";
-        this.sql.exec("INSERT INTO keys VALUES (?, ?, ?, ?)", told.add, told.by, wants ? 1 : 0, told.role);
+        this.sql.exec("INSERT INTO keys (key, by, admin, role) VALUES (?, ?, ?, ?)", told.add, told.by, wants ? 1 : 0, told.role);
       }
       if (told.recovery === true && admin) this.sql.exec("UPDATE keys SET by = 'recovery' WHERE key = ?", told.add);
       // A pairing code's computer, added, is one of the network's: it reaches every endpoint now.
@@ -750,13 +768,19 @@ export class Relay extends DurableObject {
       if (pairing.key && !this.key(pairing.key)) this.end(pairing.key, "its pairing code ended");
       return null;
     }
-    return "a tell adds or removes a key, or makes or ends a pairing code";
+    if (told.update !== undefined) {
+      if (!isKey(told.update) || !this.key(told.update)) return { error: "that key isn't on the list", code: CODES.notListed };
+      this.sql.exec("INSERT OR REPLACE INTO asks VALUES (?, ?)", told.update, JSON.stringify(signed));
+      return null;
+    }
+    return "a tell adds or removes a key, makes or ends a pairing code, or asks a device to update";
   }
 
   /// Takes `key` out, with the pairing codes it made, closing its sockets. Only a tell naming a key takes it out: an admin's
   /// node names each device the signed steps removed (`Node::tell_removed`), so the devices it let in stay.
   remove(key) {
     this.sql.exec("DELETE FROM keys WHERE key = ?", key);
+    this.sql.exec("DELETE FROM asks WHERE key = ?", key);
     this.unbind(key);
     for (const { key: joined } of this.sql.exec("SELECT key FROM pairings WHERE by = ? AND key IS NOT NULL", key).toArray()) this.end(joined, "taken out");
     this.sql.exec("DELETE FROM pairings WHERE by = ?", key);

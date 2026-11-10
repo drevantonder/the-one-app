@@ -99,6 +99,7 @@ enum Route {
     Approve,
     Refuse,
     Seen,
+    Update,
     VaultGrant,
     RecoveryHolder,
     Code,
@@ -132,6 +133,7 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/api/devices/approve", Route::Approve, false),
     ("POST", "/api/devices/refuse", Route::Refuse, true),
     ("GET", "/api/devices/seen", Route::Seen, true),
+    ("POST", "/api/devices/update", Route::Update, false),
     // A machine with a node that opens the Vault seals what's in it to the new key at once.
     ("POST", "/api/vault/grant", Route::VaultGrant, false),
     ("POST", "/api/devices/recovery-holder", Route::RecoveryHolder, true),
@@ -166,6 +168,7 @@ fn about(route: Route) -> (&'static str, Value) {
         Route::Approve => ("", of::<body::Approve>()),
         Route::Refuse => ("Turn down a device waiting to join", of::<body::Code>()),
         Route::Seen => ("Say the waiting devices were seen", of::<body::Nothing>()),
+        Route::Update => ("", of::<body::Update>()),
         Route::VaultGrant => ("", of::<body::VaultGrant>()),
         Route::RecoveryHolder => ("Name someone as holding the recovery key, or take them off", of::<body::RecoveryHolder>()),
         Route::Code => ("This device's code, read from its own screen", of::<body::Nothing>()),
@@ -283,6 +286,13 @@ mod body {
     pub struct Remove {
         pub device: Option<String>,
         pub user: Option<String>,
+    }
+
+    /// Which device, by name.
+    #[derive(Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct Update {
+        pub device: String,
     }
 
     /// `value` none sets it back to what it is by default.
@@ -568,6 +578,7 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             read::<body::Nothing>(path, raw)?;
             seen(m).await?
         }
+        Route::Update => update_device(m, &read::<body::Update>(path, raw)?.device).await?,
         Route::VaultGrant => vault_grant(m, read::<body::VaultGrant>(path, raw)?).await?,
         Route::Code => {
             read::<body::Nothing>(path, raw)?;
@@ -829,6 +840,19 @@ async fn seen(m: &impl Me) -> Result<Value> {
     let signed = keys::signed_request_by(m, crate::protocol::RELAY, json!({ "seen": true }), keys::next_at(m.now())).await?;
     let (status, out) = m.ask("POST", &format!("{address}/relay/seen"), None, Some(signed)).await?;
     Ok(if status == 200 { out["seen"].clone() } else { json!({}) })
+}
+
+/// Asks a device, through the relay, to take the newest published build. Only its user or an admin may; its own device
+/// checks that too, and only ever starts `one update`.
+async fn update_device(m: &impl Me, device: &str) -> Result<Value> {
+    let user = m.user()?;
+    let (key, name) = m.who(|who| {
+        let key = who.find_node(device)?;
+        allowed!(who.may(&user, "remove", &scopes::device(&key)), "Only its user or an admin updates a device.");
+        Ok((key, who.machine(&key)?.map(|d| d.name).unwrap_or_default()))
+    })?;
+    tell(m, m, json!({ "update": hex(&key) })).await?;
+    Ok(json!({ "said": format!("Asked {name} to update.") }))
 }
 
 /// Takes one of this user's devices out (by its key or name), or for an admin, anyone's: off the network first,

@@ -170,8 +170,12 @@ export function app(native) {
     ...inShell,
     panel,
     client: () => about?.client || "web",
-    /// The newest version of the client needs a newer app than this one.
+    /// This app is too old for the network: its newest client needs a newer app, or the network reads more than it does.
     behind: () => !!about?.behind,
+    /// What this device is, as users say it.
+    label: () => about?.platform,
+    /// A Mac: its app builds itself, so no `one update` replaces it yet.
+    mac: () => about?.platform === "Mac",
     /// The app on a phone: its home is the pages side by side, with no sidebar (`Shell`'s `phone`).
     phone: () => ["iPhone", "Android"].includes(about?.platform),
     address: () => about.address,
