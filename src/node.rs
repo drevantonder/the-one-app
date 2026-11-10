@@ -62,6 +62,7 @@ pub mod services;
 mod app_schedules;
 mod settings;
 pub(crate) use settings::routes as settings_routes;
+pub(crate) use holds::routes as holds_routes;
 mod state;
 mod status;
 mod steps;
@@ -76,8 +77,9 @@ mod home;
 mod network;
 
 pub use caller::{Caller, Credential};
+pub use holds::Holder;
 use exclusive::*;
-pub use home::device_here;
+pub use home::{device_here, runtime_folder};
 use home::*;
 use network::*;
 
@@ -251,13 +253,29 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    /// Starts the node of the home `dir`. `apart`: its app runtime is a program of its own, which oned starts
-    /// (`Apps::program`), not a thread of this process.
+    /// Starts the node of the home `dir`, as its device, holding the device's key. `apart`: its app runtime is a
+    /// program of its own, which oned starts (`Apps::program`), not a thread of this process.
     pub async fn start(dir: &Path, apart: bool) -> Result<Node> {
         std::fs::create_dir_all(dir)?;
         let device = load_device(dir)?;
-        let secret = unhex(&device.secret)?;
-        let key = SigningKey::from(secret);
+        let key = SigningKey::from(unhex(&device.secret)?);
+        let node = Node::open(dir, key.clone(), device.name, load_local_token(dir)?, holds::Holds::Key(key), apart).await?;
+        tokio::spawn(node.clone().pull_loop());
+        tokio::spawn(node.clone().invites_loop());
+        Ok(node)
+    }
+
+    /// Starts the app runtime of the device whose home is `dir`, an endpoint of its own key, listed as a compute
+    /// naming the device: its key, and the token only its device's own programs ask it with, are in its folder
+    /// (`runtime_folder`); what the device's key opens and signs, it asks `holder`. Its data is the device's home's.
+    pub async fn runtime(dir: &Path, holder: holds::Holder) -> Result<Node> {
+        let folder = runtime_folder(dir);
+        std::fs::create_dir_all(&folder)?;
+        let holds = holds::Holds::asking(holder).await?;
+        Node::open(dir, load_runtime_key(&folder)?, hostname(), load_local_token(&folder)?, holds, false).await
+    }
+
+    async fn open(dir: &Path, key: SigningKey, name: String, local_token: String, holds: holds::Holds, apart: bool) -> Result<Node> {
         let id = *key.verifying_key().as_bytes();
         let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let apps = Apps::start(dir.join(crate::handoff::runtime()), outbound.local_addr()?.port(), apart).await?;
@@ -268,12 +286,11 @@ impl Node {
         }
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),
-            local_token: load_local_token(dir)?,
-            // A computer's node is its device for now: one key.
-            holds: holds::Holds::new(key.clone()),
+            local_token,
+            holds,
             key,
             id,
-            name: Mutex::new(device.name),
+            name: Mutex::new(name),
             apps,
             network: Exclusive::new(None),
             pairings: Mutex::new(pairing::load(dir)),
@@ -343,8 +360,6 @@ impl Node {
         tokio::spawn(node.clone().tick_loop());
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
-        tokio::spawn(node.clone().pull_loop());
-        tokio::spawn(node.clone().invites_loop());
         tokio::spawn(node.clone().insights_loop());
         let worker = node.clone();
         tokio::spawn(async move {

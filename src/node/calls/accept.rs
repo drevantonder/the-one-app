@@ -101,8 +101,9 @@ impl Node {
         self.hand_passed(from, user, sealed, &scopes, service)
     }
 
-    /// Who a call another device passed on is for: only the user whose client device `remote` is, asking itself; a
-    /// node passing on keys it was handed, as itself; a user's service asks as them, as itself.
+    /// Who a call another device passed on is for: only the user whose client device `remote` is (or whose client
+    /// device's app runtime it is), asking itself; a node passing on keys it was handed, as itself; a user's service
+    /// asks as them, as itself.
     pub(in crate::node) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
@@ -110,7 +111,7 @@ impl Node {
         let passed = request["keys"].is_string();
         self.with(|i| {
             let m = i.r.db();
-            let client = m.client(&remote)?.is_some_and(|c| c.user == user);
+            let client = m.client(&m.device_of(&remote))?.is_some_and(|c| c.user == user);
             let service = m.service(&remote)?.is_some_and(|s| s.user == user);
             let allowed = match () {
                 _ if passed => remote == key && m.compute(&remote)?.is_some(),

@@ -126,9 +126,9 @@ impl Node {
 
     /// Writes `content` to `global`'s scope database as a step this device signs as `user`, at the next position: when
     /// another device wrote there first, it reads that, and signs it again for the one after. Signed by the device's key,
-    /// never this node's own, which may be its app runtime's.
-    pub(super) async fn write_step(&self, user: &str, content: Content) -> Result<Step> {
-        self.write_step_as(self.0.holds.signs_global(), user, content).await
+    /// never this node's own, which may be its app runtime's, whose device's holder writes it (`Holds::write_global`).
+    pub(super) async fn write_step(&self, user: &str, content: Content) -> Result<()> {
+        self.0.holds.write_global(self, user, content).await
     }
 
     /// `write_step`, signed by `key`: this device's, or the network's recovery key, which only ever signs on the machine
@@ -306,18 +306,18 @@ impl Node {
 }
 
 impl Node {
-    pub async fn append(&self, scope: &Scope, content: Content) -> Result<Step> {
+    pub async fn append(&self, scope: &Scope, content: Content) -> Result<()> {
         let user = self.user()?;
         self.append_as(scope, &user, content).await
     }
 
-    pub(super) async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Step> {
+    pub(super) async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<()> {
         if !self.frozen() {
             self.read_steps().await?;
         }
         match scope {
             Scope::Global => self.write_step(user, content).await,
-            _ => self.write_scope_step(scope, user, content).await,
+            _ => self.write_scope_step(scope, user, content).await.map(drop),
         }
     }
 

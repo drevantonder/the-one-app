@@ -8,6 +8,8 @@ export default {
   title: "Notes",
   description: "Lines of text, for tests",
   schema: { global: [`create table posts (n integer primary key, text text not null)`] },
+  // Runs only where a user chose a device to run notes' schedules.
+  schedules: { tick: { tool: "post", input: { text: "on schedule" }, every: "1m", description: "Adds a line" } },
   tools: {
     post: {
       reads: false,

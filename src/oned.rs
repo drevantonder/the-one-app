@@ -1,6 +1,7 @@
 //! oned (`<cli>d`): a device's always-on program, this program run by that name; the `<cli>` command line runs, answers
-//! and exits. Its key and endpoint are the device's, and everyone calls it; its parts are the app runtime (`oned apps`,
-//! `apps::run`: workerd, which oned hands apps' calls to over a loopback, holding no key or endpoint of its own) and
+//! and exits. Its key and endpoint are the device's, and everyone calls it; its parts are the app runtime (`oned apps
+//! --runtime=`, `apps::run`: workerd, which oned hands apps' calls to over a loopback, holding no key or endpoint of its
+//! own; `oned apps --listen=` is the runtime as an endpoint of its own key, `runtime`, which only tests start yet) and
 //! each service: each a process of oned's own (`oned <name>`, `service::run`) with its own key, which oned lists as its
 //! device's. Each is on while the device's latest `service` step for it says so; with none, the app runtime is on, the
 //! rest off; and each is started again when it stops, the rest left running.
@@ -564,7 +565,7 @@ fn usage() -> String {
 
 /// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`). It takes only the
 /// arguments its own starts give it (`--handoff=` to take over a node, `--sandboxed=`, `--runtime=` and the
-/// `--socket-fd=` that comes with it): any other (`--version` typed to see the build) never starts a node, which would
+/// `--socket-fd=` that comes with it, `apps --listen=`): any other (`--version` typed to see the build) never starts a node, which would
 /// replace the one running.
 pub fn run(args: &[String]) -> Result<()> {
     let flags: Vec<&str> = args.iter().filter(|a| a.starts_with('-')).map(String::as_str).collect();
@@ -580,10 +581,32 @@ pub fn run(args: &[String]) -> Result<()> {
             return serve(args);
         }
         ([crate::database::scopes::APPS_PART], _) if let Some(dir) = flag("--runtime=") && flags.iter().all(|f| f.starts_with("--runtime=") || f.starts_with("--socket-fd=")) => return crate::app::runtime::run(std::path::Path::new(dir)),
+        ([crate::database::scopes::APPS_PART], [_]) if let Some(listen) = flag("--listen=") => return runtime(listen),
         ([name], []) if crate::database::scopes::valid_app_name(name) => return crate::services::endpoint::run(name),
         _ => bail!("{}", usage()),
     }
     Ok(())
+}
+
+/// `oned apps --listen=<address>`: this device's app runtime as an endpoint of its own key (`Node::runtime`), answering
+/// on `address` only its device's own programs, with the token in its folder, and asking its device's key, held at
+/// the API's address, for what that opens and signs. Only tests start it, until oned does.
+#[tokio::main]
+async fn runtime(listen: &str) -> Result<()> {
+    crate::logs::keep(crate::database::scopes::APPS_PART);
+    tracing_subscriber::fmt()
+        .with_writer(crate::logs::Tee)
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
+        .init();
+    let stop = stopped()?;
+    let dir = crate::home();
+    let token = api::local_token(&dir).with_context(|| format!("{} has no token for this device's own programs: its device makes it as it starts", dir.display()))?;
+    let node = Node::runtime(&dir, crate::node::Holder { at: api::addr(), token }).await?;
+    let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
+    tracing::info!("{NAME} app runtime {} answering {listen} from {}", crate::keys::short(&node.id()), dir.display());
+    let served = api::serve_until(listener, api::guarded(api::routes(), node), stop).await;
+    crate::app::runtime::stop_all();
+    Ok(served?)
 }
 
 /// What a service whose app hasn’t said what it may reach shows, until it does.

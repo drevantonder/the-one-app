@@ -36,8 +36,25 @@ pub(super) fn load_device(dir: &Path) -> Result<DeviceFile> {
     Ok(file)
 }
 
-/// This machine's own programs' token, made once: only its user reads the file, which a program in a VM or emulator
-/// here, or a page, can't.
+/// The folder of the app runtime of the device whose home is `dir`: its key, and the token its device's own programs
+/// ask it with, as a service's folder holds them (`services::endpoint::folder`).
+pub fn runtime_folder(dir: &Path) -> PathBuf {
+    dir.join("services").join(scopes::APPS_PART)
+}
+
+/// The app runtime's own key, in its folder, made the first time.
+pub(super) fn load_runtime_key(folder: &Path) -> Result<SigningKey> {
+    let path = folder.join("key");
+    if let Ok(secret) = std::fs::read_to_string(&path) {
+        return Ok(SigningKey::from_bytes(&unhex(secret.trim()).context("the app runtime's key file isn't a key")?));
+    }
+    let key = SigningKey::from_bytes(&rand::random());
+    write_private(&path, hex(&key.to_bytes()).as_bytes())?;
+    Ok(key)
+}
+
+/// This machine's own programs' token (in its app runtime's folder, the one they ask that with), made once: only its
+/// user reads the file, which a program in a VM or emulator here, or a page, can't.
 pub(super) fn load_local_token(dir: &Path) -> Result<String> {
     let path = dir.join(crate::api::LOCAL_TOKEN);
     match std::fs::read_to_string(&path) {

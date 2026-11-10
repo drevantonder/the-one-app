@@ -35,6 +35,10 @@ impl Node {
             let m = i.r.db();
             let mut due = Vec::new();
             let mut seen = BTreeSet::new();
+            // A device that dropped its Compute for an app runtime of its own leaves its schedules to that.
+            if m.compute(&self.0.id)?.is_none() {
+                return Ok(due);
+            }
             let me = m.device_of(&self.0.id);
             for ((_, scope, app), _) in m.app_schedules_at(now)?.into_iter().filter(|((k, ..), _)| *k == me) {
                 let Some(state) = i.views.get(&scope.to_string()).filter(|s| s.added.contains(&app)) else { continue };

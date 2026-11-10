@@ -604,15 +604,16 @@ impl Node {
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller, limit: Duration) -> Result<(Reply, Option<Value>)> {
         // A call handed keys passes on its keys alone (below), and app schedules' calls pass on none.
         let service = self.is_service(&device);
-        // A node listed as the caller's own client asks as itself: always for a call it runs with its own keys (one
-        // another device of its user passed here as itself, whose key the receiving device would refuse from this
-        // connection), and a direct client's call only for a service — never one another node passed on: forwarding
-        // another client's key, or app database keys, would make the receiving device refuse its own user's call.
+        // A node of the caller's own client device (the device's own, or its app runtime) asks as itself: always for a
+        // call it runs with its device's keys (one another device of its user passed here as itself, whose key the
+        // receiving device would refuse from this connection), and a direct client's call only for a service — never
+        // one another node passed on: forwarding another client's key, or app database keys, would make the receiving
+        // device refuse its own user's call.
         let as_own_client = match &me.credential {
             Credential::Own => true,
             Credential::Client(key) => req.service.is_some() && *key == me.key,
             _ => false,
-        } && self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == me.user)))?;
+        } && self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
         let mut request = req.named(json!({ "service": req.service, "device": req.device, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent } }));
         // Keys handed here (a client device's, or with a call passed on) go on to another node sealed

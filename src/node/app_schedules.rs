@@ -44,7 +44,7 @@ impl Node {
         let (until, hashes) = found.with_context(|| format!("{} doesn't run {app}'s schedules in {scope}", self.device_name()))?;
         let id = (scope.clone(), app.to_string());
         let had = self.0.app_schedules.keys.lock().unwrap().get(&id).cloned().unwrap_or_default();
-        let (bucket, secret, me) = (self.bucket()?, self.seal_secret(), hex(&self.with_or(self.0.id, |i| Ok(i.r.db().device_of(&self.0.id)))));
+        let (bucket, me) = (self.bucket()?, hex(&self.0.holds.device()));
         let mut keys = crate::database::stored::Keys::new();
         for (n, hash) in &hashes {
             if let Some(key) = had.get(n).filter(|k| crate::keys::epoch_hash(k) == *hash) {
@@ -61,7 +61,7 @@ impl Node {
                 tracing::warn!("{name} isn't in the bucket yet");
                 continue;
             };
-            match crate::keys::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == *hash) {
+            match crate::keys::open_sealed_by(&self.0.holds, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == *hash) {
                 Some(key) => drop(keys.insert(*n, key)),
                 None => tracing::warn!("{name} isn't the key its app schedules name: passed over"),
             }
