@@ -477,7 +477,6 @@ impl Settings {
         Ok(settings)
     }
 
-    /// What `sign_in_proof::CLIENTS` says of the clients this network registered, if it has any.
     /// Where the Workers' `signal` (one of `basin::EXPORTED`) goes.
     pub fn exported(&self, signal: &str) -> Option<&str> {
         match signal {
@@ -493,6 +492,7 @@ impl Settings {
         }
     }
 
+    /// What `sign_in_proof::CLIENTS` says of the clients this network registered, if it has any.
     pub fn sign_in_clients(&self) -> Option<String> {
         let clients: Vec<String> = self.providers.iter().filter_map(|p| Some(format!("{} {}", p.issuer, p.client.as_ref()?.0))).collect();
         (!clients.is_empty()).then(|| clients.join("\n"))
