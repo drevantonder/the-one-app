@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::core_tools::{Feature, Tool, serves};
 
-const GUIDE: &str = "add puts an app, and the apps it uses, on a page: yours (scope user), a group you're an admin of (by its name) or everyone's (scope global, admins only). An app with a service runs it on one of your nodes it can run on (node), or the Cloudflare node for everyone's or a group's; asked when there's a choice. remove takes it off a page, and what it keeps there goes with it. The App Store (apps_list) lists every app and where it's added.";
+const GUIDE: &str = "add puts an app, and the apps it uses, on a page: yours (scope user), a group you're an admin of (by its name) or everyone's (scope global, admins only). An app with a service runs it on one of your nodes it can run on (node), or the Cloudflare node for everyone's or a group's; asked when there's a choice. remove takes it off a page: it stops running there, and what it kept stays, for when it is added back. The App Store (apps_list) lists every app and where it's added.";
 
 fn feature(name: &'static str, title: &'static str, description: &str, tool: Tool) -> Feature {
     Feature {
@@ -46,8 +46,8 @@ pub fn remove_feature() -> Feature {
         "Remove an app from a place",
         Tool::route(
             json!({
-                "name": "remove", "title": "Remove an app", "confirm": true,
-                "description": "Remove an app from a place: user (you), a group (by its name) or global (everyone). What it keeps there goes with it.",
+                "name": "remove", "title": "Remove an app",
+                "description": "Remove an app from a place: user (you), a group (by its name) or global (everyone). It leaves that page, for everyone on it, and stops running there; what it kept there stays, and adding it back brings it back.",
                 "input": { "type": "object", "required": ["app", "scope"], "properties": {
                     "app": { "type": "string", "description": "an app's name, from apps_list, like gmail" },
                     "scope": { "type": "string", "description": "user (you), global (everyone) or a group's name" },
@@ -78,6 +78,6 @@ mod serve {
     pub async fn remove(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {
         let (app, scope) = (text(&input, "app")?, node.scope_for(&me, text(&input, "scope")?)?);
         node.add(&me, app, &scope, false, None).await?;
-        Ok(json!({ "said": format!("{app} is off {}, and what it kept there is gone.", node.page_said(&scope)?) }))
+        Ok(json!({ "said": format!("{app} is off {}. What it kept there stays: adding it back brings it back.", node.page_said(&scope)?) }))
     }
 }

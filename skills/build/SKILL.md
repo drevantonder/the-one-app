@@ -32,7 +32,7 @@ An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its tools
 12. Check it: run each tool (`{{cli}} <app> <tool>`, `--trace` for where it failed) and take out your test data. You can't see a screen: say so, and ask them to open it and tell you what they see. If it says "This screen stopped working", what follows is the error: ask them for it, or look at what you last changed. `{{cli}} deploys <app>` lists its versions and `{{cli}} deploy <app> --version <hash>` (`deploy` with `version`) puts one back.
 13. Tell the user, in a sentence, where it is: on their page and in the sidebar, on all their devices, and with a widget if it has one. Don't list its tools.
 
-To change an app: edit it and deploy again. A screen that's open shows the new version the next time it's opened. To remove one, `{{cli}} remove <app> --confirm` takes it off a page, and what it kept there with it; `{{cli}} apps delete <app> --confirm` deletes it everywhere, into Recently Deleted. Both only once the user agreed.
+To change an app: edit it and deploy again. A screen that's open shows the new version the next time it's opened. To remove one, `{{cli}} remove <app>` takes it off a page, and what it kept there stays for when it is added back; `{{cli}} apps delete <app> --confirm` deletes it everywhere, into Recently Deleted, only once the user agreed.
 
 Keep its code wherever you like (Repos, GitHub, any git host), and link it: `{{cli}} apps source <app> <link>`.
 

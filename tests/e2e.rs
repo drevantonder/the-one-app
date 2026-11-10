@@ -576,6 +576,21 @@ async fn erasing_an_app_deletes_its_keys_whoever_erases_it() {
     assert_eq!(keys(), 0, "notes' keys are gone");
 }
 
+/// Taking an app off a page keeps what it kept there, and adding it back brings it back.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_app_taken_off_a_page_and_added_back_has_what_it_kept() {
+    let a = start("remove-add").await;
+    create(&a, "Home", "Andre").await;
+    add_notes(&a).await;
+    eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before it left" }))).await.is_ok()).await;
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    a.add(&me, "notes", &one::database::scopes::Scope::Global, false, None).await.unwrap();
+    assert!(a.call(notes("read", json!({}))).await.is_err(), "an app off the page doesn't run there");
+    a.add(&me, "notes", &one::database::scopes::Scope::Global, true, None).await.unwrap();
+    let read = a.call(notes("read", json!({}))).await.unwrap();
+    assert!(read.to_string().contains("before it left"), "{read}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     let a = start("put-from").await;

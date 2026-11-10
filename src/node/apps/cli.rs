@@ -4,9 +4,8 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::api::Client;
-use crate::cli::{Command, Failed, Given, ago, asked_yes};
+use crate::cli::{Command, Given, ago};
 use crate::config::CLI;
-use crate::core_tools::Reader;
 use crate::{build, tools};
 
 pub fn commands() -> Command {
@@ -18,7 +17,7 @@ pub fn commands() -> Command {
             ("deploys <app>".into(), "an app's deploys, newest last".into()),
             ("source <app> [path] [--version <hash>]".into(), "an app's code as deployed: its files, or one of them".into()),
             ("add <app> [--scope user|global|<group>] [--node <device>]".into(), "add an app, and the apps it uses, for you, a group you admin or everyone; --node is the device that runs its service, when it has one and you have more than one".into()),
-            ("remove <app> [--scope user|global|<group>] --confirm".into(), "remove an app from a place: what it keeps there goes with it, for good, so it asks for --confirm".into()),
+            ("remove <app> [--scope user|global|<group>]".into(), "remove an app from a place: it stops running there, and what it kept there stays for if you add it back".into()),
             ("fork <app> <name> [--owner <owner>]".into(), "a new app from <app>'s code, with data of its own".into()),
             ("schedules".into(), "every schedule of the apps added for you: when, as whom, and how it last went".into()),
             ("schedule on|off <app> <name> [--scope user|global|<group>]".into(), "switch an app's schedule on (it then runs as you) or off".into()),
@@ -72,10 +71,6 @@ pub fn commands() -> Command {
                 }
                 ["remove", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    let command = format!("{CLI} remove {app}");
-                    if !g.has("confirm") && !asked_yes(&command)? {
-                        return Err(Failed::Refused(Reader::Cli.unconfirmed(&command)).into());
-                    }
                     println!("{}", g.node.post("/v1/remove/remove", json!({ "app": app, "scope": scope }))?["said"].as_str().unwrap_or_default());
                 }
                 ["fork", app, name] => {
