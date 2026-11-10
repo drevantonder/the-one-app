@@ -1213,6 +1213,7 @@ impl Cloudflare {
         let auth = format!("Bearer {}", self.token);
         let mut resp = match (method, body) {
             ("GET", _) | (_, None) => agent.get(&url).header("authorization", &auth).call()?,
+            ("DELETE", _) => agent.delete(&url).header("authorization", &auth).call()?,
             ("PUT", Some((kind, bytes))) => agent.put(&url).header("authorization", &auth).header("content-type", &kind).send(&bytes[..])?,
             (_, Some((kind, bytes))) => agent.post(&url).header("authorization", &auth).header("content-type", &kind).send(&bytes[..])?,
         };
