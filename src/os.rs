@@ -41,6 +41,17 @@ pub fn ask_to_stop(child: &mut Child) {
     drop(child.stdin.take());
 }
 
+/// Asks a process this one didn't start to stop: on Windows, which can't ask one it didn't start, ends it.
+pub fn ask_pid_to_stop(pid: i32) {
+    #[cfg(unix)]
+    // SAFETY: only a signal, to a process the caller checked is this program's (`is_program`).
+    unsafe {
+        libc::kill(pid, libc::SIGTERM)
+    };
+    #[cfg(windows)]
+    kill(pid as u32);
+}
+
 /// Ends a process at once.
 #[cfg(unix)]
 pub fn kill(pid: u32) {

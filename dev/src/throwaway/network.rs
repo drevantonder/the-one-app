@@ -194,6 +194,7 @@ pub(crate) fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, 
 /// Starts the throwaway network's node, at `addr` if it's given and free, and gives its address once it answers.
 pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     std::fs::create_dir_all(dir)?;
+    Throwaway::own_release_key(dir)?;
     // What every throwaway network downloads or builds, shared.
     let shared = dir.parent().unwrap().join("cache");
     std::fs::create_dir_all(&shared)?;

@@ -19,7 +19,7 @@ impl Node {
     /// nothing else of the network has to work for that. A bad or missing record means staying on what it has and saying
     /// why (`updating`). A node in an app bundle reads the record for `status` but doesn't take it: `keep-mac-current` builds and installs it.
     pub(super) async fn pull_loop(self) {
-        if crate::config::RELEASE_KEY.is_empty() {
+        if crate::mode::here().release_key().is_empty() {
             return;
         }
         let mut handed = Instant::now() - HAND_OVER_AGAIN;
@@ -37,12 +37,15 @@ impl Node {
 
     async fn pull_once(&self, handed: &mut Instant) -> Result<()> {
         let Ok(address) = self.address() else { return Ok(()) };
+        if let Err(err) = crate::update::keep_address(&self.0.dir, &address) {
+            tracing::warn!("couldn't note the network's address for {} update: {err}", crate::config::CLI);
+        }
         let fetched = {
             let address = address.clone();
             tokio::task::spawn_blocking(move || crate::latest::fetch(&address)).await??
         };
         let Some(text) = fetched else { return Ok(()) };
-        let latest = crate::latest::Latest::read(crate::config::RELEASE_KEY, &text).context("the latest record")?;
+        let latest = crate::latest::Latest::read(crate::mode::here().release_key(), &text).context("the latest record")?;
         *self.0.latest.lock().unwrap() = latest.clone();
         let part = crate::latest::Thing::node_name(crate::config::TARGET);
         let Some(thing) = latest.get(&part).cloned() else { return Ok(()) };
@@ -56,11 +59,10 @@ impl Node {
             }
             return Ok(());
         }
-        let file = self.0.dir.join("release");
-        let taken = std::fs::read_to_string(&file).unwrap_or_default();
-        if !crate::latest::wanted(&thing, crate::config::BUILD, crate::config::COMMITTED, taken.trim()) {
+        let taken = crate::update::taken(&self.0.dir);
+        if !crate::latest::wanted(&thing, crate::config::BUILD, crate::config::COMMITTED, &taken) {
             // Already installed: asked again now and then to hand over to it, as long as this build still runs.
-            if thing.commit != crate::config::BUILD && taken.trim() == thing.sha256 && handed.elapsed() > HAND_OVER_AGAIN {
+            if thing.commit != crate::config::BUILD && taken == thing.sha256 && handed.elapsed() > HAND_OVER_AGAIN {
                 *handed = Instant::now();
                 crate::handoff::restart();
             }
@@ -75,7 +77,7 @@ impl Node {
             tokio::task::spawn_blocking(move || crate::latest::download(&address, &thing)).await?.map_err(|e| not_taken("download", e))?
         };
         let exe = release::install_commit(&thing.commit, &bytes).map_err(|e| not_taken("install", e))?;
-        std::fs::write(&file, &thing.sha256).map_err(|e| not_taken("install", e.into()))?;
+        crate::update::took(&self.0.dir, &thing.sha256).map_err(|e| not_taken("install", e.into()))?;
         self.device_signal("update.taken", Attrs::default().part(&part), true, None);
         tracing::info!("updated {} to {}; restarting", exe.display(), thing.commit);
         *handed = Instant::now();
@@ -130,7 +132,7 @@ impl Node {
         let bucket = self.bucket()?;
         let was = self.latest();
         let replaced = Bucket::replace(&bucket.place, &crate::latest::newest_name(), text.as_bytes(), tag).await?;
-        if replaced && let Ok(new) = crate::latest::Latest::read(crate::config::RELEASE_KEY, text) {
+        if replaced && let Ok(new) = crate::latest::Latest::read(crate::mode::here().release_key(), text) {
             for thing in new.things.iter().filter(|t| was.get(&t.name).is_none_or(|w| w.sha256 != t.sha256)) {
                 self.device_signal("update.sent", Attrs::default().part(&thing.name), true, None);
             }

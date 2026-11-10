@@ -625,7 +625,7 @@ async fn serve(args: &[String]) -> Result<()> {
     if handed.is_some() {
         node.warm().await;
     }
-    std::fs::write(dir.join("pid"), std::process::id().to_string())?;
+    std::fs::write(dir.join(crate::update::PID), std::process::id().to_string())?;
     tracing::info!("{NAME} node {} serving {} from {}", &crate::keys::hex(&node.id())[..8], api::addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     let mut routes = api::guarded(api::routes(), node.clone());
@@ -699,17 +699,6 @@ fn raw_fd(_listener: &tokio::net::TcpListener) -> i32 {
     -1
 }
 
-/// Asks a node this one didn't start to stop: on Windows, which can't ask a process it didn't start, ends it.
-fn stray_stop(pid: i32) {
-    #[cfg(unix)]
-    // SAFETY: only a signal, to a process of this program's (`ours`).
-    unsafe {
-        libc::kill(pid, libc::SIGTERM)
-    };
-    #[cfg(windows)]
-    crate::os::kill(pid as u32);
-}
-
 /// When the node is asked to stop: Ctrl-C, or SIGTERM from its supervisor, an update or a node replacing it, each
 /// listened for from when it's called.
 fn stopped() -> Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> {
@@ -740,7 +729,7 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
         bound => return bound.with_context(|| format!("listen on {}", api::addr())),
     }
     // Who listens there: the pid this home's node wrote.
-    let mut pids: Vec<i32> = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse().ok()).into_iter().collect();
+    let mut pids: Vec<i32> = std::fs::read_to_string(dir.join(crate::update::PID)).ok().and_then(|p| p.trim().parse().ok()).into_iter().collect();
     // Only a process of this program, never whatever else took the port.
     let me = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
     let ours = |pid: i32| crate::os::is_program(pid as u32, &me);
@@ -750,7 +739,7 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
     anyhow::ensure!(!pids.is_empty(), "{} is taken, and not by {NAME}'s node", api::addr());
     for &pid in &pids {
         tracing::warn!("a node of this network was already running (pid {pid}): stopping it, to run this one");
-        stray_stop(pid);
+        crate::os::ask_pid_to_stop(pid);
     }
     for tries in 0..100 {
         if let Ok(listener) = bind().await {

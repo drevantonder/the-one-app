@@ -24,18 +24,26 @@ pub enum Mode {
 /// A throwaway network, by its folder: its home, its programs' logs and pids, its data.
 pub struct Throwaway {
     home: PathBuf,
+    release_key: String,
 }
 
 const UI: &str = "ui-folder";
+/// The private half of a throwaway network's own release key, and beside it its public half.
+const RELEASE_KEY: &str = "release-key";
+const RELEASE_KEY_PUBLIC: &str = "release-key.pub";
 
 fn var() -> String {
     crate::config::env("THROWAWAY")
 }
 
+fn release_key_var() -> String {
+    crate::config::env("RELEASE_KEY")
+}
+
 pub fn here() -> &'static Mode {
     static HERE: OnceLock<Mode> = OnceLock::new();
     HERE.get_or_init(|| match std::env::var_os(var()) {
-        Some(home) => Mode::Throwaway(Throwaway { home: home.into() }),
+        Some(home) => Mode::Throwaway(Throwaway { home: home.into(), release_key: std::env::var(release_key_var()).unwrap_or_default() }),
         None => Mode::Own,
     })
 }
@@ -50,6 +58,15 @@ impl Mode {
             Mode::Own => crate::user_home().join(".local/bin"),
         }
     }
+
+    /// The public half of the key what this device takes must be signed with: this build's, or a throwaway network's
+    /// own, so what it publishes never needs the real one.
+    pub fn release_key(&self) -> &str {
+        match self {
+            Mode::Own => crate::config::RELEASE_KEY,
+            Mode::Throwaway(t) => &t.release_key,
+        }
+    }
 }
 
 impl Throwaway {
@@ -57,6 +74,23 @@ impl Throwaway {
     /// it asks its node at as one of this machine's programs, and its mode.
     pub fn tell(command: &mut std::process::Command, home: &Path, addr: &str) {
         command.env(var(), home).env(crate::config::env("HOME"), home).env(crate::config::env("ADDR"), addr);
+        if let Ok(key) = std::fs::read_to_string(home.join(RELEASE_KEY_PUBLIC)) {
+            command.env(release_key_var(), key.trim());
+        }
+    }
+
+    /// The private half of the throwaway network in `home`'s own release key, made the first time, which `tell` then tells
+    /// its programs the public half of.
+    pub fn own_release_key(home: &Path) -> Result<ssh_key::PrivateKey> {
+        let path = home.join(RELEASE_KEY);
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            return Ok(ssh_key::PrivateKey::from_openssh(text)?);
+        }
+        let key = ssh_key::PrivateKey::from(ssh_key::private::Ed25519Keypair::from_seed(&rand::random()));
+        std::fs::create_dir_all(home)?;
+        std::io::Write::write_all(&mut crate::os::private_file().write(true).create(true).truncate(true).open(&path)?, key.to_openssh(ssh_key::LineEnding::LF)?.as_bytes())?;
+        std::fs::write(home.join(RELEASE_KEY_PUBLIC), key.public_key().to_openssh()?)?;
+        Ok(key)
     }
 
     pub fn home(&self) -> &Path {

@@ -124,9 +124,10 @@ pub fn publish_latest(node: &crate::api::Client, key: &ssh_key::PrivateKey, thin
         };
         made.push(Thing { name: name.clone(), commit: version.commit.clone(), committed: version.committed, sha256, size, config: config.clone() });
     }
+    let public = key.public_key().to_openssh()?;
     for _ in 0..16 {
         let now = node.get("/v1/latest")?;
-        let here = now["text"].as_str().and_then(|t| Latest::read(crate::config::RELEASE_KEY, t).ok()).unwrap_or_default();
+        let here = now["text"].as_str().and_then(|t| Latest::read(&public, t).ok()).unwrap_or_default();
         let text = here.merged(made.iter().cloned()).signed(key)?;
         if node.post("/v1/latest", json!({ "text": text, "tag": now["tag"] }))?["replaced"] == true {
             return Ok(());

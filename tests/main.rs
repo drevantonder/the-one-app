@@ -10,6 +10,7 @@ mod sandbox;
 mod sealed;
 mod sim;
 mod tree;
+mod update;
 
 use std::path::{Path, PathBuf};
 

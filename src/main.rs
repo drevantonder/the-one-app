@@ -18,6 +18,8 @@ use one::core_tools::SENDS;
 fn commands() -> Vec<Command> {
     use one::node::{apps, blobs, services, storage, vault};
     vec![
+        // First: it must run with nothing else of this program working.
+        one::update::cli::commands(),
         network::commands(),
         one::groups::cli::commands(),
         one::backups::cli::commands(),

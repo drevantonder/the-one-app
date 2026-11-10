@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use one::config::CLI;
 use one::mode::Throwaway;
+use one::release::Version;
 
 use crate::dev;
 use serde_json::json;
@@ -55,7 +56,7 @@ fn folder() -> Option<(PathBuf, PathBuf)> {
 /// the command as one of its programs, by the `one` program built with this one (`Throwaway::tell`).
 pub fn run(rest: &[String]) -> Result<()> {
     let (build, ui, rest) = chosen(rest)?;
-    if matches!(rest.first().map(String::as_str), Some("--help" | "-h")) || (rest.len() == 1 && rest[0] == "help") || (rest.len() > 1 && matches!(rest[0].as_str(), "stop" | "client" | "sign-in") && rest.iter().any(|a| a == "--help" || a == "-h")) {
+    if matches!(rest.first().map(String::as_str), Some("--help" | "-h")) || (rest.len() == 1 && rest[0] == "help") || (rest.len() > 1 && matches!(rest[0].as_str(), "stop" | "client" | "sign-in" | "publish" | "update") && rest.iter().any(|a| a == "--help" || a == "-h")) {
         println!("{}", usage());
         return Ok(());
     }
@@ -108,6 +109,11 @@ pub fn run(rest: &[String]) -> Result<()> {
     if rest.first().map(String::as_str) == Some("restart") {
         start(&dir)?;
         return Ok(());
+    }
+    match rest.first().map(String::as_str) {
+        Some("publish") => return publish(&dir, &addr),
+        Some("update") => return update(&dir, &addr),
+        _ => {}
     }
     drop(starting);
     match rest.first().map(String::as_str) {
@@ -165,6 +171,35 @@ fn sign_in(dir: &Path, addr: &str) -> Result<()> {
     anyhow::ensure!(child.wait()?.success(), "its CLI didn't sign in");
     let me = node_at(dir, addr).state()?.user.map_or("you".into(), |u| u.name);
     println!("Signed in as {me}. {} throwaway and {} throwaway mcp act as them until {} throwaway sign-out.", dev(), dev(), dev());
+    Ok(())
+}
+
+/// Publishes this checkout's build at the throwaway network's address, under its own release key, for its device to take
+/// with `update`: it must be a different commit from the one the device runs, which `--build` starts it on.
+fn publish(dir: &Path, addr: &str) -> Result<()> {
+    let build = crate::program()?;
+    let version = Version::of(&build).context("ask this checkout's build what it is")?;
+    let runs = Version::of(&network::program(dir)?).context("ask the throwaway network's program what it is")?;
+    anyhow::ensure!(version.commit != runs.commit, "the throwaway network runs this build already ({}), so it would have nothing to take: start it on an older build with {} throwaway --build <program>, or commit and build again", runs.commit, dev());
+    one::build::publish(&node_at(dir, addr), &build, &Throwaway::own_release_key(dir)?, &version, None)?;
+    println!("Published {} under this throwaway network's own release key. {} throwaway update takes it.", version.commit, dev());
+    Ok(())
+}
+
+/// `update`, in the throwaway network: nothing supervises its node, so what systemd or launchd does for a device's, this does
+/// here, starting it again once the program changed.
+fn update(dir: &Path, addr: &str) -> Result<()> {
+    let program = network::program(dir)?;
+    let was = Version::of(&program).context("ask the throwaway network's program what it is")?;
+    let mut command = std::process::Command::new(&program);
+    Throwaway::tell(&mut command, dir, addr);
+    let status = command.arg("update").status().context("couldn't run the update")?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    if Version::of(&program).context("ask the throwaway network's program what it is")? != was {
+        start(dir)?;
+    }
     Ok(())
 }
 
@@ -266,6 +301,8 @@ fn commands(mcp: &str) -> one::cli::Command {
             form("throwaway cloudflare node deploy", "run its Cloudflare node beside its Workers, as Cloudflare would".into()),
             form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows".into()),
             form("throwaway client <kind> --as sam", "the same, as someone else, invited by you with Add Someone's link".into()),
+            form("throwaway publish", "publish this checkout's build to it under its own release key, for its device to take; give it an older build first with --build".into()),
+            form("throwaway update", format!("take what's published, as {CLI} update does on a device, and start it again on it")),
             form("throwaway stop", format!("stop and delete it, and give back its devices; {CLI}-dev throwaway then starts a new one")),
         ],
         run: |_| Ok(false),

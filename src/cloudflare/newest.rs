@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 
-use crate::config::{COMMITTED, RELEASE_KEY};
+use crate::config::COMMITTED;
 use crate::latest::{Latest, Thing};
 use crate::web::bundle::{Bundle, open};
 
@@ -27,7 +27,7 @@ impl Newest {
     /// a record that's there is an error: deploying what's built in instead could take Cloudflare backwards.
     pub fn read(address: &str) -> Result<Newest> {
         let Some(text) = crate::latest::fetch(address)? else { return Ok(Newest::built()) };
-        let record = Latest::read(RELEASE_KEY, &text).context("the record at the network's address")?;
+        let record = Latest::read(crate::mode::here().release_key(), &text).context("the record at the network's address")?;
         Newest::from_record(&record, COMMITTED, &|thing| crate::latest::download(address, thing))
     }
 
@@ -41,7 +41,7 @@ impl Newest {
             None => (built.workers, "this build".to_string()),
         };
         let (web, from_web) = match newer(Thing::WEB) {
-            Some(thing) => (open(RELEASE_KEY, &get(&thing)?).context("the web client in the record")?.files, thing.commit),
+            Some(thing) => (open(crate::mode::here().release_key(), &get(&thing)?).context("the web client in the record")?.files, thing.commit),
             None => (built.web, "this build".to_string()),
         };
         Ok(Newest { workers, web, said: format!("Workers from {from_workers}, web client from {from_web}") })

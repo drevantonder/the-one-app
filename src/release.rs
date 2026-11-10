@@ -36,25 +36,40 @@ pub fn in_app_bundle() -> bool {
     std::env::current_exe().and_then(|e| e.canonicalize()).is_ok_and(|e| e.to_string_lossy().contains(".app/Contents/"))
 }
 
-/// Replaces the running binary with `bytes`, once it says it's `commit` and no older than this one.
+/// Replaces the running binary with `bytes`, once it says it's `commit` and no older than this one. By a rename, so the
+/// path holds the whole old program or the whole new one, however this ends.
 pub fn install_commit(commit: &str, bytes: &[u8]) -> Result<PathBuf> {
     let exe = std::env::current_exe()?.canonicalize()?;
     ensure!(!in_app_bundle(), "this node lives in an app bundle, which updates with the app");
-    let tmp = exe.with_extension("new");
-    std::fs::write(&tmp, bytes).context("write the new binary")?;
+    // Named for this process, since `one update` and a device's own check can both be installing at once.
+    let tmp = exe.with_extension(format!("new.{}", std::process::id()));
+    let placed = placed_at(&tmp, commit, bytes).and_then(|()| std::fs::rename(&tmp, &exe).context("replace the binary"));
+    if placed.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    placed?;
+    Ok(exe)
+}
+
+/// Writes `bytes` to `tmp` as a program, on disk before it's renamed, and checks it says it's `commit`.
+fn placed_at(tmp: &Path, commit: &str, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(tmp).context("write the new binary")?;
+    file.write_all(bytes).context("write the new binary")?;
+    // A power cut after the rename must not leave an empty file, as a filesystem may do with data not yet on disk.
+    file.sync_all().context("write the new binary")?;
+    drop(file);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+        std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(0o755))?;
     }
     // The release step's commit and date aren't signed; the binary's own are.
-    let version = Version::of(&tmp);
+    let version = Version::of(tmp);
     if !version.as_ref().is_some_and(|v| v.commit == commit && v.target == crate::config::TARGET && v.committed >= crate::config::COMMITTED) {
-        let _ = std::fs::remove_file(&tmp);
         anyhow::bail!("the binary says it's {}, not {} for {}", version.map_or("nothing".into(), |v| v.json()), commit, crate::config::TARGET);
     }
-    std::fs::rename(&tmp, &exe).context("replace the binary")?;
-    Ok(exe)
+    Ok(())
 }
 
 /// What a build says it is: `version --json`, which publishing, an update's check and installing a release all read.
