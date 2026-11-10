@@ -345,6 +345,38 @@ fn signed(key: &ed25519_dalek::SigningKey, route: &str, mut fields: Value) -> Va
     one::keys::signed_request(key, "one/auth", fields, now())
 }
 
+/// What only the network's devices may write and read, a row at a time as its table holds it, and a read that can only be one of its own.
+#[test]
+fn telemetry_takes_the_networks_devices_and_only_what_its_tables_hold() {
+    let (device, key) = endpoint();
+    let (stranger, _) = endpoint();
+    let k = Workers::start_with(None, false, vec![key.clone()], None);
+    let at = |path: &str| format!("{}/telemetry/{path}", k.relay_address());
+    let ask = |by: &ed25519_dalek::SigningKey, path: &str, fields: Value| post(&at(path), &[], one::keys::signed_request(by, one::protocol::TELEMETRY, fields, now()));
+    let span = |name: &str, status: &str, ms: u64| json!({ "time": now(), "trace": "a".repeat(32), "span": "b".repeat(16), "name": name, "service": "notes", "instance": key, "kind": "server", "status": status, "duration": ms, "attrs": json!({ "one.fingerprint": "TypeError|app.js:1:1|b1" }).to_string() });
+    let rows = json!({ "spans": [span("get", "error", 3), span("get", "unset", 700), { "name": "no time or anything else" }], "logs": [{ "time": now(), "severity_number": 9, "severity_text": "INFO", "body": "node.start", "service": "one", "instance": key, "attrs": "{}" }], "metrics": [{ "time": now(), "name": "write.seen", "type": "histogram", "unit": "ms", "service": "one", "instance": key, "count": 2, "sum": 9, "buckets": json!([0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).to_string(), "attrs": "{}" }] });
+    assert_eq!(ask(&stranger, "write", rows.clone()).0, 403, "only the network's devices write");
+    assert_eq!(ask(&device, "write", rows).0, 204);
+    let read = |fields: Value| ask(&device, "read", fields);
+    assert_eq!(ask(&stranger, "read", json!({ "queries": ["spans"], "services": ["notes"] })).0, 403, "and read");
+    let everything = json!({ "queries": ["requests", "spans", "logs", "metrics", "errors"], "services": ["notes", "one"], "since": 0, "limit": 100 });
+    let (status, said) = read(everything);
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["spans"].as_array().unwrap().len(), 2, "what isn't a span is left out: {said}");
+    let hour = &said["requests"][0];
+    assert_eq!((hour["count"].as_u64(), hour["errors"].as_u64(), hour["sum"].as_u64()), (Some(2), Some(1), Some(703)), "{said}");
+    assert_eq!(hour["buckets"][1], 1, "3 ms is in (0, 5]: {said}");
+    assert_eq!(hour["buckets"][8], 0, "{said}");
+    assert_eq!(hour["buckets"][9], 1, "700 ms is in (500, 750]: {said}");
+    assert_eq!(said["logs"][0]["body"], "node.start", "{said}");
+    assert_eq!((said["metrics"][0]["sum"].as_u64(), said["metrics"][0]["buckets"][2].as_u64()), (Some(9), Some(1)), "{said}");
+    assert_eq!((said["errors"][0]["fingerprint"].as_str(), said["errors"][0]["count"].as_u64()), (Some("TypeError|app.js:1:1|b1"), Some(1)), "{said}");
+    assert_eq!(said["errors"].as_array().unwrap().len(), 2, "what broke and what was refused aren't one line: {said}");
+    assert_eq!(read(json!({ "queries": ["spans"], "services": ["other"] })).1["spans"], json!([]), "only the services asked for: {said}");
+    assert_eq!(read(json!({ "queries": ["spans"], "services": ["notes'; DROP TABLE spans; --"] })).0, 400, "a value that isn't a name never reaches the SQL");
+    assert_eq!(read(json!({ "queries": ["DROP TABLE spans"], "services": ["notes"] })).1, json!({}), "only its own reads");
+}
+
 /// A device's request to join, as `by`, one of the network's devices, reads it.
 fn request_as_read_by(k: &Workers, by: &ed25519_dalek::SigningKey, device: &[u8; 32]) -> Value {
     let key = data_encoding::HEXLOWER.encode(device);

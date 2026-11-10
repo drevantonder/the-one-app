@@ -42,7 +42,7 @@ impl Trace {
 
     /// One a device asked for this one's part of, continuing its `traceparent`, W3C's `00-<trace>-<span>-01`, if that's one.
     pub fn continuing(asked: bool, traceparent: Option<&str>) -> Trace {
-        Trace::make(asked, traceparent.and_then(parent_of))
+        Trace::make(asked, traceparent.and_then(crate::insights::parent_of))
     }
 
     fn make(asked: bool, parent: Option<(String, String)>) -> Trace {
@@ -99,22 +99,9 @@ impl Trace {
     }
 }
 
-/// `traceparent`'s trace and span, if it's W3C's and has them: what another device sent, so nothing else is kept.
-fn parent_of(text: &str) -> Option<(String, String)> {
-    let hex = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-    let ["00", trace, span, _] = text.split('-').collect::<Vec<_>>()[..] else { return None };
-    (hex(trace, 32) && hex(span, 16)).then(|| (trace.to_string(), span.to_string()))
-}
-
 /// W3C's ids: 16 random bytes for a trace and 8 for a span, as lowercase hex.
 pub mod ids {
-    pub fn trace() -> String {
-        data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>())
-    }
-
-    pub fn span() -> String {
-        data_encoding::HEXLOWER.encode(&rand::random::<[u8; 8]>())
-    }
+    pub use crate::insights::{new_span as span, new_trace as trace};
 }
 
 /// A scope as a trace names it: its kind alone, never whose.

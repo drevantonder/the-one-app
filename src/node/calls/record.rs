@@ -46,8 +46,8 @@ impl Node {
         });
     }
 
-    /// What an app's owners see of it, from every scope `viewer` may use here: who used it, when and from what;
-    /// its errors grouped, with counts; and what it spent on AI, by model. Only for someone acting for its owner.
+    /// What an app's owners see of it, from every scope `viewer` may use here: who used it, when and from what, and what it
+    /// spent on AI, by model. Only for someone acting for its owner.
     pub(in crate::node) fn insights_of(&self, viewer: &Caller, app: &str) -> Result<Option<Value>> {
         self.with(|i| {
             let m = i.r.db();
@@ -57,7 +57,6 @@ impl Node {
             }
             let name = |u: &str| user_name(m, u);
             let mut users: BTreeMap<(String, String), (u64, u64, Option<String>)> = BTreeMap::new();
-            let mut errors: BTreeMap<(String, String), status::Fingerprint> = BTreeMap::new();
             let mut cost: BTreeMap<String, (f64, u64, u64, u64)> = BTreeMap::new();
             for (log, status) in &i.status {
                 let Ok(scope) = Scope::parse(log) else { continue };
@@ -69,12 +68,6 @@ impl Node {
                     if u.agent.is_some() {
                         p.2 = u.agent.clone();
                     }
-                }
-                for (key, e) in &ins.errors {
-                    let x = errors.entry(key.clone()).or_insert_with(|| status::Fingerprint { count: 0, first: u64::MAX, ..e.clone() });
-                    x.count += e.count;
-                    x.first = x.first.min(e.first);
-                    x.last = x.last.max(e.last);
                 }
                 for (model, c) in &ins.cost {
                     let x = cost.entry(model.clone()).or_default();
@@ -89,10 +82,8 @@ impl Node {
                 usage.push(json!({ "user": name(&u)?, "client": client, "agent": agent, "days": days, "last": last }));
             }
             usage.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
-            let mut errors: Vec<Value> = errors.into_iter().filter(|(_, e)| e.status == "error").map(|((tool, _), e)| json!({ "tool": tool, "error": format!("{} at {}", e.kind, e.frame), "build": e.build, "count": e.count, "first": e.first, "last": e.last })).collect();
-            errors.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
             let cost: Vec<Value> = cost.into_iter().map(|(model, (usd, input, output, calls))| json!({ "model": model, "usd": usd, "input": input, "output": output, "calls": calls })).collect();
-            Ok(Some(json!({ "usage": usage, "errors": errors, "cost": cost })))
+            Ok(Some(json!({ "usage": usage, "cost": cost })))
         })
     }
 

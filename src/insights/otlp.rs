@@ -1,19 +1,20 @@
-//! OTLP/JSON, what services' programs may send, as signals: only what closed sets allow survives, and anything else is
-//! dropped. A span's name stays if it's a plain token (some exporters name it `GET /users/<id>`, which isn't), and its
+//! OTLP/JSON, what services' programs may send, as spans and logs: only what closed sets allow survives, and anything else
+//! is dropped. A span's name stays if it's a plain token (some exporters name it `GET /users/<id>`, which isn't), and its
 //! attributes only by these keys.
 
 use serde_json::Value;
 
-use super::{Kind, SpanKind, token};
+use super::{SpanKind, token};
 
 /// The most spans one OTLP request adds.
 const MOST: usize = 200;
 
 /// A span or log record as insights keeps it.
-pub struct Span {
+#[derive(Clone)]
+pub struct Item {
     pub name: String,
-    pub kind: Kind,
-    pub span_kind: SpanKind,
+    /// A span's kind; a log record has none.
+    pub span_kind: Option<SpanKind>,
     pub ms: u64,
     pub ok: bool,
     /// `error.type`, unchecked here: `Attrs::error` holds it to its set.
@@ -24,7 +25,7 @@ pub struct Span {
 }
 
 /// The spans and log records in an OTLP/JSON `traces` or `logs` request.
-pub fn spans(request: &Value) -> Vec<Span> {
+pub fn items(request: &Value) -> Vec<Item> {
     let in_list = |key: &str, inner: &str, leaf: &str| {
         request[key].as_array().into_iter().flatten().flat_map(|r| r[inner].as_array().into_iter().flatten()).flat_map(|s| s[leaf].as_array().into_iter().flatten()).cloned().collect::<Vec<Value>>()
     };
@@ -33,7 +34,7 @@ pub fn spans(request: &Value) -> Vec<Span> {
     traces.chain(logs).take(MOST).collect()
 }
 
-fn span(s: &Value) -> Span {
+fn span(s: &Value) -> Item {
     let nano = |key: &str| s[key].as_str().and_then(|n| n.parse::<u64>().ok()).or(s[key].as_u64()).unwrap_or(0);
     let ms = nano("endTimeUnixNano").saturating_sub(nano("startTimeUnixNano")) / 1_000_000;
     let ok = s["status"]["code"].as_u64() != Some(2) && s["status"]["code"] != "STATUS_CODE_ERROR";
@@ -46,13 +47,13 @@ fn span(s: &Value) -> Span {
         (Some(3), _) | (_, Some("SPAN_KIND_CLIENT")) => SpanKind::Client,
         _ => SpanKind::Internal,
     };
-    Span { name, kind: Kind::Span, span_kind, ms, ok, error: attribute(s, "error.type").unwrap_or_default(), status_code: number(s, "http.response.status_code"), ids }
+    Item { name, span_kind: Some(span_kind), ms, ok, error: attribute(s, "error.type").unwrap_or_default(), status_code: number(s, "http.response.status_code"), ids }
 }
 
-fn record(r: &Value) -> Span {
+fn record(r: &Value) -> Item {
     let name = r["eventName"].as_str().filter(|n| token(n)).unwrap_or("log").to_string();
     let ok = r["severityNumber"].as_u64().is_none_or(|n| n < 17);
-    Span { name, kind: Kind::Event, span_kind: SpanKind::Internal, ms: 0, ok, error: attribute(r, "error.type").unwrap_or_default(), status_code: None, ids: None }
+    Item { name, span_kind: None, ms: 0, ok, error: attribute(r, "error.type").unwrap_or_default(), status_code: None, ids: None }
 }
 
 fn hex(value: &str, length: usize) -> bool {
@@ -79,7 +80,7 @@ mod tests {
             { "name": "GET /users/anna@example.org", "traceId": "not hex", "startTimeUnixNano": "1000000000", "endTimeUnixNano": "1500000000", "status": { "code": 2, "message": "anna@example.org" }, "attributes": [{ "key": "url.full", "value": { "stringValue": "https://x/anna" } }, { "key": "error.type", "value": { "stringValue": "anna@example.org" } }, { "key": "http.response.status_code", "value": { "intValue": "500" } }] },
             { "name": "ping", "traceId": "0".repeat(32), "spanId": "1".repeat(16), "startTimeUnixNano": 0, "endTimeUnixNano": 2000000, "status": {} },
         ] }] }] });
-        let spans = spans(&request);
+        let spans = items(&request);
         assert_eq!(spans.len(), 2);
         assert_eq!((spans[0].name.as_str(), spans[0].ms, spans[0].ok, spans[0].status_code), ("span", 500, false, Some(500)));
         assert!(spans[0].ids.is_none());

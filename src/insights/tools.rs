@@ -54,14 +54,14 @@ mod serve {
         };
         let service = text("service").map(|s| if s == crate::config::CLI { String::new() } else { s });
         let limit = input.get("limit").and_then(Value::as_u64).map(|n| n as usize);
-        let ask = Ask { app: service, name: text("name"), trace: trace.clone(), since, status: text("status"), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
+        let ask = Ask { queries: if trace.is_some() { vec!["spans"] } else { vec![] }, service, name: text("name"), trace: trace.clone(), since, status: text("status"), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
         let rows = node.insights(&me, &ask).await?;
         if raw {
             return Ok(rows);
         }
         let limit = limit.unwrap_or(view::LISTED);
         let status = ask.status.as_deref().unwrap_or(view::ERROR);
-        let text = match (&trace, &ask.app) {
+        let text = match (&trace, &ask.service) {
             (Some(id), _) => view::trace(&rows, id, limit),
             (None, Some(service)) => view::service(&rows, input.get("service").and_then(Value::as_str).unwrap_or(service), status, since.unwrap_or(0), now, limit),
             (None, None) => view::overview(&rows, status, since.unwrap_or(0), now, limit),

@@ -1,16 +1,15 @@
-//! Insights: how the network is doing, recorded by the network itself. A dumb pipeline: it records, stores, expires and
-//! offers one read tool (`insights`), and has no opinion on what's a problem.
+//! Insights: how the network is doing, recorded by the network itself. A dumb pipeline: it records, sends and offers one
+//! read tool (`insights`), and has no opinion on what's a problem.
 //!
-//! It speaks OpenTelemetry's data model and field names (`service.name`, `error.type`, `exception.stacktrace`, W3C trace
-//! and span ids) without its SDK. Each device keeps a batch per scope in memory and writes it to that scope's node
-//! database every few minutes (`node.rs` here): three tables, of raw signals (a week), hourly rollups (90 days) and error
-//! fingerprints (until their build is gone from the network). Failures, slow calls and one trace in 20 keep their spans.
+//! It speaks OpenTelemetry's data model and field names (`service.name`, `error.type`, W3C trace and span ids) without its
+//! SDK. Each device keeps one batch in memory and sends it to the telemetry Worker every minute or so (`worker.rs` here),
+//! which keeps it in Cloudflare Basin (`cloudflare/telemetry/`): spans, logs and metrics. Every server span is sent, since
+//! a service's rates are read from them; a call's steps and its hops only for failures, slow calls and one trace in 20.
 //! Telemetry may be lost.
 //!
 //! A signal's attributes hold closed-set values only (`Attrs`): never a call's arguments or answer, a URL, a file, repo or
 //! account's name, an email, an IP, a prompt or anything key-shaped, and never names a user or a group. The one free text is
-//! `exception.message`, what a real failure said, cleaned first (`message`) and kept with the raw signal alone; a refusal's
-//! is never kept.
+//! `exception.message`, what a real failure said, cleaned first (`message`); a refusal's is never kept.
 
 use std::collections::BTreeMap;
 
@@ -25,7 +24,7 @@ pub mod view;
 #[cfg(feature = "node")]
 pub mod cli;
 #[cfg(feature = "node")]
-pub(crate) mod store;
+pub(crate) mod worker;
 #[cfg(feature = "node")]
 pub mod routes;
 pub mod otlp;
@@ -87,10 +86,8 @@ pub fn sampled(trace: &str) -> bool {
     u64::from_str_radix(trace.get(trace.len().saturating_sub(8)..).unwrap_or(""), 16).is_ok_and(|n| n % SAMPLED_ONE_IN == 0)
 }
 
-pub const RAW_KEPT_MS: u64 = 7 * 86_400_000;
-pub const ROLLUPS_KEPT_MS: u64 = 90 * 86_400_000;
-/// The most raw signals a batch holds: past it, they only add to the rollups.
-const MOST_SIGNALS: usize = 500;
+/// The most a batch holds of each, past which what's new is dropped: as many as the telemetry Worker takes at once.
+const MOST_ROWS: usize = 5000;
 /// The most stack frames a signal keeps.
 pub const MOST_FRAMES: usize = 8;
 
@@ -231,26 +228,11 @@ fn frame(v: &Value) -> Option<String> {
 pub struct Attrs(BTreeMap<&'static str, Value>);
 
 impl Attrs {
-    /// The app, or a service's own name.
-    pub fn service(mut self, name: &str) -> Attrs {
-        self.token("service.name", name);
-        self
-    }
-
-    /// The app's bundle, or a service's build: its hash.
-    pub fn version(mut self, hash: &str) -> Attrs {
-        self.token("service.version", hash);
-        self
-    }
-
-    pub fn tool(mut self, tool: &str) -> Attrs {
-        self.token("one.tool", tool);
-        self
-    }
-
-    pub fn device(mut self, hex: &str) -> Attrs {
-        if hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-            self.0.insert("one.device", json!(hex));
+    /// A call as OTEL's RPC conventions name it: `rpc.system.name`, and `rpc.method` as `<app>/<tool>`.
+    pub fn rpc(mut self, app: &str, tool: &str) -> Attrs {
+        self.0.insert("rpc.system.name", json!("one"));
+        if token(app) && token(tool) {
+            self.0.insert("rpc.method", json!(format!("{app}/{tool}")));
         }
         self
     }
@@ -349,6 +331,12 @@ impl Attrs {
         self
     }
 
+    /// How long something a log record says took, as that record has no duration of its own.
+    pub fn duration(mut self, ms: u64) -> Attrs {
+        self.0.insert("one.duration", json!(ms));
+        self
+    }
+
     pub fn bytes(mut self, n: u64) -> Attrs {
         self.0.insert("one.bytes", json!(n));
         self
@@ -368,45 +356,38 @@ impl Attrs {
 
     /// `error.type`: a protocol code, an exception's type, a device that couldn't be asked, or OTEL's own `timeout` or `_OTHER`.
     pub fn error(mut self, kind: &str) -> Attrs {
-        let known = code::ALL.contains(&kind) || EXCEPTIONS.contains(&kind) || [TIMEOUT, UNREACHABLE, LOST].contains(&kind);
-        self.0.insert("error.type", json!(if known { kind } else { OTHER }));
+        self.0.insert("error.type", json!(error_kind(kind)));
         self
     }
 
-    /// OTEL's `span.kind`.
-    pub fn span_kind(mut self, kind: SpanKind) -> Attrs {
-        self.0.insert("span.kind", json!(kind.as_str()));
-        self
-    }
-
+    /// An exception as OTEL's span event for one, among what the span says. What it said is the span's `message`.
     pub fn exception(mut self, e: &Exception) -> Attrs {
-        self.0.insert("exception.type", json!(e.kind));
+        let mut said = serde_json::Map::from_iter([("exception.type".to_string(), json!(e.kind))]);
         if !e.frames.is_empty() {
-            self.0.insert("exception.stacktrace", json!(e.frames.iter().map(|f| format!("at {f}")).collect::<Vec<_>>().join("\n")));
+            said.insert("exception.stacktrace".into(), json!(e.frames.iter().map(|f| format!("at {f}")).collect::<Vec<_>>().join("\n")));
         }
-        match &e.message {
-            Some(said) => self.message(said),
-            None => self,
-        }
-    }
-
-    /// `exception.message`, what a real failure said, cleaned: only ever for one that broke, as a refusal keeps no text.
-    pub fn message(mut self, said: &str) -> Attrs {
-        self.0.insert("exception.message", json!(message::cleaned(said)));
+        self.0.insert("events", json!([{ "name": "exception", "attributes": said }]));
         self
     }
 
-    /// Which fingerprint this failure is, for a reader to find what a fingerprint's failures said: made from closed sets alone.
-    pub fn fingerprint(mut self, id: &str) -> Attrs {
-        self.0.insert("one.fingerprint", json!(id));
+    /// What the Errors list groups by: the failure's type, what threw it and the build it ran in. Made from closed sets alone.
+    pub fn fingerprint(mut self, kind: &str, frame: &str, build: &str) -> Attrs {
+        self.0.insert("one.fingerprint", json!(format!("{}|{frame}|{build}", error_kind(kind))));
         self
     }
 
-    /// What a span did, step by step, without anything a step says that's more than its name and time.
-    pub fn steps(mut self, steps: &[Value]) -> Attrs {
-        let kept: Vec<Value> = steps.iter().filter_map(stored_step).collect();
-        if !kept.is_empty() {
-            self.0.insert("one.steps", Value::Array(kept));
+    /// What a step of a call says besides its name and time, each a number or from a closed set.
+    fn step(mut self, step: &Value) -> Attrs {
+        for (field, key) in [("asks", "one.asks"), ("found", "one.found"), ("new", "one.new")] {
+            if step[field].is_number() {
+                self.0.insert(key, step[field].clone());
+            }
+        }
+        if let Some(kind) = step["kind"].as_str().filter(|k| ["read", "create", "replace"].contains(k)) {
+            self.0.insert("one.kind", json!(kind));
+        }
+        if let Some(result) = step["result"].as_str().filter(|r| RESULTS.contains(r)) {
+            self.0.insert("one.result", json!(result));
         }
         self
     }
@@ -417,16 +398,14 @@ impl Attrs {
         }
     }
 
-    /// The attributes a rollup groups by, as its key: those that are few.
-    fn rollup_key(&self, kind: &str) -> String {
-        let mut key: BTreeMap<&str, Value> = self.0.iter().filter(|(k, _)| ["one.client", "one.scope", "one.device", "one.build", "one.code", "gen_ai.request.model", "gen_ai.token.type", "one.outcome", "span.kind"].contains(k)).map(|(k, v)| (*k, v.clone())).collect();
-        key.insert("kind", json!(kind));
-        serde_json::to_string(&key).unwrap_or_default()
-    }
-
     pub fn json(&self) -> Value {
         json!(self.0)
     }
+}
+
+/// `kind` if it's a name `error.type` may hold, else `_OTHER`.
+fn error_kind(kind: &str) -> &str {
+    if code::ALL.contains(&kind) || EXCEPTIONS.contains(&kind) || [TIMEOUT, UNREACHABLE, LOST].contains(&kind) { kind } else { OTHER }
 }
 
 /// Whether a value is a plain name or hash: letters, digits and `_ . - +`, so no address, path, URL or sentence.
@@ -438,21 +417,33 @@ pub fn token(value: &str) -> bool {
 const STEPS: &[&str] = &["device", "bucket", "online", "connect", "lease", "prepare", "write", "keys", "behind", "data", "open", "logs", "run"];
 const RESULTS: &[&str] = &["ran", "failed", "elsewhere", "needs keys", "unreachable", "no answer", "caught up", "behind", "asked"];
 
-fn stored_step(step: &Value) -> Option<Value> {
-    let name = step["step"].as_str().filter(|s| STEPS.contains(s))?;
-    let mut out = json!({ "step": name, "at": step["at"], "ms": step["ms"] });
-    for key in ["asks", "found", "new"] {
-        if step[key].is_number() {
-            out[key] = step[key].clone();
-        }
-    }
-    if let Some(kind) = step["kind"].as_str().filter(|k| ["read", "create", "replace"].contains(k)) {
-        out["kind"] = json!(kind);
-    }
-    if let Some(result) = step["result"].as_str().filter(|r| RESULTS.contains(r)) {
-        out["result"] = json!(result);
-    }
-    Some(out)
+/// A new W3C span id.
+pub fn new_span() -> String {
+    data_encoding::HEXLOWER.encode(&rand::random::<[u8; 8]>())
+}
+
+/// A new W3C trace id.
+pub fn new_trace() -> String {
+    data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>())
+}
+
+/// A span's steps, each as a real child of it. Only the steps `STEPS` names are kept.
+pub fn step_spans(parent: &Span, steps: &[Value]) -> Vec<Span> {
+    steps.iter().filter(|s| s["step"].as_str().is_some_and(|name| STEPS.contains(&name))).map(|step| Span {
+        time: parent.time + step["at"].as_u64().unwrap_or(0),
+        trace: parent.trace.clone(),
+        span: new_span(),
+        parent: Some(parent.span.clone()),
+        name: step["step"].as_str().unwrap_or("").to_string(),
+        service: parent.service.clone(),
+        version: None,
+        instance: parent.instance.clone(),
+        kind: SpanKind::Internal,
+        status: Status::Unset,
+        duration: step["ms"].as_u64().unwrap_or(0),
+        message: None,
+        attrs: Attrs::default().step(step),
+    }).collect()
 }
 
 /// OTEL's span kinds: what a span's rates mean. A `server` span is a request: it's what counts in a service's rates.
@@ -473,139 +464,166 @@ impl SpanKind {
     }
 }
 
+/// OTEL's severities, those it's used at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Span,
-    Event,
+pub enum Severity {
+    Info,
+    Warn,
+    Error,
 }
 
-impl Kind {
-    pub fn as_str(self) -> &'static str {
+impl Severity {
+    pub fn number(self) -> u64 {
         match self {
-            Kind::Span => "span",
-            Kind::Event => "event",
+            Severity::Info => 9,
+            Severity::Warn => 13,
+            Severity::Error => 17,
+        }
+    }
+
+    pub fn text(self) -> &'static str {
+        match self {
+            Severity::Info => "INFO",
+            Severity::Warn => "WARN",
+            Severity::Error => "ERROR",
         }
     }
 }
 
-/// One thing that happened, as a device says it.
+/// OTEL's default duration boundaries, in ms. The same as the telemetry Worker's and the screen's, as tests/contracts.rs holds them.
+pub const BOUNDS: [u64; 15] = [0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000];
+
+/// A metric: what it counts, whether it's a histogram, and its unit. A name doesn't carry its unit.
+#[derive(Clone, Copy, Debug)]
+pub struct Metric {
+    pub name: &'static str,
+    pub histogram: bool,
+    pub unit: &'static str,
+}
+
+pub const BUCKET_ASKS: Metric = Metric { name: "bucket.asks", histogram: false, unit: "{ask}" };
+pub const BUCKET_DURATION: Metric = Metric { name: "bucket.duration", histogram: true, unit: "ms" };
+pub const STEPS_BEHIND: Metric = Metric { name: "steps.behind", histogram: false, unit: "{step}" };
+pub const WRITE_SEEN: Metric = Metric { name: "write.seen", histogram: true, unit: "ms" };
+pub const SIGNER_FAILURES: Metric = Metric { name: "signer.failures", histogram: false, unit: "{failure}" };
+pub const TOKEN_USAGE: Metric = Metric { name: "gen_ai.client.token.usage", histogram: true, unit: "{token}" };
+pub const OPERATION_DURATION: Metric = Metric { name: "gen_ai.client.operation.duration", histogram: true, unit: "ms" };
+
+/// One span, as a device says it. `service` is an app, or the network's own program (`own`).
 #[derive(Clone, Debug)]
-pub struct Signal {
+pub struct Span {
     pub time: u64,
-    pub device: String,
-    pub kind: Kind,
-    pub name: String,
-    /// The app it's about, or none: the device's own, or a call of no such app.
-    pub app: String,
     pub trace: String,
     pub span: String,
     pub parent: Option<String>,
-    pub ms: u64,
+    pub name: String,
+    pub service: String,
+    pub version: Option<String>,
+    pub instance: String,
+    pub kind: SpanKind,
     pub status: Status,
+    pub duration: u64,
+    /// `exception.message`, cleaned.
+    pub message: Option<String>,
     pub attrs: Attrs,
 }
 
-/// An error grouped by what threw it: its type, its top code frame or the stage it failed at, the build it ran in and,
-/// by its id alone, what it said once that's cleaned, so what differs only by a value is one line and the row holds no text.
+/// One log record: what used to be called an event, and where warnings live.
 #[derive(Clone, Debug)]
-pub struct Print {
-    pub app: String,
-    pub tool: String,
-    pub kind: String,
-    pub frame: String,
-    pub build: String,
-    pub status: Status,
-    /// `message::id` of what it said; empty for a refusal, which says nothing here.
-    pub said: String,
+pub struct Log {
+    pub time: u64,
+    pub trace: Option<String>,
+    pub span: Option<String>,
+    pub severity: Severity,
+    pub body: String,
+    pub service: String,
+    pub version: Option<String>,
+    pub instance: String,
+    pub attrs: Attrs,
 }
 
-impl Print {
-    pub fn fingerprint(&self) -> String {
-        match self.said.as_str() {
-            "" => format!("{}|{}|{}", self.kind, self.frame, self.build),
-            said => format!("{}|{}|{}|{said}", self.kind, self.frame, self.build),
-        }
-    }
-}
-
-/// A row of a rollup, as it adds up.
+/// A metric as it adds up over a minute.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Roll {
+pub struct Sum {
     pub count: u64,
-    pub errors: u64,
-    pub ms: u64,
-    /// How many took under 10 ms, 100 ms, 1 s and 10 s, and longer.
-    pub under: [u64; 5],
+    pub sum: u64,
+    /// Bucket `i` is what's at most `BOUNDS[i]`, past the one before; the last what's over them all.
+    pub buckets: [u64; BOUNDS.len() + 1],
 }
 
-impl Roll {
-    fn add(&mut self, ms: u64, ok: bool) {
+impl Sum {
+    fn add(&mut self, value: u64) {
         self.count += 1;
-        self.errors += u64::from(!ok);
-        self.ms += ms;
-        self.under[match ms {
-            0..10 => 0,
-            10..100 => 1,
-            100..1_000 => 2,
-            1_000..10_000 => 3,
-            _ => 4,
-        }] += 1;
+        self.sum += value;
+        self.buckets[BOUNDS.iter().position(|b| value <= *b).unwrap_or(BOUNDS.len())] += 1;
     }
 }
 
-/// How a fingerprint adds up.
-#[derive(Clone, Debug)]
-pub struct Printed {
-    pub print: Print,
-    pub count: u64,
-    pub first: u64,
-    pub last: u64,
+/// `traceparent`'s trace and span, if it's W3C's and has them: what another device sent, so nothing else is kept.
+pub fn parent_of(text: &str) -> Option<(String, String)> {
+    let hex = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    let ["00", trace, span, _] = text.split('-').collect::<Vec<_>>()[..] else { return None };
+    (hex(trace, 32) && hex(span, 16)).then(|| (trace.to_string(), span.to_string()))
 }
 
-/// What a device has to say about one scope, since it last said it.
+/// The network's own program, as a service.
+pub fn own() -> &'static str {
+    crate::config::CLI
+}
+
+/// What a device has to say, since it last said it.
 #[derive(Clone, Debug, Default)]
 pub struct Batch {
-    pub signals: Vec<Signal>,
-    /// By (hour since 1970, name, app, key).
-    pub rollups: BTreeMap<(u64, String, String, String), Roll>,
-    /// By (app, tool, fingerprint).
-    pub prints: BTreeMap<(String, String, String), Printed>,
+    pub spans: Vec<Span>,
+    pub logs: Vec<Log>,
+    /// By (minute, name, service, instance, attributes as JSON): its metric and how it adds up.
+    pub metrics: BTreeMap<(u64, &'static str, String, String, String), (Metric, Sum)>,
 }
-
-/// The most fingerprints a batch adds: past it what's new adds only to the rollups, as what a message varies by can be anything.
-const MOST_PRINTS: usize = 500;
 
 impl Batch {
     pub fn is_empty(&self) -> bool {
-        self.signals.is_empty() && self.rollups.is_empty() && self.prints.is_empty()
+        self.spans.is_empty() && self.logs.is_empty() && self.metrics.is_empty()
     }
 
-    /// Adds to a metric's rollup: for a metric, `ms` is the sum of its values and `count` how many were added.
-    pub fn metric(&mut self, time: u64, name: &str, app: &str, attrs: &Attrs, value: u64) {
-        self.rollups.entry((time / 3_600_000, name.to_string(), app.to_string(), attrs.rollup_key("metric"))).or_default().add(value, true);
+    /// Adds a finished span, and its children if it's kept. A server span always goes: rates are read from them.
+    pub fn span(&mut self, span: Span, kept: bool, steps: &[Value]) {
+        if kept {
+            self.spans.extend(step_spans(&span, steps));
+        }
+        if kept || span.kind == SpanKind::Server {
+            self.spans.push(span);
+        }
+        self.spans.truncate(MOST_ROWS);
     }
 
-    /// Adds a finished signal: to the rollups always, and in full only if it's `kept`.
-    pub fn add(&mut self, signal: Signal, kept: bool, print: Option<Print>) {
-        let key = (signal.time / 3_600_000, signal.name.clone(), signal.app.clone(), signal.attrs.rollup_key(signal.kind.as_str()));
-        self.rollups.entry(key).or_default().add(signal.ms, signal.status == Status::Unset);
-        if let Some(print) = print {
-            let at = signal.time;
-            let id = (print.app.clone(), print.tool.clone(), print.fingerprint());
-            if self.prints.len() < MOST_PRINTS || self.prints.contains_key(&id) {
-                self.prints.entry(id).and_modify(|p| { p.count += 1; p.last = p.last.max(at); p.first = p.first.min(at) }).or_insert(Printed { print, count: 1, first: at, last: at });
-            }
+    pub fn log(&mut self, log: Log) {
+        if self.logs.len() < MOST_ROWS {
+            self.logs.push(log);
         }
-        if kept && self.signals.len() < MOST_SIGNALS {
-            self.signals.push(signal);
+    }
+
+    pub fn metric(&mut self, time: u64, metric: Metric, service: &str, instance: &str, attrs: &Attrs, value: u64) {
+        let key = (time / 60_000 * 60_000, metric.name, service.to_string(), instance.to_string(), attrs.json().to_string());
+        if self.metrics.len() < MOST_ROWS || self.metrics.contains_key(&key) {
+            self.metrics.entry(key).or_insert_with(|| (metric, Sum::default())).1.add(value);
         }
+    }
+
+    /// As the telemetry Worker takes it, each row with its table's columns.
+    pub fn rows(&self) -> Value {
+        let spans: Vec<Value> = self.spans.iter().map(|s| json!({ "time": s.time, "trace": s.trace, "span": s.span, "parent": s.parent, "name": s.name, "service": s.service, "version": s.version, "instance": s.instance, "kind": s.kind.as_str(), "status": s.status.as_str(), "duration": s.duration, "message": s.message, "attrs": s.attrs.json().to_string() })).collect();
+        let logs: Vec<Value> = self.logs.iter().map(|l| json!({ "time": l.time, "trace": l.trace, "span": l.span, "severity_number": l.severity.number(), "severity_text": l.severity.text(), "body": l.body, "service": l.service, "version": l.version, "instance": l.instance, "attrs": l.attrs.json().to_string() })).collect();
+        let metrics: Vec<Value> = self.metrics.iter().map(|((time, name, service, instance, attrs), (metric, sum))| json!({ "time": time, "name": name, "type": if metric.histogram { "histogram" } else { "counter" }, "unit": metric.unit, "service": service, "instance": instance, "count": sum.count, "sum": sum.sum, "buckets": metric.histogram.then(|| json!(sum.buckets).to_string()), "attrs": attrs })).collect();
+        json!({ "spans": spans, "logs": logs, "metrics": metrics })
     }
 }
 
 /// What a reader asks of `insights`.
 #[derive(Clone, Debug, Default)]
 pub struct Ask {
-    pub app: Option<String>,
+    /// Which of the telemetry Worker's reads: all of them if none's named.
+    pub queries: Vec<&'static str>,
+    pub service: Option<String>,
     pub name: Option<String>,
     pub trace: Option<String>,
     pub since: Option<u64>,
@@ -621,17 +639,21 @@ mod tests {
     #[test]
     fn only_what_a_set_allows_is_kept() {
         let secret = "anna@example.org";
-        let attrs = Attrs::default().tool(secret).service("https://x.example/a?b=c").version("a b").client(secret).device(secret).build(secret).stage(secret).error(secret).steps(&[json!({ "step": "device", "at": 1, "ms": 2, "why": secret, "device": secret, "result": secret, "trace": { "secret": secret } }), json!({ "step": secret })]);
-        let stored = attrs.json().to_string();
+        let parent = Span { time: 5, trace: "0".repeat(32), span: "1".repeat(16), parent: None, name: "x".into(), service: "s".into(), version: None, instance: "2".repeat(64), kind: SpanKind::Server, status: Status::Unset, duration: 3, message: None, attrs: Attrs::default() };
+        let steps = step_spans(&parent, &[json!({ "step": "device", "at": 1, "ms": 2, "why": secret, "device": secret, "result": secret, "trace": { "secret": secret } }), json!({ "step": secret })]);
+        assert_eq!(steps.len(), 1, "a step of no known name isn't one");
+        assert_eq!((steps[0].time, steps[0].duration, steps[0].parent.as_deref()), (6, 2, Some(parent.span.as_str())));
+        let attrs = Attrs::default().rpc(secret, "t").client(secret).build(secret).stage(secret).error(secret).fingerprint(secret, "stage:run", "b1");
+        let stored = format!("{} {}", attrs.json(), steps[0].attrs.json());
         assert!(!stored.contains("anna") && !stored.contains("example"), "{stored}");
         assert_eq!(attrs.json()["one.client"], "other");
         assert_eq!(attrs.json()["error.type"], OTHER);
-        assert_eq!(attrs.json()["one.steps"], json!([{ "step": "device", "at": 1, "ms": 2 }]));
+        assert_eq!(attrs.json()["one.fingerprint"], format!("{OTHER}|stage:run|b1"));
         let e = Exception::from_json(&json!({ "type": secret, "frames": [{ "file": "app.js", "line": 3, "col": 9 }, { "file": "a/b@c", "line": 1, "col": 1 }, { "file": "lib/a.js", "line": 2, "col": 1 }] })).unwrap();
         assert_eq!(e.kind, "Error");
         assert_eq!(e.frames, ["app.js:3:9", "lib/a.js:2:1"]);
-        let cleaned = Attrs::default().exception(&Exception { message: Some(format!("no mail for {secret}")), ..e }).json();
-        assert_eq!(cleaned["exception.message"], "no mail for <email>");
+        let events = Attrs::default().exception(&e).json();
+        assert_eq!(events["events"][0]["attributes"]["exception.stacktrace"], "at app.js:3:9\nat lib/a.js:2:1");
     }
 
     /// What's the caller's to change never counts as something that broke, and nothing else is taken for it.

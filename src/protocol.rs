@@ -12,6 +12,8 @@ use serde_json::{Value, json};
 pub const URLS: &str = "one/urls";
 /// What a device signs its requests to the relay under.
 pub const RELAY: &str = "one/relay";
+/// What a device signs to write or read telemetry.
+pub const TELEMETRY: &str = "one/telemetry";
 pub use crate::push::DOMAIN as PUSH;
 /// What a device signs its requests to auth under.
 pub const AUTH_DOMAIN: &str = "one/auth";
@@ -246,6 +248,7 @@ pub fn javascript() -> String {
          export const HEADER = {header};\n\
          export const URLS = {urls};\n\
          export const RELAY = {relay};\n\
+         export const TELEMETRY = {telemetry};\n\
          export const PUSH = {push};\n\
          export const SIGNED_NOTE = {signed_note};\n\
          export const AUTH_DOMAIN = {auth};\n\
@@ -291,6 +294,7 @@ pub fn javascript() -> String {
         header = json!({ "keys": header::KEYS, "endpoint": header::ENDPOINT, "elsewhere": header::ELSEWHERE, "trace": header::TRACE, "user": header::USER, "request": header::REQUEST, "code": header::CODE }),
         urls = json!(URLS),
         relay = json!(RELAY),
+        telemetry = json!(TELEMETRY),
         push = json!(PUSH),
         signed_note = json!(crate::push::SIGNED_NOTE),
         auth = json!(AUTH_DOMAIN),

@@ -56,6 +56,29 @@ pub fn signed(seed: &str, domain: &str, fields: &str, at: f64) -> Result<String,
     Ok(one::keys::signed_request(&signing_key(seed).map_err(thrown)?, domain, serde_json::from_str(fields)?, at as u64).to_string())
 }
 
+/// A call this node ran, as the rows the telemetry Worker takes: one server span, by the same rules as any node's. `code` is
+/// what it failed with, and `said` what it said; a refusal keeps none of that.
+#[wasm_bindgen]
+pub fn call_span(app: &str, tool: &str, instance: &str, time: f64, ms: f64, failed: bool, code: Option<String>, said: Option<String>, traceparent: Option<String>) -> String {
+    use one::insights::{Attrs, Batch, Failure, Span, SpanKind, Status, message, own, token};
+    let failure = failed.then(|| Failure::of(code.as_deref(), None, one::insights::stage::RUN));
+    let name = if token(tool) { tool } else { "_unknown" };
+    let mut attrs = Attrs::default().client("api").rpc(app, name).build(one::config::BUILD);
+    let mut text = None;
+    if let Some(failure) = &failure {
+        attrs = attrs.failed(failure).stage(one::insights::stage::RUN).fingerprint(failure.kind(), "stage:run", one::config::BUILD);
+        if let Failure::Broke(_) = failure {
+            text = said.as_deref().map(message::cleaned);
+        }
+    }
+    let parent = traceparent.as_deref().and_then(one::insights::parent_of);
+    let (trace, parent) = parent.map_or_else(|| (one::insights::new_trace(), None), |(t, s)| (t, Some(s)));
+    let service = if token(app) { app } else { own() };
+    let mut batch = Batch::default();
+    batch.span(Span { time: time as u64, trace, span: one::insights::new_span(), parent, name: name.to_string(), service: service.to_string(), version: None, instance: instance.to_string(), kind: SpanKind::Server, status: failure.as_ref().map_or(Status::Unset, Failure::status), duration: ms as u64, message: text, attrs }, false, &[]);
+    batch.rows().to_string()
+}
+
 /// The most keys one handoff may carry: a call's databases in each epoch since their newest copies.
 const HANDED_MOST: usize = 256;
 

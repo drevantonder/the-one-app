@@ -1,4 +1,4 @@
-//! How things went, as devices say it: who used each app, its AI cost and insights' tables (`crate::insights`); schedules'
+//! How things went, as devices say it: who used each app and its AI cost; schedules'
 //! runs; the build each device runs; backups' runs. Rows each scope's node database changes in place, not steps of their own: written often, and
 //! needed only as they are now. Each device reads them back into `Status`, which the rest of the node looks at.
 
@@ -73,6 +73,10 @@ create table rollups_merged (hour integer not null, name text not null, app text
 insert into rollups_merged select hour, name, app, json_remove(key, '$.fault'), sum(count), sum(errors), sum(ms), sum(under_10), sum(under_100), sum(under_1000), sum(under_10000), sum(over) from rollups group by 1, 2, 3, 4;
 drop table rollups;
 alter table rollups_merged rename to rollups;
+", "
+drop table signals;
+drop table rollups;
+drop table fingerprints;
 "];
 
 pub const RUNS_KEPT: usize = 20;
@@ -83,7 +87,7 @@ pub const CHECKS_KEPT: usize = 20;
 /// A scope's rows, as this device last read them.
 #[derive(Clone, Debug, Default)]
 pub struct Status {
-    /// What each app's owners see of it here: who used it, its error fingerprints, its AI cost.
+    /// What each app's owners see of it here: who used it, its AI cost.
     pub insights: BTreeMap<String, Insights>,
     /// Each schedule's latest runs here, oldest first, by (app, schedule).
     pub runs: BTreeMap<(String, String), Vec<Run>>,
@@ -106,8 +110,6 @@ pub struct Status {
 pub struct Insights {
     /// By (user, client): the days they used it, when last, and the agent last named.
     pub used: BTreeMap<(String, String), Used>,
-    /// By (tool, fingerprint).
-    pub errors: BTreeMap<(String, String), Fingerprint>,
     /// By model: dollars, tokens in and out, and calls.
     pub cost: BTreeMap<String, Cost>,
 }
@@ -117,18 +119,6 @@ pub struct Used {
     pub days: u64,
     pub last: u64,
     pub agent: Option<String>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Fingerprint {
-    pub kind: String,
-    pub frame: String,
-    pub build: String,
-    /// `error`, or `unset` for a refusal.
-    pub status: String,
-    pub count: u64,
-    pub first: u64,
-    pub last: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -194,8 +184,6 @@ pub enum Said {
     BackedUp(BackupRun),
     Alerted { place: String },
     Checked(CheckRun),
-    /// What this device has to say of how things went, and the builds still running, whose fingerprints stay.
-    Insights { batch: crate::insights::Batch, live: Vec<String> },
 }
 
 impl Node {
@@ -246,14 +234,13 @@ impl Node {
                     ex("insert or replace into checks values (?, ?, ?, ?, ?)", &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.report.to_string())])?;
                     ex("delete from checks where place = ? and time not in (select time from checks where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(CHECKS_KEPT)])
                 }
-                Said::Insights { batch, live } => crate::insights::store::write(c, batch, now, live),
             }
         })
         .await?;
         self.read_status(scope).await
     }
 
-    /// A scope's node database, brought to its schema: what `say` and insights write and read.
+    /// A scope's node database, brought to its schema.
     pub(super) async fn node_database(&self, scope: &Scope) -> Result<Arc<tokio::sync::Mutex<Db>>> {
         self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await
     }
@@ -270,10 +257,6 @@ impl Node {
         for r in rows("select * from used")? {
             let used = Used { days: n(&r["days"]), last: n(&r["last"]), agent: r["agent"].as_str().map(str::to_string) };
             s.insights.entry(text(&r["app"])).or_default().used.insert((text(&r["user"]), text(&r["client"])), used);
-        }
-        for r in rows("select * from fingerprints")? {
-            let print = Fingerprint { kind: text(&r["type"]), frame: text(&r["frame"]), build: text(&r["build"]), status: text(&r["status"]), count: n(&r["count"]), first: n(&r["first"]), last: n(&r["last"]) };
-            s.insights.entry(text(&r["app"])).or_default().errors.insert((text(&r["tool"]), text(&r["fingerprint"])), print);
         }
         for r in rows("select * from cost")? {
             let cost = Cost { usd: r["usd"].as_f64().unwrap_or(0.0), input: n(&r["input"]), output: n(&r["output"]), calls: n(&r["calls"]) };

@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 /// A binding: (name, value, whether it's secret). A value `service:<name>` is another Worker, or `service:<name>:<entrypoint>`
 /// one of its entrypoints, `object:<name>:<class>` another Worker's Durable Object class, `loader:` Worker Loader, `ai:` Workers
-/// AI, and `r2:<bucket>` an R2 bucket of the account's.
+/// AI, `r2:<bucket>` an R2 bucket of the account's, and `pipeline:<id>` a stream of Basin's.
 pub type Binding = (String, String, bool);
 
 /// One of the network's Workers: everything said about it is here.
@@ -42,6 +42,7 @@ pub const WORKERS: &[Worker] = &[
     Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings },
     Worker { name: "signer", entry: "signer/worker.js", class: None, place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings },
     Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), place: None, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings },
+    Worker { name: "telemetry", entry: "telemetry/worker.js", class: None, place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings },
     Worker { name: "gateway", entry: "gateway/worker.js", class: None, place: Some(|s| (s.address.as_str(), s.ports[1])), node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings },
     Worker { name: "push", entry: "push/worker.js", class: Some("Push"), place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings },
 ];
@@ -51,7 +52,7 @@ pub const WORKERS: &[Worker] = &[
 pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
 
 /// The Workers traced at 100% (`metadata`): those that open nothing. The web client is the gateway's assets.
-const TRACED: [&str; 5] = ["gateway", "auth", "relay", "signer", "push"];
+const TRACED: [&str; 6] = ["gateway", "auth", "relay", "signer", "push", "telemetry"];
 
 impl Worker {
     pub fn named(name: &str) -> &'static Worker {
@@ -208,6 +209,13 @@ pub struct Settings {
     /// again (`at_home`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<(String, String)>,
+    /// Where its telemetry is in Basin, once a deploy has set that up (`basin::provision`). Workers that run on one machine
+    /// have none, and keep it in a stand-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<super::basin::Telemetry>,
+    /// The token only for telemetry's bucket that `telemetry` was set up with, which the telemetry Worker reads with.
+    #[serde(default, skip_serializing)]
+    pub telemetry_token: Option<String>,
     /// What the relay says of the Workers (`Newest::deployed`), set by whatever deploys or serves them, so Devices can show
     /// what they're on.
     #[serde(skip)]
@@ -231,6 +239,9 @@ BUCKET=
 # The API token cloudflare deploy edits the Cloudflare account's Workers with, where CLOUDFLARE_API_TOKEN isn't set.
 # @optional
 CLOUDFLARE_API_TOKEN=
+# The token only for telemetry's bucket, made by cloudflare deploy, which the telemetry Worker reads Basin with.
+# @optional
+TELEMETRY_TOKEN=
 # The Cloudflare node's endpoint key, made by cloudflare node deploy.
 # @optional
 CLOUDFLARE_NODE_KEY=
@@ -398,6 +409,7 @@ impl Settings {
         settings.auth_secret = get("AUTH_SECRET").context("no AUTH_SECRET")?;
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
+        settings.telemetry_token = get("TELEMETRY_TOKEN");
         settings.cloudflare_node_key = get("CLOUDFLARE_NODE_KEY").unwrap_or_default();
         settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
         if settings.throwaway_user.is_none() {
@@ -459,6 +471,8 @@ impl Settings {
             push: [("VAPID_KEY".to_string(), vapid_key())].into(),
             root: None,
             throwaway_user: None,
+            telemetry: None,
+            telemetry_token: None,
             home: None,
             deployed: None,
             dir: crate::home(),
@@ -544,7 +558,7 @@ fn secret(name: &str, value: impl Into<String>) -> Binding {
 /// The gateway holds no secrets.
 fn gateway_bindings(_: &Settings) -> Vec<Binding> {
     let named = [("NAME", crate::config::NAME), ("YOURS", crate::config::YOURS), ("CLI", crate::config::CLI)].map(|(n, v)| plain(n, v));
-    let bound = [("AUTH", "auth"), ("IROH", "relay"), ("SIGNER", "signer"), ("MCP", "mcp"), ("PUSH", "push")].map(|(n, s)| plain(n, format!("service:{s}")));
+    let bound = [("AUTH", "auth"), ("IROH", "relay"), ("SIGNER", "signer"), ("MCP", "mcp"), ("PUSH", "push"), ("TELEMETRY", "telemetry")].map(|(n, s)| plain(n, format!("service:{s}")));
     bound.into_iter().chain(named).collect()
 }
 
@@ -589,11 +603,29 @@ fn mcp_bindings(settings: &Settings) -> Vec<Binding> {
     out
 }
 
+/// The Worker that holds nothing but who may reach it and where telemetry is in Basin; on one machine, the stand-in's
+/// (`served_with`) in Basin's place.
+fn telemetry_bindings(settings: &Settings) -> Vec<Binding> {
+    let store = match &settings.telemetry {
+        Some(telemetry) => {
+            let mut bound: Vec<Binding> = [("SPANS", "spans"), ("LOGS", "logs"), ("METRICS", "metrics")].iter().map(|(binding, table)| plain(binding, format!("pipeline:{}", telemetry.streams.get(*table).map_or("", String::as_str)))).collect();
+            bound.push(plain("SQL", telemetry.sql()));
+            bound.push(secret("SQL_TOKEN", settings.telemetry_token.clone().unwrap_or_default()));
+            bound
+        }
+        None => vec![plain("SPANS", format!("service:{STAND_IN}:Spans")), plain("LOGS", format!("service:{STAND_IN}:Logs")), plain("METRICS", format!("service:{STAND_IN}:Metrics")), plain("SQL", format!("http://{STAND_IN}/")), plain("SQL_TOKEN", "stand-in")],
+    };
+    let mut out = vec![plain("RELAY", "service:relay"), plain("YOURS", crate::config::YOURS), plain("CLI", crate::config::CLI)];
+    out.extend(store);
+    out
+}
+
 /// The Cloudflare node: its endpoint's key, and the relay it's reached through.
 fn node_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![
         plain("AUTH", "service:auth"),
         plain("SIGNER", "service:signer"),
+        plain("TELEMETRY", "service:telemetry"),
         plain("LOADER", "loader:"),
         // Workers AI, for the services built for Cloudflare that use it.
         plain("AI", "ai:"),
@@ -683,11 +715,23 @@ pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_
         });
     }
     served.extend(node);
+    if settings.telemetry.is_none() {
+        served.push(stand_in(sources)?);
+        served.iter_mut().find(|s| s.name == "telemetry").context("no telemetry Worker")?.outbound = Some(STAND_IN.to_string());
+    }
     let names: Vec<String> = served.iter().map(|s| s.name.clone()).collect();
     for s in &mut served {
         s.bindings.retain(|(_, v)| reaches(v).is_none_or(|other| names.iter().any(|n| n == other)));
     }
     Ok(served)
+}
+
+/// Where telemetry goes in Workers that run on one machine, in Basin's place: Basin is only on Cloudflare
+/// (`cloudflare/telemetry/stand-in.js`).
+const STAND_IN: &str = "telemetry-store";
+
+fn stand_in(sources: &Files) -> Result<Served> {
+    Ok(Served { name: STAND_IN.into(), module: module_from(sources.clone(), "telemetry/stand-in.js")?, modules: vec![], class: Some("Store".into()), listen: None, bindings: vec![], assets: None, outbound: None })
 }
 
 /// The Android app's package, as client/native/android/app/build.gradle.kts names it.
@@ -1080,8 +1124,8 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
             bindings.push(format!("(name = \"ASSETS\", service = {})", quote(&format!("{}-assets", s.name))));
         }
         for (name, value) in &s.bindings {
-            // An R2 bucket is bound only on Cloudflare, where the URL signer here reaches it by URL; Workers AI is only there.
-            if value.starts_with("r2:") || value == "ai:" {
+            // An R2 bucket is bound only on Cloudflare, where the URL signer here reaches it by URL; Workers AI and Basin's streams are only there.
+            if value.starts_with("r2:") || value.starts_with("pipeline:") || value == "ai:" {
                 continue;
             }
             let object = value.strip_prefix("object:").and_then(|o| o.split_once(':'));
@@ -1163,6 +1207,36 @@ impl Cloudflare {
             bail!("Cloudflare said {} to {method} {path}: {}", resp.status(), errors.join("; "));
         }
         Ok(out["result"].clone())
+    }
+
+    /// What's at `path`, or none if nothing is.
+    pub(crate) fn found(&self, path: &str) -> Result<Option<Value>> {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(60))).build().into();
+        let mut resp = agent.get(format!("{}{path}", self.api)).header("authorization", format!("Bearer {}", self.token)).header("user-agent", crate::config::CLI).call()?;
+        if resp.status() == 404 {
+            return Ok(None);
+        }
+        let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
+        ensure!(out["success"] == true, "Cloudflare said {} to GET {path}: {}", resp.status(), out["errors"]);
+        Ok(Some(out["result"].clone()))
+    }
+
+    /// Every page of a list.
+    pub(crate) fn list(&self, path: &str) -> Result<Vec<Value>> {
+        let mut out = Vec::new();
+        for page in 1.. {
+            let some = self.call("GET", &format!("{path}?per_page=100&page={page}"), None)?;
+            let got = some.as_array().map_or(0, Vec::len);
+            out.extend(some.as_array().into_iter().flatten().cloned());
+            if got < 100 {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn post(&self, path: &str, body: Value) -> Result<Value> {
+        self.send("POST", path, body)
     }
 
     fn send(&self, method: &str, path: &str, body: Value) -> Result<Value> {
@@ -1323,6 +1397,7 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
             None if value == "ai:" => bindings.push(json!({ "type": "ai", "name": name })),
             None => match value.strip_prefix("r2:") {
                 Some(bucket) => bindings.push(json!({ "type": "r2_bucket", "name": name, "bucket_name": bucket })),
+                None if value.starts_with("pipeline:") => bindings.push(json!({ "type": "pipelines", "name": name, "pipeline": value.trim_start_matches("pipeline:") })),
                 None => bindings.push(json!({ "type": if secret { "secret_text" } else { "plain_text" }, "name": name, "text": value })),
             },
         }
@@ -1347,6 +1422,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &[(Str
 
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &[(String, Vec<u8>)], workers: &[&Worker]) -> Result<()> {
     ensure!(settings.throwaway_user.is_none(), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network");
+    ensure!(settings.telemetry.is_some(), "telemetry isn't set up in Basin for this network, so there's nowhere for its Worker to write");
     if workers.iter().any(|w| w.serves_web) {
         parses(web)?;
     }

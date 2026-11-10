@@ -30,12 +30,12 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
+import { initSync, call_span, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
 import { Refused, json, near, refuse, textOf } from "./http.js";
-import { ASKS, BLOBS, CODES, HEADER, LATE_WIDGET, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT, WIDGET_LIMIT_MS } from "./protocol.js";
+import { ASKS, BLOBS, CODES, HEADER, LATE_WIDGET, LOG, MOST_URLS, NODE_APP, READS, TELEMETRY, URLS, VAULT, WIDGET_LIMIT_MS } from "./protocol.js";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -734,7 +734,23 @@ class Run {
     const scopes = this.scopes(app, req.scopes);
     // The keys of every database it may open, asked for at once, before it runs, unless each has its scope's current.
     await this.askKeys([{ app, scopes }]);
-    return { ok: await this.run(app, "call", { tool: req.tool, input: req.input ?? {} }, scopes, from, depth) };
+    const time = Date.now();
+    try {
+      const ok = await this.run(app, "call", { tool: req.tool, input: req.input ?? {} }, scopes, from, depth);
+      this.tell(app.name, req, time);
+      return { ok };
+    } catch (err) {
+      this.tell(app.name, req, time, err);
+      throw err;
+    }
+  }
+
+  /// Says how a call went, as any node does. Telemetry may be lost, so nothing waits for it and a failure is only logged.
+  tell(app, req, time, err) {
+    const failed = err !== undefined;
+    const fields = call_span(app, req.tool, JSON.parse(endpoint_of(this.env.NODE_KEY)).key, time, Date.now() - time, failed, err?.said?.code, failed ? String(err.message || err) : undefined, req.traceparent);
+    const body = signed(this.env.NODE_KEY, TELEMETRY, fields, Date.now());
+    this.ctx.waitUntil(this.env.TELEMETRY.fetch("https://telemetry/telemetry/write", { method: "POST", body }).then((r) => r.body?.cancel()).catch((e) => console.log(`telemetry: ${e}`)));
   }
 
   /// The apps a page shows and the scopes each reads (src/node/screens.rs: `page_contexts`): with `page` (`user`,

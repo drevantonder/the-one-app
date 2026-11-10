@@ -16,7 +16,7 @@ struct Formats {
 impl Formats {
     fn start() -> Self {
         let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("cloudflare");
-        let mut files: Vec<(String, Vec<u8>)> = ["shared/crypto.js", "shared/token.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap())).to_vec();
+        let mut files: Vec<(String, Vec<u8>)> = ["shared/crypto.js", "shared/token.js", "shared/http.js", "telemetry/worker.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap())).to_vec();
         files.push(("screen/agents.js".into(), std::fs::read(root.join("../src/screen/settings/agents.js")).unwrap()));
         let dir = crate::temp("formats");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -399,6 +399,15 @@ fn auth_pages_drawn_by_hand_name_the_network_as_the_build_does() {
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(std::fs::read_to_string(dir.join("invite.html")).unwrap().contains(&format!("Join {}", one::config::NAME)));
+}
+
+/// A row the telemetry Worker lets through has exactly the columns Basin's stream was made with: one that doesn't is taken
+/// and dropped in silence, and a stream can't change once it's made.
+#[test]
+fn telemetrys_tables_are_the_ones_basin_is_set_up_with() {
+    let tables = Formats::start().js(json!({ "op": "telemetryTables" }));
+    let ours: Value = one::cloudflare::basin::TABLES.iter().map(|(table, columns)| (table.to_string(), json!(columns.iter().map(|(name, _, required)| json!([name, *required])).collect::<Vec<_>>()))).collect::<serde_json::Map<_, _>>().into();
+    assert_eq!(tables, ours);
 }
 
 /// The Insights screen and the `insights` tool add a histogram's P95 the same way: JavaScript's in the screen, Rust's for
@@ -1041,7 +1050,7 @@ fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
     let stored = kept.iter().map(|e| one::insights::Attrs::default().exception(e).json().to_string()).collect::<String>();
     assert!(!stored.contains("anna") && !stored.contains("SECRET:") && !stored.contains("example"), "{stored}");
     assert!(kept.iter().all(|e| e.frames.iter().all(|f| !f.contains("SECRET") && !f.contains("leak"))), "{kept:?}");
-    assert_eq!(one::insights::Attrs::default().exception(&kept[0]).json()["exception.message"], "<email>");
+    assert_eq!(one::insights::message::cleaned(kept[0].message.as_deref().unwrap()), "<email>");
     assert_eq!(kept[0].kind, "TypeError");
     assert_eq!(kept[0].frames, ["a.js:12:3", "srcdoc:2:5"]);
     assert_eq!(kept[1].kind, "Error", "a name of the program's own is `Error`");

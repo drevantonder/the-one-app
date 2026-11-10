@@ -1,25 +1,20 @@
-//! A node's part of insights: the batch per scope it keeps in memory, written every few minutes and when it stops, and
-//! what it reads back for the tool.
+//! A node's part of insights: the batch it keeps in memory, sent every minute or so and when it stops, and what it reads
+//! back for the tool.
 
-use serde_json::Map;
-
-use crate::insights::{self, Ask, Attrs, Batch, Exception, Failure, Kind, Print, Signal, SpanKind, Status, stage};
+use crate::insights::{self, Ask, Attrs, Batch, Exception, Failure, Log, Severity, Span, SpanKind, Status, stage};
 
 use super::calls::record::Destination;
 use super::*;
 
-/// How often a device writes what it has to say. A write per call would cost far more than what it says is worth.
-const FLUSH_EVERY: Duration = Duration::from_secs(300);
-const MOST_SIGNALS_READ: usize = 2000;
-const MOST_ROLLUPS_READ: usize = 20_000;
-const MOST_PRINTS_READ: usize = 200;
+/// How often a device sends what it has to say.
+const FLUSH_EVERY: Duration = Duration::from_secs(60);
 /// The most reports a client's device may make a minute, and events a report may hold.
 const REPORTS_A_MINUTE: u32 = 10;
 const MOST_REPORTED: usize = 300;
 
-/// What this device hasn't written yet.
+/// What this device hasn't sent yet.
 #[derive(Default)]
-pub(super) struct State(Mutex<HashMap<Scope, Batch>>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>);
+pub(super) struct State(Mutex<Batch>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>);
 
 /// A span of a call as it runs here (its run, or trying the devices that might), in the trace of the request that made
 /// it. What came before it is put back when it ends: another call's run nests in the same trace.
@@ -61,8 +56,8 @@ impl Node {
         Call { from: trace.count(), at: trace.at(), trace, started: Instant::now(), time: now_ms(), span, parent, stage }
     }
 
-    /// A call that ran here, or failed trying: one span and a place in the rollups, and an error's fingerprint. Only a
-    /// failure, a refusal or a slow call keeps its span whole. Elsewhere isn't a failure, and it says nothing.
+    /// A call that ran here, or failed trying: one server span, and metrics of what it waited for. Only a failure, a refusal
+    /// or a slow call keeps its steps as child spans. Elsewhere isn't a failure, and it says nothing.
     pub(super) async fn finish_call(&self, call: Call, req: &CallRequest, me: &Caller, reply: &Reply) {
         let (code, said) = match reply {
             Reply::Ok(_) => (None, None),
@@ -81,51 +76,41 @@ impl Node {
         let kept = failure.is_some() || ms >= insights::SLOW_MS || insights::sampled(&trace.trace_id());
         let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
         let build = crate::config::BUILD;
-        let bundle = self.0.bundles.lock().unwrap().get(&req.app).cloned();
-        let (app, tool) = match destination.named {
+        let bundle = self.0.bundles.lock().unwrap().get(&req.app).cloned().filter(|_| destination.named);
+        let (service, tool) = match destination.named {
             true => (req.app.as_str(), self.tool_named(req).await),
-            false => ("", "".to_string()),
+            false => (insights::own(), "call".to_string()),
         };
-        let mut attrs = Attrs::default().span_kind(SpanKind::Server).device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(build);
+        let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(build);
         if destination.named {
-            attrs = attrs.service(app).tool(&tool);
-            if let Some(bundle) = &bundle {
-                attrs = attrs.version(bundle);
-            }
+            attrs = attrs.rpc(service, &tool);
         }
         if kept {
-            if destination.named {
-                attrs = attrs.steps(&steps);
-            }
             attrs = attrs.bytes(req.input.to_string().len() as u64 + if let Reply::Ok(v) = reply { v.to_string().len() as u64 } else { 0 });
         }
-        let print = failure.as_ref().map(|failure| {
-            let (frame, built) = match exception.as_ref().filter(|_| destination.named).and_then(Exception::top_frame) {
+        let mut message = None;
+        if let Some(failure) = &failure {
+            let thrown = exception.as_ref().filter(|_| destination.named);
+            let (frame, built) = match thrown.and_then(Exception::top_frame) {
                 Some(top) => (top.clone(), bundle.clone().unwrap_or_else(|| build.into())),
                 None => (format!("stage:{at}"), build.to_string()),
             };
-            attrs = std::mem::take(&mut attrs).failed(failure).stage(at);
-            let said = broke(failure, said);
-            if let (Failure::Broke(_), Some(e)) = (failure, exception.as_ref().filter(|_| destination.named)) {
-                attrs = std::mem::take(&mut attrs).exception(e);
+            attrs = attrs.failed(failure).stage(at).fingerprint(failure.kind(), &frame, &built);
+            if let (Failure::Broke(_), Some(e)) = (failure, thrown) {
+                attrs = attrs.exception(e);
             }
-            let print = Print { app: app.to_string(), tool: tool.clone(), kind: failure.kind().to_string(), frame, build: built, status, said: said.as_deref().map_or_else(String::new, |s| insights::message::id(&insights::message::cleaned(s))) };
-            if let Some(said) = said {
-                attrs = std::mem::take(&mut attrs).message(&said).fingerprint(&print.fingerprint());
-            }
-            print
-        });
-        let name = if destination.named { tool.clone() } else { "call".into() };
+            message = broke(failure, said).as_deref().map(insights::message::cleaned);
+        }
         let bucket_of = |field: &str| steps.iter().filter(|s| s["step"] == "bucket").map(|s| s[field].as_u64().unwrap_or(0)).sum::<u64>();
         let (asks, took, behind) = (bucket_of("asks"), bucket_of("ms"), steps.iter().filter(|s| s["step"] == "data").map(|s| s["new"].as_u64().unwrap_or(0)).sum::<u64>());
-        let about = Attrs::default().device(&hex(&self.0.id)).scope(destination.kind).build(build);
-        let signal = Signal { time, device: hex(&self.0.id), kind: Kind::Span, name, app: app.to_string(), trace: trace.trace_id(), span, parent, ms, status, attrs };
-        let mut batches = self.0.insights.0.lock().unwrap();
-        let batch = batches.entry(destination.scope).or_default();
-        batch.add(signal, kept, print);
-        for (metric, value) in [("bucket.asks", asks), ("bucket.ms", took), ("steps.behind", behind)] {
+        let about = Attrs::default().scope(destination.kind).build(build);
+        let instance = hex(&self.0.id);
+        let traced = Span { time, trace: trace.trace_id(), span, parent, name: tool, service: service.to_string(), version: bundle, instance: instance.clone(), kind: SpanKind::Server, status, duration: ms, message, attrs };
+        let mut batch = self.0.insights.0.lock().unwrap();
+        batch.span(traced, kept, if destination.named { &steps } else { &[] });
+        for (metric, value) in [(insights::BUCKET_ASKS, asks), (insights::BUCKET_DURATION, took), (insights::STEPS_BEHIND, behind)] {
             if value > 0 {
-                batch.metric(time, metric, app, &about, value);
+                batch.metric(time, metric, service, &instance, &about, value);
             }
         }
     }
@@ -149,62 +134,56 @@ impl Node {
         let answers = req.from.is_none() && !run_says;
         let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
         let build = crate::config::BUILD;
-        let app = if destination.named { req.app.as_str() } else { "" };
+        let service = if destination.named { req.app.as_str() } else { insights::own() };
         let name = match (answers, destination.named) {
             (true, true) => self.tool_named(req).await,
             (true, false) => "call".to_string(),
             (false, _) => "route".to_string(),
         };
-        let mut attrs = Attrs::default().span_kind(if answers { SpanKind::Server } else { SpanKind::Internal }).device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(build);
+        let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(build);
         if destination.named {
-            attrs = attrs.service(app).tool(&name);
+            attrs = attrs.rpc(service, &name);
         }
-        if kept {
-            attrs = attrs.steps(&tried);
-        }
-        let said = ended.as_ref().err().map(|err| format!("{err:#}"));
-        let said = failure.as_ref().and_then(|failure| broke(failure, said.as_deref()));
-        let cleaned = said.as_deref().map(insights::message::cleaned);
+        let mut message = None;
         if let Some(failure) = &failure {
             attrs = attrs.failed(failure).stage(at);
-        }
-        let print = failure.as_ref().filter(|_| answers).map(|failure| Print { app: app.to_string(), tool: name.clone(), kind: failure.kind().to_string(), frame: format!("stage:{at}"), build: build.to_string(), status, said: cleaned.as_deref().map_or_else(String::new, insights::message::id) });
-        if let (Some(said), true) = (&said, answers) {
-            attrs = attrs.message(said);
-            if let Some(print) = &print {
-                attrs = attrs.fingerprint(&print.fingerprint());
+            if answers {
+                attrs = attrs.fingerprint(failure.kind(), &format!("stage:{at}"), build);
+                let said = ended.as_ref().err().map(|err| format!("{err:#}"));
+                message = broke(failure, said.as_deref()).as_deref().map(insights::message::cleaned);
             }
         }
-        let signal = Signal { time, device: hex(&self.0.id), kind: Kind::Span, name, app: app.to_string(), trace: trace.trace_id(), span, parent, ms, status, attrs };
-        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, kept, print);
+        let traced = Span { time, trace: trace.trace_id(), span, parent, name, service: service.to_string(), version: None, instance: hex(&self.0.id), kind: if answers { SpanKind::Server } else { SpanKind::Internal }, status, duration: ms, message, attrs };
+        self.0.insights.0.lock().unwrap().span(traced, kept, &tried);
     }
 
     /// What a call of `app` spent on a model, in tokens and time: OTEL's `gen_ai.client.*` metrics. Dollars stay in `cost`.
     /// Only a call that finished says what it spent, so its outcome is `ok`; one that failed is the call's own span.
     pub(super) fn record_ai(&self, app: &str, me: &Caller, model: &str, input: u64, output: u64, ms: Option<u64>) {
         let destination = self.destination(app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
-        let named = if destination.named { app } else { "" };
+        let service = if destination.named { app } else { insights::own() };
         let time = now_ms();
-        let about = || Attrs::default().device(&hex(&self.0.id)).scope(destination.kind).model(model).outcome("ok");
-        let mut batches = self.0.insights.0.lock().unwrap();
-        let batch = batches.entry(destination.scope.clone()).or_default();
-        batch.metric(time, "gen_ai.client.token.usage", named, &about().tokens("input"), input);
-        batch.metric(time, "gen_ai.client.token.usage", named, &about().tokens("output"), output);
+        let about = || Attrs::default().scope(destination.kind).model(model).outcome("ok");
+        let instance = hex(&self.0.id);
+        let mut batch = self.0.insights.0.lock().unwrap();
+        batch.metric(time, insights::TOKEN_USAGE, service, &instance, &about().tokens("input"), input);
+        batch.metric(time, insights::TOKEN_USAGE, service, &instance, &about().tokens("output"), output);
         if let Some(ms) = ms {
-            batch.metric(time, "gen_ai.client.operation.duration", named, &about(), ms);
+            batch.metric(time, insights::OPERATION_DURATION, service, &instance, &about(), ms);
         }
     }
 
-    /// What's only this device's own, in `global`: named `name`, with a number if it has one.
+    /// A log record that's only this device's own, named `name`: an error if it says so.
     pub(super) fn device_signal(&self, name: &str, attrs: Attrs, status: Status) {
-        let signal = Signal { time: now_ms(), device: hex(&self.0.id), kind: Kind::Event, name: name.into(), app: String::new(), trace: trace::ids::trace(), span: trace::ids::span(), parent: None, ms: 0, status, attrs: attrs.device(&hex(&self.0.id)).scope("everyone").build(crate::config::BUILD) };
-        self.0.insights.0.lock().unwrap().entry(Scope::Global).or_default().add(signal, true, None);
+        let severity = if status == Status::Error { Severity::Error } else { Severity::Info };
+        let log = Log { time: now_ms(), trace: None, span: None, severity, body: name.into(), service: insights::own().into(), version: None, instance: hex(&self.0.id), attrs: attrs.scope("everyone").build(crate::config::BUILD) };
+        self.0.insights.0.lock().unwrap().log(log);
     }
 
-    /// Records a metric that's only this device's own, in `global`.
-    fn device_metric(&self, name: &str, attrs: Attrs, value: u64) {
-        let attrs = attrs.device(&hex(&self.0.id)).scope("everyone").build(crate::config::BUILD);
-        self.0.insights.0.lock().unwrap().entry(Scope::Global).or_default().metric(now_ms(), name, "", &attrs, value);
+    /// Records a metric that's only this device's own.
+    fn device_metric(&self, metric: insights::Metric, attrs: Attrs, value: u64) {
+        let attrs = attrs.scope("everyone").build(crate::config::BUILD);
+        self.0.insights.0.lock().unwrap().metric(now_ms(), metric, insights::own(), &hex(&self.0.id), &attrs, value);
     }
 
     /// How long a write another device told this one about took to get here. Its clock isn't this one's, so a big gap
@@ -212,7 +191,7 @@ impl Node {
     pub(super) fn write_seen(&self, sent: u64) {
         let lag = now_ms().saturating_sub(sent);
         if lag < 600_000 {
-            self.device_metric("write.seen", Attrs::default(), lag);
+            self.device_metric(insights::WRITE_SEEN, Attrs::default(), lag);
         }
     }
 
@@ -246,46 +225,35 @@ impl Node {
     /// wrong, and may be anything.
     async fn tool_named(&self, req: &CallRequest) -> String {
         let listed = self.0.apps.describe(&req.app).await.is_ok_and(|d| d["tools"].as_array().is_some_and(|t| t.iter().any(|t| t["name"] == req.runs())));
-        if listed { req.runs().to_string() } else { "_unknown".into() }
+        if listed && insights::token(req.runs()) { req.runs().to_string() } else { "_unknown".into() }
     }
 
-    /// Counts what the URL signer failed at since the last write.
+    /// Counts what the URL signer failed at since the last send.
     fn say_signer(&self) {
         let failures = crate::bucket::signed::take_failures();
         if failures > 0 {
-            self.device_metric("signer.failures", Attrs::default(), failures);
+            self.device_metric(insights::SIGNER_FAILURES, Attrs::default(), failures);
         }
     }
 
-    /// Writes what this device has to say, to each scope it holds, once it has anything: telemetry may be lost, so what
-    /// doesn't go is dropped.
+    /// What this device hasn't sent yet, handed over: the batch starts again.
+    pub fn take_insights(&self) -> Batch {
+        std::mem::take(&mut *self.0.insights.0.lock().unwrap())
+    }
+
+    /// Sends what this device has to say to the telemetry Worker. Telemetry may be lost, so what doesn't go is dropped.
     pub async fn flush_insights(&self) {
         self.say_signer();
-        let batches = std::mem::take(&mut *self.0.insights.0.lock().unwrap());
-        for (scope, batch) in batches.into_iter().filter(|(_, b)| !b.is_empty()) {
-            let live = self.with(|i| {
-                if i.builds.is_empty() {
-                    return Ok(Vec::new());
-                }
-                let m = i.r.db();
-                let mut live = Vec::new();
-                for (key, running) in &i.builds {
-                    if m.machine(key)?.is_some() {
-                        live.push(running.commit.clone());
-                    }
-                }
-                live.extend(m.apps()?.into_iter().filter_map(|a| a.bundle));
-                Ok(live)
-            });
-            let holds = self.with_or(false, |i| Ok(i.r.holds(&scope)));
-            match live {
-                Ok(live) if holds => {
-                    if let Err(err) = self.say(&scope, status::Said::Insights { batch, live }).await {
-                        tracing::debug!("insights for {}: {err:#}", trace::kind(&scope));
-                    }
-                }
-                _ => tracing::debug!("insights for {}: this device doesn't hold it now", trace::kind(&scope)),
-            }
+        let batch = self.take_insights();
+        if batch.is_empty() {
+            return;
+        }
+        let Ok(address) = self.address() else { return tracing::debug!("insights: {YOURS} has no address to send them to") };
+        let key = self.0.key.clone();
+        match tokio::task::spawn_blocking(move || insights::worker::write(&address, &key, &batch)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => tracing::debug!("insights weren't sent: {err:#}"),
+            Err(err) => tracing::debug!("insights weren't sent: {err}"),
         }
     }
 
@@ -312,7 +280,14 @@ impl Node {
         let time = e["time"].as_u64().filter(|t| *t + 300_000 >= now && *t <= now + 60_000).unwrap_or(now);
         let name = e["name"].as_str().unwrap_or("");
         let ms = e["ms"].as_u64().unwrap_or(0);
-        let attrs = Attrs::default().device(&hex(&me.key)).client(platform).build(crate::config::BUILD);
+        let instance = hex(&me.key);
+        let attrs = Attrs::default().client(platform).build(crate::config::BUILD);
+        if name == "client.try" {
+            let result = e["result"].as_str().unwrap_or("");
+            let severity = if result == "answered" { Severity::Info } else { Severity::Warn };
+            let attrs = attrs.scope("everyone").tried(e["node"].as_str().unwrap_or(""), result).duration(ms);
+            return self.0.insights.0.lock().unwrap().log(Log { time, trace: None, span: None, severity, body: name.into(), service: insights::own().into(), version: None, instance, attrs });
+        }
         let exception = e["exception"].is_object().then(|| Exception::from_json(&e["exception"])).flatten();
         let (destination, app, screen) = match name {
             "screen.exception" | "screen.undrawn" => {
@@ -321,51 +296,33 @@ impl Node {
                 let screen = self.screen_named(app, e["screen"].as_str().unwrap_or("")).await;
                 (destination, app, Some(screen))
             }
-            "page.exception" | "client.try" => (Destination { scope: Scope::Global, named: false, kind: "everyone" }, "", None),
+            "page.exception" => (Destination { scope: Scope::Global, named: false, kind: "everyone" }, "", None),
             _ => return,
         };
-        let (ok, result) = match name {
-            "client.try" => (e["result"] == "answered", Some(e["result"].as_str().unwrap_or(""))),
-            _ => (false, None),
-        };
-        let bundle = self.0.bundles.lock().unwrap().get(app).cloned();
-        let app_named = if destination.named { app } else { "" };
+        let bundle = self.0.bundles.lock().unwrap().get(app).cloned().filter(|_| destination.named);
         let mut attrs = attrs.scope(destination.kind);
-        if destination.named && !app.is_empty() {
-            attrs = attrs.service(app);
-            if let Some(bundle) = &bundle {
-                attrs = attrs.version(bundle);
-            }
-            if let Some(screen) = &screen {
-                attrs = attrs.screen(screen);
-            }
-        }
-        if let Some(result) = result {
-            attrs = attrs.tried(e["node"].as_str().unwrap_or(""), result);
+        if let (true, Some(screen)) = (destination.named, &screen) {
+            attrs = attrs.screen(screen);
         }
         let exception = exception.filter(|_| destination.named || app.is_empty());
-        let mut print = None;
-        if !ok && result.is_none() {
-            let (frame, build) = match exception.as_ref().and_then(|x| x.frames.first()) {
-                Some(top) => (top.clone(), bundle.clone().unwrap_or_else(|| crate::config::BUILD.into())),
-                None => (name.to_string(), crate::config::BUILD.to_string()),
-            };
-            attrs = attrs.error(exception.as_ref().map_or(insights::OTHER, |x| x.kind.as_str()));
-            if let Some(x) = &exception {
-                attrs = attrs.exception(x);
-            }
-            let said = exception.as_ref().and_then(|x| x.message.as_deref()).map(insights::message::cleaned);
-            let tool = match (&screen, destination.named) {
-                (Some(screen), true) => format!("screen:{screen}"),
-                _ if name == "page.exception" => "page".into(),
-                _ => "screen".into(),
-            };
-            let made = Print { app: app_named.to_string(), tool, kind: exception.as_ref().map_or_else(|| insights::OTHER.to_string(), |x| x.kind.clone()), frame, build, status: Status::Error, said: said.as_deref().map_or_else(String::new, insights::message::id) };
-            attrs = attrs.fingerprint(&made.fingerprint());
-            print = Some(made);
+        let (frame, build) = match exception.as_ref().and_then(|x| x.frames.first()) {
+            Some(top) => (top.clone(), bundle.clone().unwrap_or_else(|| crate::config::BUILD.into())),
+            None => (name.to_string(), crate::config::BUILD.to_string()),
+        };
+        let kind = exception.as_ref().map_or(insights::OTHER, |x| x.kind.as_str());
+        attrs = attrs.error(kind).fingerprint(kind, &frame, &build);
+        if let Some(x) = &exception {
+            attrs = attrs.exception(x);
         }
-        let signal = Signal { time, device: hex(&me.key), kind: Kind::Event, name: name.to_string(), app: app_named.to_string(), trace: trace::ids::trace(), span: trace::ids::span(), parent: None, ms, status: Status::of(ok), attrs };
-        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, true, print);
+        let span_name = match (&screen, destination.named) {
+            (Some(screen), true) => format!("screen:{screen}"),
+            _ if name == "page.exception" => "page".to_string(),
+            _ => "screen".to_string(),
+        };
+        let service = if destination.named { app.to_string() } else { insights::own().to_string() };
+        let message = exception.as_ref().and_then(|x| x.message.as_deref()).map(insights::message::cleaned);
+        let span = Span { time, trace: trace::ids::trace(), span: trace::ids::span(), parent: None, name: span_name, service, version: bundle, instance, kind: SpanKind::Internal, status: Status::Error, duration: ms, message, attrs };
+        self.0.insights.0.lock().unwrap().span(span, true, &[]);
     }
 
     /// A service's program going through a hop's worth of a call: one child span, with its status and bytes. A hop that
@@ -384,19 +341,16 @@ impl Node {
         let (parent_trace, parent) = trace::parent_now();
         let trace = parent_trace.unwrap_or_else(trace::ids::trace);
         let kept = !ok || ms >= insights::SLOW_MS || insights::sampled(&trace);
-        let mut attrs = Attrs::default().span_kind(SpanKind::Client).device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(crate::config::BUILD).tried(&hex(&device), result);
-        if destination.named {
-            attrs = attrs.service(&req.app);
-        }
+        let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(crate::config::BUILD).tried(&hex(&device), result);
         if kept {
             attrs = attrs.bytes(req.input.to_string().len() as u64 + answer.map_or(0, |a| a.to_string().len() as u64));
         }
         if let Some(error) = error {
             attrs = attrs.error(error);
         }
-        let app = if destination.named { req.app.clone() } else { String::new() };
-        let signal = Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: "service.hop".into(), app, trace, span: trace::ids::span(), parent, ms, status: Status::of(ok), attrs };
-        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, kept, None);
+        let service = if destination.named { req.app.clone() } else { insights::own().to_string() };
+        let span = Span { time: now_ms().saturating_sub(ms), trace, span: trace::ids::span(), parent, name: "service.hop".into(), service, version: None, instance: hex(&self.0.id), kind: SpanKind::Client, status: Status::of(ok), duration: ms, message: None, attrs };
+        self.0.insights.0.lock().unwrap().span(span, kept, &[]);
     }
 
     /// A schedule's run: one span, with the call it made under it (`finish_call`). The run stays in `runs` for its own
@@ -408,19 +362,21 @@ impl Node {
         let exception = steps.iter().rev().find(|s| s["step"] == "exception").and_then(|s| Exception::from_json(&s["exception"]));
         let failure = err.map(|err| Failure::of(crate::protocol::Coded::of(err).as_deref(), exception.as_ref(), traced.stage()));
         let status = failure.as_ref().map_or(Status::Unset, Failure::status);
-        let mut attrs = Attrs::default().span_kind(SpanKind::Internal).device(&hex(&self.0.id)).client("schedule").scope(destination.kind).build(crate::config::BUILD);
+        let mut attrs = Attrs::default().client("schedule").scope(destination.kind).build(crate::config::BUILD);
         if destination.named {
-            attrs = attrs.service(app).schedule(schedule);
+            attrs = attrs.schedule(schedule);
         }
+        let mut message = None;
         if let Some(failure) = &failure {
             attrs = attrs.failed(failure);
-            if let Failure::Broke(_) = failure {
-                attrs = attrs.message(&err.map_or_else(String::new, |err| format!("{err:#}")));
+            if let (Failure::Broke(_), Some(err)) = (failure, err) {
+                message = Some(insights::message::cleaned(&format!("{err:#}")));
             }
         }
-        let app = if destination.named { app.to_string() } else { String::new() };
-        let signal = Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: "schedule.run".into(), app, trace: traced.trace_id(), span: trace::ids::span(), parent: None, ms, status, attrs };
-        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, failure.is_some() || ms >= insights::SLOW_MS || insights::sampled(&traced.trace_id()), None);
+        let service = if destination.named { app.to_string() } else { insights::own().to_string() };
+        let kept = failure.is_some() || ms >= insights::SLOW_MS || insights::sampled(&traced.trace_id());
+        let span = Span { time: now_ms().saturating_sub(ms), trace: traced.trace_id(), span: trace::ids::span(), parent: None, name: "schedule.run".into(), service, version: None, instance: hex(&self.0.id), kind: SpanKind::Internal, status, duration: ms, message, attrs };
+        self.0.insights.0.lock().unwrap().span(span, kept, &[]);
     }
 
     /// What a service's endpoint says for insights: its program starting and ending, and OTLP. Only one of the network's
@@ -429,42 +385,35 @@ impl Node {
         let Ok(Some((app, user))) = self.with(|i| Ok(i.r.db().service(remote)?.map(|s| (s.service.clone().unwrap_or_default(), s.user.clone())))) else { return };
         let me = Caller::own(*remote, user);
         let destination = self.destination(&app, &me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
-        let base = || Attrs::default().device(&hex(&self.0.id)).scope(destination.kind).build(crate::config::BUILD);
-        let named_app = if destination.named { app.clone() } else { String::new() };
-        let say = |signal: Signal, kept: bool| self.0.insights.0.lock().unwrap().entry(destination.scope.clone()).or_default().add(signal, kept, None);
-        let signal = |name: &str, ms: u64, ok: bool, attrs: Attrs| Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: name.to_string(), app: named_app.clone(), trace: trace::ids::trace(), span: trace::ids::span(), parent: None, ms, status: Status::of(ok), attrs };
+        let base = || Attrs::default().scope(destination.kind).build(crate::config::BUILD);
+        let service = if destination.named { app.clone() } else { insights::own().to_string() };
+        let instance = hex(&self.0.id);
+        let version = body["build"].as_str().filter(|b| insights::token(b)).map(str::to_string);
         if let Some(name) = body["name"].as_str().filter(|n| ["service.start", "service.exit"].contains(n)) {
             let reason = body["reason"].as_str().unwrap_or("");
             let ok = name == "service.start" || ["exit-0", "renewed", "stopped"].contains(&reason);
-            let mut attrs = base().version(body["build"].as_str().unwrap_or("")).reason(reason);
-            if destination.named {
-                attrs = attrs.service(&app);
-            }
-            let event = Signal { kind: Kind::Event, ..signal(name, 0, ok, attrs) };
-            say(event, true);
+            let log = Log { time: now_ms(), trace: None, span: None, severity: if ok { Severity::Info } else { Severity::Error }, body: name.to_string(), service: service.clone(), version: version.clone(), instance: instance.clone(), attrs: base().reason(reason) };
+            self.0.insights.0.lock().unwrap().log(log);
         }
-        for span in insights::otlp::spans(&body["otlp"]) {
+        for item in insights::otlp::items(&body["otlp"]) {
             let mut attrs = base();
-            if span.kind == Kind::Span {
-                attrs = attrs.span_kind(span.span_kind);
-            }
-            if destination.named {
-                attrs = attrs.service(&app);
-            }
-            if let Some(code) = span.status_code {
+            if let Some(code) = item.status_code {
                 attrs = attrs.status_code(code);
             }
-            if !span.ok {
-                attrs = attrs.error(&span.error);
+            if !item.ok {
+                attrs = attrs.error(&item.error);
             }
-            let name = if destination.named { span.name.clone() } else { "span".into() };
-            let mut built = signal(&name, span.ms, span.ok, attrs);
-            built.kind = span.kind;
-            if let Some(ids) = span.ids {
-                (built.trace, built.span, built.parent) = ids;
+            let name = if destination.named { item.name.clone() } else { "span".into() };
+            let time = now_ms().saturating_sub(item.ms);
+            let (trace, span, parent) = item.ids.clone().unwrap_or_else(|| (trace::ids::trace(), trace::ids::span(), None));
+            let mut batch = self.0.insights.0.lock().unwrap();
+            match item.span_kind {
+                Some(kind) => {
+                    let kept = !item.ok || item.ms >= insights::SLOW_MS || insights::sampled(&trace);
+                    batch.span(Span { time, trace, span, parent, name, service: service.clone(), version: version.clone(), instance: instance.clone(), kind, status: Status::of(item.ok), duration: item.ms, message: None, attrs }, kept, &[]);
+                }
+                None => batch.log(Log { time, trace: Some(trace), span: Some(span), severity: if item.ok { Severity::Info } else { Severity::Error }, body: name, service: service.clone(), version: version.clone(), instance: instance.clone(), attrs }),
             }
-            let kept = !span.ok || span.ms >= insights::SLOW_MS || insights::sampled(&built.trace);
-            say(built, kept);
         }
     }
 
@@ -480,82 +429,37 @@ impl Node {
         }
     }
 
-    /// What `viewer` may see of how things went, by `ask`: in each scope they may use that this device holds, an app's
-    /// rows only for someone who may deploy it, as `insights_of` shows them, and what's only a device's in `global` only
-    /// for an admin. What this device hasn't written yet is written first.
+    /// What `viewer` may see of how things went, by `ask`, from the telemetry Worker: an app's only for someone who may
+    /// deploy it, and what's the network's own program's only for an admin. What this device hasn't sent yet is sent first.
     pub async fn insights(&self, viewer: &Caller, ask: &Ask) -> Result<Value> {
         self.flush_insights().await;
-        let scopes = self.with(|i| {
+        let services = self.with(|i| {
             let m = i.r.db();
-            Ok(m.scopes()?.into_iter().filter(|s| i.r.holds(s) && m.may(&viewer.user, "use", &scopes::object(s))).collect::<Vec<_>>())
+            let mut seen: Vec<String> = m.apps()?.into_iter().map(|a| a.name).filter(|app| app != insights::own() && m.may(&viewer.user, "deploy", &scopes::app(app))).collect();
+            if m.may(&viewer.user, "change-settings", scopes::NETWORK) {
+                seen.push(insights::own().to_string());
+            }
+            Ok(seen)
         })?;
-        let (mut signals, mut rollups, mut prints) = (Vec::new(), Vec::new(), Vec::new());
-        let since = ask.since.unwrap_or(0);
-        let limit = ask.limit.clamp(1, MOST_SIGNALS_READ);
-        let rollups_limit = ask.limit.clamp(1, MOST_ROLLUPS_READ);
-        let prints_limit = ask.limit.clamp(1, MOST_PRINTS_READ);
-        for scope in scopes {
-            let db = self.node_database(&scope).await?;
-            let mut db = db.lock().await;
-            db.catch_up(&self.bucket()?).await?;
-            let opt = |value: &Option<String>| value.as_ref().map_or(Value::Null, |v| json!(v));
-            let (app, name, status, wanted) = (opt(&ask.app), opt(&ask.name), opt(&ask.status), opt(&ask.trace));
-            let may = |row: &Map<String, Value>| self.may_see(viewer, &scope, row["app"].as_str().unwrap_or(""));
-            for row in db.query("select * from signals where time >= ?1 and (?2 is null or app = ?2) and (?3 is null or name = ?3) and (?4 is null or status = ?4) and (?6 is null or trace = ?6) order by time desc limit ?5", &[json!(since), app.clone(), name.clone(), status.clone(), json!(limit), wanted])?.into_iter().filter(may) {
-                signals.push(self.signal_read(row));
-            }
-            let errors_only = i64::from(ask.status.as_deref() == Some("error"));
-            for row in db.query("select * from rollups where hour >= ?1 and (?2 is null or app = ?2) and (?3 is null or name = ?3) and (?4 = 0 or errors > 0) order by hour desc limit ?5", &[json!(since / 3_600_000), app.clone(), name.clone(), json!(errors_only), json!(rollups_limit)])?.into_iter().filter(may) {
-                let mut rollup = row_read(row, "key");
-                rollup["service"] = service_of(&rollup);
-                self.name_devices(&mut rollup["key"]);
-                rollups.push(rollup);
-            }
-            for row in db.query("select * from fingerprints where last >= ?1 and (?2 is null or app = ?2) and (?3 is null or status = ?3) order by last desc limit ?4", &[json!(since), app, status, json!(prints_limit)])?.into_iter().filter(may) {
-                let mut print = Value::Object(row);
-                print["service"] = service_of(&print);
-                prints.push(print);
+        let (address, key) = (self.address()?, self.0.key.clone());
+        let fields = insights::worker::asked(ask, services);
+        let mut rows = tokio::task::spawn_blocking(move || insights::worker::read(&address, &key, fields)).await??;
+        for table in ["spans", "logs", "metrics"] {
+            for row in rows[table].as_array_mut().into_iter().flatten() {
+                self.read_row(row);
             }
         }
-        let newest = |rows: &mut Vec<Value>, key: &str, most: usize| {
-            rows.sort_by_key(|r| std::cmp::Reverse(r[key].as_u64()));
-            rows.truncate(most);
-        };
-        let more_signals = signals.len() > limit;
-        let more_rollups = rollups.len() > rollups_limit;
-        let more_prints = prints.len() > prints_limit;
-        newest(&mut signals, "time", limit);
-        newest(&mut rollups, "hour", rollups_limit);
-        newest(&mut prints, "last", prints_limit);
-        Ok(json!({ "signals": signals.into_iter().flat_map(with_steps).collect::<Vec<_>>(), "rollups": rollups, "fingerprints": prints, "more_signals": more_signals, "more_rollups": more_rollups, "more_fingerprints": more_prints }))
+        Ok(rows)
     }
 
-    fn may_see(&self, viewer: &Caller, scope: &Scope, app: &str) -> bool {
-        self.with_or(false, |i| {
-            let m = i.r.db();
-            Ok(match app {
-                "" => *scope != Scope::Global || m.may(&viewer.user, "change-settings", scopes::NETWORK),
-                app => m.may(&viewer.user, "deploy", &scopes::app(app)),
-            })
-        })
-    }
-
-    /// A stored signal as a reader gets it: the device by name, its attributes as JSON.
-    fn signal_read(&self, row: Map<String, Value>) -> Value {
-        let device = unhex(row["device"].as_str().unwrap_or("")).map_or_else(|_| "a device".to_string(), |k| self.name_of(&k));
-        let mut read = row_read(row, "attrs");
-        read["device"] = json!(device);
-        read["service"] = service_of(&read);
-        self.name_devices(&mut read["attrs"]);
-        read
-    }
-
-    /// A device's key among `attrs`, as a reader knows it: its name.
-    fn name_devices(&self, attrs: &mut Value) {
-        for key in ["one.device", "one.node"] {
-            if let Some(device) = attrs[key].as_str().and_then(|k| unhex(k).ok()) {
-                attrs[key] = json!(self.name_of(&device));
-            }
+    /// A row as a reader gets it: its attributes as JSON, and its device and the devices it names by name.
+    fn read_row(&self, row: &mut Value) {
+        row["attrs"] = row["attrs"].as_str().and_then(|a| serde_json::from_str(a).ok()).unwrap_or(json!({}));
+        if let Some(device) = row["instance"].as_str().and_then(|k| unhex(k).ok()) {
+            row["device"] = json!(self.name_of(&device));
+        }
+        if let Some(node) = row["attrs"]["one.node"].as_str().and_then(|k| unhex(k).ok()) {
+            row["attrs"]["one.node"] = json!(self.name_of(&node));
         }
     }
 }
@@ -574,39 +478,4 @@ fn hop_failed(err: &anyhow::Error) -> (Option<&'static str>, &'static str) {
 /// What a call said, if it broke: a refusal's is the caller's own to read, and kept nowhere.
 fn broke(failure: &Failure, said: Option<&str>) -> Option<String> {
     matches!(failure, Failure::Broke(_)).then(|| said.map(str::to_string)).flatten()
-}
-
-/// OTEL's `service.name` of a row: its app, or the network's own program for what isn't an app's.
-fn service_of(row: &Value) -> Value {
-    if row["app"] == "" { json!(crate::config::CLI) } else { row["app"].clone() }
-}
-
-/// A span and, as OTEL's readers expect them, each step it went through as a child span.
-fn with_steps(mut span: Value) -> Vec<Value> {
-    let steps = span["attrs"].as_object_mut().and_then(|a| a.remove("one.steps")).and_then(|s| s.as_array().cloned()).unwrap_or_default();
-    let mut all = Vec::with_capacity(steps.len() + 1);
-    for (i, step) in steps.iter().enumerate() {
-        let mut attrs = Map::from_iter([("span.kind".to_string(), json!(SpanKind::Internal.as_str()))]);
-        for (key, value) in step.as_object().into_iter().flatten().filter(|(k, _)| !["step", "at", "ms"].contains(&k.as_str())) {
-            attrs.insert(format!("one.{key}"), value.clone());
-        }
-        let mut child = span.clone();
-        child["name"] = step["step"].clone();
-        child["time"] = json!(span["time"].as_u64().unwrap_or(0) + step["at"].as_u64().unwrap_or(0));
-        child["ms"] = step["ms"].clone();
-        child["span"] = json!(format!("{}.{i}", span["span"].as_str().unwrap_or("")));
-        child["parent"] = span["span"].clone();
-        child["status"] = json!(Status::Unset.as_str());
-        child["attrs"] = Value::Object(attrs);
-        all.push(child);
-    }
-    all.insert(0, span);
-    all
-}
-
-/// `row` with its JSON column `key` as JSON.
-fn row_read(mut row: Map<String, Value>, key: &str) -> Value {
-    let parsed = row.get(key).and_then(Value::as_str).and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
-    row.insert(key.to_string(), parsed);
-    Value::Object(row)
 }

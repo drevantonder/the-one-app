@@ -656,25 +656,24 @@ async fn a_refusals_words_never_reach_what_insights_keeps_and_a_failures_are_cle
     let a = start("insights").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "a private thought" }))).await.is_ok()).await;
     let refused = a.call(notes("refuse", json!({ "text": "a private thought" }))).await.unwrap_err();
     assert!(format!("{refused:#}").contains("a private thought"), "the caller still reads it: {refused:#}");
     let failed = a.call(notes("fail", json!({ "text": "couldn't mail anna@example.org" }))).await.unwrap_err();
     assert!(format!("{failed:#}").contains("anna@example.org"), "the caller still reads it: {failed:#}");
-    let kept = a.insights(&me, &one::insights::Ask { limit: 500, ..Default::default() }).await.unwrap();
-    let said = kept.to_string();
-    let signals = kept["signals"].as_array().unwrap();
-    let of = |name: &str| signals.iter().find(|s| s["name"] == name).unwrap_or_else(|| panic!("no {name}: {said}"));
+    let batch = a.take_insights();
+    let sent = batch.rows();
+    let said = sent.to_string();
+    let spans = sent["spans"].as_array().unwrap();
+    let of = |name: &str| spans.iter().find(|s| s["name"] == name).unwrap_or_else(|| panic!("no {name}: {said}"));
     assert_eq!(of("refuse")["status"], "unset", "{said}");
     assert_eq!(of("fail")["status"], "error", "{said}");
-    assert_eq!(of("fail")["attrs"]["exception.message"], "couldn't mail <email>", "{said}");
-    let prints = kept["fingerprints"].as_array().unwrap();
-    assert!(prints.iter().any(|p| p["app"] == "notes" && p["tool"] == "fail" && p["count"] == 1 && p["status"] == "error"), "{said}");
-    assert!(prints.iter().any(|p| p["app"] == "notes" && p["tool"] == "refuse" && p["status"] == "unset"), "{said}");
-    assert!(kept["rollups"].as_array().unwrap().iter().any(|r| r["name"] == "post" && r["count"] == 1), "{said}");
+    assert_eq!(of("fail")["message"], "couldn't mail <email>", "{said}");
+    assert!(of("fail")["attrs"].as_str().unwrap().contains("one.fingerprint"), "{said}");
+    assert!(of("refuse")["attrs"].as_str().unwrap().contains("one.fingerprint"), "and it's in the list of what was refused: {said}");
+    assert_eq!(of("refuse")["message"], Value::Null, "a refusal's words go nowhere: {said}");
+    assert!(of("post")["kind"] == "server", "every request is sent, for its rates: {said}");
     assert!(!said.contains("private thought") && !said.contains("anna") && !said.contains(&a.user().unwrap()), "only names, numbers and a failure's cleaned words: {said}");
-    assert!(!kept["fingerprints"].to_string().contains("<email>"), "a fingerprint holds none of what it said: {said}");
 }
 
 /// A device's log is read over the network by whoever may remove the device (its user, and the network's admins), never

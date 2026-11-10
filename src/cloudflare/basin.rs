@@ -1,0 +1,125 @@
+//! Telemetry's store on Cloudflare: a bucket of its own with Basin's catalog and table maintenance, and for each table a
+//! stream, a sink and a pipeline. Set up by every deploy and changing only what isn't there yet, so a network or a custom
+//! build needs nothing done by hand. A sink can't change its table and a stream can't change its schema, so `TABLES`'
+//! columns are few and stable and all else goes in `attrs`; a new column would mean a new stream, sink, pipeline and table.
+
+use std::collections::BTreeMap;
+
+use anyhow::{Context, Result, ensure};
+use serde_json::{Value, json};
+
+use super::workers::{Cloudflare, Settings};
+
+/// A column: its name, its type, and whether every row has it.
+type Column = (&'static str, &'static str, bool);
+
+/// Each table's columns. The same as the telemetry Worker's (`TABLES`), as tests/contracts.rs holds them.
+pub const TABLES: &[(&str, &[Column])] = &[
+    ("spans", &[("time", "int64", true), ("trace", "string", true), ("span", "string", true), ("parent", "string", false), ("name", "string", true), ("service", "string", true), ("version", "string", false), ("instance", "string", true), ("kind", "string", true), ("status", "string", true), ("duration", "int64", true), ("message", "string", false), ("attrs", "string", true)]),
+    ("logs", &[("time", "int64", true), ("trace", "string", false), ("span", "string", false), ("severity_number", "int32", true), ("severity_text", "string", true), ("body", "string", true), ("service", "string", true), ("version", "string", false), ("instance", "string", true), ("attrs", "string", true)]),
+    ("metrics", &[("time", "int64", true), ("name", "string", true), ("type", "string", true), ("unit", "string", true), ("service", "string", true), ("instance", "string", true), ("count", "int64", true), ("sum", "float64", true), ("buckets", "string", false), ("attrs", "string", true)]),
+];
+
+/// The namespace each table is in.
+const NAMESPACE: &str = "telemetry";
+/// How often a sink rolls a file: how long a row takes to be read. Cloudflare's default never showed new rows.
+const ROLL_SECONDS: u64 = 10;
+/// The Cloudflare permission groups of the Worker's own token, "Workers R2 SQL Read", "Workers R2 Data Catalog Write" and
+/// "Workers R2 Storage Write".
+const WORKER_PERMISSIONS: [&str; 3] = ["f45430d92e2b4a6cb9f94f2594c141b8", "d229766a2f7f4d299f20eaa8c9b1fde9", "bf7481a1826f439697cb59a20b22293e"];
+
+/// The permissions the API token a deploy uses needs for this. An error saying "Unauthorized" doesn't say which.
+const NEEDS: &str = "Account API Tokens Write, Pipelines Write, Workers R2 Data Catalog Write and Workers R2 Storage Write";
+
+/// Where a network's telemetry is on Cloudflare.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Telemetry {
+    pub account: String,
+    pub bucket: String,
+    /// Each table's stream id, which the Worker's binding names.
+    pub streams: BTreeMap<String, String>,
+}
+
+impl Telemetry {
+    /// Where Basin SQL answers.
+    pub fn sql(&self) -> String {
+        format!("https://api.sql.cloudflarestorage.com/api/v1/accounts/{}/basin-sql/query/{}", self.account, self.bucket)
+    }
+}
+
+/// A resource's name: Basin takes underscores and no hyphens.
+fn named(table: &str, kind: &str) -> String {
+    format!("{}_{table}_{kind}", crate::config::CLI.replace('-', "_"))
+}
+
+fn fields(columns: &[Column]) -> Value {
+    json!(columns.iter().map(|(name, kind, required)| json!({ "name": name, "type": kind, "required": required })).collect::<Vec<_>>())
+}
+
+/// Sets up what's missing and notes it in `settings`, keeping the token it makes beside the Workers' secrets.
+pub fn provision(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
+    let account = cf.account.clone();
+    let bucket = format!("{}-telemetry", crate::config::CLI);
+    let provisioned = (|| -> Result<_> {
+        let buckets = format!("/accounts/{account}/r2/buckets");
+        if cf.found(&format!("{buckets}/{bucket}"))?.is_none() {
+            cf.post(&buckets, json!({ "name": bucket }))?;
+        }
+        let catalog = format!("/accounts/{account}/r2-catalog/{bucket}");
+        if cf.found(&catalog)?.is_none_or(|c| c["status"] != "active") {
+            cf.post(&format!("{catalog}/enable"), json!({}))?;
+        }
+        let token = match &settings.telemetry_token {
+            Some(token) => token.clone(),
+            None => {
+                let token = worker_token(cf, &account, &bucket)?;
+                settings.set_secret("TELEMETRY_TOKEN", &token)?;
+                settings.telemetry_token = Some(token.clone());
+                token
+            }
+        };
+        cf.post(&format!("{catalog}/credential"), json!({ "token": token }))?;
+        cf.post(&format!("{catalog}/maintenance-configs"), json!({ "compaction": { "state": "enabled", "target_size_mb": "128" }, "snapshot_expiration": { "state": "enabled", "max_snapshot_age": "1d", "min_snapshots_to_keep": 5 } }))?;
+        let mut streams = BTreeMap::new();
+        for (table, columns) in TABLES {
+            streams.insert(table.to_string(), pipeline(cf, &account, &bucket, &token, table, columns)?);
+        }
+        Ok(streams)
+    })();
+    let streams = provisioned.with_context(|| format!("setting up telemetry in Basin, which needs a Cloudflare API token with {NEEDS}"))?;
+    settings.telemetry = Some(Telemetry { account, bucket, streams });
+    settings.save()
+}
+
+/// A token only for that bucket's SQL, catalog and files: what the Worker reads with and the sinks write with.
+fn worker_token(cf: &Cloudflare, account: &str, bucket: &str) -> Result<String> {
+    let resource = format!("com.cloudflare.edge.r2.bucket.{account}_default_{bucket}");
+    let groups: Vec<Value> = WORKER_PERMISSIONS.iter().map(|id| json!({ "id": id })).collect();
+    let made = cf.post(&format!("/accounts/{account}/tokens"), json!({ "name": format!("{}-telemetry", crate::config::CLI), "policies": [{ "effect": "allow", "resources": { resource: "*" }, "permission_groups": groups }] }))?;
+    Ok(made["value"].as_str().context("Cloudflare made the token and didn't give its value")?.to_string())
+}
+
+/// `table`'s stream, sink and pipeline, those that aren't there made: → the stream's id.
+fn pipeline(cf: &Cloudflare, account: &str, bucket: &str, token: &str, table: &str, columns: &[Column]) -> Result<String> {
+    let base = format!("/accounts/{account}/pipelines/v1");
+    let existing = |kind: &str, name: &str| -> Result<Option<String>> {
+        let list = cf.list(&format!("{base}/{kind}"))?;
+        Ok(list.iter().find(|r| r["name"] == name).and_then(|r| r["id"].as_str()).map(str::to_string))
+    };
+    let (stream, sink, pipeline) = (named(table, "stream"), named(table, "sink"), named(table, "pipeline"));
+    let id = match existing("streams", &stream)? {
+        Some(id) => id,
+        None => {
+            let made = cf.post(&format!("{base}/streams"), json!({ "name": stream, "format": { "type": "json", "unstructured": false }, "schema": { "fields": fields(columns) }, "http": { "enabled": false, "authentication": true }, "worker_binding": { "enabled": true } }))?;
+            made["id"].as_str().context("Cloudflare made the stream and didn't give its id")?.to_string()
+        }
+    };
+    if existing("sinks", &sink)?.is_none() {
+        cf.post(&format!("{base}/sinks"), json!({ "name": sink, "type": "r2_data_catalog", "format": { "type": "parquet", "compression": "zstd" }, "schema": { "fields": fields(columns) }, "config": { "account_id": account, "bucket": bucket, "namespace": NAMESPACE, "table_name": table, "token": token, "rolling_policy": { "interval_seconds": ROLL_SECONDS } } }))?;
+    }
+    if existing("pipelines", &pipeline)?.is_none() {
+        cf.post(&format!("{base}/pipelines"), json!({ "name": pipeline, "sql": format!("INSERT INTO {sink} SELECT * FROM {stream}") }))?;
+    }
+    ensure!(!id.is_empty(), "Cloudflare gave {stream} no id");
+    Ok(id)
+}

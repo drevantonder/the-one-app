@@ -2,6 +2,8 @@
 //! running the Workers in workerd.
 
 #[cfg(feature = "node")]
+pub mod basin;
+#[cfg(feature = "node")]
 pub mod cli;
 #[cfg(feature = "node")]
 pub mod node;
