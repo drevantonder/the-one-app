@@ -137,16 +137,17 @@ export function workerSpans(request, cli) {
   }).filter((row) => kept(row, TABLES.spans, NOBODY, false));
 }
 
-/// How often this path says what it was handed, as a device's canary does: an export that's all dropped leaves no span
-/// to show it ever came.
+/// How often this path says what it was handed, each way that can go, as a device's canary does: an export that's refused
+/// or all dropped leaves no span to show it ever came.
 const EXPORT_SAID_EVERY = 15 * 60_000;
-let exportSaid = 0;
+const exportSaid = {};
 
-/// One log record of an export: how many spans it held and how many were kept, or that it couldn't be read.
+/// One log record of an export: how many spans it held and how many were kept (`read`), that it couldn't be read
+/// (`unreadable`), or that it came without the token (`refused`), which anyone can make happen, so it's said no more often.
 async function sayExport(env, result, found, kept) {
   const now = Date.now();
-  if (now - exportSaid < EXPORT_SAID_EVERY) return;
-  exportSaid = now;
+  if (now - (exportSaid[result] ?? 0) < EXPORT_SAID_EVERY) return;
+  exportSaid[result] = now;
   const attrs = { "one.result": result, "one.found": found, "one.new": kept };
   await env.LOGS.send([{ time: now, severity_number: result === "read" ? 9 : 17, severity_text: result === "read" ? "INFO" : "ERROR", body: "telemetry.export", service: "worker.telemetry", instance: NOBODY, attrs: JSON.stringify(attrs) }]);
 }
@@ -154,7 +155,10 @@ async function sayExport(env, result, found, kept) {
 /// Cloudflare's export of the Workers' traces: it can't sign, so it's a header only the deploy that made it knows. A log
 /// export of Cloudflare's is gzipped, which nothing here unpacks unasked.
 async function otlp(request, env) {
-  if (!env.OTLP_TOKEN || request.headers.get("authorization") !== `Bearer ${env.OTLP_TOKEN}`) refuse(401, "only Cloudflare's export of the Workers' traces, with its token");
+  if (!env.OTLP_TOKEN || request.headers.get("authorization") !== `Bearer ${env.OTLP_TOKEN}`) {
+    if (env.OTLP_TOKEN) await sayExport(env, "refused", 0, 0);
+    refuse(401, "only Cloudflare's export of the Workers' traces, with its token");
+  }
   const gzipped = request.headers.get("content-encoding") === "gzip" && request.body;
   const body = await textOf(gzipped ? new Response(request.body.pipeThrough(new DecompressionStream("gzip"))) : request, MOST_BYTES).catch(() => undefined);
   if (body === null) refuse(413, "that's too big");
