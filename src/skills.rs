@@ -1,6 +1,6 @@
 //! What agents are told, as Agent Skills (agentskills.io): a root skill, short enough to load up front, and deeper ones
 //! loaded when needed: one for each app with a guide (its instructions and tools, from the same declarations its
-//! tools come from), the Vault's, and a few areas of their own (`skills/`). One source, every way out: the agents
+//! tools come from), the Vault's, and a few areas of their own (`src/skills/`). One source, every way out: the agents
 //! service writes them into each harness's skills folder, `<cli> mcp` serves them (Skills over MCP, SEP-2640), a
 //! device serves the root's body as `/llms.txt` and each skill's files at `/skills/<name>/<path>`, and `<cli> skills`
 //! prints them. MCP's instructions are the root's short version.
@@ -145,7 +145,7 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
         true => format!("ask an admin of {YOURS} where it is"),
     };
     let fill = |t: &str| t.replace("{{name}}", NAME).replace("{{cli}}", CLI).replace("{{server}}", &server_name()).replace("{{code}}", &code).replace("{{yours}}", YOURS);
-    let written = [include_str!("../skills/accounts/SKILL.md"), include_str!("../skills/build/SKILL.md")];
+    let written = [include_str!("skills/accounts/SKILL.md"), include_str!("skills/build/SKILL.md")];
     let mut skills: Vec<Skill> = written
         .into_iter()
         .map(|md| {
@@ -169,8 +169,8 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             ("ui/icon.tsx", include_str!("screen/ui/src/components/icon.tsx")),
             ("ui/app-icon.tsx", include_str!("screen/ui/src/components/app-icon.tsx")),
             ("ui/widget.tsx", include_str!("screen/ui/src/components/widget.tsx")),
-            ("example/app.js", include_str!("../skills/build/example/app.js")),
-            ("example/screens/main.jsx", include_str!("../skills/build/example/screens/main.jsx")),
+            ("example/app.js", include_str!("skills/build/example/app.js")),
+            ("example/screens/main.jsx", include_str!("skills/build/example/screens/main.jsx")),
         ]
         .into_iter()
             .map(|(p, t)| (p.to_string(), t.to_string()))
