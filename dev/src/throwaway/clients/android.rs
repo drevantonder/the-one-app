@@ -9,21 +9,42 @@ use serde_json::json;
 
 use super::super::devices::{agent_devices, approve_code, build, didnt_sign_in, on_device};
 
+/// The Android app for this machine's processor, built in the background: → its APK's path, once `android` joins it.
+pub(crate) fn build_here(dir: &Path, checkout: &Path) -> std::thread::JoinHandle<Result<String>> {
+    let (dir, checkout) = (dir.to_path_buf(), checkout.to_path_buf());
+    std::thread::spawn(move || apk(&dir, &checkout, abi_here()))
+}
+
+fn abi_here() -> &'static str {
+    if cfg!(target_arch = "aarch64") { "arm64-v8a" } else { "x86_64" }
+}
+
+fn apk(dir: &Path, checkout: &Path, abi: &str) -> Result<String> {
+    let said = build(dir, checkout, "client/native/android/build.sh", &[("ABIS", abi)])?;
+    Ok(said.lines().last().unwrap_or_default().to_string())
+}
+
 /// The Android app (client/native), as this checkout builds it (client/native/android/build.sh, for the processor the device
 /// has), installed over the one there, then started with the throwaway network's address, printing its sign-in rather than
 /// opening a Custom Tab, and with a control port, as linux() starts it (its settings go in as the intent's `env.` extras,
 /// which a debug build reads): its Sign In pressed, the sign-in approved as the throwaway network's first user or `user`,
 /// coming back to it by the app's own link, opened on the device, and its code approved by the throwaway network's machine.
 /// Once signed in on a device as them (a file in the throwaway network's folder says so), a new build keeps that sign-in.
-pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
+/// `early` is the app built for this machine's processor while the device was being lent (`build_here`): an emulator here
+/// has it, as copies usually are. A device of another is built for again.
+pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, user: Option<&str>, early: std::thread::JoinHandle<Result<String>>) -> Result<()> {
     let address = settings.address.as_str();
     let abi = match on_device(device, "getprop ro.product.cpu.abi")?.trim() {
         abi @ ("x86_64" | "arm64-v8a") => abi.to_string(),
         other => bail!("this checkout builds the Android app for x86_64 and arm64-v8a, not {other}"),
     };
-    let apk = build(dir, checkout, "client/native/android/build.sh", &[("ABIS", abi.as_str())])?;
+    let early = early.join().map_err(|_| anyhow::anyhow!("building the Android app stopped"))?;
+    let apk = match abi == abi_here() {
+        true => early?,
+        false => apk(dir, checkout, &abi)?,
+    };
     let package = one::config::ANDROID;
-    agent_devices("install", json!({ "device": device, "app": apk.lines().last().unwrap_or_default() }))?;
+    agent_devices("install", json!({ "device": device, "app": apk }))?;
     // The launcher keeps drawing home-screen widgets from the APK it replaced ("Can't load widget") until it restarts.
     on_device(device, "am force-stop com.google.android.apps.nexuslauncher")?;
     // Play Store updates WebView on a fresh copy a few minutes in, which kills every app using it: not while a test runs.

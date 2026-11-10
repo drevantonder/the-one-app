@@ -69,6 +69,8 @@ pub(crate) fn user_named(given: &str) -> Result<String> {
 /// An Android or Windows client: on a throwaway copy of the user's lasting device, borrowed for the throwaway network,
 /// which reaches the throwaway network's address at the same address; this checkout's build installed there, and signed in.
 fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, kind: &str, user: Option<&str>) -> Result<()> {
+    // Android's app builds while its device is lent; Windows' is built on the device.
+    let early = (kind == "android").then(|| android::build_here(dir, checkout));
     let mut borrowed = devices(dir);
     let what = borrowed_for(checkout, kind);
     let listed = listed_devices;
@@ -121,7 +123,7 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settin
         })
     };
     let built = match kind {
-        "android" => android::android(dir, checkout, &device, settings, user),
+        _ if let Some(early) = early => android::android(dir, checkout, &device, settings, user, early),
         _ => windows::windows(dir, checkout, &device, settings, user),
     };
     building.store(false, std::sync::atomic::Ordering::Relaxed);
