@@ -85,7 +85,7 @@ async function start() {
       }
       if (!err.signedOut) return void show(message("Can’t Let This Device In", err.message));
       if (err.removed) return;
-      return signOut();
+      return signOut(err.message);
     }
   }
   if (handedOver) {
@@ -105,7 +105,7 @@ async function start() {
       offline.done("state");
       break;
     } catch (err) {
-      if (err.signedOut) return clearTimeout(away), clearTimeout(slow), err.removed ? undefined : void signOut();
+      if (err.signedOut) return clearTimeout(away), clearTimeout(slow), err.removed ? undefined : void signOut(err.message);
       // What it showed last stays, as a screen whose node is restarting does, saying so.
       if (!windowShowing()) (console.warn("starting:", err.message), showUnreachable());
       else offline.add("state", () => refreshState(), lastAt());

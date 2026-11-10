@@ -1222,7 +1222,7 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
             },
         }
     }
-    let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::app::runtime::COMPATIBILITY_DATE, "bindings": bindings });
+    let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::app::runtime::COMPATIBILITY_DATE, "bindings": bindings, "observability": { "enabled": true } });
     if let Some(class) = class.filter(|_| migration != Some("v1")) {
         meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });
     }

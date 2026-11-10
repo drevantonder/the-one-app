@@ -138,7 +138,7 @@ export async function listen() {
         }
       }
     } catch (err) {
-      if (err.signedOut) return err.removed ? undefined : void signOut();
+      if (err.signedOut) return err.removed ? undefined : void signOut(err.message);
     }
     if (Date.now() - started > 10_000) misses = 0;
     // What shows may be out of date from here on, with nothing to say so until it's asked for again.

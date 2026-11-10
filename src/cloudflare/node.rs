@@ -4,7 +4,7 @@
 //! bucket, each at its latest deploy.
 
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::{json};
 
 use crate::cloudflare::{Cloudflare, Files, NODE, Settings, Worker, upload_hash};
 
@@ -54,14 +54,6 @@ pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u
     }
 }
 
-/// What its upload says besides its modules: its bindings, its endpoint's Durable Object class
-/// `Node` and that class's migration the first time, and its logs on.
-pub fn metadata(settings: &Settings, migration: Option<&str>, exists: impl Fn(&str) -> bool) -> Value {
-    let (mut meta, _) = crate::cloudflare::metadata(settings, &NODE, migration, exists);
-    meta["observability"] = json!({ "enabled": true });
-    meta
-}
-
 /// Puts the Cloudflare node in the Cloudflare account of the network's Workers, with no address, and
 /// the relay again, from `sources`, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<()> {
@@ -70,7 +62,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<(
     let modules = modules()?;
     let name = NODE.worker_name();
     let scripts = cf.scripts()?;
-    let meta = metadata(settings, scripts.get(&name).and_then(|s| s.migration.as_deref()), |other| scripts.contains_key(other));
+    let (meta, _) = crate::cloudflare::metadata(settings, &NODE, scripts.get(&name).and_then(|s| s.migration.as_deref()), |other| scripts.contains_key(other));
     let mut what = vec![meta.to_string().into_bytes()];
     what.extend(modules.iter().flat_map(|(n, k, b)| [n.as_bytes().to_vec(), k.as_bytes().to_vec(), b.clone()]));
     let what = upload_hash(&what);

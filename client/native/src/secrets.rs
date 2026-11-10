@@ -9,8 +9,12 @@ mod store {
         keyring::Entry::new(service, account).ok()
     }
 
-    pub fn get(service: &str, account: &str) -> Option<Vec<u8>> {
-        entry(service, account)?.get_secret().ok()
+    pub fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+        match entry(service, account).ok_or("the secret store isn't there")?.get_secret() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(format!("the secret store: {e}")),
+        }
     }
 
     pub fn set(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
@@ -60,8 +64,13 @@ mod store {
         set_generic_password_options(value, o).map_err(|e| format!("the Keychain: {e}"))
     }
 
-    pub fn get(service: &str, account: &str) -> Option<Vec<u8>> {
-        generic_password(options(service, account)).ok()
+    pub fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+        const NOT_THERE: i32 = -25300;
+        match generic_password(options(service, account)) {
+            Ok(value) => Ok(Some(value)),
+            Err(e) if e.code() == NOT_THERE => Ok(None),
+            Err(e) => Err(format!("the Keychain: {e}")),
+        }
     }
 
     pub fn set(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
@@ -95,9 +104,9 @@ mod store {
         "refresh".into()
     }
 
-    pub fn get(service: &str, account: &str) -> Option<Vec<u8>> {
-        let said = crate::platform::host("get", json!({ "name": name(service, account) })).ok()?;
-        BASE64.decode(said.as_str()?.as_bytes()).ok()
+    pub fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+        let said = crate::platform::host("get", json!({ "name": name(service, account) }))?;
+        Ok(said.as_str().and_then(|s| BASE64.decode(s.as_bytes()).ok()))
     }
 
     pub fn set(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
@@ -115,8 +124,9 @@ fn service(name: &str) -> String {
     format!("{}{throwaway} {name}", one::config::CLI)
 }
 
+/// What's kept, if it can be read: a store that can't answer now says nothing is there, and says so in the log.
 fn get(name: &str, account: &str) -> Option<Vec<u8>> {
-    store::get(&service(name), account)
+    store::get(&service(name), account).inspect_err(|e| one::logs::record(&format!("reading {name}: {e}"))).ok().flatten()
 }
 
 fn set(name: &str, account: &str, value: &[u8]) -> Result<(), String> {
@@ -137,7 +147,8 @@ pub fn device(id: &str) -> Option<[u8; 32]> {
 
 /// `id`'s device key, made the first time: the one its sign-in was for (`signing_in`), if there is one.
 pub fn device_made(id: &str) -> Result<[u8; 32], String> {
-    if let Some(key) = device(id) {
+    // A store that can't answer now isn't one with no key: a new key here would replace the one this device is let in by.
+    if let Some(key) = store::get(&service("device"), id)?.and_then(|b| b.try_into().ok()) {
         return Ok(key);
     }
     let key = device(SIGNING_IN).unwrap_or_else(one_client::new_secret);

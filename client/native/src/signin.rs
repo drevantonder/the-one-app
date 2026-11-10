@@ -25,6 +25,8 @@ pub struct SignIn {
     /// auth comes back to.
     data: std::path::PathBuf,
     access: Mutex<Option<(String, Instant)>>,
+    /// Held while the refresh token is used: auth takes each only once.
+    refreshing: Mutex<()>,
     auth: Mutex<Option<Arc<Auth>>>,
     /// Where the browser that signed in waits for its answer (`asked`).
     browser: Mutex<Option<mpsc::Sender<String>>>,
@@ -46,7 +48,7 @@ fn failed(message: impl Into<String>) -> Failed {
 
 impl SignIn {
     pub fn new(address: &str, name: &str, data: std::path::PathBuf) -> SignIn {
-        SignIn { address: address.trim_end_matches('/').into(), name: name.into(), data, access: Mutex::default(), auth: Mutex::default(), browser: Mutex::default() }
+        SignIn { address: address.trim_end_matches('/').into(), name: name.into(), data, access: Mutex::default(), refreshing: Mutex::default(), auth: Mutex::default(), browser: Mutex::default() }
     }
 
     /// The registration kept: `(address, client id, where it comes back to)`.
@@ -64,10 +66,6 @@ impl SignIn {
         let s = Arc::new(Auth::at(&self.address)?);
         *kept = Some(s.clone());
         Ok(s)
-    }
-
-    pub fn signed_in(&self) -> bool {
-        secrets::refresh().is_some()
     }
 
     /// This app's id as a client of auth at this address, coming back to `back`: as it registered, or registered now.
@@ -168,6 +166,7 @@ impl SignIn {
 
     /// An access token good for a minute more, new from the refresh token if it's older.
     pub fn token(&self) -> Result<String, Failed> {
+        let _one_at_a_time = self.refreshing.lock().unwrap();
         if let Some((t, until)) = self.access.lock().unwrap().clone()
             && until > Instant::now() + Duration::from_secs(60)
         {
@@ -177,6 +176,7 @@ impl SignIn {
         let client = self.kept().map(|k| k.1).unwrap_or_default();
         let tokens = self.auth()?.refresh(&client, &refresh).inspect_err(|e| {
             if e.signed_out {
+                one::logs::record(&format!("auth refused the refresh token: {}", e.message));
                 secrets::forget_refresh();
             }
         })?;

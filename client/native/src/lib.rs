@@ -271,7 +271,9 @@ fn subject(token: &str) -> Result<String, Failure> {
 /// Whether someone's signed in here.
 fn signed_in() -> bool {
     let a = app();
-    a.address().is_some() && a.sign_in().is_ok_and(|s| s.signed_in())
+    // Only signing out takes the kept user: a device let in by its key stays in whatever became of its refresh token,
+    // which only asking to be let in needs.
+    a.address().is_some() && a.kept("user").is_some()
 }
 
 /// Who and where this is: the custom build's name and CLI, the address (if one's given), whether someone's signed in
@@ -391,9 +393,14 @@ fn browser_goes_on(code: Option<&str>) {
 async fn join_here() -> Result<Value, Failure> {
     let a = app();
     let address = a.address().ok_or("Enter your address first.")?;
-    let token = token().await?;
-    let user = subject(&token)?;
-    a.keep("user", Some(&user));
+    let user = match a.kept("user") {
+        Some(user) => user,
+        None => {
+            let user = subject(&token().await?)?;
+            a.keep("user", Some(&user));
+            user
+        }
+    };
     // One key for each user at each address, as the Mac and iPhone apps keep them, its folder named by it too.
     let id = format!("{address} {user}");
     let secret = secrets::device_made(&id)?;
@@ -428,6 +435,7 @@ async fn join_here() -> Result<Value, Failure> {
         Err(e) => return Err(e.to_string().into()),
     }
     let invite = a.kept("invite");
+    let token = token().await?;
     let invited = device.ask(&token, &join_name(), invite.as_deref()).await.map_err(|e| e.to_string())?;
     println!("Code: {}", device.code());
     platform::approve_here(device.code());
