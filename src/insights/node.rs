@@ -8,6 +8,8 @@ use super::*;
 
 /// How often a device sends what it has to say.
 const FLUSH_EVERY: Duration = Duration::from_secs(60);
+/// How far back an app's own screens look for what broke.
+const ERRORS_SHOWN: u64 = 7 * 86_400_000;
 /// The most reports a client's device may make a minute, and events a report may hold.
 const REPORTS_A_MINUTE: u32 = 10;
 const MOST_REPORTED: usize = 300;
@@ -449,7 +451,23 @@ impl Node {
                 self.read_row(row);
             }
         }
+        for row in rows["errors"].as_array_mut().into_iter().flatten() {
+            read_error(row);
+        }
         Ok(rows)
+    }
+
+    /// What's broken most lately in `app`, for someone who may deploy it, as an app's screens show it: empty if it can't be read.
+    pub(super) async fn errors_of(&self, viewer: &Caller, app: &str) -> Vec<Value> {
+        let ask = Ask { queries: vec!["errors"], service: Some(app.to_string()), status: Some("error".into()), since: Some(now_ms().saturating_sub(ERRORS_SHOWN)), limit: 50, ..Default::default() };
+        let rows = match self.insights(viewer, &ask).await {
+            Ok(rows) => rows,
+            Err(err) => {
+                tracing::debug!("{app}'s errors couldn't be read: {err:#}");
+                return Vec::new();
+            }
+        };
+        rows["errors"].as_array().into_iter().flatten().map(|e| json!({ "tool": e["name"], "error": format!("{} at {}", e["type"].as_str().unwrap_or(""), e["frame"].as_str().unwrap_or("")), "build": e["build"], "count": e["count"], "first": e["first"], "last": e["last"] })).collect()
     }
 
     /// A row as a reader gets it: its attributes as JSON, and its device and the devices it names by name.
@@ -472,6 +490,21 @@ fn hop_failed(err: &anyhow::Error) -> (Option<&'static str>, &'static str) {
         (Some(insights::TIMEOUT), "no answer")
     } else {
         (Some(insights::LOST), "lost")
+    }
+}
+
+/// An error as a reader gets it: its fingerprint's type, frame and build each by name, and when.
+fn read_error(row: &mut Value) {
+    let print = row["fingerprint"].as_str().unwrap_or("").to_string();
+    let mut parts = print.splitn(3, '|');
+    row["type"] = json!(parts.next().unwrap_or(""));
+    row["frame"] = json!(parts.next().unwrap_or(""));
+    row["build"] = json!(parts.next().unwrap_or(""));
+    row["first"] = row["first_seen"].take();
+    row["last"] = row["last_seen"].take();
+    if let Some(row) = row.as_object_mut() {
+        row.remove("first_seen");
+        row.remove("last_seen");
     }
 }
 

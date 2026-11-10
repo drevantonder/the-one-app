@@ -29,7 +29,7 @@ const PAST = 8 * 86_400_000;
 const FUTURE = 300_000;
 const ALLOWED_FOR = 5_000;
 /// OTEL's default duration boundaries, in ms: bucket `i` is what's over boundary `i - 1` and at most boundary `i`, and the last what's over them all.
-const BOUNDS = [0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000];
+export const BOUNDS = [0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000];
 const NAMESPACE = "telemetry";
 
 const word = (v) => typeof v === "string" && /^[A-Za-z0-9_.:+\/-]{1,128}$/.test(v);
@@ -138,7 +138,7 @@ const errorOnly = (a, key) => (a.status === "error" ? [key] : a.status === "unse
 /// The reads there are, each from what's asked to its SQL and what it gives.
 const QUERIES = {
   // Every request, an hour at a time: what rates and durations add up from.
-  requests: { sql: (a) => `SELECT ${hour} AS hour, service, name, COUNT(*) AS "count", SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors, SUM("duration") AS "sum", ${buckets()} FROM ${NAMESPACE}.spans ${where(a, [`kind = 'server'`, ...errorOnly(a, `status = 'error'`)])} GROUP BY ${hour}, service, name ORDER BY hour DESC LIMIT ${a.limit}`, rows: asBuckets },
+  requests: { sql: (a) => `SELECT ${hour} AS hour, service, name, COUNT(*) AS "count", SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors, SUM("duration") AS "sum", ${buckets()} FROM ${NAMESPACE}.spans ${where(a, [`kind = 'server'`])} GROUP BY ${hour}, service, name ORDER BY hour DESC LIMIT ${a.limit}`, rows: asBuckets },
   spans: { sql: (a) => newest("spans", SPAN, where(a, errorOnly(a, `status = 'error'`)), a.limit) },
   logs: { sql: (a) => newest("logs", LOG, where({ ...a, named: "body" }, errorOnly(a, `severity_number >= 17`)), a.limit) },
   metrics: { sql: (a) => `SELECT ${hour} AS hour, name, "type", unit, service, instance, attrs, SUM("count") AS "count", SUM("sum") AS "sum", ${summed()} FROM ${NAMESPACE}.metrics ${where(a)} GROUP BY ${hour}, name, "type", unit, service, instance, attrs ORDER BY hour DESC LIMIT ${a.limit}`, rows: asBuckets },

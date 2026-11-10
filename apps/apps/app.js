@@ -85,6 +85,11 @@ function nodeFor(a, node) {
   return w.nodes[0];
 }
 
+/// What an app's owners see: its catalog entry says who used it and what it cost, and what broke is read separately.
+async function insightsOf(ctx, a) {
+  return a.insights ? { ...a.insights, errors: await ctx.errors(a.name).catch(() => []) } : null;
+}
+
 async function find(ctx, name) {
   const all = await ctx.catalog();
   const app = all.find((a) => a.name === name);
@@ -266,7 +271,7 @@ export default {
       output: HEALTH,
       async run(ctx, { app }) {
         const a = await find(ctx, app);
-        return iso({ schedules: a.schedules || [], activity: a.activity || [], insights: a.insights || null });
+        return iso({ schedules: a.schedules || [], activity: a.activity || [], insights: await insightsOf(ctx, a) });
       },
     },
     _list: {
@@ -298,7 +303,7 @@ export default {
       output: HEALTH,
       async run(ctx, { app }) {
         const a = await find(ctx, app);
-        return { schedules: a.schedules || [], activity: a.activity || [], insights: a.insights || null };
+        return { schedules: a.schedules || [], activity: a.activity || [], insights: await insightsOf(ctx, a) };
       },
     },
     switch: {

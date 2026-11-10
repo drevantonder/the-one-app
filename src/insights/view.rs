@@ -9,9 +9,9 @@ use serde_json::Value;
 pub const LISTED: usize = 20;
 /// What a fingerprint's `status` is when something broke, which is all that's listed unless other's asked for.
 pub const ERROR: &str = "error";
-/// A histogram's bucket columns and the upper bound of each; the last has none, so it's drawn as a minute. The same as
-/// the screen's (`src/screen/settings/quantile.js`), held to it by tests/contracts.rs.
-pub const BUCKETS: [(&str, f64); 5] = [("under_10", 10.0), ("under_100", 100.0), ("under_1000", 1000.0), ("under_10000", 10000.0), ("over", 60000.0)];
+/// A histogram's bucket bounds, OTEL's defaults and, for what's over them all, a minute to draw it as. The same as the
+/// screen's (`src/screen/settings/quantile.js`), held to it by tests/contracts.rs.
+pub const BOUNDS: [f64; 16] = [0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0, 5000.0, 7500.0, 10000.0, 60000.0];
 
 const MINUTE: u64 = 60_000;
 const HOUR: u64 = 60 * MINUTE;
@@ -19,13 +19,13 @@ const DAY: u64 = 24 * HOUR;
 
 /// The quantile of histograms added together, interpolated within its bucket as Prometheus does.
 pub fn quantile(rows: &[&Value], q: f64) -> Option<f64> {
-    let counts: Vec<u64> = BUCKETS.iter().map(|(k, _)| rows.iter().map(|r| r[*k].as_u64().unwrap_or(0)).sum()).collect();
+    let counts: Vec<u64> = (0..BOUNDS.len()).map(|i| rows.iter().map(|r| r["buckets"][i].as_u64().unwrap_or(0)).sum()).collect();
     let total = counts.iter().sum::<u64>() as f64;
     if total == 0.0 {
         return None;
     }
     let (mut seen, mut low) = (0.0, 0.0);
-    for (count, (_, high)) in counts.iter().map(|c| *c as f64).zip(BUCKETS) {
+    for (count, high) in counts.iter().map(|c| *c as f64).zip(BOUNDS) {
         if count > 0.0 && seen + count >= q * total {
             return Some(low + (q * total - seen) / count * (high - low));
         }
@@ -35,9 +35,9 @@ pub fn quantile(rows: &[&Value], q: f64) -> Option<f64> {
     Some(low)
 }
 
-/// A span rollup that counted a request.
+/// What requests added up to, by the hour.
 fn requests(rows: &Value) -> Vec<&Value> {
-    rows["rollups"].as_array().into_iter().flatten().filter(|r| r["key"]["kind"] == "span" && r["key"]["span.kind"] == "server").collect()
+    rows["requests"].as_array().into_iter().flatten().collect()
 }
 
 /// What requests add up to: a line of a table, its requests, error rate and P95.
@@ -97,17 +97,17 @@ fn listed<T>(some: &[T], limit: usize, line: impl Fn(&T) -> String) -> String {
     out.join("\n")
 }
 
-/// The fingerprints of `status`: real errors unless asked for what wasn't one.
+/// What failed with `status`: real errors unless asked for what wasn't one.
 fn errors(rows: &Value, status: &str, since: u64, now: u64, limit: usize) -> Option<String> {
-    let mut prints: Vec<&Value> = rows["fingerprints"].as_array().into_iter().flatten().filter(|p| p["status"] == status && p["last"].as_u64() >= Some(since)).collect();
-    if prints.is_empty() {
+    let mut failed: Vec<&Value> = rows["errors"].as_array().into_iter().flatten().filter(|p| p["status"] == status && p["last"].as_u64() >= Some(since)).collect();
+    if failed.is_empty() {
         return None;
     }
-    prints.sort_by_key(|p| std::cmp::Reverse(p["count"].as_u64()));
+    failed.sort_by_key(|p| std::cmp::Reverse(p["count"].as_u64()));
     let text = |row: &Value, key: &str| row[key].as_str().unwrap_or("").to_string();
-    let said = |fingerprint: &str| rows["signals"].as_array().into_iter().flatten().find(|s| s["attrs"]["one.fingerprint"] == fingerprint).and_then(|s| s["attrs"]["exception.message"].as_str()).map(|m| format!("\n    {m}")).unwrap_or_default();
-    let lines = listed(&prints, limit, |p| {
-        format!("{} {}: {} at {}, {}, last {}{}", text(p, "service"), text(p, "tool"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)), said(&text(p, "fingerprint")))
+    let lines = listed(&failed, limit, |p| {
+        let said = p["message"].as_str().map(|m| format!("\n    {m}")).unwrap_or_default();
+        format!("{} {}: {} at {}, {}, last {}{said}", text(p, "service"), text(p, "name"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)))
     });
     Some(format!("{}:\n{lines}", if status == ERROR { "Top errors" } else { "Not errors" }))
 }
@@ -149,19 +149,19 @@ pub fn service(rows: &Value, service: &str, status: &str, since: u64, now: u64, 
         out.push_str("\n\n");
         out.push_str(&errors);
     }
-    let kept: Vec<&Value> = rows["signals"].as_array().into_iter().flatten().filter(|s| s["kind"] == "span" && s["attrs"]["span.kind"] == "server").collect();
-    if !kept.is_empty() {
-        let shown = listed(&kept, limit, |s| format!("{}  {}  {}  {}  {}", s["trace"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), took(s["ms"].as_f64()), s["status"].as_str().unwrap_or(""), ago(now, s["time"].as_u64().unwrap_or(0))));
-        out.push_str(&format!("\n\nTraces kept:\n{shown}"));
+    let worth: Vec<&Value> = rows["spans"].as_array().into_iter().flatten().filter(|s| s["kind"] == "server" && (s["status"] == ERROR || s["duration"].as_u64().is_some_and(|d| d >= super::SLOW_MS))).collect();
+    if !worth.is_empty() {
+        let shown = listed(&worth, limit, |s| format!("{}  {}  {}  {}  {}", s["trace"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), took(s["duration"].as_f64()), s["status"].as_str().unwrap_or(""), ago(now, s["time"].as_u64().unwrap_or(0))));
+        out.push_str(&format!("\n\nFailing or slow:\n{shown}"));
     }
     out
 }
 
 /// One trace, each span under the one that made it.
 pub fn trace(rows: &Value, id: &str, limit: usize) -> String {
-    let mut spans: Vec<&Value> = rows["signals"].as_array().into_iter().flatten().filter(|s| s["kind"] == "span" && s["trace"] == id).collect();
+    let mut spans: Vec<&Value> = rows["spans"].as_array().into_iter().flatten().filter(|s| s["trace"] == id).collect();
     if spans.is_empty() {
-        return format!("No trace {id} is kept. Only failures, slow calls and one in 20 others are, for a week.");
+        return format!("No trace {id}: nothing you may see has that id, or it hasn't arrived yet.");
     }
     spans.sort_by_key(|s| s["time"].as_u64());
     let ids: Vec<&str> = spans.iter().filter_map(|s| s["span"].as_str()).collect();
@@ -184,8 +184,8 @@ fn add_span(span: &Value, spans: &[&Value], depth: usize, limit: usize, out: &mu
         return;
     }
     let attr = |key: &str| span["attrs"][key].as_str().map(str::to_string);
-    let mut said = vec![took(span["ms"].as_f64()), span["status"].as_str().unwrap_or("").to_string()];
-    said.extend(attr("span.kind"));
+    let mut said = vec![took(span["duration"].as_f64()), span["status"].as_str().unwrap_or("").to_string()];
+    said.extend(span["kind"].as_str().map(str::to_string));
     said.extend(attr("error.type"));
     said.extend(attr("one.result"));
     out.push(format!("{}{} {} ({})", "  ".repeat(depth + 1), span["service"].as_str().unwrap_or(""), span["name"].as_str().unwrap_or(""), [said.join(", "), span["device"].as_str().unwrap_or("").to_string()].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", on ")));

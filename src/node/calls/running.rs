@@ -264,6 +264,10 @@ impl Node {
                 ok(self.source(req["app"].as_str().unwrap_or_default(), None, req["path"].as_str()).await?)
             }
             Ask::Failing => ok(json!(self.failing_schedules(&grant.caller).await?)),
+            Ask::Errors => {
+                let req: Value = serde_json::from_slice(&body)?;
+                ok(json!(self.errors_of(&grant.caller, req["app"].as_str().unwrap_or_default()).await))
+            }
             // A push to the caller's devices, from this app, through the network's push Worker.
             Ask::Notify => {
                 let send: crate::push::Send = serde_json::from_slice(&body)?;

@@ -35,6 +35,7 @@ pub enum Ask {
     Code,
     /// The caller's failing schedules (`ctx.failing`).
     Failing,
+    Errors,
     /// A push to the caller's devices (`ctx.notify`).
     Notify,
     /// The network's devices (`ctx.devices`).
@@ -50,7 +51,7 @@ pub enum Ask {
 
 /// Each ask: its name, whether a call that only reads (a widget's, badge's or hook's) is refused it, and whether the
 /// Cloudflare node answers it yet (an app that asks one there is told to use a machine).
-const ASKS: [(Ask, &str, bool, bool); 17] = [
+const ASKS: [(Ask, &str, bool, bool); 18] = [
     (Ask::Call, "call", true, true),
     (Ask::Query, "query", false, true),
     (Ask::May, "may", false, true),
@@ -63,6 +64,7 @@ const ASKS: [(Ask, &str, bool, bool); 17] = [
     (Ask::Catalog, "catalog", false, true),
     (Ask::Code, "code", false, false),
     (Ask::Failing, "failing", false, false),
+    (Ask::Errors, "errors", false, false),
     (Ask::Notify, "notify", true, false),
     (Ask::Devices, "devices", false, true),
     (Ask::Order, "order", false, false),

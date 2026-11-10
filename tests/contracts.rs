@@ -415,7 +415,7 @@ fn telemetrys_tables_are_the_ones_basin_is_set_up_with() {
 #[test]
 fn insights_on_the_screen_and_for_agents_agree_on_a_p95() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let rows = serde_json::json!([{ "under_10": 40, "under_100": 30, "under_1000": 20, "under_10000": 8, "over": 2 }, { "under_100": 1, "under_1000": 5 }, {}]);
+    let rows = serde_json::json!([{ "buckets": [0, 20, 20, 10, 10, 5, 5, 10, 10, 0, 5, 5, 3, 0, 0, 2] }, { "buckets": [0, 0, 0, 0, 0, 0, 1, 2, 3] }, {}]);
     let script = format!("const {{ quantile }} = await import({:?}); console.log(JSON.stringify([0, 0.5, 0.95, 1].map((q) => quantile({rows}, q))))", root.join("src/screen/settings/quantile.js").display());
     let out = std::process::Command::new(one::build::bun().unwrap()).args(["-e", &script]).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -423,6 +423,10 @@ fn insights_on_the_screen_and_for_agents_agree_on_a_p95() {
     let rows: Vec<&serde_json::Value> = rows.as_array().unwrap().iter().collect();
     let agents: Vec<f64> = [0.0, 0.5, 0.95, 1.0].iter().map(|q| one::insights::view::quantile(&rows, *q).unwrap()).collect();
     assert_eq!(screen, agents);
+    let worker = Formats::start().js(json!({ "op": "telemetryBounds" }));
+    let bounds: Vec<f64> = one::insights::BOUNDS.iter().map(|b| *b as f64).chain([60000.0]).collect();
+    assert_eq!(bounds.as_slice(), one::insights::view::BOUNDS.as_slice(), "a histogram's bounds are the same on a device and where they're read");
+    assert_eq!(worker, json!(one::insights::BOUNDS), "and in the telemetry Worker");
 }
 
 /// A service answers its node in the words of `service/wire.json`, in whatever language it's written: started as its

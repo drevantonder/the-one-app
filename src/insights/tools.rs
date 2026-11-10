@@ -13,17 +13,17 @@ pub fn feature() -> Feature {
         tools: vec![Tool::route(
             json!({
                 "name": "insights", "title": "Read how things went", "reads": true,
-                "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations and its failing and slow traces, then trace_id for one trace's spans. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: signals, hourly rollups and error fingerprints as JSON, each up to limit. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something, for a week. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset.",
+                "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations and its failing and slow traces, then trace_id for one trace's spans. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: requests by the hour, spans, logs, metrics and errors as JSON, each up to limit. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset. What's newest takes up to a minute or two to show.",
                 "input": { "type": "object", "properties": {
                     "service": { "type": "string", "description": "only this service: an app's name, or the network's own program" },
                     "trace_id": { "type": "string", "description": "one trace by its id, as its spans" },
                     "raw": { "type": "boolean", "description": "the rows themselves, as JSON" },
-                    "name": { "type": "string", "description": "with raw, only signals of this name, like search" },
+                    "name": { "type": "string", "description": "with raw, only spans of this name or logs of this body" },
                     "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d (1d unless raw)" },
-                    "status": { "type": "string", "enum": ["unset", "error"], "description": "only these: `error` is what broke (the default of the top errors listed), `unset` is what didn't, as what a caller had refused. With raw, also only signals of this status, and only rollups with errors if error" },
-                    "limit": { "type": "integer", "description": "how many lines to list, or with raw, how many of the newest of each kind of row (20 and 100 by default)" },
+                    "status": { "type": "string", "enum": ["unset", "error"], "description": "only these: `error` is what broke (the default of the top errors listed), `unset` is what didn't, as what a caller had refused. With raw, also only spans of this status, and logs at error level if error or below it if unset" },
+                    "limit": { "type": "integer", "description": "how many lines to list, or with raw, how many of the newest of each kind of row, up to 10000 (20 and 100 by default)" },
                 } },
-                "output": { "type": ["string", "object"], "description": "the lines to read, or with raw `{ signals, rollups, fingerprints, more_signals, more_rollups, more_fingerprints }`", "additionalProperties": true },
+                "output": { "type": ["string", "object"], "description": "the lines to read, or with raw `{ requests, spans, logs, metrics, errors }`", "additionalProperties": true },
             }),
             serves!(serve::insights),
         )],
@@ -39,8 +39,18 @@ mod serve {
     use crate::node::{Caller, Node};
 
     /// As much of a table as a reading of it needs: its lines are cut, never what they add up from.
-    const ALL_ROWS: usize = usize::MAX;
+    const ALL_ROWS: usize = 10_000;
     const DAY: u64 = 86_400_000;
+
+    /// Only what's read of it: each is a query of Basin's.
+    fn queries(raw: bool, trace: bool, service: bool) -> Vec<&'static str> {
+        match (raw, trace, service) {
+            (true, _, _) => vec![],
+            (_, true, _) => vec!["spans"],
+            (_, _, true) => vec!["requests", "errors", "spans"],
+            _ => vec!["requests", "errors"],
+        }
+    }
 
     pub async fn insights(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {
         let text = |key: &str| input.get(key).and_then(Value::as_str).map(str::to_string);
@@ -52,9 +62,9 @@ mod serve {
             None if raw || trace.is_some() => None,
             None => Some(now.saturating_sub(DAY)),
         };
-        let service = text("service").map(|s| if s == crate::config::CLI { String::new() } else { s });
+        let service = text("service");
         let limit = input.get("limit").and_then(Value::as_u64).map(|n| n as usize);
-        let ask = Ask { queries: if trace.is_some() { vec!["spans"] } else { vec![] }, service, name: text("name"), trace: trace.clone(), since, status: text("status"), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
+        let ask = Ask { queries: queries(raw, trace.is_some(), service.is_some()), service, name: text("name"), trace: trace.clone(), since, status: text("status"), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
         let rows = node.insights(&me, &ask).await?;
         if raw {
             return Ok(rows);
@@ -63,7 +73,7 @@ mod serve {
         let status = ask.status.as_deref().unwrap_or(view::ERROR);
         let text = match (&trace, &ask.service) {
             (Some(id), _) => view::trace(&rows, id, limit),
-            (None, Some(service)) => view::service(&rows, input.get("service").and_then(Value::as_str).unwrap_or(service), status, since.unwrap_or(0), now, limit),
+            (None, Some(service)) => view::service(&rows, service, status, since.unwrap_or(0), now, limit),
             (None, None) => view::overview(&rows, status, since.unwrap_or(0), now, limit),
         };
         Ok(json!(text))

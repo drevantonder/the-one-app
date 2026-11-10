@@ -6,21 +6,23 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/insights.html.
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { BUCKETS, quantile } from "./quantile.js"
+import { quantile } from "./quantile.js"
 import { Button, Empty, Icon, Input, LargeTitle, ListSkeleton, LoadFailure, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sparkline, Split, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
 
 const HOUR = 3600000
 const ALL = "*"
 const RANGES = [["1h", "1 Hour", HOUR], ["6h", "6 Hours", 6 * HOUR], ["1d", "24 Hours", 24 * HOUR], ["7d", "7 Days", 168 * HOUR], ["30d", "30 Days", 720 * HOUR], ["90d", "90 Days", 2160 * HOUR]]
-const STATS = { sum: "Sum", count: "Count", avg: "Average", p95: "P95", errors: "Errors" }
+const STATS = { sum: "Sum", count: "Count", avg: "Average", p95: "P95" }
+// As much as the store gives of each table at once.
+const MOST_ROWS = 10000
 const MOST_SERIES = 8
 const OTHER = "Other"
 // The most places a time chart stretches a short history over, so a few hours of data still reads as a chart.
 const LEAST_HOURS = 12
-// A rollup's own columns, which aren't attributes to group by.
-const COLUMNS = ["count", "errors", "ms", "hour", "name", "app", "over", "kind", ...BUCKETS.map(([k]) => k)]
+// A metric's own columns, which aren't attributes to group by.
+const COLUMNS = ["count", "sum", "hour", "name", "type", "unit", "buckets", "instance"]
 // A span's or log's columns the row itself shows.
-const SHOWN = ["name", "service", "app", "kind", "ms", "status"]
+const SHOWN = ["name", "body", "service", "kind", "duration", "status", "severity_number", "severity_text", "id"]
 // Categorical hues in a fixed order, each validated for its own theme (light, dark).
 const HUES = [["#2a78d6", "#3987e5"], ["#eb6834", "#d95926"], ["#1baf7a", "#199e70"], ["#eda100", "#c98500"], ["#e87ba4", "#d55181"], ["#008300", "#008300"], ["#6250d6", "#9085e9"], ["#e34948", "#e66767"]]
 const hue = (i) => HUES[i % HUES.length][matchMedia("(prefers-color-scheme: dark)").matches ? 1 : 0]
@@ -47,8 +49,8 @@ function duration(s) {
 }
 
 const fields = (row) => {
-  const { attrs, key, ...own } = row
-  return Object.fromEntries(Object.entries({ ...own, ...(attrs || {}), ...(key || {}) }).filter(([, v]) => v !== null && v !== ""))
+  const { attrs, ...own } = row
+  return Object.fromEntries(Object.entries({ ...own, ...(attrs || {}) }).filter(([, v]) => v !== null && v !== ""))
 }
 
 // Space-separated terms, as Jaeger's tags are: `key=value` is that field, anything else is found in any.
@@ -69,15 +71,15 @@ function tracesOf(rows) {
     const ids = new Set(spans.map((s) => s.span))
     const roots = spans.filter((s) => !s.parent || !ids.has(s.parent)).sort((a, b) => a.time - b.time)
     const start = Math.min(...spans.map((s) => s.time))
-    const end = Math.max(...spans.map((s) => s.time + s.ms))
-    return { id, spans, root: roots[0] || spans[0], start, ms: end - start, errors: spans.filter((s) => s.status === "error" && s.attrs?.["span.kind"] !== "client").length, services: sorted(spans.map((s) => s.service)) }
+    const end = Math.max(...spans.map((s) => s.time + s.duration))
+    return { id, spans, root: roots[0] || spans[0], start, ms: end - start, errors: spans.filter((s) => s.status === "error" && s.kind !== "client").length, services: sorted(spans.map((s) => s.service)) }
   }).sort((a, b) => b.start - a.start)
 }
 
 const colours = (services) => Object.fromEntries(sorted(services).map((s, i) => [s, hue(i)]))
 
 function red(rows) {
-  const count = rows.reduce((n, r) => n + r.count, 0), errors = rows.reduce((n, r) => n + r.errors, 0), sum = rows.reduce((n, r) => n + r.ms, 0)
+  const count = rows.reduce((n, r) => n + r.count, 0), errors = rows.reduce((n, r) => n + (r.errors || 0), 0), sum = rows.reduce((n, r) => n + r.sum, 0)
   return { count, errors, sum, rate: count ? errors / count : null, avg: count ? sum / count : null, p95: quantile(rows, 0.95) }
 }
 
@@ -437,8 +439,8 @@ function Trace({ trace, back, colour }) {
                   <span className="min-w-0 truncate"><span className={s.status === "error" ? "text-destructive" : ""}>{s.name}</span>{s.service !== trace.root.service && <span className="text-muted-foreground"> {s.service}</span>}</span>
                 </div>
                 <div className="relative h-4">
-                  <div className="absolute inset-y-1 rounded-sm" style={{ left: `${((s.time - trace.start) / whole) * 100}%`, width: `max(2px, ${(s.ms / whole) * 100}%)`, background: s.status === "error" ? ERROR : colour[s.service] }} />
-                  <span className="absolute inset-y-0 flex items-center px-1 text-xs tabular-nums text-muted-foreground" style={s.time - trace.start + s.ms > whole * 0.8 ? { right: `${100 - ((s.time - trace.start) / whole) * 100}%` } : { left: `${((s.time - trace.start + s.ms) / whole) * 100}%` }}>{took(s.ms)}</span>
+                  <div className="absolute inset-y-1 rounded-sm" style={{ left: `${((s.time - trace.start) / whole) * 100}%`, width: `max(2px, ${(s.duration / whole) * 100}%)`, background: s.status === "error" ? ERROR : colour[s.service] }} />
+                  <span className="absolute inset-y-0 flex items-center px-1 text-xs tabular-nums text-muted-foreground" style={s.time - trace.start + s.duration > whole * 0.8 ? { right: `${100 - ((s.time - trace.start) / whole) * 100}%` } : { left: `${((s.time - trace.start + s.duration) / whole) * 100}%` }}>{took(s.duration)}</span>
                 </div>
               </div>
               {shown && <div className="px-1 pb-3 pt-1"><Fields row={s} skip={SHOWN} /></div>}
@@ -451,12 +453,14 @@ function Trace({ trace, back, colour }) {
 }
 
 // How many in each slice of time, red for the failed: the volume bar above a log search.
+const failed = (r) => r.severity_number >= 17
+
 function Volume({ rows }) {
   const [ref, width] = useWidth()
   const slices = 48, height = 48
   const first = Math.min(...rows.map((r) => r.time)), last = Math.max(first + 60000, ...rows.map((r) => r.time))
   const buckets = Array.from({ length: slices }, () => [0, 0])
-  for (const r of rows) buckets[Math.min(slices - 1, Math.floor(((r.time - first) / (last - first)) * slices))][r.status === "error" ? 1 : 0]++
+  for (const r of rows) buckets[Math.min(slices - 1, Math.floor(((r.time - first) / (last - first)) * slices))][failed(r) ? 1 : 0]++
   const most = Math.max(1, ...buckets.map(([a, b]) => a + b))
   const w = width / slices
   return (
@@ -481,7 +485,7 @@ function Logs({ rows, more, query: [query, setQuery] }) {
   const [open, setOpen] = useState(null)
   const found = useMemo(() => {
     const matches = matcher(query)
-    return rows.filter((r) => (service === ALL || r.service === service) && matches(r))
+    return rows.map((r, id) => ({ ...r, id })).filter((r) => (service === ALL || r.service === service) && matches(r))
   }, [rows, service, query])
   // Only what differs from row to row is worth a place on the line.
   const varying = useMemo(() => {
@@ -501,13 +505,13 @@ function Logs({ rows, more, query: [query, setQuery] }) {
           <p className="m-0 text-sm text-muted-foreground">{plural(found.length, "log")}{more ? ", the newest only" : ""}</p>
           <div className="flex flex-col font-mono text-xs">
             {found.map((r) => (
-              <div key={r.span} className="border-0 border-b border-solid border-border">
-                <div className="flex cursor-pointer gap-3 py-1.5 hover:bg-muted" onClick={() => setOpen(open === r.span ? null : r.span)}>
+              <div key={r.id} className="border-0 border-b border-solid border-border">
+                <div className="flex cursor-pointer gap-3 py-1.5 hover:bg-muted" onClick={() => setOpen(open === r.id ? null : r.id)}>
                   <span className="shrink-0 tabular-nums text-muted-foreground">{when(r.time)}</span>
-                  <span className={`w-10 shrink-0 ${r.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>{r.status === "error" ? "ERROR" : "INFO"}</span>
-                  <span className="min-w-0 truncate">{r.service} {r.name} <span className="text-muted-foreground">{Object.entries(r.attrs || {}).filter(([k]) => varying.has(k)).map(([k, v]) => `${k}=${text(v)}`).join(" ")}</span></span>
+                  <span className={`w-10 shrink-0 ${failed(r) ? "text-destructive" : "text-muted-foreground"}`}>{r.severity_text}</span>
+                  <span className="min-w-0 truncate">{r.service} {r.body} <span className="text-muted-foreground">{Object.entries(r.attrs || {}).filter(([k]) => varying.has(k)).map(([k, v]) => `${k}=${text(v)}`).join(" ")}</span></span>
                 </div>
-                {open === r.span && <div className="px-1 pb-3 pt-1"><Fields row={r} skip={SHOWN} /></div>}
+                {open === r.id && <div className="px-1 pb-3 pt-1"><Fields row={r} skip={SHOWN} /></div>}
               </div>
             ))}
           </div>
@@ -519,7 +523,7 @@ function Logs({ rows, more, query: [query, setQuery] }) {
 
 function statOver(rows, stat) {
   const r = red(rows)
-  return { sum: r.sum, count: r.count, errors: r.errors, avg: r.avg, p95: r.p95 }[stat]
+  return { sum: r.sum, count: r.count, avg: r.avg, p95: r.p95 }[stat]
 }
 const zeroAt = (stat) => (stat === "avg" || stat === "p95" ? null : 0)
 function seriesOf(rows, hours, stat, split) {
@@ -605,20 +609,19 @@ function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
   )
 }
 
-function Errors({ rows, signals, showTraces, query: [query, setQuery] }) {
+function Errors({ rows, showTraces, query: [query, setQuery] }) {
   const [service, setService] = useState(ALL)
   const [status, setStatus] = useState("error")
   const [open, setOpen] = useState(null)
   const found = useMemo(() => {
     const matches = matcher(query)
-    const said = new Map(signals.filter((s) => s.attrs?.["one.fingerprint"]).map((s) => [s.attrs["one.fingerprint"], s.attrs["exception.message"]]).reverse())
-    return rows.map((r) => ({ ...r, message: said.get(r.fingerprint) })).filter((r) => (service === ALL || r.service === service) && (status === ALL || r.status === status) && matches(r)).map((r) => ({ ...r, id: `${r.service}|${r.tool}|${r.fingerprint}` }))
-  }, [rows, signals, service, status, query])
+    return rows.filter((r) => (service === ALL || r.service === service) && (status === ALL || r.status === status) && matches(r)).map((r) => ({ ...r, id: `${r.service}|${r.name}|${r.status}|${r.fingerprint}` }))
+  }, [rows, service, status, query])
   const chosen = found.find((r) => r.id === open)
   const columns = [
     { key: "type", label: "Error", value: (p) => p.type, cell: (p) => <span className="break-all"><span className="font-medium">{p.type}</span> <span className="text-muted-foreground">{p.frame}</span>{p.message && <span className="block text-muted-foreground">{p.message}</span>}</span> },
     { key: "service", label: "Service", value: (p) => p.service, cell: (p) => <span className="break-all">{p.service}</span> },
-    { key: "tool", label: "Operation", wide: true, value: (p) => p.tool, cell: (p) => <span className="break-all">{p.tool}</span> },
+    { key: "name", label: "Operation", wide: true, value: (p) => p.name, cell: (p) => <span className="break-all">{p.name}</span> },
     { key: "count", label: "Count", right: true, value: (p) => p.count, cell: (p) => number(p.count) },
     { key: "last", label: "Last", right: true, value: (p) => p.last, cell: (p) => <span className="text-muted-foreground" title={when(p.last)}>{ago(p.last)}</span> },
   ]
@@ -662,7 +665,7 @@ function Insights() {
     const mine = ++asked.current
     setLoading(true)
     try {
-      const got = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: 20000 })
+      const got = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: MOST_ROWS })
       if (mine !== asked.current) return
       setData({ ...got, at: Date.now() })
       setProblem(null)
@@ -674,8 +677,7 @@ function Insights() {
   }
   useEffect(() => void load(), [range])
 
-  const kinds = useMemo(() => (data ? Map.groupBy(data.rollups, (r) => r.key?.kind) : new Map()), [data])
-  const traces = useMemo(() => (data ? tracesOf(data.signals.filter((s) => s.kind === "span")) : []), [data])
+  const traces = useMemo(() => (data ? tracesOf(data.spans) : []), [data])
 
   if (!data) {
     return (
@@ -687,11 +689,11 @@ function Insights() {
   }
 
   const to = data.at, from = to - RANGES.find(([v]) => v === range)[2]
-  const colour = colours(data.signals.map((s) => s.service))
+  const colour = colours(data.spans.map((s) => s.service))
   const opened = traceId && traces.find((t) => t.id === traceId)
   if (opened) return <Trace trace={opened} back={() => setTraceId(null)} colour={colour} />
   const toTraces = (next) => (filters[1](next), setTab("Traces"))
-  const logs = data.signals.filter((s) => s.kind !== "span")
+  const more = (rows) => rows.length >= MOST_ROWS
 
   return (
     <div className="flex flex-col gap-4">
@@ -712,11 +714,11 @@ function Insights() {
           <TabsList><TabsTrigger value="Services">Services</TabsTrigger>{Object.keys(queries).map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>
         </Tabs>
       </div>
-      {tab === "Services" && <Services rows={(kinds.get("span") || []).filter((r) => r.key["span.kind"] === "server")} traces={traces} from={from} to={to} open={service} colour={colour} showTrace={setTraceId} showTraces={toTraces} />}
-      {tab === "Traces" && <Traces traces={traces} filters={filters} query={queries.Traces} open={setTraceId} colour={colour} more={data.more_signals} />}
-      {tab === "Logs" && <Logs rows={logs} more={data.more_signals} query={queries.Logs} />}
-      {tab === "Metrics" && <Metrics rows={kinds.get("metric") || []} from={from} to={to} more={data.more_rollups} query={queries.Metrics} />}
-      {tab === "Errors" && <Errors rows={data.fingerprints} signals={data.signals} query={queries.Errors} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
+      {tab === "Services" && <Services rows={data.requests} traces={traces} from={from} to={to} open={service} colour={colour} showTrace={setTraceId} showTraces={toTraces} />}
+      {tab === "Traces" && <Traces traces={traces} filters={filters} query={queries.Traces} open={setTraceId} colour={colour} more={more(data.spans)} />}
+      {tab === "Logs" && <Logs rows={data.logs} more={more(data.logs)} query={queries.Logs} />}
+      {tab === "Metrics" && <Metrics rows={data.metrics} from={from} to={to} more={more(data.metrics)} query={queries.Metrics} />}
+      {tab === "Errors" && <Errors rows={data.errors} query={queries.Errors} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
     </div>
   )
 }
