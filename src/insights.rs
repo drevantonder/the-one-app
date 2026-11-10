@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 use crate::protocol::code;
 
 pub mod tools;
+pub mod view;
 
 #[cfg(feature = "node")]
 pub mod cli;
@@ -543,6 +544,7 @@ impl Batch {
 pub struct Ask {
     pub app: Option<String>,
     pub name: Option<String>,
+    pub trace: Option<String>,
     pub since: Option<u64>,
     /// `ok` or `error`.
     pub status: Option<String>,

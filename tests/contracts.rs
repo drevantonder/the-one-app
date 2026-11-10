@@ -401,6 +401,21 @@ fn auth_pages_drawn_by_hand_name_the_network_as_the_build_does() {
     assert!(std::fs::read_to_string(dir.join("invite.html")).unwrap().contains(&format!("Join {}", one::config::NAME)));
 }
 
+/// The Insights screen and the `insights` tool add a histogram's P95 the same way: JavaScript's in the screen, Rust's for
+/// agents.
+#[test]
+fn insights_on_the_screen_and_for_agents_agree_on_a_p95() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let rows = serde_json::json!([{ "under_10": 40, "under_100": 30, "under_1000": 20, "under_10000": 8, "over": 2 }, { "under_100": 1, "under_1000": 5 }, {}]);
+    let script = format!("const {{ quantile }} = await import({:?}); console.log(JSON.stringify([0, 0.5, 0.95, 1].map((q) => quantile({rows}, q))))", root.join("src/screen/settings/quantile.js").display());
+    let out = std::process::Command::new(one::build::bun().unwrap()).args(["-e", &script]).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let screen: Vec<f64> = serde_json::from_slice(&out.stdout).unwrap();
+    let rows: Vec<&serde_json::Value> = rows.as_array().unwrap().iter().collect();
+    let agents: Vec<f64> = [0.0, 0.5, 0.95, 1.0].iter().map(|q| one::insights::view::quantile(&rows, *q).unwrap()).collect();
+    assert_eq!(screen, agents);
+}
+
 /// A service answers its node in the words of `service/wire.json`, in whatever language it's written: started as its
 /// endpoint starts it, registering what's about its machine, taking calls and answering with `ok`, `error` or
 /// `elsewhere`, registering again when its endpoint forgets it, always with the token in its home. What it talks to is

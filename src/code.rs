@@ -25,7 +25,7 @@ pub fn catalog(node: &Client) -> Result<Vec<Value>> {
 /// them yet: those not added where they are, nor deleted.
 pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
     let (mut apps, mut addable) = (Vec::new(), Vec::new());
-    for mut app in tools::sets(node)? {
+    for mut app in node.sets()? {
         let tools: Vec<Value> = app["tools"]
             .as_array()
             .into_iter()
@@ -100,7 +100,7 @@ fn call(app: &Value, tool: &Value, how: Reader) -> String {
     let (a, o) = (app["name"].as_str().unwrap_or(""), tool["name"].as_str().unwrap_or(""));
     match how {
         Reader::Code => format!("{}({})", path(a, o), ts(&tool["input"])),
-        Reader::Mcp => format!("{a}_{o} {}", ts(&tool["input"])),
+        Reader::Mcp => format!("{} {}", tool["id"].as_str().unwrap_or(&format!("{a}_{o}")), ts(&tool["input"])),
         Reader::Cli => {
             let mut line = tools::usage(a, tool);
             for (k, v) in tools::optional(tool) {

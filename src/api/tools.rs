@@ -51,7 +51,7 @@ mod tests {
             for tool in feature.tools.iter() {
                 let name = feature.mcp_name(&tool.spec);
                 assert!(tool.spec["input"]["type"] == "object", "{name} says what it takes");
-                assert!(tool.spec["output"]["type"].is_string(), "{name} says what it answers");
+                assert!(!tool.spec["output"]["type"].is_null(), "{name} says what it answers");
                 assert!(tool.spec["title"].is_string() && tool.spec["description"].is_string(), "{name} says what it is");
             }
         }

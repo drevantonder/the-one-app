@@ -8,50 +8,61 @@ import { useEffect as t, useMemo as n, useRef as r, useState as i } from "react"
 import { createRoot as a } from "react-dom/client";
 import { Button as o, Empty as s, Icon as c, Input as l, LargeTitle as u, ListSkeleton as d, LoadFailure as f, Section as p, Select as m, SelectContent as h, SelectItem as g, SelectTrigger as _, SelectValue as v, Sparkline as y, Split as b, Tabs as x, TabsList as S, TabsTrigger as C, useWidth as w } from "@one/ui";
 import { Fragment as T, jsx as E, jsxs as D } from "react/jsx-runtime";
-var O = 36e5, k = "*", A = [
-	[
-		"1h",
-		"1 Hour",
-		O
-	],
-	[
-		"6h",
-		"6 Hours",
-		6 * O
-	],
-	[
-		"1d",
-		"24 Hours",
-		24 * O
-	],
-	[
-		"7d",
-		"7 Days",
-		168 * O
-	],
-	[
-		"30d",
-		"30 Days",
-		720 * O
-	],
-	[
-		"90d",
-		"90 Days",
-		2160 * O
-	]
-], j = {
-	sum: "Sum",
-	count: "Count",
-	avg: "Average",
-	p95: "P95",
-	errors: "Errors"
-}, M = 8, N = "Other", P = 12, F = [
+var O = [
 	["under_10", 10],
 	["under_100", 100],
 	["under_1000", 1e3],
 	["under_10000", 1e4],
 	["over", 6e4]
-], I = [
+];
+function k(e, t) {
+	let n = O.map(([t]) => e.reduce((e, n) => e + (n[t] || 0), 0)), r = n.reduce((e, t) => e + t, 0);
+	if (!r) return null;
+	let i = 0, a = 0;
+	for (let e = 0; e < n.length; e++) {
+		if (n[e] && i + n[e] >= t * r) return a + (t * r - i) / n[e] * (O[e][1] - a);
+		i += n[e], a = O[e][1];
+	}
+	return a;
+}
+var A = 36e5, j = "*", M = [
+	[
+		"1h",
+		"1 Hour",
+		A
+	],
+	[
+		"6h",
+		"6 Hours",
+		6 * A
+	],
+	[
+		"1d",
+		"24 Hours",
+		24 * A
+	],
+	[
+		"7d",
+		"7 Days",
+		168 * A
+	],
+	[
+		"30d",
+		"30 Days",
+		720 * A
+	],
+	[
+		"90d",
+		"90 Days",
+		2160 * A
+	]
+], N = {
+	sum: "Sum",
+	count: "Count",
+	avg: "Average",
+	p95: "P95",
+	errors: "Errors"
+}, P = 8, F = "Other", I = 12, L = [
 	"count",
 	"errors",
 	"ms",
@@ -60,15 +71,15 @@ var O = 36e5, k = "*", A = [
 	"app",
 	"over",
 	"kind",
-	...F.map(([e]) => e)
-], L = [
+	...O.map(([e]) => e)
+], R = [
 	"name",
 	"service",
 	"app",
 	"kind",
 	"ms",
 	"status"
-], R = [
+], z = [
 	["#2a78d6", "#3987e5"],
 	["#eb6834", "#d95926"],
 	["#1baf7a", "#199e70"],
@@ -77,23 +88,23 @@ var O = 36e5, k = "*", A = [
 	["#008300", "#008300"],
 	["#6250d6", "#9085e9"],
 	["#e34948", "#e66767"]
-], z = (e) => R[e % R.length][+!!matchMedia("(prefers-color-scheme: dark)").matches], B = "var(--destructive)", V = "var(--muted-foreground)", H = (e) => new Date(e).toLocaleString(void 0, {
+], B = (e) => z[e % z.length][+!!matchMedia("(prefers-color-scheme: dark)").matches], V = "var(--destructive)", H = "var(--muted-foreground)", U = (e) => new Date(e).toLocaleString(void 0, {
 	month: "short",
 	day: "numeric",
 	hour: "numeric",
 	minute: "2-digit",
 	second: "2-digit"
-}), U = (e) => new Date(e).toLocaleString(void 0, {
+}), W = (e) => new Date(e).toLocaleString(void 0, {
 	month: "short",
 	day: "numeric",
 	hour: "numeric"
-}), W = (e) => e == null ? "–" : new Intl.NumberFormat(void 0, {
+}), G = (e) => e == null ? "–" : new Intl.NumberFormat(void 0, {
 	notation: "compact",
 	maximumFractionDigits: 1
-}).format(e), ee = (e) => e == null ? "–" : e === 0 ? "0%" : e < .001 ? "<0.1%" : `${(e * 100).toFixed(+(e < .1))}%`, G = (e) => e == null ? "–" : e >= 6e4 ? `${(e / 6e4).toFixed(1)}m` : e >= 1e3 ? `${(e / 1e3).toFixed(e >= 1e4 ? 0 : 1)}s` : `${Math.round(e)}ms`, te = (e) => {
+}).format(e), ee = (e) => e == null ? "–" : e === 0 ? "0%" : e < .001 ? "<0.1%" : `${(e * 100).toFixed(+(e < .1))}%`, K = (e) => e == null ? "–" : e >= 6e4 ? `${(e / 6e4).toFixed(1)}m` : e >= 1e3 ? `${(e / 1e3).toFixed(e >= 1e4 ? 0 : 1)}s` : `${Math.round(e)}ms`, te = (e) => {
 	let t = Math.max(0, Math.round((Date.now() - e) / 1e3));
 	return t < 60 ? `${t}s ago` : t < 3600 ? `${Math.round(t / 60)}m ago` : t < 86400 ? `${Math.round(t / 3600)}h ago` : `${Math.round(t / 86400)}d ago`;
-}, K = (e) => typeof e == "string" ? e : JSON.stringify(e), q = (e) => [...new Set(e)].sort((e, t) => String(e).localeCompare(String(t))), J = (e, t) => `${W(e)} ${t}${e === 1 ? "" : "s"}`;
+}, q = (e) => typeof e == "string" ? e : JSON.stringify(e), J = (e) => [...new Set(e)].sort((e, t) => String(e).localeCompare(String(t))), Y = (e, t) => `${G(e)} ${t}${e === 1 ? "" : "s"}`;
 function ne(e) {
 	let t = /^\s*([\d.]+)\s*(ms|s|m)?\s*$/.exec(e);
 	return t ? Number(t[1]) * {
@@ -102,7 +113,7 @@ function ne(e) {
 		m: 6e4
 	}[t[2] || "ms"] : 0;
 }
-var Y = (e) => {
+var X = (e) => {
 	let { attrs: t, key: n, ...r } = e;
 	return Object.fromEntries(Object.entries({
 		...r,
@@ -110,17 +121,17 @@ var Y = (e) => {
 		...n || {}
 	}).filter(([, e]) => e !== null && e !== ""));
 };
-function X(e) {
+function re(e) {
 	let t = e.split(/\s+/).filter(Boolean).map((e) => e.toLowerCase());
 	return (e) => {
-		let n = Object.entries(Y(e)).map(([e, t]) => [e.toLowerCase(), K(t).toLowerCase()]);
+		let n = Object.entries(X(e)).map(([e, t]) => [e.toLowerCase(), q(t).toLowerCase()]);
 		return t.every((e) => {
 			let t = e.indexOf("=");
 			return t > 0 ? n.some(([n, r]) => n === e.slice(0, t) && r === e.slice(t + 1)) : n.some(([t, n]) => t.includes(e) || n.includes(e));
 		});
 	};
 }
-function re(e) {
+function ie(e) {
 	return [...Map.groupBy(e, (e) => e.trace).entries()].map(([e, t]) => {
 		let n = new Set(t.map((e) => e.span)), r = t.filter((e) => !e.parent || !n.has(e.parent)).sort((e, t) => e.time - t.time), i = Math.min(...t.map((e) => e.time)), a = Math.max(...t.map((e) => e.time + e.ms));
 		return {
@@ -130,21 +141,11 @@ function re(e) {
 			start: i,
 			ms: a - i,
 			errors: t.filter((e) => e.status === "error" && e.attrs?.["span.kind"] !== "client").length,
-			services: q(t.map((e) => e.service))
+			services: J(t.map((e) => e.service))
 		};
 	}).sort((e, t) => t.start - e.start);
 }
-var ie = (e) => Object.fromEntries(q(e).map((e, t) => [e, z(t)]));
-function ae(e, t) {
-	let n = F.map(([t]) => e.reduce((e, n) => e + (n[t] || 0), 0)), r = n.reduce((e, t) => e + t, 0);
-	if (!r) return null;
-	let i = 0, a = 0;
-	for (let e = 0; e < n.length; e++) {
-		if (n[e] && i + n[e] >= t * r) return a + (t * r - i) / n[e] * (F[e][1] - a);
-		i += n[e], a = F[e][1];
-	}
-	return a;
-}
+var ae = (e) => Object.fromEntries(J(e).map((e, t) => [e, B(t)]));
 function oe(e) {
 	let t = e.reduce((e, t) => e + t.count, 0), n = e.reduce((e, t) => e + t.errors, 0), r = e.reduce((e, t) => e + t.ms, 0);
 	return {
@@ -153,11 +154,11 @@ function oe(e) {
 		sum: r,
 		rate: t ? n / t : null,
 		avg: t ? r / t : null,
-		p95: ae(e, .95)
+		p95: k(e, .95)
 	};
 }
 function se(e, t, n) {
-	let r = Math.floor(n / O), i = Math.floor(t / O), a = Math.min(r, ...e.map((e) => e.hour)), o = Math.max(i, Math.min(a, r - P + 1));
+	let r = Math.floor(n / A), i = Math.floor(t / A), a = Math.min(r, ...e.map((e) => e.hour)), o = Math.max(i, Math.min(a, r - I + 1));
 	return Array.from({ length: r - o + 1 }, (e, t) => o + t);
 }
 function ce(t) {
@@ -196,7 +197,7 @@ function ue({ ticks: e, width: t, left: n, top: r, height: i }) {
 		y: r + e * i + 4,
 		textAnchor: "end",
 		fontSize: "11",
-		fill: V,
+		fill: H,
 		children: a
 	})] }, a));
 }
@@ -206,7 +207,7 @@ var Z = 44, Q = 8, de = 20, fe = (t) => {
 		x: c,
 		y: l,
 		fontSize: "11",
-		fill: V,
+		fill: H,
 		children: r
 	}), n[0] = r, n[1] = c, n[2] = l, n[3] = u) : u = n[3];
 	let d = a - 4, f = o - 5, p;
@@ -215,14 +216,14 @@ var Z = 44, Q = 8, de = 20, fe = (t) => {
 		y: f,
 		fontSize: "11",
 		textAnchor: "end",
-		fill: V,
+		fill: H,
 		children: i
 	}), n[4] = i, n[5] = d, n[6] = f, n[7] = p) : p = n[7];
 	let m;
 	return n[8] !== u || n[9] !== p ? (m = /* @__PURE__ */ D(T, { children: [u, p] }), n[8] = u, n[9] = p, n[10] = m) : m = n[10], m;
 };
 function pe(t) {
-	let n = e(69), { hours: r, stacks: a, height: o, axis: s, format: c } = t, l = o === void 0 ? 96 : o, u = s === void 0 || s, d = c === void 0 ? W : c, [f, p] = w(), [m, h] = i(null), g = u ? Z : 0, _ = u ? Q : 2, v = u ? de : 2, y = l - _ - v, b;
+	let n = e(69), { hours: r, stacks: a, height: o, axis: s, format: c } = t, l = o === void 0 ? 96 : o, u = s === void 0 || s, d = c === void 0 ? G : c, [f, p] = w(), [m, h] = i(null), g = u ? Z : 0, _ = u ? Q : 2, v = u ? de : 2, y = l - _ - v, b;
 	if (n[0] !== r || n[1] !== a) {
 		let e;
 		n[3] === a ? e = n[4] : (e = (e, t) => a.reduce((e, n) => e + (n.values[t] || 0), 0), n[3] = a, n[4] = e);
@@ -231,8 +232,8 @@ function pe(t) {
 	} else b = n[2];
 	let x = b, S = Math.max(1, p - g - 4) / r.length, C = Math.max(1, Math.min(S - 2, 20)), T;
 	n[5] !== r.length || n[6] !== g || n[7] !== S ? (T = (e) => h(Math.max(0, Math.min(r.length - 1, Math.floor((e.clientX - e.currentTarget.getBoundingClientRect().left - g) / S)))), n[5] = r.length, n[6] = g, n[7] = S, n[8] = T) : T = n[8];
-	let k = T, A;
-	n[9] === Symbol.for("react.memo_cache_sentinel") ? (A = () => h(null), n[9] = A) : A = n[9];
+	let O = T, k;
+	n[9] === Symbol.for("react.memo_cache_sentinel") ? (k = () => h(null), n[9] = k) : k = n[9];
 	let j;
 	n[10] === a ? j = n[11] : (j = a.map(me).join(", "), n[10] = a, n[11] = j);
 	let M;
@@ -251,8 +252,8 @@ function pe(t) {
 	}), n[12] = u, n[13] = d, n[14] = g, n[15] = x, n[16] = y, n[17] = _, n[18] = p, n[19] = M) : M = n[19];
 	let N;
 	n[20] !== u || n[21] !== l || n[22] !== r || n[23] !== p ? (N = u && /* @__PURE__ */ E(fe, {
-		first: U(r[0] * O),
-		last: U(r.at(-1) * O),
+		first: W(r[0] * A),
+		last: W(r.at(-1) * A),
 		width: p,
 		height: l
 	}), n[20] = u, n[21] = l, n[22] = r, n[23] = p, n[24] = N) : N = n[24];
@@ -285,11 +286,11 @@ function pe(t) {
 		}, n[40] = C, n[41] = g, n[42] = x, n[43] = S, n[44] = y, n[45] = a, n[46] = _, n[47] = e) : e = n[47], F = r.map(e), n[31] = C, n[32] = r, n[33] = g, n[34] = x, n[35] = S, n[36] = y, n[37] = a, n[38] = _, n[39] = F;
 	} else F = n[39];
 	let I;
-	n[48] !== l || n[49] !== k || n[50] !== P || n[51] !== F || n[52] !== j || n[53] !== M || n[54] !== N || n[55] !== p ? (I = /* @__PURE__ */ D("svg", {
+	n[48] !== l || n[49] !== O || n[50] !== P || n[51] !== F || n[52] !== j || n[53] !== M || n[54] !== N || n[55] !== p ? (I = /* @__PURE__ */ D("svg", {
 		width: p,
 		height: l,
-		onMouseMove: k,
-		onMouseLeave: A,
+		onMouseMove: O,
+		onMouseLeave: k,
 		role: "img",
 		"aria-label": j,
 		children: [
@@ -298,13 +299,13 @@ function pe(t) {
 			P,
 			F
 		]
-	}), n[48] = l, n[49] = k, n[50] = P, n[51] = F, n[52] = j, n[53] = M, n[54] = N, n[55] = p, n[56] = I) : I = n[56];
+	}), n[48] = l, n[49] = O, n[50] = P, n[51] = F, n[52] = j, n[53] = M, n[54] = N, n[55] = p, n[56] = I) : I = n[56];
 	let L;
 	n[57] !== m || n[58] !== d || n[59] !== r || n[60] !== g || n[61] !== S || n[62] !== a || n[63] !== _ ? (L = m != null && /* @__PURE__ */ E(ce, { tip: {
 		x: g + m * S + S / 2,
 		y: _ + 12,
 		flip: m > r.length / 2,
-		lines: [U(r[m] * O), ...a.map((e) => `${e.name}: ${d(e.values[m] || 0)}`)]
+		lines: [W(r[m] * A), ...a.map((e) => `${e.name}: ${d(e.values[m] || 0)}`)]
 	} }), n[57] = m, n[58] = d, n[59] = r, n[60] = g, n[61] = S, n[62] = a, n[63] = _, n[64] = L) : L = n[64];
 	let R;
 	return n[65] !== f || n[66] !== I || n[67] !== L ? (R = /* @__PURE__ */ D("div", {
@@ -317,7 +318,7 @@ function me(e) {
 	return e.name;
 }
 function he(t) {
-	let n = e(72), { hours: r, series: a, height: o, format: s } = t, c = o === void 0 ? 96 : o, l = s === void 0 ? W : s, [u, d] = w(), [f, p] = i(null), m = c - Q - de, h;
+	let n = e(72), { hours: r, series: a, height: o, format: s } = t, c = o === void 0 ? 96 : o, l = s === void 0 ? G : s, [u, d] = w(), [f, p] = i(null), m = c - Q - de, h;
 	n[0] === a ? h = n[1] : (h = Math.max(1, ...a.flatMap(be)), n[0] = a, n[1] = h);
 	let g = h, _;
 	n[2] !== r.length || n[3] !== d ? (_ = (e) => Z + (e + .5) / r.length * Math.max(1, d - Z - 4), n[2] = r.length, n[3] = d, n[4] = _) : _ = n[4];
@@ -336,8 +337,8 @@ function he(t) {
 		let t = e.currentTarget.getBoundingClientRect();
 		p(Math.max(0, Math.min(r.length - 1, Math.floor((e.clientX - t.left - Z) / Math.max(1, d - Z - 4) * r.length))));
 	}, n[11] = r.length, n[12] = d, n[13] = T) : T = n[13];
-	let k = T, A;
-	if (n[14] !== f || n[15] !== l || n[16] !== c || n[17] !== r || n[18] !== k || n[19] !== g || n[20] !== S || n[21] !== m || n[22] !== u || n[23] !== a || n[24] !== d || n[25] !== v || n[26] !== b) {
+	let O = T, k;
+	if (n[14] !== f || n[15] !== l || n[16] !== c || n[17] !== r || n[18] !== O || n[19] !== g || n[20] !== S || n[21] !== m || n[22] !== u || n[23] !== a || n[24] !== d || n[25] !== v || n[26] !== b) {
 		let e = f == null ? [] : a.map((e) => ({
 			...e,
 			v: e.values[f]
@@ -367,10 +368,10 @@ function he(t) {
 			height: m,
 			ticks: _
 		}), n[39] = m, n[40] = _, n[41] = d, n[42] = y) : y = n[42];
-		let x = r[0] * O, w;
-		n[43] === x ? w = n[44] : (w = U(x), n[43] = x, n[44] = w);
-		let T = r.at(-1) * O, j;
-		n[45] === T ? j = n[46] : (j = U(T), n[45] = T, n[46] = j);
+		let x = r[0] * A, w;
+		n[43] === x ? w = n[44] : (w = W(x), n[43] = x, n[44] = w);
+		let T = r.at(-1) * A, j;
+		n[45] === T ? j = n[46] : (j = W(T), n[45] = T, n[46] = j);
 		let M;
 		n[47] !== c || n[48] !== w || n[49] !== j || n[50] !== d ? (M = /* @__PURE__ */ E(fe, {
 			first: w,
@@ -408,7 +409,7 @@ function he(t) {
 			x2: v(f),
 			y1: Q,
 			y2: Q + m,
-			stroke: V
+			stroke: H
 		}), n[64] = f, n[65] = m, n[66] = v, n[67] = F) : F = n[67];
 		let I;
 		n[68] !== f || n[69] !== v || n[70] !== b ? (I = (e) => /* @__PURE__ */ E("circle", {
@@ -418,13 +419,13 @@ function he(t) {
 			fill: e.colour,
 			stroke: "var(--background)",
 			strokeWidth: "2"
-		}, e.name), n[68] = f, n[69] = v, n[70] = b, n[71] = I) : I = n[71], A = /* @__PURE__ */ D("div", {
+		}, e.name), n[68] = f, n[69] = v, n[70] = b, n[71] = I) : I = n[71], k = /* @__PURE__ */ D("div", {
 			ref: u,
 			className: "relative",
 			children: [/* @__PURE__ */ D("svg", {
 				width: d,
 				height: c,
-				onMouseMove: k,
+				onMouseMove: O,
 				onMouseLeave: t,
 				role: "img",
 				"aria-label": i,
@@ -440,11 +441,11 @@ function he(t) {
 				x: v(f) + (f > r.length / 2 ? -10 : 10),
 				y: 42,
 				flip: f > r.length / 2,
-				lines: [U(r[f] * O), ...e.map((e) => `${e.name}: ${l(e.v)}`)]
+				lines: [W(r[f] * A), ...e.map((e) => `${e.name}: ${l(e.v)}`)]
 			} })]
-		}), n[14] = f, n[15] = l, n[16] = c, n[17] = r, n[18] = k, n[19] = g, n[20] = S, n[21] = m, n[22] = u, n[23] = a, n[24] = d, n[25] = v, n[26] = b, n[27] = A;
-	} else A = n[27];
-	return A;
+		}), n[14] = f, n[15] = l, n[16] = c, n[17] = r, n[18] = O, n[19] = g, n[20] = S, n[21] = m, n[22] = u, n[23] = a, n[24] = d, n[25] = v, n[26] = b, n[27] = k;
+	} else k = n[27];
+	return k;
 }
 function ge(e) {
 	return e.name;
@@ -501,32 +502,32 @@ function Ce(t) {
 		let e = se(r, i, a), t = Map.groupBy(r, Oe), b = (n) => e.map((e) => t.has(e) ? n(oe(t.get(e))) : null), x = oe(r), S = b(De);
 		l = "grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-x-8 gap-y-5", u = /* @__PURE__ */ E(Se, {
 			title: "Requests",
-			value: W(x.count),
+			value: G(x.count),
 			children: /* @__PURE__ */ E(pe, {
 				hours: e,
 				stacks: [{
 					name: "Requests",
-					colour: z(0),
+					colour: B(0),
 					values: b(Ee)
 				}]
 			})
 		}), d = /* @__PURE__ */ E(Se, {
 			title: "Errors",
 			value: ee(x.rate),
-			note: J(x.errors, "error"),
+			note: Y(x.errors, "error"),
 			children: /* @__PURE__ */ E(pe, {
 				hours: e,
 				stacks: [{
 					name: "Errors",
-					colour: B,
+					colour: V,
 					values: S
 				}]
 			})
-		}), s = Se, _ = "Duration", v = G(x.p95), y = "P95", o = he, h = e, g = G, m = {
+		}), s = Se, _ = "Duration", v = K(x.p95), y = "P95", o = he, h = e, g = K, m = {
 			name: "P95",
-			colour: z(0),
+			colour: B(0),
 			values: b(Te)
-		}, c = "Average", n[17] === Symbol.for("react.memo_cache_sentinel") ? (f = z(1), n[17] = f) : f = n[17], p = b(we), n[0] = i, n[1] = r, n[2] = a, n[3] = o, n[4] = s, n[5] = c, n[6] = l, n[7] = u, n[8] = d, n[9] = f, n[10] = p, n[11] = m, n[12] = h, n[13] = g, n[14] = _, n[15] = v, n[16] = y;
+		}, c = "Average", n[17] === Symbol.for("react.memo_cache_sentinel") ? (f = B(1), n[17] = f) : f = n[17], p = b(we), n[0] = i, n[1] = r, n[2] = a, n[3] = o, n[4] = s, n[5] = c, n[6] = l, n[7] = u, n[8] = d, n[9] = f, n[10] = p, n[11] = m, n[12] = h, n[13] = g, n[14] = _, n[15] = v, n[16] = y;
 	} else o = n[3], s = n[4], c = n[5], l = n[6], u = n[7], d = n[8], f = n[9], p = n[10], m = n[11], h = n[12], g = n[13], _ = n[14], v = n[15], y = n[16];
 	let b;
 	n[18] !== c || n[19] !== f || n[20] !== p ? (b = {
@@ -654,7 +655,7 @@ var je = (e, t) => [
 		label: "Requests",
 		right: !0,
 		value: (e) => e.count,
-		cell: (e) => W(e.count)
+		cell: (e) => G(e.count)
 	},
 	{
 		key: "rate",
@@ -672,14 +673,14 @@ var je = (e, t) => [
 		right: !0,
 		wide: !0,
 		value: (e) => e.avg,
-		cell: (e) => G(e.avg)
+		cell: (e) => K(e.avg)
 	},
 	{
 		key: "p95",
 		label: "P95",
 		right: !0,
 		value: (e) => e.p95,
-		cell: (e) => G(e.p95)
+		cell: (e) => K(e.p95)
 	},
 	...t ? [{
 		key: "trend",
@@ -753,7 +754,7 @@ function Ne(t) {
 					service: h,
 					operation: e.name
 				}), n[39] = h, n[40] = m, n[41] = O) : O = n[41];
-				let A = /* @__PURE__ */ E(p, {
+				let k = /* @__PURE__ */ E(p, {
 					title: "Operations",
 					children: /* @__PURE__ */ E(ke, {
 						label: "Operations",
@@ -762,14 +763,14 @@ function Ne(t) {
 						start: T,
 						open: O
 					})
-				}), j;
-				n[42] !== d || n[43] !== _ || n[44] !== h || n[45] !== f || n[46] !== m ? (j = _.length > 0 && /* @__PURE__ */ E(p, {
+				}), A;
+				n[42] !== d || n[43] !== _ || n[44] !== h || n[45] !== f || n[46] !== m ? (A = _.length > 0 && /* @__PURE__ */ E(p, {
 					title: "Recent Traces",
 					action: /* @__PURE__ */ E(o, {
 						variant: "ghost",
 						onClick: () => m({
 							service: h,
-							operation: k
+							operation: j
 						}),
 						children: "All Traces"
 					}),
@@ -778,18 +779,18 @@ function Ne(t) {
 						open: f,
 						colour: d
 					})
-				}), n[42] = d, n[43] = _, n[44] = h, n[45] = f, n[46] = m, n[47] = j) : j = n[47];
+				}), n[42] = d, n[43] = _, n[44] = h, n[45] = f, n[46] = m, n[47] = A) : A = n[47];
 				let M;
-				n[48] !== b || n[49] !== x || n[50] !== S || n[51] !== A || n[52] !== j ? (M = /* @__PURE__ */ D("div", {
+				n[48] !== b || n[49] !== x || n[50] !== S || n[51] !== k || n[52] !== A ? (M = /* @__PURE__ */ D("div", {
 					className: "flex flex-col gap-6",
 					children: [
 						b,
 						x,
 						S,
-						A,
-						j
+						k,
+						A
 					]
-				}), n[48] = b, n[49] = x, n[50] = S, n[51] = A, n[52] = j, n[53] = M) : M = n[53], C = M;
+				}), n[48] = b, n[49] = x, n[50] = S, n[51] = k, n[52] = A, n[53] = M) : M = n[53], C = M;
 				break bb0;
 			}
 			if (!r.length) {
@@ -821,11 +822,11 @@ function Ne(t) {
 		start: w,
 		open: T
 	}), n[63] = _, n[64] = v, n[65] = y, n[66] = b, n[67] = T, n[68] = O) : O = n[68];
-	let A;
-	return n[69] !== O || n[70] !== x || n[71] !== S ? (A = /* @__PURE__ */ D("div", {
+	let k;
+	return n[69] !== O || n[70] !== x || n[71] !== S ? (k = /* @__PURE__ */ D("div", {
 		className: x,
 		children: [S, O]
-	}), n[69] = O, n[70] = x, n[71] = S, n[72] = A) : A = n[72], A;
+	}), n[69] = O, n[70] = x, n[71] = S, n[72] = k) : k = n[72], k;
 }
 function Pe(e) {
 	return e.service;
@@ -845,7 +846,7 @@ function Ie(t) {
 			className: "flex min-w-0 items-center gap-2",
 			children: [/* @__PURE__ */ E("span", {
 				className: "size-2 shrink-0 rounded-full",
-				style: { background: e.errors ? B : a[e.root.service] }
+				style: { background: e.errors ? V : a[e.root.service] }
 			}), /* @__PURE__ */ D("span", {
 				className: "min-w-0 break-all",
 				children: [
@@ -885,12 +886,12 @@ function Ie(t) {
 					className: "block h-1 rounded-sm",
 					style: {
 						width: `${Math.max(2, e.ms / s * 100)}%`,
-						background: e.errors ? B : V
+						background: e.errors ? V : H
 					}
 				})
 			}), /* @__PURE__ */ E("span", {
 				className: e.errors ? "text-destructive" : "",
-				children: G(e.ms)
+				children: K(e.ms)
 			})]
 		})
 	}, n[5] = s, n[6] = u);
@@ -936,7 +937,7 @@ function Le(e) {
 function Re(e) {
 	return /* @__PURE__ */ E("span", {
 		className: "text-muted-foreground",
-		title: H(e.start),
+		title: U(e.start),
 		children: te(e.start)
 	});
 }
@@ -961,7 +962,7 @@ function We(e) {
 function Ge({ traces: e, open: t, colour: n }) {
 	let [r, a] = w(), [o, s] = i(null), c = e.map((e) => e.start), l = Math.min(...c), u = Math.max(...c, l + 6e4), d = e.map((e) => Math.max(1, e.ms)), f = Math.floor(Math.log10(Math.min(...d))), p = Math.max(f + 1, Math.ceil(Math.log10(Math.max(...d)))), m = (e) => 50 + (e - l) / (u - l) * Math.max(1, a - Z - 14), h = (e) => 130 - (Math.log10(Math.max(1, e)) - f) / (p - f) * 122, g = Array.from({ length: p - f + 1 }, (e, t) => ({
 		y: t / (p - f),
-		label: G(10 ** (p - t))
+		label: K(10 ** (p - t))
 	}));
 	return /* @__PURE__ */ D("div", {
 		ref: r,
@@ -980,8 +981,8 @@ function Ge({ traces: e, open: t, colour: n }) {
 					ticks: g
 				}),
 				/* @__PURE__ */ E(fe, {
-					first: H(l),
-					last: H(u),
+					first: U(l),
+					last: U(u),
 					width: a,
 					height: 150
 				}),
@@ -994,8 +995,8 @@ function Ge({ traces: e, open: t, colour: n }) {
 						flip: m(e.start) > a / 2,
 						lines: [
 							`${e.root.service} ${e.root.name}`,
-							G(e.ms),
-							H(e.start)
+							K(e.ms),
+							U(e.start)
 						]
 					}),
 					onMouseLeave: () => s(null),
@@ -1008,7 +1009,7 @@ function Ge({ traces: e, open: t, colour: n }) {
 						cx: m(e.start),
 						cy: h(e.ms),
 						r: "4",
-						fill: e.errors ? B : n[e.root.service],
+						fill: e.errors ? V : n[e.root.service],
 						stroke: "var(--background)",
 						strokeWidth: "1.5"
 					})]
@@ -1027,7 +1028,7 @@ function $(t) {
 	}), n[1] = r, n[2] = l);
 	let u;
 	n[3] === o ? u = n[4] : (u = /* @__PURE__ */ E(g, {
-		value: k,
+		value: j,
 		children: o
 	}), n[3] = o, n[4] = u);
 	let d;
@@ -1048,31 +1049,31 @@ function Ke(e) {
 	}, e);
 }
 function qe(t) {
-	let n = e(58), { traces: r, filters: a, query: o, open: c, colour: u, more: d } = t, [f, p] = a, [m, h] = o, [g, _] = i(""), v, y, b, x, S, C, w, O, A, j;
+	let n = e(58), { traces: r, filters: a, query: o, open: c, colour: u, more: d } = t, [f, p] = a, [m, h] = o, [g, _] = i(""), v, y, b, x, S, C, w, O, k, A;
 	if (n[0] !== f || n[1] !== g || n[2] !== m || n[3] !== p || n[4] !== r) {
 		let e = r.flatMap(Xe), { service: t, operation: i } = f, a;
 		if (n[15] !== g || n[16] !== i || n[17] !== m || n[18] !== t || n[19] !== r) {
-			let e = X(m), o = ne(g);
-			a = r.filter((n) => n.ms >= o && n.spans.some((n) => (t === k || n.service === t) && (i === k || n.name === i) && e(n))), n[15] = g, n[16] = i, n[17] = m, n[18] = t, n[19] = r, n[20] = a;
+			let e = re(m), o = ne(g);
+			a = r.filter((n) => n.ms >= o && n.spans.some((n) => (t === j || n.service === t) && (i === j || n.name === i) && e(n))), n[15] = g, n[16] = i, n[17] = m, n[18] = t, n[19] = r, n[20] = a;
 		} else a = n[20];
-		y = a, b = "flex flex-col gap-4", A = "flex flex-wrap items-center gap-2";
+		y = a, b = "flex flex-col gap-4", k = "flex flex-wrap items-center gap-2";
 		let o;
 		n[21] === p ? o = n[22] : (o = (e) => p({
 			service: e,
-			operation: k
-		}), n[21] = p, n[22] = o), j = /* @__PURE__ */ E($, {
+			operation: j
+		}), n[21] = p, n[22] = o), A = /* @__PURE__ */ E($, {
 			label: "Service",
 			value: t,
 			set: o,
 			all: "All Services",
-			options: q(e.map(Ye))
+			options: J(e.map(Ye))
 		}), v = $, x = "Operation", S = i, n[23] !== t || n[24] !== p ? (C = (e) => p({
 			service: t,
 			operation: e
 		}), n[23] = t, n[24] = p, n[25] = C) : C = n[25], w = "All Operations";
 		let s;
-		n[26] === t ? s = n[27] : (s = (e) => t === k || e.service === t, n[26] = t, n[27] = s), O = q(e.filter(s).map(Je)), n[0] = f, n[1] = g, n[2] = m, n[3] = p, n[4] = r, n[5] = v, n[6] = y, n[7] = b, n[8] = x, n[9] = S, n[10] = C, n[11] = w, n[12] = O, n[13] = A, n[14] = j;
-	} else v = n[5], y = n[6], b = n[7], x = n[8], S = n[9], C = n[10], w = n[11], O = n[12], A = n[13], j = n[14];
+		n[26] === t ? s = n[27] : (s = (e) => t === j || e.service === t, n[26] = t, n[27] = s), O = J(e.filter(s).map(Je)), n[0] = f, n[1] = g, n[2] = m, n[3] = p, n[4] = r, n[5] = v, n[6] = y, n[7] = b, n[8] = x, n[9] = S, n[10] = C, n[11] = w, n[12] = O, n[13] = k, n[14] = A;
+	} else v = n[5], y = n[6], b = n[7], x = n[8], S = n[9], C = n[10], w = n[11], O = n[12], k = n[13], A = n[14];
 	let M;
 	n[28] !== v || n[29] !== x || n[30] !== S || n[31] !== C || n[32] !== w || n[33] !== O ? (M = /* @__PURE__ */ E(v, {
 		label: x,
@@ -1102,15 +1103,15 @@ function qe(t) {
 		onChange: F
 	}), n[40] = m, n[41] = F, n[42] = I) : I = n[42];
 	let L;
-	n[43] !== M || n[44] !== P || n[45] !== I || n[46] !== A || n[47] !== j ? (L = /* @__PURE__ */ D("div", {
-		className: A,
+	n[43] !== M || n[44] !== P || n[45] !== I || n[46] !== k || n[47] !== A ? (L = /* @__PURE__ */ D("div", {
+		className: k,
 		children: [
-			j,
+			A,
 			M,
 			P,
 			I
 		]
-	}), n[43] = M, n[44] = P, n[45] = I, n[46] = A, n[47] = j, n[48] = L) : L = n[48];
+	}), n[43] = M, n[44] = P, n[45] = I, n[46] = k, n[47] = A, n[48] = L) : L = n[48];
 	let R;
 	n[49] !== u || n[50] !== y || n[51] !== d || n[52] !== c ? (R = y.length ? /* @__PURE__ */ D(T, { children: [
 		/* @__PURE__ */ E(Ge, {
@@ -1148,7 +1149,7 @@ function Ze(t) {
 	n[0] === i ? a = n[1] : (a = i === void 0 ? [] : i, n[0] = i, n[1] = a);
 	let o = a, s, c;
 	if (n[2] !== r || n[3] !== o) {
-		let e = Y(r), t = Qe;
+		let e = X(r), t = Qe;
 		s = "m-0 grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono text-xs", c = Object.keys(e).filter((e) => !o.includes(e)).sort().map((n) => [/* @__PURE__ */ E("dt", {
 			className: "break-all text-muted-foreground",
 			children: n
@@ -1168,7 +1169,7 @@ function Qe(e, t) {
 		"time",
 		"first",
 		"last"
-	].includes(e) && typeof t == "number" ? H(t) : K(t);
+	].includes(e) && typeof t == "number" ? U(t) : q(t);
 }
 function $e(t) {
 	let n = e(60), { trace: r, back: a, colour: s } = t, [l, d] = i(it), [f, p] = i(null), m, h, g, _, v, y;
@@ -1204,15 +1205,15 @@ function $e(t) {
 			children: T
 		}), n[26] = T, n[27] = O);
 		let k;
-		n[28] === r.start ? k = n[29] : (k = H(r.start), n[28] = r.start, n[29] = k);
+		n[28] === r.start ? k = n[29] : (k = U(r.start), n[28] = r.start, n[29] = k);
 		let A;
-		n[30] === r.ms ? A = n[31] : (A = G(r.ms), n[30] = r.ms, n[31] = A);
+		n[30] === r.ms ? A = n[31] : (A = K(r.ms), n[30] = r.ms, n[31] = A);
 		let j;
-		n[32] === r.spans.length ? j = n[33] : (j = J(r.spans.length, "span"), n[32] = r.spans.length, n[33] = j);
+		n[32] === r.spans.length ? j = n[33] : (j = Y(r.spans.length, "span"), n[32] = r.spans.length, n[33] = j);
 		let M;
 		n[34] === r.errors ? M = n[35] : (M = r.errors ? /* @__PURE__ */ D("span", {
 			className: "text-destructive",
-			children: [" · ", J(r.errors, "error")]
+			children: [" · ", Y(r.errors, "error")]
 		}) : null, n[34] = r.errors, n[35] = M);
 		let N;
 		n[36] !== k || n[37] !== A || n[38] !== j || n[39] !== M ? (N = /* @__PURE__ */ D("p", {
@@ -1251,7 +1252,7 @@ function $e(t) {
 			className: "grid grid-cols-1 gap-x-3 @2xl:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] border-0 border-b border-solid border-border pb-1 text-xs text-muted-foreground",
 			children: [F, /* @__PURE__ */ E("div", {
 				className: "flex justify-between font-mono",
-				children: I.map((e) => /* @__PURE__ */ E("span", { children: G(e * x) }, e))
+				children: I.map((e) => /* @__PURE__ */ E("span", { children: K(e * x) }, e))
 			})]
 		}), n[49] = x, n[50] = h), g = i.map((t) => {
 			let { s: n, depth: i } = t, a = (e.get(n.span) || []).length > 0, o = f === n.span;
@@ -1286,19 +1287,19 @@ function $e(t) {
 							style: {
 								left: `${(n.time - r.start) / x * 100}%`,
 								width: `max(2px, ${n.ms / x * 100}%)`,
-								background: n.status === "error" ? B : s[n.service]
+								background: n.status === "error" ? V : s[n.service]
 							}
 						}), /* @__PURE__ */ E("span", {
 							className: "absolute inset-y-0 flex items-center px-1 text-xs tabular-nums text-muted-foreground",
 							style: n.time - r.start + n.ms > x * .8 ? { right: `${100 - (n.time - r.start) / x * 100}%` } : { left: `${(n.time - r.start + n.ms) / x * 100}%` },
-							children: G(n.ms)
+							children: K(n.ms)
 						})]
 					})]
 				}), o && /* @__PURE__ */ E("div", {
 					className: "px-1 pb-3 pt-1",
 					children: /* @__PURE__ */ E(Ze, {
 						row: n,
-						skip: L
+						skip: R
 					})
 				})]
 			}, n.span);
@@ -1359,7 +1360,7 @@ function at(t) {
 			y: 48 - i,
 			height: Math.max(1, i - a - 1),
 			rx: "2",
-			fill: V,
+			fill: H,
 			opacity: ".5"
 		}), r > 0 && /* @__PURE__ */ E("rect", {
 			x: t * p + 1,
@@ -1367,7 +1368,7 @@ function at(t) {
 			y: 48 - a,
 			height: a,
 			rx: "2",
-			fill: B
+			fill: V
 		})] }, t);
 	}), n[11] = u, n[12] = f, n[13] = p, n[14] = m) : m = n[14];
 	let h;
@@ -1398,16 +1399,16 @@ function lt(e) {
 	return e.time;
 }
 function ut({ rows: e, more: t, query: [r, a] }) {
-	let [o, c] = i(k), [u, d] = i(null), f = n(() => {
-		let t = X(r);
-		return e.filter((e) => (o === k || e.service === o) && t(e));
+	let [o, c] = i(j), [u, d] = i(null), f = n(() => {
+		let t = re(r);
+		return e.filter((e) => (o === j || e.service === o) && t(e));
 	}, [
 		e,
 		o,
 		r
 	]), p = n(() => {
 		let e = {};
-		for (let t of f) for (let [n, r] of Object.entries(t.attrs || {})) (e[n] ||= /* @__PURE__ */ new Set()).add(K(r));
+		for (let t of f) for (let [n, r] of Object.entries(t.attrs || {})) (e[n] ||= /* @__PURE__ */ new Set()).add(q(r));
 		return new Set(Object.keys(e).filter((t) => e[t].size > 1));
 	}, [f]);
 	return /* @__PURE__ */ D("div", {
@@ -1419,7 +1420,7 @@ function ut({ rows: e, more: t, query: [r, a] }) {
 				value: o,
 				set: c,
 				all: "All Services",
-				options: q(e.map((e) => e.service))
+				options: J(e.map((e) => e.service))
 			}), /* @__PURE__ */ E(l, {
 				className: "min-w-52 flex-1",
 				"aria-label": "Search",
@@ -1431,7 +1432,7 @@ function ut({ rows: e, more: t, query: [r, a] }) {
 			/* @__PURE__ */ E(at, { rows: f }),
 			/* @__PURE__ */ D("p", {
 				className: "m-0 text-sm text-muted-foreground",
-				children: [J(f.length, "log"), t ? ", the newest only" : ""]
+				children: [Y(f.length, "log"), t ? ", the newest only" : ""]
 			}),
 			/* @__PURE__ */ E("div", {
 				className: "flex flex-col font-mono text-xs",
@@ -1443,7 +1444,7 @@ function ut({ rows: e, more: t, query: [r, a] }) {
 						children: [
 							/* @__PURE__ */ E("span", {
 								className: "shrink-0 tabular-nums text-muted-foreground",
-								children: H(e.time)
+								children: U(e.time)
 							}),
 							/* @__PURE__ */ E("span", {
 								className: `w-10 shrink-0 ${e.status === "error" ? "text-destructive" : "text-muted-foreground"}`,
@@ -1458,7 +1459,7 @@ function ut({ rows: e, more: t, query: [r, a] }) {
 									" ",
 									/* @__PURE__ */ E("span", {
 										className: "text-muted-foreground",
-										children: Object.entries(e.attrs || {}).filter(([e]) => p.has(e)).map(([e, t]) => `${e}=${K(t)}`).join(" ")
+										children: Object.entries(e.attrs || {}).filter(([e]) => p.has(e)).map(([e, t]) => `${e}=${q(t)}`).join(" ")
 									})
 								]
 							})
@@ -1467,7 +1468,7 @@ function ut({ rows: e, more: t, query: [r, a] }) {
 						className: "px-1 pb-3 pt-1",
 						children: /* @__PURE__ */ E(Ze, {
 							row: e,
-							skip: L
+							skip: R
 						})
 					})]
 				}, e.span))
@@ -1487,46 +1488,46 @@ function dt(e, t) {
 }
 var ft = (e) => e === "avg" || e === "p95" ? null : 0;
 function pt(e, t, n, r) {
-	let i = Map.groupBy(e, (e) => r === k ? "All" : K(Y(e)[r] ?? "–")), a = (e) => e.reduce((e, t) => e + t.count, 0), o = [...i.entries()].sort((e, t) => a(t[1]) - a(e[1])), s = q([...i.keys()]), c = (e, r, i) => {
+	let i = Map.groupBy(e, (e) => r === j ? "All" : q(X(e)[r] ?? "–")), a = (e) => e.reduce((e, t) => e + t.count, 0), o = [...i.entries()].sort((e, t) => a(t[1]) - a(e[1])), s = J([...i.keys()]), c = (e, r, i) => {
 		let a = Map.groupBy(r, (e) => e.hour);
 		return {
 			name: e,
 			colour: i,
 			values: t.map((e) => a.has(e) ? dt(a.get(e), n) : ft(n))
 		};
-	}, l = o.slice(0, M).map(([e, t]) => c(e, t, z(s.indexOf(e))));
-	return o.length > M && l.push(c(N, o.slice(M).flatMap(([, e]) => e), V)), l;
+	}, l = o.slice(0, P).map(([e, t]) => c(e, t, B(s.indexOf(e))));
+	return o.length > P && l.push(c(F, o.slice(P).flatMap(([, e]) => e), H)), l;
 }
 function mt(t) {
-	let n = e(58), { rows: r, from: a, to: u, more: d, query: f } = t, [p, g] = f, [y, b] = i(null), [x, S] = i("sum"), [C, w] = i(k), O;
-	n[0] !== p || n[1] !== r ? (O = r.filter(X(p)), n[0] = p, n[1] = r, n[2] = O) : O = n[2];
-	let A = O, M;
-	n[3] === g ? M = n[4] : (M = (e) => g(e.target.value), n[3] = g, n[4] = M);
-	let N;
-	n[5] !== p || n[6] !== M ? (N = /* @__PURE__ */ E(l, {
+	let n = e(58), { rows: r, from: a, to: u, more: d, query: f } = t, [p, g] = f, [y, b] = i(null), [x, S] = i("sum"), [C, w] = i(j), O;
+	n[0] !== p || n[1] !== r ? (O = r.filter(re(p)), n[0] = p, n[1] = r, n[2] = O) : O = n[2];
+	let k = O, A;
+	n[3] === g ? A = n[4] : (A = (e) => g(e.target.value), n[3] = g, n[4] = A);
+	let M;
+	n[5] !== p || n[6] !== A ? (M = /* @__PURE__ */ E(l, {
 		className: "min-w-52 flex-1",
 		"aria-label": "Filter",
 		placeholder: "Filter, or key=value",
 		value: p,
-		onChange: M
-	}), n[5] = p, n[6] = M, n[7] = N) : N = n[7];
-	let P = N;
+		onChange: A
+	}), n[5] = p, n[6] = A, n[7] = M) : M = n[7];
+	let P = M;
 	if (y) {
 		let e, t, i, l;
-		if (n[8] !== a || n[9] !== y || n[10] !== r || n[11] !== A || n[12] !== C || n[13] !== x || n[14] !== u) {
+		if (n[8] !== a || n[9] !== y || n[10] !== r || n[11] !== k || n[12] !== C || n[13] !== x || n[14] !== u) {
 			let o;
-			n[19] === y ? o = n[20] : (o = (e) => e.name === y, n[19] = y, n[20] = o), l = A.filter(o), e = se(l, a, u);
+			n[19] === y ? o = n[20] : (o = (e) => e.name === y, n[19] = y, n[20] = o), l = k.filter(o), e = se(l, a, u);
 			let s;
 			if (n[21] !== y || n[22] !== r) {
 				let e;
-				n[24] === y ? e = n[25] : (e = (e) => e.name === y, n[24] = y, n[25] = e), s = q(r.filter(e).flatMap(xt)).filter(bt), n[21] = y, n[22] = r, n[23] = s;
+				n[24] === y ? e = n[25] : (e = (e) => e.name === y, n[24] = y, n[25] = e), s = J(r.filter(e).flatMap(xt)).filter(bt), n[21] = y, n[22] = r, n[23] = s;
 			} else s = n[23];
-			t = s, i = pt(l, e, x, C), n[8] = a, n[9] = y, n[10] = r, n[11] = A, n[12] = C, n[13] = x, n[14] = u, n[15] = e, n[16] = t, n[17] = i, n[18] = l;
+			t = s, i = pt(l, e, x, C), n[8] = a, n[9] = y, n[10] = r, n[11] = k, n[12] = C, n[13] = x, n[14] = u, n[15] = e, n[16] = t, n[17] = i, n[18] = l;
 		} else e = n[15], t = n[16], i = n[17], l = n[18];
 		let d = i, f;
 		n[26] === Symbol.for("react.memo_cache_sentinel") ? (f = /* @__PURE__ */ E("div", { children: /* @__PURE__ */ D(o, {
 			variant: "ghost",
-			onClick: () => (b(null), w(k)),
+			onClick: () => (b(null), w(j)),
 			children: [/* @__PURE__ */ E(c, { name: "caret-left" }), "Metrics"]
 		}) }), n[26] = f) : f = n[26];
 		let p;
@@ -1540,30 +1541,30 @@ function mt(t) {
 			children: /* @__PURE__ */ E(v, {})
 		}), n[29] = g) : g = n[29];
 		let O;
-		n[30] === Symbol.for("react.memo_cache_sentinel") ? (O = /* @__PURE__ */ E(h, { children: Object.entries(j).map(yt) }), n[30] = O) : O = n[30];
-		let M;
-		n[31] === x ? M = n[32] : (M = /* @__PURE__ */ D(m, {
+		n[30] === Symbol.for("react.memo_cache_sentinel") ? (O = /* @__PURE__ */ E(h, { children: Object.entries(N).map(yt) }), n[30] = O) : O = n[30];
+		let A;
+		n[31] === x ? A = n[32] : (A = /* @__PURE__ */ D(m, {
 			value: x,
 			onValueChange: S,
 			children: [g, O]
-		}), n[31] = x, n[32] = M);
-		let N;
-		n[33] !== t || n[34] !== C ? (N = /* @__PURE__ */ E($, {
+		}), n[31] = x, n[32] = A);
+		let M;
+		n[33] !== t || n[34] !== C ? (M = /* @__PURE__ */ E($, {
 			label: "Group by",
 			value: C,
 			set: w,
 			all: "No Grouping",
 			options: t
-		}), n[33] = t, n[34] = C, n[35] = N) : N = n[35];
+		}), n[33] = t, n[34] = C, n[35] = M) : M = n[35];
 		let F;
-		n[36] !== P || n[37] !== M || n[38] !== N ? (F = /* @__PURE__ */ D("div", {
+		n[36] !== P || n[37] !== A || n[38] !== M ? (F = /* @__PURE__ */ D("div", {
 			className: "flex flex-wrap items-center gap-2",
 			children: [
+				A,
 				M,
-				N,
 				P
 			]
-		}), n[36] = P, n[37] = M, n[38] = N, n[39] = F) : F = n[39];
+		}), n[36] = P, n[37] = A, n[38] = M, n[39] = F) : F = n[39];
 		let I;
 		n[40] !== e || n[41] !== d || n[42] !== l.length ? (I = l.length ? /* @__PURE__ */ D(T, { children: [/* @__PURE__ */ E(he, {
 			hours: e,
@@ -1601,8 +1602,8 @@ function mt(t) {
 		}), n[44] = F, n[45] = I, n[46] = p, n[47] = L) : L = n[47], L;
 	}
 	let F;
-	if (n[48] !== a || n[49] !== d || n[50] !== P || n[51] !== A || n[52] !== u) {
-		let e = [...Map.groupBy(A, gt).entries()].sort(ht), t;
+	if (n[48] !== a || n[49] !== d || n[50] !== P || n[51] !== k || n[52] !== u) {
+		let e = [...Map.groupBy(k, gt).entries()].sort(ht), t;
 		n[54] === P ? t = n[55] : (t = /* @__PURE__ */ E("div", {
 			className: "flex flex-wrap items-center gap-2",
 			children: P
@@ -1631,7 +1632,7 @@ function mt(t) {
 									children: t
 								}), /* @__PURE__ */ E("span", {
 									className: "tabular-nums text-sm",
-									children: W(dt(n, "sum"))
+									children: G(dt(n, "sum"))
 								})]
 							}), /* @__PURE__ */ E(pe, {
 								hours: r,
@@ -1639,15 +1640,15 @@ function mt(t) {
 								height: 44,
 								stacks: [{
 									name: t,
-									colour: z(0),
-									values: pt(n, r, "sum", k)[0].values
+									colour: B(0),
+									values: pt(n, r, "sum", j)[0].values
 								}]
 							})]
 						}, t);
 					})
 				}) : /* @__PURE__ */ E(s, { children: "No metrics match." })
 			]
-		}), n[48] = a, n[49] = d, n[50] = P, n[51] = A, n[52] = u, n[53] = F;
+		}), n[48] = a, n[49] = d, n[50] = P, n[51] = k, n[52] = u, n[53] = F;
 	} else F = n[53];
 	return F;
 }
@@ -1677,11 +1678,11 @@ function _t(e) {
 			}),
 			/* @__PURE__ */ E("td", {
 				className: "py-1.5 text-right tabular-nums",
-				children: W(t.length ? Math.max(...t) : null)
+				children: G(t.length ? Math.max(...t) : null)
 			}),
 			/* @__PURE__ */ E("td", {
 				className: "py-1.5 text-right tabular-nums",
-				children: W(t.at(-1))
+				children: G(t.at(-1))
 			})
 		]
 	}, e.name);
@@ -1697,16 +1698,16 @@ function yt(e) {
 	}, t);
 }
 function bt(e) {
-	return !I.includes(e);
+	return !L.includes(e);
 }
 function xt(e) {
-	return Object.keys(Y(e));
+	return Object.keys(X(e));
 }
 function St(t) {
-	let n = e(43), { rows: r, showTraces: a, query: c } = t, [u, d] = c, [f, p] = i(k), [m, h] = i(k), [g, _] = i(null), v;
+	let n = e(43), { rows: r, showTraces: a, query: c } = t, [u, d] = c, [f, p] = i(j), [m, h] = i(j), [g, _] = i(null), v;
 	if (n[0] !== m || n[1] !== u || n[2] !== r || n[3] !== f) {
-		let e = X(u);
-		v = r.filter((t) => (f === k || t.service === f) && (m === k || t.fault === m) && e(t)).map(Ft), n[0] = m, n[1] = u, n[2] = r, n[3] = f, n[4] = v;
+		let e = re(u);
+		v = r.filter((t) => (f === j || t.service === f) && (m === j || t.fault === m) && e(t)).map(Ft), n[0] = m, n[1] = u, n[2] = r, n[3] = f, n[4] = v;
 	} else v = n[4];
 	let y = v, x;
 	if (n[5] !== y || n[6] !== g) {
@@ -1751,18 +1752,18 @@ function St(t) {
 	], n[10] = C) : C = n[10];
 	let w = C, T = S && `${S.type} ${S.frame}`, O;
 	n[11] === Symbol.for("react.memo_cache_sentinel") ? (O = () => _(null), n[11] = O) : O = n[11];
+	let k;
+	n[12] === r ? k = n[13] : (k = J(r.map(wt)), n[12] = r, n[13] = k);
 	let A;
-	n[12] === r ? A = n[13] : (A = q(r.map(wt)), n[12] = r, n[13] = A);
-	let j;
-	n[14] !== f || n[15] !== A ? (j = /* @__PURE__ */ E($, {
+	n[14] !== f || n[15] !== k ? (A = /* @__PURE__ */ E($, {
 		label: "Service",
 		value: f,
 		set: p,
 		all: "All Services",
-		options: A
-	}), n[14] = f, n[15] = A, n[16] = j) : j = n[16];
+		options: k
+	}), n[14] = f, n[15] = k, n[16] = A) : A = n[16];
 	let M;
-	n[17] === r ? M = n[18] : (M = q(r.map(Ct).filter(Boolean)), n[17] = r, n[18] = M);
+	n[17] === r ? M = n[18] : (M = J(r.map(Ct).filter(Boolean)), n[17] = r, n[18] = M);
 	let N;
 	n[19] !== m || n[20] !== M ? (N = /* @__PURE__ */ E($, {
 		label: "Fault",
@@ -1782,14 +1783,14 @@ function St(t) {
 		onChange: P
 	}), n[24] = u, n[25] = P, n[26] = F) : F = n[26];
 	let I;
-	n[27] !== N || n[28] !== F || n[29] !== j ? (I = /* @__PURE__ */ D("div", {
+	n[27] !== N || n[28] !== F || n[29] !== A ? (I = /* @__PURE__ */ D("div", {
 		className: "flex flex-wrap items-center gap-2",
 		children: [
-			j,
+			A,
 			N,
 			F
 		]
-	}), n[27] = N, n[28] = F, n[29] = j, n[30] = I) : I = n[30];
+	}), n[27] = N, n[28] = F, n[29] = A, n[30] = I) : I = n[30];
 	let L;
 	n[31] === y ? L = n[32] : (L = y.length ? /* @__PURE__ */ E(ke, {
 		label: "Errors",
@@ -1835,7 +1836,7 @@ function wt(e) {
 function Tt(e) {
 	return /* @__PURE__ */ E("span", {
 		className: "text-muted-foreground",
-		title: H(e.last),
+		title: U(e.last),
 		children: te(e.last)
 	});
 }
@@ -1843,7 +1844,7 @@ function Et(e) {
 	return e.last;
 }
 function Dt(e) {
-	return W(e.count);
+	return G(e.count);
 }
 function Ot(e) {
 	return e.count;
@@ -1892,9 +1893,9 @@ function Ft(e) {
 	};
 }
 function It() {
-	let [e, a] = i(null), [s, l] = i(null), [p, y] = i("Services"), [b, w] = i("1d"), [T, O] = i(!1), [j, M] = i(null), N = i(null), P = i({
-		service: k,
-		operation: k
+	let [e, a] = i(null), [s, l] = i(null), [p, y] = i("Services"), [b, w] = i("1d"), [T, O] = i(!1), [k, A] = i(null), N = i(null), P = i({
+		service: j,
+		operation: j
 	}), F = {
 		Traces: i(""),
 		Logs: i(""),
@@ -1906,8 +1907,9 @@ function It() {
 		O(!0);
 		try {
 			let t = await one.api("POST", "/api/insights/insights", {
+				raw: !0,
 				since: b,
-				limit: 2e3
+				limit: 2e4
 			});
 			if (e !== I.current) return;
 			a({
@@ -1921,7 +1923,7 @@ function It() {
 		}
 	}
 	t(() => void L(), [b]);
-	let R = n(() => e ? Map.groupBy(e.rollups, (e) => e.key?.kind) : /* @__PURE__ */ new Map(), [e]), z = n(() => e ? re(e.signals.filter((e) => e.kind === "span")) : [], [e]);
+	let R = n(() => e ? Map.groupBy(e.rollups, (e) => e.key?.kind) : /* @__PURE__ */ new Map(), [e]), z = n(() => e ? ie(e.signals.filter((e) => e.kind === "span")) : [], [e]);
 	if (!e) return /* @__PURE__ */ D("div", {
 		className: "flex flex-col gap-6",
 		children: [/* @__PURE__ */ E(u, { children: "Insights" }), s ? /* @__PURE__ */ E(f, {
@@ -1929,13 +1931,13 @@ function It() {
 			retry: L
 		}) : /* @__PURE__ */ E(d, { rows: 3 })]
 	});
-	let B = e.at, V = B - A.find(([e]) => e === b)[2], H = ie(e.signals.map((e) => e.service)), U = j && z.find((e) => e.id === j);
+	let B = e.at, V = B - M.find(([e]) => e === b)[2], H = ae(e.signals.map((e) => e.service)), U = k && z.find((e) => e.id === k);
 	if (U) return /* @__PURE__ */ E($e, {
 		trace: U,
-		back: () => M(null),
+		back: () => A(null),
 		colour: H
 	});
-	let W = (e) => (P[1](e), y("Traces")), ee = e.signals.filter((e) => e.kind !== "span");
+	let W = (e) => (P[1](e), y("Traces")), G = e.signals.filter((e) => e.kind !== "span");
 	return /* @__PURE__ */ D("div", {
 		className: "flex flex-col gap-4",
 		children: [
@@ -1948,7 +1950,7 @@ function It() {
 						children: [/* @__PURE__ */ E(_, {
 							"aria-label": "Time range",
 							children: /* @__PURE__ */ E(v, {})
-						}), /* @__PURE__ */ E(h, { children: A.map(([e, t]) => /* @__PURE__ */ E(g, {
+						}), /* @__PURE__ */ E(h, { children: M.map(([e, t]) => /* @__PURE__ */ E(g, {
 							value: e,
 							children: t
 						}, e)) })]
@@ -1985,19 +1987,19 @@ function It() {
 				to: B,
 				open: N,
 				colour: H,
-				showTrace: M,
+				showTrace: A,
 				showTraces: W
 			}),
 			p === "Traces" && /* @__PURE__ */ E(qe, {
 				traces: z,
 				filters: P,
 				query: F.Traces,
-				open: M,
+				open: A,
 				colour: H,
 				more: e.more_signals
 			}),
 			p === "Logs" && /* @__PURE__ */ E(ut, {
-				rows: ee,
+				rows: G,
 				more: e.more_signals,
 				query: F.Logs
 			}),
@@ -2013,7 +2015,7 @@ function It() {
 				query: F.Errors,
 				showTraces: (e) => (F.Traces[1](`error.type=${e.type}`), W({
 					service: e.service,
-					operation: k
+					operation: j
 				}))
 			})
 		]

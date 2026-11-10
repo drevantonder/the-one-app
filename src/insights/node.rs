@@ -478,24 +478,26 @@ impl Node {
         let (mut signals, mut rollups, mut prints) = (Vec::new(), Vec::new(), Vec::new());
         let since = ask.since.unwrap_or(0);
         let limit = ask.limit.clamp(1, MOST_SIGNALS_READ);
+        let rollups_limit = ask.limit.clamp(1, MOST_ROLLUPS_READ);
+        let prints_limit = ask.limit.clamp(1, MOST_PRINTS_READ);
         for scope in scopes {
             let db = self.node_database(&scope).await?;
             let mut db = db.lock().await;
             db.catch_up(&self.bucket()?).await?;
             let opt = |value: &Option<String>| value.as_ref().map_or(Value::Null, |v| json!(v));
-            let (app, name, status, fault) = (opt(&ask.app), opt(&ask.name), opt(&ask.status), opt(&ask.fault));
+            let (app, name, status, fault, wanted) = (opt(&ask.app), opt(&ask.name), opt(&ask.status), opt(&ask.fault), opt(&ask.trace));
             let may = |row: &Map<String, Value>| self.may_see(viewer, &scope, row["app"].as_str().unwrap_or(""));
-            for row in db.query("select * from signals where time >= ?1 and (?2 is null or app = ?2) and (?3 is null or name = ?3) and (?4 is null or status = ?4) and (?5 is null or fault = ?5) order by time desc limit ?6", &[json!(since), app.clone(), name.clone(), status.clone(), fault.clone(), json!(limit)])?.into_iter().filter(may) {
+            for row in db.query("select * from signals where time >= ?1 and (?2 is null or app = ?2) and (?3 is null or name = ?3) and (?4 is null or status = ?4) and (?5 is null or fault = ?5) and (?7 is null or trace = ?7) order by time desc limit ?6", &[json!(since), app.clone(), name.clone(), status.clone(), fault.clone(), json!(limit), wanted])?.into_iter().filter(may) {
                 signals.push(self.signal_read(row));
             }
             let errors_only = i64::from(ask.status.as_deref() == Some("error"));
-            for row in db.query("select * from rollups where hour >= ?1 and (?2 is null or app = ?2) and (?3 is null or name = ?3) and (?4 = 0 or errors > 0) and (?5 is null or json_extract(key, '$.fault') = ?5) order by hour desc limit ?6", &[json!(since / 3_600_000), app.clone(), name.clone(), json!(errors_only), fault.clone(), json!(MOST_ROLLUPS_READ)])?.into_iter().filter(may) {
+            for row in db.query("select * from rollups where hour >= ?1 and (?2 is null or app = ?2) and (?3 is null or name = ?3) and (?4 = 0 or errors > 0) and (?5 is null or json_extract(key, '$.fault') = ?5) order by hour desc limit ?6", &[json!(since / 3_600_000), app.clone(), name.clone(), json!(errors_only), fault.clone(), json!(rollups_limit)])?.into_iter().filter(may) {
                 let mut rollup = row_read(row, "key");
                 rollup["service"] = service_of(&rollup);
                 self.name_devices(&mut rollup["key"]);
                 rollups.push(rollup);
             }
-            for row in db.query("select * from fingerprints where last >= ?1 and (?2 is null or app = ?2) and (?3 is null or fault = ?3) order by last desc limit ?4", &[json!(since), app, fault, json!(MOST_PRINTS_READ)])?.into_iter().filter(may) {
+            for row in db.query("select * from fingerprints where last >= ?1 and (?2 is null or app = ?2) and (?3 is null or fault = ?3) order by last desc limit ?4", &[json!(since), app, fault, json!(prints_limit)])?.into_iter().filter(may) {
                 let mut print = Value::Object(row);
                 print["service"] = service_of(&print);
                 prints.push(print);
@@ -506,11 +508,12 @@ impl Node {
             rows.truncate(most);
         };
         let more_signals = signals.len() > limit;
-        let more_rollups = rollups.len() > MOST_ROLLUPS_READ;
+        let more_rollups = rollups.len() > rollups_limit;
+        let more_prints = prints.len() > prints_limit;
         newest(&mut signals, "time", limit);
-        newest(&mut rollups, "hour", MOST_ROLLUPS_READ);
-        newest(&mut prints, "last", MOST_PRINTS_READ);
-        Ok(json!({ "signals": signals.into_iter().flat_map(with_steps).collect::<Vec<_>>(), "rollups": rollups, "fingerprints": prints, "more_signals": more_signals, "more_rollups": more_rollups }))
+        newest(&mut rollups, "hour", rollups_limit);
+        newest(&mut prints, "last", prints_limit);
+        Ok(json!({ "signals": signals.into_iter().flat_map(with_steps).collect::<Vec<_>>(), "rollups": rollups, "fingerprints": prints, "more_signals": more_signals, "more_rollups": more_rollups, "more_fingerprints": more_prints }))
     }
 
     fn may_see(&self, viewer: &Caller, scope: &Scope, app: &str) -> bool {

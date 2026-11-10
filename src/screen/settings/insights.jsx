@@ -6,6 +6,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/insights.html.
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
+import { BUCKETS, quantile } from "./quantile.js"
 import { Button, Empty, Icon, Input, LargeTitle, ListSkeleton, LoadFailure, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sparkline, Split, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
 
 const HOUR = 3600000
@@ -16,8 +17,6 @@ const MOST_SERIES = 8
 const OTHER = "Other"
 // The most places a time chart stretches a short history over, so a few hours of data still reads as a chart.
 const LEAST_HOURS = 12
-// A histogram's bucket columns and the upper bound of each; the last has none, so it's drawn as a minute.
-const BUCKETS = [["under_10", 10], ["under_100", 100], ["under_1000", 1000], ["under_10000", 10000], ["over", 60000]]
 // A rollup's own columns, which aren't attributes to group by.
 const COLUMNS = ["count", "errors", "ms", "hour", "name", "app", "over", "kind", ...BUCKETS.map(([k]) => k)]
 // A span's or log's columns the row itself shows.
@@ -76,20 +75,6 @@ function tracesOf(rows) {
 }
 
 const colours = (services) => Object.fromEntries(sorted(services).map((s, i) => [s, hue(i)]))
-
-// The quantile of histograms added together, interpolated within its bucket as Prometheus does.
-function quantile(rows, q) {
-  const counts = BUCKETS.map(([k]) => rows.reduce((n, r) => n + (r[k] || 0), 0))
-  const total = counts.reduce((a, b) => a + b, 0)
-  if (!total) return null
-  let seen = 0, low = 0
-  for (let i = 0; i < counts.length; i++) {
-    if (counts[i] && seen + counts[i] >= q * total) return low + ((q * total - seen) / counts[i]) * (BUCKETS[i][1] - low)
-    seen += counts[i]
-    low = BUCKETS[i][1]
-  }
-  return low
-}
 
 function red(rows) {
   const count = rows.reduce((n, r) => n + r.count, 0), errors = rows.reduce((n, r) => n + r.errors, 0), sum = rows.reduce((n, r) => n + r.ms, 0)
@@ -676,7 +661,7 @@ function Insights() {
     const mine = ++asked.current
     setLoading(true)
     try {
-      const got = await one.api("POST", "/api/insights/insights", { since: range, limit: 2000 })
+      const got = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: 20000 })
       if (mine !== asked.current) return
       setData({ ...got, at: Date.now() })
       setProblem(null)

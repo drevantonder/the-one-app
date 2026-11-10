@@ -25,7 +25,10 @@ fn kind(prop: &Value) -> String {
 /// required inputs as flags.
 pub fn usage(app: &str, tool: &Value) -> String {
     let (required, places) = (required(&tool["input"]), places(tool));
-    let mut usage = format!("{CLI} {app} {}", tool["name"].as_str().unwrap_or(""));
+    let mut usage = match tool["id"] == app {
+        true => format!("{CLI} {app}"),
+        false => format!("{CLI} {app} {}", tool["name"].as_str().unwrap_or("")),
+    };
     for p in &places {
         usage.push_str(&match required.contains(p) {
             true => format!(" <{}>", kebab(p)),
