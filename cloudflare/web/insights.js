@@ -11,19 +11,29 @@ export function note(event) {
   while (kept.length > MOST || (kept.length && kept[0].time < from)) kept.shift();
 }
 
-/// What's in the timeline, oldest first.
-export const timeline = () => kept.slice();
-
+/// A node can be restarting, or out of reach, for a minute or two, and takes an event back from the last five minutes: a
+/// report no node took goes again then, with whatever's newer.
+const AGAIN_AFTER = 30_000;
+const KEPT_FOR = 300_000;
 let sending = null;
+let unsent = [];
+
+function flush(send) {
+  sending = null;
+  const from = Date.now() - KEPT_FOR;
+  const events = [...new Set([...unsent, ...kept])].filter((e) => e.time >= from).slice(-MOST);
+  unsent = [];
+  send(events).catch(() => {
+    unsent = events;
+    sending ||= setTimeout(() => flush(send), AGAIN_AFTER);
+  });
+}
+
 /// Adds `event`, something that went wrong, and writes out the timeline through `send` (`/api/insights/report`'s), soon: what
 /// goes wrong together goes in one report.
 export function report(send, event) {
   note(event);
-  if (sending) return;
-  sending = setTimeout(() => {
-    sending = null;
-    send(timeline()).catch(() => {});
-  }, 1000);
+  sending ||= setTimeout(() => flush(send), 1000);
 }
 
 /// The devices a request asked, for the timeline: a request's `trace`, which a shell gives as text.

@@ -326,7 +326,12 @@ pub(crate) fn stop(dir: &Path, delete: bool) -> Result<()> {
 
 /// `stop`, and with `clients` false, leaving the clients' browsers running, as starting the network again does.
 pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
-    end(&programs(dir, clients));
+    // Its node first, while its Workers run: it sends the telemetry Worker what it hasn't yet as it stops, which a
+    // telemetry Worker stopping beside it would lose.
+    let all = programs(dir, clients);
+    let node = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse::<i32>().ok()).filter(|n| all.contains(n));
+    end(&Vec::from_iter(node));
+    end(&all.into_iter().filter(|p| Some(*p) != node).collect::<Vec<_>>());
     // What still runs stays listed: its browsers.
     let kept: String = std::fs::read_to_string(dir.join("pids")).unwrap_or_default().lines().filter(|l| !clients && l.ends_with(" client")).map(|l| format!("{l}\n")).collect();
     if kept.is_empty() {
