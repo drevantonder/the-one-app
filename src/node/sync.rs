@@ -293,6 +293,7 @@ impl Node {
             let before = i.peers.insert(key, Peer { services: services.clone(), load: None, parts: None, updating: None, seen: Instant::now() });
             Ok(before.is_none_or(|p| p.services != services || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
         });
+        self.0.heard.notify_waiters();
         if changed.unwrap_or(false) {
             self.emit(Event::Changed { apps: vec![name] });
         }

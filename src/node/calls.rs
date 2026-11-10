@@ -110,6 +110,11 @@ use record::Guard;
 /// A service's call may take longer, as a browser or a desktop starts: as long as a service is waited for.
 const SERVICE_LIMIT: Duration = Duration::from_secs(600);
 
+/// The devices that are up among those `app`, as a catalog lists it, is on.
+fn runs_on_online(app: &Value) -> impl Iterator<Item = &Value> {
+    app["runs_on"].as_array().into_iter().flatten().filter(|r| r["online"] == true)
+}
+
 /// Whether a device has no room for more: its memory, or its CPU of late, over 90% used.
 fn full(load: &crate::load::Load) -> bool {
     let busy = load.cpu.iter().rev().take(3).map(|c| *c as u32).sum::<u32>() / 3;
@@ -304,11 +309,13 @@ impl Node {
         let req = self.reaching(req.clone(), me)?;
         let me = me.clone();
         let mut why = Vec::new();
-        let candidates = self.candidates(&req, &me)?;
-        trace::stage(crate::insights::stage::ROUTE);
         let began = Instant::now();
+        let limit = self.limit(&req).await;
+        let candidates = self.candidates_or_starting(&req, &me, limit).await?;
+        let left = limit.saturating_sub(began.elapsed());
+        trace::stage(crate::insights::stage::ROUTE);
         // A device that stalls costs a call's whole limit, so no call waits on more than one more after that.
-        let most = self.limit(&req).await * 2;
+        let most = limit * 2;
         for device in candidates {
             if !why.is_empty() && began.elapsed() >= most {
                 break;
@@ -333,7 +340,7 @@ impl Node {
                         return Err(need.into());
                     }
                 },
-                false => self.ask_device(device, &req, &me).await,
+                false => self.ask_device(device, &req, &me, left).await,
             };
             let here = device == self.0.id;
             *run_says = matches!(reply, Ok((Reply::Ok(_) | Reply::Error(..), _))) && (here || !self.is_service(&device));
@@ -375,18 +382,50 @@ impl Node {
         bail!("None of your devices can do this now. Try again soon. ({})", why.join("; "))
     }
 
-    /// No device of `me`'s runs `app`, in words: not on any yet, with what it needs and how to add it, or on one that's
-    /// starting (`restarting`: asking again in a moment answers).
+    /// The devices that might run a call: `candidates`, or when a service has none but is on a device that's up, those
+    /// that say hello within a restart and the call's `limit`. Before any device has it, so it can't run twice.
+    async fn candidates_or_starting(&self, req: &CallRequest, me: &Caller, limit: Duration) -> Result<Vec<Key>> {
+        let found = self.candidates(req, me)?;
+        let coming = req.service.is_some() && found.is_empty() && self.about(&req.app, me).await.is_some_and(|a| runs_on_online(&a).any(|r| r["problem"].is_null()));
+        if !coming {
+            return Ok(found);
+        }
+        let waiting = Instant::now();
+        let heard = async {
+            loop {
+                let hello = self.0.heard.notified();
+                tokio::pin!(hello);
+                hello.as_mut().enable();
+                let found = self.candidates(req, me)?;
+                if !found.is_empty() {
+                    return Ok(found);
+                }
+                hello.await;
+            }
+        };
+        let found = tokio::time::timeout(crate::services::STARTS_WITHIN.min(limit), heard).await.unwrap_or(Ok(Vec::new()));
+        trace::note(req.named(json!({ "step": "starting" })), waiting.elapsed());
+        found
+    }
+
+    /// `app` as `me`'s catalog lists it.
+    async fn about(&self, app: &str, me: &Caller) -> Option<Value> {
+        self.catalog(me, false).await.ok()?.into_iter().find(|a| a["name"] == app)
+    }
+
+    /// No device of `me`'s runs `app`, in words: it's on one that's starting (`restarting`), or on none yet, with what it
+    /// needs and how to add it.
     async fn no_device(&self, app: &str, me: &Caller) -> crate::protocol::Coded {
         let title = self.title(app).await;
-        let info = self.catalog(me, false).await.ok().and_then(|c| c.into_iter().find(|a| a["name"] == app));
-        let starting = info.as_ref().is_some_and(|a| a["runs_on"].as_array().is_some_and(|r| r.iter().any(|r| r["online"] == true)));
+        let info = self.about(app, me).await;
+        if info.as_ref().is_some_and(|a| runs_on_online(a).next().is_some()) {
+            return crate::protocol::Coded::new(crate::protocol::code::RESTARTING, format!("{title} is starting: try again in a moment."));
+        }
         let text = match &info {
-            _ if starting => format!("{title} is starting: try again in a moment."),
             Some(a) => format!("{title} isn't on any of your devices yet.{} add {app} adds it, on a node you choose (apps_devices {app} lists them).", a["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()),
             None => format!("{title} isn't on any of your devices yet."),
         };
-        crate::protocol::Coded::new(crate::protocol::code::RESTARTING, text)
+        crate::protocol::Coded::new(crate::protocol::code::NOT_ADDED, text)
     }
 
     /// Why `app`'s service runs nowhere for `me` though it was put on a node, as its problem box in the App Store says
@@ -418,12 +457,13 @@ impl Node {
         ensure!(req.service.is_some(), "{} is an app: its calls run once, on one device", req.app);
         let req = CallRequest { device: None, ..req };
         let devices = self.candidates(&req, &me)?;
+        let limit = self.limit(&req).await;
         let asked = devices.iter().map(|device| {
             let (req, me) = (&req, &me);
             async move {
                 let reply = match *device == self.0.id {
                     true => Ok(self.run(req, me).await),
-                    false => self.ask_device(*device, req, me).await.map(|(reply, _)| reply),
+                    false => self.ask_device(*device, req, me, limit).await.map(|(reply, _)| reply),
                 };
                 let answer = match reply {
                     Ok(Reply::Ok(v)) => v,
@@ -541,8 +581,8 @@ impl Node {
         req
     }
 
-    /// Asks another device to run a call. → its reply, and what it did, if this request is being traced.
-    pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<(Reply, Option<Value>)> {
+    /// Asks another device to run a call, within `limit`. → its reply, and what it did, if this request is being traced.
+    pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller, limit: Duration) -> Result<(Reply, Option<Value>)> {
         // A call handed keys passes on its keys alone (below), and app schedules' calls pass on none.
         let service = self.is_service(&device);
         // A node listed as the caller's own client asks as itself: always for a call it runs with its own keys (one
@@ -583,7 +623,7 @@ impl Node {
             false => Vec::new(),
         };
         let hop = Instant::now();
-        let asked = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await;
+        let asked = self.ask(device, request, limit + Duration::from_secs(5)).await;
         if service {
             self.finish_hop(&resolved, me, device, hop.elapsed(), &asked);
         }

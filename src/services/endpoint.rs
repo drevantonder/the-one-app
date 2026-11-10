@@ -1006,6 +1006,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
         loop {
             if let Some(status) = running.done()? {
                 PROGRAM.store(0, SeqCst);
+                service.services().program_stopped(name);
                 told(json!({ "name": "service.exit", "build": build, "reason": exit_reason(&status) }));
                 eprintln!("{} stopped ({status}): starting it again", program.display());
                 std::thread::sleep(Duration::from_secs(2));
@@ -1020,6 +1021,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
             if stop() || renewed {
                 running.end();
                 PROGRAM.store(0, SeqCst);
+                service.services().program_stopped(name);
                 told(json!({ "name": "service.exit", "build": build, "reason": if renewed { "renewed" } else { "stopped" } }));
                 if renewed {
                     eprintln!("{}: a new build is there, so it starts again", program.display());

@@ -46,6 +46,14 @@ impl std::error::Error for Elsewhere {}
 
 /// A registered service that hasn't asked for calls in this long is gone.
 const GONE_AFTER: Duration = Duration::from_secs(60);
+/// How long a call waits for a service's program, or its endpoint, to come back from a restart before it fails: longer
+/// than one takes on a machine busy with several at once.
+pub const STARTS_WITHIN: Duration = Duration::from_secs(30);
+
+/// That `app`'s program isn't running here: it didn't come back from a restart in time, so its call has failed, unrun.
+fn not_running(app: &str) -> anyhow::Error {
+    crate::protocol::Coded::error(crate::protocol::code::RESTARTING, format!("{app} isn't running on this device"))
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call {
@@ -58,13 +66,32 @@ pub struct Call {
     pub from: Option<String>,
 }
 
+/// A service and its calls, which outlive any one run of its program: what the one before never took, the next one does.
 struct Registered {
-    describe: Value,
+    describe: Mutex<Value>,
     calls: mpsc::UnboundedSender<Call>,
     waiting: tokio::sync::Mutex<mpsc::UnboundedReceiver<Call>>,
-    /// The calls waiting for its answer, with whom each is for.
-    replies: Mutex<HashMap<u64, (oneshot::Sender<Value>, Me)>>,
+    /// The calls waiting for their answer.
+    replies: Mutex<HashMap<u64, Waiting>>,
     seen: Mutex<Instant>,
+}
+
+impl Registered {
+    /// Takes back a call no program has taken, so that none will. → whether it did.
+    fn take_back(&self, id: u64) -> bool {
+        let mut replies = self.replies.lock().unwrap();
+        let untaken = replies.get(&id).is_some_and(|w| !w.taken);
+        if untaken {
+            replies.remove(&id);
+        }
+        untaken
+    }
+}
+
+struct Waiting {
+    answer: oneshot::Sender<Value>,
+    /// Whether its program has taken it, after which it's never offered again.
+    taken: bool,
 }
 
 #[derive(Default)]
@@ -77,15 +104,30 @@ pub struct Services {
 }
 
 impl Services {
-    /// Registers `app`; whether that changes how it's listed: it wasn't here, had gone, or describes itself differently.
-    pub fn register(&self, app: &str, mut describe: Value) -> bool {
+    /// Registers `app`: its program started, or its endpoint forgot it.
+    pub fn register(&self, app: &str, mut describe: Value) {
         describe["name"] = json!(app);
         describe["runs"] = json!("here");
-        let (calls, rx) = mpsc::unbounded_channel();
-        let p = Registered { describe: describe.clone(), calls, waiting: tokio::sync::Mutex::new(rx), replies: Mutex::new(HashMap::new()), seen: Mutex::new(Instant::now()) };
-        let before = self.by_app.lock().unwrap().insert(app.to_string(), std::sync::Arc::new(p));
+        let mut by_app = self.by_app.lock().unwrap();
+        match by_app.get(app) {
+            Some(p) => {
+                *p.describe.lock().unwrap() = describe;
+                *p.seen.lock().unwrap() = Instant::now();
+            }
+            None => {
+                let (calls, rx) = mpsc::unbounded_channel();
+                by_app.insert(app.to_string(), std::sync::Arc::new(Registered { describe: Mutex::new(describe), calls, waiting: tokio::sync::Mutex::new(rx), replies: Mutex::default(), seen: Mutex::new(Instant::now()) }));
+            }
+        }
         self.registered.notify_waiters();
-        before.is_none_or(|p| p.describe != describe || p.seen.lock().unwrap().elapsed() >= GONE_AFTER)
+    }
+
+    /// `app`'s program stopped: the calls it took and hasn't answered fail now, as it may have begun them, so no other
+    /// program runs them. What it never took waits for the next one.
+    pub fn program_stopped(&self, app: &str) {
+        if let Some(p) = self.by_app.lock().unwrap().get(app) {
+            p.replies.lock().unwrap().retain(|_, w| !w.taken);
+        }
     }
 
     fn get(&self, app: &str) -> Option<std::sync::Arc<Registered>> {
@@ -100,7 +142,7 @@ impl Services {
 
     pub fn describe(&self) -> Vec<Value> {
         let names: Vec<String> = self.by_app.lock().unwrap().keys().cloned().collect();
-        names.iter().filter_map(|n| self.get(n)).map(|p| p.describe.clone()).collect()
+        names.iter().filter_map(|n| self.get(n)).map(|p| p.describe.lock().unwrap().clone()).collect()
     }
 
     /// Waits until `app` is registered.
@@ -119,17 +161,23 @@ impl Services {
     /// Hands a call to the service and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
     /// caller's scope keeps, so the devices that hold the scope can fetch it.
     pub async fn call(&self, app: &str, function: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
-        // A node that just started, an update's, waits a moment for its services to register again with it.
-        if crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(15)) {
-            let _ = tokio::time::timeout(Duration::from_secs(5), self.registered(app)).await;
+        let now = tokio::time::Instant::now();
+        let (starts_by, answers_by) = (now + STARTS_WITHIN, now + Duration::from_secs(600));
+        if self.get(app).is_none() {
+            let _ = tokio::time::timeout_at(starts_by, self.registered(app)).await;
         }
-        let p = self.get(app);
-        let p = p.ok_or_else(|| crate::protocol::Coded::error(crate::protocol::code::RESTARTING, format!("{app} isn't running on this device")))?;
+        let p = self.get(app).ok_or_else(|| not_running(app))?;
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let (tx, rx) = oneshot::channel();
-        p.replies.lock().unwrap().insert(id, (tx, caller.clone()));
+        let (tx, mut rx) = oneshot::channel();
+        p.replies.lock().unwrap().insert(id, Waiting { answer: tx, taken: false });
         p.calls.send(Call { id, function: function.into(), input, caller, from }).map_err(|_| anyhow!("{app} stopped"))?;
-        let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{app} didn't answer"))??;
+        // A running program takes a call at once; one restarting, when it's back. Past that it isn't coming in time.
+        let answer = match tokio::time::timeout_at(starts_by, &mut rx).await {
+            Ok(answer) => answer,
+            Err(_) if p.take_back(id) => return Err(not_running(app)),
+            Err(_) => tokio::time::timeout_at(answers_by, rx).await.map_err(|_| anyhow!("{app} didn't answer"))?,
+        };
+        let reply = answer.map_err(|_| anyhow!("{app} stopped before it answered"))?;
         if let Some(why) = reply.get("elsewhere") {
             return Err(Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());
         }
@@ -151,13 +199,14 @@ impl Services {
             _ = crate::handoff::stopping() => None,
         };
         *p.seen.lock().unwrap() = Instant::now();
-        Ok(call)
+        // One its caller gave up on isn't run.
+        Ok(call.filter(|c| p.replies.lock().unwrap().get_mut(&c.id).map(|w| w.taken = true).is_some()))
     }
 
     pub fn reply(&self, app: &str, id: u64, reply: Value) -> Result<()> {
         let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("no service {app}"))?;
-        let (tx, _) = p.replies.lock().unwrap().remove(&id).ok_or_else(|| anyhow!("no call {id} waiting"))?;
-        let _ = tx.send(reply);
+        let waiting = p.replies.lock().unwrap().remove(&id).ok_or_else(|| anyhow!("no call {id} waiting"))?;
+        let _ = waiting.answer.send(reply);
         Ok(())
     }
 
@@ -275,4 +324,49 @@ impl Registry {
 pub(crate) fn refused(code: axum::http::StatusCode, why: impl std::fmt::Display) -> axum::response::Response {
     use axum::response::IntoResponse;
     (code, axum::Json(json!({ "error": why.to_string() }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{Coded, code};
+
+    fn me() -> Me {
+        serde_json::from_value(json!({ "key": "k1", "user": "u1", "name": "mac", "role": null, "user_name": "Ann", "handle": "ann", "agent": null })).unwrap()
+    }
+
+    fn asked(services: &std::sync::Arc<Services>) -> tokio::task::JoinHandle<Result<Answer>> {
+        let services = services.clone();
+        tokio::spawn(async move { services.call("s", "f", json!({}), me(), None).await })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_restart_loses_no_call_and_runs_none_twice() {
+        let services = std::sync::Arc::new(Services::default());
+        services.register("s", json!({}));
+
+        // Asked while its program is down: the next one takes it.
+        let waiting = asked(&services);
+        tokio::task::yield_now().await;
+        services.program_stopped("s");
+        services.register("s", json!({}));
+        let call = services.next("s").await.unwrap().expect("the next program takes it");
+        services.reply("s", call.id, json!({ "ok": 1 })).unwrap();
+        assert_eq!(waiting.await.unwrap().unwrap().ok, json!(1));
+
+        // Taken by a program that then stopped: it may have begun, so it fails and no one else is given it.
+        let failing = asked(&services);
+        services.next("s").await.unwrap().expect("it takes it");
+        services.program_stopped("s");
+        services.register("s", json!({}));
+        let err = failing.await.unwrap().err().expect("it stopped before answering");
+        assert_eq!(Coded::of(&err), None, "asking again could run it twice: {err:#}");
+        assert!(services.next("s").await.unwrap().is_none(), "it's never offered again");
+
+        // Never taken, within the wait: it fails, and a program that comes late doesn't run it.
+        let late = asked(&services);
+        let err = late.await.unwrap().err().expect("no program took it");
+        assert_eq!(Coded::of(&err).as_deref(), Some(code::RESTARTING));
+        assert!(services.next("s").await.unwrap().is_none(), "its caller gave up on it");
+    }
 }

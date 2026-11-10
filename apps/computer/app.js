@@ -144,7 +144,7 @@ export default {
         const [listed, devs] = await Promise.all([act(ctx, "list", input).catch((err) => err), input.here ? [] : devices(ctx)]);
         const on = devs.filter((d) => d.on).map(asListed);
         if (listed instanceof Error) {
-          if (on.length && listed.code === "restarting") return { devices: on };
+          if (on.length && ["restarting", "not_added"].includes(listed.code)) return { devices: on };
           throw listed;
         }
         const { devices: theirs = [], ...rest } = listed || {};

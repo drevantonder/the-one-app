@@ -176,6 +176,8 @@ pub struct Inner {
     writes: tokio::sync::Mutex<()>,
     /// Wakes the task that loads deploys and announces this device.
     changed: tokio::sync::Notify,
+    /// Woken by each service endpoint's hello, for a call waiting for one that's starting.
+    heard: tokio::sync::Notify,
     /// What the record at the network's address last said (`crate::latest`), and why it couldn't take it, if so.
     latest: Mutex<crate::latest::Latest>,
     updating: Mutex<Option<String>>,
@@ -272,6 +274,7 @@ impl Node {
             events,
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),
+            heard: tokio::sync::Notify::new(),
             latest: Mutex::new(Default::default()),
             updating: Mutex::new(None),
             update_seen: Mutex::new(None),
