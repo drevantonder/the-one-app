@@ -61,9 +61,9 @@ impl Trace {
         self.0.steps.lock().unwrap().push(step);
     }
 
-    /// What it did, as this device says it: `{ device, ms, steps }`.
+    /// What it did, as this device says it: `{ trace, device, ms, steps }`, `trace` its id.
     pub fn done(&self, device: &str) -> Value {
-        json!({ "device": device, "ms": self.0.start.elapsed().as_millis() as u64, "steps": self.0.steps.lock().unwrap().clone() })
+        json!({ "trace": self.0.trace_id, "device": device, "ms": self.0.start.elapsed().as_millis() as u64, "steps": self.0.steps.lock().unwrap().clone() })
     }
 
     /// How many steps it has, where a call started now begins.
@@ -191,7 +191,7 @@ pub fn bucket(kind: &str, took: std::time::Duration, found: bool) {
 /// A call's trace as a few readable lines, in the Developer panel's words (src/screen/settings/devtools.jsx): what the
 /// device that answered did (`node`, its `x-one-trace`), each wait with its milliseconds, and the total.
 pub fn said(node: &Value) -> Vec<String> {
-    let mut out = Vec::new();
+    let mut out: Vec<String> = node["trace"].as_str().map(|id| format!("trace-id {id}")).into_iter().collect();
     steps(node, node["device"].as_str().unwrap_or("the device that answered"), &mut out);
     out.push(format!("total {} ms", node["ms"].as_u64().unwrap_or(0)));
     out
