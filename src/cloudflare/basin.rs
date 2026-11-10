@@ -92,27 +92,38 @@ pub fn provision(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
     settings.save()
 }
 
-/// Where the Workers' own traces go: a destination on Cloudflare pointed at the telemetry Worker, with a header only it
-/// knows. Cloudflare's export can't sign, and is OTLP/JSON. Set up once, by a deploy whose token may: the Workers are
-/// deployed without it until then.
+/// The name of Cloudflare's destination for the Workers' own traces.
+pub fn destination() -> String {
+    format!("{}-worker-traces", crate::config::CLI)
+}
+
+/// Points Cloudflare's trace destination at the telemetry Worker, with a header only it knows: Cloudflare's export can't
+/// sign, and is OTLP/JSON. It's the telemetry Worker's own address, never the gateway's, or each export would be a request
+/// of the gateway's for the next export to carry; a deploy that can't yet (Workers Observability Write) leaves it as it is.
 pub fn traces(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
-    let name = format!("{}-worker-traces", crate::config::CLI);
+    let url = format!("https://{}.{}.workers.dev/telemetry/otlp", crate::cloudflare::worker_name("telemetry"), cf.subdomain()?);
+    if settings.traces.as_deref() == Some(url.as_str()) {
+        return Ok(());
+    }
+    let name = destination();
     let path = format!("/accounts/{}/workers/observability/destinations", cf.account);
     let there = cf.list(&path).context("reading Cloudflare's trace destinations, which needs an API token with Workers Observability Write")?;
-    if !there.iter().any(|d| d["name"] == name) {
-        let token = match &settings.otlp_token {
-            Some(token) => token.clone(),
-            None => {
-                let token = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
-                settings.set_secret("OTLP_TOKEN", &token)?;
-                settings.otlp_token = Some(token.clone());
-                token
-            }
-        };
-        let url = format!("{}/telemetry/otlp", settings.address.trim_end_matches('/'));
-        cf.post(&path, json!({ "name": name, "enabled": true, "skipPreflightCheck": true, "configuration": { "type": "logpush", "logpushDataset": "opentelemetry-traces", "url": url, "headers": { "authorization": format!("Bearer {token}") } } })).context("making Cloudflare's trace destination")?;
+    let token = match &settings.otlp_token {
+        Some(token) => token.clone(),
+        None => {
+            let token = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
+            settings.set_secret("OTLP_TOKEN", &token)?;
+            settings.otlp_token = Some(token.clone());
+            token
+        }
+    };
+    let configuration = json!({ "type": "logpush", "logpushDataset": "opentelemetry-traces", "url": url, "headers": { "authorization": format!("Bearer {token}") } });
+    if there.iter().any(|d| d["name"] == name) {
+        cf.patch(&format!("{path}/{name}"), json!({ "enabled": true, "skipPreflightCheck": true, "configuration": configuration })).context("pointing Cloudflare's trace destination at the telemetry Worker")?;
+    } else {
+        cf.post(&path, json!({ "name": name, "enabled": true, "skipPreflightCheck": true, "configuration": configuration })).context("making Cloudflare's trace destination")?;
     }
-    settings.traces = Some(name);
+    settings.traces = Some(url);
     settings.save()
 }
 

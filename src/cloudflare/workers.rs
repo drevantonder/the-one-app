@@ -24,6 +24,8 @@ pub struct Worker {
     pub class: Option<&'static str>,
     /// Where it's reached and the local port it listens on, if anywhere but by other Workers' bindings.
     place: Option<fn(&Settings) -> (&str, u16)>,
+    /// Whether it's also reached at its workers.dev address: by what mustn't come through the gateway.
+    own_address: bool,
     /// Whether it runs the Cloudflare node's build, which carries its devices' endpoints.
     node_build: bool,
     /// Whether it serves the web client's files, as its static assets.
@@ -38,21 +40,21 @@ pub struct Worker {
 /// Auth's Durable Object `Auth` holds every user's passkeys and accounts. The paths under `/api/auth` name the
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer, so they never change.
 pub const WORKERS: &[Worker] = &[
-    Worker { name: "auth", entry: "auth/worker.js", class: Some("Auth"), place: Some(|s| (s.auth_url.as_str(), s.ports[0])), node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings },
-    Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings },
-    Worker { name: "signer", entry: "signer/worker.js", class: None, place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings },
-    Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), place: None, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings },
-    Worker { name: "telemetry", entry: "telemetry/worker.js", class: None, place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings },
-    Worker { name: "gateway", entry: "gateway/worker.js", class: None, place: Some(|s| (s.address.as_str(), s.ports[1])), node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings },
-    Worker { name: "push", entry: "push/worker.js", class: Some("Push"), place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings },
+    Worker { name: "auth", entry: "auth/worker.js", class: Some("Auth"), place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings },
+    Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings },
+    Worker { name: "signer", entry: "signer/worker.js", class: None, place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings },
+    Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), place: None, own_address: false, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings },
+    Worker { name: "telemetry", entry: "telemetry/worker.js", class: None, place: None, own_address: true, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings },
+    Worker { name: "gateway", entry: "gateway/worker.js", class: None, place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings },
+    Worker { name: "push", entry: "push/worker.js", class: Some("Push"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings },
 ];
 
 /// The Cloudflare node's Worker (`cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
 /// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
-pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
+pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
 
-/// The Workers traced at 100% (`metadata`): those that open nothing. The web client is the gateway's assets.
-const TRACED: [&str; 6] = crate::insights::WORKERS;
+/// The Workers traced at 100% (`metadata`): those that open nothing but the telemetry Worker. The web client is the gateway's assets.
+const TRACED: [&str; 5] = crate::insights::TRACED;
 
 impl Worker {
     pub fn named(name: &str) -> &'static Worker {
@@ -216,7 +218,7 @@ pub struct Settings {
     /// The token only for telemetry's bucket that `telemetry` was set up with, which the telemetry Worker reads with.
     #[serde(default, skip_serializing)]
     pub telemetry_token: Option<String>,
-    /// The Cloudflare destination the Workers' own traces go to, once a deploy has made it (`basin::traces`).
+    /// Where the Workers' own traces go, once a deploy has pointed Cloudflare's destination there (`basin::traces`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub traces: Option<String>,
     /// What Cloudflare sends those traces with, which the telemetry Worker checks: its export can't sign.
@@ -1252,6 +1254,10 @@ impl Cloudflare {
         self.send("POST", path, body)
     }
 
+    pub(crate) fn patch(&self, path: &str, body: Value) -> Result<Value> {
+        self.send("PATCH", path, body)
+    }
+
     fn send(&self, method: &str, path: &str, body: Value) -> Result<Value> {
         self.call(method, path, Some(("application/json".into(), body.to_string().into_bytes())))
     }
@@ -1347,6 +1353,12 @@ impl Cloudflare {
         Ok(token)
     }
 
+    /// Gives a Worker its workers.dev address alone.
+    pub(crate) fn expose(&self, name: &str) -> Result<()> {
+        self.send("POST", &format!("/accounts/{}/workers/scripts/{name}/subdomain", self.account), json!({ "enabled": true, "previews_enabled": false }))?;
+        Ok(())
+    }
+
     /// Gives a Worker no address: only other Workers' bindings reach it.
     pub(crate) fn hide(&self, name: &str) -> Result<()> {
         self.send("POST", &format!("/accounts/{}/workers/scripts/{name}/subdomain", self.account), json!({ "enabled": false, "previews_enabled": false }))?;
@@ -1436,8 +1448,8 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
     // two that open data (mcp, node).
     if TRACED.contains(&worker.name) {
         meta["observability"]["traces"] = json!({ "enabled": true, "head_sampling_rate": 1 });
-        if let Some(destination) = &settings.traces {
-            meta["observability"]["traces"]["destinations"] = json!([destination]);
+        if settings.traces.is_some() {
+            meta["observability"]["traces"]["destinations"] = json!([crate::cloudflare::basin::destination()]);
             meta["observability"]["traces"]["persist"] = json!(true);
         }
     }
@@ -1479,6 +1491,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &
             // Its address may have been changed by hand; one with none is reached only by binding.
             let reach = || match url {
                 Some(url) => cf.reach(&name, url),
+                None if worker.own_address => cf.expose(&name),
                 None => cf.hide(&name),
             };
             if complete && scripts.contains_key(&name) && cf.runs(&name, &what)? {

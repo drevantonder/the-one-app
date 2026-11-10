@@ -50,10 +50,8 @@ fn put_up(cf: &crate::cloudflare::Cloudflare, settings: &mut crate::cloudflare::
             eprintln!("Insights won't have data until this is done, by a deploy with a token that may: {err:#}");
         }
     }
-    if settings.traces.is_none() {
-        if let Err(err) = crate::cloudflare::basin::traces(cf, settings) {
-            eprintln!("The Workers' own traces won't reach Insights until this is done, by a deploy with a token that may: {err:#}");
-        }
+    if let Err(err) = crate::cloudflare::basin::traces(cf, settings) {
+        eprintln!("The Workers' own traces won't reach Insights until this is done, by a deploy with a token that may: {err:#}");
     }
     settings.deployed = Some(newest.deployed(settings));
     let mut web = settings.web_with(newest.web);

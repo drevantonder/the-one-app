@@ -103,8 +103,9 @@ async function signed(request, env, most) {
 
 const STREAMS = { spans: "SPANS", logs: "LOGS", metrics: "METRICS" };
 
-/// The Workers whose own traces are kept: those that open nothing, never `mcp` or `node`, whatever a request says of itself.
-export const TRACED = ["gateway", "auth", "relay", "signer", "push", "telemetry"];
+/// The Workers whose own traces are kept: those that open nothing, never `mcp` or `node`, whatever a request says of itself,
+/// and not this one, as an export of its traces would be the next thing it was handed (src/insights.rs).
+export const TRACED = ["gateway", "auth", "relay", "signer", "push"];
 const token = (v) => typeof v === "string" && /^[A-Za-z0-9_.+-]{1,72}$/.test(v);
 const nanos = (v) => Number(BigInt(v ?? 0) / 1000000n);
 const OTLP_PATH = "/telemetry/otlp";
@@ -117,7 +118,6 @@ const sampledTrace = (trace) => parseInt(trace.slice(-8), 16) % SAMPLED_ONE_IN =
 
 /// OTLP/JSON from Cloudflare, each Worker's spans as rows for the spans table: only its name if that's a plain token, its
 /// ids, timing, kind and status, and a status code. Its other attributes are Cloudflare's, and may name a URL: none are kept.
-/// A trace of Cloudflare handing over these very spans is dropped, or each export would make the next.
 export function workerSpans(request, cli) {
   const spans = [];
   for (const resource of request.resourceSpans ?? []) {
@@ -126,11 +126,10 @@ export function workerSpans(request, cli) {
     if (!TRACED.includes(job)) continue;
     for (const scope of resource.scopeSpans ?? []) spans.push(...(scope.spans ?? []).map((s) => ({ s, job })));
   }
-  const exporting = new Set(spans.filter(({ s }) => (s.attributes ?? []).some((a) => String(a.value?.stringValue ?? "").includes(OTLP_PATH))).map(({ s }) => s.traceId));
   const failed = ({ s }) => s.status?.code === 2 || s.status?.code === "STATUS_CODE_ERROR";
   const took = ({ s }) => nanos(s.endTimeUnixNano) - nanos(s.startTimeUnixNano);
   const worth = new Set(spans.filter((x) => failed(x) || took(x) >= SLOW_MS).map(({ s }) => s.traceId));
-  return spans.filter(({ s }) => hex(s.traceId, 32) && hex(s.spanId, 16) && !exporting.has(s.traceId) && (!hex(s.parentSpanId, 16) || worth.has(s.traceId) || sampledTrace(s.traceId))).map((x) => {
+  return spans.filter(({ s }) => hex(s.traceId, 32) && hex(s.spanId, 16) && (!hex(s.parentSpanId, 16) || worth.has(s.traceId) || sampledTrace(s.traceId))).map((x) => {
     const { s, job } = x;
     const code = s.attributes?.find((a) => a.key === "http.response.status_code")?.value?.intValue;
     const kind = s.kind === 2 || s.kind === "SPAN_KIND_SERVER" ? "server" : s.kind === 3 || s.kind === "SPAN_KIND_CLIENT" ? "client" : "internal";

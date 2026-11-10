@@ -89,9 +89,11 @@ pub fn sampled(trace: &str) -> bool {
 
 /// The most a batch holds of each, past which what's new is dropped: as many as the telemetry Worker takes at once.
 const MOST_ROWS: usize = 5000;
-/// The Workers whose own traces are kept, each `worker.<name>` as a service (`worker_service`): those that open nothing, as
-/// the telemetry Worker's `TRACED` says the same.
+/// The Workers read as `worker.<name>` services (`worker_service`): those that open nothing.
 pub const WORKERS: [&str; 6] = ["gateway", "auth", "relay", "signer", "push", "telemetry"];
+/// Those whose traces Cloudflare exports, as the telemetry Worker's `TRACED` says: not the telemetry Worker itself, as an
+/// export of its traces would be the next thing it was handed.
+pub const TRACED: [&str; 5] = ["gateway", "auth", "relay", "signer", "push"];
 
 /// One of `WORKERS`, as a service.
 pub fn worker_service(worker: &str) -> String {
