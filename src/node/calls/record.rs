@@ -14,7 +14,7 @@ impl Node {
     }
 
     /// Where what's said of `me`'s call of `app` goes: the owner's scope when `me` may use it and this device holds it, else
-    /// `global`, where a private app can't be named. `None` for no such app.
+    /// `global`. `None` for no such app, as what a caller typed is theirs and may be anything.
     pub(in crate::node) fn destination(&self, app: &str, me: &Caller) -> Option<Destination> {
         self.with(|i| {
             let m = i.r.db();
@@ -28,17 +28,16 @@ impl Node {
             Ok(Some(if m.may(&me.user, "use", &scopes::object(&own)) && i.r.holds(&own) {
                 Destination { scope: own, named: true, kind }
             } else {
-                Destination { named: own == Scope::Global, scope: Scope::Global, kind }
+                Destination { named: true, scope: Scope::Global, kind }
             }))
         })
         .ok()
         .flatten()
     }
 
-    /// Writes an insight about `app` for `me`'s call, in the background: one that names a user or a private app, where
-    /// `destination` says, and nowhere else, as `global` holds neither.
+    /// Writes an insight about `app` for `me`'s call, where `destination` says, in the background.
     pub(in crate::node) fn write_insight(&self, app: &str, me: &Caller, said: status::Said) {
-        let Some(Destination { scope, named: true, .. }) = self.destination(app, me) else { return };
+        let Some(Destination { scope, .. }) = self.destination(app, me) else { return };
         let node = self.clone();
         tokio::spawn(async move {
             if let Err(err) = node.say(&scope, said).await {
@@ -139,7 +138,7 @@ impl Node {
 /// Where what's said of a call goes.
 pub(in crate::node) struct Destination {
     pub scope: Scope,
-    /// Whether it may name the app there.
+    /// Whether there's an app to name: every member can list every app's name, so only a call of no such app has none.
     pub named: bool,
     /// The kind of the app's owner's scope.
     pub kind: &'static str,

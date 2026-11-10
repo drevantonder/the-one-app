@@ -7,8 +7,7 @@
 //! fingerprints (until their build is gone from the network). Telemetry may be lost.
 //!
 //! A signal holds closed-set values only (`Attrs`): never a call's arguments or answer, an app's error text, a URL, a file,
-//! repo or account's name, an email, an IP, a prompt or anything key-shaped. `global` holds only device, build and Worker
-//! facts, with a scope's kind, never a user, a group or the name of an app in someone's private scope.
+//! repo or account's name, an email, an IP, a prompt or anything key-shaped, and never names a user or a group.
 
 use std::collections::BTreeMap;
 
@@ -398,7 +397,7 @@ pub struct Signal {
     pub device: String,
     pub kind: Kind,
     pub name: String,
-    /// The app it's about, or none: the device's own, or a private app's named in `global`, where it can't be.
+    /// The app it's about, or none: the device's own, or a call of no such app.
     pub app: String,
     pub trace: String,
     pub span: String,

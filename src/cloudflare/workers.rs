@@ -48,10 +48,10 @@ pub const WORKERS: &[Worker] = &[
 
 /// The Cloudflare node's Worker (`cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
 /// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
+pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
+
 /// The Workers traced at 100% (`metadata`): those that open nothing. The web client is the gateway's assets.
 const TRACED: [&str; 5] = ["gateway", "auth", "relay", "signer", "push"];
-
-pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
 
 impl Worker {
     pub fn named(name: &str) -> &'static Worker {
