@@ -49,7 +49,7 @@ impl Node {
         let address = self.address()?;
         self.with(|i| {
             let root = i.r.root().with_context(|| format!("this device isn't in {YOURS} yet"))?.to_hex();
-            let on = i.r.db().switches()?.into_iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), s)| (name, s.time)).collect();
+            let on = i.r.db().switches()?.into_iter().filter(|((k, _), s)| *k == self.0.holds.device() && s.on).map(|((_, name), s)| (name, s.time)).collect();
             Ok((crate::services::endpoint::Network { address: address.clone(), root, user: i.user.clone() }, on))
         })
     }
@@ -63,12 +63,12 @@ impl Node {
         let named = self.with(|i| {
             let m = i.r.db();
             let switches = m.switches()?;
-            let unnamed = switches.iter().filter(|((k, name), s)| *k == self.0.id && s.on && s.scope.is_none() && name != scopes::APPS_PART).map(|((_, name), _)| name.clone());
-            let unrecorded = carried.iter().filter(|name| !switches.contains_key(&(self.0.id, name.to_string()))).cloned();
+            let unnamed = switches.iter().filter(|((k, name), s)| *k == self.0.holds.device() && s.on && s.scope.is_none() && name != scopes::APPS_PART).map(|((_, name), _)| name.clone());
+            let unrecorded = carried.iter().filter(|name| !switches.contains_key(&(self.0.holds.device(), name.to_string()))).cloned();
             let mut entries = Vec::new();
             for name in unnamed.chain(unrecorded) {
                 if let Some(scope) = added_scope(i, &caller.user, &name)?
-                    && let Ok(entry) = crate::settings::service(m, &caller.user, &hex(&self.0.id), &name, true, Some(&scope))
+                    && let Ok(entry) = crate::settings::service(m, &caller.user, &hex(&self.0.holds.device()), &name, true, Some(&scope))
                 {
                     entries.push(entry);
                 }
@@ -90,7 +90,7 @@ impl Node {
 
     /// Says hello to this device's part `name`, a service endpoint of its own, which answers once it's up.
     pub async fn hello_part(&self, name: &str) {
-        let keys: Vec<Key> = self.with_or(Default::default(), |i| Ok(i.r.db().offering(name)?.into_iter().filter(|s| s.device == Some(self.0.id)).map(|s| s.key).collect()));
+        let keys: Vec<Key> = self.with_or(Default::default(), |i| Ok(i.r.db().offering(name)?.into_iter().filter(|s| s.device == Some(self.0.holds.device())).map(|s| s.key).collect()));
         for key in keys {
             let _ = tokio::time::timeout(Duration::from_secs(3), self.hello_service_now(&key)).await;
         }
@@ -98,7 +98,7 @@ impl Node {
 
     /// Whether this device's part `name`, a service endpoint of its own, has answered it since `since`.
     pub fn part_up(&self, name: &str, since: Instant) -> bool {
-        self.with_or(false, |i| Ok(i.r.db().offering(name)?.into_iter().any(|s| s.device == Some(self.0.id) && i.peers.get(&s.key).is_some_and(|p| p.seen >= since))))
+        self.with_or(false, |i| Ok(i.r.db().offering(name)?.into_iter().any(|s| s.device == Some(self.0.holds.device()) && i.peers.get(&s.key).is_some_and(|p| p.seen >= since))))
     }
 
     /// What the app `name` this device runs says of its service's wrapper (`service: { network, user }` in its
@@ -132,7 +132,7 @@ impl Node {
         out.insert(scopes::APPS_PART.into(), Part { on: on(scopes::APPS_PART)?, ..Part::off(scopes::APPS_PART) });
         // A process of oned's is on only by its entry: with none, it's off; but a Mac helper the Mac app carries is on
         // unless switched off, as oned runs it.
-        let switched = |name: &str| -> Result<bool> { Ok(m.switch(&self.0.id, name)?.is_some_and(|s| s.on) || (crate::oned::helper(name).is_some() && on(name)?)) };
+        let switched = |name: &str| -> Result<bool> { Ok(m.switch(&self.0.holds.device(), name)?.is_some_and(|s| s.on) || (crate::oned::helper(name).is_some() && on(name)?)) };
         let (processes, now) = self.0.parts.now();
         for name in &processes {
             out.insert(name.clone(), Part { on: switched(name)?, ..Part::off(name) });

@@ -17,11 +17,11 @@ pub(super) type IssuerKeys = HashMap<String, (Value, Instant)>;
 
 impl crate::keys::Signs for Node {
     fn public(&self) -> [u8; 32] {
-        self.0.id
+        crate::keys::Signs::public(&self.0.holds)
     }
 
     async fn sign_bytes(&self, bytes: &[u8]) -> Result<[u8; 64]> {
-        self.signing_key().sign_bytes(bytes).await
+        self.0.holds.sign_bytes(bytes).await
     }
 }
 
@@ -35,7 +35,7 @@ impl Me for Node {
     }
 
     fn seal(&self) -> [u8; 32] {
-        crate::keys::public_of(&self.seal_secret())
+        crate::keys::Opens::public(&self.0.holds)
     }
 
     fn welcome(&self) -> Option<crate::database::steps::Welcome> {
@@ -131,7 +131,7 @@ impl Me for Node {
     }
 
     async fn open(&self, sealed: &[u8]) -> Result<Vec<u8>> {
-        crate::keys::open_sealed(&self.seal_secret(), sealed)
+        crate::keys::open_sealed_by(&self.0.holds, sealed).await
     }
 }
 
@@ -156,7 +156,7 @@ impl Node {
     /// What each start of a device does once it's in (`settings::settle_own`), in the background, on a client of its
     /// user's: their own scope's first epoch made as this node makes any it needs, one at a time.
     pub(super) fn settle_own(&self) {
-        let Ok(me) = self.with(|i| Ok(i.r.db().client(&self.0.id)?.filter(|c| c.user == i.user).map(|c| c.user))) else { return };
+        let Ok(me) = self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.filter(|c| c.user == i.user).map(|c| c.user))) else { return };
         let Some(me) = me else { return };
         let node = self.clone();
         tokio::spawn(async move {
@@ -178,7 +178,7 @@ impl Node {
     pub(super) async fn invites_loop(self) {
         loop {
             tokio::time::sleep(INVITES_EVERY).await;
-            let admin = self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == i.user) && i.r.db().may(&i.user, "invite", scopes::NETWORK)));
+            let admin = self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.is_some_and(|c| c.user == i.user) && i.r.db().may(&i.user, "invite", scopes::NETWORK)));
             if !admin.unwrap_or(false) || Node::address(&self).is_err() {
                 continue;
             }

@@ -64,7 +64,7 @@ impl Node {
         ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes())
     }
 
-    /// The secret that opens what's sealed to this device: epochs, and the keys a call is handed.
+    /// The secret that opens what's sealed to this node's own key: the keys a call is handed.
     pub(super) fn seal_secret(&self) -> [u8; 32] {
         crate::keys::seal_secret(&self.signing_key())
     }
@@ -121,28 +121,9 @@ impl Node {
         if newest == 0 || keys.contains_key(&newest) {
             return Ok((keys, newest));
         }
-        for (n, hash) in &hashes {
-            if !keys.contains_key(n)
-                && let Some(key) = self.sealed_epoch(scope, *n, hash).await?
-            {
-                keys.insert(*n, key);
-            }
-        }
+        let missing = hashes.into_iter().filter(|(n, _)| !keys.contains_key(n)).collect();
+        keys.extend(self.0.holds.epochs(&self.bucket()?, scope, &missing).await?);
         Ok((keys, newest))
-    }
-
-    /// Epoch `n` of a scope as it's sealed to this device in the bucket, if it's there and its hash is `hash`.
-    async fn sealed_epoch(&self, scope: &Scope, n: u32, hash: &str) -> Result<Option<[u8; 32]>> {
-        let name = crate::keys::epoch_name(&scope.to_string(), n, &hex(&self.0.id));
-        let Some(o) = crate::bucket::Bucket::get(&self.bucket()?, &name).await? else { return Ok(None) };
-        let key = crate::keys::open_sealed(&self.seal_secret(), &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok());
-        match key.filter(|k| crate::keys::epoch_hash(k) == hash) {
-            Some(key) => Ok(Some(key)),
-            None => {
-                tracing::warn!("{name} isn't the key {scope}'s epoch {n} entry made: passed over");
-                Ok(None)
-            }
-        }
     }
 
     /// Forgets the epochs this device knows of a scope, so the next use looks in the bucket for newer ones: after a
@@ -157,7 +138,7 @@ impl Node {
     /// (`steps::read_sealed_to`).
     pub(super) async fn first_global_read(&self) -> Result<crate::database::stored::Keys> {
         let mut reader = crate::database::steps::Reader::new(self.with(|i| Ok(i.r.root()))?);
-        let (epochs, _) = crate::database::steps::read_sealed_to(&self.bucket()?, &mut reader, &hex(&self.0.id), &self.seal_secret(), &mut None, now_ms()).await?;
+        let (epochs, _) = crate::database::steps::read_sealed_to(&self.bucket()?, &mut reader, &hex(&self.0.holds.device()), &self.0.holds, &mut None, now_ms()).await?;
         ensure!(!epochs.is_empty(), NotGiven(Scope::Global, self.device_name()));
         self.0.databases.epochs.lock().unwrap().insert(Scope::Global, epochs.clone());
         Ok(epochs)
@@ -236,7 +217,7 @@ impl Node {
     async fn seal_epoch(&self, scope: &Scope, keys: &crate::database::stored::Keys) -> Result<()> {
         use crate::bucket::Bucket;
         let bucket = self.bucket()?;
-        let to = self.with(|i| Ok(i.r.db().openers(scope)?.into_iter().filter(|c| c.key != self.0.id).collect::<Vec<_>>()))?;
+        let to = self.with(|i| Ok(i.r.db().openers(scope)?.into_iter().filter(|c| c.key != self.0.holds.device()).collect::<Vec<_>>()))?;
         for (n, key) in keys {
             for c in &to {
                 let name = crate::keys::epoch_name(&scope.to_string(), *n, &hex(&c.key));

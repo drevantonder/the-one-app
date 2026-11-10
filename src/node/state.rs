@@ -138,7 +138,7 @@ impl Node {
         file.name = name.to_string();
         write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
         if self.has_network() {
-            self.member_content(&Caller::local(self)?, content::rename("key", &hex(&self.0.id), name)).await?;
+            self.member_content(&Caller::local(self)?, content::rename("key", &hex(&self.0.holds.device()), name)).await?;
         }
         Ok(())
     }

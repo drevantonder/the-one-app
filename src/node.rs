@@ -71,6 +71,7 @@ pub mod vault;
 pub mod widgets;
 mod caller;
 mod exclusive;
+mod holds;
 mod home;
 mod network;
 
@@ -165,8 +166,11 @@ pub struct Inner {
     dir: PathBuf,
     /// What this machine's own programs send to say they are: `api::LOCAL_TOKEN`, a file only its user reads.
     local_token: String,
+    /// This node's own key, its endpoint's: what it signs and is handed keys under as itself.
     key: SigningKey,
     id: Key,
+    /// What its device's key opens and signs.
+    holds: holds::Holds,
     name: Mutex<String>,
     apps: Apps,
     network: Exclusive<Option<Network>>,
@@ -265,6 +269,8 @@ impl Node {
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),
             local_token: load_local_token(dir)?,
+            // A computer's node is its device for now: one key.
+            holds: holds::Holds::new(key.clone()),
             key,
             id,
             name: Mutex::new(device.name),
@@ -496,7 +502,7 @@ impl Node {
     pub fn device_name(&self) -> String {
         let network = self.0.network.0.try_lock().ok();
         // A name that can't be read from the network now is the last one, so the error is the log's.
-        let listed = network.as_ref().and_then(|i| i.as_ref()).and_then(|i| i.r.db().machine(&self.0.id).inspect_err(|err| tracing::warn!("reading this device's name: {err:#}")).ok().flatten().map(|m| m.name));
+        let listed = network.as_ref().and_then(|i| i.as_ref()).and_then(|i| i.r.db().machine(&self.0.holds.device()).inspect_err(|err| tracing::warn!("reading this device's name: {err:#}")).ok().flatten().map(|m| m.name));
         drop(network);
         let mut name = self.0.name.lock().unwrap();
         if let Some(listed) = listed {

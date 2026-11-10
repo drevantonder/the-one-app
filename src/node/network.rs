@@ -133,7 +133,7 @@ impl Node {
         let me = Caller::own(self.0.id, user);
         // Its Vault and its first user's own open on this machine, so a new network fills items with no other step.
         for scope in [Scope::Global, Scope::User(me.user.clone())] {
-            crate::settings::new_vault_key(self, &scope, 1, &[self.0.id]).await?;
+            crate::settings::new_vault_key(self, &scope, 1, &[self.0.holds.device()]).await?;
         }
         // Written first and run together: running them one by one, each runs them all again.
         for (app, _) in crate::config::BUILT_IN {

@@ -273,7 +273,7 @@ impl Node {
         let listed = self.with(|i| {
             let db = i.r.db();
             ensure!(db.service(&endpoint.key)?.is_some() || db.machine_ever(&endpoint.key)?.is_none(), "that key is listed already, and not as a service");
-            Ok(db.service(&endpoint.key)?.map(|s| s.device == Some(self.0.id)))
+            Ok(db.service(&endpoint.key)?.map(|s| s.device == Some(self.0.holds.device())))
         })?;
         if listed.is_none() {
             // Told first: a service the relay won't let in is never reached.
@@ -283,7 +283,7 @@ impl Node {
         }
         if listed != Some(true) {
             let name = self.device_name();
-            self.member_content(&caller, content::service_endpoint(endpoint, &user, &name, service, &self.0.id)).await?;
+            self.member_content(&caller, content::service_endpoint(endpoint, &user, &name, service, &self.0.holds.device())).await?;
         }
         // Its first hello brings it the entries that say it's theirs: as soon as the relay lets it in.
         let (node, key) = (self.clone(), endpoint.key);
@@ -330,7 +330,7 @@ impl Node {
         let owing = self
             .with(|i| {
                 let db = i.r.db();
-                if db.client(&self.0.id)?.is_none_or(|c| c.user != me) {
+                if db.client(&self.0.holds.device())?.is_none_or(|c| c.user != me) {
                     return Ok(Default::default());
                 }
                 let mut owed = BTreeSet::new();
@@ -341,11 +341,11 @@ impl Node {
                 }
                 let mut epochs = Vec::new();
                 for (s, n) in db.epochs()? {
-                    if db.sealed_to(&s)?.contains(&self.0.id) && db.starts_epochs(&me, &s)? {
+                    if db.sealed_to(&s)?.contains(&self.0.holds.device()) && db.starts_epochs(&me, &s)? {
                         epochs.push((Owing::Epoch(s), n));
                     }
                 }
-                let vaults: BTreeMap<Scope, (u32, Vec<Key>)> = db.vaults()?.into_iter().filter(|(s, v)| v.to.contains(&self.0.id) && db.may(&me, "choose-devices", &scopes::object(s))).map(|(s, v)| (s, (v.n, v.to))).collect();
+                let vaults: BTreeMap<Scope, (u32, Vec<Key>)> = db.vaults()?.into_iter().filter(|(s, v)| v.to.contains(&self.0.holds.device()) && db.may(&me, "choose-devices", &scopes::object(s))).map(|(s, v)| (s, (v.n, v.to))).collect();
                 let listed: Vec<(Owing, u32)> = epochs.into_iter().chain(vaults.iter().map(|(s, (n, _))| (Owing::Vault(s.clone()), *n))).collect();
                 Ok((owed, listed, vaults))
             });
@@ -373,8 +373,8 @@ impl Node {
                 let mut unsealed = BTreeSet::new();
                 for (owing, n) in unsure {
                     let name = match &owing {
-                        Owing::Epoch(s) => crate::keys::epoch_name(&s.to_string(), n, &hex(&node.0.id)),
-                        Owing::Vault(s) => crate::keys::vault_key_name(&s.to_string(), n, &hex(&node.0.id)),
+                        Owing::Epoch(s) => crate::keys::epoch_name(&s.to_string(), n, &hex(&node.0.holds.device())),
+                        Owing::Vault(s) => crate::keys::vault_key_name(&s.to_string(), n, &hex(&node.0.holds.device())),
                     };
                     match Bucket::get(&bucket, &name).await {
                         Ok(Some(_)) => drop(node.0.owed.lock().unwrap().sealed.insert((owing, n))),

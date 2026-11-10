@@ -64,7 +64,7 @@ impl Node {
     /// stays until this device next starts.
     async fn read_global_again(&self) -> Result<()> {
         let (root, at) = self.with(|i| Ok((i.r.root(), i.r.looked())))?;
-        let Some((fresh, epochs)) = steps::read_again(&self.bucket()?, root, at, &hex(&self.0.id), &self.seal_secret(), now_ms()).await? else {
+        let Some((fresh, epochs)) = steps::read_again(&self.bucket()?, root, at, &hex(&self.0.holds.device()), &self.0.holds, now_ms()).await? else {
             tracing::warn!("who's who read again doesn't reach step {at}, where this device was: it stays as it was");
             self.with(|i| Ok(i.r.read_again = false))?;
             return Ok(());
@@ -125,9 +125,10 @@ impl Node {
     }
 
     /// Writes `content` to `global`'s scope database as a step this device signs as `user`, at the next position: when
-    /// another device wrote there first, it reads that, and signs it again for the one after.
+    /// another device wrote there first, it reads that, and signs it again for the one after. Signed by the device's key,
+    /// never this node's own, which may be its app runtime's.
     pub(super) async fn write_step(&self, user: &str, content: Content) -> Result<Step> {
-        self.write_step_as(&self.0.key, user, content).await
+        self.write_step_as(self.0.holds.signs_global(), user, content).await
     }
 
     /// `write_step`, signed by `key`: this device's, or the network's recovery key, which only ever signs on the machine

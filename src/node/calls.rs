@@ -539,7 +539,7 @@ impl Node {
         // the caller's first.
         let about_here = |d: &Value| d["prefer"][req.runs()] == "here";
         // This device: its node, or a part of it (a service endpoint of oned's own).
-        let ours = |i: &Network, k: &Key| -> Result<bool> { Ok(*k == self.0.id || i.r.db().machine(k)?.is_some_and(|m| m.device == Some(self.0.id))) };
+        let ours = |i: &Network, k: &Key| -> Result<bool> { Ok(*k == self.0.id || i.r.db().machine(k)?.is_some_and(|m| m.device == Some(self.0.holds.device()))) };
         let here_first = req.service.is_some()
             && self.with(|i| {
                 let mut part = false;
