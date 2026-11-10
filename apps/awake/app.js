@@ -73,8 +73,8 @@ export default {
         const line = (text) => ({ t: "text", text, size: "sm", tone: "muted", lines: 1 });
         const rows = all.map((d) => {
           const on = set[d.name] ?? true;
-          if (!d.online) return { t: "col", gap: 2, c: [{ t: "text", text: d.name, weight: "medium" }, line("Offline")] };
-          return { t: "col", gap: 2, c: [{ t: "toggle", label: d.name, on, tool: "set", input: { device: d.name } }, line(on ? "Awake while plugged in" : "Sleeps as usual")] };
+          const says = !d.online ? "Offline" : on ? "Awake while plugged in" : "Sleeps as usual";
+          return { t: "col", gap: 2, c: [{ t: "toggle", label: d.name, on, tool: "set", input: { device: d.name } }, line(says)] };
         });
         return { t: "col", gap: 8, c: rows };
       },
