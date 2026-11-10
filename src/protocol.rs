@@ -291,7 +291,7 @@ pub fn javascript() -> String {
          export const newestName = (prefix) => `${{prefix}}/${{NEWEST}}`;\n\
          export const updateRefusal = (yours) => {update}.replace(\"{{yours}}\", yours);\n\
          {call}",
-        header = json!({ "keys": header::KEYS, "endpoint": header::ENDPOINT, "elsewhere": header::ELSEWHERE, "trace": header::TRACE, "user": header::USER, "request": header::REQUEST, "code": header::CODE }),
+        header = json!({ "keys": header::KEYS, "endpoint": header::ENDPOINT, "elsewhere": header::ELSEWHERE, "trace": header::TRACE, "traceparent": header::TRACEPARENT, "user": header::USER, "request": header::REQUEST, "code": header::CODE }),
         urls = json!(URLS),
         relay = json!(RELAY),
         telemetry = json!(TELEMETRY),

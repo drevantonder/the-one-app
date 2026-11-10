@@ -47,6 +47,10 @@ export async function api(path, { method = "GET", body, query, raw, signal, sinc
   }
 }
 
+const hexOf = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
+/// W3C's `traceparent` for a request made here.
+const traceparent = () => `00-${hexOf(16)}-${hexOf(8)}-01`;
+
 /// `api`'s request, each send's trace kept in `trace` if it has one. The device sends it again with the keys a node
 /// asks for (onet's keyring); a request that doesn't reach a node is asked again here.
 async function sending(url, method, body, raw, signal, trace) {
@@ -63,8 +67,10 @@ async function sending(url, method, body, raw, signal, trace) {
     }
   };
   const began = performance.now();
+  // The same for each send, so what the nodes do of this one request is one trace.
+  const parent = traceparent();
   for (let misses = 0; ; ) {
-    const headers = {};
+    const headers = { [HEADER.traceparent]: parent };
     if (trace) headers[HEADER.trace] = "1";
     if (body !== undefined) headers["content-type"] = "application/json";
     const sent = body === undefined ? undefined : JSON.stringify(body);

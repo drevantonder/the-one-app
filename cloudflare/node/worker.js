@@ -997,6 +997,7 @@ async function route(p, request) {
     const req = await bodyOf(request);
     if (typeof req !== "object" || req === null || Array.isArray(req)) refuse(400, "a call is an object");
     const run = new Run(p, who, await p.networkFor(who));
+    req.traceparent = request.headers.get(HEADER.traceparent) ?? undefined;
     const named = namesThisNode(req.device);
     const app = !req.service && (!req.device || named) && deployed(run.view, req.app);
     const d = app && (await p.describe(who, app));

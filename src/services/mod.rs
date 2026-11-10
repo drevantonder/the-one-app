@@ -64,6 +64,9 @@ pub struct Call {
     pub caller: Me,
     /// The app whose `ctx.services` made the call, if one did.
     pub from: Option<String>,
+    /// W3C's `traceparent`, for what the program says of this call to be part of its request's trace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traceparent: Option<String>,
 }
 
 /// A service and its calls, which outlive any one run of its program: what the one before never took, the next one does.
@@ -160,7 +163,7 @@ impl Services {
 
     /// Hands a call to the service and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
     /// caller's scope keeps, so the devices that hold the scope can fetch it.
-    pub async fn call(&self, app: &str, function: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
+    pub async fn call(&self, app: &str, function: &str, input: Value, caller: Me, from: Option<String>, traceparent: Option<String>) -> Result<Answer> {
         let now = tokio::time::Instant::now();
         let (starts_by, answers_by) = (now + STARTS_WITHIN, now + Duration::from_secs(600));
         if self.get(app).is_none() {
@@ -170,7 +173,7 @@ impl Services {
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, mut rx) = oneshot::channel();
         p.replies.lock().unwrap().insert(id, Waiting { answer: tx, taken: false });
-        p.calls.send(Call { id, function: function.into(), input, caller, from }).map_err(|_| anyhow!("{app} stopped"))?;
+        p.calls.send(Call { id, function: function.into(), input, caller, from, traceparent }).map_err(|_| anyhow!("{app} stopped"))?;
         // A running program takes a call at once; one restarting, when it's back. Past that it isn't coming in time.
         let answer = match tokio::time::timeout_at(starts_by, &mut rx).await {
             Ok(answer) => answer,
@@ -337,7 +340,7 @@ mod tests {
 
     fn asked(services: &std::sync::Arc<Services>) -> tokio::task::JoinHandle<Result<Answer>> {
         let services = services.clone();
-        tokio::spawn(async move { services.call("s", "f", json!({}), me(), None).await })
+        tokio::spawn(async move { services.call("s", "f", json!({}), me(), None, None).await })
     }
 
     #[tokio::test(start_paused = true)]

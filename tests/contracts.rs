@@ -530,7 +530,7 @@ mod service_protocol {
     async fn services_in_rust_and_go_speak_the_protocol_their_node_reads() {
         let fixture = wire();
         // The node sends a call as the file says, and replies as the file says reach it as what they are.
-        let sent = Call { id: 7, function: "events".into(), input: fixture["call"]["input"].clone(), caller: me(), from: Some("calendar".into()) };
+        let sent = Call { id: 7, function: "events".into(), input: fixture["call"]["input"].clone(), caller: me(), from: Some("calendar".into()), traceparent: fixture["call"]["traceparent"].as_str().map(str::to_string) };
         assert_eq!(serde_json::to_value(&sent).unwrap(), fixture["call"], "wire.json's call is what the node sends");
         let allowed: Vec<&str> = fixture["registers"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
 
@@ -564,7 +564,7 @@ mod service_protocol {
 
             // It answers a call, a refusal and, in Go, one that belongs on another device.
             async fn ask(registry: &Registry, name: &str, function: &str, input: Value) -> anyhow::Result<one::services::Answer> {
-                registry.services().call(name, function, input, me(), None).await
+                registry.services().call(name, function, input, me(), None, None).await
             }
             let (function, input, field, says) = case.ok.clone();
             let out = ask(&registry, name, function, input.clone()).await.unwrap_or_else(|err| panic!("{name} answers {function}: {err:#}"));

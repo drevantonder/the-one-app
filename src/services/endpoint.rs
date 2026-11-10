@@ -366,7 +366,7 @@ impl Service {
                 Ok(()) => json!({ "ok": true }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             },
-            Some(crate::protocol::message::ASK) if self.is_node(&remote) => self.run(remote, &body["call"]).await.unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
+            Some(crate::protocol::message::ASK) if self.is_node(&remote) => self.run(remote, &body["call"], body["traceparent"].as_str()).await.unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
             _ => json!({ "error": format!("only {YOURS}'s devices are answered") }),
         }
     }
@@ -431,7 +431,7 @@ impl Service {
 
     /// Runs a call a node asked for, if it may: → `{ ok }`, `{ error }`, or `{ elsewhere }` for a call this service
     /// can't run here.
-    async fn run(&self, remote: Key, call: &Value) -> Result<Value> {
+    async fn run(&self, remote: Key, call: &Value, traceparent: Option<&str>) -> Result<Value> {
         let me = &call["me"];
         let (key, user) = match (me["key"].as_str().map(unhex), me["user"].as_str()) {
             (Some(Ok(key)), Some(user)) => (key, user.to_string()),
@@ -456,7 +456,7 @@ impl Service {
         };
         let input = if call["input"].is_null() { json!({}) } else { call["input"].clone() };
         let from = call["from"].as_str().map(str::to_string);
-        Ok(match self.services().call(&self.0.name, call["function"].as_str().unwrap_or(""), input, caller, from).await {
+        Ok(match self.services().call(&self.0.name, call["function"].as_str().unwrap_or(""), input, caller, from, traceparent.map(str::to_string)).await {
             Ok(answer) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
             Err(err) if err.is::<crate::services::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
             Err(err) => match crate::protocol::Coded::of(&err) {

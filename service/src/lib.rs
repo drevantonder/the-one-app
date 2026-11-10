@@ -41,6 +41,9 @@ pub struct Call {
     /// The app whose `ctx.services` made the call, if one did.
     #[serde(default)]
     pub from: Option<String>,
+    /// W3C's `traceparent`: send it as your spans' parent, so they're part of the trace of the request that made this call.
+    #[serde(default)]
+    pub traceparent: Option<String>,
 }
 
 /// What a call gives back: its answer, and blobs the caller's scope keeps.
