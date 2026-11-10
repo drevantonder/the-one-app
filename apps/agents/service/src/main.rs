@@ -73,10 +73,17 @@ fn sync(host: &Host) -> Result<()> {
         let text = format!(
             "<!-- Your AGENTS.md app keeps this the same on every device: change it with agents_set (`{cli} agents set`), and add a skill for every agent with agents_skill_set (`{cli} agents skill_set`). Edited here, it stays on this device and stops updating. -->\n\n{text}"
         );
-        let codex = std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
-        for dir in [codex, home.join(".config/amp"), home.join(".config/opencode")] {
-            if dir.is_dir() {
-                written.write(&dir.join("AGENTS.md"), &text);
+        let home_of = |var: &str, default: &str| std::env::var_os(var).map(PathBuf::from).unwrap_or_else(|| home.join(default));
+        // Claude Code reads only its own CLAUDE.md, never AGENTS.md.
+        let files = [
+            home_of("CODEX_HOME", ".codex").join("AGENTS.md"),
+            home.join(".config/amp/AGENTS.md"),
+            home.join(".config/opencode/AGENTS.md"),
+            home_of("CLAUDE_CONFIG_DIR", ".claude").join("CLAUDE.md"),
+        ];
+        for file in files {
+            if file.parent().is_some_and(Path::is_dir) {
+                written.write(&file, &text);
             }
         }
     }
