@@ -25,6 +25,8 @@ use crate::keys::{self, Endpoint, Key, Signs, hex, unhex};
 use crate::onboarding::sign_in_proof::{self, Account, Proof};
 use crate::protocol::{Coded, code};
 
+pub mod recovery;
+
 /// How long app schedules last, unless their user renews them as they use the app.
 pub const APP_SCHEDULES_DAYS: u64 = 30;
 const DAY: u64 = 86_400_000;
@@ -70,6 +72,13 @@ pub trait Me: Signs {
     fn leave(&self) -> impl Future<Output = Result<()>>;
     /// What's kept at `name` in the bucket, sealed as it is.
     fn stored(&self, name: &str) -> impl Future<Output = Result<Option<Vec<u8>>>>;
+    /// Keeps `bytes` at `name` in the bucket, only if nothing is there (`stored::created`): false if something else is.
+    fn create(&self, name: &str, bytes: &[u8]) -> impl Future<Output = Result<bool>>;
+    /// Deletes what's at `name` in the bucket.
+    fn delete(&self, name: &str) -> impl Future<Output = Result<()>>;
+    /// Signs `content` with `key`, the network's recovery key, as `user`'s, as the next step of `global`'s scope
+    /// database, and writes it (`recovery`).
+    fn write_as(&self, key: &crate::keys::SigningKey, user: &str, content: Content) -> impl Future<Output = Result<()>>;
     /// Opens what's sealed to this device.
     fn open(&self, sealed: &[u8]) -> impl Future<Output = Result<Vec<u8>>>;
 }

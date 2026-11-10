@@ -216,36 +216,6 @@ impl Node {
         }
         Ok(json!({ "recovery": recovery, "holders": out }))
     }
-
-    /// Keeps a copy of the recovery key, sealed and signed by whoever has its file on this machine, for `to`: only a
-    /// device who's who says may hold it, of someone an admin named (`ScopeDb::recovery_devices`), and only by an admin's
-    /// own machine. This node never sees the key: what's sealed goes by. One there already stays, unless the recovery key
-    /// never signed it: then it's anyone's who can reach the bucket, and it goes for this one.
-    pub async fn seal_recovery(&self, to: &str, copy: &str) -> Result<()> {
-        let copy = B64U.decode(copy.trim().as_bytes()).map_err(|_| anyhow!("copy is base64url"))?;
-        ensure!(!copy.is_empty() && copy.len() <= SEALED_MAX + 64, "a sealed key is at most {SEALED_MAX} bytes");
-        let key = crate::keys::unhex(to)?;
-        let me = self.user()?;
-        let recovery = self.with(|i| {
-            let db = i.r.db();
-            allowed!(db.may(&me, "change-settings", scopes::NETWORK), "only an admin seals the recovery key to someone who holds it");
-            let may_hold = db.recovery_holders()?.into_iter().try_fold(false, |found, user| Ok::<_, anyhow::Error>(found || db.recovery_devices(&user)?.iter().any(|d| d.key == key)))?;
-            ensure!(may_hold, "the recovery key is sealed only to a device of someone an admin named, and not to a browser, a node or a passkey");
-            db.recovery()?.context("this network has no recovery key to seal")
-        })?;
-        ensure!(crate::keys::held_sealed(&recovery, to, &copy).is_some(), "that copy isn't signed by the recovery key");
-        let (bucket, name) = (self.bucket()?, crate::keys::recovery_held_name(&hex(&recovery), to));
-        if let Some(there) = Bucket::get(&bucket, &name).await? {
-            if crate::keys::held_sealed(&recovery, to, &there.bytes).is_some() {
-                return Err(crate::protocol::Coded::error(crate::protocol::code::ALREADY, "that device has the recovery key already"));
-            }
-            Bucket::delete(&bucket, &name).await?;
-        }
-        if !crate::database::stored::created(&bucket, &name, &copy).await? {
-            return Err(crate::protocol::Coded::error(crate::protocol::code::ALREADY, "that device has the recovery key already"));
-        }
-        Ok(())
-    }
 }
 
 impl Node {

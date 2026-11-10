@@ -100,6 +100,13 @@ fn main() {
         }
         return;
     }
+    if onet::computer::invoked() {
+        if let Err(err) = onet::computer::run(&args) {
+            eprintln!("{}: {err:#}", onet::computer::name());
+            std::process::exit(1);
+        }
+        return;
+    }
     // Run by git, for a repo's address.
     if one::os::invoked_as().is_some_and(|me| me == one::git_wire::helper()) {
         match git_remote::run(&args) {

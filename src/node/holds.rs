@@ -175,29 +175,31 @@ async fn held(State(node): State<Node>) -> Reply {
     Ok(axum::Json(json!({ "key": hex(&holds.device()), "seal": hex(&crate::keys::Opens::public(holds)) })))
 }
 
+/// What `/api/holds/shared` takes: answered by whatever holds the device's key, its node or its onet.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Share {
+pub struct HeldShare {
     /// An X25519 public key, base64url.
-    share: String,
+    pub share: String,
 }
 
 /// The X25519 secret the device's seal key shares with `share`: what opens something sealed to the device.
-async fn shared(State(node): State<Node>, Body(body): Body<Share>) -> Reply {
+async fn shared(State(node): State<Node>, Body(body): Body<HeldShare>) -> Reply {
     let share = <[u8; 32]>::try_from(B64U.decode(body.share.as_bytes()).map_err(anyhow::Error::from)?).map_err(|_| anyhow!("a share is 32 bytes"))?;
     let shared = crate::keys::Opens::shared(&node.0.holds, &share).await?;
     Ok(axum::Json(json!({ "shared": B64U.encode(&shared) })))
 }
 
+/// What `/api/holds/write` takes: answered by whatever holds the device's key, its node or its onet.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Write {
-    user: String,
-    content: Content,
+pub struct HeldWrite {
+    pub user: String,
+    pub content: Content,
 }
 
 /// Writes a step of `global` as the device, for its user alone.
-async fn write(State(node): State<Node>, Body(body): Body<Write>) -> Reply {
+async fn write(State(node): State<Node>, Body(body): Body<HeldWrite>) -> Reply {
     if body.user != node.user()? {
         return Err(anyhow!("the device writes in global only as its own user").into());
     }

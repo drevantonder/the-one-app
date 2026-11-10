@@ -1,7 +1,6 @@
 //! How this machine's own programs prove they are: the token in the node's home, which they send and the node checks.
 
 use super::addr;
-use crate::node::Node;
 
 /// The file in a node's home holding the token its machine's own programs send, in `protocol::header::LOCAL_TOKEN`, to say they
 /// are: only the machine's user can read it. The CLI, its MCP, services and the Mac app read it there.
@@ -34,7 +33,7 @@ const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host",
 
 /// What a program that didn't show the token is told by the node, with `code::NOT_THIS_MACHINE`: the node can't know which
 /// home the program read its token from, so the program says that (`token_refused`) where it can.
-pub(super) fn not_this_machine() -> String {
+pub fn not_this_machine() -> String {
     let name = crate::config::NAME;
     format!("{name} on this machine didn't take this request as from one of its own programs: it needs the token in the node's home, which only this machine's user can read.")
 }
@@ -56,12 +55,12 @@ pub fn token_refused(home: &std::path::Path) -> String {
 /// names whatever host it likes, but can't read the token, which only this machine's user can. A browser says when a
 /// page asked, its own address's too (`Origin`, `Sec-Fetch-Site`), and a screen this node served is an app's code,
 /// which only a shell or a sandboxed frame answers.
-pub(super) fn from_this_machine(node: &Node, req: &axum::extract::Request) -> bool {
+pub fn from_this_machine(local_token: &str, req: &axum::extract::Request) -> bool {
     let header = |name| req.headers().get(name).and_then(|h| h.to_str().ok());
     let peer = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().is_some_and(|c| c.0.ip().is_loopback());
     // Compared as hashes, so how long it takes says nothing of the token.
     let digest = |t: &str| <sha2::Sha256 as sha2::Digest>::digest(t.as_bytes());
-    let token = header(crate::protocol::header::LOCAL_TOKEN).is_some_and(|t| digest(t.trim()) == digest(node.local_token()));
+    let token = header(crate::protocol::header::LOCAL_TOKEN).is_some_and(|t| digest(t.trim()) == digest(local_token));
     // A proxy on this machine still says it passed on someone else's request.
     let forwarded = FORWARDED.iter().any(|h| req.headers().contains_key(*h));
     let page = header("origin").is_some() || header("sec-fetch-site").is_some_and(|s| s != "none");

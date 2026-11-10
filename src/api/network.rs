@@ -7,7 +7,7 @@ use serde_json::json;
 
 
 use crate::node::Node;
-use crate::says::api::Join;
+use crate::says::api::{Create, Join};
 
 use super::guard::Me;
 use super::{Routes, Who};
@@ -55,15 +55,6 @@ async fn state(State(node): State<Node>, client: Option<axum::Extension<Me>>) ->
         Some(me) => node.state_for_client(&me.caller, me.client.as_deref().unwrap_or_default())?,
         None => node.state()?,
     })))
-}
-
-/// A new network, named `name`, whose first user is `user_name` (with `user`, their id).
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Create {
-    name: String,
-    user_name: String,
-    user: Option<String>,
 }
 
 async fn create(State(node): State<Node>, Body(body): Body<Create>) -> Reply {

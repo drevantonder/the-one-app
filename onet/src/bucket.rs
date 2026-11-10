@@ -87,3 +87,58 @@ impl Bucket for Signed {
         n0_future::time::sleep(n0_future::time::Duration::from_millis(ms)).await
     }
 }
+
+/// The network's bucket as a device reaches it: through the URL signer, only reading, as a phone or a native app does;
+/// or on a computer, the place its home's network file names (`one::bucket::Place`), a folder here or S3 through the URL
+/// signer, which it may write in too, as anyone in the network may create there what isn't yet.
+pub enum Reached {
+    Signed(Signed),
+    #[cfg(feature = "computer")]
+    Place(one::bucket::Place),
+}
+
+impl Bucket for Reached {
+    async fn get(&self, name: &str) -> Result<Option<Object>> {
+        match self {
+            Reached::Signed(b) => b.get(name).await,
+            #[cfg(feature = "computer")]
+            Reached::Place(b) => Bucket::get(b, name).await,
+        }
+    }
+
+    async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
+        match self {
+            Reached::Signed(b) => b.create(name, bytes).await,
+            #[cfg(feature = "computer")]
+            Reached::Place(b) => Bucket::create(b, name, bytes).await,
+        }
+    }
+
+    async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
+        match self {
+            Reached::Signed(b) => b.replace(name, bytes, tag).await,
+            #[cfg(feature = "computer")]
+            Reached::Place(b) => Bucket::replace(b, name, bytes, tag).await,
+        }
+    }
+
+    async fn wait(&self, ms: u64) {
+        n0_future::time::sleep(n0_future::time::Duration::from_millis(ms)).await
+    }
+
+    fn now(&self) -> u64 {
+        match self {
+            Reached::Signed(b) => b.now(),
+            #[cfg(feature = "computer")]
+            Reached::Place(b) => Bucket::now(b),
+        }
+    }
+
+    async fn delete(&self, name: &str) -> Result<()> {
+        match self {
+            Reached::Signed(b) => b.delete(name).await,
+            #[cfg(feature = "computer")]
+            Reached::Place(b) => Bucket::delete(b, name).await,
+        }
+    }
+}

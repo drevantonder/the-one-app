@@ -19,20 +19,38 @@ pub(super) fn bucket_root(place: &Place) -> Result<Option<Vec<u8>>> {
     Ok(old)
 }
 
-pub(super) const NETWORK_DIR: &str = "network";
+pub const NETWORK_DIR: &str = "network";
 
-pub(super) const NETWORK_FILE: &str = "network.json";
+pub const NETWORK_FILE: &str = "network.json";
 
+/// The network a computer is in, as its home keeps it (`<home>/network/network.json`): read by its node and its onet.
 #[derive(Serialize, Deserialize)]
-pub(super) struct NetworkFile {
-    pub(super) root: String,
-    pub(super) user: String,
+pub struct NetworkFile {
+    pub root: String,
+    pub user: String,
     /// The network's bucket, as a place's fields: a folder's `path`, or S3's. None if this device can't reach it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) bucket: Option<BTreeMap<String, String>>,
+    pub bucket: Option<BTreeMap<String, String>>,
     /// The folders on this device it backs up to, by their place's id: a folder is only ever this device's own choice.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(super) folders: BTreeMap<String, String>,
+    pub folders: BTreeMap<String, String>,
+}
+
+impl NetworkFile {
+    /// The network the computer whose home is `home` is in, if it's in one.
+    pub fn read(home: &Path) -> Result<Option<NetworkFile>> {
+        match std::fs::read(home.join(NETWORK_DIR).join(NETWORK_FILE)) {
+            Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    pub fn write(&self, home: &Path) -> Result<()> {
+        let dir = home.join(NETWORK_DIR);
+        std::fs::create_dir_all(&dir)?;
+        write_private(&dir.join(NETWORK_FILE), &serde_json::to_vec_pretty(self)?)
+    }
 }
 
 impl Node {
@@ -85,10 +103,7 @@ impl Node {
     }
 
     pub(super) fn save_network(&self, file: &NetworkFile) -> Result<()> {
-        let dir = self.network_dir();
-        std::fs::create_dir_all(&dir)?;
-        write_private(&dir.join(NETWORK_FILE), &serde_json::to_vec_pretty(file)?)?;
-        Ok(())
+        file.write(&self.0.dir)
     }
 
     /// Creates the network, with every built-in app added (owned by admins), so anyone may add one to their own page,

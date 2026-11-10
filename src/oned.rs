@@ -660,7 +660,15 @@ async fn serve(args: &[String]) -> Result<()> {
     // installed here reach this node.
     let mode = crate::mode::here();
     if matches!(mode, crate::mode::Mode::Own) {
-        tokio::spawn(crate::harnesses::keep(node.clone(), dir.clone(), api::addr()));
+        let asked = node.clone();
+        let apps = move || {
+            let node = asked.clone();
+            async move {
+                let me = crate::node::Caller::local(&node).ok().filter(|_| node.has_network())?;
+                Some(node.apps(&me).await.unwrap_or_default())
+            }
+        };
+        tokio::spawn(crate::harnesses::keep(apps, dir.clone(), api::addr()));
     }
     if let Ok(address) = node.address() {
         crate::git_wire::wire_here(address);

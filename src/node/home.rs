@@ -21,9 +21,14 @@ pub(super) fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// The key (hex) and name of the device whose home is `dir`, as it last was.
 pub fn device_here(dir: &Path) -> Result<(String, String)> {
+    let (key, name) = device_key(dir)?;
+    Ok((hex(&key.verifying_key().to_bytes()), name))
+}
+
+/// The key and name of the device whose home is `dir`, made the first time.
+pub fn device_key(dir: &Path) -> Result<(ed25519_dalek::SigningKey, String)> {
     let file = load_device(dir)?;
-    let key = ed25519_dalek::SigningKey::from_bytes(&unhex(&file.secret)?);
-    Ok((hex(&key.verifying_key().to_bytes()), file.name))
+    Ok((ed25519_dalek::SigningKey::from_bytes(&unhex(&file.secret)?), file.name))
 }
 
 pub(super) fn load_device(dir: &Path) -> Result<DeviceFile> {
@@ -55,7 +60,7 @@ pub(super) fn load_runtime_key(folder: &Path) -> Result<SigningKey> {
 
 /// This machine's own programs' token (in its app runtime's folder, the one they ask that with), made once: only its
 /// user reads the file, which a program in a VM or emulator here, or a page, can't.
-pub(super) fn load_local_token(dir: &Path) -> Result<String> {
+pub fn load_local_token(dir: &Path) -> Result<String> {
     let path = dir.join(crate::api::LOCAL_TOKEN);
     match std::fs::read_to_string(&path) {
         Ok(token) if !token.trim().is_empty() => Ok(token.trim().to_string()),

@@ -9,7 +9,7 @@ use serde_json::json;
 
 use crate::api::{Body, Me, Reply, Routes, Who, done, given};
 use crate::node::Node;
-use crate::says::devices::{Device, Pair};
+use crate::says::devices::{ApproveWithRecovery, Device, Pair, ReplaceRecovery, SealRecovery, recovery_key};
 
 pub fn routes() -> Routes {
     Routes::default()
@@ -45,55 +45,20 @@ async fn erase(State(node): State<Node>, me: Me, Body(body): Body<Device>) -> Re
     Ok(Json(node.erase(&me.caller, given(&body.key, "key")?).await?))
 }
 
-/// Lets in the device showing `code` with `recovery`, the network's recovery key (hex), read by the command on this
-/// machine (`devices::cli`) and never kept.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Approve {
-    code: String,
-    #[serde(default)]
-    confirm: bool,
-    recovery: String,
-}
-
-async fn approve_with_recovery(State(node): State<Node>, Body(body): Body<Approve>) -> Reply {
-    let secret: [u8; 32] = crate::keys::unhex(body.recovery.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
-    let key = ed25519_dalek::SigningKey::from_bytes(&secret);
-    let mut approved = node.approve_with_recovery(given(&body.code, "code")?, &key, body.confirm).await?;
-    approved["said"] = json!(crate::settings::said_approved(&approved));
-    Ok(Json(approved))
-}
-
-/// Replaces the recovery key with `next`, both read by the command on this machine (`devices::cli`) and never kept.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReplaceRecovery {
-    recovery: String,
-    next: String,
-    #[serde(default)]
-    confirm: bool,
+async fn approve_with_recovery(State(node): State<Node>, Body(body): Body<ApproveWithRecovery>) -> Reply {
+    let key = recovery_key(&body.recovery, "a recovery key")?;
+    Ok(Json(crate::settings::recovery::approve(&node, given(&body.code, "code")?, &key, body.confirm).await?))
 }
 
 async fn replace_recovery(State(node): State<Node>, Body(body): Body<ReplaceRecovery>) -> Reply {
-    let key = |hex: &str, what: &str| crate::keys::unhex(hex.trim()).map_err(|_| anyhow::anyhow!("{what} is 64 hex characters")).map(|k| ed25519_dalek::SigningKey::from_bytes(&k));
-    Ok(Json(node.replace_recovery(&key(&body.recovery, "a recovery key")?, &key(&body.next, "the next recovery key")?, body.confirm).await?))
+    Ok(Json(crate::settings::recovery::replace(&node, &recovery_key(&body.recovery, "a recovery key")?, &recovery_key(&body.next, "the next recovery key")?, body.confirm).await?))
 }
 
 async fn recovery_holders(State(node): State<Node>, me: Me) -> Reply {
     Ok(Json(node.recovery_holders(&me.caller).await?))
 }
 
-/// The recovery key, sealed on this machine by the command that read its file (`devices::cli`), for a device that may
-/// hold it.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SealRecovery {
-    to: String,
-    /// What the recovery key signed and sealed for it (`keys::held_copy`).
-    copy: String,
-}
-
 async fn seal_recovery(State(node): State<Node>, Body(body): Body<SealRecovery>) -> Reply {
-    node.seal_recovery(given(&body.to, "to")?, given(&body.copy, "copy")?).await?;
+    crate::settings::recovery::seal(&node, given(&body.to, "to")?, given(&body.copy, "copy")?).await?;
     done()
 }

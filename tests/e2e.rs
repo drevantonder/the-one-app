@@ -359,17 +359,17 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     let before = opens(&phone).await;
 
     let to = hex(&phone.verifying_key().to_bytes());
-    assert!(a.seal_recovery(&to, &sealed_for(&phone)).await.is_err(), "no one is named yet");
+    assert!(one::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.is_err(), "no one is named yet");
     name(true).await;
     assert_eq!(opens(&phone).await, before, "naming a holder rewrites nothing sealed");
     let sealed_to_node = seal_to(&one::keys::public_of(&[9; 32]), &secret).unwrap();
-    assert!(a.seal_recovery(&hex(&a.id()), &B64U.encode(&one::keys::held_copy(&recovery, &hex(&a.id()), &sealed_to_node))).await.is_err(), "not a node");
-    assert!(a.seal_recovery(&hex(&browser.verifying_key().to_bytes()), &sealed_for(&browser)).await.is_err(), "not a browser");
+    assert!(one::settings::recovery::seal(&a, &hex(&a.id()), &B64U.encode(&one::keys::held_copy(&recovery, &hex(&a.id()), &sealed_to_node))).await.is_err(), "not a node");
+    assert!(one::settings::recovery::seal(&a, &hex(&browser.verifying_key().to_bytes()), &sealed_for(&browser)).await.is_err(), "not a browser");
 
     let bad_key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let sealed = seal_to(&Endpoint::of(&phone).seal, &secret).unwrap();
-    assert!(a.seal_recovery(&to, &B64U.encode(&one::keys::held_copy(&bad_key, &to, &sealed))).await.is_err(), "only the recovery key signs a copy");
-    a.seal_recovery(&to, &sealed_for(&phone)).await.unwrap();
+    assert!(one::settings::recovery::seal(&a, &to, &B64U.encode(&one::keys::held_copy(&bad_key, &to, &sealed))).await.is_err(), "only the recovery key signs a copy");
+    one::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.unwrap();
     // Anyone who can reach the bucket can create an object at that name: it neither counts nor stands in the way.
     let files: Vec<_> = walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_recovery/")).collect();
     assert!(!files.is_empty());
@@ -377,11 +377,11 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
         std::fs::write(file, b"anyone can make this").unwrap();
     }
     assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "a fake isn't counted");
-    a.seal_recovery(&to, &sealed_for(&phone)).await.unwrap();
+    one::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.unwrap();
     let listed = a.recovery_holders(&me).await.unwrap();
     assert_eq!(listed["holders"][0]["devices"][0]["holds"], true, "{listed}");
     assert_eq!(listed["holders"][0]["devices"].as_array().unwrap().len(), 1, "only the phone: {listed}");
-    assert!(a.seal_recovery(&to, &sealed_for(&phone)).await.is_err(), "the one there stays");
+    assert!(one::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.is_err(), "the one there stays");
     let held: Vec<_> = walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_recovery/")).collect();
     assert_eq!(held.len(), 1, "{held:?}");
     let copy = std::fs::read(&held[0]).unwrap();
@@ -391,7 +391,7 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
 
     name(false).await;
     let laptop = new_device("linux").await;
-    assert!(a.seal_recovery(&hex(&laptop.verifying_key().to_bytes()), &sealed_for(&laptop)).await.is_err(), "taken off, none of their devices is sealed it");
+    assert!(one::settings::recovery::seal(&a, &hex(&laptop.verifying_key().to_bytes()), &sealed_for(&laptop)).await.is_err(), "taken off, none of their devices is sealed it");
     assert!(a.recovery_holders(&me).await.unwrap()["holders"].as_array().unwrap().is_empty());
 }
 
@@ -425,7 +425,7 @@ async fn a_holder_restores_someone_and_no_one_else_can() {
     assert!(restore(true).await.is_err(), "no one is named yet");
     name(true).await;
     assert!(restore(true).await.unwrap_err().to_string().contains("doesn't have the recovery key"), "named, without its own copy");
-    a.seal_recovery(&to, &B64U.encode(&one::keys::held_copy(&recovery, &to, &seal_to(&e.seal, &secret).unwrap()))).await.unwrap();
+    one::settings::recovery::seal(&a, &to, &B64U.encode(&one::keys::held_copy(&recovery, &to, &seal_to(&e.seal, &secret).unwrap()))).await.unwrap();
     let phone_copy = walk(&dir).into_iter().find(|p| p.to_string_lossy().contains("/_recovery/")).unwrap();
     let mine = phone_copy.with_file_name(hex(&a.id()));
     std::fs::write(&mine, one::keys::held_copy(&recovery, &hex(&a.id()), &seal_to(&one::settings::Me::seal(&a), &secret).unwrap())).unwrap();
@@ -459,7 +459,7 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "phone", "user": me.user, "platform": "iphone" })).unwrap();
     one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
     one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
-    a.seal_recovery(&hex(&e.key), &B64U.encode(&one::keys::held_copy(&old, &hex(&e.key), &seal_to(&e.seal, &old_secret).unwrap()))).await.unwrap();
+    one::settings::recovery::seal(&a, &hex(&e.key), &B64U.encode(&one::keys::held_copy(&old, &hex(&e.key), &seal_to(&e.seal, &old_secret).unwrap()))).await.unwrap();
     assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], true);
 
     let own = one::database::scopes::Scope::User(me.user.clone());
@@ -471,12 +471,12 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     let before = a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap();
     let n1 = before["epoch"].as_u64().unwrap() as u32;
 
-    let said = a.replace_recovery(&old, &new, false).await.unwrap();
+    let said = one::settings::recovery::replace(&a, &old, &new, false).await.unwrap();
     assert!(said["said"].as_str().unwrap().contains("Would"), "{said}");
     assert_eq!(a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap()["epoch"], n1, "and changes nothing");
-    assert!(a.replace_recovery(&new, &ed25519_dalek::SigningKey::from_bytes(&rand::random()), true).await.is_err(), "a file that isn't the recovery key changes nothing");
+    assert!(one::settings::recovery::replace(&a, &new, &ed25519_dalek::SigningKey::from_bytes(&rand::random()), true).await.is_err(), "a file that isn't the recovery key changes nothing");
 
-    let done = a.replace_recovery(&old, &new, true).await.unwrap();
+    let done = one::settings::recovery::replace(&a, &old, &new, true).await.unwrap();
     assert!(done["not_renewed"].as_array().unwrap().is_empty() && done["not_carried"].as_array().unwrap().is_empty(), "{done}");
     assert_eq!(a.state().unwrap().network.unwrap().recovery.unwrap(), hex(&new.verifying_key().to_bytes()));
     let n2 = a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap()["epoch"].as_u64().unwrap() as u32;
@@ -497,7 +497,7 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "old holders' copies stop counting");
     assert!(walk(&dir).into_iter().any(|p| p.to_string_lossy().contains(&format!("/_recovery/{}/", hex(&old.verifying_key().to_bytes())))), "and nothing sealed was deleted");
 
-    let again = a.replace_recovery(&old, &new, true).await.unwrap();
+    let again = one::settings::recovery::replace(&a, &old, &new, true).await.unwrap();
     assert!(again["renewed"].as_array().unwrap().is_empty(), "run again, nothing's made twice: {again}");
     assert_eq!(a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap()["epoch"].as_u64().unwrap() as u32, n2);
 }
@@ -519,7 +519,7 @@ async fn a_backup_keeps_a_holders_copy_of_the_recovery_key() {
     one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
     let to = hex(&e.key);
     let sealed = seal_to(&e.seal, &secret).unwrap();
-    a.seal_recovery(&to, &B64U.encode(&one::keys::held_copy(&recovery, &to, &sealed))).await.unwrap();
+    one::settings::recovery::seal(&a, &to, &B64U.encode(&one::keys::held_copy(&recovery, &to, &sealed))).await.unwrap();
 
     let dir = temp("holder-backup-disk").join("One Backups");
     a.add_place(&me, &json!({ "path": dir, "title": "Disk" })).await.unwrap();
@@ -1027,6 +1027,91 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     let slots = k.dir().join("network/bucket/global").join(one::database::scopes::APP).join("slots/notes/tick");
     let taken: Vec<String> = std::fs::read_dir(slots).unwrap().map(|f| std::fs::read_to_string(f.unwrap().path()).unwrap()).collect();
     assert_eq!(taken, vec![one::keys::hex(&r.key)], "each slot's lease names who took it");
+}
+
+/// A computer's onet holds its device's key for the device's app runtime, an endpoint of its own key: the runtime asks
+/// it for what that key opens, and onet asks the runtime, its own, with the token in the runtime's folder, which the
+/// home's token isn't. A call made on onet runs there, and reaches the user's other devices.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
+    use one::database::content::{self, Change};
+    use one::database::scopes::Kind;
+    let k = start("onet-device").await;
+    create(&k, "Home", "Andre").await;
+    add_notes(&k).await;
+    let _relay = relay(&k).await;
+    let b = start("onet-other").await;
+    b.join(&k.pair().unwrap()).await.unwrap();
+    let me = one::node::Caller::own(k.id(), k.user().unwrap());
+
+    // The device's home as onet and its runtime share it: its key, network and token; the runtime's key in its folder,
+    // listed by the device as a compute naming it, let in at the relay; then the device drops its own Compute.
+    let home = crate::temp("onet-home");
+    for file in ["device.json", one::api::LOCAL_TOKEN, "network/network.json"] {
+        std::fs::create_dir_all(home.join(file).parent().unwrap()).unwrap();
+        std::fs::copy(k.dir().join(file), home.join(file)).unwrap();
+    }
+    let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let r = one::keys::Endpoint::of(&key);
+    let folder = one::node::runtime_folder(&home);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("key"), one::keys::hex(&key.to_bytes())).unwrap();
+    let listing = |key: &[u8; 32], seal: &[u8; 32], name: &str, roles: &[Kind], device: Option<&[u8; 32]>| {
+        content::node(Change::Device, json!({ "key": one::keys::hex(key), "seal": one::keys::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(one::keys::hex) }))
+    };
+    k.member_content(&me, listing(&r.key, &r.seal, "onet-device's runtime", &[Kind::Compute], Some(&k.id()))).await.unwrap();
+    one::settings::tell(&k, &k, json!({ "add": one::keys::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
+    k.member_content(&me, listing(&k.id(), &one::settings::Me::seal(&k), "onet-device", &[Kind::Client], None)).await.unwrap();
+
+    let free = || format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
+    let (onet_at, runtime_at) = (free(), free());
+    let started = |name: String, args: Vec<String>, addr: &str, log: &str| {
+        let log = std::fs::File::create(home.join(log)).unwrap();
+        let mut program = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
+        std::os::unix::process::CommandExt::arg0(&mut program, name);
+        program.args(args).env(one::config::env("HOME"), &home).env(one::config::env("ADDR"), addr).stdout(log.try_clone().unwrap()).stderr(log);
+        Runtime(program.spawn().unwrap())
+    };
+    let _onet = started(onet::computer::name(), vec![format!("--listen={onet_at}"), format!("--runtime={runtime_at}")], &onet_at, "onet.log");
+    let home_token = std::fs::read_to_string(home.join(one::api::LOCAL_TOKEN)).unwrap();
+    let held = async || ask(&onet_at, "GET", "/api/holds", &home_token, None).await;
+    polled("onet to answer", &home.join("onet.log"), async || held().await.0 == 200).await;
+    assert_eq!(held().await.1["key"], one::keys::hex(&k.id()), "it holds the device's key");
+    let _runtime = started(one::oned::name(), vec![one::database::scopes::APPS_PART.into(), format!("--listen={runtime_at}")], &onet_at, "runtime.log");
+    polled("the runtime to start", &home.join("runtime.log"), async || ask(&runtime_at, "GET", "/api/state", "", None).await.0 == 403).await;
+    assert_eq!(ask(&runtime_at, "GET", "/api/state", &home_token, None).await.0, 403, "the runtime takes only its own token");
+
+    let post = json!({ "app": "notes", "tool": "post", "input": { "text": "through onet" } });
+    let mut ran = Value::Null;
+    polled("a call through onet", &home.join("runtime.log"), async || {
+        let (status, _, trace) = ask(&onet_at, "POST", "/api/call", &home_token, Some(post.clone())).await;
+        ran = trace;
+        status == 200
+    })
+    .await;
+    let here = ran["steps"].as_array().into_iter().flatten().any(|s| s["here"] == true && s["device"] == "onet-device's runtime");
+    assert!(here, "its own runtime took it, asked on its loopback: {ran}");
+    let lines = async |node: &one::node::Node| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
+    eventually("its write to reach another device", &b, async || lines(&b).await.contains("through onet")).await;
+}
+
+/// Asks `at` as one of a computer's own programs would, with `token`, for a trace too. → status, answer, and the trace
+/// of whoever answered, if it said.
+async fn ask(at: &str, method: &str, path: &str, token: &str, body: Option<Value>) -> (u16, Value, Value) {
+    let (url, method, token) = (format!("http://{at}{path}"), method.to_string(), token.to_string());
+    tokio::task::spawn_blocking(move || {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        let request = ureq::http::Request::builder().method(method.as_str()).uri(&url).header(one::protocol::header::LOCAL_TOKEN, &token).header(one::protocol::header::TRACE, "1").header("content-type", "application/json");
+        match agent.run(request.body(body.map(|b| b.to_string()).unwrap_or_default()).unwrap()) {
+            Ok(mut answer) => {
+                let trace = answer.headers().get(one::protocol::header::TRACE).and_then(|t| data_encoding::BASE64.decode(t.as_bytes()).ok()).and_then(|t| serde_json::from_slice(&t).ok()).unwrap_or_default();
+                (answer.status().as_u16(), answer.body_mut().read_json().unwrap_or(Value::Null), trace)
+            }
+            Err(err) => (0, json!(err.to_string()), Value::Null),
+        }
+    })
+    .await
+    .unwrap()
 }
 
 /// Waits for what's expected of a process of its own, which tells this one nothing as it goes, so it's asked again

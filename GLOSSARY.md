@@ -42,7 +42,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   iPhone, Android, Windows), the web client in a browser, the CLI and the local MCP server on a computer, and the remote
   MCP server. Each has its own key, never shared, but the CLI and the local MCP server, which are their computer's
   node's own programs and ask it.
-- **onet**: being built (ARCHITECTURE.md, Designed): the entry point into the network, the same on every device. Its library is the `onet` crate (`onet/`) today.
+- **onet**: being built (ARCHITECTURE.md, Designed): the entry point into the network, the same on every device. Its library is the `onet` crate (`onet/`) today; on a computer it's `<cli>t` (`onet/src/computer/`), started by hand until oned starts it.
 - **oned**: the small program, and the spec it follows, that makes a machine a node: it connects the machine to the
   network, and installs and runs what the node's owner switches on there (the app runtime, services). It runs nothing
   itself, and stays small. It has a version for each platform it runs on: computers (Mac, Windows, Linux) and

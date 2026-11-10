@@ -16,7 +16,7 @@ use crate::{Client, Error, not_let_in, unsent};
 const HOUR: u64 = 3_600_000;
 
 /// A keyring with what it asks through, as the device `one::settings` signs as.
-struct Mine<'a, O, D> {
+pub(crate) struct Mine<'a, O, D> {
     keyring: &'a Keyring<O>,
     client: &'a Client,
     on: &'a D,
@@ -139,10 +139,22 @@ impl<O: Opens, D: Address + Keep + Signs> one::settings::Me for Mine<'_, O, D> {
     async fn open(&self, sealed: &[u8]) -> anyhow::Result<Vec<u8>> {
         keys::open_sealed_by(self.keyring.opens(), sealed).await
     }
+
+    async fn create(&self, name: &str, bytes: &[u8]) -> anyhow::Result<bool> {
+        one::database::stored::created(self.on.bucket(), name, bytes).await
+    }
+
+    async fn delete(&self, name: &str) -> anyhow::Result<()> {
+        one::bucket::Bucket::delete(self.on.bucket(), name).await
+    }
+
+    async fn write_as(&self, key: &keys::SigningKey, user: &str, content: Content) -> anyhow::Result<()> {
+        self.keyring.write_to_bucket(self.on, key, user, content).await.map_err(to_one)
+    }
 }
 
 impl<O: Opens> Keyring<O> {
-    fn mine<'a, D>(&'a self, client: &'a Client, on: &'a D) -> Mine<'a, O, D> {
+    pub(crate) fn mine<'a, D>(&'a self, client: &'a Client, on: &'a D) -> Mine<'a, O, D> {
         Mine { keyring: self, client, on }
     }
 
@@ -165,6 +177,26 @@ impl<O: Opens> Keyring<O> {
                 Ok(_) => return Ok(()),
                 Err(err) if err.code.as_deref() == Some(code::TAKEN) => steps = self.asked(client, on, "GET", &newest, None).await?,
                 Err(err) => return Err(err),
+            }
+        }
+        Err(unsent("Who's who changed too often to write to: try again."))
+    }
+
+    /// Signs a step of `content` with `by` as `user`'s, and writes it to the bucket itself, at the next position: read
+    /// again, and signed again for the one after, while another device's goes first. For the recovery key's steps, which
+    /// no node takes from a device as its user's (`POST /api/steps`), and on a computer, the device's own steps its app
+    /// runtime asks it to write (`one::node::Holder`), as the runtime signs nothing as the device.
+    pub(crate) async fn write_to_bucket(&self, on: &(impl Address + Keep), by: &impl Signs, user: &str, content: Content) -> Result<(), Error> {
+        use one::database::{steps, stored};
+        for _ in 0..50 {
+            self.read(on).await?;
+            let (at, epoch, keys) = self.next_step().ok_or_else(refused)?;
+            let step = steps::sign_by(by, &Scope::Global, at + 1, user, epoch, now(), content.clone()).await.map_err(unsent)?;
+            self.who(|db| steps::apply(db, None, &Scope::Global, &step).map(drop)).ok_or_else(refused)?.map_err(|e| unsent(format!("{e:#}")))?;
+            let name = stored::step_name(&steps::prefix("global"), at + 1);
+            let sealed = steps::seal(&keys, &name, &steps::encode(&step, None)).map_err(unsent)?;
+            if stored::created(on.bucket(), &name, &sealed).await.map_err(|e| unsent(format!("{e:#}")))? {
+                return self.read(on).await;
             }
         }
         Err(unsent("Who's who changed too often to write to: try again."))

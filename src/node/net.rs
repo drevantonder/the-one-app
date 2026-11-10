@@ -815,36 +815,6 @@ impl Node {
         }
     }
 
-    /// Asks the device that made a pairing code to admit this one, through the relay at `address`, which lets this
-    /// one in for the code's `ticket`. The device that made it may not have told the relay of it yet: it's tried for a
-    /// few seconds.
-    pub(super) async fn ask_to_join(&self, address: &str, ticket: &str, to: Key, join: Value) -> Result<Value> {
-        let endpoint = self.bind(address, Some(ticket)).await?;
-        let (url, _) = relay(address, None)?;
-        let addr = EndpointAddr::new(PublicKey::from_bytes(&to)?).with_relay_url(url);
-        let mut tried = 0;
-        let conn = loop {
-            match tokio::time::timeout(CONNECT, endpoint.connect(addr.clone(), &alpn())).await {
-                Ok(Ok(conn)) => break conn,
-                _ if tried < 3 => tried += 1,
-                Ok(Err(err)) => bail!("the device that made the pairing code couldn't be reached: {err:#}"),
-                Err(_) => bail!("the device that made the pairing code isn't on"),
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        };
-        let answer = async {
-            let (mut send, mut recv) = conn.open_bi().await?;
-            send.write_all(json!({ "kind": M::ASK, "body": { "join": join } }).to_string().as_bytes()).await?;
-            send.finish()?;
-            let answer = tokio::time::timeout(Duration::from_secs(30), recv.read_to_end(MESSAGE_LIMIT)).await.context("the device that made the pairing code didn't answer")??;
-            anyhow::Ok(serde_json::from_slice(&answer)?)
-        }
-        .await;
-        conn.close(0u32.into(), b"joined");
-        endpoint.close().await;
-        answer
-    }
-
     /// Tells the relay to take out the devices removed from the network, if this device is an admin's: the relay lets
     /// in only its list, which nothing on it can read the network's log for.
     fn tell_removed(&self) {
@@ -943,6 +913,36 @@ impl Node {
             }
         });
     }
+}
+
+/// Asks the device `to`, which made a pairing code, to let in the computer whose key is `key` (`join`), through the relay
+/// at `address`, which lets it in for the code's `ticket`: → its answer. The device that made it may not have told the
+/// relay of it yet: it's tried for a few seconds.
+pub(super) async fn ask_to_join(key: &SigningKey, address: &str, ticket: &str, to: Key, join: Value) -> Result<Value> {
+    let (url, map) = relay(address, Some(ticket))?;
+    let endpoint = Endpoint::builder(presets::Minimal).secret_key(SecretKey::from_bytes(key.as_bytes())).relay_mode(RelayMode::Custom(map)).bind().await?;
+    let addr = EndpointAddr::new(PublicKey::from_bytes(&to)?).with_relay_url(url);
+    let mut tried = 0;
+    let conn = loop {
+        match tokio::time::timeout(CONNECT, endpoint.connect(addr.clone(), &alpn())).await {
+            Ok(Ok(conn)) => break conn,
+            _ if tried < 3 => tried += 1,
+            Ok(Err(err)) => bail!("the device that made the pairing code couldn't be reached: {err:#}"),
+            Err(_) => bail!("the device that made the pairing code isn't on"),
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    };
+    let answer = async {
+        let (mut send, mut recv) = conn.open_bi().await?;
+        send.write_all(json!({ "kind": M::ASK, "body": { "join": join } }).to_string().as_bytes()).await?;
+        send.finish()?;
+        let answer = tokio::time::timeout(Duration::from_secs(30), recv.read_to_end(MESSAGE_LIMIT)).await.context("the device that made the pairing code didn't answer")??;
+        anyhow::Ok(serde_json::from_slice(&answer)?)
+    }
+    .await;
+    conn.close(0u32.into(), b"joined");
+    endpoint.close().await;
+    answer
 }
 
 /// What a computer joining shows the relay for a pairing code's `secret`: not the secret, which admits it.

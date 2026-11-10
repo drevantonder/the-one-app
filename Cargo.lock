@@ -3020,6 +3020,7 @@ name = "onet"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "data-encoding",
  "ed25519-dalek 3.0.0",
  "getrandom 0.2.17",
@@ -3033,9 +3034,12 @@ dependencies = [
  "one",
  "rand 0.8.8",
  "rusqlite",
+ "serde",
  "serde_json",
  "sqlite-wasm-rs",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",

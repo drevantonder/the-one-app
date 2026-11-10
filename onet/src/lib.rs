@@ -39,6 +39,8 @@ pub use device::{Device, PLATFORM, join_of, new_secret, open_note};
 #[cfg(not(target_family = "wasm"))]
 pub use one::push;
 pub mod sign_in;
+#[cfg(feature = "computer")]
+pub mod computer;
 
 /// How long a connection to a node may take before the next is started alongside it: the first up is asked, and the
 /// rest are kept for later. A connection carries nothing but itself, so racing them hands no node anything.
@@ -191,6 +193,19 @@ struct Inner {
     down: Mutex<HashMap<PublicKey, Down>>,
     /// What answers a node that opens a stream on a connection of this client's, if anything does.
     asked: Mutex<Option<Asked>>,
+    /// This device's own app runtime, on its own machine, if it has one: asked first, over its loopback.
+    local: Option<Local>,
+}
+
+/// This device's own app runtime, on its own machine: its endpoint's key, and where its loopback answers this machine's
+/// own programs, which show its token (`one::api::LOCAL_TOKEN`). It's asked ahead of every node over iroh, as this
+/// device's own, so it hands it nothing and passes calls on itself; one it doesn't answer goes to the rest.
+#[derive(Clone)]
+pub struct Local {
+    pub key: [u8; 32],
+    pub addr: String,
+    /// Its token, as it is when it's asked: none before the runtime made it.
+    pub token: Arc<dyn Fn() -> Option<String> + Send + Sync>,
 }
 
 /// How a client answers a node that asks for its log over a connection the client opened: the ask as JSON (`logs`'s
@@ -228,8 +243,27 @@ impl Client {
         Ok((Client::with(secret, way, None, nodes).await?, inbox))
     }
 
+    /// `start`'s client, for a device whose own app runtime is on this machine (`Local`): no endpoint is made, nor any
+    /// node connected to, until a request finds the runtime doesn't answer, as only it is asked while it does.
+    #[cfg(feature = "computer")]
+    pub async fn beside(secret: [u8; 32], address: &str, nodes: &[[u8; 32]], local: Local) -> Result<Client, Error> {
+        let url: RelayUrl = address.trim_end_matches('/').parse().map_err(|_| unsent("the network's address isn't a URL"))?;
+        let mut config = RelayConfig::from(url.clone());
+        config.quic = None;
+        let client = Client::made(secret, Way::Relay(url, config), None, Some(local));
+        client.set_nodes(nodes)?;
+        Ok(client)
+    }
+
     async fn with(secret: [u8; 32], way: Way, certificate: Option<String>, nodes: &[[u8; 32]]) -> Result<Client, Error> {
-        let client = Client(Arc::new(Inner {
+        let client = Client::made(secret, way, certificate, None);
+        client.endpoint().await?;
+        client.set_nodes(nodes)?;
+        Ok(client)
+    }
+
+    fn made(secret: [u8; 32], way: Way, certificate: Option<String>, local: Option<Local>) -> Client {
+        Client(Arc::new(Inner {
             secret: SecretKey::from_bytes(&secret),
             way,
             certificate: Mutex::new(certificate),
@@ -241,10 +275,8 @@ impl Client {
             conns: Mutex::default(),
             down: Mutex::default(),
             asked: Mutex::default(),
-        }));
-        client.endpoint().await?;
-        client.set_nodes(nodes)?;
-        Ok(client)
+            local,
+        }))
     }
 
     pub fn id(&self) -> [u8; 32] {
@@ -294,6 +326,9 @@ impl Client {
 
     fn warm(&self) {
         let nodes = self.0.nodes.lock().unwrap().clone();
+        if self.local_among(&nodes).is_some() {
+            return;
+        }
         let client = self.clone();
         n0_future::task::spawn(async move {
             let (first, fallback) = client.in_order(&nodes);
@@ -408,6 +443,29 @@ impl Client {
             if nodes.is_empty() {
                 return Err(Error { trace: traces(&mut tries, None), ..why });
             }
+            if let Some(local) = self.local_among(&nodes) {
+                let began = Instant::now();
+                match self.ask_local(&local, &req).await {
+                    Ok(mut response) => {
+                        let key = PublicKey::from_bytes(&local.key).map_err(|_| unsent("a node's key isn't a key"))?;
+                        tried(&mut tries, &key, began, "answered", None);
+                        let theirs = response.headers.iter().find(|h| h.0 == header::TRACE).and_then(|h| data_encoding::BASE64.decode(h.1.as_bytes()).ok()).and_then(|b| serde_json::from_slice(&b).ok());
+                        response.trace = traces(&mut tries, theirs);
+                        return Ok(response);
+                    }
+                    Err(err) => {
+                        if let Ok(key) = PublicKey::from_bytes(&local.key) {
+                            tried(&mut tries, &key, began, failure(&err), None);
+                            skipped.push(key);
+                        }
+                        if err.sent {
+                            return Err(Error { trace: traces(&mut tries, None), ..err });
+                        }
+                        why = err;
+                        continue;
+                    }
+                }
+            }
             let (first, fallback) = self.in_order(&nodes);
             let (key, conn, opened) = match self.pick(&first, &fallback, &mut tries).await {
                 Ok(picked) => picked,
@@ -464,6 +522,43 @@ impl Client {
                 skipped.push(key);
             }
         }
+    }
+
+    /// This device's own runtime, if it has one and it's among `nodes`.
+    fn local_among(&self, nodes: &[PublicKey]) -> Option<Local> {
+        self.0.local.clone().filter(|l| nodes.iter().any(|n| n.as_bytes() == &l.key))
+    }
+
+    /// `req` of this device's own runtime, over its loopback, as one of this machine's own programs: with its token, and
+    /// none of what a client says over iroh, so it answers as this device and passes a call on itself.
+    #[cfg(feature = "computer")]
+    async fn ask_local(&self, local: &Local, req: &Request) -> Result<Response, Error> {
+        use tokio::io::AsyncWriteExt;
+        let mut headers: Vec<(String, String)> = req.headers.iter().filter(|(n, _)| !n.eq_ignore_ascii_case(header::USER) && !n.eq_ignore_ascii_case(header::KEYS)).cloned().collect();
+        let token = (local.token)().ok_or_else(|| unsent("this device's own runtime hasn't started here yet"))?;
+        headers.push((header::LOCAL_TOKEN.into(), token));
+        let head = local_head(&req.method, &req.path, &headers, req.body.len()?)?;
+        let mut stream = tokio::net::TcpStream::connect(&local.addr).await.map_err(|err| unsent(format!("this device's own runtime didn't answer: {err}")))?;
+        let sending = async {
+            stream.write_all(&head).await?;
+            match &req.body {
+                Sent::Bytes(bytes) => stream.write_all(bytes).await?,
+                Sent::File(path) => {
+                    let mut file = tokio::fs::File::open(path).await?;
+                    tokio::io::copy(&mut file, &mut stream).await?;
+                }
+            }
+            stream.flush().await
+        };
+        sending.await.map_err(sent)?;
+        let mut from = Stream::Tcp(stream);
+        let (status, headers, body) = read_response(&mut from, req.method == "HEAD").await?;
+        Ok(Response { node: local.key, status, headers, body: Body { recv: Some(from), ..body }, trace: None })
+    }
+
+    #[cfg(not(feature = "computer"))]
+    async fn ask_local(&self, _: &Local, _: &Request) -> Result<Response, Error> {
+        Err(unsent("no runtime of this device's is on this machine"))
     }
 
     /// The node to ask of `first` and then `fallback`, and its connection: the first whose connection is up (another
@@ -614,7 +709,7 @@ impl Client {
 
     async fn exchange(&self, node: &PublicKey, conn: &Connection, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {
         // A connection gone quiet takes no more streams once its peer's allowance is used: nothing was sent.
-        let (mut send, mut recv) = match timeout(ANSWER, conn.open_bi()).await {
+        let (mut send, recv) = match timeout(ANSWER, conn.open_bi()).await {
             Ok(opened) => opened.map_err(unsent)?,
             Err(_) => {
                 self.give_up(node);
@@ -629,6 +724,7 @@ impl Client {
         };
         sending.await.map_err(sent)?;
         let head_only = req.method == "HEAD";
+        let mut recv = Stream::Iroh(recv);
         let (status, headers, body) = if !last && matches!(req.method.as_str(), "GET" | "HEAD") {
             match timeout(ANSWER, read_response(&mut recv, head_only)).await {
                 Ok(read) => read,
@@ -681,24 +777,7 @@ enum Way {
 
 /// A request's head, checked: nothing in it can start another header or request. A session's certificate goes with it.
 fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certificate: Option<&str>) -> Result<Vec<u8>, Error> {
-    let token = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
-    if !token(method) {
-        return Err(unsent("that isn't a method"));
-    }
-    if !path.starts_with('/') || path.bytes().any(|b| b <= b' ' || b == 0x7f) {
-        return Err(unsent("a path starts with / and has no spaces"));
-    }
-    let mut head = format!("{method} {path} HTTP/1.1\r\nhost: node\r\n");
-    for (name, value) in headers {
-        if !token(name) || value.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
-            return Err(unsent(format!("{name} isn't a header")));
-        }
-        // How the request is framed, and who it's from, is this library's to say.
-        if ["host", "content-length", "transfer-encoding", "connection", header::ENDPOINT, header::ELSEWHERE, header::READS].iter().any(|h| name.eq_ignore_ascii_case(h)) {
-            continue;
-        }
-        head.push_str(&format!("{name}: {value}\r\n"));
-    }
+    let mut head = lines(method, path, "node", headers)?;
     if let Some(certificate) = certificate.filter(|c| c.bytes().all(|b| b.is_ascii_graphic())) {
         head.push_str(&format!("{}: {certificate}\r\n", header::ENDPOINT));
     }
@@ -708,7 +787,66 @@ fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certif
     Ok(head.into_bytes())
 }
 
-async fn read_response(recv: &mut RecvStream, head_only: bool) -> Result<(u16, Vec<(String, String)>, Body), Error> {
+/// A request's head for this device's own runtime: checked as `head`'s is, closed once it's answered, and saying
+/// nothing of who it's from but what `headers` carry (its token), so the runtime passes it on itself.
+#[cfg(feature = "computer")]
+fn local_head(method: &str, path: &str, headers: &[(String, String)], len: u64) -> Result<Vec<u8>, Error> {
+    let mut head = lines(method, path, "localhost", headers)?;
+    head.push_str(&format!("connection: close\r\ncontent-length: {len}\r\n\r\n"));
+    Ok(head.into_bytes())
+}
+
+/// A request's line and its headers, checked: nothing in them can start another header or request. How it's framed,
+/// and who it's from, is this library's to say, so a header of those is left out.
+fn lines(method: &str, path: &str, host: &str, headers: &[(String, String)]) -> Result<String, Error> {
+    let token = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
+    if !token(method) {
+        return Err(unsent("that isn't a method"));
+    }
+    if !path.starts_with('/') || path.bytes().any(|b| b <= b' ' || b == 0x7f) {
+        return Err(unsent("a path starts with / and has no spaces"));
+    }
+    let mut head = format!("{method} {path} HTTP/1.1\r\nhost: {host}\r\n");
+    for (name, value) in headers {
+        if !token(name) || value.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
+            return Err(unsent(format!("{name} isn't a header")));
+        }
+        if ["host", "content-length", "transfer-encoding", "connection", header::ENDPOINT, header::ELSEWHERE, header::READS].iter().any(|h| name.eq_ignore_ascii_case(h)) {
+            continue;
+        }
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    Ok(head)
+}
+
+/// Where a response is read from: a stream of a connection over iroh, or this device's own runtime's loopback.
+enum Stream {
+    Iroh(RecvStream),
+    #[cfg(feature = "computer")]
+    Tcp(tokio::net::TcpStream),
+}
+
+impl Stream {
+    async fn read(&mut self) -> Result<Option<Vec<u8>>, String> {
+        match self {
+            Stream::Iroh(recv) => recv.read_chunk(READ).await.map(|c| c.map(|c| c.to_vec())).map_err(|e| e.to_string()),
+            #[cfg(feature = "computer")]
+            Stream::Tcp(stream) => {
+                use tokio::io::AsyncReadExt;
+                let mut part = vec![0; READ];
+                match stream.read(&mut part).await.map_err(|e| e.to_string())? {
+                    0 => Ok(None),
+                    n => {
+                        part.truncate(n);
+                        Ok(Some(part))
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn read_response(recv: &mut Stream, head_only: bool) -> Result<(u16, Vec<(String, String)>, Body), Error> {
     let mut buf = Vec::new();
     loop {
         let mut list = [httparse::EMPTY_HEADER; 100];
@@ -740,8 +878,8 @@ async fn read_response(recv: &mut RecvStream, head_only: bool) -> Result<(u16, V
     }
 }
 
-async fn more(recv: &mut RecvStream, buf: &mut Vec<u8>) -> Result<bool, Error> {
-    match recv.read_chunk(READ).await.map_err(|e| sent(format!("reading the node's response: {e}")))? {
+async fn more(recv: &mut Stream, buf: &mut Vec<u8>) -> Result<bool, Error> {
+    match recv.read().await.map_err(|e| sent(format!("reading the node's response: {e}")))? {
         Some(chunk) => {
             buf.extend_from_slice(&chunk);
             Ok(true)
@@ -768,7 +906,7 @@ enum Framing {
 
 /// A response's body, read as it comes: dropping it before the end stops the node sending it.
 pub struct Body {
-    recv: Option<RecvStream>,
+    recv: Option<Stream>,
     buf: Vec<u8>,
     framing: Framing,
 }

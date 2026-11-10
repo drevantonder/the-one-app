@@ -1,7 +1,7 @@
-//! A native app as a device of its user (ARCHITECTURE.md, Being built: Devices), the same on every app: its own key,
-//! which the app keeps in the Keychain, the keystore or the Credential Locker and hands it at start; asking to be let in,
-//! with the code it shows; and once a device of theirs approved it, asking its nodes with the keys it opens
-//! (`crate::keyring`), keeping what outlives it in its folder. A browser runs the same keyring in its worker.
+//! A native app, or a computer's onet (`crate::computer`), as a device of its user, the same on each: its own key, which
+//! an app keeps in the Keychain, the keystore or the Credential Locker and hands it at start, and a computer in its
+//! home; asking to be let in, with the code it shows; and once a device of theirs approved it, asking its nodes with the
+//! keys it opens (`crate::keyring`), keeping what outlives it in its folder. A browser runs the same keyring in its worker.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use crate::answers::{Answers, Files};
 use crate::join;
-use crate::bucket::Signed;
+use crate::bucket::{Reached, Signed};
 pub(crate) use crate::keyring::now;
 use crate::keyring::{Address, HANDED_FOR, Keep, Keyring, error, refused};
 use crate::{Body, Client, Error, Request, Response, Sent, unsent};
@@ -77,7 +77,10 @@ pub struct Device {
     address: String,
     /// Where it keeps what outlives it (`Keep`): whether it was let in (`joined`), developer mode, and the keyring's.
     dir: PathBuf,
-    bucket: Signed,
+    bucket: Reached,
+    /// Where its own app runtime answers on this machine, and what it's asked with: a computer's (`on_computer`).
+    #[cfg(feature = "computer")]
+    runtime: Option<crate::computer::Runtime>,
     /// Held while it connects, so it connects once.
     stage: tokio::sync::Mutex<Stage>,
     keyring: Keyring,
@@ -95,11 +98,30 @@ pub struct Device {
 
 impl Device {
     pub fn new(secret: [u8; 32], address: &str, dir: &str) -> Device {
+        let address = address.trim_end_matches('/').to_string();
+        Device::with(secret, address.clone(), dir, Reached::Signed(Signed::new(address, secret)))
+    }
+
+    /// A computer's device, its onet's (`crate::computer`): its bucket the place its home's network file names, from
+    /// which it reads who's who to find the network's address; and if it has one, its own app runtime at `runtime`
+    /// (where it answers, and its token), which it asks before any other node.
+    #[cfg(feature = "computer")]
+    pub async fn on_computer(secret: [u8; 32], dir: &str, place: one::bucket::Place, runtime: Option<crate::computer::Runtime>) -> Result<Device, Error> {
+        let mut device = Device::with(secret, String::new(), dir, Reached::Place(place));
+        device.runtime = runtime;
+        device.keyring.read(&device).await?;
+        let address = device.keyring.who(|db| db.setting("address")).and_then(Result::ok).flatten();
+        device.address = address.ok_or_else(|| failed(format!("{YOURS} has no address yet, which this computer's onet reaches it at: an admin sets one with cloudflare use")))?.trim_end_matches('/').to_string();
+        Ok(device)
+    }
+
+    fn with(secret: [u8; 32], address: String, dir: &str, bucket: Reached) -> Device {
         let key = SigningKey::from_bytes(&secret);
         let me = Endpoint::of(&key);
-        let address = address.trim_end_matches('/').to_string();
         Device {
-            bucket: Signed::new(address.clone(), secret),
+            bucket,
+            #[cfg(feature = "computer")]
+            runtime: None,
             keyring: Keyring::new(me.key, keys::seal_secret(&key)),
             me,
             key,
@@ -244,7 +266,11 @@ impl Device {
         if nodes.is_empty() {
             return Err(failed("None of your devices runs your things yet."));
         }
-        let client = Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?;
+        let client = match self.local() {
+            #[cfg(feature = "computer")]
+            Some(local) => Client::beside(self.key.to_bytes(), &self.address, &nodes, local).await?,
+            _ => Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?,
+        };
         if let Some(dir) = self.logs.clone() {
             client.answer_with(std::sync::Arc::new(move |ask| one::logs::answer(&dir, &ask)));
         }
@@ -258,6 +284,27 @@ impl Device {
             self.put("joined", self.key().as_bytes()).await.map_err(failed)?;
         }
         Ok(true)
+    }
+
+    /// Its own app runtime on this machine, as who's who lists it and where it answers, if it has both.
+    #[cfg(feature = "computer")]
+    pub(crate) fn local(&self) -> Option<crate::Local> {
+        let key = self.keyring.own_runtime()?;
+        Some(self.runtime.as_ref()?.local(key, &self.me.key))
+    }
+
+    #[cfg(not(feature = "computer"))]
+    pub(crate) fn local(&self) -> Option<crate::Local> {
+        None
+    }
+
+    /// Its keyring, and its client, once it's reached its network: what signs as it (`Keyring::mine`).
+    #[cfg(feature = "computer")]
+    pub(crate) async fn reached(&self) -> Result<(&Keyring, Client), Error> {
+        if !self.reach().await? {
+            return Err(refused());
+        }
+        Ok((&self.keyring, self.client().await.ok_or_else(refused)?))
     }
 
     async fn client(&self) -> Option<Client> {
@@ -510,7 +557,7 @@ impl keys::Signs for Device {
 }
 
 impl Address for Device {
-    type Bucket = Signed;
+    type Bucket = Reached;
 
     fn address(&self) -> &str {
         &self.address
@@ -520,7 +567,7 @@ impl Address for Device {
         http(method, url, header, body).await
     }
 
-    fn bucket(&self) -> &Signed {
+    fn bucket(&self) -> &Reached {
         &self.bucket
     }
 

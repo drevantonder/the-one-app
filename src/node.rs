@@ -77,11 +77,13 @@ mod home;
 mod network;
 
 pub use caller::{Caller, Credential};
-pub use holds::Holder;
+pub use holds::{HeldShare, HeldWrite, Holder};
 use exclusive::*;
-pub use home::{device_here, runtime_folder};
+pub use home::{device_here, device_key, load_local_token, runtime_folder};
 use home::*;
 use network::*;
+pub use network::NetworkFile;
+pub use pairing::{Joined, join_with};
 
 const CALL_LIMIT: Duration = Duration::from_secs(30);
 /// A device whose round trip is longer than this is far: a nearer one runs what it would have, whatever their order.
