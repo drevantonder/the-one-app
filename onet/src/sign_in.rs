@@ -1,6 +1,5 @@
-//! Signing in at the network's address, as every client does (the CLI and MCP, the native app, a browser's page
-//! through its worker): an OAuth client of its auth, from its metadata (RFC 8414), registered the first time (RFC
-//! 7591), with an authorization code and PKCE, refreshed, and revoked. Each step is a `Request` made here and an answer
+//! Signing in at the network's address, as every client does (the native app, a browser's page
+//! through its worker): an OAuth client of its auth, from its metadata (RFC 8414), registered the first time (RFC 7591), with an authorization code and PKCE, refreshed, and revoked. Each step is a `Request` made here and an answer
 //! read here; who sends it is the client's (natively, `ureq`, below; in a browser, its worker's `fetch`), as are where
 //! it keeps its registration and tokens, and how the user reaches the authorization and comes back.
 
@@ -66,8 +65,7 @@ pub struct Auth {
 /// An authorization asked for: its query, and the verifier and state it's finished with.
 pub struct Asked {
     pub query: String,
-    /// What a code's sign-in takes its code by (the CLI's).
-    pub state: String,
+    state: String,
     verifier: String,
     redirect: String,
     client: String,
@@ -130,11 +128,11 @@ impl Auth {
 
     /// An authorization for `client`, coming back to `redirect`, for the device `join` names (its key ‖ seal key, hex),
     /// which whoever answers its request then checks.
-    pub fn ask(&self, client: &str, redirect: &str, join: Option<&str>) -> Asked {
+    pub fn ask(&self, client: &str, redirect: &str, join: &str) -> Asked {
         let verifier = B64U.encode(&rand::random::<[u8; 32]>());
         let state = B64U.encode(&rand::random::<[u8; 32]>());
         let challenge = B64U.encode(&one::keys::sha256(verifier.as_bytes()));
-        let mut fields = vec![
+        let fields = [
             ("response_type", "code"),
             ("client_id", client),
             ("redirect_uri", redirect),
@@ -143,8 +141,8 @@ impl Auth {
             ("code_challenge_method", "S256"),
             ("state", &state),
             ("prompt", "consent"),
+            ("join", join),
         ];
-        fields.extend(join.map(|j| ("join", j)));
         Asked { query: form(&fields), verifier, state: state.clone(), redirect: redirect.into(), client: client.into() }
     }
 
@@ -159,11 +157,6 @@ impl Auth {
             return Err(failed(if e == "access_denied" { "You didn’t let this device in." } else { got.get("error_description").unwrap_or(e) }));
         }
         let code = got.get("code").filter(|_| got.get("state") == Some(&asked.state)).ok_or_else(|| failed("That sign-in didn’t start here. Sign in again."))?;
-        self.code_grant(asked, code)
-    }
-
-    /// `asked`'s code, exchanged for tokens: the grant to send.
-    pub fn code_grant(&self, asked: &Asked, code: &str) -> Result<Request, Failed> {
         self.grant(&[("grant_type", "authorization_code"), ("code", code), ("redirect_uri", &asked.redirect), ("client_id", &asked.client), ("code_verifier", &asked.verifier)])
     }
 
@@ -223,12 +216,6 @@ mod sent {
         /// What came back to `asked`'s redirect (its query's fields), exchanged for tokens.
         pub fn finish(&self, asked: &Asked, got: &HashMap<String, String>) -> Result<Tokens, Failed> {
             let (status, out) = send(self.finishing(asked, got)?)?;
-            Auth::granted(status, &out)
-        }
-
-        /// `asked`'s code, exchanged for tokens.
-        pub fn code(&self, asked: &Asked, code: &str) -> Result<Tokens, Failed> {
-            let (status, out) = send(self.code_grant(asked, code)?)?;
             Auth::granted(status, &out)
         }
 

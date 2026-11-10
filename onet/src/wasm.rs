@@ -395,7 +395,7 @@ impl SignIn {
     /// An authorization for `client`, coming back to `back`, for the device `join` names → `{ url, asked }` as JSON,
     /// `asked` for `finish` once it's back.
     pub fn ask(&self, client: String, back: String, join: String) -> Result<String, JsValue> {
-        let asked = self.auth.ask(&client, &back, Some(&join));
+        let asked = self.auth.ask(&client, &back, &join);
         Ok(serde_json::json!({ "url": self.auth.url(&asked).map_err(thrown)?, "asked": asked.to_json() }).to_string())
     }
 

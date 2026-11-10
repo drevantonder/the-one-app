@@ -1,21 +1,18 @@
-//! Who's in the network and this machine, on the command line: status, signing in and out, making or joining a
-//! network, and its settings. A command of this program, not the library's: signing in is a browser's work.
+//! Who's in the network and this machine, on the command line: status, making or joining a network, and its settings.
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use one::api::Client;
-use one::cli::{Command, Given};
-use one::config::{CLI, NAME, YOURS};
+use one::cli::Command;
+use one::config::{CLI, YOURS};
 use one::rank::Priority;
 use one::state::State;
 use serde_json::{Value, json};
 
-/// Who's in the network and this device: status, signing in and out, making or joining a network, settings.
+/// Who's in the network and this device: status, making or joining a network, settings.
 pub fn commands() -> Command {
     Command {
         help: vec![
             ("status".into(), format!("this device, and the users, groups and devices in {YOURS}")),
-            ("sign-in [--address <url>]".into(), "sign this machine in, as you: approve its code by signing in on any of your devices".into()),
-            ("sign-out".into(), "sign this machine out".into()),
             ("create <name> --as <your name> [--user <id>]".into(), "create a network, with you as its first admin (--user: who you were in one it replaces, so your sign-in is still yours)".into()),
             ("pair [--user <name>]".into(), "a pairing code for another of your machines (or, for admins, someone else's)".into()),
             ("join <code>".into(), format!("join {YOURS} with a pairing code")),
@@ -25,21 +22,15 @@ pub fn commands() -> Command {
         ],
         run: |g| {
             let takes = match g.words().as_slice() {
-                ["sign-in"] => &["address"][..],
-                ["status"] => &[],
+                ["status"] => &[][..],
                 ["create", ..] => &["as", "user"],
                 ["pair"] => &["user"],
                 ["settings", _, ..] => &["default"],
-                ["sign-out" | "join" | "settings" | "role" | "rename", ..] => &[],
+                ["join" | "settings" | "role" | "rename", ..] => &[],
                 _ => return Ok(false),
             };
             g.takes_only(takes)?;
             match g.words().as_slice() {
-                ["sign-in"] => sign_in(g)?,
-                ["sign-out"] => match crate::sign_in::sign_out()? {
-                    true => println!("Signed out."),
-                    false => println!("This machine isn't signed in."),
-                },
                 ["status"] if g.json => println!("{}", serde_json::to_string(&g.node.state()?)?),
                 ["status"] => status(g.node, &g.node.state()?),
                 ["create", name @ ..] if !name.is_empty() => {
@@ -84,31 +75,6 @@ pub fn commands() -> Command {
             Ok(true)
         },
     }
-}
-
-/// `sign-in`: this machine signs in at the network's address, as the user who approves its code with their passkey.
-fn sign_in(g: &Given) -> Result<()> {
-    let state = g.node.state()?;
-    let address = match g.flag("address") {
-        Some(a) => a.to_string(),
-        None => state.address().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string(),
-    };
-    let started = crate::sign_in::start(&address)?;
-    let with = if one::config::JOIN_DOMAIN.is_empty() { "your passkey" } else { "your work account" };
-    println!("To sign in this machine, open this link on any of your devices and sign in with {with}:\n\n  {}\n\nor go to {}/sign-in/code and type {}.", started.url, address.trim_end_matches('/'), started.code);
-    if crate::sign_in::has_screen() && crate::sign_in::open(&started.url) {
-        println!("It's open in your browser here.");
-    }
-    crate::sign_in::finish(started)?;
-    // A throwaway network's repos are reached by `one-dev throwaway git`, which leaves this machine's git as it is.
-    if matches!(one::mode::here(), one::mode::Mode::Own)
-        && let Err(err) = one::git_wire::wire(&address)
-    {
-        eprintln!("{err:#}");
-    }
-    let me = state.user.map_or("its user".into(), |u| u.name);
-    println!("Signed in. {NAME} runs on this computer, so {CLI} and {CLI} mcp here act as {me}, whose device it is, whoever signs in.");
-    Ok(())
 }
 
 fn status(node: &Client, state: &State) {

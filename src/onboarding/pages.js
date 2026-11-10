@@ -475,26 +475,5 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
     return page("passkeys", look, script);
   }
 
-  /// Signing in with a code another device shows (the CLI on one with no screen): typing it here goes on to signing in with a
-  /// passkey (or a provider); `done` says how that went, once it's back.
-  function codePage(look) {
-    const { error = "", done } = look;
-    if (done !== undefined) return page(done ? "code-signed-in" : "code-not-signed-in", look);
-    const script = `
-      say(${json(error)});
-      const field = slot("field"), button = slot("action");
-      field.focus();
-      field.oninput = () => (button.disabled = !field.value.trim());
-      const go = (e) => {
-        e.preventDefault();
-        if (!field.value.trim()) return;
-        busy(button, "Continuing…");
-        location.href = "/sign-in/code?c=" + encodeURIComponent(field.value);
-      };
-      field.form.onsubmit = go;
-      button.onclick = go;`;
-    return page("code", look, script);
-  }
-
-  return { page, signInPage, throwawayPage, invitePage, linkPage, passkeysPage, codePage };
+  return { page, signInPage, throwawayPage, invitePage, linkPage, passkeysPage };
 }

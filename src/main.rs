@@ -7,8 +7,6 @@ use serde_json::Value;
 
 mod git_remote;
 mod network;
-#[path = "onboarding/sign_in.rs"]
-mod sign_in;
 
 use one::api::Client;
 use one::tools;

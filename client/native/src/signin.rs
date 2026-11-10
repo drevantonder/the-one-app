@@ -88,7 +88,7 @@ impl SignIn {
     pub fn sign_in_here(&self, join: &str, open: impl FnOnce(String) -> Result<String, String>) -> Result<(), Failed> {
         let s = self.auth()?;
         let back = format!("{}://signed-in/", one::config::CLI);
-        let asked = s.ask(&self.client(&s, &back)?, &back, Some(join));
+        let asked = s.ask(&self.client(&s, &back)?, &back, join);
         let came = url::Url::parse(&open(s.url(&asked)?).map_err(failed)?).map_err(|e| failed(e.to_string()))?;
         self.keep(s.finish(&asked, &came.query_pairs().into_owned().collect())?)
     }
@@ -102,7 +102,7 @@ impl SignIn {
         let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| failed(e.to_string()))?;
         let at = listener.local_addr().map_err(|e| failed(e.to_string()))?;
         let redirect = format!("http://{at}/callback");
-        let asked = s.ask(&id, &redirect, Some(join));
+        let asked = s.ask(&id, &redirect, join);
         let (came, given_up) = (mpsc::channel(), Arc::new(AtomicBool::new(false)));
         let (tx, stop) = (came.0, given_up.clone());
         let (answer, answered) = mpsc::channel();

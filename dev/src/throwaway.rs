@@ -56,7 +56,7 @@ fn folder() -> Option<(PathBuf, PathBuf)> {
 /// the command as one of its programs, by the `one` program built with this one (`Throwaway::tell`).
 pub fn run(rest: &[String]) -> Result<()> {
     let (build, ui, rest) = chosen(rest)?;
-    if matches!(rest.first().map(String::as_str), Some("--help" | "-h")) || (rest.len() == 1 && rest[0] == "help") || (rest.len() > 1 && matches!(rest[0].as_str(), "stop" | "client" | "sign-in" | "publish" | "update") && rest.iter().any(|a| a == "--help" || a == "-h")) {
+    if matches!(rest.first().map(String::as_str), Some("--help" | "-h")) || (rest.len() == 1 && rest[0] == "help") || (rest.len() > 1 && matches!(rest[0].as_str(), "stop" | "client" | "publish" | "update") && rest.iter().any(|a| a == "--help" || a == "-h")) {
         println!("{}", usage());
         return Ok(());
     }
@@ -122,7 +122,6 @@ pub fn run(rest: &[String]) -> Result<()> {
             let settings = one::cloudflare::Settings::load_in(&dir)?;
             return clients::client(&dir, &checkout, &settings, &rest[1..]);
         }
-        Some("sign-in") => return sign_in(&dir, &addr),
         Some("git") => return git(&dir, &addr, &rest[1..]),
         _ => {}
     }
@@ -151,27 +150,6 @@ fn chosen(rest: &[String]) -> Result<(Option<PathBuf>, Option<PathBuf>, &[String
 pub fn build_dev() -> Result<()> {
     let (_, checkout) = folder().context("run this in a checkout of The One App")?;
     rebuild::with_web_client_and_cloudflare_node(&checkout).map(drop)
-}
-
-/// `sign-in`, as the throwaway network's user, with no passkey: its CLI signs in as any does, with its own git config and
-/// no screen, and the link it gives is approved here, as its auth lets a throwaway network's first user in with none.
-fn sign_in(dir: &Path, addr: &str) -> Result<()> {
-    use std::io::BufRead;
-    let address = node_at(dir, addr).state()?.address().context("the throwaway network has no address")?.to_string();
-    let mut command = std::process::Command::new(network::program(dir)?);
-    Throwaway::tell(&mut command, dir, addr);
-    let mut child = command.arg("sign-in").env("GIT_CONFIG_GLOBAL", dir.join("gitconfig")).env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY").stdout(std::process::Stdio::piped()).spawn()?;
-    for line in std::io::BufReader::new(child.stdout.take().context("no output from signing in")?).lines() {
-        let line = line?;
-        let said = line.trim();
-        if said.starts_with(&address) && said.contains("/sign-in") {
-            sign_in::approve_on_throwaway(&address, said, None)?;
-        }
-    }
-    anyhow::ensure!(child.wait()?.success(), "its CLI didn't sign in");
-    let me = node_at(dir, addr).state()?.user.map_or("you".into(), |u| u.name);
-    println!("Signed in as {me}. {} throwaway and {} throwaway mcp act as them until {} throwaway sign-out.", dev(), dev(), dev());
-    Ok(())
 }
 
 /// Publishes this checkout's build at the throwaway network's address, under its own release key, for its device to take
@@ -219,7 +197,7 @@ recovery key; its Workers' settings are in {}.
 }
 
 /// `git`, told that the throwaway network's repos (`<its address>/repos/…`) are reached through this build's remote helper, as
-/// git is on a computer signed in to any network: this build's helper is linked in a folder of the throwaway network's, put
+/// git is on a computer with a node: this build's helper is linked in a folder of the throwaway network's, put
 /// first on git's PATH (the one the real network's CLI links is another build, reaching another node).
 fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
     let address = node_at(dir, addr).state()?.address().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
@@ -296,7 +274,6 @@ fn commands(mcp: &str) -> one::cli::Command {
             form("throwaway restart", "start it again, keeping its data, to pick up a changed Worker in the UI folder".into()),
             form("throwaway <command>", format!("any command, in it: {CLI}-dev throwaway status, {CLI}-dev throwaway apps, {CLI}-dev throwaway repos list")),
             form("throwaway mcp", format!("its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}")),
-            form("throwaway sign-in", "sign its CLI in as its user, with no browser".into()),
             form("throwaway git <args>", format!("git, reaching its repos at its address: {CLI}-dev throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI}-dev throwaway git push in the clone")),
             form("throwaway cloudflare node deploy", "run its Cloudflare node beside its Workers, as Cloudflare would".into()),
             form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows".into()),

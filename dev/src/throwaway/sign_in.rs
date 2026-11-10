@@ -10,8 +10,8 @@ fn said(out: &Value, otherwise: &str) -> String {
     out["error_description"].as_str().or(out["error"].as_str()).or(out["message"].as_str()).unwrap_or(otherwise).to_string()
 }
 
-/// Approves a sign-in as a throwaway network's first user would in a browser, with no passkey: a code's link (the CLI's) or
-/// an authorization (an app's, which then comes back to it). Only a throwaway network's auth signs anyone in this way
+/// Approves a sign-in as a throwaway network's first user would in a browser, with no passkey: an app's authorization,
+/// which then comes back to it. Only a throwaway network's auth signs anyone in this way
 /// (`cloudflare/auth`'s `throwawayNetwork`). `user`, someone who joined it, signs in as them instead.
 pub fn approve_on_throwaway(address: &str, url: &str, user: Option<&str>) -> Result<()> {
     let back = approved_on_throwaway(address, url, user)?;
@@ -27,16 +27,9 @@ pub fn approved_on_throwaway(address: &str, url: &str, user: Option<&str>) -> Re
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
     let went = |resp: &ureq::http::Response<ureq::Body>| resp.headers().get("location").and_then(|l| l.to_str().ok()).map(str::to_string);
     let to = |l: String| if l.starts_with('/') { format!("{address}{l}") } else { l };
-    // A code's link goes on to its authorization, which, with nobody signed in, goes on to the sign-in page with it.
-    let mut at = url.to_string();
-    let page = loop {
-        let next = went(&agent.get(&at).call()?).context("the sign-in went nowhere")?;
-        if next.starts_with("/sign-in?") || next.starts_with(&format!("{address}/sign-in?")) {
-            break next;
-        }
-        anyhow::ensure!(at == url, "the sign-in went on to {next}, not its sign-in page");
-        at = to(next);
-    };
+    // With nobody signed in, an authorization goes on to the sign-in page with it.
+    let page = went(&agent.get(url).call()?).context("the sign-in went nowhere")?;
+    anyhow::ensure!(page.starts_with("/sign-in?") || page.starts_with(&format!("{address}/sign-in?")), "the sign-in went on to {page}, not its sign-in page");
     let oauth_query = page.split_once('?').map(|(_, q)| q.to_string()).context("its sign-in page had no authorization")?;
     // For the device its authorization names, as a throwaway network's sign-in page signs in for it.
     let join = oauth_query.split('&').find_map(|p| p.strip_prefix("join="));

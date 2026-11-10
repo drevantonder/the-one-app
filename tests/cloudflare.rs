@@ -683,7 +683,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(status, 403, "{out}");
 }
 
-/// A sign-in finished from a link opened elsewhere (the CLI's sign-in code page, or a site that sent the user a link)
+/// A sign-in finished from a link opened elsewhere (a site that sent the user a link)
 /// could have been started by whoever sent it, who'd hold the token it gave. Auth passes that one's proof on as `by_link`,
 /// which still shows who signed in, but is never enough for an invite to let it in with no tap.
 #[test]
@@ -741,12 +741,10 @@ fn a_sign_in_finished_from_a_link_says_so() {
     let here = carried("/callback");
     assert_eq!(here["goes_straight_in"], true, "{here}");
     assert!(here["sign_in"]["by_link"].is_null());
-    // The CLI's sign-in link comes back to the sign-in code page, from any browser: it waits for a tap.
-    let linked = carried("/sign-in/code/done");
+    // A site that sent the user a link comes back to it from any browser: it waits for a tap.
+    let linked = carried("/elsewhere");
     assert_eq!(linked["goes_straight_in"], false, "{linked}");
     assert!(linked["sign_in"]["by_link"]["passkey"].is_object(), "{linked}");
-    // As a site that sent the user a link does.
-    assert_eq!(carried("/elsewhere")["goes_straight_in"], false);
     // Only loopback and the apps' own link count as on the device: another scheme can open any site.
     assert_eq!(carried("intent://attacker.example/cb")["goes_straight_in"], false);
     assert_eq!(carried(&format!("{}://signed-in/", one::config::CLI))["goes_straight_in"], true, "the native apps' own link");

@@ -30,10 +30,10 @@
 // nothing else to show.
 //
 // Only a device that signed in itself goes straight in by an invite: a sign-in finished from a link opened on another
-// device (the CLI's sign-in link, or any link sent to the user) could have been started by anyone, who'd then hold the
+// device (any link sent to the user) could have been started by anyone, who'd then hold the
 // token it gave. Auth tells them apart by the client whose token asks to join: one whose every sign-in comes back to the
 // device it was made on (the web client's page, the native apps' `<cli>://signed-in/` or loopback) signed in itself;
-// any other's (the sign-in code's page, a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
+// any other's (a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
 // which is approved only by a tap.
 //
 // It pushes (`PUSH`, the push Worker's entrypoint for the network's own Workers) to the user's devices, never the one asking: "<device>
@@ -72,7 +72,7 @@ import css from "../web/screen/ui/auth.css" with { type: "text" };
 import drawn from "../web/screen/ui/auth.json";
 import { DurableObjectDialect } from "./sql.js";
 
-const { codePage, invitePage, linkPage, passkeysPage, signInPage, throwawayPage } = pages({ css, ...drawn });
+const { invitePage, linkPage, passkeysPage, signInPage, throwawayPage } = pages({ css, ...drawn });
 
 const hex16 = () => hex.encode(random(8));
 /// Better Auth's users all have an email, unique and never empty, and a user whose only identity is a passkey has none:
@@ -80,18 +80,16 @@ const hex16 = () => hex.encode(random(8));
 const noEmail = (id) => `${id}@people.invalid`;
 const isNoEmail = (email) => String(email || "").endsWith("@people.invalid");
 /// Where a client's sign-in goes, in words: an app on the user's device (one listening on loopback, or the network's own
-/// apps' `<cli>://signed-in/`, which anyone else's link can't be), the device that showed them a code, or the site or
-/// other scheme it really goes to.
-function goesTo(uri, origin, cli) {
+/// apps' `<cli>://signed-in/`, which anyone else's link can't be), or the site or other scheme it really goes to.
+function goesTo(uri, cli) {
   let url;
   try { url = new URL(uri); } catch { return String(uri); }
   if (uri === `${cli}://signed-in/`) return ON_DEVICE;
   if (url.protocol !== "https:" && url.protocol !== "http:") return `${url.protocol}//${url.host}`;
-  if (url.origin === origin && url.pathname === "/sign-in/code/done") return BY_CODE;
   if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return ON_DEVICE;
   return url.host;
 }
-const [ON_DEVICE, BY_CODE] = ["an app on this device", "where you got your code"];
+const ON_DEVICE = "an app on this device";
 
 function basicClient(headers) {
   const basic = /^basic (.+)$/i.exec(headers?.get?.("authorization") || "");
@@ -114,14 +112,11 @@ const REQUEST = 3 * 86_400_000;
 const WANTS_IN = 10_000;
 /// The most devices of one user pushed to, the newest.
 const PUSHED_TO = 20;
-const CODE = 10 * 60_000;
 /// How lately someone signed in for one more identity to be added to their account: a session taken from them adds none,
 /// since an added identity signs in for good.
 const FRESH = 5 * 60_000;
 /// How long an invite's secret waits in a cookie for a provider to answer.
 const INVITE_COOKIE = 15 * 60;
-/// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
-const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
 const USER = /^[0-9a-f]{16}$/;
 /// A device a sign-in is for: its key and seal key, hex.
 const JOIN = /^[0-9a-f]{128}$/;
@@ -223,7 +218,8 @@ export class Auth extends DurableObject {
     sql.exec("create table if not exists refused (key text primary key, at integer not null)");
     // Signed requests taken, until they're too old to take again.
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
-    sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
+    // Goes once every network's auth has run this: sign-in codes, which the CLI once signed in with.
+    sql.exec("drop table if exists codes");
     // A Durable Object keeps this from when a provider's sign-in was started here: goes once every network's auth has run this.
     sql.exec("drop table if exists provider_starts");
     // What a user's sign-in for a device showed (`{ id_token }` or `{ passkey }`), by that device's key and the user,
@@ -390,10 +386,6 @@ export class Auth extends DurableObject {
       if (path === "/sign-in/link" && request.method === "GET" && !throwaway) return await this.linkOpened(request, url, signIn);
       if (path === "/sign-in/link/done" && request.method === "POST") return json(await this.linkDone(request, await request.json()));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams));
-      if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
-      if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), look);
-      if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ ...look, done: await this.codeDone(url.searchParams) }));
-      if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
       if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, throwaway, providers }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
       if (path === "/invite/provider" && request.method === "POST" && providers.length) return await this.joinWithProvider(request, await request.json());
@@ -862,8 +854,7 @@ export class Auth extends DurableObject {
   }
 
   /// Whether a client's every sign-in comes back to the device it was made on: the web client's page at the network's
-  /// address (in the browser that signed in), an app's own link scheme or loopback. Not the sign-in code's page, where
-  /// a sign-in finished in any browser is taken by whichever device made the code, nor any site.
+  /// address (in the browser that signed in), an app's own link scheme or loopback. Not any site.
   signsInHere(client) {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const origin = new URL(this.env.ADDRESS).origin;
@@ -874,15 +865,15 @@ export class Auth extends DurableObject {
 
   /// Where `uri` goes, in words (`goesTo`).
   goes(uri) {
-    return goesTo(uri, new URL(this.env.ADDRESS).origin, this.env.CLI || "one");
+    return goesTo(uri, this.env.CLI || "one");
   }
 
   /// Whether a client is one of the network's own apps, by where its sign-ins come back: the web client's page, the
-  /// page a machine's sign-in code is shown on, the native apps' `<cli>://signed-in/`, or Windows' loopback.
+  /// native apps' `<cli>://signed-in/`, or Windows' loopback.
   firstParty(client) {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const origin = new URL(this.env.ADDRESS).origin;
-    const ours = [`${origin}/callback`, `${origin}/sign-in/code/done`, `${this.env.CLI || "one"}://signed-in/`, "http://127.0.0.1/callback"];
+    const ours = [`${origin}/callback`, `${this.env.CLI || "one"}://signed-in/`, "http://127.0.0.1/callback"];
     return uris.length > 0 && uris.every((u) => ours.includes(u));
   }
 
@@ -897,7 +888,7 @@ export class Auth extends DurableObject {
   notNamedAsUs(body) {
     const plain = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").replace(/^the/, "");
     const [name, ours] = [plain(body.client_name), plain(this.auth.options.appName)];
-    const toSites = [].concat(body.redirect_uris || []).some((u) => ![ON_DEVICE, BY_CODE].includes(this.goes(u)));
+    const toSites = [].concat(body.redirect_uris || []).some((u) => this.goes(u) !== ON_DEVICE);
     if (name === ours || (name.startsWith(ours) && toSites)) refuse(400, `a client can't be called ${body.client_name}: that's the name of what it signs in to`);
   }
 
@@ -918,57 +909,6 @@ export class Auth extends DurableObject {
 
   fromOurPages(request) {
     if (request.headers.get("origin") !== new URL(this.env.ADDRESS).origin) refuse(403, "only the sign-in page asks that");
-  }
-
-  // Signing in with a code, for a client with no browser of its own (the CLI on a device with no screen): it makes an authorization
-  // request coming back to /sign-in/code/done and gets a short code for it; the user opens /sign-in/code on any
-  // device, types the code (or follows its link), and signs in there with their passkey; the client takes the
-  // authorization code by its state and turns it into tokens with its PKCE verifier, which only it has.
-
-  /// A code for an authorization request: `{ query }`, the request's query, coming back here. → `{ code, url, until }`.
-  async codeFor({ query }) {
-    const q = new URLSearchParams(typeof query === "string" ? query : "");
-    const origin = new URL(this.env.ADDRESS).origin;
-    if (q.get("redirect_uri") !== `${origin}/sign-in/code/done`) refuse(400, `a sign-in code's request comes back to ${origin}/sign-in/code/done`);
-    if ((q.get("state") || "").length < 32 || !q.get("code_challenge")) refuse(400, "a sign-in code's request has a state of 32 characters or more, and PKCE");
-    await this.client(q.get("client_id"));
-    const sql = this.ctx.storage.sql;
-    sql.exec("delete from codes where until <= ?", Date.now());
-    const until = Date.now() + CODE;
-    for (;;) {
-      const code = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => LETTERS[b % LETTERS.length]).join("");
-      if (sql.exec("select code from codes where code = ?", code).toArray().length) continue;
-      sql.exec("insert into codes (code, state, query, until) values (?, ?, ?, ?)", code, await hash(q.get("state")), q.toString(), until);
-      return { code: `${code.slice(0, 4)}-${code.slice(4)}`, url: `${origin}/sign-in/code?c=${code}`, until };
-    }
-  }
-
-  codeOpened(typed, look) {
-    if (typed == null) return html(codePage(look));
-    const code = String(typed).toUpperCase().replace(/[^A-Z]/g, "");
-    const [row] = this.ctx.storage.sql.exec("select query from codes where code = ? and until > ? and back is null", code, Date.now()).toArray();
-    if (!row) return html(codePage({ ...look, error: "That code doesn't work: it may have expired. Start signing in again where you got it." }));
-    return Response.redirect(`${new URL(this.env.ADDRESS).origin}/api/auth/oauth2/authorize?${row.query}`, 302);
-  }
-
-  /// Where a code's sign-in comes back: the authorization code (or why there's none) is kept for its client to take.
-  /// → whether it's signed in.
-  async codeDone(params) {
-    const state = params.get("state");
-    const back = params.get("code") ? JSON.stringify({ code: params.get("code") }) : JSON.stringify({ error: params.get("error_description") || params.get("error") || "Signing in didn't work." });
-    if (!state) return false;
-    const changed = this.ctx.storage.sql.exec("update codes set back = ? where state = ? and until > ? and back is null", back, await hash(state), Date.now()).rowsWritten;
-    return changed > 0 && !!params.get("code");
-  }
-
-  /// A client takes what its code's sign-in gave, once: `{ state }` → `{ code }` or `{ error }`; 202 while it waits.
-  async codeTaken({ state }) {
-    const sql = this.ctx.storage.sql;
-    const [row] = sql.exec("select code, back from codes where state = ? and until > ?", await hash(String(state || "")), Date.now()).toArray();
-    if (!row) return json({ error: "That sign-in code has expired. Sign in again." }, 404);
-    if (!row.back) return json({ waiting: true }, 202);
-    sql.exec("delete from codes where code = ?", row.code);
-    return json(JSON.parse(row.back));
   }
 
   async openInvite(secret) {

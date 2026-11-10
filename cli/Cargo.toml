@@ -1,6 +1,6 @@
 # The `one` program: the CLI, MCP and the node it serves (src/main.rs and the modules beside it). A package of its own,
-# not the root's, since it's a client too: it signs in through `onet`, which depends on `one` itself, and Cargo
-# allows no package to depend on its own dependent.
+# not the root's, since its tests run clients (`onet`), which depends on `one` itself, and Cargo allows no package to
+# depend on its own dependent.
 [package]
 name = "one-cli"
 version = "0.1.0"
@@ -21,15 +21,12 @@ path = "../tests/main.rs"
 
 [dependencies]
 one = { path = ".." }
-onet = { path = "../onet" }
 anyhow = "1"
 axum = "0.8"
 data-encoding = "2"
 jiff = "0.2"
 libc = "0.2"
 rand = "0.8"
-# What this machine keeps of its sign-in (src/onboarding/sign_in.rs), as `one` already builds it.
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"] }
@@ -40,6 +37,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
+onet = { path = "../onet" }
 # What a browser's push service does with a push (RFC 8291's decryption, tests/contracts.rs): the node's own crypto.
 aes-gcm = "0.10"
 hkdf = "0.13"
