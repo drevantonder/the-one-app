@@ -260,6 +260,23 @@ impl Attrs {
         self
     }
 
+    /// `gen_ai.request.model`.
+    pub fn model(mut self, model: &str) -> Attrs {
+        self.token("gen_ai.request.model", model);
+        self
+    }
+
+    /// `gen_ai.token.type`.
+    pub fn tokens(mut self, kind: &'static str) -> Attrs {
+        self.0.insert("gen_ai.token.type", json!(kind));
+        self
+    }
+
+    pub fn outcome(mut self, outcome: &'static str) -> Attrs {
+        self.0.insert("one.outcome", json!(outcome));
+        self
+    }
+
     /// Who says a device is on or off: the relay, or this node.
     pub fn says(mut self, who: &'static str) -> Attrs {
         self.0.insert("one.says", json!(who));
@@ -319,13 +336,9 @@ impl Attrs {
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&Value> {
-        self.0.get(key)
-    }
-
     /// The attributes a rollup groups by, as its key: those that are few.
     fn rollup_key(&self, fault: Option<Fault>) -> String {
-        let mut key: BTreeMap<&str, Value> = self.0.iter().filter(|(k, _)| ["one.client", "one.scope", "one.device", "one.build"].contains(k)).map(|(k, v)| (*k, v.clone())).collect();
+        let mut key: BTreeMap<&str, Value> = self.0.iter().filter(|(k, _)| ["one.client", "one.scope", "one.device", "one.build", "gen_ai.request.model", "gen_ai.token.type", "one.outcome"].contains(k)).map(|(k, v)| (*k, v.clone())).collect();
         if let Some(fault) = fault {
             key.insert("fault", json!(fault.as_str()));
         }
@@ -504,9 +517,9 @@ mod tests {
         let attrs = Attrs::default().tool(secret).service("https://x.example/a?b=c").version("a b").client(secret).device(secret).build(secret).stage(secret).error(secret).steps(&[json!({ "step": "device", "at": 1, "ms": 2, "why": secret, "device": secret, "result": secret, "trace": { "secret": secret } }), json!({ "step": secret })]);
         let stored = attrs.json().to_string();
         assert!(!stored.contains("anna") && !stored.contains("example"), "{stored}");
-        assert_eq!(attrs.get("one.client"), Some(&json!("other")));
-        assert_eq!(attrs.get("error.type"), Some(&json!(OTHER)));
-        assert_eq!(attrs.get("one.steps"), Some(&json!([{ "step": "device", "at": 1, "ms": 2 }])));
+        assert_eq!(attrs.json()["one.client"], "other");
+        assert_eq!(attrs.json()["error.type"], OTHER);
+        assert_eq!(attrs.json()["one.steps"], json!([{ "step": "device", "at": 1, "ms": 2 }]));
         let e = Exception::from_json(&json!({ "type": secret, "frames": [{ "file": "app.js", "line": 3, "col": 9 }, { "file": "a/b@c", "line": 1, "col": 1 }, { "file": "lib/a.js", "line": 2, "col": 1 }] })).unwrap();
         assert_eq!(e.kind, "Error");
         assert_eq!(e.frames, ["app.js:3:9", "lib/a.js:2:1"]);

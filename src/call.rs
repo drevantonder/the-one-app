@@ -127,7 +127,15 @@ pub enum Append {
     /// sees it added): for the device's user, or to stop it, for who may add apps where it ran.
     Service { name: String, device: String, on: bool, scope: Option<String> },
     /// What the call spent on AI, for the insights of the app that called it.
-    Cost { model: String, usd: f64, input: u64, output: u64 },
+    Cost {
+        model: String,
+        usd: f64,
+        input: u64,
+        output: u64,
+        /// How long the model took, if the app timed it.
+        #[serde(default)]
+        ms: Option<u64>,
+    },
     /// Makes, changes or lets go of (`release`) a Vault item: `scope` for one it makes, `same` a plain field by
     /// which it changes an item of that type instead.
     Vault {

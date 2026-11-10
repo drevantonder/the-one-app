@@ -63,12 +63,8 @@ impl Trace {
     }
 
     /// How many steps it has, where a call started now begins.
-    pub fn len(&self) -> usize {
+    pub fn count(&self) -> usize {
         self.0.steps.lock().unwrap().len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// The steps since the `from`th.

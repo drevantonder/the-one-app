@@ -197,11 +197,11 @@ function context(ask, body, appends, later) {
     /// group's and Everyone's with members: { <user id>: "admin" | "member" }. Everyone's has automatic: true, as being in
     /// the network isn't being given anything on purpose. `me.handle` is the caller's.
     handles: body.handles,
-    /// Says what this call spent on AI, { model, usd, input, output }: it shows in the insights of the app that called
-    /// it (ctx.from), or else of this one.
+    /// Says what this call spent on AI, { model, usd, input, output, ms }: it shows in the insights of the app that
+    /// called it (ctx.from), or else of this one; `ms`, how long the model took, is optional.
     cost: (spent) => {
       if (body.read_only) return;
-      appends.push({ kind: "cost", model: String(spent?.model ?? "?"), usd: Number(spent?.usd) || 0, input: Math.round(Number(spent?.input) || 0), output: Math.round(Number(spent?.output) || 0) });
+      appends.push({ kind: "cost", model: String(spent?.model ?? "?"), usd: Number(spent?.usd) || 0, input: Math.round(Number(spent?.input) || 0), output: Math.round(Number(spent?.output) || 0), ms: spent?.ms == null ? null : Math.round(Number(spent.ms) || 0) });
     },
     /// Keeps work going after the call returns (an AI read, a copy to Drive), up to 10 minutes: its requests and
     /// calls still go out as this call's, and what it writes is written when it's done.

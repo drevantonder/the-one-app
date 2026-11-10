@@ -43,7 +43,7 @@ impl Node {
         let trace = trace::current().unwrap_or_else(trace::Trace::quiet);
         let span = trace::ids::span();
         let parent = trace.enter(span.clone());
-        let from = trace.len();
+        let from = trace.count();
         trace.stage_is(stage::CHECK);
         Call { trace, from, started: Instant::now(), time: now_ms(), span, parent }
     }
@@ -108,6 +108,22 @@ impl Node {
             if value > 0 {
                 batch.metric(time, metric, app, &about, value);
             }
+        }
+    }
+
+    /// What a call of `app` spent on a model, in tokens and time: OTEL's `gen_ai.client.*` metrics. Dollars stay in `cost`.
+    /// Only a call that finished says what it spent, so its outcome is `ok`; one that failed is the call's own span.
+    pub(super) fn record_ai(&self, app: &str, me: &Caller, model: &str, input: u64, output: u64, ms: Option<u64>) {
+        let destination = self.destination(app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let named = if destination.named { app } else { "" };
+        let time = now_ms();
+        let about = || Attrs::default().device(&hex(&self.0.id)).scope(destination.kind).model(model).outcome("ok");
+        let mut batches = self.0.insights.0.lock().unwrap();
+        let batch = batches.entry(destination.scope.clone()).or_default();
+        batch.metric(time, "gen_ai.client.token.usage", named, &about().tokens("input"), input);
+        batch.metric(time, "gen_ai.client.token.usage", named, &about().tokens("output"), output);
+        if let Some(ms) = ms {
+            batch.metric(time, "gen_ai.client.operation.duration", named, &about(), ms);
         }
     }
 

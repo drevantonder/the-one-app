@@ -28,6 +28,13 @@ export function report(send, event) {
 
 /// The devices a request asked, for the timeline: a request's `trace`, which a shell gives as text.
 export function tried(trace) {
-  const said = typeof trace === "string" ? JSON.parse(trace || "{}") : trace;
+  let said = trace;
+  if (typeof trace === "string") {
+    try {
+      said = JSON.parse(trace);
+    } catch {
+      return;
+    }
+  }
   for (const t of Array.isArray(said?.tries) ? said.tries : []) note({ name: "client.try", node: t.node, result: t.result, ms: t.ms });
 }

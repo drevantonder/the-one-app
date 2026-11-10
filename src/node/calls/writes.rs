@@ -16,8 +16,9 @@ impl Node {
         // What it spent on AI counts against the app that called it, if one did.
         let (costs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Cost { .. }));
         for cost in costs {
-            if let Append::Cost { model, usd, input, output } = cost {
+            if let Append::Cost { model, usd, input, output, ms } = cost {
                 let to = from.unwrap_or(app);
+                self.record_ai(to, me, &model, input, output, ms);
                 let said = status::Said::Cost { app: to.into(), model, usd, input, output };
                 self.write_insight(to, me, said);
             }

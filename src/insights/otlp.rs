@@ -78,7 +78,7 @@ mod tests {
         assert_eq!((spans[0].name.as_str(), spans[0].ms, spans[0].ok, spans[0].status_code), ("span", 500, false, Some(500)));
         assert!(spans[0].ids.is_none());
         let attrs = super::super::Attrs::default().error(&spans[0].error);
-        assert_eq!(attrs.get("error.type"), Some(&json!(super::super::OTHER)), "what a program calls its error isn't kept");
+        assert_eq!(attrs.json()["error.type"], super::super::OTHER, "what a program calls its error isn't kept");
         assert_eq!((spans[1].name.as_str(), spans[1].ms), ("ping", 2));
         assert!(spans[1].ids.is_some());
     }

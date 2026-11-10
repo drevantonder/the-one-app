@@ -48,6 +48,9 @@ pub const WORKERS: &[Worker] = &[
 
 /// The Cloudflare node's Worker (`cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
 /// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
+/// The Workers traced at 100% (`metadata`): those that open nothing. The web client is the gateway's assets.
+const TRACED: [&str; 5] = ["gateway", "auth", "relay", "signer", "push"];
+
 pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
 
 impl Worker {
@@ -1223,6 +1226,10 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
         }
     }
     let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::app::runtime::COMPATIBILITY_DATE, "bindings": bindings, "observability": { "enabled": true } });
+    // Kept in Cloudflare, with no export, and never for the two that open data (mcp, node).
+    if TRACED.contains(&worker.name) {
+        meta["observability"]["traces"] = json!({ "enabled": true, "head_sampling_rate": 1 });
+    }
     if let Some(class) = class.filter(|_| migration != Some("v1")) {
         meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });
     }
@@ -1305,4 +1312,21 @@ pub(crate) fn upload_hash(parts: &[Vec<u8>]) -> String {
         hash.update(part);
     }
     data_encoding::HEXLOWER.encode(&hash.finalize())
+}
+
+#[cfg(test)]
+mod observability_tests {
+    use super::*;
+
+    /// Traces at 100% only for the Workers that open nothing: a trace of what mcp or node does would be of data they opened.
+    #[test]
+    fn only_workers_that_open_nothing_are_traced() {
+        let settings = Settings::new("https://example.org");
+        let traced = |worker: &Worker| metadata(&settings, worker, None, |_| true).0["observability"]["traces"]["enabled"] == true;
+        for name in TRACED {
+            assert!(traced(Worker::named(name)), "{name}");
+        }
+        assert!(!traced(Worker::named("mcp")), "the remote MCP server opens data");
+        assert!(!traced(&NODE), "the Cloudflare node opens data");
+    }
 }
