@@ -46,6 +46,7 @@ const PATH = { type: "string", description: "a path in the repo, like src/app.js
 const SHA = { type: "string", description: "a commit's sha, full or its first 7 characters, from repos_log" };
 const USER = { type: "string", description: "a user's handle, from groups_list, like sam" };
 const CONFIRM = { type: "boolean", description: "true once the user agreed: it changes who may push" };
+const MOVED_FOR = 30 * 24 * 60 * 60 * 1000;
 
 const handles = (ctx) => ctx.handles;
 const byId = (ctx, id) => handles(ctx).find((h) => h.id === id) || null;
@@ -71,6 +72,17 @@ async function repoAt(ctx, g, repo) {
   return withPath(ctx, (await g.query("select * from repos where owner = ? and name = ?", [owner, name]))[0] || null);
 }
 
+/// The repo transferred away from `owner`/`name`, while that address still leads to it, with `until`.
+async function movedFrom(ctx, g, owner, name) {
+  return withPath(ctx, (await g.query("select r.*, m.until from moved m join repos r on r.id = m.repo where m.owner = ? and m.name = ? and m.until > ?", [owner, name, ctx.now()]))[0] || null);
+}
+
+/// A repo by the address given: where it is, or where it went.
+async function repoFrom(ctx, g, repo) {
+  const { owner, name } = parse(ctx, repo);
+  return (await repoAt(ctx, g, repo)) || movedFrom(ctx, g, owner, name);
+}
+
 async function named(ctx, repo) {
   const g = global(ctx);
   if (!String(repo || "").includes("/")) {
@@ -84,7 +96,7 @@ async function named(ctx, repo) {
 }
 
 async function live(ctx, repo) {
-  const r = await repoAt(ctx, global(ctx), repo);
+  const r = await repoFrom(ctx, global(ctx), repo);
   if (r?.deleted) throw new Error(`${r.path} was deleted: its owners restore it from Recently Deleted`);
   return r;
 }
@@ -95,14 +107,23 @@ const randomId = () => [...crypto.getRandomValues(new Uint8Array(8))].map((x) =>
 
 const object = (r) => `repo:${r.id}`;
 
+/// Who holds a role on a repo by owning it.
+function holders(ctx, owner) {
+  const h = byId(ctx, owner);
+  return !h?.members ? [[owner, "owner"]] : [[`${owner}#admin`, "owner"], ...(h.automatic ? [] : [[`${owner}#member`, "collaborator"]])];
+}
+
+const give = (ctx, g, owner, id) => {
+  for (const [subject, relation] of holders(ctx, owner)) g.exec("insert or ignore into relations (subject, relation, object, by, time) values (?, ?, ?, ?, ?)", [subject, relation, object({ id }), ctx.me.user, ctx.now()]);
+};
+
 /// Writes a new repo, or a fork of `from` (a row) with its branches and history as they are now: its owner's, a user
 /// or the admins of a group or Everyone, and a group's members its collaborators.
 function newRepo(ctx, g, { name, owner, from = null }) {
   const id = randomId();
   g.exec(`insert into repos (id, owner, name, "from", created, user) values (?, ?, ?, ?, ?, ?)`, [id, owner, name, from?.id ?? null, ctx.now(), ctx.me.user]);
-  const h = byId(ctx, owner);
-  const holders = !h?.members ? [[owner, "owner"]] : [[`${owner}#admin`, "owner"], ...(h.automatic ? [] : [[`${owner}#member`, "collaborator"]])];
-  for (const [subject, relation] of holders) g.exec("insert into relations (subject, relation, object, by, time) values (?, ?, ?, ?, ?)", [subject, relation, object({ id }), ctx.me.user, ctx.now()]);
+  g.exec("delete from moved where owner = ? and name = ?", [owner, name]);
+  give(ctx, g, owner, id);
   if (from) {
     g.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ?`, [id, ctx.me.user, ctx.me.user_name || ctx.me.name, ctx.now(), from.id]);
     g.exec("insert or ignore into packs select ?, hash, time from packs where repo = ?", [id, from.id]);
@@ -124,7 +145,7 @@ function ownerFor(ctx, handle) {
 }
 
 async function owned(ctx, repo) {
-  const r = await repoAt(ctx, global(ctx), repo);
+  const r = await repoFrom(ctx, global(ctx), repo);
   if (!r) await named(ctx, repo);
   if (!(await global(ctx).may("manage", object(r)))) throw new Error(`only ${byId(ctx, r.owner)?.members ? `${ownerName(ctx, r.owner)}'s admins` : ownerName(ctx, r.owner)} ${r.deleted ? "restore or erase" : "manage"} ${r.path}`);
   return r;
@@ -184,7 +205,7 @@ const app = {
   color: "#5856d6",
   advanced: true,
   description: "Git hosting for you and your agents: clone, push and suggest changes",
-  instructions: `Repos is git hosting for the user and their agents, as on GitHub. A repo is <owner>/<name>, its owner a user, a group or Everyone by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where it is installed and in the network; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a user adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them; Everyone's are the network's admins' alone, who add others as collaborators. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it. Each repo has issues, as on GitHub, numbered from #1: anyone opens one (repos_open_issue) and comments (repos_comment); its author edits and closes it, and those who push to the repo close, label and assign any (repos_issues finds them). GitHub's repos show beside them, as github.com/<owner>/<name>: those the user's own GitHub accounts see (repos_accounts, repos_sign_in) and those of GitHub organizations connected for their groups. Reading and the issue tools work on them the same, asking GitHub at once, and what they write goes to GitHub; clone one from GitHub's own address (repos_get gives it).`,
+  instructions: `Repos is git hosting for the user and their agents, as on GitHub. A repo is <owner>/<name>, its owner a user, a group or Everyone by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where it is installed and in the network; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a user adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them; Everyone's are the network's admins' alone, who add others as collaborators. An owner gives a repo to a group they're in or Everyone with repos_transfer; its old address keeps working for 30 days. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it. Each repo has issues, as on GitHub, numbered from #1: anyone opens one (repos_open_issue) and comments (repos_comment); its author edits and closes it, and those who push to the repo close, label and assign any (repos_issues finds them). GitHub's repos show beside them, as github.com/<owner>/<name>: those the user's own GitHub accounts see (repos_accounts, repos_sign_in) and those of GitHub organizations connected for their groups. Reading and the issue tools work on them the same, asking GitHub at once, and what they write goes to GitHub; clone one from GitHub's own address (repos_get gives it).`,
   vault: github.VAULT,
 
   schema: {
@@ -236,6 +257,8 @@ const app = {
       `update relations set subject = 'user:' || substr(subject, 8) where subject like 'person:%';`,
       // Sign-offs on a repo's commits, as git refs (refs/signoff/…), which aren't branches: one-dev's.
       `create table signoffs (repo text not null, ref text not null, head text not null, primary key (repo, ref));`,
+      // Addresses repos were transferred away from, which lead to them until `until` or until a repo is made there.
+      `create table moved (owner text not null, name text not null, repo text not null, until integer not null, primary key (owner, name));`,
     ],
   },
 
@@ -525,6 +548,30 @@ const app = {
         return address(ctx, path) ? `Forked ${from.path} as ${path}: git clone ${address(ctx, path)}` : `Forked ${from.path} as ${path}.`;
       },
     },
+    transfer: {
+      title: "Transfer a repo",
+      reads: false,
+      confirm: true,
+      description: "Give a repo you own to yourself, a group you're in, or, if you're an admin, Everyone. Its history, issues and added collaborators stay with it, and who owns it changes who may push. Its old address keeps working for 30 days, with git saying where it went, unless a repo is made there first.",
+      input: { type: "object", required: ["repo", "owner"], properties: { repo: REPO, owner: OWNER, confirm: CONFIRM } },
+      output: TEXT("where it is now, and when its old address stops working"),
+      async run(ctx, { repo, owner }) {
+        const g = global(ctx);
+        const r = await owned(ctx, repo);
+        if (r.deleted) throw new Error(`${r.path} was deleted: restore it first`);
+        const id = ownerFor(ctx, owner);
+        if (id === r.owner) throw new Error(`${r.path} is already theirs`);
+        const to = `${byId(ctx, id).handle}/${r.name}`;
+        if (await repoAt(ctx, g, to)) throw new Error(`${to} already exists`);
+        const until = ctx.now() + MOVED_FOR;
+        for (const [subject, relation] of holders(ctx, r.owner)) g.exec("delete from relations where subject = ? and relation = ? and object = ?", [subject, relation, object(r)]);
+        give(ctx, g, id, r.id);
+        g.exec("update repos set owner = ? where id = ?", [id, r.id]);
+        g.exec("delete from moved where owner = ? and name = ?", [id, r.name]);
+        g.exec("insert or replace into moved values (?, ?, ?, ?)", [r.owner, r.name, r.id, until]);
+        return `${r.path} is now ${to}. Its old address works until ${new Date(until).toISOString().slice(0, 10)}: git remote set-url origin ${address(ctx, to) ?? to}`;
+      },
+    },
     delete: {
       title: "Delete a repo",
       reads: false,
@@ -673,7 +720,10 @@ const git = {
   find: async (ctx, g, owner, name) => {
     const h = byHandle(ctx, owner);
     if (!h) return { why: `no one and no group has the handle ${owner}` };
-    return { r: withPath(ctx, (await g.query("select * from repos where owner = ? and name = ?", [h.id, name]))[0] || null) };
+    const r = withPath(ctx, (await g.query("select * from repos where owner = ? and name = ?", [h.id, name]))[0] || null);
+    if (r) return { r };
+    const moved = await movedFrom(ctx, g, h.id, name);
+    return { r: moved, moved: moved && `${owner}/${name} moved to ${moved.path}, and this address stops working on ${new Date(moved.until).toISOString().slice(0, 10)}: git remote set-url origin ${address(ctx, moved.path) ?? moved.path}` };
   },
   ownerName,
   object,

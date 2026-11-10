@@ -120,6 +120,9 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
             Err(err) => return drop(head.send((502, "text/plain".into(), Some(format!("{err}"))))),
         };
         let status = resp.status().as_u16();
+        if let Some(said) = resp.headers().get(one::api::APP_SAYS).and_then(|v| v.to_str().ok()) {
+            eprintln!("remote: {said}");
+        }
         let kind = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();
         // What the node says is wrong, as git shows it: each line of a plain answer, after "remote:".
         if status >= 400 && kind.starts_with("application/json") {

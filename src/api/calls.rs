@@ -69,10 +69,13 @@ pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::
     ran.await.unwrap_or_else(|err| failed(&err))
 }
 
+/// The header carrying a line an app's `_http` wants git to show.
+pub const APP_SAYS: &str = "x-app-says";
+
 /// A request to `/<app>/<path>`, answered by the app's `_http` tool, run as whoever asked (this machine's user,
 /// or a client device's), whose checks are the app's own: the body reaches it as a blob, read as it comes
 /// and deleted once it's answered unless something keeps it, and it answers `{ status, type, text }`, or
-/// `{ status, type, blob }` for bytes it keeps.
+/// `{ status, type, blob }` for bytes it keeps, with `say` for a line git shows whoever asked (`APP_SAYS`).
 async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(String, String)>, req: axum::extract::Request) -> Result<Response, Error> {
     let method = req.method().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
@@ -95,5 +98,9 @@ async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(Str
         Some(hash) => node.blob_for(&me.caller, hash).await?,
         None => out["text"].as_str().unwrap_or("").as_bytes().to_vec(),
     };
-    Ok((status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response())
+    let mut reply = (status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response();
+    if let Some(said) = out["say"].as_str() {
+        reply.headers_mut().insert(APP_SAYS, axum::http::HeaderValue::from_str(said)?);
+    }
+    Ok(reply)
 }

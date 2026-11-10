@@ -30,12 +30,13 @@ export async function serve(ctx, g, api, { method, path, query, body }) {
   const found = await api.find(ctx, g, owner, name);
   if (method === "POST" && file === "git-receive-pack") return receive(ctx, g, api, owner, name, found, body);
   if (method !== "GET") return missing();
-  if (file === "info/refs" && service === "git-receive-pack") return advertise(g, found.r);
+  const told = (reply) => (found.moved ? { ...reply, say: found.moved } : reply);
+  if (file === "info/refs" && service === "git-receive-pack") return told(await advertise(g, found.r));
   const r = found.r;
   if (!r) return missing(found.why || `There's no repo ${owner}/${name}`);
   if (r.deleted) return missing(`${r.path} was deleted: its owners restore it from Recently Deleted`);
   const branches = await g.query("select branch, head from branches where repo = ? order by branch", [r.id]);
-  if (file === "info/refs") return text((await refs(g, r.id)).map((b) => `${b.head}\t${b.ref}\n`).join(""));
+  if (file === "info/refs") return told(text((await refs(g, r.id)).map((b) => `${b.head}\t${b.ref}\n`).join("")));
   if (file === "HEAD") return text(`ref: refs/heads/${api.defaultBranch(branches.map((b) => b.branch)) || "main"}\n`);
   if (file === "objects/info/packs") return text((await indexed(g, r.id)).map((p) => `P pack-${p.name}.pack\n`).join("") + "\n");
   const want = /^objects\/pack\/pack-([0-9a-f]{40})\.(pack|idx)$/.exec(file);

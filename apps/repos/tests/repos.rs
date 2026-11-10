@@ -158,6 +158,23 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let refused = call(as_sam("delete", json!({ "repo": core })), &client).await.unwrap_err();
     assert!(format!("{refused:#}").contains(&format!("only Everyone's admins manage {core}")), "{refused:#}");
 
+    // Transferring: only its owners may, and only to somewhere they make repos. Its old address leads to it, by the
+    // same rights, until a repo is made there.
+    let refused = call(as_sam("transfer", json!({ "repo": "team/site", "owner": "sam", "confirm": true })), &client).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("only Team's admins manage team/site"), "{refused:#}");
+    let refused = a.call(repos("transfer", json!({ "repo": "team/site", "owner": "sam", "confirm": true }))).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("only Sam makes repos as sam"), "{refused:#}");
+    a.call(repos("transfer", json!({ "repo": "team/site", "owner": one::config::CLI, "confirm": true }))).await.unwrap();
+    let site = format!("{}/site", one::config::CLI);
+    assert_eq!(a.call(repos("get", json!({ "repo": "team/site" }))).await.unwrap()["repo"], site.as_str());
+    assert!(!sams_push(&client, "team/site", "after", false).await, "a member of the group it left no longer pushes, at either address");
+    assert!(!sams_push(&client, &site, "after", false).await);
+    let told = a.call(repos("_http", json!({ "method": "GET", "path": "team/site.git/info/refs", "query": "service=git-upload-pack" }))).await.unwrap();
+    assert!(told["say"].as_str().unwrap().contains(&format!("moved to {site}")), "{told}");
+    a.call(repos("create", json!({ "name": "site", "owner": "team" }))).await.unwrap();
+    assert_eq!(a.call(repos("get", json!({ "repo": "team/site" }))).await.unwrap()["repo"], "team/site", "a repo made at the old address ends the redirect");
+    a.call(repos("delete", json!({ "repo": site }))).await.unwrap();
+
     a.call(repos("delete", json!({ "repo": core }))).await.unwrap();
     a.call(repos("delete", json!({ "repo": "andre/home" }))).await.unwrap();
     a.call(repos("delete", json!({ "repo": "team/site" }))).await.unwrap();

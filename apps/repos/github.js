@@ -492,6 +492,7 @@ export const elsewhere = {
   add_collaborator: "add a collaborator",
   remove_collaborator: "remove a collaborator",
   fork: "fork it",
+  transfer: "transfer it",
   delete: "delete it",
   restore: "restore it",
   erase: "erase it",
