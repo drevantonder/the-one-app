@@ -1,7 +1,7 @@
 // A stand-in for Cloudflare Basin, which exists only on Cloudflare: where a network's Workers run on one machine (a
 // throwaway network's, or `cloudflare serve`'s), the telemetry Worker writes to and reads from this instead. It answers
 // what the Worker asks of Basin, the pipelines' `send` and SQL over HTTP, from one SQLite database in a Durable Object,
-// so the Worker has no idea which it's talking to. Only the two functions it doesn't have are turned into SQLite's. As in
+// so the Worker has no idea which it's talking to. Only the two functions it doesn't have are turned into SQLite's, and Basin's partition column is dropped. As in
 // Basin, a row that doesn't fit is taken and dropped, and an unknown table is an error.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { TABLES } from "./worker.js";
@@ -9,7 +9,7 @@ import { TABLES } from "./worker.js";
 // A JavaScript number comes to SQLite as a float, and these are divided as integers.
 const INTEGERS = ["time", "duration", "severity_number", "count"];
 const store = (env) => env.STORE.get(env.STORE.idFromName("telemetry"));
-const sqlite = (sql) => sql.replace(/\bFROM telemetry\./g, "FROM ").replace(/json_get_str\(attrs, '([^']+)'\)/g, `json_extract(attrs, '$."$1"')`).replace(/json_get_int\(buckets, (\d+)\)/g, "json_extract(buckets, '$[$1]')");
+const sqlite = (sql) => sql.replace(/__ingest_ts >= '[^']*' AND /g, "").replace(/\bFROM telemetry\./g, "FROM ").replace(/json_get_str\(attrs, '([^']+)'\)/g, `json_extract(attrs, '$."$1"')`).replace(/json_get_int\(buckets, (\d+)\)/g, "json_extract(buckets, '$[$1]')");
 
 export class Store extends DurableObject {
   constructor(ctx, env) {

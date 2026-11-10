@@ -114,6 +114,9 @@ const NOBODY = "0".repeat(64);
 /// As a device's: a request always, and the rest of a trace if it failed, was slow or is one in 20 (src/insights.rs).
 const SLOW_MS = 1000;
 const SAMPLED_ONE_IN = 20;
+/// What a Worker answers as a request. Its other events (each WebSocket message the relay takes is one, some 200,000 an hour)
+/// have no caller to report to: they're kept only if they failed or were slow.
+const REQUEST = /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/;
 const sampledTrace = (trace) => parseInt(trace.slice(-8), 16) % SAMPLED_ONE_IN === 0;
 
 /// OTLP/JSON from Cloudflare, each Worker's spans as rows for the spans table: only its name if that's a plain token, its
@@ -129,7 +132,8 @@ export function workerSpans(request, cli) {
   const failed = ({ s }) => s.status?.code === 2 || s.status?.code === "STATUS_CODE_ERROR";
   const took = ({ s }) => nanos(s.endTimeUnixNano) - nanos(s.startTimeUnixNano);
   const worth = new Set(spans.filter((x) => failed(x) || took(x) >= SLOW_MS).map(({ s }) => s.traceId));
-  return spans.filter(({ s }) => hex(s.traceId, 32) && hex(s.spanId, 16) && (!hex(s.parentSpanId, 16) || worth.has(s.traceId) || sampledTrace(s.traceId))).map((x) => {
+  const requests = new Set(spans.filter(({ s }) => !hex(s.parentSpanId, 16) && REQUEST.test(s.name)).map(({ s }) => s.traceId));
+  return spans.filter(({ s }) => hex(s.traceId, 32) && hex(s.spanId, 16) && (worth.has(s.traceId) || (requests.has(s.traceId) && (!hex(s.parentSpanId, 16) || sampledTrace(s.traceId))))).map((x) => {
     const { s, job } = x;
     const code = s.attributes?.find((a) => a.key === "http.response.status_code")?.value?.intValue;
     const kind = s.kind === 2 || s.kind === "SPAN_KIND_SERVER" ? "server" : s.kind === 3 || s.kind === "SPAN_KIND_CLIENT" ? "client" : "internal";
@@ -202,9 +206,11 @@ const asBuckets = (rows) => rows.map((row) => {
   return { ...out, buckets: counts };
 });
 
-// A filter of a table, by what a read asks: `since` and which services always, and the rest as given.
+// A filter of a table, by what a read asks: `since` and which services always, and the rest as given. Basin partitions each
+// table by day of `__ingest_ts` and prunes by that alone: a bound on "time" reads every file (measured 2026-11-10, 171 files
+// against 3). A row can be `FUTURE` ahead of when it came.
 function where(a, more = []) {
-  const parts = [`"time" >= ${a.since}`, `service IN (${a.services.map(quoted).join(", ")})`, ...more];
+  const parts = [`__ingest_ts >= '${new Date(Math.max(0, a.since - FUTURE)).toISOString()}'`, `"time" >= ${a.since}`, `service IN (${a.services.map(quoted).join(", ")})`, ...more];
   if (a.service) parts.push(`service = ${quoted(a.service)}`);
   if (a.name) parts.push(`${a.named || "name"} = ${quoted(a.name)}`);
   if (a.trace) parts.push(`trace = ${quoted(a.trace)}`);

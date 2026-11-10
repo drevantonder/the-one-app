@@ -1074,10 +1074,10 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     let start = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() * 1_000_000;
     let span = |name: &str, trace: char, status: i64, parent: Option<&str>| json!({ "name": name, "traceId": trace.to_string().repeat(32), "spanId": "1".repeat(16), "parentSpanId": parent, "startTimeUnixNano": start.to_string(), "endTimeUnixNano": (start + 500_000_000).to_string(), "status": { "code": status }, "kind": 2, "attributes": [{ "key": "url.full", "value": { "stringValue": "https://x/anna@example.org" } }, { "key": "http.response.status_code", "value": { "intValue": "500" } }] });
     let of = |worker: &str, spans: Vec<Value>| json!({ "resource": { "attributes": [{ "key": "service.name", "value": { "stringValue": worker } }] }, "scopeSpans": [{ "spans": spans }] });
-    let request = json!({ "resourceSpans": [of("one-gateway", vec![span("GET /users/anna@example.org", 'a', 2, None)]), of("one-telemetry", vec![span("fetch", 'c', 2, None)]), of("one-mcp", vec![span("fetch", 'b', 2, None)]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
+    let request = json!({ "resourceSpans": [of("one-gateway", vec![span("GET /users/anna@example.org", 'a', 2, None), span("GET", 'd', 0, None)]), of("one-relay", vec![span("hibernatableWebSocket", 'e', 0, None)]), of("one-telemetry", vec![span("fetch", 'c', 2, None)]), of("one-mcp", vec![span("fetch", 'b', 2, None)]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
     let rows = formats.js(json!({ "op": "telemetryWorkerSpans", "request": request, "cli": "one" }));
     let rows = rows.as_array().unwrap();
-    assert_eq!(rows.len(), 1, "only the gateway's, of the three: {rows:?}");
+    assert_eq!(rows.len(), 2, "the gateway's failure and its request: not a WebSocket message, nor what mcp, node or telemetry did: {rows:?}");
     let stored = rows[0].to_string();
     assert!(!stored.contains("anna") && !stored.contains("example") && !stored.contains("url.full"), "{stored}");
     let attrs: Value = serde_json::from_str(rows[0]["attrs"].as_str().unwrap()).unwrap();
