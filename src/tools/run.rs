@@ -75,7 +75,8 @@ pub fn run(node: &Client, name: &str, tool_spec: &Value, input: Map<String, Valu
     }
     if let Some(route) = tool_spec["route"].as_str() {
         let body = crate::core_tools::body(tool_spec, input, how.confirmed);
-        return Called { ok: node.post_for(how.agent, route, body).map(crate::core_tools::said), trace: None };
+        let called = node.route(how.agent, route, &body, how.trace);
+        return Called { ok: called.ok.map(crate::core_tools::said), trace: called.trace };
     }
     node.call(&json!({ "device": how.device, "scopes": how.scopes, "app": app, "tool": tool, "input": input, "agent": how.agent, "client": how.reader.client() }), how.trace)
 }

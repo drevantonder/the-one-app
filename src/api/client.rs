@@ -111,13 +111,24 @@ impl Client {
         self.via.send("GET", path, &[], None, wait)
     }
 
+    /// `post_for`, with what it did when `trace` asks, as a call says it.
+    pub fn route(&self, agent: Option<&str>, path: &str, body: &Value, trace: bool) -> Called {
+        let named = agent.map(|a| data_encoding::BASE64URL_NOPAD.encode(a.as_bytes()));
+        let mut headers = vec![("content-type", "application/json")];
+        headers.extend(named.as_deref().map(|n| (crate::protocol::header::AGENT, n)));
+        self.traced(path, headers, body, trace, |r| r)
+    }
+
     /// Runs a call (`/api/call`'s body), with what it did when `trace` asks: after its answer, or the reason it failed.
     pub fn call(&self, body: &Value, trace: bool) -> Called {
-        let mut headers = vec![("content-type", "application/json")];
+        self.traced("/api/call", vec![("content-type", "application/json")], body, trace, |mut r| r["ok"].take())
+    }
+
+    fn traced(&self, path: &str, mut headers: Vec<(&str, &str)>, body: &Value, trace: bool, answered: impl FnOnce(Value) -> Value) -> Called {
         if trace {
             headers.push((crate::protocol::header::TRACE, "1"));
         }
-        let (ok, node) = match self.via.send("POST", "/api/call", &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None) {
+        let (ok, node) = match self.via.send("POST", path, &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None) {
             Ok(mut answer) => {
                 let node = answer.trace.take().and_then(|h| data_encoding::BASE64.decode(h.as_bytes()).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok());
                 (self.json(answer), node)
@@ -128,7 +139,7 @@ impl Client {
             Some(node) => crate::node::trace::said(node),
             None => vec!["no trace came back".to_string()],
         });
-        Called { ok: ok.map(|mut r| r["ok"].take()), trace }
+        Called { ok: ok.map(answered), trace }
     }
 
     /// What a call it made needed and wasn't handed, since this was last asked (`{ error, need, to, seal }`): the node's

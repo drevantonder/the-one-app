@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// The most lines a list has unless asked for more.
 pub const LISTED: usize = 20;
@@ -97,17 +97,34 @@ fn listed<T>(some: &[T], limit: usize, line: impl Fn(&T) -> String) -> String {
     out.join("\n")
 }
 
-/// What failed with `status`: real errors unless asked for what wasn't one.
+/// What failed with `status`, real errors unless asked for what wasn't one: one line each for what failed and where,
+/// whichever builds it ran in, with the newest trace of it to read.
 fn errors(rows: &Value, status: &str, since: u64, now: u64, limit: usize) -> Option<String> {
-    let mut failed: Vec<&Value> = rows["errors"].as_array().into_iter().flatten().filter(|p| p["status"] == status && p["last"].as_u64() >= Some(since)).collect();
-    if failed.is_empty() {
+    let text = |row: &Value, key: &str| row[key].as_str().unwrap_or("").to_string();
+    let mut grouped: BTreeMap<(String, String, String, String), Value> = BTreeMap::new();
+    for row in rows["errors"].as_array().into_iter().flatten().filter(|p| p["status"] == status && p["last"].as_u64() >= Some(since)) {
+        let key = (text(row, "service"), text(row, "name"), text(row, "type"), text(row, "frame"));
+        match grouped.get_mut(&key) {
+            None => {
+                grouped.insert(key, row.clone());
+            }
+            Some(had) => {
+                had["count"] = json!(had["count"].as_u64().unwrap_or(0) + row["count"].as_u64().unwrap_or(0));
+                if row["last"].as_u64() > had["last"].as_u64() {
+                    (had["last"], had["message"], had["trace"]) = (row["last"].clone(), row["message"].clone(), row["trace"].clone());
+                }
+            }
+        }
+    }
+    if grouped.is_empty() {
         return None;
     }
+    let mut failed: Vec<Value> = grouped.into_values().collect();
     failed.sort_by_key(|p| std::cmp::Reverse(p["count"].as_u64()));
-    let text = |row: &Value, key: &str| row[key].as_str().unwrap_or("").to_string();
     let lines = listed(&failed, limit, |p| {
         let said = p["message"].as_str().map(|m| format!("\n    {m}")).unwrap_or_default();
-        format!("{} {}: {} at {}, {}, last {}{said}", text(p, "service"), text(p, "name"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)))
+        let trace = p["trace"].as_str().map(|t| format!(", trace {t}")).unwrap_or_default();
+        format!("{} {}: {} at {}, {}, last {}{trace}{said}", text(p, "service"), text(p, "name"), text(p, "type"), text(p, "frame"), plural(p["count"].as_u64().unwrap_or(0), "time"), ago(now, p["last"].as_u64().unwrap_or(0)))
     });
     Some(format!("{}:\n{lines}", if status == ERROR { "Top errors" } else { "Not errors" }))
 }
@@ -151,7 +168,7 @@ pub fn service(rows: &Value, service: &str, status: &str, since: u64, now: u64, 
     }
     let worth: Vec<&Value> = rows["spans"].as_array().into_iter().flatten().filter(|s| s["kind"] == "server" && (s["status"] == ERROR || s["duration"].as_u64().is_some_and(|d| d >= super::SLOW_MS))).collect();
     if !worth.is_empty() {
-        let shown = listed(&worth, limit, |s| format!("{}  {}  {}  {}  {}", s["trace"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), took(s["duration"].as_f64()), s["status"].as_str().unwrap_or(""), ago(now, s["time"].as_u64().unwrap_or(0))));
+        let shown = listed(&worth, limit, |s| format!("{}  {}  {}  {}  {}", s["trace"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), took(s["duration"].as_f64()), s["attrs"]["error.type"].as_str().unwrap_or(s["status"].as_str().unwrap_or("")), ago(now, s["time"].as_u64().unwrap_or(0))));
         out.push_str(&format!("\n\nFailing or slow:\n{shown}"));
     }
     out
@@ -213,6 +230,9 @@ pub fn effect(rows: &Value, build: &str, now: u64, limit: usize) -> String {
     out.join("\n")
 }
 
+/// The most of a failure's stack a trace shows of each span.
+const FRAMES_SHOWN: usize = 3;
+
 /// One trace, each span under the one that made it.
 pub fn trace(rows: &Value, id: &str, limit: usize) -> String {
     let mut spans: Vec<&Value> = rows["spans"].as_array().into_iter().flatten().filter(|s| s["trace"] == id).collect();
@@ -245,6 +265,13 @@ fn add_span(span: &Value, spans: &[&Value], depth: usize, limit: usize, out: &mu
     said.extend(attr("error.type"));
     said.extend(attr("one.result"));
     out.push(format!("{}{} {} ({})", "  ".repeat(depth + 1), span["service"].as_str().unwrap_or(""), span["name"].as_str().unwrap_or(""), [said.join(", "), span["device"].as_str().unwrap_or("").to_string()].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", on ")));
+    let more = "  ".repeat(depth + 2);
+    if let Some(said) = span["message"].as_str() {
+        out.push(format!("{more}said: {said}"));
+    }
+    for at in span["attrs"]["events"][0]["attributes"]["exception.stacktrace"].as_str().into_iter().flat_map(str::lines).take(FRAMES_SHOWN) {
+        out.push(format!("{more}{at}"));
+    }
     let mine = span["span"].as_str();
     for child in spans.iter().filter(|s| s["parent"].as_str() == mine) {
         add_span(child, spans, depth + 1, limit, out);

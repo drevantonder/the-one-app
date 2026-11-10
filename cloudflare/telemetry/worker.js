@@ -200,7 +200,7 @@ const QUERIES = {
   logs: { sql: (a) => newest("logs", LOG, where({ ...a, named: "body" }, errorOnly(a, `severity_number >= 17`)), a.limit) },
   metrics: { sql: (a) => `SELECT ${hour} AS hour, name, "type", unit, service, instance, attrs, SUM("count") AS "count", SUM("sum") AS "sum", ${summed()} FROM ${NAMESPACE}.metrics ${where(a)} GROUP BY ${hour}, name, "type", unit, service, instance, attrs ORDER BY hour DESC LIMIT ${a.limit}`, rows: asBuckets },
   // What broke, as often as it did: its type, the frame that threw it and the build it ran in, in that one attribute.
-  errors: { sql: (a) => `SELECT service, name, status, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", MIN("time") AS first_seen, MAX("time") AS last_seen, MIN(message) AS message FROM ${NAMESPACE}.spans ${where(a, [`${attr("one.fingerprint")} IS NOT NULL`, ...(a.status === "error" || a.status === "unset" ? [`status = ${quoted(a.status)}`] : [])])} GROUP BY service, name, status, ${attr("one.fingerprint")} ORDER BY last_seen DESC LIMIT ${Math.min(a.limit, ERRORS_READ)}` },
+  errors: { sql: (a) => `SELECT service, name, status, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", MIN("time") AS first_seen, MAX("time") AS last_seen, MIN(message) AS message, MAX(trace) AS trace FROM ${NAMESPACE}.spans ${where(a, [`${attr("one.fingerprint")} IS NOT NULL`, ...(a.status === "error" || a.status === "unset" ? [`status = ${quoted(a.status)}`] : [])])} GROUP BY service, name, status, ${attr("one.fingerprint")} ORDER BY last_seen DESC LIMIT ${Math.min(a.limit, ERRORS_READ)}` },
   // What a build did, per operation: rates and durations, each with the first time this build was seen.
   builds: { sql: (a) => `SELECT ${attr("one.build")} AS build, service, name, MIN("time") AS first_seen, COUNT(*) AS "count", SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors, SUM("duration") AS "sum", ${buckets()} FROM ${NAMESPACE}.spans ${where(a, [`kind = 'server'`, `${attr("one.build")} IS NOT NULL`])} GROUP BY ${attr("one.build")}, service, name ORDER BY first_seen DESC LIMIT ${a.limit}`, rows: asBuckets },
   // What broke in each build: the same fingerprints as `errors`, by the build that ran them.
@@ -209,7 +209,7 @@ const QUERIES = {
 
 // `requests` and `errors` read the same spans, so a view that shows both is one trip to Basin: each is split out here, its
 // `status` applied only to `errors`, as it is when they're separate. Each kept row is a kind of span at a status in an hour.
-const SUMMARY = (a) => `SELECT ${hour} AS hour, service, name, kind, status, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", SUM("duration") AS "sum", ${buckets()}, MIN("time") AS first_seen, MAX("time") AS last_seen, MIN(message) AS message FROM ${NAMESPACE}.spans ${where(a, [`(kind = 'server' OR ${attr("one.fingerprint")} IS NOT NULL)`])} GROUP BY ${hour}, service, name, kind, status, ${attr("one.fingerprint")} ORDER BY hour DESC LIMIT ${a.limit}`;
+const SUMMARY = (a) => `SELECT ${hour} AS hour, service, name, kind, status, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", SUM("duration") AS "sum", ${buckets()}, MIN("time") AS first_seen, MAX("time") AS last_seen, MIN(message) AS message, MAX(trace) AS trace FROM ${NAMESPACE}.spans ${where(a, [`(kind = 'server' OR ${attr("one.fingerprint")} IS NOT NULL)`])} GROUP BY ${hour}, service, name, kind, status, ${attr("one.fingerprint")} ORDER BY hour DESC LIMIT ${a.limit}`;
 
 function summary(rows, a) {
   const requests = new Map(), errors = new Map();
@@ -235,8 +235,9 @@ function summary(rows, a) {
         had.first_seen = Math.min(had.first_seen, row.first_seen);
         had.last_seen = Math.max(had.last_seen, row.last_seen);
         had.message ??= row.message;
+        had.trace = row.last_seen >= had.last_seen ? row.trace : had.trace;
       } else {
-        errors.set(key, { service: row.service, name: row.name, status: row.status, fingerprint: row.fingerprint, count, first_seen: row.first_seen, last_seen: row.last_seen, message: row.message });
+        errors.set(key, { service: row.service, name: row.name, status: row.status, fingerprint: row.fingerprint, count, first_seen: row.first_seen, last_seen: row.last_seen, message: row.message, trace: row.trace });
       }
     }
   }

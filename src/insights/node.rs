@@ -583,12 +583,12 @@ impl Node {
         let fields = insights::worker::asked(ask, services);
         let mut rows = tokio::task::spawn_blocking(move || insights::worker::read(&address, &key, fields)).await??;
         for table in ["spans", "logs", "metrics"] {
-            for row in rows[table].as_array_mut().into_iter().flatten() {
+            for row in rows.get_mut(table).and_then(Value::as_array_mut).into_iter().flatten() {
                 self.read_row(row);
             }
         }
         for table in ["errors", "build_errors"] {
-            for row in rows[table].as_array_mut().into_iter().flatten() {
+            for row in rows.get_mut(table).and_then(Value::as_array_mut).into_iter().flatten() {
                 read_error(row);
             }
         }
