@@ -563,6 +563,7 @@ impl Node {
             let admin = m.may(&viewer.user, "change-settings", scopes::NETWORK);
             if admin {
                 seen.push(insights::own().to_string());
+                seen.extend(insights::WORKERS.iter().map(|w| insights::worker_service(w)));
             }
             Ok((seen, admin))
         })?;
@@ -601,7 +602,8 @@ impl Node {
     /// A row as a reader gets it: its attributes as JSON, and its device and the devices it names by name.
     fn read_row(&self, row: &mut Value) {
         row["attrs"] = row["attrs"].as_str().and_then(|a| serde_json::from_str(a).ok()).unwrap_or(json!({}));
-        if let Some(device) = row["instance"].as_str().and_then(|k| unhex(k).ok()) {
+        // A Worker's own span says no device, as it's none of them.
+        if let Some(device) = row["instance"].as_str().and_then(|k| unhex(k).ok()).filter(|k| k.iter().any(|b| *b != 0)) {
             row["device"] = json!(self.name_of(&device));
         }
         if let Some(node) = row["attrs"]["one.node"].as_str().and_then(|k| unhex(k).ok()) {

@@ -7,6 +7,7 @@
 // cleaned message (src/insights/message.rs).
 //
 //   POST /telemetry/write { spans, logs, metrics, at, by, sig } → 204
+//   POST /telemetry/otlp  Cloudflare's export of the Workers' own traces (`otlp`) → 204
 //   POST /telemetry/read  { queries: [name], since, services, service?, name?, status?, trace?, limit?, at, by, sig }
 //                         → { <name>: [row] }
 //
@@ -99,6 +100,58 @@ async function signed(request, env, most) {
 }
 
 const STREAMS = { spans: "SPANS", logs: "LOGS", metrics: "METRICS" };
+
+/// The Workers whose own traces are kept: those that open nothing, never `mcp` or `node`, whatever a request says of itself.
+export const TRACED = ["gateway", "auth", "relay", "signer", "push", "telemetry"];
+const token = (v) => typeof v === "string" && /^[A-Za-z0-9_.+-]{1,72}$/.test(v);
+const nanos = (v) => Number(BigInt(v ?? 0) / 1000000n);
+const OTLP_PATH = "/telemetry/otlp";
+/// Who it's from isn't a device, so a Worker's own spans have no device of their own.
+const NOBODY = "0".repeat(64);
+/// As a device's: a request always, and the rest of a trace if it failed, was slow or is one in 20 (src/insights.rs).
+const SLOW_MS = 1000;
+const SAMPLED_ONE_IN = 20;
+const sampledTrace = (trace) => parseInt(trace.slice(-8), 16) % SAMPLED_ONE_IN === 0;
+
+/// OTLP/JSON from Cloudflare, each Worker's spans as rows for the spans table: only its name if that's a plain token, its
+/// ids, timing, kind and status, and a status code. Its other attributes are Cloudflare's, and may name a URL: none are kept.
+/// A trace of Cloudflare handing over these very spans is dropped, or each export would make the next.
+export function workerSpans(request, cli) {
+  const spans = [];
+  for (const resource of request.resourceSpans ?? []) {
+    const named = (resource.resource?.attributes ?? []).find((a) => a.key === "service.name")?.value?.stringValue ?? "";
+    const job = String(named).replace(`${cli}-`, "");
+    if (!TRACED.includes(job)) continue;
+    for (const scope of resource.scopeSpans ?? []) spans.push(...(scope.spans ?? []).map((s) => ({ s, job })));
+  }
+  const exporting = new Set(spans.filter(({ s }) => (s.attributes ?? []).some((a) => String(a.value?.stringValue ?? "").includes(OTLP_PATH))).map(({ s }) => s.traceId));
+  const failed = ({ s }) => s.status?.code === 2 || s.status?.code === "STATUS_CODE_ERROR";
+  const took = ({ s }) => nanos(s.endTimeUnixNano) - nanos(s.startTimeUnixNano);
+  const worth = new Set(spans.filter((x) => failed(x) || took(x) >= SLOW_MS).map(({ s }) => s.traceId));
+  return spans.filter(({ s }) => hex(s.traceId, 32) && hex(s.spanId, 16) && !exporting.has(s.traceId) && (!hex(s.parentSpanId, 16) || worth.has(s.traceId) || sampledTrace(s.traceId))).map((x) => {
+    const { s, job } = x;
+    const code = s.attributes?.find((a) => a.key === "http.response.status_code")?.value?.intValue;
+    const kind = s.kind === 2 || s.kind === "SPAN_KIND_SERVER" ? "server" : s.kind === 3 || s.kind === "SPAN_KIND_CLIENT" ? "client" : "internal";
+    const attrs = { ...(code !== undefined ? { "http.response.status_code": Number(code) } : {}), ...(failed(x) ? { "error.type": "_OTHER" } : {}) };
+    return { time: nanos(s.startTimeUnixNano), trace: s.traceId, span: s.spanId, ...(hex(s.parentSpanId, 16) ? { parent: s.parentSpanId } : {}), name: token(s.name) ? s.name : "span", service: `worker.${job}`, instance: NOBODY, kind, status: failed(x) ? "error" : "unset", duration: took(x), attrs: JSON.stringify(attrs) };
+  }).filter((row) => kept(row, TABLES.spans, NOBODY, false));
+}
+
+/// Cloudflare's export of the Workers' traces: it can't sign, so it's a header only the deploy that made it knows.
+async function otlp(request, env) {
+  if (!env.OTLP_TOKEN || request.headers.get("authorization") !== `Bearer ${env.OTLP_TOKEN}`) refuse(401, "only Cloudflare's export of the Workers' traces, with its token");
+  const body = await textOf(request, MOST_BYTES);
+  if (body === null) refuse(413, "that's too big");
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    refuse(400, "OTLP here is JSON");
+  }
+  const rows = workerSpans(parsed, env.CLI).slice(0, MOST_ROWS);
+  if (rows.length) await env.SPANS.send(rows);
+  return new Response(null, { status: 204 });
+}
 
 async function write(request, env) {
   const { by, fields, device } = await signed(request, env, MOST_BYTES);
@@ -238,7 +291,7 @@ async function read(request, env) {
   return Response.json(Object.fromEntries(results.flatMap((r) => (typeof r[0] === "string" ? [r] : r))));
 }
 
-const ROUTES = { "/telemetry/write": write, "/telemetry/read": read };
+const ROUTES = { "/telemetry/write": write, "/telemetry/read": read, [OTLP_PATH]: otlp };
 
 export default {
   async fetch(request, env) {

@@ -2,10 +2,12 @@
 import { b64u, canonical, certify, checkCertificate, checkRequest, discoveryUrl, ed25519Public, hex, idOf, joinChallenge, joinCode, joinNonce, openNote, openUnder, sealTo, sealUnder, signedRequest, x25519Public } from "../shared/crypto.js";
 import { CODES, copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { AGENTS } from "../screen/agents.js";
-import { BOUNDS, TABLES } from "../telemetry/worker.js";
+import { BOUNDS, TABLES, TRACED, workerSpans } from "../telemetry/worker.js";
 
 const ops = {
   telemetryBounds: () => BOUNDS,
+  telemetryTraced: () => TRACED,
+  telemetryWorkerSpans: ({ request, cli }) => workerSpans(request, cli),
 
   /// Each table the telemetry Worker holds rows to: each column's name, and whether a row must have it.
   telemetryTables() {

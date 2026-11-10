@@ -1064,6 +1064,30 @@ fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
     assert_eq!(kept[3].frames, ["main.screen.js:3:30", "srcdoc:3:5"], "a frame in the screen's own module is a line of it, and its source map's to resolve; anything before it isn't");
 }
 
+/// Cloudflare's export of the Workers' traces is held to what a program's OTLP is on a device: nothing but a plain name, the
+/// ids, timing and status of each span; and it only ever keeps the Workers that open nothing.
+#[test]
+fn a_workers_traces_are_clamped_as_a_programs_are() {
+    let formats = Formats::start();
+    let traced: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryTraced" }))).unwrap();
+    assert_eq!(traced, one::insights::WORKERS, "the telemetry Worker keeps the Workers the deploy exports");
+    let start = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() * 1_000_000;
+    let span = |name: &str, trace: char, status: i64, parent: Option<&str>| json!({ "name": name, "traceId": trace.to_string().repeat(32), "spanId": "1".repeat(16), "parentSpanId": parent, "startTimeUnixNano": start.to_string(), "endTimeUnixNano": (start + 500_000_000).to_string(), "status": { "code": status }, "kind": 2, "attributes": [{ "key": "url.full", "value": { "stringValue": "https://x/anna@example.org" } }, { "key": "http.response.status_code", "value": { "intValue": "500" } }] });
+    let of = |worker: &str, spans: Vec<Value>| json!({ "resource": { "attributes": [{ "key": "service.name", "value": { "stringValue": worker } }] }, "scopeSpans": [{ "spans": spans }] });
+    let export = json!({ "name": "fetch", "traceId": "c".repeat(32), "spanId": "2".repeat(16), "startTimeUnixNano": start.to_string(), "endTimeUnixNano": start.to_string(), "status": {}, "attributes": [{ "key": "url.path", "value": { "stringValue": "/telemetry/otlp" } }] });
+    let request = json!({ "resourceSpans": [of("one-gateway", vec![span("GET /users/anna@example.org", 'a', 2, None), export]), of("one-mcp", vec![span("fetch", 'b', 2, None)]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
+    let rows = formats.js(json!({ "op": "telemetryWorkerSpans", "request": request, "cli": "one" }));
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 1, "only the gateway's, without the trace of the export itself: {rows:?}");
+    let stored = rows[0].to_string();
+    assert!(!stored.contains("anna") && !stored.contains("example") && !stored.contains("url.full"), "{stored}");
+    let attrs: Value = serde_json::from_str(rows[0]["attrs"].as_str().unwrap()).unwrap();
+    assert_eq!((rows[0]["name"].as_str(), rows[0]["service"].as_str(), rows[0]["duration"].as_u64(), rows[0]["status"].as_str()), (Some("span"), Some("worker.gateway"), Some(500), Some("error")));
+    assert_eq!((&attrs["error.type"], &attrs["http.response.status_code"]), (&json!("_OTHER"), &json!(500)));
+    let program = one::insights::otlp::items(&json!({ "resourceSpans": [{ "scopeSpans": [{ "spans": [span("GET /users/anna@example.org", 'a', 2, None)] }] }] }));
+    assert_eq!((program[0].name.as_str(), program[0].ms, program[0].ok, program[0].status_code), ("span", 500, false, Some(500)), "the same span reads the same on a device");
+}
+
 /// The body a device sends `POST /relay/computes`, what it's answered, and the signed ask it hears are frozen, as the
 /// signed record is: a device left behind must still be able to tell the relay what it's on and hear that it's been
 /// asked to update, whatever else has changed.

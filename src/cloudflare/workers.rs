@@ -52,7 +52,7 @@ pub const WORKERS: &[Worker] = &[
 pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
 
 /// The Workers traced at 100% (`metadata`): those that open nothing. The web client is the gateway's assets.
-const TRACED: [&str; 6] = ["gateway", "auth", "relay", "signer", "push", "telemetry"];
+const TRACED: [&str; 6] = crate::insights::WORKERS;
 
 impl Worker {
     pub fn named(name: &str) -> &'static Worker {
@@ -216,6 +216,12 @@ pub struct Settings {
     /// The token only for telemetry's bucket that `telemetry` was set up with, which the telemetry Worker reads with.
     #[serde(default, skip_serializing)]
     pub telemetry_token: Option<String>,
+    /// The Cloudflare destination the Workers' own traces go to, once a deploy has made it (`basin::traces`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traces: Option<String>,
+    /// What Cloudflare sends those traces with, which the telemetry Worker checks: its export can't sign.
+    #[serde(default, skip_serializing)]
+    pub otlp_token: Option<String>,
     /// What the relay says of the Workers (`Newest::deployed`), set by whatever deploys or serves them, so Devices can show
     /// what they're on.
     #[serde(skip)]
@@ -242,6 +248,9 @@ CLOUDFLARE_API_TOKEN=
 # The token only for telemetry's bucket, made by cloudflare deploy, which the telemetry Worker reads Basin with.
 # @optional
 TELEMETRY_TOKEN=
+# What Cloudflare's export of the Workers' traces is let in by, made by cloudflare deploy.
+# @optional
+OTLP_TOKEN=
 # The Cloudflare node's endpoint key, made by cloudflare node deploy.
 # @optional
 CLOUDFLARE_NODE_KEY=
@@ -410,6 +419,7 @@ impl Settings {
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
         settings.telemetry_token = get("TELEMETRY_TOKEN");
+        settings.otlp_token = get("OTLP_TOKEN");
         settings.cloudflare_node_key = get("CLOUDFLARE_NODE_KEY").unwrap_or_default();
         settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
         if settings.throwaway_user.is_none() {
@@ -473,6 +483,8 @@ impl Settings {
             throwaway_user: None,
             telemetry: None,
             telemetry_token: None,
+            traces: None,
+            otlp_token: None,
             home: None,
             deployed: None,
             dir: crate::home(),
@@ -617,6 +629,7 @@ fn telemetry_bindings(settings: &Settings) -> Vec<Binding> {
     };
     let mut out = vec![plain("RELAY", "service:relay"), plain("YOURS", crate::config::YOURS), plain("CLI", crate::config::CLI)];
     out.extend(store);
+    out.extend(settings.otlp_token.clone().map(|token| secret("OTLP_TOKEN", token)));
     out
 }
 
@@ -1419,9 +1432,14 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
         }
     }
     let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::app::runtime::COMPATIBILITY_DATE, "bindings": bindings, "observability": { "enabled": true } });
-    // Kept in Cloudflare, with no export, and never for the two that open data (mcp, node).
+    // Kept in Cloudflare, sent to the telemetry Worker once a deploy has made where to (`basin::traces`), and never for the
+    // two that open data (mcp, node).
     if TRACED.contains(&worker.name) {
         meta["observability"]["traces"] = json!({ "enabled": true, "head_sampling_rate": 1 });
+        if let Some(destination) = &settings.traces {
+            meta["observability"]["traces"]["destinations"] = json!([destination]);
+            meta["observability"]["traces"]["persist"] = json!(true);
+        }
     }
     if let Some(class) = class.filter(|_| migration != Some("v1")) {
         meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });

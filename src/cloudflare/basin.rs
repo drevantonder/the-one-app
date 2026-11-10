@@ -92,6 +92,30 @@ pub fn provision(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
     settings.save()
 }
 
+/// Where the Workers' own traces go: a destination on Cloudflare pointed at the telemetry Worker, with a header only it
+/// knows. Cloudflare's export can't sign, and is OTLP/JSON. Set up once, by a deploy whose token may: the Workers are
+/// deployed without it until then.
+pub fn traces(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
+    let name = format!("{}-worker-traces", crate::config::CLI);
+    let path = format!("/accounts/{}/workers/observability/destinations", cf.account);
+    let there = cf.list(&path).context("reading Cloudflare's trace destinations, which needs an API token with Workers Observability Write")?;
+    if !there.iter().any(|d| d["name"] == name) {
+        let token = match &settings.otlp_token {
+            Some(token) => token.clone(),
+            None => {
+                let token = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
+                settings.set_secret("OTLP_TOKEN", &token)?;
+                settings.otlp_token = Some(token.clone());
+                token
+            }
+        };
+        let url = format!("{}/telemetry/otlp", settings.address.trim_end_matches('/'));
+        cf.post(&path, json!({ "name": name, "enabled": true, "skipPreflightCheck": true, "configuration": { "type": "logpush", "logpushDataset": "opentelemetry-traces", "url": url, "headers": { "authorization": format!("Bearer {token}") } } })).context("making Cloudflare's trace destination")?;
+    }
+    settings.traces = Some(name);
+    settings.save()
+}
+
 /// A token only for that bucket's SQL, catalog and files: what the Worker reads with and the sinks write with.
 fn worker_token(cf: &Cloudflare, account: &str, bucket: &str) -> Result<String> {
     let resource = format!("com.cloudflare.edge.r2.bucket.{account}_default_{bucket}");
