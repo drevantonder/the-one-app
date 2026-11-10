@@ -15,6 +15,7 @@ const URL: &str = "<url>";
 const IP: &str = "<ip>";
 const PHONE: &str = "<phone>";
 const NUMBER: &str = "<number>";
+const ID: &str = "<id>";
 const PATH: &str = "<path>";
 
 /// `text` with what it mustn't keep as placeholders, and no longer than may be kept.
@@ -120,14 +121,22 @@ fn keyish(word: &str) -> bool {
     of_key && !path_like && ((word.len() >= 20 && digit && letter) || (word.len() >= 16 && hex && letter))
 }
 
-/// The digits left in `text`: a run of 8 or more with a phone's spaces or marks is a phone number; any other of 4 or
-/// more, a long number. Fewer say nothing much: an attempt, a status, a line.
+/// The digits left in `text`: a word of 8 or more hex digits, some of them letters, is an id, as a device's or a user's
+/// short one is; a run of 8 or more with a phone's spaces or marks is a phone number; any other of 4 or more, a long
+/// number. Fewer say nothing much: an attempt, a status, a line.
 fn numbers(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
+        let word = &chars[i..i + chars[i..].iter().take_while(|c| c.is_ascii_alphanumeric()).count()];
+        let hex = word.len() >= 8 && word.iter().all(char::is_ascii_hexdigit) && word.iter().any(char::is_ascii_digit) && word.iter().any(char::is_ascii_alphabetic);
+        if hex && (i == 0 || !chars[i - 1].is_ascii_alphanumeric()) {
+            out.push_str(ID);
+            i += word.len();
+            continue;
+        }
         let starts = c.is_ascii_digit() || ((c == '+' || c == '(') && chars.get(i + 1).is_some_and(char::is_ascii_digit));
         // A digit inside a word (`abc123`, `v2`) is part of it.
         if !starts || (i > 0 && chars[i - 1].is_ascii_alphanumeric()) {
@@ -180,6 +189,8 @@ mod tests {
             ("call (02) 9876 5432 back", "call <phone> back"),
             ("order 123456789 isn't there", "order <number> isn't there"),
             ("bad key ab12cd34ef56ab12cd34ef56ab12", "bad key <key>"),
+            ("(mac: 1fcdd729 isn't connected; ptc: 4821d16a isn't connected)", "(mac: <id> isn't connected; ptc: <id> isn't connected)"),
+            ("user:48213355fe8c23's keys in epoch 16", "user:<id>'s keys in epoch 16"),
             ("token=hunter2 was refused", "token=<key> was refused"),
             ("password: hunter2 was refused", "password: <key> was refused"),
             ("eyJhbGci.eyJzdWIi.c2lnbmF0dXJl expired", "<key> expired"),

@@ -57,6 +57,7 @@ impl Trace {
         let at = self.0.start.elapsed().saturating_sub(took);
         step["at"] = json!(at.as_millis() as u64);
         step["ms"] = json!(took.as_millis() as u64);
+        step["within"] = json!(self.span());
         self.0.steps.lock().unwrap().push(step);
     }
 
@@ -73,6 +74,11 @@ impl Trace {
     /// The steps since the `from`th.
     pub fn since(&self, from: usize) -> Vec<Value> {
         self.0.steps.lock().unwrap()[from..].to_vec()
+    }
+
+    /// The steps since the `from`th that `span` itself took: one a call under it took is that call's.
+    pub fn within(&self, from: usize, span: &str) -> Vec<Value> {
+        self.0.steps.lock().unwrap()[from..].iter().filter(|s| s["within"] == span).cloned().collect()
     }
 
     pub fn trace_id(&self) -> String {

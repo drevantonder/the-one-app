@@ -55,7 +55,7 @@ impl Call {
 
     /// Its own steps, each timed from when it began.
     fn steps(&self) -> Vec<Value> {
-        let mut steps = self.trace.since(self.from);
+        let mut steps = self.trace.within(self.from, &self.span);
         for step in &mut steps {
             step["at"] = json!(step["at"].as_u64().unwrap_or(0).saturating_sub(self.at));
         }
@@ -111,7 +111,7 @@ impl Node {
         if let Some(failure) = &failure {
             let thrown = exception.as_ref().filter(|_| destination.named);
             let (frame, built) = match thrown.and_then(Exception::top_frame) {
-                Some(top) => (top.clone(), bundle.clone().unwrap_or_else(|| build.into())),
+                Some(top) => (top, bundle.clone().unwrap_or_else(|| build.into())),
                 None => (format!("stage:{at}"), build.to_string()),
             };
             attrs = attrs.failed(failure).stage(at).fingerprint(failure.kind(), &frame, &built);
@@ -140,8 +140,7 @@ impl Node {
         if traced.called() {
             return;
         }
-        // A route's failure with no code is nearly always what it was asked, and nothing tells it from one that broke.
-        let failure = failed.code.as_deref().map_or_else(|| Failure::Refused(insights::OTHER.into()), |code| Failure::of(Some(code), None, stage::CHECK));
+        let failure = Failure::of(failed.code.as_deref(), None, stage::CHECK);
         let name = route.replace(['{', '}', '*'], "");
         let build = crate::config::BUILD;
         let attrs = Attrs::default().client("api").build(build).failed(&failure).stage(stage::CHECK).fingerprint(failure.kind(), &name, build);
@@ -161,11 +160,14 @@ impl Node {
         let Call { trace, started, time, span, parent, stage: was, .. } = call;
         trace.stage_is(was);
         trace.leave(parent.clone());
-        let code = ended.as_ref().err().map(crate::protocol::Coded::of);
-        let failure = code.map(|code| Failure::of(code.as_deref(), None, at));
+        // A device that ran it says how that went in its own span: trying the devices only failed if none did.
+        let failure = ended.as_ref().err().filter(|_| !run_says).map(|err| match err.downcast_ref::<super::calls::NoneCould>() {
+            Some(none) => Failure::Broke(none.kind.into()),
+            None => Failure::of(crate::protocol::Coded::of(err).as_deref(), None, at),
+        });
         let status = failure.as_ref().map_or(Status::Unset, Failure::status);
         let ms = started.elapsed().as_millis() as u64;
-        let kept = failure.is_some() || ms >= insights::SLOW_MS || insights::sampled(&trace.trace_id());
+        let kept = ended.is_err() || ms >= insights::SLOW_MS || insights::sampled(&trace.trace_id());
         let answers = req.from.is_none() && !run_says;
         let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
         let build = crate::config::BUILD;
@@ -256,11 +258,15 @@ impl Node {
         }
     }
 
-    /// What `req` runs, if its app says it has a tool of that name, else `_unknown`: what a caller typed is theirs to get
-    /// wrong, and may be anything.
+    /// What `req` runs, if its app says it has a tool of that name: what a caller typed is theirs to get wrong, and may be
+    /// anything. Else `_unknown`, or for a function of its service, which nothing lists, `_function`.
     async fn tool_named(&self, req: &CallRequest) -> String {
         let listed = self.0.apps.describe(&req.app).await.is_ok_and(|d| d["tools"].as_array().is_some_and(|t| t.iter().any(|t| t["name"] == req.runs())));
-        if listed && insights::token(req.runs()) { req.runs().to_string() } else { "_unknown".into() }
+        match (listed && insights::token(req.runs()), &req.service) {
+            (true, _) => req.runs().to_string(),
+            (false, Some(_)) => "_function".into(),
+            (false, None) => "_unknown".into(),
+        }
     }
 
     /// Counts what the URL signer failed at since the last send.
@@ -421,7 +427,7 @@ impl Node {
         }
         let exception = self.located(exception.filter(|_| destination.named || app.is_empty()), bundle.clone().filter(|_| destination.named)).await;
         let (frame, build) = match exception.as_ref().and_then(Exception::top_frame) {
-            Some(top) => (top.clone(), bundle.clone().unwrap_or_else(|| crate::config::BUILD.into())),
+            Some(top) => (top, bundle.clone().unwrap_or_else(|| crate::config::BUILD.into())),
             None => (name.to_string(), crate::config::BUILD.to_string()),
         };
         let kind = exception.as_ref().map_or(insights::OTHER, |x| x.kind.as_str());
@@ -451,7 +457,10 @@ impl Node {
         let (error, result) = match asked {
             Ok(_) if ok => (None, "answered"),
             Ok(_) => (Some(code.unwrap_or(insights::OTHER)), "failed"),
-            Err(err) => hop_failed(err),
+            Err(err) => {
+                let (kind, result) = asking_failed(err);
+                (Some(kind), result)
+            }
         };
         let (parent_trace, parent) = trace::parent_now();
         let trace = parent_trace.unwrap_or_else(trace::ids::trace);
@@ -624,14 +633,14 @@ impl Node {
     }
 }
 
-/// Why a device couldn't be asked, as `error.type` and `one.result`.
-fn hop_failed(err: &anyhow::Error) -> (Option<&'static str>, &'static str) {
+/// Why a device couldn't be asked, as `error.type` and as a try's result.
+pub(super) fn asking_failed(err: &anyhow::Error) -> (&'static str, &'static str) {
     if err.is::<net::NotThere>() {
-        (Some(insights::UNREACHABLE), "unreachable")
+        (insights::UNREACHABLE, "unreachable")
     } else if err.to_string() == "timed out" {
-        (Some(insights::TIMEOUT), "no answer")
+        (insights::TIMEOUT, "no answer")
     } else {
-        (Some(insights::LOST), "lost")
+        (insights::LOST, "lost")
     }
 }
 

@@ -66,9 +66,9 @@ function describe() {
   };
 }
 
-/// The node's answer to an ask, as a Response: its error, with the code the node gave it, thrown.
-async function answered(r) {
-  if (!r.ok) throw Object.assign(new Error(await r.text()), r.headers.has(CODE_HEADER) ? { code: r.headers.get(CODE_HEADER) } : {});
+/// The node's answer to the ask `name`, as a Response: its error, with the code the node gave it and which ask it was, thrown.
+async function answered(name, r) {
+  if (!r.ok) throw Object.assign(new Error(await r.text()), { ask: name }, r.headers.has(CODE_HEADER) ? { code: r.headers.get(CODE_HEADER) } : {});
   return r;
 }
 
@@ -78,7 +78,7 @@ const asking = (send, body) => async (name, data) => {
   const ask = ASKS[name];
   if (!ask) throw new Error(`the node has no ask ${name}`);
   if (ask.writes && body.read_only) throw new Error(READ_ONLY);
-  return answered(await send(name, data ?? null));
+  return answered(name, await send(name, data ?? null));
 };
 
 /// After a call returned: waits for the work it left running (ctx.waitUntil), hands the node what that work wrote,
@@ -380,7 +380,8 @@ function exception(err) {
     const at = /^\s+at (?:.*\()?([\w./-]+):(\d+):(\d+)\)?$/.exec(line);
     if (at) frames.push({ file: at[1], line: Number(at[2]), col: Number(at[3]) });
   }
-  return { type: String(err?.name ?? "Error"), frames: frames.slice(0, 8) };
+  // An error thrown here for the node's answer was made in this file, so its frames are this file's: its ask says more.
+  return { type: String(err?.name ?? "Error"), frames: frames.slice(0, 8), ...(typeof err?.ask === "string" ? { ask: err.ask } : {}) };
 }
 
 export default {

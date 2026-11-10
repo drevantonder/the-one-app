@@ -199,6 +199,21 @@ impl std::fmt::Display for Elsewhere {
 
 impl std::error::Error for Elsewhere {}
 
+/// No device asked ran a call: how the last one didn't (an `error.type` of insights'), and what each said.
+#[derive(Debug)]
+pub(super) struct NoneCould {
+    pub kind: &'static str,
+    why: Vec<String>,
+}
+
+impl std::fmt::Display for NoneCould {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "None of your devices can do this now. Try again soon. ({})", self.why.join("; "))
+    }
+}
+
+impl std::error::Error for NoneCould {}
+
 impl Node {
     /// Runs a tool for this device's local user: here, or on the nearest device that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
@@ -309,6 +324,7 @@ impl Node {
         let req = self.reaching(req.clone(), me)?;
         let me = me.clone();
         let mut why = Vec::new();
+        let mut kind = crate::insights::UNAVAILABLE;
         let began = Instant::now();
         let limit = self.limit(&req).await;
         let candidates = self.candidates_or_starting(&req, &me, limit).await?;
@@ -356,6 +372,7 @@ impl Node {
                 }
                 Ok((Reply::Elsewhere(w), theirs)) => {
                     tried("elsewhere", json!({ "here": here, "why": w, "trace": theirs }));
+                    kind = crate::insights::UNAVAILABLE;
                     why.push(format!("{name}: {w}"))
                 }
                 // The keys it lacks are its caller's to hand this device, which passes on to it those of the scopes
@@ -365,7 +382,9 @@ impl Node {
                     return Err(self.need(need.need).into());
                 }
                 Err(err) => {
-                    tried(if err.is::<net::NotThere>() { "unreachable" } else if err.to_string() == "timed out" { "no answer" } else { "failed" }, json!({}));
+                    let result;
+                    (kind, result) = super::insights::asking_failed(&err);
+                    tried(result, json!({}));
                     self.with_or(None, |i| Ok(i.nearest.insert(device, Duration::MAX)));
                     why.push(format!("{name}: {err:#}"));
                 }
@@ -379,7 +398,7 @@ impl Node {
         if why.is_empty() {
             bail!(self.no_device(&req.app, &me).await);
         }
-        bail!("None of your devices can do this now. Try again soon. ({})", why.join("; "))
+        Err(NoneCould { kind, why }.into())
     }
 
     /// The devices that might run a call: `candidates`, or when a service has none but is on a device that's up, those

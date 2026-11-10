@@ -193,6 +193,8 @@ pub const TIMEOUT: &str = "timeout";
 /// A device that couldn't be reached, and one that went away while it was being asked.
 pub const UNREACHABLE: &str = "unreachable";
 pub const LOST: &str = "lost";
+/// Every device asked said to ask another, so none would run it.
+pub const UNAVAILABLE: &str = "unavailable";
 
 /// `name` if it's one of the errors the engine names, else `Error`: an app can name its own anything.
 pub fn exception_type(name: &str) -> &'static str {
@@ -206,6 +208,8 @@ pub struct Exception {
     pub frames: Vec<String>,
     /// As it came: `Attrs::message` cleans it.
     pub message: Option<String>,
+    /// What it had asked the node (`call::Ask`) when the node's answer was the failure: the runtime threw it, not the app.
+    pub ask: Option<&'static str>,
 }
 
 impl Exception {
@@ -213,12 +217,15 @@ impl Exception {
     pub fn from_json(v: &Value) -> Option<Exception> {
         let kind = exception_type(v["type"].as_str()?).to_string();
         let frames = v["frames"].as_array().into_iter().flatten().filter_map(frame).take(MOST_FRAMES).collect();
-        Some(Exception { kind, frames, message: v["message"].as_str().filter(|m| !m.is_empty()).map(str::to_string) })
+        let ask = v["ask"].as_str().and_then(crate::call::Ask::parse).map(crate::call::Ask::name);
+        Some(Exception { kind, frames, message: v["message"].as_str().filter(|m| !m.is_empty()).map(str::to_string), ask })
     }
 
-    /// The frame that says what threw it: the first of the app's or screen's own, past the runtime's that carried it there.
-    pub fn top_frame(&self) -> Option<&String> {
-        self.frames.iter().find(|f| !RUNTIME_FRAMES.iter().any(|r| f.starts_with(r))).or(self.frames.first())
+    /// What says where it failed: the first frame of the app's or screen's own, past the runtime's that carried it there;
+    /// with none of its own, what it had asked the node, as `ask:<name>`, since the runtime's frames are the same for every app.
+    pub fn top_frame(&self) -> Option<String> {
+        let own = self.frames.iter().find(|f| !RUNTIME_FRAMES.iter().any(|r| f.starts_with(r)));
+        own.cloned().or(self.ask.map(|ask| format!("ask:{ask}"))).or(self.frames.first().cloned())
     }
 
     /// Each frame where it was written, for those of a built file `map_of` knows the source map of: the rest stay as they are.
@@ -383,7 +390,7 @@ impl Attrs {
         }
     }
 
-    /// `error.type`: a protocol code, an exception's type, a device that couldn't be asked, or OTEL's own `timeout` or `_OTHER`.
+    /// `error.type`: a protocol code, an exception's type, how the devices asked couldn't run it, or OTEL's own `timeout` or `_OTHER`.
     pub fn error(mut self, kind: &str) -> Attrs {
         self.0.insert("error.type", json!(error_kind(kind)));
         self
@@ -443,7 +450,7 @@ impl Attrs {
 
 /// `kind` if it's a name `error.type` may hold, else `_OTHER`.
 fn error_kind(kind: &str) -> &str {
-    if code::ALL.contains(&kind) || EXCEPTIONS.contains(&kind) || [TIMEOUT, UNREACHABLE, LOST].contains(&kind) { kind } else { OTHER }
+    if code::ALL.contains(&kind) || EXCEPTIONS.contains(&kind) || [TIMEOUT, UNREACHABLE, LOST, UNAVAILABLE].contains(&kind) { kind } else { OTHER }
 }
 
 /// Whether a value is a plain name or hash: letters, digits and `_ . - +`, so no address, path, URL or sentence.
@@ -453,7 +460,9 @@ pub fn token(value: &str) -> bool {
 
 /// The steps a trace may name, and the fields of each that are only a name or a number.
 const STEPS: &[&str] = &["device", "bucket", "online", "connect", "lease", "prepare", "write", "keys", "behind", "data", "open", "logs", "run"];
-const RESULTS: &[&str] = &["ran", "failed", "elsewhere", "needs keys", "unreachable", "no answer", "caught up", "behind", "asked"];
+const RESULTS: &[&str] = &["ran", "failed", "elsewhere", "needs keys", "unreachable", "no answer", "lost", "caught up", "behind", "asked"];
+/// Those of them that say a step didn't do what it tried.
+const FAILED_RESULTS: &[&str] = &["failed", "unreachable", "no answer", "lost"];
 
 /// A new W3C span id.
 pub fn new_span() -> String {
@@ -485,7 +494,7 @@ pub fn step_spans(parent: &Span, steps: &[Value]) -> Vec<Span> {
             version: None,
             instance: parent.instance.clone(),
             kind: SpanKind::Internal,
-            status: Status::of(step["failed"] != true),
+            status: Status::of(step["failed"] != true && !step["result"].as_str().is_some_and(|r| FAILED_RESULTS.contains(&r))),
             duration: step["ms"].as_u64().unwrap_or(0),
             message: None,
             attrs: if app { Attrs::default().app(&step["attrs"]) } else { Attrs::default().step(step) },
@@ -715,12 +724,15 @@ mod tests {
         assert_eq!(e.frames, ["app.js:3:9", "lib/a.js:2:1"]);
         let events = Attrs::default().exception(&e).json();
         assert_eq!(events["events"][0]["attributes"]["exception.stacktrace"], "at app.js:3:9\nat lib/a.js:2:1");
+        let asked = Exception::from_json(&json!({ "type": "Error", "ask": "call", "frames": [{ "file": "shim.js", "line": 76, "col": 34 }] })).unwrap();
+        assert_eq!(asked.top_frame().as_deref(), Some("ask:call"), "the runtime's frames name no app's code");
+        assert_eq!(Exception::from_json(&json!({ "type": "Error", "ask": secret, "frames": [] })).unwrap().ask, None);
     }
 
     /// What's the caller's to change never counts as something that broke, and nothing else is taken for it.
     #[test]
     fn only_a_refusal_is_the_callers() {
-        let thrown = Exception { kind: "TypeError".into(), frames: vec!["app.js:1:1".into()], message: None };
+        let thrown = Exception { kind: "TypeError".into(), frames: vec!["app.js:1:1".into()], message: None, ask: None };
         assert_eq!(Failure::of(Some(code::REFUSED), None, stage::RUN), Failure::Refused("refused".into()));
         assert_eq!(Failure::of(Some(code::REFUSED), None, stage::RUN).status(), Status::Unset);
         assert_eq!(Failure::of(Some(code::RESTARTING), None, stage::RUN), Failure::Broke("restarting".into()));
