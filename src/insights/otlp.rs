@@ -1,5 +1,5 @@
-//! OTLP/JSON, what services' programs may send, as spans and logs: only what closed sets allow survives, and anything else
-//! is dropped. A span's name stays if it's a plain token (some exporters name it `GET /users/<id>`, which isn't), and its
+//! OTLP, what services' programs may send, as spans and logs: only what closed sets allow survives, and anything else
+//! is dropped. Protobuf, which Go's exporter sends by default, is read as the JSON form of the same message (`from_protobuf`). A span's name stays if it's a plain token (some exporters name it `GET /users/<id>`, which isn't), and its
 //! attributes only by these keys.
 
 use serde_json::Value;
@@ -56,6 +56,19 @@ fn record(r: &Value) -> Item {
     Item { name, span_kind: None, ms: 0, ok, error: attribute(r, "error.type").unwrap_or_default(), status_code: None, ids: None }
 }
 
+/// The OTLP/JSON of a protobuf request to `path` (`/v1/traces`, `/v1/logs` or `/v1/metrics`), if it is one.
+#[cfg(feature = "node")]
+pub fn from_protobuf(path: &str, body: &[u8]) -> Option<Value> {
+    use opentelemetry_proto::tonic::collector::{logs::v1::ExportLogsServiceRequest, metrics::v1::ExportMetricsServiceRequest, trace::v1::ExportTraceServiceRequest};
+    use prost::Message;
+    match path {
+        "/v1/traces" => serde_json::to_value(ExportTraceServiceRequest::decode(body).ok()?).ok(),
+        "/v1/logs" => serde_json::to_value(ExportLogsServiceRequest::decode(body).ok()?).ok(),
+        "/v1/metrics" => serde_json::to_value(ExportMetricsServiceRequest::decode(body).ok()?).ok(),
+        _ => None,
+    }
+}
+
 fn hex(value: &str, length: usize) -> bool {
     value.len() == length && value.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
@@ -73,6 +86,25 @@ fn number(item: &Value, key: &str) -> Option<u64> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Protobuf from a program, as Go's exporter sends it, reads as its JSON does, ids as hex, held to the same closed sets.
+    #[cfg(feature = "node")]
+    #[test]
+    fn protobuf_is_read_as_the_same_message() {
+        use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+        use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span, Status, status::StatusCode};
+        use prost::Message;
+        let attribute = KeyValue { key: "url.full".into(), value: Some(AnyValue { value: Some(any_value::Value::StringValue("https://x/anna".into())) }), ..Default::default() };
+        let span = Span { name: "GET /users/anna@example.org".into(), trace_id: vec![0xab; 16], span_id: vec![0xcd; 8], parent_span_id: vec![0xef; 8], start_time_unix_nano: 1_000_000_000, end_time_unix_nano: 1_500_000_000, status: Some(Status { code: StatusCode::Error as i32, message: "anna@example.org".into() }), attributes: vec![attribute], ..Default::default() };
+        let request = ExportTraceServiceRequest { resource_spans: vec![ResourceSpans { scope_spans: vec![ScopeSpans { spans: vec![span], ..Default::default() }], ..Default::default() }] };
+        let read = items(&from_protobuf("/v1/traces", &request.encode_to_vec()).unwrap());
+        assert_eq!(read.len(), 1);
+        assert_eq!((read[0].name.as_str(), read[0].ms, read[0].ok), ("span", 500, false), "a name that isn't a plain token isn't kept");
+        assert_eq!(read[0].ids, Some(("ab".repeat(16), "cd".repeat(8), Some("ef".repeat(8)))), "a program's ids are the trace it continues");
+        assert!(from_protobuf("/v1/traces", b"not protobuf").is_none());
+        assert!(from_protobuf("/elsewhere", &[]).is_none());
+    }
 
     #[test]
     fn a_program_can_only_say_what_closed_sets_allow() {

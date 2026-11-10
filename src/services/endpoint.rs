@@ -656,15 +656,21 @@ async fn state(State(s): State<Service>, headers: HeaderMap) -> Response {
     }
 }
 
-/// OTLP/JSON from the program: passed to its node, which keeps what closed sets allow (`crate::insights::otlp`), said
-/// back as taken whatever happens to it, as an exporter would only retry. Metrics aren't kept: each signal is a span or
-/// an event, and a metric's rollups are the node's.
-async fn otlp(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+/// OTLP from the program, JSON or protobuf: passed to its node, which keeps what closed sets allow
+/// (`crate::insights::otlp`), said back as taken whatever happens to it, as an exporter would only retry. A program's
+/// metrics aren't kept: what's a metric is the node's own to say.
+async fn otlp(State(s): State<Service>, uri: axum::http::Uri, headers: HeaderMap, body: axum::body::Bytes) -> Response {
     if let Err(r) = s.0.registry.ours(&headers) {
         return r;
     }
-    if body.get("resourceMetrics").is_none() {
-        s.tell_node(json!({ "otlp": body }), &tokio::runtime::Handle::current());
+    let protobuf = headers.get(axum::http::header::CONTENT_TYPE).is_some_and(|t| t.as_bytes().starts_with(b"application/x-protobuf"));
+    let request = if protobuf { crate::insights::otlp::from_protobuf(uri.path(), &body) } else { serde_json::from_slice::<Value>(&body).ok() };
+    if let Some(request) = request.filter(|r| r.get("resourceMetrics").is_none()) {
+        s.tell_node(json!({ "otlp": request }), &tokio::runtime::Handle::current());
+    }
+    if protobuf {
+        // An empty message: what OTLP answers in protobuf.
+        return ([(axum::http::header::CONTENT_TYPE, "application/x-protobuf")], axum::body::Bytes::new()).into_response();
     }
     Json(json!({})).into_response()
 }

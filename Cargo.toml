@@ -23,7 +23,7 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "web-bundle"]
+node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
 # `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
 web-bundle = ["dep:ssh-key", "dep:flate2"]
 
@@ -69,6 +69,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 # the Cloudflare node and the native apps' client share.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 axum = { version = "0.8", optional = true }
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "trace", "logs", "metrics", "with-serde"], optional = true }
+prost = { version = "0.14", optional = true }
 # Its take_until ends a node's event streams as it hands over to an update's build (src/node/screens/routes.rs); axum and iroh already
 # build it.
 futures-util = { version = "0.3", default-features = false, optional = true }
