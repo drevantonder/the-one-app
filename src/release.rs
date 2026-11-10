@@ -39,7 +39,10 @@ pub fn in_app_bundle() -> bool {
 /// Replaces the running binary with `bytes`, once it says it's `commit` and no older than this one. By a rename, so the
 /// path holds the whole old program or the whole new one, however this ends.
 pub fn install_commit(commit: &str, bytes: &[u8]) -> Result<PathBuf> {
-    let exe = std::env::current_exe()?.canonicalize()?;
+    let exe = std::env::current_exe()?;
+    // Linux names a running program's file that was replaced since it started "<path> (deleted)": the path is still
+    // where it's installed.
+    let exe = exe.to_str().and_then(|p| p.strip_suffix(" (deleted)")).map(PathBuf::from).unwrap_or(exe).canonicalize().context("find where this program is installed")?;
     ensure!(!in_app_bundle(), "this node lives in an app bundle, which updates with the app");
     // Named for this process, since `one update` and a device's own check can both be installing at once.
     let tmp = exe.with_extension(format!("new.{}", std::process::id()));
