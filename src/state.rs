@@ -593,10 +593,19 @@ pub fn settings(set: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     out
 }
 
+/// What install.sh sets as `name` (`repo`, `cli`, `key`): it is shell, which can't read config.toml, so it says it again.
+pub(crate) fn installer_says(name: &str) -> Option<&'static str> {
+    include_str!("../install.sh").lines().find_map(|l| l.strip_prefix(&format!("{name}="))).map(|v| v.trim_matches('"'))
+}
+
+/// Whether install.sh, which gets releases from GitHub, installs this custom build. Only that custom build is released there.
+pub fn installer_is_ours() -> bool {
+    installer_says("cli") == Some(crate::config::CLI) && installer_says("repo") == Some(crate::config::REPO)
+}
+
 /// The one line that installs this custom build's latest release on a machine, if it publishes releases.
 pub fn install_line() -> Option<String> {
-    let repo = crate::config::REPO;
-    (!repo.is_empty()).then(|| format!("curl -fsSL https://github.com/{repo}/releases/latest/download/install.sh | sh"))
+    installer_is_ours().then(|| format!("curl -fsSL {}/releases/latest/download/install.sh | sh", crate::config::REPO))
 }
 
 /// What to paste into an AI so it connects itself, for Connect Your AI: the guide at the network's address, where it

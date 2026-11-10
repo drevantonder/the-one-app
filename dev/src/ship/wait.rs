@@ -57,12 +57,12 @@ fn git_history() -> Command {
     git
 }
 
-/// `history()`, made if it isn't there and up to date with GitHub's.
+/// `history()`, made if it isn't there and up to date with the repo's.
 fn keep_history() -> Result<()> {
     if !history().join("HEAD").is_file() {
         std::fs::create_dir_all(cache())?;
         let next = cache().join(format!("history.{}", std::process::id()));
-        show(Command::new("git").args(["clone", "-q", "--bare", "--filter=blob:none", &format!("https://github.com/{REPO}.git")]).arg(&next))?;
+        show(Command::new("git").args(["clone", "-q", "--bare", "--filter=blob:none", REPO]).arg(&next))?;
         // Another command may have made it first: either's the same.
         if std::fs::rename(&next, history()).is_err() {
             let _ = std::fs::remove_dir_all(&next);
@@ -73,7 +73,7 @@ fn keep_history() -> Result<()> {
 }
 
 fn fetch_history() -> bool {
-    succeeds(git_history().args(["fetch", "-q", "origin", "+refs/heads/*:refs/heads/*"]))
+    succeeds(git_history().args(["remote", "set-url", "origin", REPO])) && succeeds(git_history().args(["fetch", "-q", "origin", "+refs/heads/*:refs/heads/*"]))
 }
 
 /// A build's name, or what's given for one: its commit on main, and a custom build's config commit.

@@ -46,16 +46,6 @@ fn is_rust(source: &Path) -> Option<bool> {
     }
 }
 
-/// What install.sh sets as `name` (`repo`, `cli`, `key`): it is shell, which can't read config.toml, so it says it again.
-fn installer_says(name: &str) -> Option<&'static str> {
-    include_str!("../install.sh").lines().find_map(|l| l.strip_prefix(&format!("{name}="))).map(|v| v.trim_matches('"'))
-}
-
-/// Whether install.sh, which gets releases from GitHub, installs this custom build. Only that custom build is released there.
-pub fn installer_is_ours() -> bool {
-    installer_says("cli") == Some(CLI) && installer_says("repo") == Some(crate::config::REPO)
-}
-
 /// What `build_service` made: each program by its platform, and the platforms it couldn't build for.
 pub struct Built {
     pub made: Vec<(&'static Platform, PathBuf)>,
@@ -291,9 +281,9 @@ mod tests {
     fn the_installer_is_for_the_platforms_here() {
         let installer = include_str!("../install.sh");
         // A custom build's installer is its own: when it's this build's, it names the same repo and release key.
-        if installer_says("cli") == Some(CLI) {
-            assert_eq!(installer_says("repo"), Some(crate::config::REPO));
-            assert_eq!(installer_says("key"), Some(crate::config::RELEASE_KEY));
+        if crate::state::installer_says("cli") == Some(CLI) {
+            assert_eq!(crate::state::installer_says("repo"), Some(crate::config::REPO));
+            assert_eq!(crate::state::installer_says("key"), Some(crate::config::RELEASE_KEY));
         }
         for p in &PLATFORMS {
             let (arch, rest) = p.target.split_once('-').unwrap();

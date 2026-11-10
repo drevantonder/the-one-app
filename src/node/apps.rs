@@ -528,11 +528,11 @@ impl Node {
 }
 
 /// Where a built-in app's code is: its folder of `apps/` in the repo releases come from, at this build's commit when
-/// it's one (else main); none for a custom build with no repo.
+/// it's one (else main); none for a repo elsewhere, as only GitHub has a page for a folder at a commit.
 fn built_in_source(app: &str) -> Option<String> {
-    let repo = crate::config::REPO;
+    let repo = crate::config::REPO.strip_prefix("https://github.com/")?;
     let commit = crate::config::BUILD.split(['-', '+']).next().filter(|c| !crate::config::BUILD.contains('+') && c.len() >= 7 && c.bytes().all(|b| b.is_ascii_hexdigit()));
-    (!repo.is_empty()).then(|| format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
+    Some(format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
 }
 
 /// Where `app`'s service runs for the scopes `added` names, and for `user` on their own nodes: `{ scope, node,

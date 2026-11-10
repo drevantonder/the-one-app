@@ -14,7 +14,7 @@ fn main() {
         get("name").as_str().unwrap(),
         get("cli").as_str().unwrap(),
         get("port").as_integer().unwrap(),
-        // The GitHub repo releases come from; a custom build without one isn't released.
+        // The git address the code comes from; a custom build without one has nothing to build from.
         config.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
     );
     let optional = |key: &str| config.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();

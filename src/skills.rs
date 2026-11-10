@@ -141,7 +141,7 @@ pub fn read(apps: &[Value], name: &str) -> Option<String> {
 /// tools): the areas of their own, then one for each of the core's features and each app with a guide.
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     let code = match REPO.is_empty() {
-        false => format!("https://github.com/{REPO}"),
+        false => REPO.to_string(),
         true => format!("ask an admin of {YOURS} where it is"),
     };
     let fill = |t: &str| t.replace("{{name}}", NAME).replace("{{cli}}", CLI).replace("{{server}}", &server_name()).replace("{{code}}", &code).replace("{{yours}}", YOURS);

@@ -126,7 +126,7 @@ fn changes(commit: Option<&str>) -> Result<()> {
 /// Publishes a build on GitHub, for the installer.
 fn github_release(tag: &str) -> Result<()> {
     ensure!(version_tag(tag), "a release is named like v1.2.3");
-    ensure!(build::installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub");
+    ensure!(one::state::installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub");
     ensure!(succeeds(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     let key = release_key()?;
     let _turn = turn()?;
@@ -270,16 +270,16 @@ fn publish_source(at: &At, release: bool) -> Result<()> {
     Ok(())
 }
 
-/// A clean clone of the repo, kept in the cache, at `commit` or the tip of main on GitHub. Build output stays, so builds are quick.
+/// A clean clone of the repo, kept in the cache, at `commit` or the tip of the repo's main. Build output stays, so builds are quick.
 fn checkout(commit: Option<&str>) -> Result<PathBuf> {
     ensure!(cache().is_absolute(), "give {} as a full path", one::config::env("HOME"));
     std::fs::create_dir_all(cache())?;
     let dir = cache().join("src");
     if !dir.join(".git").exists() {
         std::fs::create_dir_all(cache())?;
-        show(Command::new("git").args(["clone", "-q", &format!("https://github.com/{REPO}.git")]).arg(&dir))?;
+        show(Command::new("git").args(["clone", "-q", REPO]).arg(&dir))?;
     }
-    for args in [&["fetch", "-q", "--tags", "--force", "origin"][..], &["checkout", "-q", "--detach", "--force", commit.map_or("origin/main", |c| c.split('-').next().unwrap_or(c))], &["clean", "-qfdx", "-e", "/target"]] {
+    for args in [&["remote", "set-url", "origin", REPO][..], &["fetch", "-q", "--tags", "--force", "origin"], &["checkout", "-q", "--detach", "--force", commit.map_or("origin/main", |c| c.split('-').next().unwrap_or(c))], &["clean", "-qfdx", "-e", "/target"]] {
         show(Command::new("git").current_dir(&dir).args(args))?;
     }
     Ok(dir)

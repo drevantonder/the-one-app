@@ -52,8 +52,8 @@ same() { [ "${1:0:12}" = "${2:0:12}" ]; }
 
 # The clean clone at a commit, with `config` the config to build with.
 checkout() {
-	[ -d "$c/src/.git" ] || git clone -q "https://github.com/$repo.git" "$c/src" || return 1
-	cd "$c/src" && git fetch -q --tags --force origin && git checkout -q --detach --force "$1" && git clean -qfdx -e /target -e /client/native/target || return 1
+	[ -d "$c/src/.git" ] || git clone -q "$repo" "$c/src" || return 1
+	cd "$c/src" && git remote set-url origin "$repo" && git fetch -q --tags --force origin && git checkout -q --detach --force "$1" && git clean -qfdx -e /target -e /client/native/target || return 1
 	if [ -n "$config_repo" ]; then
 		[ -d "$c/config/.git" ] || git clone -q "$config_repo" "$c/config" || return 1
 		git -C "$c/config" fetch -q origin && git -C "$c/config" checkout -q --detach --force "$2" || return 1
