@@ -1109,6 +1109,9 @@ pub async fn requests(m: &impl Me) -> Result<Value> {
             }
         }
         let mut shown = json!({ "device": r.name, "user": who_joins(&r, &joining), "code": keys::spaced_code(code_needed(&r, &joining)), "made": r.said["made"], "place": r.said["place"], "platform": r.said["platform"] });
+        if r.said["by_link"] == true {
+            shown["by_link"] = json!(true);
+        }
         let replaces = replaced(m.who(|who| who.clients())?, &r);
         if !replaces.is_empty() {
             shown["replaces"] = json!(replaces.iter().map(|c| &c.name).collect::<Vec<_>>());
@@ -1229,9 +1232,16 @@ async fn approve_code(m: &impl Me, code: &str, confirm: bool) -> Result<Value> {
     if !confirm {
         let sign_in = signed_in_with(m, &r).await;
         let replaces: Vec<String> = replaced(m.who(|who| who.clients())?, &r).into_iter().map(|c| c.name).collect();
-        return Ok(json!({ "device": r.name, "user": who_joins(&r, &joining), "yours": matches!(joining, Joining::Own { .. }), "new": matches!(joining, Joining::Link(_) | Joining::New { .. }), "sign_in": sign_in, "replaces": replaces }));
+        return Ok(json!({ "device": r.name, "user": who_joins(&r, &joining), "yours": matches!(joining, Joining::Own { .. }), "new": matches!(joining, Joining::Link(_) | Joining::New { .. }), "sign_in": sign_in, "replaces": replaces, "by_link": r.said["by_link"] == true }));
     }
     approve(m, &r, &joining).await
+}
+
+/// Whether what `POST /v1/devices/approve` said of a device without `confirm` lets it in from its notification, with no
+/// card read: only one of this user's own, taking none out, that signed in on itself. A sign-in finished from a link may be
+/// someone else's device, so it waits for the card that says so.
+pub fn approves_from_a_note(about: &Value) -> bool {
+    about["yours"] == true && about["by_link"] == false && about["replaces"].as_array().is_none_or(|r| r.is_empty())
 }
 
 /// Lets in a device that asked: lists it (and for a newcomer, them), with what it signed in with, the device it's
@@ -1586,6 +1596,18 @@ mod tests {
         assert!(one(Joining::Own { proved: false }, &whole));
         assert!(!one(Joining::Lost, &short), "someone with no device left shows no device of theirs to compare");
         assert!(one(Joining::Lost, &whole));
+    }
+
+    /// A notification's Approve lets in only one of the user's own that signed in on itself: what a link signed in, or what
+    /// says nothing of how it did, waits for its card.
+    #[test]
+    fn a_sign_in_from_a_link_is_never_approved_from_a_notification() {
+        let about = |yours: bool, by_link: serde_json::Value, replaces: serde_json::Value| json!({ "yours": yours, "by_link": by_link, "replaces": replaces });
+        assert!(super::approves_from_a_note(&about(true, json!(false), json!([]))));
+        assert!(!super::approves_from_a_note(&about(true, json!(true), json!([]))), "signed in from a link");
+        assert!(!super::approves_from_a_note(&about(true, serde_json::Value::Null, json!([]))), "says nothing of how");
+        assert!(!super::approves_from_a_note(&about(false, json!(false), json!([]))), "someone else's");
+        assert!(!super::approves_from_a_note(&about(true, json!(false), json!(["old"]))), "takes one out");
     }
 
     /// An invite link lets a device in with no tap only when auth says its sign-in wasn't finished from a link: not when it

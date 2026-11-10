@@ -551,6 +551,7 @@ function Waiting({ r, busy, answer }) {
           {sub && <span className="block break-words text-muted-foreground">{sub}</span>}
           {signInLabel(r.sign_in) && <span className="block break-words text-muted-foreground">{signInLabel(r.sign_in)}</span>}
           {r.replaces && <span className="block break-words text-muted-foreground">Replaces {r.replaces.join(", ")}</span>}
+          {r.by_link && <span className="block break-words text-muted-foreground">Signed in from a link, not on this device. Approve only if you started this.</span>}
         </span>
       </div>
       <div className="text-center font-mono text-3xl font-semibold tracking-widest select-all">

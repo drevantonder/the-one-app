@@ -161,7 +161,7 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<one_client::Device>>) -
             match input["approve"] == true {
                 true => {
                     let about = crate::node(&device, "POST", "/v1/devices/approve", Some(json!({ "code": code }))).await?;
-                    if about["yours"] != true || about["replaces"].as_array().is_some_and(|r| !r.is_empty()) {
+                    if !one::settings::approves_from_a_note(&about) {
                         return Err("Open Settings › Devices to answer it.".to_string());
                     }
                     crate::node(&device, "POST", "/v1/devices/approve", Some(json!({ "code": code, "confirm": true }))).await?
