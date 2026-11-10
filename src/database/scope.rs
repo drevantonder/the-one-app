@@ -401,7 +401,7 @@ pub fn derive(db: &Connection) -> Result<()> {
         INSERT OR IGNORE INTO relations SELECT id, 'member', '{n}', NULL FROM principals p WHERE kind = 'user' AND removed = 0
             AND NOT EXISTS (SELECT 1 FROM relations r WHERE r.subject = p.id AND r.object = '{n}');
         INSERT OR IGNORE INTO relations SELECT id, 'owner', id, NULL FROM principals WHERE kind = 'user' AND removed = 0;
-        CREATE TEMP TABLE listed AS SELECT d.key, d.principal, d.listed_by, d.compute, d.service, d.shared FROM devices d
+        CREATE TEMP TABLE listed AS SELECT d.key, d.principal, d.listed_by, d.compute, d.client, d.service, d.shared, d.device FROM devices d
             JOIN principals p ON p.id = d.principal AND p.kind = 'user' AND p.removed = 0 WHERE d.removed = 0;
         INSERT OR IGNORE INTO relations SELECT principal, 'owner', 'device:' || key, NULL FROM listed;
         INSERT OR IGNORE INTO relations SELECT iif(shared, '{n}#member', principal), 'user', 'service:' || key, NULL FROM listed WHERE service IS NOT NULL;
@@ -410,7 +410,9 @@ pub fn derive(db: &Connection) -> Result<()> {
         FROM apps WHERE substr(owner, 1, 5) != 'user:' OR owner IN (SELECT id FROM principals WHERE kind = 'user' AND removed = 0);
         INSERT OR IGNORE INTO relations
         WITH admins AS (SELECT subject FROM relations WHERE relation = 'admin' AND object = '{n}'),
-            computes AS (SELECT key, principal, listed_by FROM listed WHERE compute = 1),
+            runtimes AS (SELECT device FROM listed WHERE compute = 1 AND client = 0 AND service IS NULL AND device IS NOT NULL),
+            computes AS (SELECT key, principal, listed_by FROM listed
+                WHERE (compute = 1 AND NOT (client = 0 AND service IS NULL AND device IS NOT NULL)) OR key IN runtimes),
             grps AS (SELECT id FROM principals WHERE kind = 'group'),
             users AS (SELECT id FROM principals WHERE kind = 'user')
         SELECT 'device:' || key, 'runner', '{n}', NULL FROM computes WHERE principal IN admins

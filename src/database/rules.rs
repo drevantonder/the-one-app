@@ -159,7 +159,7 @@ impl Rule<'_> {
     }
 
     fn runs_things(&self, k: &Key) -> Result<bool> {
-        Ok(self.who.compute(k)?.is_some() || self.who.cloudflare_node()? == Some(*k))
+        Ok(self.who.compute(k)?.is_some() || self.who.has_runtime(k)? || self.who.cloudflare_node()? == Some(*k))
     }
 
     fn devices_changed(&self) -> Result<()> {
@@ -210,6 +210,13 @@ impl Rule<'_> {
         let theirs = self.may("add-devices", &user_principal(&user));
         // A service answers its user's calls as them: only their own device lists one, never an admin's.
         ensure!(!machine.is(Kind::Service) || theirs, "only a user's own device lists their services");
+        // An app runtime carries its device's rights to run things: only that device says what's its runtime.
+        if let Some(of) = machine.runtime_of() {
+            ensure!(self.step.author() == of, "only a device lists its own app runtime");
+            let device = self.who.client(&of)?.filter(|d| d.user == user && d.passkey.is_none() && d.device.is_none());
+            ensure!(device.is_some(), "an app runtime is of one of its user's own devices");
+            ensure!(self.who.key_for(&machine.key, &user)?.is_none() && !self.who.has_runtime(&of)?, "a device has one app runtime, listed once");
+        }
         // A machine an admin listed for someone is listed again by that user's own device to be theirs: then it runs
         // their own scope too.
         if let Some(was) = self.who.key_for(&machine.key, &user)? {
@@ -220,8 +227,12 @@ impl Rule<'_> {
             // Or a sign-in saying what it is, once, which changes nothing else about it.
             let says = was.is(Kind::Client) && was.roles == machine.roles && was.passkey == machine.passkey && was.platform.is_none() && machine.platform.is_some() && (was.device.is_none() || was.device == machine.device);
             let part = part || says;
-            ensure!(!was.removed && was.user == user && theirs && (was.by != user || part) && was.seal == machine.seal, "that key is listed already");
-            if says {
+            // Or a device with an app runtime of its own, no longer running things itself.
+            let drops = was.roles == BTreeSet::from([Kind::Client, Kind::Compute]) && machine.roles == BTreeSet::from([Kind::Client]) && self.step.author() == machine.key && self.who.has_runtime(&machine.key)?;
+            ensure!(!was.removed && was.user == user && theirs && (was.by != user || part || drops) && was.seal == machine.seal, "that key is listed already");
+            if drops {
+                machine = Machine { roles: machine.roles, ..was };
+            } else if says {
                 (machine.since, machine.place, machine.sign_in) = (was.since, was.place, was.sign_in);
             }
         } else if self.who.user_ever(&user)?.is_some() {
@@ -377,7 +388,7 @@ impl Rule<'_> {
         self.out.execute("INSERT OR IGNORE INTO runs_chosen VALUES (?)", [&me])?;
         self.out.execute("DELETE FROM runs WHERE principal = ?", [&me])?;
         for k in &on {
-            self.out.execute("INSERT INTO runs VALUES (?, ?)", params![me, hex(k)])?;
+            self.out.execute("INSERT INTO runs VALUES (?, ?)", params![me, hex(&self.who.device_of(k))])?;
         }
         Ok(())
     }
@@ -894,6 +905,64 @@ mod tests {
         let mac = Dev::new(1);
         let net = Net::new(&mac, BOTH, &[7; 32]);
         (mac, net)
+    }
+
+    /// A device's app runtime: only that device says it has one, and it then runs what the device runs, grants and
+    /// others' choices included, until the device is taken out.
+    #[test]
+    fn a_devices_runtime_is_its_own_to_list_and_runs_what_it_runs() -> anyhow::Result<()> {
+        let (mac, mut net) = setup();
+        let (linux, rt, bobs) = (Dev::new(4), Dev::new(5), Dev::new(3));
+        let (andre, bob) = (Scope::User(ANDRE.into()), Scope::User(BOB.into()));
+        let runtime = |d: &Dev, of: &Dev, user: &str| {
+            let mut c = device(&d.endpoint(), user, "runtime", &[Kind::Compute], None);
+            c.data["device"] = json!(hex(&of.id()));
+            c
+        };
+        assert!(net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member)))));
+        let mut listing = device(&linux.endpoint(), ANDRE, "linux", BOTH, None);
+        listing.data["platform"] = json!("linux");
+        assert!(net.step(&mac, ANDRE, listing));
+        // Bob chose linux to run his things, and it opens Andre's Vault.
+        assert!(net.step(&bobs, BOB, runs(&[linux.id()])));
+        assert!(net.step(&mac, ANDRE, vault(&andre, 1, &[9; 32], &[linux.id()])));
+        // A device with no runtime of its own keeps its Compute; its user's other device doesn't list one for it, nor
+        // anyone else's.
+        assert!(!net.step(&linux, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Client], None)), "no runtime yet");
+        assert!(!net.step(&mac, ANDRE, runtime(&rt, &linux, ANDRE)), "another of its user's devices");
+        assert!(!net.step(&bobs, BOB, runtime(&rt, &linux, BOB)), "someone else's");
+        assert!(net.db.machine(&rt.id())?.is_none());
+
+        assert!(net.step(&linux, ANDRE, runtime(&rt, &linux, ANDRE)));
+        assert_eq!(net.db.device_of(&rt.id()), linux.id());
+        assert!(net.db.runs_for(&rt.id(), &andre) && net.db.runs_for(&rt.id(), &Scope::Global));
+        assert!(net.db.runs_for(&rt.id(), &bob) && net.db.serves(&rt.id(), BOB)?, "what Bob chose for the device");
+        assert!(net.db.opens_vault(&rt.id(), &andre)?, "a Vault granted to the device");
+        assert!(net.db.runners(BOB, std::slice::from_ref(&bob))?.iter().any(|m| m.key == rt.id()));
+        assert!(!net.step(&linux, ANDRE, runtime(&Dev::new(6), &linux, ANDRE)), "a device has one");
+        // The device drops its own Compute, and nothing else moves.
+        assert!(!net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Client], None)), "only itself drops it");
+        assert!(net.step(&linux, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Client], None)));
+        let was = net.db.machine(&linux.id())?.unwrap();
+        assert_eq!(was.roles, BTreeSet::from([Kind::Client]));
+        assert_eq!(was.by, ANDRE);
+        assert!(net.db.compute(&linux.id())?.is_none());
+        assert!(net.db.runs_for(&rt.id(), &bob) && net.db.runs_for(&linux.id(), &bob) && net.db.opens_vault(&rt.id(), &andre)?);
+        assert!(net.step(&bobs, BOB, runs(&[linux.id()])), "the device stays what they name");
+        assert!(net.step(&mac, ANDRE, vault(&andre, 2, &[9; 32], &[linux.id()])), "and what's granted");
+        assert_eq!(net.db.find_node("linux")?, linux.id());
+        assert_eq!(net.db.find_runner("linux")?, rt.id());
+        // A device with a runtime of its own isn't just a client: the recovery key isn't sealed to it.
+        assert!(net.db.recovery_devices(ANDRE)?.iter().all(|m| m.key != linux.id()));
+        // Choosing the runtime itself is choosing the device.
+        assert!(net.step(&bobs, BOB, runs(&[rt.id()])));
+        assert!(net.db.runs_for(&rt.id(), &bob));
+        assert_eq!(net.db.runs(BOB)?, Some(BTreeSet::from([linux.id()])));
+        // Its device taken out, it's gone with it, and runs nothing.
+        assert!(net.step(&mac, ANDRE, remove_device(&linux.id())));
+        assert!(net.db.machine(&rt.id())?.is_none() && !net.db.runs_for(&rt.id(), &andre) && !net.db.opens_vault(&rt.id(), &andre)?);
+        assert!(net.db.computes()?.iter().all(|m| m.key != rt.id()));
+        Ok(())
     }
 
     /// Only an admin names who holds the recovery key; a value that doesn't read, or someone since taken out, names no

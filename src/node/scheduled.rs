@@ -35,7 +35,8 @@ impl Node {
             let m = i.r.db();
             let mut due = Vec::new();
             let mut seen = BTreeSet::new();
-            for ((_, scope, app), _) in m.app_schedules_at(now)?.into_iter().filter(|((k, ..), _)| *k == self.0.id) {
+            let me = m.device_of(&self.0.id);
+            for ((_, scope, app), _) in m.app_schedules_at(now)?.into_iter().filter(|((k, ..), _)| *k == me) {
                 let Some(state) = i.views.get(&scope.to_string()).filter(|s| s.added.contains(&app)) else { continue };
                 let Some((_, list)) = declared.iter().find(|(a, _)| *a == app) else { continue };
                 for s in list.iter().filter_map(|s| s.as_ref().ok()) {

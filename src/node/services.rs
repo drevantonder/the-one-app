@@ -40,7 +40,7 @@ impl Node {
 
     /// Whether a part of this device is switched off, by its latest `service` entry.
     pub(super) fn off(m: &ScopeDb, device: &Key, name: &str) -> Result<bool> {
-        Ok(m.switch(device, name)?.is_some_and(|s| !s.on))
+        Ok(m.switch(&m.device_of(device), name)?.is_some_and(|s| !s.on))
     }
 
     /// The network this device's parts are in, and those switched on here, each with when it was: switched on again

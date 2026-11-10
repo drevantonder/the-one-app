@@ -680,6 +680,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
                 user: "u".into(),
                 roles: [Kind::Compute].into(),
                 since: 1,
+                device: Some("d".into()),
                 kind: "laptop".into(),
                 priority: one::rank::Priority::Last,
                 order: 0,

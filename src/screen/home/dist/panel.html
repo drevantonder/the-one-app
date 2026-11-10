@@ -248,7 +248,7 @@ function f() {
 		key: e.key,
 		name: String(e.name || "").replace(/\.local$/, ""),
 		online: e.online === !0,
-		here: !!n && e.key === n
+		here: !!n && (e.key === n || e.device === n)
 	})).sort((e, t) => t.here - e.here || e.name.localeCompare(t.name));
 }
 var p = () => {};

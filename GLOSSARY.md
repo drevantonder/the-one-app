@@ -79,7 +79,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Accounts**: the accounts apps sign in to (a Gmail address, a WhatsApp number), listed together in the sidebar.
 - **App runtime**: where apps run on a node, switched on per node: a sandbox with no disk and no keys of its own, where
   an app reaches only its own databases, its own services, the web, and other apps' tools, through `ctx`. It is our
-  wrapper around workerd (Cloudflare's open-source Workers runtime). Avoid: node, app service.
+  wrapper around workerd (Cloudflare's open-source Workers runtime). A device can have one of its own, an endpoint
+  listed as compute and naming the device, which runs what the device runs. Avoid: node, app service.
 - **Call**: one run of an app's tool, screen or schedule, on one node, with the keys the caller hands it for that call,
   which expire within the hour.
 - **Deploy**: a version of an app put into a scope. **Built-in apps** are the folders in `apps/` with an `app.js`, shipped with every

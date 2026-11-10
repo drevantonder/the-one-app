@@ -77,6 +77,10 @@ const LATE = 30_000, AGAIN = 10_000
 // How long a device has to come back on a new version before it counts as not having.
 const UPDATE_WITHIN = 5 * 60_000
 
+/// The device a node entry is, for what's recorded against a device (its priority, its grants, its parts): itself, or
+/// the device it's the app runtime of.
+const deviceKey = (node) => node.device || node.key
+
 // What the screen knows of the devices, from what the node says: each of theirs with what's on it, their passkeys, and
 // what each part of a device is doing. `again` gives what Try Again runs.
 function model(x, again) {
@@ -101,7 +105,14 @@ function model(x, again) {
       return c
     }
     const byKey = new Map()
-    for (const d of devices.filter((d) => (d.roles || []).includes("compute"))) byKey.set(d.key, Object.assign(card(d.user, d.name), { node: d }))
+    const computes = devices.filter((d) => (d.roles || []).includes("compute"))
+    for (const d of computes.filter((d) => !d.device)) byKey.set(d.key, Object.assign(card(d.user, d.name), { node: d }))
+    // A device's app runtime, folded under that device: the device's own card if it still runs things itself, else its
+    // only card, under the device's key.
+    for (const d of computes.filter((d) => d.device)) {
+      if (byKey.has(d.device)) byKey.get(d.device).runtime = d
+      else byKey.set(d.device, Object.assign(card(d.user, d.name), { node: d }))
+    }
     for (const c of clients) {
       if (c.passkey) {
         passkeys.push(c)
@@ -116,12 +127,15 @@ function model(x, again) {
       // An app's sign-in, under the device it's on: its oned's card, or a phone's own, which a sign-in there again
       // replaces.
       if (c.device && !byKey.has(c.device)) byKey.set(c.device, card(c.user, c.name))
-      ;(byKey.get(c.device) || card(c.user, c.name)).clients.push(c)
+      ;(byKey.get(c.device || c.key) || card(c.user, c.name)).clients.push(c)
     }
     for (const c of cards) {
       c.id = c.node?.key || c.clients[0]?.key
-      // Its oned last: removing it takes what's part of it, its apps' sign-ins first here.
-      c.keys = [...c.clients, c.node].filter(Boolean).map((e) => e.key)
+      // A device with a runtime of its own goes by the device's name, in its client row.
+      const named = c.node?.device && c.clients.find((e) => e.key === c.node.device)
+      if (named) c.name = shown(named.name)
+      // Its oned last, then the device itself: removing it takes what's part of it, its apps' sign-ins first here.
+      c.keys = [...c.clients, c.runtime, c.node].filter(Boolean).map((e) => e.key).sort((a, b) => (a === c.node?.device) - (b === c.node?.device))
       c.me = [c.node, ...c.clients].some((e) => e?.me)
       c.online = !!c.node?.online
       c.runs = !!c.node
@@ -145,7 +159,7 @@ function model(x, again) {
 
   /// A part as its dot shows it, from what its device says and what was asked here.
   function partNow(c, p) {
-    const k = `${c.node.key} ${p.name}`, a = asked[k]
+    const k = `${deviceKey(c.node)} ${p.name}`, a = asked[k]
     if (!a) return p
     // Its device did it: on or off as asked, and for Try Again, past the problem it retried.
     if (a.state !== "failed" && p.on === a.on && (!a.again || p.doing || p.problem !== a.again)) return delete asked[k], p
@@ -158,10 +172,10 @@ function model(x, again) {
   /// What a device can run, as it says (Runs apps, then its services), each as asked here, with how to switch it. One
   /// that doesn't list them yet: Runs apps as it is, and its services, on.
   function partsOf(c) {
-    if (Array.isArray(c.node?.parts)) return c.node.parts.map((p) => ({ ...partNow(c, p), part: { device: c.node.key, name: p.name } }))
+    if (Array.isArray(c.node?.parts)) return c.node.parts.map((p) => ({ ...partNow(c, p), part: { device: deviceKey(c.node), name: p.name } }))
     return [
       ...(c.node ? [{ name: "apps", on: true, fixed: true }] : []),
-      ...(c.node?.installed_services || []).map((s) => ({ name: s.name, on: true, part: { service: s.name, device: c.node.key } })),
+      ...(c.node?.installed_services || []).map((s) => ({ name: s.name, on: true, part: { service: s.name, device: deviceKey(c.node) } })),
     ]
   }
   /// What's wrong with a part, as one problem with what fixes it: a switch that failed or is late, or a part that
@@ -181,7 +195,7 @@ function model(x, again) {
   function board() {
     const entries = drawn.cards.filter((c) => c.runs).map((c) => ({
       id: c.id, name: c.name, icon: c.icon, whose: c.user === me ? "" : `${userName(c.user)}’s`, p: c.priority,
-      keys: [c.node.key],
+      keys: [deviceKey(c.node)],
     }))
     const s = state.network?.cloudflare_node
     if (s) entries.push({ id: "cloudflare", name: "Cloudflare", icon: CLOUDFLARE, whose: "", p: s.priority ?? "last", keys: ["cloudflare"] })
@@ -341,7 +355,7 @@ function Devices() {
       set = JSON.parse(network.settings?.priority || "{}") || {}
     } catch {}
     // Only what's still a device of the network, or Cloudflare.
-    const known = new Set([...(network.devices || []).map((d) => d.key), "cloudflare"])
+    const known = new Set([...(network.devices || []).map(deviceKey), "cloudflare"])
     set = Object.fromEntries(Object.entries(set).filter(([k]) => known.has(k)))
     order.forEach((c, i) => c.forEach((x) => x.keys.forEach((k) => (set[k] = i + 1))))
     end.forEach((x) => x.keys.forEach((k) => (set[k] = "last")))
@@ -354,7 +368,7 @@ function Devices() {
         ...data.state,
         network: {
           ...network,
-          devices: (network.devices || []).map((d) => (d.key in set ? { ...d, priority: set[d.key] } : d)),
+          devices: (network.devices || []).map((d) => (deviceKey(d) in set ? { ...d, priority: set[deviceKey(d)] } : d)),
           cloudflare_node: network.cloudflare_node && "cloudflare" in set ? { ...network.cloudflare_node, priority: set.cloudflare } : network.cloudflare_node,
           settings: { ...network.settings, priority: value },
         },
@@ -761,7 +775,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
             <Section title="App Schedules">
               <List>
                 {appSchedules.map((g) => {
-                  const on = (state.network?.devices || []).find((d) => d.key === g.endpoint)
+                  const on = (state.network?.devices || []).find((d) => deviceKey(d) === g.endpoint)
                   const until = new Date(g.until).toLocaleDateString(undefined, { day: "numeric", month: "long" })
                   return (
                     <div key={`${g.endpoint} ${g.app} ${g.scope}`} className="flex items-center gap-3 px-3 py-2.5 text-sm">
@@ -1076,7 +1090,7 @@ function Restore({ open, setOpen, done }) {
 
 /// Renames a device: its node, or its app's sign-ins.
 function Rename({ card, open, setOpen, done }) {
-  const keys = card.runs ? [card.node.key] : card.clients.map((c) => c.key)
+  const keys = card.runs ? [deviceKey(card.node)] : card.clients.map((c) => c.key)
   const [name, setName] = useState(card.name)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -1279,7 +1293,7 @@ function AppSchedules({ m, asked, open, setOpen, done }) {
   async function choose(d) {
     setError("")
     try {
-      await api("POST", "/api/devices/run_schedules", { device: d.key, app, scope })
+      await api("POST", "/api/devices/run_schedules", { device: deviceKey(d), app, scope })
       done()
     } catch (err) {
       setError(said(err))

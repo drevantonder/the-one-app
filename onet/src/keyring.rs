@@ -104,7 +104,7 @@ impl Known {
         let ranks = nodes
             .keys()
             .map(|k| {
-                let id = if Some(*k) == cloudflare_node { one::rank::CLOUDFLARE.to_string() } else { hex(k) };
+                let id = if Some(*k) == cloudflare_node { one::rank::CLOUDFLARE.to_string() } else { hex(&who.device_of(k)) };
                 (*k, match one::rank::priority(&set, &id) { one::rank::Priority::Number(n) => n, one::rank::Priority::Last => u32::MAX })
             })
             .collect();
@@ -274,6 +274,34 @@ impl<O: Opens> Keyring<O> {
         self.known.lock().unwrap().as_ref().and_then(|k| k.cloudflare_node)
     }
 
+    /// The nodes it may ask, in the order things run on them: `first`, as last said, then those it wasn't told of, the
+    /// Cloudflare node last of them; then by run priority, which may put the Cloudflare node first.
+    pub fn ordered(&self, first: &[[u8; 32]]) -> Vec<[u8; 32]> {
+        let nodes = self.nodes();
+        let last = self.cloudflare_node();
+        let ranks: HashMap<[u8; 32], u32> = self.ranks().into_iter().collect();
+        let mut out: Vec<[u8; 32]> = first.iter().filter(|k| nodes.contains_key(*k) && Some(**k) != last).copied().collect();
+        let mut rest: Vec<[u8; 32]> = nodes.keys().filter(|k| !out.contains(k) && Some(**k) != last).copied().collect();
+        rest.sort();
+        out.extend(rest);
+        out.extend(last.filter(|k| nodes.contains_key(k)));
+        out.sort_by_key(|k| ranks.get(k).copied().unwrap_or(1));
+        out
+    }
+
+    /// Every node it knows failed: who's who read again, now and then, in case a device has a runtime of its own by now.
+    /// → whether that listed a node it hadn't known of, which it now asks too.
+    async fn found_nodes(&self, client: &Client, on: &(impl Address + Keep)) -> bool {
+        let stale = self.known.lock().unwrap().as_ref().is_some_and(|k| now() > k.at + REREAD);
+        let had = self.nodes();
+        if !stale || self.read(on).await.is_err() || self.nodes().keys().all(|k| had.contains_key(k)) {
+            return false;
+        }
+        let _ = client.set_ranks(&self.ranks());
+        let _ = client.set_wakes(self.cloudflare_node());
+        client.set_nodes(&self.ordered(&[])).is_ok()
+    }
+
     pub fn ranks(&self) -> Vec<([u8; 32], u32)> {
         self.known.lock().unwrap().as_ref().map(|k| k.ranks.iter().map(|(k, r)| (*k, *r)).collect()).unwrap_or_default()
     }
@@ -340,7 +368,7 @@ impl<O: Opens> Keyring<O> {
             let kept = on.get(NEEDS).await.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
             self.needs.lock().unwrap().get_or_insert(kept);
         }
-        let (mut needed, mut behind) = (0, 0);
+        let (mut needed, mut behind, mut reread) = (0, 0, false);
         loop {
             let learning = self.learning.lock().unwrap().get(&kind.name).cloned();
             if let Some(learning) = learning {
@@ -360,6 +388,12 @@ impl<O: Opens> Keyring<O> {
                     fetched["handed"] = opened;
                 }
                 fetches.push(fetched);
+            }
+            if sent.as_ref().is_err_and(|err| !err.sent) && !reread {
+                reread = true;
+                if self.found_nodes(client, on).await {
+                    continue;
+                }
             }
             let response = sent?;
             if response.status == 428 && needed < 3 {

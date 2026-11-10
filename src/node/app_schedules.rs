@@ -36,11 +36,15 @@ impl Node {
     /// bucket: each sealed to this device whose hash is the one they name, the rest passed over. → until when it lasts.
     pub(super) async fn app_schedules_keys(&self, scope: &Scope, app: &str) -> Result<u64> {
         let now = now_ms();
-        let found = self.with(|i| Ok(i.r.db().app_schedules_at(now)?.into_iter().find(|((k, s, a), _)| *k == self.0.id && s == scope && a == app).map(|(_, g)| (g.until, g.hashes))))?;
+        let found = self.with(|i| {
+            let m = i.r.db();
+            let me = m.device_of(&self.0.id);
+            Ok(m.app_schedules_at(now)?.into_iter().find(|((k, s, a), _)| *k == me && s == scope && a == app).map(|(_, g)| (g.until, g.hashes)))
+        })?;
         let (until, hashes) = found.with_context(|| format!("{} doesn't run {app}'s schedules in {scope}", self.device_name()))?;
         let id = (scope.clone(), app.to_string());
         let had = self.0.app_schedules.keys.lock().unwrap().get(&id).cloned().unwrap_or_default();
-        let (bucket, secret, me) = (self.bucket()?, self.seal_secret(), hex(&self.0.id));
+        let (bucket, secret, me) = (self.bucket()?, self.seal_secret(), hex(&self.with_or(self.0.id, |i| Ok(i.r.db().device_of(&self.0.id)))));
         let mut keys = crate::database::stored::Keys::new();
         for (n, hash) in &hashes {
             if let Some(key) = had.get(n).filter(|k| crate::keys::epoch_hash(k) == *hash) {
@@ -93,13 +97,21 @@ impl Node {
     /// Until when `app`'s schedules in `scope` here last: 0 once they're over.
     pub(super) fn app_schedules_until(&self, scope: &Scope, app: &str) -> u64 {
         let now = now_ms();
-        self.with_or(0, |i| Ok(i.r.db().app_schedules_at(now)?.into_iter().find(|((k, s, a), _)| *k == self.0.id && s == scope && a == app).map_or(0, |(_, g)| g.until)))
+        self.with_or(0, |i| {
+            let m = i.r.db();
+            let me = m.device_of(&self.0.id);
+            Ok(m.app_schedules_at(now)?.into_iter().find(|((k, s, a), _)| *k == me && s == scope && a == app).map_or(0, |(_, g)| g.until))
+        })
     }
 
     /// Forgets the keys of app schedules no longer in force here, and the databases they had open.
     pub(super) fn forget_app_schedules(&self) {
         let now = now_ms();
-        let held: std::collections::HashSet<(Scope, String)> = self.with_or(Default::default(), |i| Ok(i.r.db().app_schedules_at(now)?.into_iter().filter(|((k, ..), _)| *k == self.0.id).map(|((_, s, a), _)| (s, a)).collect()));
+        let held: std::collections::HashSet<(Scope, String)> = self.with_or(Default::default(), |i| {
+            let m = i.r.db();
+            let me = m.device_of(&self.0.id);
+            Ok(m.app_schedules_at(now)?.into_iter().filter(|((k, ..), _)| *k == me).map(|((_, s, a), _)| (s, a)).collect())
+        });
         let gone: Vec<(Scope, String)> = {
             let mut kept = self.0.app_schedules.keys.lock().unwrap();
             let gone = kept.keys().filter(|id| !held.contains(*id)).cloned().collect();

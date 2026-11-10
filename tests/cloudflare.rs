@@ -1219,11 +1219,20 @@ mod relay {
             assert_eq!(tell(&address, &stranger, json!({ "remove": hex(&stranger) })), 204);
             assert!(shut_out(&k, &stranger, None).await, "a key taken out reached the relay");
 
-            // A client adds only clients: a compute or a service only an admin's device or a compute adds, and a key's
-            // role, once it's in, only an admin's changes.
+            // Any key on the list adds a compute or a service: who's who, which every reader checks, is the real gate. A
+            // key's role, once it's in, only an admin's changes, but a device dropping compute from itself.
             for role in ["compute", "service"] {
-                assert_eq!(tell(&address, &phone, json!({ "add": hex(&SecretKey::generate()), "role": role })), 403, "a client added a {role}");
+                assert_eq!(tell(&address, &phone, json!({ "add": hex(&SecretKey::generate()), "role": role })), 204, "a client couldn't add a {role}");
             }
+            let dropping = SecretKey::generate();
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&dropping), "role": "compute" })), 204);
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&dropping), "role": "client" })), 403, "another device dropped compute from a key");
+            assert_eq!(tell(&address, &dropping, json!({ "add": hex(&dropping), "role": "client" })), 204, "a device couldn't drop compute from itself");
+            assert_eq!(tell(&address, &dropping, json!({ "add": hex(&dropping), "role": "compute" })), 403, "a device took compute back");
+            let admins = SecretKey::generate();
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&admins), "role": "compute", "admin": true })), 204);
+            assert_eq!(tell(&address, &admins, json!({ "add": hex(&admins), "role": "client", "admin": true })), 204, "an admin's device couldn't drop compute from itself");
+            assert_eq!(tell(&address, &admins, json!({ "add": hex(&SecretKey::generate()), "role": "client", "admin": true })), 204, "dropping compute took its admin");
             let machine = SecretKey::generate();
             assert_eq!(tell(&address, &first, json!({ "add": hex(&machine), "role": "compute" })), 204);
             assert_eq!(tell(&address, &machine, json!({ "add": hex(&SecretKey::generate()), "role": "compute" })), 204, "a compute didn't add the computer it paired");

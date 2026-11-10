@@ -67,7 +67,8 @@ pub fn owner_object(p: &Principal) -> String {
 }
 
 const MACHINE: &str = "SELECT d.key, d.seal, d.principal, d.name, d.client, d.compute, d.service, d.shared, d.passkey, d.device, d.listed_by, d.listed_at,
-    d.removed OR coalesce(p.removed, 1), d.sign_in, d.place, d.platform FROM devices d LEFT JOIN principals p ON p.id = d.principal";
+    d.removed OR coalesce(p.removed, 1) OR (d.compute = 1 AND d.client = 0 AND d.service IS NULL AND d.device IS NOT NULL AND coalesce((SELECT k.removed FROM devices k WHERE k.key = d.device), 1)),
+    d.sign_in, d.place, d.platform FROM devices d LEFT JOIN principals p ON p.id = d.principal";
 
 fn machine(r: &rusqlite::Row) -> rusqlite::Result<Machine> {
     let mut roles = BTreeSet::new();
@@ -192,8 +193,24 @@ impl ScopeDb {
         })
     }
 
+    /// The device `key` acts as: the one it's the app runtime of, if it's that, else itself. A device's rights to run
+    /// things are recorded against the device, whichever key runs them.
+    pub fn device_of(&self, key: &Key) -> Key {
+        self.machine(key).ok().flatten().and_then(|m| m.runtime_of()).unwrap_or(*key)
+    }
+
+    /// The devices with an app runtime of their own listed.
+    fn with_runtimes(&self) -> Result<BTreeSet<Key>> {
+        Ok(self.machines()?.into_iter().filter(|m| !m.removed).filter_map(|m| m.runtime_of()).collect())
+    }
+
+    /// Whether a device has an app runtime of its own listed.
+    pub fn has_runtime(&self, key: &Key) -> Result<bool> {
+        Ok(self.with_runtimes()?.contains(key))
+    }
+
     pub fn runs_for(&self, key: &Key, scope: &Scope) -> bool {
-        self.device_may(key, "run", &object(scope))
+        self.device_may(&self.device_of(key), "run", &object(scope))
     }
 
     /// What `principal` may do `verb` to (`permissions::objects`), to ask of many at once.
@@ -207,7 +224,7 @@ impl ScopeDb {
     }
 
     pub fn run_by(&self, key: &Key) -> Result<Vec<Scope>> {
-        let runs = self.objects(&device(key), "run")?;
+        let runs = self.objects(&device(&self.device_of(key)), "run")?;
         Ok(self.scopes()?.into_iter().filter(|s| permissions::allows(&runs, &object(s))).collect())
     }
 
@@ -227,7 +244,7 @@ impl ScopeDb {
         let all: Vec<String> = self.scopes()?.iter().map(object).collect();
         let mut out = Vec::new();
         for m in self.computes()? {
-            let runs = self.objects(&device(&m.key), "run")?;
+            let runs = self.objects(&device(&self.device_of(&m.key)), "run")?;
             if all.iter().any(|o| permissions::allows(&uses, o) && permissions::allows(&runs, o)) && scopes.iter().all(|s| permissions::allows(&runs, &object(s))) {
                 out.push(m);
             }
@@ -308,11 +325,12 @@ impl ScopeDb {
         Ok(holders)
     }
 
-    /// The devices of a holder of the recovery key that it may be sealed to: only a client's, as a node holds no keys;
-    /// never a browser's, whose code a Worker serves, a remote MCP client's, or a passkey's, which is wherever that
-    /// passkey syncs; and only one that has said what it is.
+    /// The devices of a holder of the recovery key that it may be sealed to: only a client's, with no app runtime of its
+    /// own, as a node holds no keys; never a browser's, whose code a Worker serves, a remote MCP client's, or a passkey's,
+    /// which is wherever that passkey syncs; and only one that has said what it is.
     pub fn recovery_devices(&self, user: &str) -> Result<Vec<Machine>> {
-        let holds = |m: &Machine| m.user == user && m.roles == BTreeSet::from([Kind::Client]) && m.passkey.is_none() && m.seal != m.key && m.platform.as_deref().is_some_and(|p| !["browser", "cloudflare"].contains(&p));
+        let runtimes = self.with_runtimes()?;
+        let holds = |m: &Machine| m.user == user && m.roles == BTreeSet::from([Kind::Client]) && m.passkey.is_none() && m.seal != m.key && !runtimes.contains(&m.key) && m.platform.as_deref().is_some_and(|p| !["browser", "cloudflare"].contains(&p));
         Ok(self.clients()?.into_iter().filter(holds).collect())
     }
 
@@ -328,16 +346,31 @@ impl ScopeDb {
         }
     }
 
-    /// A node on a machine, which runs calls, as someone gives it, by its name or the start of its key.
+    /// A machine that runs calls, as someone gives it, by its name or the start of its key, each by its device's name: a
+    /// device with a runtime of its own only as that runtime.
+    fn running_machines(&self) -> Result<Vec<(Machine, String)>> {
+        let runtimes = self.with_runtimes()?;
+        self.computes()?
+            .into_iter()
+            .filter(|m| !runtimes.contains(&m.key))
+            .map(|m| {
+                let named = m.runtime_of().map(|d| self.machine_ever(&d)).transpose()?.flatten().map_or_else(|| m.name.clone(), |d| d.name);
+                Ok((m, named))
+            })
+            .collect()
+    }
+
+    /// A device that runs calls, as someone gives it, by its name or the start of its key: what's recorded against it (a
+    /// grant, a schedule) names the device, not its runtime.
     pub fn find_node(&self, name: &str) -> Result<Key> {
-        let nodes = self.computes()?.into_iter().map(|m| (m.key, m.name)).collect();
+        let nodes = self.running_machines()?.into_iter().map(|(m, named)| (m.runtime_of().unwrap_or(m.key), named)).collect();
         Self::find_among(nodes, name)
     }
 
     /// A node that runs a call, as someone names it for one (`--device`): a machine's, or the Cloudflare node, whose
     /// name is `cloudflare` wherever a device is named.
     pub fn find_runner(&self, name: &str) -> Result<Key> {
-        let mut nodes: Vec<(Key, String)> = self.computes()?.into_iter().map(|m| (m.key, m.name)).collect();
+        let mut nodes: Vec<(Key, String)> = self.running_machines()?.into_iter().map(|(m, named)| (m.key, named)).collect();
         nodes.extend(self.cloudflare_node()?.map(|k| (k, crate::rank::CLOUDFLARE.to_string())));
         Self::find_among(nodes, name)
     }
@@ -744,7 +777,8 @@ impl ScopeDb {
 
     /// Whether `k` opens `scope`'s Vault now: its newest key lists it, and it's still listed.
     pub fn opens_vault(&self, k: &Key, scope: &Scope) -> Result<bool> {
-        Ok(self.vault(scope)?.is_some_and(|v| v.to.contains(k)) && self.machine(k)?.is_some())
+        let k = self.device_of(k);
+        Ok(self.vault(scope)?.is_some_and(|v| v.to.contains(&k)) && self.machine(&k)?.is_some())
     }
 
     /// Every app ever made, erased ones too, by name.
@@ -1028,7 +1062,8 @@ pub struct Machine {
     /// its own user.
     pub shared: bool,
     /// The device it's part of, when it's one's: for a service, its device's oned; for a native app's sign-in, the
-    /// device it's on (that device's oned, or an id of the device's own).
+    /// device it's on (that device's oned, or an id of the device's own); for a device's app runtime, that device
+    /// (`runtime_of`).
     pub device: Option<Key>,
     /// Who listed it: its user, from one of their own devices, or an admin.
     pub by: String,
@@ -1045,6 +1080,11 @@ pub struct Machine {
 impl Machine {
     pub fn is(&self, kind: Kind) -> bool {
         self.roles.contains(&kind)
+    }
+
+    /// The device this is the app runtime of, if it's one: a compute and nothing else, naming the device it's part of.
+    pub fn runtime_of(&self) -> Option<Key> {
+        self.device.filter(|_| self.roles == BTreeSet::from([Kind::Compute]))
     }
 }
 

@@ -57,7 +57,7 @@ impl Node {
         if publics.is_empty() {
             return Ok(None);
         }
-        let (secret, me) = (self.seal_secret(), hex(&self.0.id));
+        let (secret, me) = (self.seal_secret(), hex(&self.with_or(self.0.id, |i| Ok(i.r.db().device_of(&self.0.id)))));
         let mut out = BTreeMap::new();
         for (n, public) in publics {
             if let Some(key) = self.0.app_schedules.vault.lock().unwrap().get(&(scope.clone(), n)) {

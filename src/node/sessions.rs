@@ -348,7 +348,8 @@ impl Node {
 
     /// Whether this device opens a scope with its own keys: it's a client device of someone who uses it.
     pub(super) fn opens(&self, m: &ScopeDb, scope: &Scope) -> Result<bool> {
-        Ok(*scope == Scope::Global || m.openers(scope)?.iter().any(|c| c.key == self.0.id))
+        let me = m.device_of(&self.0.id);
+        Ok(*scope == Scope::Global || m.openers(scope)?.iter().any(|c| c.key == me))
     }
 
     /// A scope's newest epoch: the newest an `epoch` entry that counts made, whatever the bucket holds. 0 while it has

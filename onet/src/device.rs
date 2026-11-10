@@ -3,7 +3,6 @@
 //! with the code it shows; and once a device of theirs approved it, asking its nodes with the keys it opens
 //! (`crate::keyring`), keeping what outlives it in its folder. A browser runs the same keyring in its worker.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -292,20 +291,9 @@ impl Device {
         Ok(Some((keys(&out["computes"]), keys(&out["online"]))))
     }
 
-    /// The nodes it may ask, in the order things run on them as last said, those it wasn't told of after, and the
-    /// Cloudflare node after them; then by run priority, which may put the Cloudflare node first.
     fn ordered(&self) -> Vec<[u8; 32]> {
-        let nodes = self.keyring.nodes();
         let order = self.order.lock().unwrap().clone();
-        let last = self.keyring.cloudflare_node();
-        let ranks: HashMap<[u8; 32], u32> = self.keyring.ranks().into_iter().collect();
-        let mut out: Vec<[u8; 32]> = order.iter().filter(|k| nodes.contains_key(*k) && Some(**k) != last).copied().collect();
-        let mut rest: Vec<[u8; 32]> = nodes.keys().filter(|k| !out.contains(k) && Some(**k) != last).copied().collect();
-        rest.sort();
-        out.extend(rest);
-        out.extend(last.filter(|k| nodes.contains_key(k)));
-        out.sort_by_key(|k| ranks.get(k).copied().unwrap_or(1));
-        out
+        self.keyring.ordered(&order)
     }
 
     pub async fn reconnect(&self) {

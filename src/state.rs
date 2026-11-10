@@ -223,6 +223,9 @@ pub struct Device {
     pub user: String,
     pub roles: BTreeSet<Kind>,
     pub since: u64,
+    /// The device this is the app runtime of, if it is: what's recorded of it (a grant, a priority) is that device's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
     /// What it is, for its icon: `laptop`, `cloud` or `always_on`.
     pub kind: String,
     pub priority: Priority,
@@ -489,12 +492,13 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
             user: s.user.clone(),
             roles: s.roles.clone(),
             since: s.since,
+            device: s.runtime_of().as_ref().map(hex),
             kind,
-            priority: rank::priority(&set, &hex(&s.key)),
+            priority: rank::priority(&set, &hex(&m.device_of(&s.key))),
             order: 0,
             serves_me: m.serves(&s.key, me)?,
             runs_for: m.run_by(&s.key)?.iter().map(|scope| scope.to_string()).collect(),
-            off_services: switches.iter().filter(|((k, _), d)| *k == s.key && !d.on).map(|((_, name), d)| Switched { name: name.clone(), time: d.time }).collect(),
+            off_services: switches.iter().filter(|((k, _), d)| *k == m.device_of(&s.key) && !d.on).map(|((_, name), d)| Switched { name: name.clone(), time: d.time }).collect(),
             me: Some(s.key) == here.looking,
             now,
         });

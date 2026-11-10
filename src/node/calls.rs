@@ -569,7 +569,7 @@ impl Node {
             // A service with an endpoint of its own is where its device is.
             let mut at = BTreeMap::new();
             for k in &devices {
-                at.insert(*k, i.r.db().service(k)?.and_then(|s| s.device).unwrap_or(*k));
+                at.insert(*k, i.r.db().service(k)?.and_then(|s| s.device).unwrap_or_else(|| i.r.db().device_of(k)));
             }
             let mut ours_now = BTreeMap::new();
             for k in &devices {
