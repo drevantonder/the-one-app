@@ -108,15 +108,10 @@ pub fn traces(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
     let name = destination();
     let path = format!("/accounts/{}/workers/observability/destinations", cf.account);
     let there = cf.list(&path).context("reading Cloudflare's trace destinations, which needs an API token with Workers Observability Write")?;
-    let token = match &settings.otlp_token {
-        Some(token) => token.clone(),
-        None => {
-            let token = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
-            settings.set_secret("OTLP_TOKEN", &token)?;
-            settings.otlp_token = Some(token.clone());
-            token
-        }
-    };
+    // Cloudflare changes a destination's URL only along with new values for its headers.
+    let token = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
+    settings.set_secret("OTLP_TOKEN", &token)?;
+    settings.otlp_token = Some(token.clone());
     let configuration = json!({ "type": "logpush", "logpushDataset": "opentelemetry-traces", "url": url, "headers": { "authorization": format!("Bearer {token}") } });
     if there.iter().any(|d| d["name"] == name) {
         cf.patch(&format!("{path}/{name}"), json!({ "enabled": true, "skipPreflightCheck": true, "configuration": configuration })).context("pointing Cloudflare's trace destination at the telemetry Worker")?;
