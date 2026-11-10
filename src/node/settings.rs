@@ -63,9 +63,9 @@ impl Me for Node {
 
     async fn app_key(&self, scope: &Scope, app: &str, n: u32) -> Result<[u8; 32]> {
         let epochs = self.epoch_keys(scope, true).await?;
-        let newest = epochs.keys().next_back().copied().unwrap_or(0);
         let epoch = epochs.get(&n).with_context(|| format!("{} doesn't hold {scope}'s epoch {n}", self.device_name()))?;
-        crate::keys::app_key(&self.bucket()?, epoch, &scope.to_string(), app, n, n == newest).await?.with_context(|| format!("{app} has no key in {scope}'s epoch {n}"))
+        // An app added after an epoch ended has no key in it until this asks, as a browser's own keyring makes one.
+        crate::keys::app_key(&self.bucket()?, epoch, &scope.to_string(), app, n, true).await?.with_context(|| format!("{app} has no key in {scope}'s epoch {n}"))
     }
 
     fn made_epoch(&self, scope: &Scope, _: u32, _: [u8; 32]) {
