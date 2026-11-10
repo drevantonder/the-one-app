@@ -168,6 +168,51 @@ pub fn with_problem(rows: &Value, now: u64, text: String) -> String {
     format!("Telemetry is failing: {said} ({}).\n\n{text}", ago(now, rows["problem"]["since"].as_u64().unwrap_or(now)))
 }
 
+/// How little a build must have answered of a call before its P95 is worth comparing.
+const ENOUGH_REQUESTS: u64 = 20;
+
+/// What `build`, or the newest build it starts, changed against the one before it: what's newly failing and what's got
+/// slower. Saying so when there's nothing to say: it's read right after a ship, before anything has run on it.
+pub fn effect(rows: &Value, build: &str, now: u64, limit: usize) -> String {
+    let requests: Vec<&Value> = rows["builds"].as_array().into_iter().flatten().collect();
+    let Some(ran) = requests.iter().filter_map(|r| r["build"].as_str()).find(|b| b.starts_with(build)) else {
+        return format!("Nothing to compare yet: nothing has run on {build}.");
+    };
+    let first_seen = |of: &str| requests.iter().filter(|r| r["build"] == of).filter_map(|r| r["first_seen"].as_u64()).min();
+    let was = requests.iter().filter_map(|r| r["build"].as_str()).filter(|b| *b != ran && first_seen(b) < first_seen(ran)).max_by_key(|b| first_seen(b));
+    let of = |it: &str| requests.iter().copied().filter(|r| r["build"] == it).collect::<Vec<_>>();
+    let operation = |r: &Value| format!("{} {}", r["service"].as_str().unwrap_or(""), r["name"].as_str().unwrap_or(""));
+    let new = lines(of(ran), operation);
+    let total = new.iter().map(|l| l.requests).sum::<u64>();
+    let Some(was) = was else {
+        return format!("{ran}: {}. Nothing to compare yet: there's no earlier build in what's kept.", plural(total, "request"));
+    };
+    let old = lines(of(was), operation);
+    let failed: Vec<&Value> = rows["build_errors"].as_array().into_iter().flatten().collect();
+    let place = |frame: &str| frame.trim_end_matches(|c: char| c.is_ascii_digit() || c == ':').to_string();
+    let print = |r: &&Value| (operation(r), r["type"].as_str().unwrap_or("").to_string(), place(r["frame"].as_str().unwrap_or("")));
+    let before: std::collections::BTreeSet<_> = failed.iter().filter(|r| r["build"] == was).map(print).collect();
+    let mut errors: Vec<&Value> = failed.iter().copied().filter(|r| r["build"] == ran && !before.contains(&print(r))).collect();
+    errors.sort_by_key(|r| std::cmp::Reverse(r["count"].as_u64()));
+    let mut out = vec![format!("{ran} against {was}: {} since {}.", plural(total, "request"), ago(now, first_seen(ran).unwrap_or(now)))];
+    if !errors.is_empty() {
+        out.push(format!("New errors:\n{}", listed(&errors, limit, |r| format!("{}: {} at {}, {}", operation(r), r["type"].as_str().unwrap_or(""), r["frame"].as_str().unwrap_or(""), plural(r["count"].as_u64().unwrap_or(0), "time")))));
+    }
+    let worse: Vec<String> = new.iter().filter_map(|n| {
+        let o = old.iter().find(|o| o.name == n.name)?;
+        let enough = n.requests >= ENOUGH_REQUESTS && o.requests >= ENOUGH_REQUESTS;
+        let slower = n.p95? >= o.p95? * 2.0 && n.p95? >= o.p95? + 100.0;
+        (enough && slower).then(|| format!("{}: P95 {} from {}", n.name, took(n.p95), took(o.p95)))
+    }).collect();
+    if !worse.is_empty() {
+        out.push(format!("Slower:\n{}", listed(&worse, limit, |w| w.clone())));
+    }
+    if errors.is_empty() && worse.is_empty() {
+        out.push("No new errors, and nothing slower.".into());
+    }
+    out.join("\n")
+}
+
 /// One trace, each span under the one that made it.
 pub fn trace(rows: &Value, id: &str, limit: usize) -> String {
     let mut spans: Vec<&Value> = rows["spans"].as_array().into_iter().flatten().filter(|s| s["trace"] == id).collect();
@@ -203,5 +248,32 @@ fn add_span(span: &Value, spans: &[&Value], depth: usize, limit: usize, out: &mu
     let mine = span["span"].as_str();
     for child in spans.iter().filter(|s| s["parent"].as_str() == mine) {
         add_span(child, spans, depth + 1, limit, out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A build is judged only against the one before it, and a failure that only moved lines isn't new.
+    #[test]
+    fn a_build_is_compared_with_the_one_before_it() {
+        let row = |build: &str, name: &str, first: u64, count: u64, p95_bucket: usize| {
+            let mut buckets = vec![0_u64; BOUNDS.len()];
+            buckets[p95_bucket] = count;
+            json!({ "build": build, "service": "tally", "name": name, "first_seen": first, "count": count, "errors": 0, "sum": 0, "buckets": buckets })
+        };
+        let error = |build: &str, frame: &str| json!({ "build": build, "service": "tally", "name": "add", "type": "TypeError", "frame": frame, "count": 3 });
+        let rows = json!({
+            "builds": [row("new", "list", 300, 30, 9), row("new", "add", 300, 30, 1), row("old", "list", 200, 30, 3), row("old", "add", 200, 30, 1), row("older", "list", 100, 30, 9)],
+            "build_errors": [error("new", "lib/a.js:9:1"), error("new", "lib/b.js:2:1"), error("old", "lib/a.js:5:1")],
+        });
+        let said = effect(&rows, "new", 301, 20);
+        assert!(said.contains("new against old: 60 requests"), "{said}");
+        assert!(said.contains("lib/b.js:2:1, 3 times") && !said.contains("lib/a.js"), "lines moving aren't a new failure: {said}");
+        assert!(said.contains("Slower") && said.contains("tally list") && !said.contains("tally add: P95"), "{said}");
+        assert_eq!(effect(&rows, "missing", 301, 20), "Nothing to compare yet: nothing has run on missing.");
+        assert!(effect(&json!({ "builds": [row("only", "list", 10, 3, 1)] }), "only", 11, 20).contains("no earlier build"));
     }
 }

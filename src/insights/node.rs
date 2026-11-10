@@ -574,8 +574,10 @@ impl Node {
                 self.read_row(row);
             }
         }
-        for row in rows["errors"].as_array_mut().into_iter().flatten() {
-            read_error(row);
+        for table in ["errors", "build_errors"] {
+            for row in rows[table].as_array_mut().into_iter().flatten() {
+                read_error(row);
+            }
         }
         if let Some(problem) = self.telemetry_problem().filter(|_| admin) {
             rows["problem"] = problem;

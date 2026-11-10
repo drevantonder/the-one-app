@@ -148,6 +148,10 @@ const QUERIES = {
   metrics: { sql: (a) => `SELECT ${hour} AS hour, name, "type", unit, service, instance, attrs, SUM("count") AS "count", SUM("sum") AS "sum", ${summed()} FROM ${NAMESPACE}.metrics ${where(a)} GROUP BY ${hour}, name, "type", unit, service, instance, attrs ORDER BY hour DESC LIMIT ${a.limit}`, rows: asBuckets },
   // What broke, as often as it did: its type, the frame that threw it and the build it ran in, in that one attribute.
   errors: { sql: (a) => `SELECT service, name, status, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", MIN("time") AS first_seen, MAX("time") AS last_seen, MIN(message) AS message FROM ${NAMESPACE}.spans ${where(a, [`${attr("one.fingerprint")} IS NOT NULL`, ...(a.status === "error" || a.status === "unset" ? [`status = ${quoted(a.status)}`] : [])])} GROUP BY service, name, status, ${attr("one.fingerprint")} ORDER BY last_seen DESC LIMIT ${Math.min(a.limit, ERRORS_READ)}` },
+  // What a build did, per operation: rates and durations, each with the first time this build was seen.
+  builds: { sql: (a) => `SELECT ${attr("one.build")} AS build, service, name, MIN("time") AS first_seen, COUNT(*) AS "count", SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors, SUM("duration") AS "sum", ${buckets()} FROM ${NAMESPACE}.spans ${where(a, [`kind = 'server'`, `${attr("one.build")} IS NOT NULL`])} GROUP BY ${attr("one.build")}, service, name ORDER BY first_seen DESC LIMIT ${a.limit}`, rows: asBuckets },
+  // What broke in each build: the same fingerprints as `errors`, by the build that ran them.
+  build_errors: { sql: (a) => `SELECT ${attr("one.build")} AS build, service, name, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", MIN("time") AS first_seen, MAX("time") AS last_seen, MIN(message) AS message FROM ${NAMESPACE}.spans ${where(a, [`status = 'error'`, `${attr("one.fingerprint")} IS NOT NULL`])} GROUP BY ${attr("one.build")}, service, name, ${attr("one.fingerprint")} ORDER BY last_seen DESC LIMIT ${Math.min(a.limit, ERRORS_READ)}` },
 };
 
 // `requests` and `errors` read the same spans, so a view that shows both is one trip to Basin: each is split out here, its

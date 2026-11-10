@@ -18,6 +18,7 @@ pub fn feature() -> Feature {
                     "service": { "type": "string", "description": "only this service: an app's name, or the network's own program" },
                     "trace_id": { "type": "string", "description": "one trace by its id, as its spans: a failure says its trace-id" },
                     "raw": { "type": "boolean", "description": "the rows themselves, as JSON" },
+                    "effect_of": { "type": "string", "description": "what a build (its commit, or the start of it) changed against the build before it: newly failing and slower operations, or that there's nothing to compare yet" },
                     "parts": { "type": "array", "items": { "type": "string", "enum": ["requests", "spans", "logs", "metrics", "errors"] }, "description": "with raw, only these kinds of row (each costs a read of its own): every kind unless given" },
                     "check": { "type": "boolean", "description": "check telemetry's own path now, by sending a known signal and reading the last one back, before answering. It's checked every 15 minutes anyway" },
                     "name": { "type": "string", "description": "with raw, only spans of this name or logs of this body" },
@@ -46,11 +47,12 @@ mod serve {
     const ALL_PARTS: [&str; 5] = ["requests", "spans", "logs", "metrics", "errors"];
 
     /// Only what's read of it: each is a query of Basin's.
-    fn queries(raw: bool, parts: Option<&Vec<Value>>, trace: bool, service: bool) -> Vec<&'static str> {
-        match (raw, trace, service) {
-            (true, _, _) => parts.into_iter().flatten().filter_map(|p| ALL_PARTS.iter().copied().find(|q| p == q)).collect(),
-            (_, true, _) => vec!["spans"],
-            (_, _, true) => vec!["requests", "errors", "spans"],
+    fn queries(raw: bool, parts: Option<&Vec<Value>>, trace: bool, service: bool, effect: bool) -> Vec<&'static str> {
+        match (raw, trace, service, effect) {
+            (true, ..) => parts.into_iter().flatten().filter_map(|p| ALL_PARTS.iter().copied().find(|q| p == q)).collect(),
+            (_, _, _, true) => vec!["builds", "build_errors"],
+            (_, true, ..) => vec!["spans"],
+            (_, _, true, _) => vec!["requests", "errors", "spans"],
             _ => vec!["requests", "errors"],
         }
     }
@@ -59,10 +61,12 @@ mod serve {
         let text = |key: &str| input.get(key).and_then(Value::as_str).map(str::to_string);
         let raw = input.get("raw").and_then(Value::as_bool).unwrap_or(false);
         let trace = text("trace_id");
+        let effect = text("effect_of");
         let now = crate::node::now_ms();
         let since = match text("since").map(|s| crate::logs::since(&s)).transpose()? {
             Some(d) => Some(now.saturating_sub(d.as_millis() as u64)),
             None if raw || trace.is_some() => None,
+            None if effect.is_some() => Some(now.saturating_sub(7 * DAY)),
             None => Some(now.saturating_sub(DAY)),
         };
         let service = text("service");
@@ -70,7 +74,7 @@ mod serve {
         if input.get("check").and_then(Value::as_bool).unwrap_or(false) {
             node.check_telemetry().await;
         }
-        let ask = Ask { queries: queries(raw, input.get("parts").and_then(Value::as_array), trace.is_some(), service.is_some()), service, name: text("name"), trace: trace.clone(), since, status: text("status"), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
+        let ask = Ask { queries: queries(raw, input.get("parts").and_then(Value::as_array), trace.is_some(), service.is_some(), effect.is_some()), service, name: text("name"), trace: trace.clone(), since, status: text("status"), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
         let rows = node.insights(&me, &ask).await?;
         if raw {
             return Ok(rows);
@@ -78,6 +82,7 @@ mod serve {
         let limit = limit.unwrap_or(view::LISTED);
         let status = ask.status.as_deref().unwrap_or(view::ERROR);
         let text = match (&trace, &ask.service) {
+            _ if effect.is_some() => view::effect(&rows, effect.as_deref().unwrap_or(""), now, limit),
             (Some(id), _) => view::trace(&rows, id, limit),
             (None, Some(service)) => view::service(&rows, service, status, since.unwrap_or(0), now, limit),
             (None, None) => view::overview(&rows, status, since.unwrap_or(0), now, limit),

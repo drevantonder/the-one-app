@@ -155,8 +155,17 @@ pub(super) fn ship(commit: Option<&str>, limit: Duration) -> Result<()> {
     wait_until(&at.build_name(), &[], limit)?;
     keep(Stage::Running, &at.commit, "Every device online then took it");
     prune()?;
+    println!("{}", effect_of(&at.build_name()));
     println!("Running everywhere. Once you've seen it work: {CLI}-dev signoff seen {} --checked \"<what you checked>\"", short(&wanted));
     Ok(())
+}
+
+/// What a build changed against the one before it, as `insights` says it: how a ship reads it, and a sign-off's evidence.
+fn effect_of(build: &str) -> String {
+    match crate::node().post("/api/insights/insights", serde_json::json!({ "effect_of": build })) {
+        Ok(text) => text.as_str().unwrap_or("Couldn't read its effect from insights.").to_string(),
+        Err(err) => format!("Couldn't read its effect from insights: {err:#}"),
+    }
 }
 
 /// Signs off what a send did, which has already happened: a builder may read this repo without being able to push to it.
@@ -182,8 +191,9 @@ fn prune() -> Result<()> {
 pub(super) fn seen(commit: Option<&str>, checked: &str) -> Result<()> {
     keep_history()?;
     let commit = named_commit(commit)?;
-    record(Stage::Seen, &commit, &format!("Checked: {checked}"))?;
-    println!("{} is finished.", short(&commit));
+    let effect = effect_of(short(&commit));
+    record(Stage::Seen, &commit, &format!("Checked: {checked}\nEffect: {effect}"))?;
+    println!("{effect}\n{} is finished.", short(&commit));
     Ok(())
 }
 
