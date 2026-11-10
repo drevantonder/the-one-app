@@ -130,14 +130,14 @@ fn numbers(text: &str) -> String {
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
-        let word = &chars[i..i + chars[i..].iter().take_while(|c| c.is_ascii_alphanumeric()).count()];
-        let hex = word.len() >= 8 && word.iter().all(char::is_ascii_hexdigit) && word.iter().any(char::is_ascii_digit) && word.iter().any(char::is_ascii_alphabetic);
-        if hex && (i == 0 || !chars[i - 1].is_ascii_alphanumeric()) {
+        if (i == 0 || !chars[i - 1].is_ascii_alphanumeric())
+            && let Some(long) = hex_id(&chars[i..])
+        {
             out.push_str(ID);
-            i += word.len();
+            i += long;
             continue;
         }
-        let starts = c.is_ascii_digit() || ((c == '+' || c == '(') && chars.get(i + 1).is_some_and(char::is_ascii_digit));
+        let starts = c.is_ascii_digit() || ((c == '+' || c == '(') && chars.get(i + 1).is_some_and(char::is_ascii_digit) && hex_id(&chars[i + 1..]).is_none());
         // A digit inside a word (`abc123`, `v2`) is part of it.
         if !starts || (i > 0 && chars[i - 1].is_ascii_alphanumeric()) {
             out.push(c);
@@ -160,6 +160,12 @@ fn numbers(text: &str) -> String {
         i = end;
     }
     out
+}
+
+/// How long the id `chars` starts with is, if it does: a word of 8 or more hex digits, some of them letters.
+fn hex_id(chars: &[char]) -> Option<usize> {
+    let word = &chars[..chars.iter().take_while(|c| c.is_ascii_alphanumeric()).count()];
+    (word.len() >= 8 && word.iter().all(char::is_ascii_hexdigit) && word.iter().any(char::is_ascii_digit) && word.iter().any(char::is_ascii_alphabetic)).then_some(word.len())
 }
 
 /// Whether a phone number's marks, at most two together as in `) `, go on to another of its digits.
@@ -191,6 +197,7 @@ mod tests {
             ("bad key ab12cd34ef56ab12cd34ef56ab12", "bad key <key>"),
             ("(mac: 1fcdd729 isn't connected; ptc: 4821d16a isn't connected)", "(mac: <id> isn't connected; ptc: <id> isn't connected)"),
             ("user:48213355fe8c23's keys in epoch 16", "user:<id>'s keys in epoch 16"),
+            ("couldn't be reached (8f668fcfb3d64d8bbef3c8895af0f67c.r2.cloudflarestorage.com: io: reset)", "couldn't be reached (<id>.r2.cloudflarestorage.com: io: reset)"),
             ("token=hunter2 was refused", "token=<key> was refused"),
             ("password: hunter2 was refused", "password: <key> was refused"),
             ("eyJhbGci.eyJzdWIi.c2lnbmF0dXJl expired", "<key> expired"),
