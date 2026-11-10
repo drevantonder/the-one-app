@@ -81,10 +81,14 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settin
         Some(device) => device,
         None => {
             eprintln!("Borrowing a copy of your {kind} device…");
-            let got = match agent_devices("borrow", json!({ "kind": kind, "copy": true, "for": what })) {
+            let borrow = || agent_devices("borrow", json!({ "kind": kind, "copy": true, "for": what }));
+            let got = match borrow() {
                 Ok(got) => got,
+                // Listing waits for the service to come back, and it gives back the copy it was preparing as it starts: so
+                // what's listed is a copy that was lent before it stopped, or none, and then it's borrowed again.
                 Err(err) => match ours(&listed()) {
                     Some(device) => json!({ "device": device }),
+                    None if one::protocol::Coded::is(&err, one::protocol::code::STOPPED) => borrow()?,
                     None => return Err(err),
                 },
             };

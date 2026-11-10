@@ -155,6 +155,9 @@ pub mod code {
         NOT_SIGNED_IN = "not_signed_in",
         /// No device runs what was asked now: its node or service is starting, asking again in a moment answers.
         RESTARTING = "restarting",
+        /// A service's program stopped while it ran the call, which may have done some of it: look at what it did before
+        /// asking again.
+        STOPPED = "stopped",
         /// An app that isn't added, or isn't on the user's pages.
         NOT_ADDED = "not_added",
         /// An app in Recently Deleted: a client says so where its screen would be, and offers Restore.

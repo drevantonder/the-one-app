@@ -80,7 +80,6 @@ pub struct Devices {
     /// One borrow, or spare made, at a time.
     take: Mutex<()>,
     kick: (Mutex<bool>, std::sync::Condvar),
-    started: jiff::Timestamp,
     /// Two devices being made at once mustn't take the same port.
     creating: Mutex<()>,
     vm_files: Mutex<()>,
@@ -119,7 +118,6 @@ impl Devices {
             pool: Mutex::new(pool::Pool::default()),
             take: Mutex::new(()),
             kick: (Mutex::new(false), std::sync::Condvar::new()),
-            started: jiff::Timestamp::now(),
             creating: Mutex::new(()),
             vm_files: Mutex::new(()),
             life: Mutex::new(()),
@@ -156,6 +154,7 @@ fn main() -> Result<()> {
 
 fn start(host: &Host) {
     let ds = devices(host);
+    ds.give_back_unfinished();
     let d = ds.clone();
     std::thread::spawn(move || {
         let _ = d.refresh();

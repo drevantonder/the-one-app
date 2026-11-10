@@ -180,7 +180,7 @@ impl Services {
             Err(_) if p.take_back(id) => return Err(not_running(app)),
             Err(_) => tokio::time::timeout_at(answers_by, rx).await.map_err(|_| anyhow!("{app} didn't answer"))?,
         };
-        let reply = answer.map_err(|_| anyhow!("{app} stopped before it answered"))?;
+        let reply = answer.map_err(|_| crate::protocol::Coded::error(crate::protocol::code::STOPPED, format!("{app} stopped before it answered, and may have done some of it: look at what it did before asking again")))?;
         if let Some(why) = reply.get("elsewhere") {
             return Err(Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());
         }
@@ -363,7 +363,7 @@ mod tests {
         services.program_stopped("s");
         services.register("s", json!({}));
         let err = failing.await.unwrap().err().expect("it stopped before answering");
-        assert_eq!(Coded::of(&err), None, "asking again could run it twice: {err:#}");
+        assert_eq!(Coded::of(&err).as_deref(), Some(code::STOPPED), "asking again could run it twice: {err:#}");
         assert!(services.next("s").await.unwrap().is_none(), "it's never offered again");
 
         // Never taken, within the wait: it fails, and a program that comes late doesn't run it.

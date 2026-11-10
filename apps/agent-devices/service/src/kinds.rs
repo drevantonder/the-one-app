@@ -662,7 +662,7 @@ impl Devices {
         self.chrome_off("Chrome isn't allowed here now");
         for (name, l) in self.loans() {
             let Some(v) = self.vm_named(&name) else { continue };
-            if l.state == LoanState::Returning || l.state == LoanState::Preparing && l.since > self.started {
+            if l.state == LoanState::Returning || l.state == LoanState::Preparing {
                 continue;
             }
             let limit = if !v.throwaway() {

@@ -446,6 +446,24 @@ impl Devices {
         self.loans().values().any(|l| l.signing_in && l.item == item)
     }
 
+    /// Gives back each loan that was still being prepared when the last run of this program stopped, which no one is
+    /// finishing, before this one takes a call: a borrow that comes after can't find one half-ready.
+    pub(super) fn give_back_unfinished(&self) {
+        for (name, l) in self.loans() {
+            if l.state != LoanState::Preparing {
+                continue;
+            }
+            let why = "never got ready before this program restarted";
+            let given = match self.vm_named(&name) {
+                Some(v) => self.give_back_vm(&v, why),
+                None => self.give_back(&name, why),
+            };
+            if let Err(err) = given {
+                tracing::warn!("giving back {name}: {err:#}");
+            }
+        }
+    }
+
     pub(super) fn tend(&self) {
         let all = match self.list() {
             Ok(all) => all,
@@ -460,12 +478,10 @@ impl Devices {
         let vms: std::collections::HashSet<String> = self.vms().into_iter().map(|v| v.name).collect();
         self.save_used(|name| here.contains(name) || vms.contains(name));
         for (name, l) in self.loans() {
-            if vms.contains(&name) || l.state == LoanState::Returning || l.state == LoanState::Preparing && l.since > self.started {
+            if vms.contains(&name) || l.state == LoanState::Returning || l.state == LoanState::Preparing {
                 continue;
             }
-            let why = if l.state == LoanState::Preparing {
-                "never got ready before this program restarted"
-            } else if !here.contains(&name) {
+            let why = if !here.contains(&name) {
                 "gone"
             } else if l.signing_in && l.until.is_none_or(|u| super::now() > u) {
                 "sign-in time up"
