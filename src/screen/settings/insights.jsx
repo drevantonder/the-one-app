@@ -15,6 +15,8 @@ const RANGES = [["1h", "1 Hour", HOUR], ["6h", "6 Hours", 6 * HOUR], ["1d", "24 
 const STATS = { sum: "Sum", count: "Count", avg: "Average", p95: "P95" }
 // As much as the store gives of each table at once.
 const MOST_ROWS = 10000
+// The most traces a list finds at once.
+const MOST_TRACES = 200
 const MOST_SERIES = 8
 // The most things Insights opens by saying are failing.
 const MOST_FAILING = 3
@@ -81,6 +83,29 @@ function tracesOf(rows) {
 }
 
 const colours = (services) => Object.fromEntries(sorted(services).map((s, i) => [s, hue(i)]))
+
+const asked = (body) => one.api("POST", "/api/insights/insights", { raw: true, ...body })
+
+// The newest traces with a span of what's asked, over the whole range, each whole. The store finds them, so what's most
+// common never crowds out what's looked for: → null while they're read, then `{ traces }` or `{ problem }`.
+function useTraces(range, { service, operation, least }, at) {
+  const [got, setGot] = useState(null)
+  useEffect(() => {
+    let live = true
+    setGot(null)
+    const only = { ...(service && service !== ALL && { service }), ...(operation && operation !== ALL && { name: operation }), ...(least > 0 && { min_ms: Math.round(least) }) }
+    asked({ since: range, limit: MOST_TRACES, parts: ["traces"], ...only }).then((r) => live && setGot({ traces: tracesOf(r.traces || []) }), (e) => live && setGot({ problem: one.plain(e) }))
+    return () => { live = false }
+  }, [range, service, operation, least, at])
+  return got
+}
+
+// A trace's list as it's read: its traces, or that they're being read, or why they couldn't be.
+function Found({ got, children }) {
+  if (!got) return <ListSkeleton rows={3} />
+  if (got.problem) return <LoadFailure problem={got.problem} />
+  return children(got.traces)
+}
 
 function red(rows) {
   const count = rows.reduce((n, r) => n + r.count, 0), errors = rows.reduce((n, r) => n + (r.errors || 0), 0), sum = rows.reduce((n, r) => n + r.sum, 0)
@@ -310,34 +335,38 @@ function Failing({ rows, to, service, open }) {
   return <Table label="Failing now" columns={failureColumns} rows={now} start={{ key: "count", down: true }} open={open} />
 }
 
-function Services({ rows, errors, traces, from, to, open: [service, setService], colour, showTrace, showTraces, showFailure }) {
+function Services({ rows, errors, range, at, from, to, open: [service, setService], colour, showTrace, showTraces, showFailure }) {
   const hours = hoursOf(rows, from, to)
-  if (service) {
-    const mine = rows.filter((r) => r.service === service)
-    const recent = traces.filter((t) => t.services.includes(service)).slice(0, 12)
-    return (
-      <div className="flex flex-col gap-6">
-        <div><Button variant="ghost" onClick={() => setService(null)}><Icon name="caret-left" />Services</Button></div>
-        <h2 className="m-0 break-all text-xl font-semibold">{service}</h2>
-        <Failing rows={errors} to={to} service={service} open={showFailure} />
-        <Health rows={mine} from={from} to={to} />
-        <Section title="Operations">
-          <Table label="Operations" columns={redColumns("Operation", true)} rows={grouped(mine, (r) => r.name, hours)} start={{ key: "errors", down: true }} open={(r) => showTraces({ service, operation: r.name })} />
-        </Section>
-        {recent.length > 0 && (
-          <Section title="Recent Traces" action={<Button variant="ghost" onClick={() => showTraces({ service, operation: ALL })}>All Traces</Button>}>
-            <TraceTable traces={recent} open={showTrace} colour={colour} />
-          </Section>
-        )}
-      </div>
-    )
-  }
+  if (service) return <Service rows={rows} errors={errors} range={range} at={at} from={from} to={to} service={service} close={() => setService(null)} colour={colour} showTrace={showTrace} showTraces={showTraces} showFailure={showFailure} />
   if (!rows.length) return <Empty>Nothing recorded in this range.</Empty>
   // Each service on its own, never a total: one request is a server span in each service it goes through.
   return (
     <div className="flex flex-col gap-6">
       <Failing rows={errors} to={to} open={showFailure} />
       <Table label="Services" columns={redColumns("Service", true)} rows={grouped(rows, (r) => r.service, hours)} start={{ key: "errors", down: true }} open={(r) => setService(r.name)} />
+    </div>
+  )
+}
+
+function Service({ rows, errors, range, at, from, to, service, close, colour, showTrace, showTraces, showFailure }) {
+  const hours = hoursOf(rows, from, to)
+  const mine = rows.filter((r) => r.service === service)
+  const got = useTraces(range, { service }, at)
+  const recent = got?.traces?.slice(0, 12) || []
+  return (
+    <div className="flex flex-col gap-6">
+      <div><Button variant="ghost" onClick={close}><Icon name="caret-left" />Services</Button></div>
+      <h2 className="m-0 break-all text-xl font-semibold">{service}</h2>
+      <Failing rows={errors} to={to} service={service} open={showFailure} />
+      <Health rows={mine} from={from} to={to} />
+      <Section title="Operations">
+        <Table label="Operations" columns={redColumns("Operation", true)} rows={grouped(mine, (r) => r.name, hours)} start={{ key: "errors", down: true }} open={(r) => showTraces({ service, operation: r.name })} />
+      </Section>
+      {recent.length > 0 && (
+        <Section title="Recent Traces" action={<Button variant="ghost" onClick={() => showTraces({ service, operation: ALL })}>All Traces</Button>}>
+          <TraceTable traces={recent} open={showTrace} colour={colour} />
+        </Section>
+      )}
     </div>
   )
 }
@@ -350,7 +379,7 @@ function TraceTable({ traces, open, colour }) {
     { key: "ms", label: "Duration", right: true, value: (t) => t.ms, cell: (t) => <span className="inline-flex items-center justify-end gap-2"><span className="hidden h-1 w-20 overflow-hidden rounded-sm bg-muted @2xl:block"><span className="block h-1 rounded-sm" style={{ width: `${Math.max(2, (t.ms / longest) * 100)}%`, background: t.errors ? ERROR : MUTED }} /></span><span className={t.errors ? "text-destructive" : ""}>{took(t.ms)}</span></span> },
     { key: "start", label: "Started", right: true, value: (t) => t.start, cell: (t) => <span className="text-muted-foreground" title={when(t.start)}>{ago(t.start)}</span> },
   ]
-  return <Table label="Traces" columns={columns} rows={traces.map((t) => ({ ...t, name: `${t.root.service} ${t.root.name}` }))} start={{ key: "start", down: true }} open={(t) => open(t.id)} />
+  return <Table label="Traces" columns={columns} rows={traces.map((t) => ({ ...t, name: `${t.root.service} ${t.root.name}` }))} start={{ key: "start", down: true }} open={(t) => open(t.id, t)} />
 }
 
 // Duration against time on a log scale, as durations differ by orders of magnitude: one dot a trace.
@@ -371,7 +400,7 @@ function Scatter({ traces, open, colour }) {
         <Axis width={width} left={LEFT} top={TOP} height={plot} ticks={ticks} />
         <TimeLabels first={when(first)} last={when(last)} width={width} height={height} />
         {traces.map((t) => (
-          <g key={t.id} className="cursor-pointer" onClick={() => open(t.id)} onMouseEnter={() => setTip({ x: x(t.start), y: y(t.ms) - 8, flip: x(t.start) > width / 2, lines: [`${t.root.service} ${t.root.name}`, took(t.ms), when(t.start)] })} onMouseLeave={() => setTip(null)}>
+          <g key={t.id} className="cursor-pointer" onClick={() => open(t.id, t)} onMouseEnter={() => setTip({ x: x(t.start), y: y(t.ms) - 8, flip: x(t.start) > width / 2, lines: [`${t.root.service} ${t.root.name}`, took(t.ms), when(t.start)] })} onMouseLeave={() => setTip(null)}>
             <circle cx={x(t.start)} cy={y(t.ms)} r="10" fill="transparent" />
             <circle cx={x(t.start)} cy={y(t.ms)} r="4" fill={t.errors ? ERROR : colour[t.root.service]} stroke="var(--background)" strokeWidth="1.5" />
           </g>
@@ -394,29 +423,55 @@ function Pick({ label, value, set, all, options }) {
   )
 }
 
-function Traces({ traces, filters: [filters, setFilters], query: [query, setQuery], open, colour, more }) {
+function Traces({ rows, range, at, filters: [filters, setFilters], query: [query, setQuery], open, colour }) {
   const [least, setLeast] = useState("")
-  const spans = traces.flatMap((t) => t.spans)
+  const [floor, setFloor] = useState(0)
+  // What's typed is asked for once it's stopped changing.
+  useEffect(() => {
+    const later = setTimeout(() => setFloor(duration(least)), 500)
+    return () => clearTimeout(later)
+  }, [least])
   const { service, operation } = filters
+  const got = useTraces(range, { service, operation, least: floor }, at)
   const found = useMemo(() => {
-    const matches = matcher(query), floor = duration(least)
-    return traces.filter((t) => t.ms >= floor && t.spans.some((s) => (service === ALL || s.service === service) && (operation === ALL || s.name === operation) && matches(s)))
-  }, [traces, service, operation, query, least])
+    const matches = matcher(query)
+    return (got?.traces || []).filter((t) => t.spans.some(matches))
+  }, [got, query])
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Pick label="Service" value={service} set={(v) => setFilters({ service: v, operation: ALL })} all="All Services" options={sorted(spans.map((s) => s.service))} />
-        <Pick label="Operation" value={operation} set={(v) => setFilters({ service, operation: v })} all="All Operations" options={sorted(spans.filter((s) => service === ALL || s.service === service).map((s) => s.name))} />
+        <Pick label="Service" value={service} set={(v) => setFilters({ service: v, operation: ALL })} all="All Services" options={sorted(rows.map((r) => r.service))} />
+        <Pick label="Operation" value={operation} set={(v) => setFilters({ service, operation: v })} all="All Operations" options={sorted(rows.filter((r) => service === ALL || r.service === service).map((r) => r.name))} />
         <Input className="w-28" aria-label="Minimum duration" placeholder="Min 1.2s" value={least} onChange={(e) => setLeast(e.target.value)} />
         <Input className="min-w-52 flex-1" aria-label="Tags" placeholder="Tags, like error.type=timeout" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
-      {found.length ? (
-        <>
-          <Scatter traces={found} open={open} colour={colour} />
-          {more && <p className="m-0 text-sm text-muted-foreground">The newest only.</p>}
-          <TraceTable traces={found} open={open} colour={colour} />
-        </>
-      ) : <Empty>No traces match.</Empty>}
+      <Found got={got}>
+        {(traces) => found.length ? (
+          <>
+            <Scatter traces={found} open={open} colour={colour} />
+            {traces.length >= MOST_TRACES && <p className="m-0 text-sm text-muted-foreground">The newest {MOST_TRACES} only.</p>}
+            <TraceTable traces={found} open={open} colour={colour} />
+          </>
+        ) : <Empty>No traces match.</Empty>}
+      </Found>
+    </div>
+  )
+}
+
+// One trace by its id, read whole: the one a list showed, or else read by its id.
+function OpenTrace({ id, trace, back, colour }) {
+  const [got, setGot] = useState(trace ? { trace } : null)
+  useEffect(() => {
+    if (trace) return
+    let live = true
+    asked({ trace_id: id, parts: ["spans"] }).then((r) => live && setGot({ trace: tracesOf(r.spans || [])[0] }), (e) => live && setGot({ problem: one.plain(e) }))
+    return () => { live = false }
+  }, [id])
+  if (got?.trace) return <Trace trace={got.trace} back={back} colour={colour} />
+  return (
+    <div className="flex flex-col gap-6">
+      <LargeTitle action={<Button variant="ghost" onClick={back}><Icon name="caret-left" />Back</Button>}>Trace</LargeTitle>
+      {!got ? <ListSkeleton rows={3} /> : got.problem ? <LoadFailure problem={got.problem} /> : <Empty>Nothing of this trace has arrived yet: a span takes a minute or two.</Empty>}
     </div>
   )
 }
@@ -684,7 +739,7 @@ function Errors({ rows, showTraces, showTrace, open: [open, setOpen], query: [qu
       detail={chosen && (
         <div className="flex flex-col items-start gap-3">
           <Fields row={chosen} skip={["id"]} />
-          {chosen.trace && showTrace.known(chosen.trace) ? <Button variant="secondary" onClick={() => showTrace.open(chosen.trace)}>Open Latest Trace</Button> : <Button variant="secondary" onClick={() => showTraces(chosen)}>Show Traces</Button>}
+          {chosen.trace ? <Button variant="secondary" onClick={() => showTrace(chosen.trace)}>Open Latest Trace</Button> : <Button variant="secondary" onClick={() => showTraces(chosen)}>Show Traces</Button>}
         </div>
       )}
     />
@@ -700,33 +755,33 @@ function Insights() {
   const [tab, setTab] = useState("Services")
   const [range, setRange] = useState("1d")
   const [loading, setLoading] = useState(false)
-  const [traceId, setTraceId] = useState(null)
+  // The trace open: its id, and the trace itself if a list showed it.
+  const [opened, setOpened] = useState(null)
+  const showTrace = (id, trace) => setOpened({ id, trace })
   const service = useState(null)
   const filters = useState({ service: ALL, operation: ALL })
   const failure = useState(null)
   const queries = { Traces: useState(""), Logs: useState(""), Metrics: useState(""), Errors: useState("") }
-  const asked = useRef(0)
+  const loads = useRef(0)
 
   async function load({ check } = {}) {
-    const mine = ++asked.current
+    const mine = ++loads.current
     setLoading(true)
     try {
       // What's summed first, as it's what the first tab shows; the rows afterwards, which are many and most of the wait.
-      const got = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: MOST_ROWS, check: !!check, parts: ["requests", "errors"] })
-      if (mine !== asked.current) return
+      const got = await asked({ since: range, limit: MOST_ROWS, check: !!check, parts: ["requests", "errors"] })
+      if (mine !== loads.current) return
       setData({ ...got, at: Date.now() })
       setProblem(null)
-      const rows = await one.api("POST", "/api/insights/insights", { raw: true, since: range, limit: MOST_ROWS, parts: ["spans", "logs", "metrics"] })
-      if (mine === asked.current) setData((had) => ({ ...had, ...rows }))
+      const rows = await asked({ since: range, limit: MOST_ROWS, parts: ["logs", "metrics"] })
+      if (mine === loads.current) setData((had) => ({ ...had, ...rows }))
     } catch (e) {
-      if (mine === asked.current) setProblem(one.plain(e))
+      if (mine === loads.current) setProblem(one.plain(e))
     } finally {
-      if (mine === asked.current) setLoading(false)
+      if (mine === loads.current) setLoading(false)
     }
   }
   useEffect(() => void load(), [range])
-
-  const traces = useMemo(() => (data?.spans ? tracesOf(data.spans) : []), [data])
 
   if (!data) {
     return (
@@ -738,9 +793,8 @@ function Insights() {
   }
 
   const to = data.at, from = to - RANGES.find(([v]) => v === range)[2]
-  const colour = colours((data.spans || []).map((s) => s.service))
-  const opened = traceId && traces.find((t) => t.id === traceId)
-  if (opened) return <Trace trace={opened} back={() => setTraceId(null)} colour={colour} />
+  const colour = colours(data.requests.map((r) => r.service))
+  if (opened) return <OpenTrace key={opened.id} id={opened.id} trace={opened.trace} back={() => setOpened(null)} colour={colour} />
   const toTraces = (next) => (filters[1](next), setTab("Traces"))
   const more = (rows) => rows.length >= MOST_ROWS
 
@@ -764,12 +818,12 @@ function Insights() {
           <TabsList><TabsTrigger value="Services">Services</TabsTrigger>{Object.keys(queries).map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>
         </Tabs>
       </div>
-      {tab === "Services" && <Services rows={data.requests} errors={data.errors} showFailure={(p) => (failure[1](p.id), setTab("Errors"))} traces={traces} from={from} to={to} open={service} colour={colour} showTrace={setTraceId} showTraces={toTraces} />}
-      {tab !== "Services" && tab !== "Errors" && !data.spans && <ListSkeleton rows={3} />}
-      {tab === "Traces" && data.spans && <Traces traces={traces} filters={filters} query={queries.Traces} open={setTraceId} colour={colour} more={more(data.spans)} />}
+      {tab === "Services" && <Services rows={data.requests} errors={data.errors} showFailure={(p) => (failure[1](p.id), setTab("Errors"))} range={range} at={data.at} from={from} to={to} open={service} colour={colour} showTrace={showTrace} showTraces={toTraces} />}
+      {(tab === "Logs" || tab === "Metrics") && !data.logs && <ListSkeleton rows={3} />}
+      {tab === "Traces" && <Traces rows={data.requests} range={range} at={data.at} filters={filters} query={queries.Traces} open={showTrace} colour={colour} />}
       {tab === "Logs" && data.logs && <Logs rows={data.logs} more={more(data.logs)} query={queries.Logs} />}
       {tab === "Metrics" && data.metrics && <Metrics rows={data.metrics} from={from} to={to} more={more(data.metrics)} query={queries.Metrics} />}
-      {tab === "Errors" && <Errors rows={data.errors} open={failure} query={queries.Errors} showTrace={{ known: (id) => traces.some((t) => t.id === id), open: setTraceId }} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
+      {tab === "Errors" && <Errors rows={data.errors} open={failure} query={queries.Errors} showTrace={showTrace} showTraces={(p) => (queries.Traces[1](`error.type=${p.type}`), toTraces({ service: p.service, operation: ALL }))} />}
     </div>
   )
 }

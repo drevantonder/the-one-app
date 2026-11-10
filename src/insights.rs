@@ -710,6 +710,8 @@ pub struct Ask {
     pub since: Option<u64>,
     /// `unset` or `error`.
     pub status: Option<String>,
+    /// Only traces with a span that took at least this long, in ms.
+    pub least: Option<u64>,
     pub limit: usize,
 }
 

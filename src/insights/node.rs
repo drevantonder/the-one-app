@@ -607,7 +607,7 @@ impl Node {
         if let (Some(trace), Some(read)) = (&ask.trace, rows.get_mut("spans").and_then(Value::as_array_mut)) {
             self.add_arriving(read, trace, &services);
         }
-        for table in ["spans", "logs", "metrics"] {
+        for table in ["spans", "logs", "metrics", "traces"] {
             for row in rows.get_mut(table).and_then(Value::as_array_mut).into_iter().flatten() {
                 self.read_row(row);
             }

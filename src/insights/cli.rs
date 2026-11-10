@@ -6,11 +6,11 @@ use crate::cli::Command;
 
 pub fn commands() -> Command {
     Command {
-        help: vec![("insights [--service <name>] [--trace-id <id>] [--since <1h>] [--limit <n>] [--status error|unset] [--effect-of <build>] [--raw [--name <name>] [--parts requests|spans|logs|metrics|errors]...] [--check]".into(), "how things are going, as lines to read: each service's requests, errors and P95 and what broke most, a service's operations and failing or slow traces (--service), a trace's spans (--trace-id), what a build changed against the one before it (--effect-of), or the rows as JSON (--raw). --status unset lists what didn't break, as what a caller had refused. --parts takes one kind of row, given again for each. --check checks telemetry's own path first, as it's checked every 15 minutes. --since takes s, m, h or d".into())],
+        help: vec![("insights [--service <name>] [--trace-id <id>] [--since <1h>] [--limit <n>] [--status error|unset] [--effect-of <build>] [--raw [--name <name>] [--min-ms <n>] [--parts requests|spans|logs|metrics|errors|traces]...] [--check]".into(), "how things are going, as lines to read: each service's requests, errors and P95 and what broke most, a service's operations and failing or slow traces (--service), a trace's spans (--trace-id), what a build changed against the one before it (--effect-of), or the rows as JSON (--raw): traces are the newest with a span of --service, --name, --status and --min-ms, whole. --status unset lists what didn't break, as what a caller had refused. --parts takes one kind of row, given again for each. --check checks telemetry's own path first, as it's checked every 15 minutes. --since takes s, m, h or d".into())],
         run: |g| {
             let words = g.words();
             let ["insights"] = words.as_slice() else { return Ok(false) };
-            g.takes_only(&["service", "trace-id", "effect-of", "parts", "raw", "name", "since", "status", "limit", "check"])?;
+            g.takes_only(&["service", "trace-id", "effect-of", "parts", "raw", "name", "min-ms", "since", "status", "limit", "check"])?;
             let schema = super::tools::feature().tools.remove(0).spec["input"].clone();
             let input = crate::tools::input(&schema, &[], vec![], g.flags.clone(), &[]).map_err(|e| crate::cli::Failed::Typed(format!("{e:#}")))?;
             let ran = g.node.route(g.agent, "/api/insights/insights", &Value::Object(input), g.trace);

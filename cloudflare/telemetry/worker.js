@@ -8,7 +8,7 @@
 //
 //   POST /telemetry/write { spans, logs, metrics, at, by, sig } → 204
 //   POST /telemetry/otlp  Cloudflare's export of the Workers' own traces (`otlp`), gzipped or not → 204
-//   POST /telemetry/read  { queries: [name], since, services, service?, name?, status?, trace?, limit?, at, by, sig }
+//   POST /telemetry/read  { queries: [name], since, services, service?, name?, status?, trace?, least?, limit?, at, by, sig }
 //                         → { <name>: [row] }
 //
 // Each is a request signed by a key on the relay's list (`one/telemetry`). A row that isn't what its table holds is left
@@ -284,6 +284,8 @@ const errorOnly = (a, key) => (a.status === "error" ? [key] : a.status === "unse
 
 /// The reads there are, each the table it reads, from what's asked to its SQL, and what it gives.
 const QUERIES = {
+  // The newest traces a reader filters for, whole (`traces`).
+  traces: { table: "spans", run: traces },
   // Every request, an hour at a time: what rates and durations add up from.
   requests: { table: "spans", sql: (a) => `SELECT ${hour} AS hour, service, name, COUNT(*) AS "count", SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors, SUM("duration") AS "sum", ${buckets()} FROM ${NAMESPACE}.spans ${where(a, [`kind = 'server'`, UNSAMPLED])} GROUP BY ${hour}, service, name ORDER BY hour DESC LIMIT ${a.limit}`, rows: asBuckets, counted: true },
   spans: { table: "spans", sql: (a) => newest("spans", SPAN, where(a, errorOnly(a, `status = 'error'`)), a.limit) },
@@ -296,6 +298,18 @@ const QUERIES = {
   // What broke in each build: the same fingerprints as `errors`, by the build that ran them.
   build_errors: { table: "spans", sql: (a) => `SELECT ${attr("one.build")} AS build, service, name, ${attr("one.fingerprint")} AS fingerprint, COUNT(*) AS "count", MIN("time") AS first_seen, MAX("time") AS last_seen, ${NEWEST} FROM ${NAMESPACE}.spans ${where(a, [`status = 'error'`, `${attr("one.fingerprint")} IS NOT NULL`])} GROUP BY ${attr("one.build")}, service, name, ${attr("one.fingerprint")} ORDER BY last_seen DESC LIMIT ${Math.min(a.limit, ERRORS_READ)}`, rows: (r) => r.map(newestOf) },
 };
+
+/// The most traces a list finds at once.
+const MOST_TRACES = 500;
+
+// The newest traces with a span that's what a reader filters for (service, name, status, at least `least` ms), found over
+// the whole range and each read whole: a list that's never crowded out by whatever's most common.
+async function traces(env, a) {
+  const found = await query(env, `SELECT trace, MAX("time") AS at FROM ${NAMESPACE}.spans ${where(a, [...errorOnly(a, `status = 'error'`), ...(a.least ? [`"duration" >= ${a.least}`] : [])])} GROUP BY trace ORDER BY at DESC LIMIT ${Math.min(a.limit, MOST_TRACES)}`);
+  const ids = found.map((r) => r.trace).filter((t) => hex(t, 32));
+  if (!ids.length) return [];
+  return query(env, newest("spans", SPAN, where({ since: a.since, services: a.services }, [`trace IN (${ids.map(quoted).join(", ")})`]), MOST_READ));
+}
 
 // `requests` and `errors` read the same spans, so a view that shows both is one trip to Basin: each is split out here, its
 // `status` applied only to `errors`, as it is when they're separate. Each kept row is a kind of span at a status in an hour.
@@ -360,6 +374,10 @@ function asked(fields) {
   if (!count(a.since) || !count(a.limit) || !a.limit) refuse(400, "since and limit are numbers");
   a.since -= a.since % 60_000;
   if (!Array.isArray(a.services) || a.services.length > MOST_SERVICES || !a.services.every(word)) refuse(400, "services are names");
+  if (fields.least !== undefined && fields.least !== null) {
+    if (!count(fields.least)) refuse(400, "least is a number");
+    a.least = fields.least;
+  }
   for (const key of ["service", "name", "status", "trace"]) {
     const given = fields[key];
     if (given !== undefined && given !== null && !word(given)) refuse(400, `${key} is a name`);
@@ -383,9 +401,10 @@ async function read(request, env) {
   if (!a.services.length) return Response.json(Object.fromEntries(names.map((n) => [n, []])));
   const together = names.includes("requests") && names.includes("errors") && !a.trace;
   const results = await Promise.all(names.filter((n) => !together || (n !== "requests" && n !== "errors")).map(async (name) => {
-    const { table, sql, rows = (r) => r, counted } = QUERIES[name];
+    const { table, sql, rows = (r) => r, counted, run } = QUERIES[name];
     // A metric belongs to no trace: asked for one, a table without the column has none of it.
     if (a.trace && !TABLES[table].trace) return [name, []];
+    if (run) return [name, await run(env, a)];
     if (!counted || a.trace) return [name, rows(await query(env, sql(a)))];
     const [own, more] = await Promise.all([query(env, sql(a)), query(env, COUNTED(a))]);
     const all = new Map();

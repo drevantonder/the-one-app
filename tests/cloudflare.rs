@@ -383,6 +383,8 @@ fn telemetry_takes_the_networks_devices_and_only_what_its_tables_hold() {
     let (status, said) = read(json!({ "queries": ["requests", "spans", "logs", "metrics", "errors", "builds", "build_errors"], "services": ["notes"], "service": "notes", "name": "get", "status": "error", "trace": "a".repeat(32), "since": 0, "limit": 100 }));
     assert_eq!(status, 200, "every read runs with every filter, each only on a table with what it's filtered by: {said}");
     assert_eq!((said["spans"].as_array().unwrap().len(), said["metrics"].clone()), (1, json!([])), "a metric is in no trace: {said}");
+    let traces = |least: u64| read(json!({ "queries": ["traces"], "services": ["notes"], "service": "notes", "least": least, "since": 0, "limit": 10 })).1["traces"].as_array().unwrap().len();
+    assert_eq!((traces(500), traces(1000)), (3, 0), "a trace is found by a span that's what's asked for, and read whole");
     assert_eq!(read(json!({ "queries": ["spans"], "services": ["other"] })).1["spans"], json!([]), "only the services asked for: {said}");
     assert_eq!(read(json!({ "queries": ["spans"], "services": ["notes'; DROP TABLE spans; --"] })).0, 400, "a value that isn't a name never reaches the SQL");
     assert_eq!(read(json!({ "queries": ["DROP TABLE spans"], "services": ["notes"] })).1, json!({}), "only its own reads");

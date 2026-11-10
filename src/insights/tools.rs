@@ -13,15 +13,16 @@ pub fn feature() -> Feature {
         tools: vec![Tool::route(
             json!({
                 "name": "insights", "title": "Read how things went", "reads": true,
-                "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations and its failing and slow traces, then trace_id for one trace's spans. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: requests by the hour, spans, logs, metrics and errors as JSON, each up to limit. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset. What's newest takes up to a minute or two to show.",
+                "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations and its failing and slow traces, then trace_id for one trace's spans. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: requests by the hour, spans, logs, metrics and errors as JSON, each up to limit, and traces, the newest traces with a span of service, name, status and min_ms over the whole range, each with all its spans. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset. What's newest takes up to a minute or two to show.",
                 "input": { "type": "object", "properties": {
                     "service": { "type": "string", "description": "only this service: an app's name, or the network's own program" },
                     "trace_id": { "type": "string", "description": "one trace by its id, as its spans: a failure says its trace-id" },
                     "raw": { "type": "boolean", "description": "the rows themselves, as JSON" },
                     "effect_of": { "type": "string", "description": "what a build (its commit, or the start of it) changed against the build before it: newly failing and slower operations, or that there's nothing to compare yet" },
-                    "parts": { "type": "array", "items": { "type": "string", "enum": ["requests", "spans", "logs", "metrics", "errors"] }, "description": "with raw, only these kinds of row (each costs a read of its own): every kind unless given" },
+                    "parts": { "type": "array", "items": { "type": "string", "enum": ["requests", "spans", "logs", "metrics", "errors", "traces"] }, "description": "with raw, only these kinds of row (each costs a read of its own): every kind unless given" },
                     "check": { "type": "boolean", "description": "check telemetry's own path now, by sending a known signal and reading the last one back, before answering. It's checked every 15 minutes anyway" },
                     "name": { "type": "string", "description": "with raw, only spans of this name or logs of this body" },
+                    "min_ms": { "type": "integer", "description": "with raw's traces, only those with a span that took at least this long, in ms" },
                     "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d (1d unless raw)" },
                     "status": { "type": "string", "enum": ["unset", "error"], "description": "only these: `error` is what broke (the default of the top errors listed), `unset` is what didn't, as what a caller had refused. With raw, also only spans of this status, and logs at error level if error or below it if unset" },
                     "limit": { "type": "integer", "description": "how many lines to list, or with raw, how many of the newest of each kind of row, up to 10000 (20 and 100 by default)" },
@@ -44,7 +45,7 @@ mod serve {
     /// As much of a table as a reading of it needs: its lines are cut, never what they add up from.
     const ALL_ROWS: usize = 10_000;
     const DAY: u64 = 86_400_000;
-    const ALL_PARTS: [&str; 5] = ["requests", "spans", "logs", "metrics", "errors"];
+    const ALL_PARTS: [&str; 6] = ["requests", "spans", "logs", "metrics", "errors", "traces"];
 
     /// Only what's read of it: each is a query of Basin's.
     fn queries(raw: bool, parts: Option<&Vec<Value>>, trace: bool, service: bool, effect: bool) -> Vec<&'static str> {
@@ -74,7 +75,7 @@ mod serve {
         if input.get("check").and_then(Value::as_bool).unwrap_or(false) {
             node.check_telemetry().await;
         }
-        let ask = Ask { queries: queries(raw, input.get("parts").and_then(Value::as_array), trace.is_some(), service.is_some(), effect.is_some()), service, name: text("name"), trace: trace.clone(), since, status: text("status"), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
+        let ask = Ask { queries: queries(raw, input.get("parts").and_then(Value::as_array), trace.is_some(), service.is_some(), effect.is_some()), service, name: text("name"), trace: trace.clone(), since, status: text("status"), least: input.get("min_ms").and_then(Value::as_u64), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
         let rows = node.insights(&me, &ask).await?;
         if raw {
             return Ok(rows);

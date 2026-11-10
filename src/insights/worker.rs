@@ -29,7 +29,7 @@ pub fn write(address: &str, key: &SigningKey, batch: &Batch) -> Result<()> {
 /// What's read for `ask`, of `services` alone.
 pub fn asked(ask: &Ask, services: Vec<String>) -> Value {
     let queries: Vec<&str> = if ask.queries.is_empty() { vec!["requests", "spans", "logs", "metrics", "errors"] } else { ask.queries.clone() };
-    json!({ "queries": queries, "services": services, "service": ask.service, "name": ask.name, "trace": ask.trace, "status": ask.status, "since": ask.since.unwrap_or(0), "limit": ask.limit.max(1).min(10_000) })
+    json!({ "queries": queries, "services": services, "service": ask.service, "name": ask.name, "trace": ask.trace, "status": ask.status, "least": ask.least, "since": ask.since.unwrap_or(0), "limit": ask.limit.max(1).min(10_000) })
 }
 
 pub fn read(address: &str, key: &SigningKey, fields: Value) -> Result<Value> {
