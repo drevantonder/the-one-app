@@ -701,6 +701,28 @@ impl Node {
         conn.paths().iter().find(|p| p.is_selected()).map(|p| p.rtt())
     }
 
+    /// Says in this device's log how each connection it holds goes: each path, whether it's the one sent on, and the
+    /// packets and bytes it has carried each way, as iroh counts them. Every packet through the relay is billed by
+    /// Cloudflare, so this is what says which devices reach each other directly (`one logs <device> --grep paths`).
+    pub(super) fn log_paths(&self) {
+        let mut conns: Vec<(Key, Connection)> = self.0.net.conns.lock().unwrap().iter().filter_map(|(k, slot)| Some((*k, slot.try_lock().ok()?.clone()?))).collect();
+        conns.extend(self.0.net.clients.lock().unwrap().iter().flat_map(|(k, held)| held.iter().map(|(c, _)| (*k, c.clone()))));
+        for (key, conn) in conns.into_iter().filter(|(_, c)| c.close_reason().is_none()) {
+            let paths: Vec<String> = conn
+                .paths()
+                .iter()
+                .map(|p| {
+                    let s = p.stats();
+                    let way = if p.is_relay() { "relay".to_string() } else { p.remote_addr().to_string() };
+                    let on = if p.is_selected() { " (sent on)" } else { "" };
+                    format!("{way}{on} {}ms: sent {} packets, {} B; got {} packets, {} B", s.rtt.as_millis(), s.udp_tx.datagrams, s.udp_tx.bytes, s.udp_rx.datagrams, s.udp_rx.bytes)
+                })
+                .collect();
+            let service = self.with_or(None, |i| Ok(i.r.db().machine_ever(&key)?.and_then(|m| m.service))).map(|s| format!(" ({s})")).unwrap_or_default();
+            tracing::info!("paths to {}{service} {}: {}", self.name_of(&key), short(&key), paths.join("; "));
+        }
+    }
+
     fn drop_conn(&self, to: &Key) {
         self.0.net.conns.lock().unwrap().remove(to);
     }

@@ -5,6 +5,8 @@ use super::*;
 
 /// The largest step a `changed` carries: a bigger one, the devices it tells read from the bucket.
 const SENT_STEP: usize = 1 << 20;
+/// How often each connection's paths are said in the log (`log_paths`).
+const PATHS_EVERY: Duration = Duration::from_secs(5 * 60);
 
 impl Node {
     /// Reads what each scope this device holds has in the bucket after what it last read, `global` first, until it
@@ -192,8 +194,13 @@ impl Node {
 
     /// Tells every other device how loaded it is and what its parts are doing, now and then.
     pub(super) async fn presence_loop(self) {
+        let mut paths_said = Instant::now();
         loop {
             if self.has_network() {
+                if paths_said.elapsed() >= PATHS_EVERY {
+                    paths_said = Instant::now();
+                    self.log_paths();
+                }
                 self.say_hello();
                 self.read_connected();
                 self.check_relay();
