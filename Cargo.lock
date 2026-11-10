@@ -2978,6 +2978,7 @@ dependencies = [
  "data-encoding",
  "libc",
  "one",
+ "rustc-demangle",
  "serde_json",
  "sha2 0.11.1",
  "ssh-key",
@@ -3764,6 +3765,12 @@ dependencies = [
  "smallvec",
  "sqlite-wasm-rs",
 ]
+
+[[package]]
+name = "rustc-demangle"
+version = "0.1.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b74b56ffa8bb2830709a538c2cbcae9aa062db0d2a42563bfb09bdaae44020eb"
 
 [[package]]
 name = "rustc-hash"

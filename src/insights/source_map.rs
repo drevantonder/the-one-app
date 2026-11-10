@@ -1,8 +1,6 @@
 //! Where a frame of built code came from: the app's `app.js.map`, each screen's `<name>.html.map`. What's kept of a map is
 //! its files and lines, none of the code; and a frame stays only ever a location.
 
-use std::collections::BTreeMap;
-
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 

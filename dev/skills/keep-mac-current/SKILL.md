@@ -18,3 +18,5 @@ For each network, with its address, `<cli>` and app name (`~/Applications/<name>
 7. **The iPhone app**, only if what changed reaches it (anything but `client/native/{mac,windows,android}/`, `service/`, `apps/` and step 3's list): `CONFIG=<config.toml> client/native/iphone/build.sh device <dir>`, then `xcrun devicectl device install app --device <paired iPhone> <dir>/*.app`. Not reachable: try next run.
 
 A step that fails: read its output and fix the cause. `one logs <mac>` says what the node saw.
+
+A stall on the Mac leaves every thread's stack in `logs/stall.sample` under its home. Each release keeps its programs' symbols on the Mac, by UUID: `<checkout>/target/release/<cli>-dev symbols <that file>` prints it with the `???` frames named.

@@ -18,6 +18,8 @@ one = { path = ".." }
 anyhow = "1"
 data-encoding = "2"
 libc = "0.2"
+# Rust's v0 symbol mangling, which `one-dev symbols` turns back into names: writing its grammar here would be longer than the crate.
+rustc-demangle = "0.1"
 serde_json = "1"
 sha2 = "0.11"
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"] }

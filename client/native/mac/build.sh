@@ -9,7 +9,9 @@ BUNDLE_ID=app.$CONFIG_CLI.mac
 label=$BUNDLE_ID.oned
 cd "$native"
 
-(cd "$root" && CONFIG=$config ONE_BUILD=$BUILD_COMMIT cargo build --release)
+# Built unstripped, so each program's symbols can be kept before it's stripped below: a stall's stacks (logs/stall.sample)
+# are read against them by one-dev symbols, as the releases themselves carry none. The strip is here, not in Cargo's profile.
+(cd "$root" && CONFIG=$config ONE_BUILD=$BUILD_COMMIT CARGO_PROFILE_RELEASE_STRIP=none cargo build --release)
 CONFIG=$config ONE_BUILD=$BUILD_COMMIT cargo build --release
 
 app=$native/target/mac/$CONFIG_NAME.app
@@ -27,6 +29,17 @@ for m in "$root"/apps/*/service/Cargo.toml; do
 	s=$(basename "$(dirname "$(dirname "$m")")")
 	cp "$root/target/release/one-$s" "$app/Contents/MacOS/$CONFIG_CLI-$s"
 done
+
+symbols=$HOME/Library/Caches/$CONFIG_CLI/symbols
+mkdir -p "$symbols"
+for program in "$app/Contents/MacOS/$CONFIG_CLI" "$app"/Contents/MacOS/$CONFIG_CLI-*; do
+	[ -e "$program" ] || continue
+	uuid=$(dwarfdump --uuid "$program" | awk '{print $2; exit}')
+	nm -n "$program" | awk '$2 ~ /^[Tt]$/ {print $1, $3}' | gzip -9 >"$symbols/$uuid.gz"
+	strip -x "$program"
+done
+# A symbols file is a few MB, and a build makes one per program: the newest 200 are the last 25 or so.
+ls -1t "$symbols" | tail -n +201 | while read -r old; do rm -f "$symbols/$old"; done
 
 # The icon is the config's as it is.
 icon=$(art icon)

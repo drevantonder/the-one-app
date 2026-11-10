@@ -10,6 +10,7 @@ use one::config::{CLI, NAME};
 use one::tools;
 
 mod ship;
+mod symbols;
 mod throwaway;
 
 /// What this program is called, beside the custom build's own: `one-dev` beside `one`.
@@ -36,7 +37,7 @@ pub fn agent() -> ureq::Agent {
 }
 
 fn commands() -> Vec<one::cli::Command> {
-    vec![ship::commands(), throwaway::command()]
+    vec![ship::commands(), symbols::command(), throwaway::command()]
 }
 
 fn main() {
