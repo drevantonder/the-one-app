@@ -217,7 +217,7 @@ function Health({ rows, from, to }) {
         <Bars hours={hours} stacks={[{ name: "Errors", colour: ERROR, values: failed }]} />
       </Panel>
       <Panel title="Duration" value={p95(all.p95)} note="P95">
-        <Lines hours={hours} format={took} series={[{ name: "P95", colour: hue(0), values: at((r) => r.p95) }]} />
+        <Lines hours={hours} format={took} series={[{ name: "P95", colour: hue(0), values: at((r) => (r.p95 == null ? null : Math.min(r.p95, LAST_BOUND))) }]} />
       </Panel>
     </div>
   )
