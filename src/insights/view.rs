@@ -237,7 +237,7 @@ const FRAMES_SHOWN: usize = 3;
 pub fn trace(rows: &Value, id: &str, limit: usize) -> String {
     let mut spans: Vec<&Value> = rows["spans"].as_array().into_iter().flatten().filter(|s| s["trace"] == id).collect();
     if spans.is_empty() {
-        return format!("No trace {id}: nothing you may see has that id, or it hasn't arrived yet.");
+        return format!("No trace {id} yet. What another device recorded takes a minute or two to arrive: ask again then. If it still isn't there, nothing you may see has that id.");
     }
     spans.sort_by_key(|s| s["time"].as_u64());
     let ids: Vec<&str> = spans.iter().filter_map(|s| s["span"].as_str()).collect();
@@ -251,6 +251,9 @@ pub fn trace(rows: &Value, id: &str, limit: usize) -> String {
         let more = out.len() - limit - 1;
         out.truncate(limit + 1);
         out.push(format!("  and {more} more"));
+    }
+    if spans.iter().any(|s| s["arriving"] == true) {
+        out.push("Some of it is only what this device recorded, just now: what other devices did arrives within a minute or two.".into());
     }
     out.join("\n")
 }

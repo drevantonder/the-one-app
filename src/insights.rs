@@ -585,6 +585,13 @@ pub struct Span {
     pub attrs: Attrs,
 }
 
+impl Span {
+    /// As the telemetry Worker takes it and gives it back: its table's columns.
+    pub fn row(&self) -> Value {
+        json!({ "time": self.time, "trace": self.trace, "span": self.span, "parent": self.parent, "name": self.name, "service": self.service, "version": self.version, "instance": self.instance, "kind": self.kind.as_str(), "status": self.status.as_str(), "duration": self.duration, "message": self.message, "attrs": self.attrs.json().to_string() })
+    }
+}
+
 /// One log record: what used to be called an event, and where warnings live.
 #[derive(Clone, Debug)]
 pub struct Log {
@@ -680,7 +687,7 @@ impl Batch {
 
     /// As the telemetry Worker takes it, each row with its table's columns.
     pub fn rows(&self) -> Value {
-        let spans: Vec<Value> = self.spans.iter().map(|s| json!({ "time": s.time, "trace": s.trace, "span": s.span, "parent": s.parent, "name": s.name, "service": s.service, "version": s.version, "instance": s.instance, "kind": s.kind.as_str(), "status": s.status.as_str(), "duration": s.duration, "message": s.message, "attrs": s.attrs.json().to_string() })).collect();
+        let spans: Vec<Value> = self.spans.iter().map(Span::row).collect();
         let logs: Vec<Value> = self.logs.iter().map(|l| json!({ "time": l.time, "trace": l.trace, "span": l.span, "severity_number": l.severity.number(), "severity_text": l.severity.text(), "body": l.body, "service": l.service, "version": l.version, "instance": l.instance, "attrs": l.attrs.json().to_string() })).collect();
         let metrics: Vec<Value> = self.metrics.iter().map(|((time, name, service, instance, attrs), (metric, sum))| json!({ "time": time, "name": name, "type": if metric.histogram { "histogram" } else { "counter" }, "unit": metric.unit, "service": service, "instance": instance, "count": sum.count, "sum": sum.sum, "buckets": metric.histogram.then(|| json!(sum.buckets).to_string()), "attrs": attrs })).collect();
         let programs = self.programs.iter().map(|((time, name, service, instance), p)| json!({ "time": time, "name": name, "type": p.kind, "unit": p.unit, "service": service, "instance": instance, "count": p.count, "sum": p.sum, "buckets": p.buckets.as_ref().map(|b| json!(b).to_string()), "attrs": "{}" }));

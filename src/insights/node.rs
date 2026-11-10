@@ -20,10 +20,15 @@ const ERRORS_SHOWN: u64 = 7 * 86_400_000;
 /// The most reports a client's device may make a minute, and events a report may hold.
 const REPORTS_A_MINUTE: u32 = 10;
 const MOST_REPORTED: usize = 300;
+/// How long a span this device sent stays with it too, and the most that do: a row takes a minute or two to be readable,
+/// and a failure names its trace to be read at once.
+const ARRIVING_FOR: u64 = 180_000;
+const MOST_ARRIVING: usize = 2000;
 
-/// What this device hasn't sent yet, and how its check of telemetry's own path is going.
+/// What this device hasn't sent yet, how its check of telemetry's own path is going, and last the spans it sent lately
+/// (`ARRIVING_FOR`), each with when.
 #[derive(Default)]
-pub(super) struct State(Mutex<Batch>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>, Mutex<Canary>, Mutex<HashMap<(String, String), insights::otlp::Point>>);
+pub(super) struct State(Mutex<Batch>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>, Mutex<Canary>, Mutex<HashMap<(String, String), insights::otlp::Point>>, Mutex<std::collections::VecDeque<(u64, Span)>>);
 
 /// Telemetry checking itself: what it last sent, and how many checks in a row failed, how and since when.
 #[derive(Default)]
@@ -301,6 +306,14 @@ impl Node {
         let batch = self.take_insights();
         if batch.is_empty() {
             return true;
+        }
+        {
+            let now = now_ms();
+            let mut arriving = self.0.insights.5.lock().unwrap();
+            arriving.extend(batch.spans.iter().cloned().map(|span| (now, span)));
+            while arriving.len() > MOST_ARRIVING || arriving.front().is_some_and(|(sent, _)| now.saturating_sub(*sent) > ARRIVING_FOR) {
+                arriving.pop_front();
+            }
         }
         let Ok(address) = self.address() else {
             tracing::debug!("insights: {YOURS} has no address to send them to");
@@ -589,8 +602,11 @@ impl Node {
             Ok((seen, admin))
         })?;
         let (address, key) = (self.address()?, self.0.key.clone());
-        let fields = insights::worker::asked(ask, services);
+        let fields = insights::worker::asked(ask, services.clone());
         let mut rows = tokio::task::spawn_blocking(move || insights::worker::read(&address, &key, fields)).await??;
+        if let (Some(trace), Some(read)) = (&ask.trace, rows.get_mut("spans").and_then(Value::as_array_mut)) {
+            self.add_arriving(read, trace, &services);
+        }
         for table in ["spans", "logs", "metrics"] {
             for row in rows.get_mut(table).and_then(Value::as_array_mut).into_iter().flatten() {
                 self.read_row(row);
@@ -605,6 +621,19 @@ impl Node {
             rows["problem"] = problem;
         }
         Ok(rows)
+    }
+
+    /// Adds to `read` this device's own spans of `trace` that can't be read back yet (unsent, or sent within
+    /// `ARRIVING_FOR`), of `services`, each marked `arriving`: what other devices recorded of it is still on its way.
+    fn add_arriving(&self, read: &mut Vec<Value>, trace: &str, services: &[String]) {
+        let mut mine: Vec<Span> = self.0.insights.0.lock().unwrap().spans.iter().filter(|s| s.trace == trace).cloned().collect();
+        mine.extend(self.0.insights.5.lock().unwrap().iter().filter(|(_, s)| s.trace == trace).map(|(_, s)| s.clone()));
+        let have: std::collections::HashSet<String> = read.iter().filter_map(|row| row["span"].as_str().map(str::to_string)).collect();
+        for span in mine.iter().filter(|s| services.contains(&s.service) && !have.contains(&s.span)) {
+            let mut row = span.row();
+            row["arriving"] = json!(true);
+            read.push(row);
+        }
     }
 
     /// What's broken most lately in `app`, for someone who may deploy it, as an app's screens show it: empty if it can't be read.
