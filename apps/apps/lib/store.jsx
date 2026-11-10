@@ -6,32 +6,34 @@ export const useList = () => useCall("_list", {})
 
 export const said = (error) => one.plain(error)
 
-/// The list, and `add(a, place)`: to You unless given a place, drawn as added at once and put back if it fails, which
-/// it throws for the caller to say. It gives back the line to say of the apps it added with it (those it uses), or "".
+/// The list, and `put(a, place, on)`: an app put on a page or taken off it, drawn so at once and put back if it fails,
+/// which it throws for the caller to say. Putting on gives back the line to say of the apps it added with it (those it
+/// uses), or "".
 export function useApps() {
   const list = useList()
-  const [adding, setAdding] = useState([])
+  const [changing, setChanging] = useState([])
   const data = list.data && {
     ...list.data,
     apps: list.data.apps.map((a) => {
-      const more = adding.filter((x) => x.app === a.name && !a.added.includes(x.place)).map((x) => x.place)
-      return more.length ? { ...a, added: [...a.added, ...more] } : a
+      let added = a.added
+      for (const c of changing.filter((x) => x.app === a.name)) added = c.on ? (added.includes(c.place) ? added : [...added, c.place]) : added.filter((id) => id !== c.place)
+      return added === a.added ? a : { ...a, added }
     }),
   }
-  const add = async (a, place = data.places[0]) => {
-    const entry = { app: a.name, place: place.id }
-    const also = a.uses.apps.map((n) => data.apps.find((x) => x.name === n)).filter((u) => u && !u.added.includes(place.id)).map((u) => u.title)
-    setAdding((all) => [...all, entry])
+  const put = async (a, place, on) => {
+    const entry = { app: a.name, place: place.id, on }
+    const also = on ? a.uses.apps.map((n) => data.apps.find((x) => x.name === n)).filter((u) => u && !u.added.includes(place.id)).map((u) => u.title) : []
+    setChanging((all) => [...all, entry])
     try {
-      await one.call("_add", { app: a.name, scope: place.scope })
+      await one.call(on ? "_add" : "_remove", { app: a.name, scope: place.scope })
       one.tap("success")
       await list.reload()
       return also.length ? `Also added ${also.join(" and ")}.` : ""
     } finally {
-      setAdding((all) => all.filter((x) => x !== entry))
+      setChanging((all) => all.filter((x) => x !== entry))
     }
   }
-  return { ...list, data, add }
+  return { ...list, data, put }
 }
 
 export const onAPage = (a, places) => a.added.some((id) => places.some((p) => p.id === id))

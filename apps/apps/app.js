@@ -1,6 +1,6 @@
 // The App Store: the apps built into the release, whether or not the network has added them, and the apps made in the
-// network; who owns each, where it's added, its forks and its code; and "Add to…" each place the user has a
-// page: themselves, their groups and everyone, saying who can add it where they can't.
+// network; who owns each, where it's added, its forks and its code; and "Add to" or "Manage" for the
+// places the user may put an app: themselves, the groups they're an admin of and, for an admin, everyone.
 // An ordinary app: it adds apps with ctx.add, with the caller's own rights. Adding a built-in app the network
 // hasn't added yet adds it (admins only). Its screens are React, in screens/ and lib/, built into dist/ when it's
 // deployed (`one deploy apps/apps`), which is committed because a release ships the app as it is.

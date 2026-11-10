@@ -1,30 +1,27 @@
-// The App Store: every app, built in or made here, as tiles that fill the room, each with Add or Open; and, where there's
+// The App Store: every app, built in or made here, as tiles that fill the room, each with Add to or Manage; and, where there's
 // room, the app opened beside them.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, Hint, LargeTitle, LoadingButton, Pending, Problem, SearchInput, Section, Split, useWidth } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, LargeTitle, LoadingButton, Pending, Problem, SearchInput, Section, Split, useWidth } from "@one/ui"
 import { AppPage } from "../lib/app-page.jsx"
-import { addAccount, onAPage, openApp, said, useApps } from "../lib/store.jsx"
+import { PagesButton } from "../lib/pages.jsx"
+import { said, useApps } from "../lib/store.jsx"
 
 // The sections: the apps built into the release, and those made in this network (each network words that its own way,
 // in its settings).
 const MADE_HERE = one.config?.made_here || "Made here"
 const WIDE = 900
 
-function Tile({ a, list, selected, open, add, restore }) {
-  const { places, admin } = list
+function Tile({ a, store, selected, open, show, restore }) {
   const me = useRef(null)
   // The tiles narrow to one column as an app opens beside them, so the one opened could end up out of sight.
   useEffect(() => {
     if (selected) me.current.scrollIntoView({ block: "nearest" })
   }, [selected])
-  const small = (label, run) => <LoadingButton size="sm" variant="secondary" run={run}>{label}</LoadingButton>
   const action = a.deleted
-    ? a.mine && small("Restore", () => restore(a))
-    : onAPage(a, places)
-      ? a.opens ? small("Open", () => openApp(a, places)) : a.signs_in ? small("Add Account", () => addAccount(a, places)) : <span className="text-sm text-muted-foreground">Added</span>
-      : (a.deployed || admin) && small("Add", () => add(a))
-  // The app is a button and its Add or Open another, side by side: one button never holds another.
+    ? a.mine && <LoadingButton size="sm" variant="secondary" run={() => restore(a)}>Restore</LoadingButton>
+    : (a.deployed || store.data.admin) && <PagesButton a={a} store={store} then={show} />
+  // The app is a button and its Add to or Manage another, side by side: one button never holds another.
   return (
     <div
       ref={me}
@@ -51,21 +48,15 @@ function Main() {
   const [shown, setShown] = useState(null)
   const [restored, setRestored] = useState([])
   const [error, setError] = useState("")
-  const [note, setNote] = useState("")
-  const [ref, width] = useWidth()
+    const [ref, width] = useWidth()
   const beside = width >= WIDE
 
-  const add = (a) => {
-    setError("")
-    setNote("")
-    // Nothing of it appears to open: its own page says what comes next (an account, or the device it needs).
-    apps.add(a).then((also) => (setNote(also), a.opens) || (beside ? setShown(a.name) : one.open("app", { app: a.name }))).catch((err) => setError(said(err).title))
-  }
   const restore = (a) => {
     setError("")
     setRestored((r) => [...r, a.name])
     one.call("restore", { app: a.name }).catch((err) => (setRestored((r) => r.filter((n) => n !== a.name)), setError(said(err).title)))
   }
+  const show = (a) => (beside ? setShown(a.name) : one.open("app", { app: a.name }))
   const open = (a) => (beside ? setShown((s) => (s === a.name ? null : a.name)) : one.open("app", { app: a.name }))
 
   let tiles
@@ -78,7 +69,7 @@ function Main() {
     const section = (title, of) => of.length > 0 && (
       <Section key={title} title={title}>
         <Grid min="17rem" max={4} gap="0.25rem">
-          {of.map((a) => <Tile key={a.name} a={a} list={apps.data} selected={beside && shown === a.name} open={open} add={add} restore={restore} />)}
+          {of.map((a) => <Tile key={a.name} a={a} store={apps} selected={beside && shown === a.name} open={open} show={show} restore={restore} />)}
         </Grid>
       </Section>
     )
@@ -103,7 +94,7 @@ function Main() {
     <div ref={ref}>
       <Split
         wide={WIDE}
-        list={<div className="flex flex-col gap-6"><LargeTitle>App Store</LargeTitle>{top}{error && <Problem title={error} />}{note && <Hint>{note}</Hint>}{tiles}</div>}
+        list={<div className="flex flex-col gap-6"><LargeTitle>App Store</LargeTitle>{top}{error && <Problem title={error} />}{tiles}</div>}
         detail={beside && shown && apps.data && (
           <AppPage key={shown} name={shown} apps={apps} onOpen={setShown} onGone={() => setShown(null)} />
         )}

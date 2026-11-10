@@ -3,6 +3,7 @@
 // its activity and deleting it.
 import { useEffect, useRef, useState } from "react"
 import { AppIcon, Button, Empty, Grid, Hint, Icon, List, ListRow, ListSkeleton, Problem, Section, Switch, useCall } from "@one/ui"
+import { PagesButton } from "./pages.jsx"
 import { addAccount, onAPage, openApp, said } from "./store.jsx"
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
@@ -22,7 +23,6 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
   const health = useCall("_health", { app: name })
   const where = useCall("devices", { app: name })
   const [error, setError] = useState("")
-  const [note, setNote] = useState("")
   const [busy, setBusy] = useState("")
   const [flipped, setFlipped] = useState({})
   const heading = useRef(null)
@@ -35,7 +35,6 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
   }
   const run = async (key, go) => {
     setError("")
-    setNote("")
     setBusy(key)
     try {
       await go()
@@ -111,15 +110,8 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
   const repo = a.source && /^http:[/][/](localhost|127[.]0[.]0[.]1):[0-9]+[/]repos[/]([a-z0-9][a-z0-9._-]*?)([.]git)?[/]?$/.exec(a.source)?.[2]
 
   const on = onAPage(a, places)
-  const offered = places.filter((p) => p.may && !a.added.includes(p.id) && (on || p !== places[0]))
-  const addIt = (place) => run("add", async () => setNote(await store.add(a, place)))
-  const addTo = async (e) => {
-    const i = await one.menu(offered.map((p) => ({ title: p.name })), e.currentTarget)
-    if (i != null) addIt(offered[i])
-  }
   const more = [
     ...(owner ? [{ title: a.source ? "Edit Source Link" : "Add Source Link", run: editSource }] : []),
-    ...places.filter((p) => p.may && a.added.includes(p.id)).map((p) => ({ title: `Remove from ${p.name}`, run: () => run("remove", () => one.call("_remove", { app: name, scope: p.scope })) })),
     ...(owner ? [{ title: "Delete App", danger: true, section: true, run: () => retire("delete") }] : []),
     ...(a.mine && a.deleted ? [{ title: "Erase App", danger: true, run: () => retire("erase") }] : []),
   ]
@@ -142,10 +134,11 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
             <div className="mt-auto flex items-center gap-2 pt-2">
               {a.deleted
                 ? a.mine && <Button size="sm" disabled={busy === "restore"} onClick={() => retire("restore")}>Restore</Button>
-                : on
-                  ? a.opens ? <Button size="sm" onClick={() => openApp(a, places)}>Open</Button> : a.signs_in ? <Button size="sm" onClick={() => addAccount(a, places)}>Add Account</Button> : <span className="text-sm text-muted-foreground">Added</span>
-                  : adds ? <Button size="sm" onClick={() => addIt()}>Add</Button> : <span className="text-sm text-muted-foreground">Ask an admin to add it first</span>}
-              {!a.deleted && adds && offered.length > 0 && <Button variant="secondary" size="sm" onClick={addTo}>Add to…</Button>}
+                : <>
+                  {on && a.opens && <Button size="sm" onClick={() => openApp(a, places)}>Open</Button>}
+                  {on && !a.opens && a.signs_in && <Button size="sm" onClick={() => addAccount(a, places)}>Add Account</Button>}
+                  {adds ? <PagesButton a={a} store={store} variant={on ? "secondary" : "default"} /> : <span className="text-sm text-muted-foreground">Ask an admin to add it first</span>}
+                </>}
               {more.length > 0 && <Button variant="ghost" size="icon-sm" aria-label="More" onClick={showMore}><Icon name="dots-three" className="size-5" /></Button>}
             </div>
           </div>
@@ -154,7 +147,6 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
       </div>
 
       {error && <Problem title={error} />}
-      {note && <Hint>{note}</Hint>}
 
       {answered ? <>
       {w?.problem && <Problem warn title={w.problem.title} text={w.problem.text} action={w.problem.move ? { label: "Move", run: () => move() } : undefined} />}
