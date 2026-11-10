@@ -31,6 +31,9 @@ pub fn feature() -> Feature {
 }
 
 #[cfg(feature = "node")]
+pub(crate) use serve::insights as read;
+
+#[cfg(feature = "node")]
 mod serve {
     use anyhow::Result;
     use serde_json::{Map, Value, json};
