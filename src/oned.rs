@@ -33,13 +33,12 @@ pub fn name() -> String {
 }
 
 pub fn invoked() -> bool {
-    std::env::args_os().next().and_then(|a| PathBuf::from(a).file_name().map(|n| n.to_string_lossy() == name())).unwrap_or(false)
+    crate::os::invoked_as().is_some_and(|me| me == name())
 }
 
 pub fn command(args: &[&str]) -> std::io::Result<std::process::Command> {
-    use std::os::unix::process::CommandExt;
-    let mut command = std::process::Command::new(crate::this_program()?);
-    command.arg0(name()).args(args);
+    let mut command = crate::os::named(&name())?;
+    command.args(args);
     Ok(command)
 }
 
@@ -50,14 +49,14 @@ pub fn program(name: &str) -> PathBuf {
 
 /// Where oned puts a service's program it fetched (`Mode::bin`).
 pub fn fetched(name: &str) -> PathBuf {
-    crate::mode::here().bin().join(format!("{CLI}-{name}"))
+    crate::mode::here().bin().join(format!("{CLI}-{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// A service's program built with this one and carried beside it, which oned runs as it is and fetches none of: the
 /// Mac app's, inside it (client/native/mac/build.sh), and a checkout's (`one-dev throwaway`), which Cargo builds beside it.
 pub fn carried(name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let path = exe.parent()?.join(format!("{CLI}-{name}"));
+    let path = exe.parent()?.join(format!("{CLI}-{name}{}", std::env::consts::EXE_SUFFIX));
     (path.exists() && path != fetched(name)).then_some(path).or_else(|| helper(name))
 }
 
@@ -106,7 +105,7 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     }
     for entry in dirs.iter().flat_map(std::fs::read_dir).flatten().flatten() {
         let file = entry.file_name().to_string_lossy().to_string();
-        let Some(name) = file.strip_prefix(&prefix).filter(|n| crate::database::scopes::valid_app_name(n)) else { continue };
+        let Some(name) = file.strip_suffix(std::env::consts::EXE_SUFFIX).and_then(|f| f.strip_prefix(&prefix)).filter(|n| crate::database::scopes::valid_app_name(n)) else { continue };
         if on.contains_key(name) || crate::services::endpoint::folder(name).is_dir() {
             names.insert(name.to_string());
         }
@@ -206,7 +205,6 @@ fn taken(name: &str) -> (Option<u64>, String) {
 /// Puts the program of `build`, once its signature is the release key's or its hash the one its deploy names, where
 /// oned runs it, in one step so it never starts half of it.
 fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, build: &Build) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     let (bytes, kept) = match build {
         Build::Released(r) => (runtime.block_on(node.thing_bytes(r))?, format!("{} {}", r.committed, r.sha256)),
         Build::Deployed(hash) => (runtime.block_on(node.service_build(hash))?, format!("deploy {hash}")),
@@ -216,7 +214,7 @@ fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, build: &Build)
     std::fs::create_dir_all(path.parent().unwrap_or(&path))?;
     let new = path.with_extension("new");
     std::fs::write(&new, bytes)?;
-    std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))?;
+    crate::os::set_mode(&new, 0o755)?;
     std::fs::rename(&new, &path)?;
     let folder = crate::services::endpoint::folder(name);
     std::fs::create_dir_all(&folder)?;
@@ -473,7 +471,8 @@ fn keep_runtime(node: &Node, runtime: &tokio::runtime::Handle, apps: &mut Option
         }
     }
     match (apps.is_some(), node.runs_apps()) {
-        (false, true) => match node.app_runtime().program().and_then(|mut c| c.stdin(std::process::Stdio::null()).spawn()) {
+        // On Windows, closing its stdin is how it's asked to stop (`os::ask_to_stop`).
+        (false, true) => match node.app_runtime().program().and_then(|mut c| c.stdin(if cfg!(windows) { std::process::Stdio::piped() } else { std::process::Stdio::null() }).spawn()) {
             Ok(child) => {
                 tracing::info!("oned started the app runtime");
                 *apps = Some(child);
@@ -509,8 +508,7 @@ fn start(network: &crate::services::endpoint::Network, name: &str, declared: Opt
 
 /// Stops a part: asked, then made to, if it hasn't in ten seconds.
 fn stop(name: &str, mut child: std::process::Child) {
-    // SAFETY: a signal to a child of this process, which it hasn't reaped.
-    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    crate::os::ask_to_stop(&mut child);
     for _ in 0..100 {
         if !matches!(child.try_wait(), Ok(None)) {
             tracing::info!("oned stopped {name}");
@@ -579,6 +577,8 @@ const LAST_SAY: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[tokio::main]
 async fn serve(args: &[String]) -> Result<()> {
+    #[cfg(windows)]
+    crate::os::children_end_with_me()?;
     // What it says is kept too, for `one logs`.
     crate::logs::keep(crate::logs::NODE);
     tracing_subscriber::fmt()
@@ -710,6 +710,17 @@ fn raw_fd(_listener: &tokio::net::TcpListener) -> i32 {
     -1
 }
 
+/// Asks a node this one didn't start to stop: on Windows, which can't ask a process it didn't start, ends it.
+fn stray_stop(pid: i32) {
+    #[cfg(unix)]
+    // SAFETY: only a signal, to a process of this program's (`ours`).
+    unsafe {
+        libc::kill(pid, libc::SIGTERM)
+    };
+    #[cfg(windows)]
+    crate::os::kill(pid as u32);
+}
+
 /// When the node is asked to stop: Ctrl-C, or SIGTERM from its supervisor, an update or a node replacing it, each
 /// listened for from when it's called.
 fn stopped() -> Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> {
@@ -743,17 +754,14 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
     let mut pids: Vec<i32> = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse().ok()).into_iter().collect();
     // Only a process of this program, never whatever else took the port.
     let me = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
-    let ours = |pid: i32| {
-        let out = std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output().ok();
-        out.is_some_and(|o| std::path::Path::new(String::from_utf8_lossy(&o.stdout).trim()).file_name().is_some_and(|n| n.to_string_lossy() == me))
-    };
+    let ours = |pid: i32| crate::os::is_program(pid as u32, &me);
     pids.sort();
     pids.dedup();
     pids.retain(|&pid| pid as u32 != std::process::id() && ours(pid));
     anyhow::ensure!(!pids.is_empty(), "{} is taken, and not by {NAME}'s node", api::addr());
     for &pid in &pids {
         tracing::warn!("a node of this network was already running (pid {pid}): stopping it, to run this one");
-        unsafe { libc::kill(pid, libc::SIGTERM) };
+        stray_stop(pid);
     }
     for tries in 0..100 {
         if let Ok(listener) = bind().await {
@@ -761,7 +769,7 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
         }
         if tries == 50 {
             for &pid in &pids {
-                unsafe { libc::kill(pid, libc::SIGKILL) };
+                crate::os::kill(pid as u32);
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;

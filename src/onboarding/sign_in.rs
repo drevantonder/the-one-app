@@ -42,11 +42,10 @@ pub fn kept() -> Option<Kept> {
 
 /// Writes it whole, readable only by this machine's user, so a reader never sees half.
 fn keep(kept: &Kept) -> Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
     let path = path();
     std::fs::create_dir_all(path.parent().expect("a file in a folder"))?;
     let new = path.with_extension("new");
-    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&new)?;
+    let mut file = one::os::private_file().truncate(true).open(&new)?;
     file.write_all(&serde_json::to_vec(kept)?)?;
     file.sync_all()?;
     std::fs::rename(&new, &path)?;

@@ -854,9 +854,7 @@ fn disks() -> Vec<Value> {
 }
 
 fn free_space(path: &Path) -> Option<u64> {
-    let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
-    let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
-    (unsafe { libc::statvfs(c.as_ptr(), &mut s) } == 0).then(|| s.f_bavail as u64 * s.f_frsize as u64)
+    crate::os::disk_space(path).map(|(_, free)| free)
 }
 
 /// When a scope's database first changed after `after` (ms), as this device read it since it started: none if it hasn't,

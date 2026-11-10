@@ -340,7 +340,7 @@ pub fn execute(node: &Client, script: &str, agent: Option<&str>) -> Result<Value
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(LIMITS.0 + 60_000));
         if !watching.load(std::sync::atomic::Ordering::SeqCst) {
-            unsafe { libc::kill(pid, libc::SIGKILL) };
+            crate::os::kill(pid as u32);
         }
     });
     let mut result = None;

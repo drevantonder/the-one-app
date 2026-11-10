@@ -136,15 +136,9 @@ fn find(paths: &[&'static str]) -> Option<&'static str> {
 }
 
 fn disk() -> Option<Space> {
-    let path = if cfg!(target_os = "macos") { "/System/Volumes/Data" } else { "/" };
-    let c = std::ffi::CString::new(path).ok()?;
-    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
-        return None;
-    }
-    let block = st.f_frsize as u64;
-    let used = (st.f_blocks as u64).saturating_sub(st.f_bfree as u64) * block;
-    Some(Space { used, total: used + st.f_bavail as u64 * block })
+    let path = if cfg!(target_os = "macos") { "/System/Volumes/Data" } else if cfg!(windows) { "C:\\" } else { "/" };
+    let (used, free) = crate::os::disk_space(std::path::Path::new(path))?;
+    Some(Space { used, total: used + free })
 }
 
 #[cfg(target_os = "linux")]

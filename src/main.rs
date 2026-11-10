@@ -98,7 +98,7 @@ fn main() {
         return;
     }
     // Run by git, for a repo's address.
-    if std::env::args_os().next().is_some_and(|me| std::path::Path::new(&me).file_name().is_some_and(|n| *n == *one::git_wire::helper())) {
+    if one::os::invoked_as().is_some_and(|me| me == one::git_wire::helper()) {
         match git_remote::run(&args) {
             Ok(code) => std::process::exit(code),
             Err(err) => {
@@ -124,7 +124,10 @@ fn run(args: Vec<String>) -> Result<()> {
     let (positional, flags) = tools::split(&args);
     if positional.first().map(String::as_str) != Some("mcp") {
         // Printing into `| head` ends quietly, as other commands do, instead of panicking.
-        unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+        #[cfg(unix)]
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL)
+        };
     }
     let (agent, node, forms) = (one::mcp::agent_from_env(), node(), commands().into_iter().flat_map(|c| c.help).collect::<Vec<_>>());
     let given = Given { words: &positional, flags: &flags, args: &args, node: &node, agent: agent.as_deref(), json, trace, commands: &forms };

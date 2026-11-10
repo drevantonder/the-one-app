@@ -32,9 +32,9 @@ pub fn node_home() -> Option<std::path::PathBuf> {
 
 pub fn link_in(dir: &std::path::Path) -> Result<()> {
     let me = std::env::current_exe()?.canonicalize()?;
-    let link = dir.join(helper());
+    let link = dir.join(format!("{}{}", helper(), std::env::consts::EXE_SUFFIX));
     let _ = std::fs::remove_file(&link);
-    std::os::unix::fs::symlink(&me, &link).with_context(|| format!("git reaches your repos through {}, which couldn't be made: ln -s {} {}", link.display(), me.display(), link.display()))
+    crate::os::link_program(&me, &link).with_context(|| format!("git reaches your repos through {}, which couldn't be made: ln -s {} {}", link.display(), me.display(), link.display()))
 }
 
 /// Tells git on this machine to reach `address`'s repos through this program, and makes sure git finds it as
@@ -49,7 +49,7 @@ pub fn wire(address: &str) -> Result<()> {
     if !on_path(&helper()) {
         // Beside the `<CLI>` users run (a link to it, on a Mac), else beside this program.
         let dir = std::env::var_os("PATH")
-            .map(|p| std::env::split_paths(&p).find(|d| d.join(CLI).is_file()).unwrap_or_default())
+            .map(|p| std::env::split_paths(&p).find(|d| d.join(format!("{CLI}{}", std::env::consts::EXE_SUFFIX)).is_file()).unwrap_or_default())
             .filter(|d| !d.as_os_str().is_empty())
             .or_else(|| std::env::current_exe().ok()?.canonicalize().ok()?.parent().map(|p| p.to_path_buf()))
             .context("this program is in no folder")?;
@@ -67,5 +67,5 @@ fn git(args: &[&str]) -> bool {
 }
 
 fn on_path(name: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)).is_file()))
 }

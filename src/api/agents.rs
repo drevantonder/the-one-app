@@ -80,6 +80,13 @@ pub async fn serve_guide(node: Node) {
 }
 
 /// This machine's Tailscale address, in 100.64.0.0/10, if it has one.
+#[cfg(windows)]
+fn tailnet_address() -> Option<std::net::Ipv4Addr> {
+    None
+}
+
+/// This machine's Tailscale address, in 100.64.0.0/10, if it has one.
+#[cfg(unix)]
 fn tailnet_address() -> Option<std::net::Ipv4Addr> {
     let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
     if unsafe { libc::getifaddrs(&mut list) } != 0 {

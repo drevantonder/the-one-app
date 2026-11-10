@@ -59,6 +59,11 @@ tracing = "0.1"
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
+# Windows has none of what `libc` gives a node on Unix (src/os.rs): a job for its children, and a disk's free space.
+# The version Cargo already builds for tokio and iroh there.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
 # What only a node on a machine uses (the `node` feature): the rest of the node, which src/lib.rs keeps apart from what
 # the Cloudflare node and the native apps' client share.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

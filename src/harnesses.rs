@@ -200,8 +200,7 @@ fn git(node_home: &Path, addr: &str) {
     let text = format!("{hosts}{}", crate::git_wire::home_config(node_home));
     if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
         use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let wrote = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&file).and_then(|mut f| f.write_all(text.as_bytes()));
+        let wrote = crate::os::private_file().truncate(true).open(&file).and_then(|mut f| f.write_all(text.as_bytes()));
         if let Err(err) = wrote {
             once(format!("couldn't write {}: {err}", file.display()));
             return;

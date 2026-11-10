@@ -84,6 +84,9 @@ pub fn how(declared: Option<&Declared>, device: &str) -> How {
     if cfg!(target_os = "macos") {
         return How::Seatbelt;
     }
+    if cfg!(windows) {
+        return How::Plain(Some("Windows has no sandbox for it yet.".into()));
+    }
     if d.user {
         return How::User;
     }
@@ -217,11 +220,10 @@ pub const BEFORE: &str = "data-before";
 /// Puts `program`, `launcher` (this program), the token and what the launcher is told in the sandbox's folder for the
 /// service `name`, and, for a unit, its data from before it had one.
 pub fn prepare(name: &str, program: &Path, launcher: &Path, token: &str, launch: &Launch) -> Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
     let dir = dir(name);
     std::fs::create_dir_all(&dir)?;
-    std::fs::set_permissions(root(), std::fs::Permissions::from_mode(0o700))?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))?;
+    crate::os::set_mode(&root(), 0o700)?;
+    crate::os::set_mode(&dir, 0o755)?;
     for (from, to) in [(launcher, format!("{CLI}d")), (program, PROGRAM.to_string())] {
         let to = dir.join(to);
         let _ = std::fs::remove_file(&to);
@@ -233,7 +235,7 @@ pub fn prepare(name: &str, program: &Path, launcher: &Path, token: &str, launch:
     }
     let token_file = dir.join(crate::api::LOCAL_TOKEN);
     std::fs::write(&token_file, token)?;
-    std::fs::set_permissions(&token_file, std::fs::Permissions::from_mode(0o644))?;
+    crate::os::set_mode(&token_file, 0o644)?;
     std::fs::write(dir.join("sandbox.json"), serde_json::to_vec_pretty(launch)?)?;
     // A unit's data is systemd's (its own user's): what the service kept before is handed over once, readable to it.
     let before = crate::home().join(name);
@@ -245,6 +247,12 @@ pub fn prepare(name: &str, program: &Path, launcher: &Path, token: &str, launch:
 }
 
 /// Makes everything under `path` readable to its unit's user, whose folder alone shows it.
+#[cfg(windows)]
+fn readable(_: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
 fn readable(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let meta = std::fs::symlink_metadata(path)?;

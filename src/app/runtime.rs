@@ -30,6 +30,7 @@ const PACKAGES: &[(&str, &str, &str)] = &[
     ("aarch64-unknown-linux-gnu", "linux-arm64", "ZGeXhiFYcUoKvQVLARBowkyjEhymW7VUMk69f4TD2B7UFj4ijq6YEDWcxm0oQLw7uTI9W2915Bnlp8sCixLYag=="),
     ("aarch64-apple-darwin", "darwin-arm64", "rN2OJjYA9DiHJPub+J1D1TCTw0+g40M+hfMUsD4sPm1qBSWyqG/H9M40ww2IKB16F8m+/0O9GmdlzYI932GduA=="),
     ("x86_64-apple-darwin", "darwin-64", "qjXbqX7J50hqThWbYzT2c5yxr5Ymq6m6WETgPGqOAbIY+aZ11NQhnEV1Vsd/3Ljt97ctApQ1v8aCwX4Fa16nYQ=="),
+    ("x86_64-pc-windows-gnu", "windows-64", "n936OTt6rPIWrOEZ3LJzaKP3AqTnsf80uiR0Zb664RCSBCYwpWQsuiCtsFRjPDOz43GP2QOLIffrCcV0oJ9wYQ=="),
 ];
 pub const COMPATIBILITY_DATE: &str = "2026-10-01";
 /// How long an app may take to answer.
@@ -77,8 +78,9 @@ struct Runtime {
     /// The apps loaded, (name, module source); the built-in apps the network hasn't added, loaded only to be described;
     /// and how many times the runtime was configured.
     loaded: Mutex<(Vec<(String, String)>, Vec<(String, String)>, u64)>,
-    /// The port workerd serves, held for as long as the node runs and handed to each that serves it.
-    listener: std::net::TcpListener,
+    /// The port workerd serves, held for as long as the node runs and handed to each that serves it. None on Windows,
+    /// where workerd can't be handed one: it binds the config's port itself, so a call while it restarts is refused.
+    listener: Option<std::net::TcpListener>,
     /// What each loaded app says it is, once asked.
     described: Mutex<std::collections::HashMap<String, Value>>,
     /// What each app last said it is, kept when the apps load again, for a service to be listed as its app says.
@@ -98,14 +100,15 @@ impl Apps {
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         write_config(dir, &[], port, outbound, 0)?;
+        let listener = cfg!(unix).then_some(listener);
         let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), Vec::new(), 0)), listener, described: Mutex::new(Default::default()), identity: Mutex::new(Default::default()), apart });
         if apart {
             return Ok(Apps(runtime));
         }
         let workerd = workerd()?;
         stop_previous(dir);
-        let (dir, listener) = (dir.to_path_buf(), runtime.listener.try_clone()?);
-        std::thread::Builder::new().name("workerd".into()).spawn(move || keep(&workerd, &dir, &listener))?;
+        let (dir, listener) = (dir.to_path_buf(), runtime.listener.as_ref().map(|l| l.try_clone()).transpose()?);
+        std::thread::Builder::new().name("workerd".into()).spawn(move || keep(&workerd, &dir, listener.as_ref()))?;
         runtime.wait_ready(0)?;
         Ok(Apps(runtime))
     }
@@ -113,7 +116,7 @@ impl Apps {
     /// The app runtime's program, as oned starts it: the port it serves, which it keeps as its child's.
     pub fn program(&self) -> std::io::Result<std::process::Command> {
         let mut command = crate::oned::command(&[crate::database::scopes::APPS_PART, &format!("--runtime={}", self.0.dir.display())])?;
-        child(&mut command, &[("listening", &self.0.listener)]);
+        child(&mut command, &self.0.listener.iter().map(|l| ("listening", l)).collect::<Vec<_>>());
         Ok(command)
     }
 
@@ -382,12 +385,12 @@ pub fn stop_all() {
     let mut running = RUNNING.lock().unwrap();
     STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
     for pid in std::mem::take(&mut *running) {
-        let _ = std::process::Command::new("kill").arg("-9").arg(pid.to_string()).status();
+        crate::os::kill(pid);
     }
 }
 
 /// Keeps a workerd serving `dir`'s config on `listener`, starting it again whenever it stops, until this process stops.
-fn keep(workerd: &Path, dir: &Path, listener: &std::net::TcpListener) {
+fn keep(workerd: &Path, dir: &Path, listener: Option<&std::net::TcpListener>) {
     let (config, log) = (dir.join("config.capnp"), dir.join("workerd.log"));
     loop {
         let out = std::fs::OpenOptions::new().create(true).append(true).open(&log).expect("workerd log");
@@ -395,7 +398,7 @@ fn keep(workerd: &Path, dir: &Path, listener: &std::net::TcpListener) {
         command.arg("serve").arg(&config).stdout(out.try_clone().unwrap()).stderr(out);
         // Elsewhere than Linux, where it dies with what started it, that stops it as it stops (stop_all), and the
         // next start stops one a killed one left (stop_previous).
-        child(&mut command, &[("http", listener)]);
+        child(&mut command, &listener.iter().map(|l| ("http", *l)).collect::<Vec<_>>());
         let spawned = {
             let mut running = RUNNING.lock().unwrap();
             if STOPPING.load(std::sync::atomic::Ordering::SeqCst) {
@@ -417,37 +420,66 @@ fn keep(workerd: &Path, dir: &Path, listener: &std::net::TcpListener) {
     }
 }
 
-/// Asked to stop (SIGTERM, from oned).
-static TERMINATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// The app runtime, as oned starts it (`program`): keeps a workerd serving the config in `dir` on the port oned handed
-/// it, until oned asks it to stop or stops itself, then stops its workerd and exits.
-pub fn run(dir: &Path) -> Result<()> {
-    use std::os::fd::FromRawFd;
-    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into())).init();
-    let fd: i32 = std::env::args().find_map(|a| a.strip_prefix("--socket-fd=listening=").and_then(|f| f.parse().ok())).context("oned hands the app runtime its port")?;
-    // SAFETY: the listening socket oned handed this process, open past exec for it alone, owned here from now on.
-    let listener = unsafe { std::net::TcpListener::from_raw_fd(fd) };
-    let workerd = workerd()?;
-    stop_previous(dir);
+/// Waits until oned asks this program to stop, or stops itself.
+#[cfg(unix)]
+fn until_stopped() {
+    static TERMINATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     extern "C" fn term(_: i32) {
         TERMINATED.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     // SAFETY: the handler only stores to an atomic.
     unsafe { libc::signal(libc::SIGTERM, term as *const () as libc::sighandler_t) };
     let parent = std::os::unix::process::parent_id();
-    let dir2 = dir.to_path_buf();
-    std::thread::Builder::new().name("workerd".into()).spawn(move || keep(&workerd, &dir2, &listener))?;
-    tracing::info!("the app runtime is serving {}", dir.display());
     while !TERMINATED.load(std::sync::atomic::Ordering::SeqCst) && std::os::unix::process::parent_id() == parent {
         std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+/// Waits until oned closes this program's stdin (`os::ask_to_stop`), which it does by stopping too.
+#[cfg(windows)]
+fn until_stopped() {
+    use std::io::Read;
+    while std::io::stdin().read(&mut [0u8; 64]).is_ok_and(|n| n > 0) {}
+}
+
+/// The port oned handed this program: on Windows none, as workerd binds its config's port itself.
+#[cfg(unix)]
+fn handed_port() -> Result<Option<std::net::TcpListener>> {
+    use std::os::fd::FromRawFd;
+    let fd: i32 = std::env::args().find_map(|a| a.strip_prefix("--socket-fd=listening=").and_then(|f| f.parse().ok())).context("oned hands the app runtime its port")?;
+    // SAFETY: the listening socket oned handed this process, open past exec for it alone, owned here from now on.
+    Ok(Some(unsafe { std::net::TcpListener::from_raw_fd(fd) }))
+}
+
+#[cfg(windows)]
+fn handed_port() -> Result<Option<std::net::TcpListener>> {
+    Ok(None)
+}
+
+/// The app runtime, as oned starts it (`program`): keeps a workerd serving the config in `dir` on the port oned handed
+/// it, until oned asks it to stop or stops itself, then stops its workerd and exits.
+pub fn run(dir: &Path) -> Result<()> {
+    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into())).init();
+    let listener = handed_port()?;
+    let workerd = workerd()?;
+    stop_previous(dir);
+    let dir2 = dir.to_path_buf();
+    std::thread::Builder::new().name("workerd".into()).spawn(move || keep(&workerd, &dir2, listener.as_ref()))?;
+    tracing::info!("the app runtime is serving {}", dir.display());
+    until_stopped();
     stop_all();
     tracing::info!("the app runtime stopped");
     Ok(())
 }
 
+/// None can be left on Windows: a workerd ends with the oned whose job it's in (`os::children_end_with_me`).
+#[cfg(windows)]
+fn kill_serving(_: &Path) -> bool {
+    false
+}
+
 /// Stops each workerd serving `dir`'s config, saying whether there was one.
+#[cfg(unix)]
 fn kill_serving(dir: &Path) -> bool {
     let serving = format!(" serve {}", dir.join("config.capnp").display());
     let Ok(out) = std::process::Command::new("ps").args(["-A", "-ww", "-o", "pid=,command="]).output() else { return false };
@@ -477,7 +509,7 @@ pub fn workerd() -> Result<PathBuf> {
         .find(|(target, _, _)| *target == crate::config::TARGET)
         .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", crate::config::TARGET))?;
     let url = format!("https://registry.npmjs.org/@cloudflare/workerd-{package}/-/workerd-{package}-{WORKERD}.tgz");
-    pinned(&format!("workerd-{WORKERD}"), "workerd", &url, integrity)
+    pinned(&format!("workerd-{WORKERD}"), &format!("workerd{}", std::env::consts::EXE_SUFFIX), &url, integrity)
 }
 
 /// A program from an npm package's tarball (`package/bin/<bin>`), downloaded once into the node's cache and checked
@@ -512,6 +544,7 @@ pub fn pinned(dir: &str, bin: &str, url: &str, integrity: &str) -> Result<PathBu
 /// name, in place of the address there: no one else can take the port before workerd does, and what reaches it waits
 /// for workerd, while it starts again too, rather than being refused. Only that child keeps them open past exec, not
 /// whatever else this process starts meanwhile. On Linux the child dies with this process.
+#[cfg_attr(windows, allow(unused_variables))]
 pub fn child(command: &mut std::process::Command, listening: &[(&str, &std::net::TcpListener)]) {
     #[cfg(unix)]
     {

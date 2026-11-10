@@ -111,10 +111,9 @@ pub fn folder(name: &str) -> PathBuf {
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, bytes)?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    crate::os::set_mode(&tmp, 0o600)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
 }
@@ -122,10 +121,9 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 impl Service {
     /// The service `name` kept in `dir`: its key (made the first time), and the network oned gave it.
     pub fn open(dir: &Path, name: &str) -> Result<Service> {
-        use std::os::unix::fs::PermissionsExt;
         ensure!(scopes::valid_app_name(name), "a service's name is lowercase words joined by -");
         std::fs::create_dir_all(dir)?;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        crate::os::set_mode(dir, 0o700)?;
         let key_file = dir.join("key");
         let key = match std::fs::read_to_string(&key_file) {
             Ok(secret) => SigningKey::from_bytes(&unhex(secret.trim()).context("its key file isn't a key")?),
@@ -698,16 +696,18 @@ async fn blobs(s: &Service, headers: &HeaderMap, method: &'static str, path: &st
 /// Whether this part should stop: this program's binary was replaced, by an update, so the new oned starts it again;
 /// or asked to.
 fn stop_check() -> Result<impl Fn() -> bool> {
-    use std::os::unix::fs::MetadataExt;
     // Asked to stop (oned switching it off): it stops what it started first, on a Mac too, where nothing else would.
-    extern "C" fn asked(_: libc::c_int) {
-        ASKED.store(true, SeqCst);
+    #[cfg(unix)]
+    {
+        extern "C" fn asked(_: libc::c_int) {
+            ASKED.store(true, SeqCst);
+        }
+        // SAFETY: the handler only stores to an atomic.
+        unsafe { libc::signal(libc::SIGTERM, asked as *const () as libc::sighandler_t) };
     }
-    // SAFETY: the handler only stores to an atomic.
-    unsafe { libc::signal(libc::SIGTERM, asked as *const () as libc::sighandler_t) };
     let exe = std::env::current_exe()?.canonicalize()?;
-    let ino = std::fs::metadata(&exe)?.ino();
-    Ok(move || ASKED.load(SeqCst) || std::fs::metadata(&exe).map(|m| m.ino()).ok() != Some(ino))
+    let id = crate::os::file_id(&std::fs::metadata(&exe)?);
+    Ok(move || ASKED.load(SeqCst) || std::fs::metadata(&exe).map(|m| crate::os::file_id(&m)).ok() != Some(id))
 }
 
 static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -719,6 +719,18 @@ static PROGRAM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new
 /// keeps the other end of the pipe that is this part's stdin, and closes it by dying. A thread of its own does it, so a
 /// part whose runtime or loops are stuck (a Mac out of memory) still goes, and with it its lock; polling the parent
 /// from those loops didn't. Linux ends the program with it (`PR_SET_PDEATHSIG`); a Mac has nothing like that.
+#[cfg(windows)]
+fn die_with_oned() -> Result<()> {
+    use std::io::Read;
+    // Its program goes with it: oned's job takes every process it starts (`os::children_end_with_me`).
+    std::thread::spawn(|| {
+        while std::io::stdin().read(&mut [0u8; 64]).is_ok_and(|n| n > 0) {}
+        std::process::exit(1);
+    });
+    Ok(())
+}
+
+#[cfg(unix)]
 fn die_with_oned() -> Result<()> {
     use std::io::Read;
     use std::os::fd::{AsFd, AsRawFd};
@@ -755,9 +767,9 @@ pub fn run(name: &str) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     die_with_oned()?;
     let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("lock"))?;
-    // SAFETY: a plain flock on a file this keeps open: held until this process exits, however it does. While another
-    // holds it, this waits; the oned that started this one going ends it (`die_with_oned`), even here.
-    ensure!(unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX) } == 0, "{name}: {}", std::io::Error::last_os_error());
+    // Held until this process exits, however it does. While another holds it, this waits; the oned that started this
+    // one going ends it (`die_with_oned`), even here.
+    lock.lock().with_context(|| name.to_string())?;
     let stop = stop_check()?;
     let program = crate::oned::program(name);
     #[cfg(target_os = "macos")]
@@ -962,8 +974,7 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
 /// Runs a service's program in another language, started again whenever it stops, until `stop`. One that can't start
 /// in its sandbox says why (`PROBLEM`), and is tried again a minute on.
 fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service, stop: &impl Fn() -> bool, runtime: &tokio::runtime::Handle) -> Result<()> {
-    use std::os::unix::fs::MetadataExt;
-    let built = || std::fs::metadata(program).map(|m| (m.ino(), m.mtime())).ok();
+    let built = || std::fs::metadata(program).ok().and_then(|m| Some((crate::os::file_id(&m), m.modified().ok()?)));
     let problem = service.0.dir.join(PROBLEM);
     let before = crate::services::sandbox::dir(name).join(crate::services::sandbox::BEFORE);
     while !stop() {
@@ -1030,8 +1041,7 @@ fn exit_reason(status: &str) -> String {
 
 /// Stops a program: asked, then made to, if it hasn't in ten seconds, so it closes what it keeps (WhatsApp's link).
 fn end(child: &mut std::process::Child) {
-    // SAFETY: a signal to a child of this process, which it hasn't reaped.
-    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    crate::os::ask_to_stop(child);
     for _ in 0..100 {
         if !matches!(child.try_wait(), Ok(None)) {
             return;

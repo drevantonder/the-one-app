@@ -46,6 +46,7 @@ impl Mode {
     pub fn bin(&self) -> PathBuf {
         match self {
             Mode::Throwaway(t) => t.home.join("bin"),
+            Mode::Own if cfg!(windows) => crate::home().join("bin"),
             Mode::Own => crate::user_home().join(".local/bin"),
         }
     }
@@ -103,7 +104,7 @@ impl Throwaway {
                 let _ = std::fs::remove_file(home.join("pid"));
                 // Its Workers and browser, then its own group: it keeps its data, for `throwaway` to start it again.
                 stop_others(&home);
-                unsafe { libc::kill(0, libc::SIGTERM) };
+                crate::os::ask_group_to_stop(0);
             }
         });
         routes.layer(axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
@@ -150,7 +151,7 @@ pub fn stop_others(home: &Path) {
     let me = std::process::id() as i32;
     for pid in programs(home, true) {
         if pid != me {
-            unsafe { libc::kill(-pid, libc::SIGTERM) };
+            crate::os::ask_group_to_stop(-pid);
         }
     }
     let _ = std::fs::remove_file(home.join("pids"));
