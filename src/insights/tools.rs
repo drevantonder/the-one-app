@@ -93,7 +93,7 @@ mod serve {
             (None, None) => {
                 let since = since.unwrap_or(0);
                 let metrics = usage.as_ref().and_then(|u| u["metrics"].as_array()).cloned().unwrap_or_default();
-                let cost = cost::said(&metrics, since, now, &view::since_said(since, now));
+                let cost = cost::said(&metrics, &view::since_said(since, now));
                 [Some(view::overview(&rows, status, since, now, limit)), cost].into_iter().flatten().collect::<Vec<_>>().join("\n\n")
             }
         };

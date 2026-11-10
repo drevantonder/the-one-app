@@ -66,10 +66,16 @@ const HOUR: f64 = 3_600_000.0;
 /// Cloudflare's billing month.
 const MONTH: f64 = 30.0 * 24.0 * HOUR;
 
-/// What each product cost over the `since`–`now` range of `metrics` (the `metrics` rows of the service `CLOUDFLARE`),
-/// at list prices less that range's share of each monthly allowance, most first: `(product, dollars)`.
-pub fn estimate(metrics: &[Value], since: u64, now: u64) -> Vec<(&'static str, f64)> {
-    let range = now.saturating_sub(since).max(1) as f64;
+/// The hours `metrics` (the `metrics` rows of the service `CLOUDFLARE`) recorded: what an estimate is of, as an hour
+/// that wasn't recorded is one nothing's known of.
+fn hours(metrics: &[Value]) -> usize {
+    metrics.iter().filter_map(|r| r["hour"].as_u64()).collect::<std::collections::BTreeSet<_>>().len()
+}
+
+/// What each product cost in the hours `metrics` recorded, at list prices less those hours' share of each monthly
+/// allowance, most first: `(product, dollars)`.
+pub fn estimate(metrics: &[Value]) -> Vec<(&'static str, f64)> {
+    let range = hours(metrics) as f64 * HOUR;
     let mut products: BTreeMap<&str, f64> = BTreeMap::new();
     for p in PRICES {
         let rows: Vec<&Value> = metrics.iter().filter(|r| r["name"] == p.metric).collect();
@@ -84,14 +90,15 @@ pub fn estimate(metrics: &[Value], since: u64, now: u64) -> Vec<(&'static str, f
     out
 }
 
-/// `estimate` as lines to read, honest that it is one, or none if there's no usage in the range.
-pub fn said(metrics: &[Value], since: u64, now: u64, range: &str) -> Option<String> {
-    let products = estimate(metrics, since, now);
+/// `estimate` as lines to read, honest that it is one, or none if nothing was recorded in `range` (as it's said: "the last 1d").
+pub fn said(metrics: &[Value], range: &str) -> Option<String> {
+    let products = estimate(metrics);
+    let hours = hours(metrics);
     if products.is_empty() {
         return None;
     }
-    let a_month = MONTH / now.saturating_sub(since).max(1) as f64;
+    let a_month = MONTH / (hours as f64 * HOUR);
     let width = products.iter().map(|(p, _)| p.len()).max().unwrap_or(0);
     let lines: Vec<String> = products.iter().map(|(product, dollars)| format!("  {product:<width$}  ${dollars:.2}  (${:.2} a month at this rate)", dollars * a_month)).collect();
-    Some(format!("Cloudflare, estimated for {range} from what the network used, at list prices less its share of the free allowances (the account's other use shares them too):\n{}", lines.join("\n")))
+    Some(format!("Cloudflare, estimated from the {hours} hour{} of {range} recorded, at list prices less their share of the free allowances (the account's other use shares them too):\n{}", if hours == 1 { "" } else { "s" }, lines.join("\n")))
 }
