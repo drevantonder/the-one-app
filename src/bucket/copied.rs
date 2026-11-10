@@ -121,6 +121,35 @@ fn kept(name: &str) -> bool {
     segments.next().is_some_and(|last| position(last.strip_suffix(".sig").unwrap_or(last))) && name.split('/').count() > 1 && name.split('/').all(segment)
 }
 
+/// This device's reads of the bucket since `take_reads` last took them, by kind of object and whether it was there.
+static READS: std::sync::Mutex<std::collections::BTreeMap<(&'static str, bool), u64>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// This device's reads of the bucket since this last asked, for insights: (kind, found, how many).
+pub fn take_reads() -> Vec<(&'static str, bool, u64)> {
+    std::mem::take(&mut *READS.lock().unwrap()).into_iter().map(|((kind, found), n)| (kind, found, n)).collect()
+}
+
+/// What kind of object a name is, out of a closed set, so what a device reads can be told apart without its names.
+fn kind_of(name: &str) -> &'static str {
+    let has = |part: &str| name.split('/').any(|s| s == part);
+    let last = name.rsplit('/').next().unwrap_or("");
+    match () {
+        _ if has("_epochs") => "epoch",
+        _ if has("_key") => "app-key",
+        _ if has("_vault") => "vault-key",
+        _ if has("_app_schedules") || has("_grants") => "app-schedules-key",
+        _ if has(crate::protocol::COPY) => "copy",
+        _ if last == crate::protocol::NEWEST => "newest",
+        _ if last == crate::protocol::TIDIED => "tidied",
+        _ if last.ends_with(".sig") => "sig",
+        _ => match crate::database::stored::position(name) {
+            Some((prefix, _)) if crate::database::stored::keeps_every_step(prefix) => "scope-step",
+            Some(_) => "step",
+            None => "other",
+        },
+    }
+}
+
 /// A name's part that's safe as a file's.
 fn segment(s: &str) -> bool {
     !s.is_empty() && s != "." && s != ".." && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_:.".contains(&b))
@@ -142,6 +171,7 @@ impl<B: Bucket> Bucket for Copied<B> {
         let asking = std::time::Instant::now();
         let got = Bucket::get(moved.as_deref().and_then(Option::as_ref).unwrap_or(&self.place), name).await?;
         crate::node::trace::bucket("read", asking.elapsed(), got.is_some());
+        *READS.lock().unwrap().entry((kind_of(name), got.is_some())).or_default() += 1;
         if let Some(o) = got.as_ref().filter(|_| kept(name)) {
             if let Err(err) = self.here.create(name, &o.bytes) {
                 tracing::debug!("keeping {name}: {err:#}");

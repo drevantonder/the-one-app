@@ -569,6 +569,8 @@ pub struct Metric {
 }
 
 pub const BUCKET_ASKS: Metric = Metric { name: "bucket.asks", histogram: false, unit: "{ask}" };
+/// What a device read of the bucket, by kind of object (`one.reached`) and whether it was there (`one.outcome`).
+pub const BUCKET_READS: Metric = Metric { name: "bucket.reads", histogram: false, unit: "{read}" };
 pub const BUCKET_DURATION: Metric = Metric { name: "bucket.duration", histogram: true, unit: "ms" };
 pub const STEPS_BEHIND: Metric = Metric { name: "steps.behind", histogram: false, unit: "{step}" };
 pub const WRITE_SEEN: Metric = Metric { name: "write.seen", histogram: true, unit: "ms" };
