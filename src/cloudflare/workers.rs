@@ -1375,7 +1375,7 @@ impl Cloudflare {
         Ok(token)
     }
 
-    /// Runs a Worker at `cron` besides, or only when asked.
+    /// Runs a Worker at `cron` too, or on no schedule.
     pub(crate) fn schedule(&self, name: &str, cron: Option<&str>) -> Result<()> {
         self.send("PUT", &format!("/accounts/{}/workers/scripts/{name}/schedules", self.account), json!(cron.iter().map(|c| json!({ "cron": c })).collect::<Vec<_>>()))?;
         Ok(())
