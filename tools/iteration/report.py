@@ -2,18 +2,28 @@
 """How fast work on The One App goes from started to done, and where the time goes, for the last day.
 
 Reads this machine's Claude Code sessions in the repo and its worktrees, Agent Memory and git, and writes a report
-to ~/one-export/iteration/<date>.md. Sessions on other machines and other harnesses aren't in it; Agent Memory and
-git are everyone's. Memories have a date and no time, so it reads whole days.
+to ~/one-export/iteration/<date>.md. Sessions on other machines and other harnesses aren't in it, and the report says
+so; Agent Memory and git are everyone's. Memories have a date and no time, so it reads whole days.
 
     python3 -I tools/iteration/report.py [--days 1]
 """
 
-import argparse, datetime as dt, glob, json, os, re, subprocess, sys, time
-from collections import Counter
+import argparse, datetime as dt, glob, json, os, re, subprocess, sys
+from collections import Counter, defaultdict
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SESSIONS = os.path.expanduser("~/.claude/projects/*the-one-app*/*.jsonl")
 OUT = os.path.expanduser("~/one-export/iteration")
+
+EDITS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+LOOP = "sleep or until loop"
+PLUMBING = set("""cd echo printf tail head grep rg sed awk cut sort uniq tr wc cat ls find tee xargs jq true false test exit date pwd
+    export set unset mkdir rm cp mv touch chmod ln stat basename dirname which command source read hostname fi done then else for if
+    while do case esac bash sh python python3 pgrep pkill kill ps lsof df du file readlink diff nl sha256sum wait""".split())
+WRAPPERS = ("nice", "time", "timeout", "nohup", "env", "sudo", "ionice", "exec", "stdbuf")
+SUBCOMMANDS = ("cargo", "git", "go", "bun", "one", "one-dev", "ssh", "gh")
+CHANGES_THE_WAIT = ("--until", "--release")
+QUICK = re.compile(r"git \S+|gh \S+|one (memory|board|status|version|logs|agent-devices)|one-dev (signoff|changes|unfinished|status)|ssh \S+")
 
 
 def when(s):
@@ -26,62 +36,72 @@ def pct(xs, p):
 
 
 def one(*args):
-    """A one command's output. A node just starting can't answer yet, so it's asked again for a few minutes;
-    then the report fails rather than counting nothing as zero."""
-    for wait in (0, 30, 60, 120):
-        time.sleep(wait)
-        r = subprocess.run(["one", *args], capture_output=True, text=True, stdin=subprocess.DEVNULL)
-        if r.returncode == 0:
-            return r.stdout
-    sys.exit(f"one {' '.join(args)} failed: {r.stderr.strip()[:300]}")
+    """A one command's output. If it fails the report does too, rather than counting nothing as zero."""
+    r = subprocess.run(["one", *args], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    if r.returncode != 0:
+        sys.exit(f"one {' '.join(args)} failed: {r.stderr.strip()[:300]}")
+    return r.stdout
+
+
+def label(words):
+    """A program's name with the words naming the job, from one command in a shell line."""
+    prog = {"ptc": "one", "ptc-dev": "one-dev"}.get(os.path.basename(words[0]), os.path.basename(words[0]))
+    if prog == "cargo-test-when-quiet":  # ~/.local/bin's cargo test, once the machine is quiet
+        return "cargo test"
+    if words[1:2] == ["-C"]:
+        del words[1:3]
+    args = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
+    take = 3 if args[:2] == ["throwaway", "client"] else 2 if args[:1] == ["throwaway"] else 1
+    return " ".join([prog, *(args[:take] if prog in SUBCOMMANDS else []), *(f for f in CHANGES_THE_WAIT if f in words)])
+
+
+def kind(c):
+    """What a shell command was for: its last real job, or its last program if all were quick. None if all plumbing."""
+    c = re.sub(r"<<-?\s*['\"]?(\w+)['\"]?.*?^\s*\1$", "", c, flags=re.S | re.M)
+    c = re.sub(r"'[^']*'|\"[^\"]*\"|\$\([^)]*\)|`[^`]*`", "''", c)
+    if re.search(r"\bsleep \d|\buntil\b.*\bdo\b", c, re.S):
+        return LOOP
+    found = []
+    for part in re.split(r"&&|\|\||;|\||\n|&(?=\s)", c):
+        words = re.sub(r"\d?>&?\s*\S+|<\s*\S+", " ", part).strip(" (){}").split()
+        while words and (re.match(r"\w+=", words[0]) or words[0] in WRAPPERS or re.match(r"-|\d+\w?$", words[0])):
+            words.pop(0)
+        if words and re.fullmatch(r"[\w./~-]+", words[0]) and os.path.basename(words[0]) not in PLUMBING:
+            found.append(label(words))
+    jobs = [k for k in found if not QUICK.fullmatch(k)]
+    return (jobs or found or [None])[-1]
 
 
 # What a tool call was for, as time is split.
 def phase(name, inp):
-    if name in ("Read", "Grep", "Glob"):
-        return "reading code"
-    if name in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
-        return "editing"
+    if name in ("Read", "Grep", "Glob") + EDITS:
+        return "reading and editing code"
     if "computer_" in name or "agent-devices_" in name or "preview_" in name:
         return "checking it works"
-    if "memory_" in name or name.startswith("mcp__t3-code__") or name in ("Agent", "SendMessage", "ToolSearch", "AskUserQuestion"):
-        return "memory and delegating"
     if name != "Bash":
         return "other"
-    c = inp.get("command", "")
-    if "<<'EOF'" in c and re.search(r"python3? -|cat >", c):
-        return "editing"
-    if re.search(r"\bsleep \d|\buntil\b.*\bdo\b", c):
-        return "waiting"
-    if re.search(r"cargo (test|build|check|clippy)|xcodebuild|gradle|go test|build\.sh", c):
+    k = kind(inp.get("command", ""))
+    if k is None or re.match(r"git (log|show|diff|status|blame)", k):
+        return "reading and editing code"
+    if k == LOOP:
+        return "sleep or until loops"
+    if re.match(r"cargo|xcodebuild|gradle|go (test|build)|build\.sh|bun", k):
         return "building and testing"
-    if re.search(r"one(-dev)? update|git (push|pull|rebase|commit)|one deploy|one(-dev)? release|cloudflare deploy", c):
+    if re.match(r"git (push|pull|fetch|rebase|commit)|one(-dev)? (update|deploy|release|ship|signoff|publish|build|retire)|cloudflare", k):
         return "shipping"
-    if re.search(r"one (try|throwaway)|ssh mac|simctl|idb |screencapture|curl|adb |one (status|version)", c):
+    if re.match(r"one(-dev)? (try|throwaway|status|version|logs|agent-devices|computer)|ssh|curl|xcrun|idb|adb|screencapture", k):
         return "checking it works"
-    if re.search(r"one memory|t3 thread", c):
-        return "memory and delegating"
-    return "reading code" if re.match(r"(cd [^&]*&& )?(grep|rg|sed -n|cat|head|tail|ls|find|wc|git (log|show|diff|status|blame))", c) else "other"
-
-
-def waited_for(c):
-    for kind, p in [("the Mac", r"ssh mac|xcode|simctl|idb"), ("an update", r"one(-dev)? (update|build|publish)"),
-                    ("a node or the Workers", r"curl|healthz|one status|cloudflare|/api/"),
-                    ("an agent device", r"adb|vnc|agent-devices|emulator|qemu|VM ready"), ("one-dev throwaway", r"one(-dev)? (try|throwaway)"),
-                    ("tests or builds", r"cargo|gradle|build")]:
-        if re.search(p, c, re.I):
-            return kind
-    return "its own background job"
+    return "other"
 
 
 def sessions(since):
-    split, waits, tests, builds, release = Counter(), Counter(), [], 0, 0
-    calls = errors = bounced = steps = 0
-    n = 0
+    split, commands, started, stuck = Counter(), defaultdict(list), [], []
+    theirs = cut = n = 0
     for f in glob.glob(SESSIONS):
         if os.path.getmtime(f) < since.timestamp():
             continue
-        uses, last, counted = {}, None, False
+        uses, background, last = {}, {}, None
+        whole, first, edit, push, context, calls = True, None, None, None, None, 0
         for line in open(f, errors="replace"):
             try:
                 e = json.loads(line)
@@ -91,8 +111,18 @@ def sessions(since):
                 continue
             t = when(e["timestamp"])
             if t < since:
+                whole = False
                 continue
-            content = (e.get("message") or {}).get("content")
+            done = re.search(r"<tool-use-id>([^<]+)</tool-use-id>.*?<status>(\w+)</status>", line)
+            if done and done[1] in background:
+                t0, k = background.pop(done[1])
+                if done[2] in ("completed", "failed"):
+                    commands[k].append((t - t0).total_seconds())
+            message = e.get("message") or {}
+            if e.get("type") == "assistant" and context is None and message.get("usage"):
+                u = message["usage"]
+                context = u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) + u.get("cache_creation_input_tokens", 0)
+            content = message.get("content")
             if e.get("type") == "user" and (isinstance(content, str) or any(isinstance(c, dict) and c.get("type") == "text" for c in content or [])):
                 last = None  # a user's message: the time before it was theirs
                 continue
@@ -102,84 +132,60 @@ def sessions(since):
                 if not isinstance(c, dict):
                     continue
                 if c.get("type") == "tool_use":
-                    if not counted:
-                        n, counted = n + 1, True
+                    if c["name"] == "StructuredOutput":  # T3 Code asking for a branch name: no work was done
+                        continue
+                    if first is None:
+                        first, n = t, n + 1
                     if last and (t - last).total_seconds() < 1800:
                         split["the model thinking and writing"] += (t - last).total_seconds()
-                    steps += 1
+                    last = None  # calls sent together follow the same thinking
+                    calls += edit is None
+                    if edit is None and c["name"] in EDITS:
+                        edit = t
+                    if edit and push is None and c["name"] == "Bash" and re.search(r"\bgit push\b", c["input"].get("command", "")):
+                        push = t
                     uses[c["id"]] = (t, c["name"], c.get("input", {}))
                 elif c.get("type") == "tool_result" and c.get("tool_use_id") in uses:
                     t0, name, inp = uses.pop(c["tool_use_id"])
                     d = (t - t0).total_seconds()
                     last = t
-                    if d > 3600:  # a command left hanging, counted apart
-                        split["commands left hanging (over an hour)"] += d
-                        continue
-                    p = phase(name, inp)
-                    split[p] += d
-                    calls += 1
-                    text = json.dumps(c.get("content"))[:2000]
-                    if c.get("is_error"):
-                        errors += 1
-                    if "too long" in text and "memory" in name:
-                        bounced += 1
-                    cmd = inp.get("command", "") if name == "Bash" else ""
-                    if p == "waiting" and not inp.get("run_in_background"):
-                        waits[waited_for(cmd)] += d
-                    if re.search(r"(^|&& |; )(\S+=\S+ )*(nice \S* )?cargo test", cmd) and not inp.get("run_in_background"):
-                        tests.append(d)
-                    if re.search(r"cargo build", cmd):
-                        builds += 1
-                        release += "--release" in cmd
-    return dict(n=n, split=split, waits=waits, tests=tests, builds=builds, release=release, calls=calls, errors=errors,
-                bounced=bounced, steps=steps)
+                    # a call the user had to answer or approve runs on their clock, not an agent's
+                    if name == "AskUserQuestion" or (e.get("permissionDecision") or {}).get("source", "").startswith("user"):
+                        theirs += d
+                    elif e.get("toolDenialKind") == "interrupted":  # the session ended: its result is written when it resumes
+                        cut += d
+                    elif d > 3600:
+                        stuck.append((d, name, inp.get("command") or json.dumps(inp)))
+                    else:
+                        split[phase(name, inp)] += d
+                        k = kind(inp["command"]) if name == "Bash" else None
+                        if k and inp.get("run_in_background"):
+                            background[c["tool_use_id"]] = (t0, k)
+                        elif k:
+                            commands[k].append(d)
+        if whole and edit:
+            started.append(((edit - first).total_seconds(), calls, (push - edit).total_seconds() if push else None, context or 0))
+    return dict(n=n, split=split, commands=commands, started=started, stuck=stuck, theirs=theirs, cut=cut)
 
 
 MEMORY = re.compile(r"#(\d+) (\d{4}-\d\d-\d\d) (.*)$")
 
 
 def memories(since):
-    """Agent Memory's memories from since's day on, oldest first: (id, date, text)."""
-    days = [since.date() + dt.timedelta(days=i) for i in range((dt.datetime.now(dt.timezone.utc).date() - since.date()).days + 1)]
-    out = one("memory", "recall", "^#\\d+ (" + "|".join(f"{d:%Y-%m-%d}" for d in days) + ") ")
-    return [(int(m.group(1)), m.group(2), m.group(3)) for m in map(MEMORY.match, out.splitlines()) if m]
+    """Memories since since's day that correct an earlier report or say Friction, oldest first: (id, date, text).
+    Asked a day at a time, as recall gives only the newest matches that fit."""
+    out, day = [], since.date()
+    while day <= dt.datetime.now(dt.timezone.utc).date():
+        text = one("memory", "recall", f"^#\\d+ {day:%Y-%m-%d} (correcting|.*friction)")
+        if "Narrow the regex" in text:
+            sys.exit(f"Agent Memory has more matches for {day} than recall gives: the report would undercount")
+        out += [(int(m.group(1)), m.group(2), m.group(3)) for m in map(MEMORY.match, text.splitlines()) if m]
+        day += dt.timedelta(days=1)
+    return out
 
 
-def broken(posts):
-    """Memories saying something that went out was broken, found after."""
-    return [p for p in posts if re.search(r"\bBug since\b|\bbroke\b|\bdidn't (build|parse|load|start) since\b|\bfailed since\b|\bsince [0-9a-f]{7}\b.*\b(fail|broke|didn't)", p[2], re.I)]
-
-
-def git(*args):
-    return subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True, errors="replace").stdout
-
-
-def code(since):
-    out = git("log", f"--since={since:%Y-%m-%dT%H:%M:%SZ}", "--numstat", "--format=tformat:@@", "--", ".", ":!vendor", ":!Cargo.lock", ":!icons", ":!*.png", ":!*.svg")
-    commits = out.count("@@")
-    added = removed = 0
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) == 3 and parts[0].isdigit():
-            added, removed = added + int(parts[0]), removed + int(parts[1])
-    return commits, added, removed
-
-
-def survival(day):
-    """Of the lines committed on `day`, how many are still in main."""
-    out = git("log", f"--since={day:%Y-%m-%dT%H:%M:%SZ}", f"--until={day + dt.timedelta(days=1):%Y-%m-%dT%H:%M:%SZ}", "--numstat", "--format=", "--",
-              ".", ":!vendor", ":!Cargo.lock", ":!icons", ":!*.png", ":!*.svg")
-    added = sum(int(l.split("\t")[0]) for l in out.splitlines() if l.split("\t")[0].isdigit())
-    if not added:
-        return None
-    kept = 0
-    files = [f for f in git("ls-files").splitlines() if not re.search(r"^(vendor|icons)/|\.(png|svg|lock|jpg|ico)$", f)]
-    lo, hi = day.timestamp(), day.timestamp() + 86400
-    for f in files:
-        for line in git("blame", "--line-porcelain", "--", f).splitlines():
-            if line.startswith("committer-time "):
-                kept += lo <= int(line.split()[1]) < hi
-    return kept, added
+def commits(since):
+    return subprocess.run(["git", "-C", REPO, "rev-list", "--count", f"--since={since:%Y-%m-%dT%H:%M:%SZ}", "HEAD"], capture_output=True, text=True).stdout.strip()
 
 
 def hours(s):
@@ -195,26 +201,30 @@ def main():
 
     s = sessions(since)
     posts = memories(since)
-    bad = broken(posts)
-    friction = [p for p in posts if p[2].lower().startswith("friction:")]
-    commits, added, removed = code(since)
-    day = (now - dt.timedelta(days=3)).replace(hour=0, minute=0, second=0, microsecond=0)
-    kept = survival(day)
+    corrected = [p for p in posts if p[2].lower().startswith("correcting")]
+    friction = [p for p in posts if re.search(r"\bFriction\b[^:.]{0,12}:", p[2])]
     total = sum(s["split"].values()) or 1
 
-    lines = [f"# Iteration, {since:%Y-%m-%d %H:%M} to {now:%Y-%m-%d %H:%M} UTC", ""]
-    lines += [f"## Where agents' time went ({s['n']} sessions on this machine, {hours(total)})", ""]
+    lines = [f"# Iteration, {since:%Y-%m-%d %H:%M} to {now:%Y-%m-%d %H:%M} UTC: {commits(since)} commits to main", "",
+             f"Times and commands are Claude Code sessions on {os.uname().nodename} only: other machines and harnesses aren't in them.", ""]
+    lines += [f"## Where agents' time went ({s['n']} sessions, {hours(total)})", ""]
     lines += [f"- {k}: {hours(v)} ({100 * v / total:.0f}%)" for k, v in s["split"].most_common()]
-    lines.append(f"- steps: {s['steps']}, {s['steps'] // max(s['n'], 1)} a session; {s['errors']} of {s['calls']} tool calls failed ({100 * s['errors'] / max(s['calls'], 1):.0f}%); {s['bounced']} memories bounced as too long")
-    lines += ["", "Waiting, for:", ""] + [f"- {k}: {hours(v)}" for k, v in s["waits"].most_common()]
-    t = s["tests"]
-    lines += ["", "## Builds", "", f"- cargo test: {len(t)} runs, median {pct(t, .5) or 0:.0f}s, p90 {pct(t, .9) or 0:.0f}s",
-              f"- cargo build: {s['builds']}, {s['release']} of them release",
-              f"- load now: {open('/proc/loadavg').read().split()[0]} on {os.cpu_count()} cores"]
-    lines += ["", "## Code", "", f"- {commits} commits, +{added} −{removed}"]
-    if kept:
-        lines.append(f"- of {day:%b %d}'s {kept[1]} lines, {kept[0]} ({100 * kept[0] / kept[1]:.0f}%) are still in main")
-    lines += ["", f"## Broken, found after it went out ({len(bad)})", ""] + [f"- #{n} {text[:200]}" for n, _, text in bad]
+    lines += ["", f"Not counted: {hours(s['theirs'])} waiting on the user, {hours(s['cut'])} cut off when a session ended."]
+    if s["stuck"]:
+        lines += ["", "Also not counted, over an hour:", ""] + [f"- {hours(d)} {name}: {' '.join(what.split())[:120]}" for d, name, what in sorted(s["stuck"], reverse=True)]
+
+    edited = s["started"]
+    lines += ["", f"## From a session's start to its first push ({len(edited)} sessions that edited)", ""]
+    pushed = [x[2] for x in edited if x[2] is not None]
+    lines += [f"- first tool call to first edit: median {(pct([x[0] for x in edited], .5) or 0) / 60:.0f} min, {pct([x[1] for x in edited], .5) or 0} calls",
+              f"- first edit to first push: median {(pct(pushed, .5) or 0) / 60:.0f} min ({len(pushed)} pushed)",
+              f"- context at the first turn: median {pct([x[3] for x in edited], .5) or 0:,} tokens"]
+
+    slow = sorted(((k, v) for k, v in s["commands"].items() if len(v) >= 3 and pct(v, .9) >= 60), key=lambda kv: -sum(kv[1]))[:12]
+    lines += ["", "## Slowest commands, foreground and background", "", "| command | runs | median | p90 | total |", "| --- | ---: | ---: | ---: | ---: |"]
+    lines += [f"| {k} | {len(v)} | {pct(v, .5):.0f}s | {pct(v, .9):.0f}s | {hours(sum(v))} |" for k, v in slow]
+
+    lines += ["", f"## Reports corrected afterwards ({len(corrected)})", ""] + [f"- #{n} {text[:200]}" for n, _, text in corrected]
     lines += ["", f"## Friction ({len(friction)})", ""] + [f"- #{n} {text}" for n, _, text in friction]
     report = "\n".join(lines) + "\n"
 
