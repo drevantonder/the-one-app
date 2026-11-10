@@ -36,6 +36,31 @@ pub fn open_note(secret: [u8; 32], pushed: &str) -> Result<(one::push::Note, Opt
     one::push::open_note(&keys::seal_secret(&SigningKey::from_bytes(&secret)), &sealed).map_err(|_| failed("That note isn't this device's."))
 }
 
+/// A member of a network, as the key of one of their devices reads who's who: what lets another device in as them
+/// (`Device::admit_by_member`). A demo network's build publishes such a key.
+pub struct Member {
+    signing: SigningKey,
+    bucket: Signed,
+    reader: one::database::steps::Reader,
+    step_keys: std::collections::BTreeMap<u32, [u8; 32]>,
+    pub user: String,
+}
+
+impl Member {
+    /// Reads who's who at `address` as the device whose key is `secret`.
+    pub async fn read(address: &str, secret: [u8; 32]) -> Result<Member, Error> {
+        use one::database::steps;
+        let signing = SigningKey::from_bytes(&secret);
+        let key = signing.verifying_key().to_bytes();
+        let bucket = Signed::new(address.trim_end_matches('/').to_string(), secret);
+        let mut reader = steps::Reader::new(None);
+        let (_, step_keys) = steps::read_sealed_to(&bucket, &mut reader, &hex(&key), &keys::seal_secret(&signing), &mut None, now()).await.map_err(failed)?;
+        let machine = reader.truth().ok_or_else(|| failed(format!("{YOURS} hasn't been read yet.")))?.db.machine(&key).map_err(failed)?;
+        let user = machine.filter(|m| !m.removed).ok_or_else(|| failed("That device isn't in this network."))?.user;
+        Ok(Member { signing, bucket, reader, step_keys, user })
+    }
+}
+
 pub fn new_secret() -> [u8; 32] {
     rand::random()
 }
@@ -189,22 +214,72 @@ impl Device {
         join::ask(self, token, &asked).await
     }
 
+    /// Lets this device in as `member`'s user, signed by `member`, which then has no more to do with it: a device people
+    /// use, with what its user may use sealed to it.
+    pub async fn admit_by_member(&self, member: Member, name: &str) -> Result<(), Error> {
+        let mut epochs = Vec::new();
+        for scope in member.reader.truth().map(|t| t.db.may_scopes(&member.user, "use")).transpose().map_err(failed)?.unwrap_or_default() {
+            let at = scope.to_string();
+            let hashes = member.reader.truth().map(|t| t.db.epoch_hashes(&scope)).transpose().map_err(failed)?.unwrap_or_default();
+            for n in hashes.into_keys() {
+                let Some(sealed) = one::bucket::Bucket::get(&member.bucket, &keys::epoch_name(&at, n, &hex(&member.signing.verifying_key().to_bytes()))).await.map_err(failed)? else { continue };
+                let key = keys::open_sealed_by(&keys::seal_secret(&member.signing), &sealed.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok());
+                epochs.extend(key.map(|key| (at.clone(), n, key)));
+            }
+        }
+        let Member { signing, bucket, mut reader, step_keys, user } = member;
+        self.list(&signing, &bucket, &mut reader, &step_keys, &user, name, epochs).await
+    }
+
+    /// Lists this device as `user`'s, signed by `signing`, tells the relay, and seals it `epochs` (scope, epoch, key).
+    #[allow(clippy::too_many_arguments)]
+    async fn list(&self, signing: &SigningKey, bucket: &Signed, reader: &mut one::database::steps::Reader, step_keys: &std::collections::BTreeMap<u32, [u8; 32]>, user: &str, name: &str, epochs: Vec<(String, u32, [u8; 32])>) -> Result<(), Error> {
+        use one::database::scopes::Scope;
+        use one::database::{content, steps, stored};
+        let signer = std::sync::Arc::new(one::bucket::Signer::reading(self.address.clone(), signing.clone()));
+        let mut listing = content::device(&self.me, user, name, &[one::database::scopes::Kind::Client], None);
+        listing.data["platform"] = json!(PLATFORM);
+        let mut wrote = false;
+        for _ in 0..20 {
+            let at = reader.at() + 1;
+            let name_now = stored::step_name(&steps::prefix("global"), at);
+            let epoch = reader.truth().map(|t| t.db.epoch(&Scope::Global)).transpose().map_err(failed)?.unwrap_or(0);
+            let step = steps::sign(signing, &Scope::Global, at, user, epoch, now(), listing.clone()).map_err(failed)?;
+            let bytes = steps::seal(step_keys, &name_now, &steps::encode(&step, None)).map_err(failed)?;
+            if create(signer.clone(), name_now, bytes).await.map_err(failed)? {
+                wrote = true;
+                break;
+            }
+            reader.read(bucket, step_keys, now()).await.map_err(failed)?;
+        }
+        if !wrote {
+            return Err(failed("Who's who changed too often to write to: try again."));
+        }
+        let admin = reader.truth().is_some_and(|t| t.db.may(user, "invite", one::database::scopes::NETWORK));
+        let told = keys::signed_request_by(signing, one::protocol::RELAY, json!({ "add": self.key(), "role": "client", "admin": admin }), keys::next_at(now())).await.map_err(failed)?;
+        let (status, out) = http("POST", &format!("{}/relay/tell", self.address), None, Some(told)).await?;
+        if !(200..300).contains(&status) && out["code"] != one::protocol::code::ALREADY {
+            return Err(failed(error(&out).unwrap_or_else(|| format!("{YOURS}'s relay answered {status}."))));
+        }
+        for (scope, n, key) in epochs {
+            create(signer.clone(), keys::epoch_name(&scope, n, &self.key()), keys::seal_to(&self.me.seal, &key).map_err(failed)?).await.map_err(failed)?;
+        }
+        Ok(())
+    }
+
     /// Lets this device in with the network's recovery key (`recovery`, its secret), read from a file on this computer,
     /// when no device is left to say yes: it asks auth first (`ask`), which says whose it is, and then the recovery key
     /// signs it listed, as `database::rules` lets it for someone already in, each use an entry in the log. The recovery
     /// key does the rest, reaching the bucket and relay as itself, since this device can't yet: reads who's who as its
     /// own, seals this device each epoch it opens of what its user may use, and tells the relay to let it in.
     pub async fn admit_by_recovery(&self, recovery: &[u8; 32]) -> Result<(), Error> {
-        use one::bucket::Signer;
-        use one::database::scopes::Scope;
-        use one::database::{content, steps, stored};
+        use one::database::steps;
         let signing = SigningKey::from_bytes(recovery);
         let public = signing.verifying_key().to_bytes();
         let (secret, twin) = (keys::seal_secret(&signing), keys::twin_public(&public).map_err(failed)?);
         let bucket = Signed::new(self.address.clone(), *recovery);
         let mut reader = steps::Reader::new(None);
         let (_, step_keys) = steps::read_sealed_to(&bucket, &mut reader, "recovery", &secret, &mut None, now()).await.map_err(failed)?;
-        let signer = std::sync::Arc::new(Signer::reading(self.address.clone(), signing.clone()));
         let asked_at = format!("{}/api/auth/devices/requests", self.address);
         let asking = keys::signed_request_by(&signing, one::protocol::AUTH_DOMAIN, json!({ "route": "GET /api/auth/devices/requests" }), now()).await.map_err(failed)?;
         let (status, listed) = http("GET", &asked_at, Some((one::protocol::header::REQUEST, B64U.encode(&serde_json::to_vec(&asking).map_err(failed)?))), None).await?;
@@ -222,43 +297,19 @@ impl Device {
                 return Err(failed(format!("The recovery key lets in a device of someone already in {YOURS}.")));
             }
         }
-        let mut listing = content::device(&self.me, &user, &name, &[one::database::scopes::Kind::Client], None);
-        listing.data["platform"] = json!(PLATFORM);
-        let mut wrote = false;
-        for _ in 0..20 {
-            let at = reader.at() + 1;
-            let name_now = stored::step_name(&steps::prefix("global"), at);
-            let epoch = reader.truth().map(|t| t.db.epoch(&Scope::Global)).transpose().map_err(failed)?.unwrap_or(0);
-            let step = steps::sign(&signing, &Scope::Global, at, &user, epoch, now(), listing.clone()).map_err(failed)?;
-            let bytes = steps::seal(&step_keys, &name_now, &steps::encode(&step, None)).map_err(failed)?;
-            if create(signer.clone(), name_now, bytes).await.map_err(failed)? {
-                wrote = true;
-                break;
-            }
-            reader.read(&bucket, &step_keys, now()).await.map_err(failed)?;
-        }
-        if !wrote {
-            return Err(failed("Who's who changed too often to write to: try again."));
-        }
-        let admin = reader.truth().is_some_and(|t| t.db.may(&user, "invite", one::database::scopes::NETWORK));
-        let told = keys::signed_request_by(&signing, one::protocol::RELAY, json!({ "add": self.key(), "role": "client", "admin": admin }), keys::next_at(now())).await.map_err(failed)?;
-        let (status, out) = http("POST", &format!("{}/relay/tell", self.address), None, Some(told)).await?;
-        if !(200..300).contains(&status) && out["code"] != one::protocol::code::ALREADY {
-            return Err(failed(error(&out).unwrap_or_else(|| format!("{YOURS}'s relay answered {status}."))));
-        }
-        let scopes = reader.truth().map(|t| t.db.may_scopes(&user, "use")).transpose().map_err(failed)?.unwrap_or_default();
-        for scope in scopes {
-            let name = scope.to_string();
+        let mut epochs = Vec::new();
+        for scope in reader.truth().map(|t| t.db.may_scopes(&user, "use")).transpose().map_err(failed)?.unwrap_or_default() {
+            let at = scope.to_string();
             let hashes = reader.truth().map(|t| t.db.epoch_hashes(&scope)).transpose().map_err(failed)?.unwrap_or_default();
             for (n, hash) in hashes {
                 let mut kept = Vec::new();
-                for at in keys::recovery_epoch_names(&name, n, &twin) {
-                    kept.extend(one::bucket::Bucket::get(&bucket, &at).await.map_err(failed)?.map(|o| o.bytes));
+                for name in keys::recovery_epoch_names(&at, n, &twin) {
+                    kept.extend(one::bucket::Bucket::get(&bucket, &name).await.map_err(failed)?.map(|o| o.bytes));
                 }
-                let Some(key) = keys::opened_recovery_epoch(&secret, &hash, &kept) else { continue };
-                create(signer.clone(), keys::epoch_name(&name, n, &self.key()), keys::seal_to(&self.me.seal, &key).map_err(failed)?).await.map_err(failed)?;
+                epochs.extend(keys::opened_recovery_epoch(&secret, &hash, &kept).map(|key| (at.clone(), n, key)));
             }
         }
+        self.list(&signing, &bucket, &mut reader, &step_keys, &user, &name, epochs).await?;
         // Its request, answered as its own: nothing else will, as nothing else let it in.
         let path = format!("/api/auth/devices/requests/{}", self.key());
         let root = reader.root().map(|r| r.to_hex().to_string()).unwrap_or_default();

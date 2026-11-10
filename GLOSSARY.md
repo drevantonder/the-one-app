@@ -8,6 +8,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Network**: one user's or one workplace's whole: its users, their devices and nodes, their apps, its bucket, and
   the pieces at its address on Cloudflare. A key belongs to one network forever, and networks never talk to each other.
   Users see "your One App network", or a custom build's, "the PTC App network". Avoid: install.
+- **Demo network**: an ordinary network whose member's device key a build publishes, so a store's reviewer can get in
+  with Try a Demo. Everyone in it is the same user, and sees what the others entered.
 - **Custom build**: this code built with its own `config.toml`, the only place the product is named (The One App, The
   PTC App). It usually serves one workplace's network, but can serve many. Avoid: white label.
 - **Throwaway network**: what `one-dev throwaway` makes from your checkout's build: a network on your machine, with its own

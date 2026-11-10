@@ -191,9 +191,12 @@ export function app(native) {
       about = await native.about();
     },
     /// The sign-in screen (`props`, @one/ui's Welcome's); but first, where: an address, or an invite link to one.
-    welcome(props) {
+    welcome(shown) {
+      const again = (problem, note) => show(platform.welcome({ ...shown, problem, note }));
+      // Visible on purpose: a store's reviewer has to find it, and Apple rejects hidden ways in.
+      const demo = about.demo ? { label: "Try a Demo", run: () => native.demo().then(() => location.reload(), (err) => again(err.message)) } : undefined;
+      const props = demo ? { ...shown, other: demo, note: shown.note ?? "Anyone trying the demo can see what's entered in it." } : shown;
       if (about.address) return h(ui.Welcome, props);
-      const again = (problem, note) => show(platform.welcome({ ...props, problem, note }));
       const take = async (typed) => {
         try {
           await native.address(typed);
@@ -207,7 +210,7 @@ export function app(native) {
       };
       const field = { label: "Address", placeholder: "one.example.com" };
       // A Mac whose own node is in no network yet joins one with a pairing code.
-      const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing(() => again()) } : undefined;
+      const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing(() => again()) } : props.other;
       return h(ui.Welcome, { ...props, field, action: { label: "Sign In", invite: "Open Invite", run: take }, other });
     },
 

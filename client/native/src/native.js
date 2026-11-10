@@ -68,6 +68,7 @@
     /// What the user typed, an address or an invite link → the address.
     address: (typed) => invoke("address", { typed }),
     signIn: () => invoke("sign_in"),
+    demo: () => invoke("demo"),
     /// → `{ in: true }`, or `{ code, invited }` to show while `wait` waits.
     join: () => invoke("join"),
     wait: () => invoke("wait"),

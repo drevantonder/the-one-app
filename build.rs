@@ -67,6 +67,8 @@ fn main() {
     let out = format!("{out}pub const YOURS: &str = {yours:?};\n");
     // A custom build's one network's address, if it serves only one: its native app never asks where.
     let out = format!("{out}pub const ADDRESS: &str = {:?};\n", optional("address").trim_end_matches('/'));
+    // A demo network's address and one member's device key, public, for a store's reviewer: `<address>#<key>`.
+    let out = format!("{out}pub const DEMO: &str = {:?};\n", optional("demo"));
     // The Mac's menu bar mark, its @2x, which the native app's build draws its menu bar item with.
     let menubar = std::path::Path::new(&path).parent().unwrap().join(optional("menubar").replace(".png", "@2x.png"));
     println!("cargo:rerun-if-changed={}", menubar.display());

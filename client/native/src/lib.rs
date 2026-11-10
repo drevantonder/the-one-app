@@ -106,7 +106,14 @@ fn kept_in(data: &std::path::Path, name: &str) -> Option<String> {
 
 /// The network's address: `ADDRESS` for a test, the custom build's if it has one, else as the user gave it.
 fn address_in(data: &std::path::Path) -> Option<String> {
-    env("ADDRESS").or_else(|| Some(one::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| kept_in(data, "address")).map(|a| a.trim_end_matches('/').to_string())
+    env("ADDRESS").or_else(|| kept_in(data, "demo")).or_else(|| Some(one::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| kept_in(data, "address")).map(|a| a.trim_end_matches('/').to_string())
+}
+
+/// This build's demo network: its address and a member's device key (`DEMO` for a test).
+fn demo_network() -> Option<(String, [u8; 32])> {
+    let demo = env("DEMO").or_else(|| Some(one::config::DEMO.to_string()).filter(|d| !d.is_empty()))?;
+    let (address, key) = demo.split_once('#')?;
+    Some((address.trim_end_matches('/').to_string(), one::keys::unhex(key).ok()?))
 }
 
 /// This device's client for `id` (`<address> <user>`), its folder in `data` named by it.
@@ -271,7 +278,7 @@ fn subject(token: &str) -> Result<String, Failure> {
 /// Whether someone's signed in here.
 fn signed_in() -> bool {
     let a = app();
-    a.address().is_some() && a.sign_in().is_ok_and(|s| s.signed_in())
+    a.address().is_some() && (a.kept("demo").is_some() || a.sign_in().is_ok_and(|s| s.signed_in()))
 }
 
 /// Who and where this is: the custom build's name and CLI, the address (if one's given), whether someone's signed in
@@ -289,6 +296,7 @@ fn native() -> Value {
     platform::menus(signed_in, unpaired);
     json!({
         "name": one::config::NAME, "yours": one::config::YOURS, "cli": one::config::CLI, "platform": label(), "device": device_name(), "client": platform::CLIENT,
+        "demo": demo_network().is_some(),
         "address": address, "signedIn": signed_in, "user": if signed_in { a.kept("user") } else { None },
         "opened": opened,
         // This computer's own node, where one runs here: "This device" in the panel.
@@ -337,6 +345,21 @@ fn address_of(typed: &str) -> Result<String, String> {
     a.keep("invite", invite.as_deref());
     platform::claim(a.address());
     Ok(origin)
+}
+
+/// Goes into this build's demo network as a device of its own, let in once by the member's key the build publishes.
+#[tauri::command]
+async fn demo() -> Result<(), Failure> {
+    let a = app();
+    let (address, key) = demo_network().ok_or("This app has no demo.")?;
+    let member = one_client::Member::read(&address, key).await.map_err(|e| e.to_string())?;
+    let user = member.user.clone();
+    let id = format!("{address} {user}");
+    let device = client(&a.data, &address, &id, secrets::device_made(&id)?);
+    device.admit_by_member(member, &join_name()).await.map_err(|e| e.to_string())?;
+    a.keep("user", Some(&user));
+    a.keep("demo", Some(&address));
+    Ok(())
 }
 
 /// Signs in, in the system's browser, which comes back to this device; naming the device it's for, so the user's
@@ -391,8 +414,10 @@ fn browser_goes_on(code: Option<&str>) {
 async fn join_here() -> Result<Value, Failure> {
     let a = app();
     let address = a.address().ok_or("Enter your address first.")?;
-    let token = token().await?;
-    let user = subject(&token)?;
+    let user = match a.kept("demo") {
+        Some(_) => a.kept("user").ok_or("Signed out.")?,
+        None => subject(&token().await?)?,
+    };
     a.keep("user", Some(&user));
     // One key for each user at each address, as the Mac and iPhone apps keep them, its folder named by it too.
     let id = format!("{address} {user}");
@@ -427,6 +452,7 @@ async fn join_here() -> Result<Value, Failure> {
         Err(e) if e.not_let_in => {}
         Err(e) => return Err(e.to_string().into()),
     }
+    let token = token().await?;
     let invite = a.kept("invite");
     let invited = device.ask(&token, &join_name(), invite.as_deref()).await.map_err(|e| e.to_string())?;
     println!("Code: {}", device.code());
@@ -672,6 +698,7 @@ async fn sign_out() -> Result<(), String> {
         secrets::forget_device(&format!("{address} {user}"));
     }
     a.keep("user", None);
+    a.keep("demo", None);
     widgets::forget(&platform::widgets_dir());
     platform::redraw_widgets();
     badge(0);
