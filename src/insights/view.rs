@@ -147,7 +147,7 @@ fn errors(rows: &Value, status: &str, since: u64, now: u64, limit: usize) -> Opt
     Some(format!("{}:\n{lines}", if status == ERROR { "Top errors" } else { "Not errors" }))
 }
 
-fn since_said(since: u64, now: u64) -> String {
+pub fn since_said(since: u64, now: u64) -> String {
     format!("the last {}", ago(now, since).trim_end_matches(" ago").replace("just now", "moment"))
 }
 

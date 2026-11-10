@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 
 use crate::protocol::code;
 
+pub mod cost;
 pub mod message;
 pub mod source_map;
 pub mod tools;

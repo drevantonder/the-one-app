@@ -16,7 +16,7 @@ struct Formats {
 impl Formats {
     fn start() -> Self {
         let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("cloudflare");
-        let mut files: Vec<(String, Vec<u8>)> = ["shared/crypto.js", "shared/token.js", "shared/http.js", "telemetry/worker.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap())).to_vec();
+        let mut files: Vec<(String, Vec<u8>)> = ["shared/crypto.js", "shared/token.js", "shared/http.js", "telemetry/worker.js", "telemetry/usage.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap())).to_vec();
         files.push(("screen/agents.js".into(), std::fs::read(root.join("../src/screen/settings/agents.js")).unwrap()));
         let dir = crate::temp("formats");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1098,6 +1098,41 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     assert_eq!((program[0].name.as_str(), program[0].ms, program[0].ok, program[0].status_code), ("span", 500, false, Some(500)), "the same span reads the same on a device");
     let named: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryExceptions" }))).unwrap();
     assert!(named.iter().all(|n| one::insights::exception_type(n) == n) && one::insights::exception_type("Nope") == "Error", "a Worker's exception is named as a program's is: {named:?}");
+}
+
+/// What the network uses of Cloudflare is asked of its analytics by its own resources alone, grouped by nothing that's
+/// about a request, and recorded as the service only an admin reads; and every price is of a metric that's recorded.
+#[test]
+fn cloudflare_usage_is_only_the_networks_and_priced() {
+    let formats = Formats::start();
+    let usage = json!({ "account": "a", "scripts": { "one-gateway": "one-gateway" }, "buckets": { "b": "b" }, "namespaces": { "n1": "one-relay_Relay" }, "pipelines": { "p1": "one_spans_pipeline" }, "warehouses": { "a_b": "b" } });
+    let groups = |dimensions: Value, sum: Value| json!({ "dimensions": dimensions, "sum": sum, "max": { "payloadSize": 7, "metadataSize": 1 }, "count": 4 });
+    let answer = json!({
+        "workersInvocationsAdaptive": [groups(json!({ "scriptName": "one-gateway" }), json!({ "requests": 3, "cpuTimeUs": 2000 })), groups(json!({ "scriptName": "someone-elses" }), json!({ "requests": 9, "cpuTimeUs": 9 }))],
+        "r2OperationsAdaptiveGroups": [groups(json!({ "bucketName": "b", "actionType": "GetObject" }), json!({ "requests": 5 })), groups(json!({ "bucketName": "b", "actionType": "PutObject" }), json!({ "requests": 2 }))],
+        "r2StorageAdaptiveGroups": [groups(json!({ "bucketName": "b" }), json!({}))],
+        "durableObjectsInvocationsAdaptiveGroups": [groups(json!({ "namespaceId": "n1", "type": "hibernation" }), json!({ "requests": 6 }))],
+        "durableObjectsPeriodicGroups": [groups(json!({ "namespaceId": "n1" }), json!({ "activeTime": 2_000_000 }))],
+        "pipelinesOperatorAdaptiveGroups": [groups(json!({ "pipelineId": "p1" }), json!({ "bytesIn": 10 }))],
+        "pipelinesSinkAdaptiveGroups": [groups(json!({ "pipelineId": "p1" }), json!({ "uncompressedBytesWritten": 8 }))],
+        "r2sqlOperationsAdaptiveGroups": [groups(json!({ "bucket": "b" }), json!({ "r2BytesRead": 30 }))],
+        "r2CatalogDataOperationsAdaptiveGroups": [groups(json!({ "warehouseName": "a_b" }), json!({}))],
+    });
+    let said = formats.js(json!({ "op": "telemetryUsage", "usage": usage, "answer": answer }));
+    let query = said["query"].as_str().unwrap();
+    let resources = ["scriptName", "bucketName", "actionType", "namespaceId", "type", "pipelineId", "bucket", "warehouseName"];
+    for grouped in query.split("dimensions { ").skip(1).flat_map(|d| d.split(" }").next().unwrap().split_whitespace()) {
+        assert!(resources.contains(&grouped), "usage is grouped by the network's resources alone, never {grouped}");
+    }
+    assert!(query.contains(r#"scriptName_in: ["one-gateway"]"#) && query.contains(r#"namespaceId_in: ["n1"]"#), "only the network's own: {query}");
+    let rows = said["rows"].as_array().unwrap();
+    assert!(rows.iter().all(|r| r["service"] == one::insights::cost::CLOUDFLARE && !r.to_string().contains("someone-elses")), "{rows:?}");
+    let attrs = |r: &Value| serde_json::from_str::<Value>(r["attrs"].as_str().unwrap()).unwrap();
+    for price in one::insights::cost::PRICES {
+        assert!(rows.iter().any(|r| r["name"] == price.metric && (price.counts)(&attrs(r)) > 0.0), "{} is priced as nothing that's recorded", price.metric);
+    }
+    let cpu = rows.iter().find(|r| r["name"] == "cloudflare.workers.cpu_time").unwrap();
+    assert_eq!((cpu["sum"].as_f64(), cpu["unit"].as_str(), attrs(cpu)), (Some(2.0), Some("ms"), json!({ "cloudflare.product": "workers", "cloudflare.resource": "one-gateway" })));
 }
 
 /// The body a device sends `POST /relay/computes`, what it's answered, and the signed ask it hears are frozen, as the

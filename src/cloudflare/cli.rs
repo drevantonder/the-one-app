@@ -45,7 +45,7 @@ fn at_home(settings: &mut crate::cloudflare::Settings) -> Result<()> {
 fn put_up(cf: &crate::cloudflare::Cloudflare, settings: &mut crate::cloudflare::Settings, newest: crate::cloudflare::Newest) -> Result<()> {
     // Setting up Basin needs more of the Cloudflare account than a deploy token has, and is done once: a network whose token
     // can't yet still gets its Workers.
-    if settings.telemetry.is_none() {
+    if settings.telemetry.as_ref().is_none_or(|t| t.pipelines.is_empty()) {
         if let Err(err) = crate::cloudflare::basin::provision(cf, settings) {
             eprintln!("Insights won't have data until this is done, by a deploy with a token that may: {err:#}");
         }
@@ -53,12 +53,25 @@ fn put_up(cf: &crate::cloudflare::Cloudflare, settings: &mut crate::cloudflare::
     if let Err(err) = crate::cloudflare::basin::traces(cf, settings) {
         eprintln!("The Workers' own traces won't reach Insights until this is done, by a deploy with a token that may: {err:#}");
     }
+    let usage = |settings: &mut crate::cloudflare::Settings| {
+        if let Err(err) = crate::cloudflare::basin::usage(cf, settings) {
+            eprintln!("Insights won't show what the network uses of Cloudflare until this is done, by a deploy with a token that may: {err:#}");
+        }
+    };
+    usage(settings);
     settings.deployed = Some(newest.deployed(settings));
     let mut web = settings.web_with(newest.web);
     web.extend(crate::cloudflare::precompressed(&web)?);
     crate::cloudflare::deploy(cf, settings, &newest.workers, &web)?;
     if settings.cloudflare_node {
         crate::cloudflare::node::deploy(cf, settings, &newest.workers)?;
+    }
+    // A Durable Object class deployed for the first time just now has made its namespace.
+    if let Some(before) = settings.usage.clone() {
+        usage(settings);
+        if settings.usage.as_ref() != Some(&before) {
+            crate::cloudflare::deploy_some(cf, settings, &newest.workers, &web, &[crate::cloudflare::Worker::named("telemetry")])?;
+        }
     }
     Ok(())
 }

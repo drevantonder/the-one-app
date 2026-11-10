@@ -33,6 +33,8 @@ pub struct Worker {
     /// Whether it reads the network's bucket itself.
     pub reads_bucket: bool,
     bindings: fn(&Settings) -> Vec<Binding>,
+    /// When Cloudflare runs it besides, as a cron expression (its `scheduled`): only there, never on one machine.
+    cron: Option<&'static str>,
 }
 
 /// The network's Workers, in the order they're deployed.
@@ -40,18 +42,18 @@ pub struct Worker {
 /// Auth's Durable Object `Auth` holds every user's passkeys and accounts. The paths under `/api/auth` name the
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer, so they never change.
 pub const WORKERS: &[Worker] = &[
-    Worker { name: "auth", entry: "auth/worker.js", class: Some("Auth"), place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings },
-    Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings },
-    Worker { name: "signer", entry: "signer/worker.js", class: None, place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings },
-    Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), place: None, own_address: false, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings },
-    Worker { name: "telemetry", entry: "telemetry/worker.js", class: None, place: None, own_address: true, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings },
-    Worker { name: "gateway", entry: "gateway/worker.js", class: None, place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings },
-    Worker { name: "push", entry: "push/worker.js", class: Some("Push"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings },
+    Worker { name: "auth", entry: "auth/worker.js", class: Some("Auth"), place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings, cron: None },
+    Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings, cron: None },
+    Worker { name: "signer", entry: "signer/worker.js", class: None, place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings, cron: None },
+    Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), place: None, own_address: false, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings, cron: None },
+    Worker { name: "telemetry", entry: "telemetry/worker.js", class: None, place: None, own_address: true, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *") },
+    Worker { name: "gateway", entry: "gateway/worker.js", class: None, place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None },
+    Worker { name: "push", entry: "push/worker.js", class: Some("Push"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings, cron: None },
 ];
 
 /// The Cloudflare node's Worker (`cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
 /// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
-pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
+pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings, cron: None };
 
 /// The Workers traced at 100% (`metadata`): those that open nothing but the telemetry Worker. The web client is the gateway's assets.
 const TRACED: [&str; 5] = crate::insights::TRACED;
@@ -224,6 +226,14 @@ pub struct Settings {
     /// What Cloudflare sends those traces with, which the telemetry Worker checks: its export can't sign.
     #[serde(default, skip_serializing)]
     pub otlp_token: Option<String>,
+    /// The token only for reading the account's analytics, made by a deploy (`basin::usage`), which the telemetry Worker
+    /// reads what the network uses of Cloudflare with.
+    #[serde(default, skip_serializing)]
+    pub analytics_token: Option<String>,
+    /// What of the Cloudflare account is the network's, as a deploy found it (`basin::usage`), for the telemetry Worker to
+    /// read the usage of.
+    #[serde(skip)]
+    pub usage: Option<Value>,
     /// What the relay says of the Workers (`Newest::deployed`), set by whatever deploys or serves them, so Devices can show
     /// what they're on.
     #[serde(skip)]
@@ -253,6 +263,10 @@ TELEMETRY_TOKEN=
 # What Cloudflare's export of the Workers' traces is let in by, made by cloudflare deploy.
 # @optional
 OTLP_TOKEN=
+# The token only for reading the account's analytics, made by cloudflare deploy, which the telemetry Worker reads the
+# network's usage of Cloudflare with.
+# @optional
+ANALYTICS_TOKEN=
 # The Cloudflare node's endpoint key, made by cloudflare node deploy.
 # @optional
 CLOUDFLARE_NODE_KEY=
@@ -422,6 +436,7 @@ impl Settings {
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
         settings.telemetry_token = get("TELEMETRY_TOKEN");
         settings.otlp_token = get("OTLP_TOKEN");
+        settings.analytics_token = get("ANALYTICS_TOKEN");
         settings.cloudflare_node_key = get("CLOUDFLARE_NODE_KEY").unwrap_or_default();
         settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
         if settings.throwaway_user.is_none() {
@@ -487,6 +502,8 @@ impl Settings {
             telemetry_token: None,
             traces: None,
             otlp_token: None,
+            analytics_token: None,
+            usage: None,
             home: None,
             deployed: None,
             dir: crate::home(),
@@ -625,6 +642,10 @@ fn telemetry_bindings(settings: &Settings) -> Vec<Binding> {
             let mut bound: Vec<Binding> = [("SPANS", "spans"), ("LOGS", "logs"), ("METRICS", "metrics")].iter().map(|(binding, table)| plain(binding, format!("pipeline:{}", telemetry.streams.get(*table).map_or("", String::as_str)))).collect();
             bound.push(plain("SQL", telemetry.sql()));
             bound.push(secret("SQL_TOKEN", settings.telemetry_token.clone().unwrap_or_default()));
+            if let (Some(token), Some(usage)) = (&settings.analytics_token, &settings.usage) {
+                bound.push(secret("ANALYTICS_TOKEN", token.clone()));
+                bound.push(plain("USAGE", usage.to_string()));
+            }
             bound
         }
         None => vec![plain("SPANS", format!("service:{STAND_IN}:Spans")), plain("LOGS", format!("service:{STAND_IN}:Logs")), plain("METRICS", format!("service:{STAND_IN}:Metrics")), plain("SQL", format!("http://{STAND_IN}/")), plain("SQL_TOKEN", "stand-in")],
@@ -1354,6 +1375,12 @@ impl Cloudflare {
         Ok(token)
     }
 
+    /// Runs a Worker at `cron` besides, or only when asked.
+    pub(crate) fn schedule(&self, name: &str, cron: Option<&str>) -> Result<()> {
+        self.send("PUT", &format!("/accounts/{}/workers/scripts/{name}/schedules", self.account), json!(cron.iter().map(|c| json!({ "cron": c })).collect::<Vec<_>>()))?;
+        Ok(())
+    }
+
     /// Gives a Worker its workers.dev address alone.
     pub(crate) fn expose(&self, name: &str) -> Result<()> {
         self.send("POST", &format!("/accounts/{}/workers/scripts/{name}/subdomain", self.account), json!({ "enabled": true, "previews_enabled": false }))?;
@@ -1489,11 +1516,14 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &
                 what.extend(web.iter().flat_map(|(path, bytes)| [path.as_bytes().to_vec(), bytes.clone()]));
             }
             let what = upload_hash(&what);
-            // Its address may have been changed by hand; one with none is reached only by binding.
-            let reach = || match url {
-                Some(url) => cf.reach(&name, url),
-                None if worker.own_address => cf.expose(&name),
-                None => cf.hide(&name),
+            // Its address may have been changed by hand; one with none is reached only by binding. So may its schedule.
+            let reach = || -> Result<()> {
+                match url {
+                    Some(url) => cf.reach(&name, url)?,
+                    None if worker.own_address => cf.expose(&name)?,
+                    None => cf.hide(&name)?,
+                }
+                cf.schedule(&name, worker.cron)
             };
             if complete && scripts.contains_key(&name) && cf.runs(&name, &what)? {
                 reach()?;

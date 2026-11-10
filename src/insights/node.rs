@@ -598,6 +598,7 @@ impl Node {
             if admin {
                 seen.push(insights::own().to_string());
                 seen.extend(insights::WORKERS.iter().map(|w| insights::worker_service(w)));
+                seen.push(insights::cost::CLOUDFLARE.to_string());
             }
             Ok((seen, admin))
         })?;

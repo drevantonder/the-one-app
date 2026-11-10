@@ -39,6 +39,9 @@ pub struct Telemetry {
     pub bucket: String,
     /// Each table's stream id, which the Worker's binding names.
     pub streams: BTreeMap<String, String>,
+    /// Each pipeline's name by its id, which Cloudflare's analytics name it by: a deploy's token may not list them.
+    #[serde(default)]
+    pub pipelines: BTreeMap<String, String>,
 }
 
 impl Telemetry {
@@ -81,15 +84,49 @@ pub fn provision(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
         };
         cf.post(&format!("{catalog}/credential"), json!({ "token": token }))?;
         cf.post(&format!("{catalog}/maintenance-configs"), json!({ "compaction": { "state": "enabled", "target_size_mb": "128" }, "snapshot_expiration": { "state": "enabled", "max_snapshot_age": "1d", "min_snapshots_to_keep": 5 } }))?;
-        let mut streams = BTreeMap::new();
+        let (mut streams, mut pipelines) = (BTreeMap::new(), BTreeMap::new());
         for (table, columns) in TABLES {
-            streams.insert(table.to_string(), pipeline(cf, &account, &bucket, &token, table, columns)?);
+            let (stream, id) = pipeline(cf, &account, &bucket, &token, table, columns)?;
+            streams.insert(table.to_string(), stream);
+            pipelines.insert(id, named(table, "pipeline"));
         }
-        Ok(streams)
+        Ok((streams, pipelines))
     })();
-    let streams = provisioned.with_context(|| format!("setting up telemetry in Basin, which needs a Cloudflare API token with {NEEDS}"))?;
-    settings.telemetry = Some(Telemetry { account, bucket, streams });
+    let (streams, pipelines) = provisioned.with_context(|| format!("setting up telemetry in Basin, which needs a Cloudflare API token with {NEEDS}"))?;
+    settings.telemetry = Some(Telemetry { account, bucket, streams, pipelines });
     settings.save()
+}
+
+/// The Cloudflare permission group of the token the telemetry Worker reads the account's analytics with, and nothing else:
+/// "Account Analytics Read".
+const ANALYTICS_PERMISSIONS: [&str; 1] = ["b89a480218d04ceb98b4fe57ca29dc1f"];
+
+/// What of the Cloudflare account is the network's (`settings.usage`), each as Cloudflare's analytics filter it, to what
+/// it's called: its Workers, buckets, Durable Object namespaces, pipelines and Basin's catalog, which the telemetry Worker
+/// reads the hourly usage of (cloudflare/telemetry/usage.js). The token it reads with is made the first time, which a
+/// deploy's token may not, and kept beside the Workers' secrets.
+pub fn usage(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
+    let telemetry = settings.telemetry.clone().context("telemetry isn't in Basin yet")?;
+    if settings.analytics_token.is_none() {
+        let policies = json!([{ "effect": "allow", "resources": { format!("com.cloudflare.api.account.{}", cf.account): "*" }, "permission_groups": ANALYTICS_PERMISSIONS.iter().map(|id| json!({ "id": id })).collect::<Vec<_>>() }]);
+        let made = cf.post(&format!("/accounts/{}/tokens", cf.account), json!({ "name": format!("{}-usage", crate::config::CLI), "policies": policies })).context("making the token the telemetry Worker reads the account's analytics with, which needs a Cloudflare API token with Account API Tokens Write")?;
+        let token = made["value"].as_str().context("Cloudflare made the token and didn't give its value")?.to_string();
+        settings.set_secret("ANALYTICS_TOKEN", &token)?;
+        settings.analytics_token = Some(token);
+    }
+    let named = |names: Vec<String>| names.into_iter().map(|n| (n.clone(), n)).collect::<BTreeMap<_, _>>();
+    let scripts: Vec<String> = super::WORKERS.iter().chain(settings.cloudflare_node.then_some(&super::NODE)).map(|w| w.worker_name()).collect();
+    let namespaces: BTreeMap<String, String> = cf.list(&format!("/accounts/{}/workers/durable_objects/namespaces", cf.account))?.iter().filter(|n| n["script"].as_str().is_some_and(|s| scripts.iter().any(|w| w == s))).filter_map(|n| Some((n["id"].as_str()?.to_string(), n["name"].as_str()?.to_string()))).collect();
+    let buckets: Vec<String> = [Some(telemetry.bucket.clone()), settings.bucket.as_ref().and_then(|b| b["bucket"].as_str()).map(str::to_string)].into_iter().flatten().collect();
+    settings.usage = Some(json!({
+        "account": cf.account,
+        "scripts": named(scripts),
+        "buckets": named(buckets),
+        "namespaces": namespaces,
+        "pipelines": telemetry.pipelines,
+        "warehouses": { format!("{}_{}", cf.account, telemetry.bucket): telemetry.bucket },
+    }));
+    Ok(())
 }
 
 /// The name of Cloudflare's destination for the Workers' own traces.
@@ -139,8 +176,8 @@ fn worker_token(cf: &Cloudflare, account: &str, bucket: &str) -> Result<String> 
     Ok(made["value"].as_str().context("Cloudflare made the token and didn't give its value")?.to_string())
 }
 
-/// `table`'s stream, sink and pipeline, those that aren't there made: → the stream's id.
-fn pipeline(cf: &Cloudflare, account: &str, bucket: &str, token: &str, table: &str, columns: &[Column]) -> Result<String> {
+/// `table`'s stream, sink and pipeline, those that aren't there made: → the stream's id and the pipeline's.
+fn pipeline(cf: &Cloudflare, account: &str, bucket: &str, token: &str, table: &str, columns: &[Column]) -> Result<(String, String)> {
     let base = format!("/accounts/{account}/pipelines/v1");
     let existing = |kind: &str, name: &str| -> Result<Option<String>> {
         let list = cf.list(&format!("{base}/{kind}"))?;
@@ -157,9 +194,10 @@ fn pipeline(cf: &Cloudflare, account: &str, bucket: &str, token: &str, table: &s
     if existing("sinks", &sink)?.is_none() {
         cf.post(&format!("{base}/sinks"), json!({ "name": sink, "type": "basin_catalog", "format": { "type": "parquet", "compression": "zstd" }, "schema": { "fields": fields(columns) }, "config": { "account_id": account, "bucket": bucket, "namespace": NAMESPACE, "table_name": table, "token": token, "rolling_policy": { "interval_seconds": ROLL_SECONDS } } }))?;
     }
-    if existing("pipelines", &pipeline)?.is_none() {
-        cf.post(&format!("{base}/pipelines"), json!({ "name": pipeline, "sql": format!("INSERT INTO {sink} SELECT * FROM {stream}") }))?;
-    }
+    let made = match existing("pipelines", &pipeline)? {
+        Some(made) => made,
+        None => cf.post(&format!("{base}/pipelines"), json!({ "name": pipeline, "sql": format!("INSERT INTO {sink} SELECT * FROM {stream}") }))?["id"].as_str().context("Cloudflare made the pipeline and didn't give its id")?.to_string(),
+    };
     ensure!(!id.is_empty(), "Cloudflare gave {stream} no id");
-    Ok(id)
+    Ok((id, made))
 }

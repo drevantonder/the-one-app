@@ -10,6 +10,7 @@
 //   POST /telemetry/otlp  Cloudflare's export of the Workers' own traces (`otlp`), gzipped or not → 204
 //   POST /telemetry/read  { queries: [name], since, services, service?, name?, status?, trace?, least?, limit?, at, by, sig }
 //                         → { <name>: [row] }
+//   hourly                each of `SOURCES`' metric rows of the hour before
 //
 // Each is a request signed by a key on the relay's list (`one/telemetry`). A row that isn't what its table holds is left
 // out here, as Basin would take it and drop it in silence. A read runs only `QUERIES`, each value a number or a token
@@ -17,6 +18,7 @@
 import { checkRequest, rolesOf } from "../shared/crypto.js";
 import { Refused, answer, refusal, refuse, textOf } from "../shared/http.js";
 import { TELEMETRY } from "../shared/protocol.js";
+import { cloudflareUsage } from "./usage.js";
 
 /// What Basin's own limit on a request (5 MB) leaves room for.
 const MOST_BYTES = 4 << 20;
@@ -414,6 +416,26 @@ async function read(request, env) {
   return Response.json(Object.fromEntries(results.flatMap((r) => (typeof r[0] === "string" ? [r] : r))));
 }
 
+/// What's recorded of the world outside the network, each a function of the hour it's run in that gives metric rows.
+const SOURCES = { cloudflare: cloudflareUsage };
+
+/// Each source's rows, and a log of how many each gave or that it failed, which is how it's seen to run.
+async function hourly(env, at) {
+  await Promise.all(Object.entries(SOURCES).map(async ([source, rowsOf]) => {
+    let attrs;
+    try {
+      const rows = (await rowsOf(env, at, NOBODY)).filter((row) => kept(row, TABLES.metrics, NOBODY, false)).slice(0, MOST_ROWS);
+      if (rows.length) await env.METRICS.send(rows);
+      attrs = { "one.source": source, "one.result": "read", "one.found": rows.length };
+    } catch (err) {
+      console.error(err.stack || err);
+      attrs = { "one.source": source, "one.result": "failed" };
+    }
+    const failed = attrs["one.result"] === "failed";
+    await env.LOGS.send([{ time: Date.now(), severity_number: failed ? 17 : 9, severity_text: failed ? "ERROR" : "INFO", body: "telemetry.source", service: "worker.telemetry", instance: NOBODY, attrs: JSON.stringify(attrs) }]);
+  }));
+}
+
 const ROUTES = { "/telemetry/write": write, "/telemetry/read": read, [OTLP_PATH]: otlp };
 
 export default {
@@ -429,5 +451,8 @@ export default {
       console.error(err.stack || err);
       return refusal(500, "telemetry failed");
     }
+  },
+  async scheduled(event, env) {
+    await hourly(env, event.scheduledTime);
   },
 };
