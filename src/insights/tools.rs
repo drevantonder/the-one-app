@@ -20,12 +20,14 @@ pub fn feature() -> Feature {
                     "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d" },
                     "status": { "type": "string", "enum": ["ok", "error"], "description": "only these signals; only rollups with errors if error" },
                     "fault": { "type": "string", "enum": ["caller", "internal"] },
-                    "limit": { "type": "integer", "description": "how many of the newest signals to give, at most 500" },
+                    "limit": { "type": "integer", "description": "how many of the newest signals to give, at most 2000" },
                 } },
-                "output": { "type": "object", "required": ["signals", "rollups", "fingerprints"], "properties": {
+                "output": { "type": "object", "required": ["signals", "rollups", "fingerprints", "more_signals", "more_rollups"], "properties": {
                     "signals": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
                     "rollups": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
                     "fingerprints": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+                    "more_signals": { "type": "boolean", "description": "whether older signals were left out" },
+                    "more_rollups": { "type": "boolean", "description": "whether older rollups were left out" },
                 } },
             }),
             serves!(serve::insights),

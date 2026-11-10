@@ -1,326 +1,1353 @@
 <meta name="@one/ui">
 <style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
-@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-pan-x:initial;--tw-pan-y:initial;--tw-pinch-zoom:initial;--tw-border-style:solid;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-ordinal:initial;--tw-slashed-zero:initial;--tw-numeric-figure:initial;--tw-numeric-spacing:initial;--tw-numeric-fraction:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-backdrop-blur:initial;--tw-backdrop-brightness:initial;--tw-backdrop-contrast:initial;--tw-backdrop-grayscale:initial;--tw-backdrop-hue-rotate:initial;--tw-backdrop-invert:initial;--tw-backdrop-opacity:initial;--tw-backdrop-saturate:initial;--tw-backdrop-sepia:initial;--tw-ease:initial}}}@layer theme{:root,:host{--default-transition-duration:var(--move-quick);--default-transition-timing-function:var(--ease-quick)}}@layer base,components;@layer utilities{.\@container{container-type:inline-size}.pointer-events-none{pointer-events:none}.visible{visibility:visible}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.sticky{position:sticky}.top-0{top:0}.top-1{top:var(--spacing,.25rem)}.-right-1{right:calc(var(--spacing,.25rem) * -1)}.-right-1\.5{right:calc(var(--spacing,.25rem) * -1.5)}.right-2{right:calc(var(--spacing,.25rem) * 2)}.-bottom-1{bottom:calc(var(--spacing,.25rem) * -1)}.left-0{left:0}.left-3{left:calc(var(--spacing,.25rem) * 3)}.z-10{z-index:10}.z-\[60\]{z-index:60}.m-0{margin:0}.-mx-2{margin-inline:calc(var(--spacing,.25rem) * -2)}.mx-4{margin-inline:calc(var(--spacing,.25rem) * 4)}.mx-auto{margin-inline:auto}.-my-1{margin-block:calc(var(--spacing,.25rem) * -1)}.my-1{margin-block:var(--spacing,.25rem)}.-mt-2{margin-top:calc(var(--spacing,.25rem) * -2)}.-mt-3{margin-top:calc(var(--spacing,.25rem) * -3)}.mt-0{margin-top:0}.mt-0\.5{margin-top:calc(var(--spacing,.25rem) * .5)}.mt-1{margin-top:var(--spacing,.25rem)}.mt-2{margin-top:calc(var(--spacing,.25rem) * 2)}.mt-3{margin-top:calc(var(--spacing,.25rem) * 3)}.mt-3\.5{margin-top:calc(var(--spacing,.25rem) * 3.5)}.mr-2{margin-right:calc(var(--spacing,.25rem) * 2)}.mb-1{margin-bottom:var(--spacing,.25rem)}.mb-1\.5{margin-bottom:calc(var(--spacing,.25rem) * 1.5)}.-ml-4{margin-left:calc(var(--spacing,.25rem) * -4)}.-ml-\[25px\]{margin-left:-25px}.ml-auto{margin-left:auto}.block{display:block}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline-grid{display:inline-grid}.table{display:table}.size-2{width:calc(var(--spacing,.25rem) * 2);height:calc(var(--spacing,.25rem) * 2)}.size-2\.5{width:calc(var(--spacing,.25rem) * 2.5);height:calc(var(--spacing,.25rem) * 2.5)}.size-4{width:calc(var(--spacing,.25rem) * 4);height:calc(var(--spacing,.25rem) * 4)}.size-5{width:calc(var(--spacing,.25rem) * 5);height:calc(var(--spacing,.25rem) * 5)}.size-6{width:calc(var(--spacing,.25rem) * 6);height:calc(var(--spacing,.25rem) * 6)}.size-7{width:calc(var(--spacing,.25rem) * 7);height:calc(var(--spacing,.25rem) * 7)}.size-8{width:calc(var(--spacing,.25rem) * 8);height:calc(var(--spacing,.25rem) * 8)}.size-9{width:calc(var(--spacing,.25rem) * 9);height:calc(var(--spacing,.25rem) * 9)}.h-3{height:calc(var(--spacing,.25rem) * 3)}.h-3\.5{height:calc(var(--spacing,.25rem) * 3.5)}.h-6{height:calc(var(--spacing,.25rem) * 6)}.h-7{height:calc(var(--spacing,.25rem) * 7)}.h-8{height:calc(var(--spacing,.25rem) * 8)}.h-9{height:calc(var(--spacing,.25rem) * 9)}.h-10{height:calc(var(--spacing,.25rem) * 10)}.h-11{height:calc(var(--spacing,.25rem) * 11)}.h-\[1\.15rem\]{height:1.15rem}.h-\[5px\]{height:5px}.h-\[120px\]{height:120px}.min-h-3{min-height:calc(var(--spacing,.25rem) * 3)}.min-h-3\.5{min-height:calc(var(--spacing,.25rem) * 3.5)}.min-h-8{min-height:calc(var(--spacing,.25rem) * 8)}.min-h-11{min-height:calc(var(--spacing,.25rem) * 11)}.min-h-12{min-height:calc(var(--spacing,.25rem) * 12)}.min-h-24{min-height:calc(var(--spacing,.25rem) * 24)}.min-h-\[4\.25rem\]{min-height:4.25rem}.w-1{width:var(--spacing,.25rem)}.w-2{width:calc(var(--spacing,.25rem) * 2)}.w-2\/3{width:66.6667%}.w-8{width:calc(var(--spacing,.25rem) * 8)}.w-11{width:calc(var(--spacing,.25rem) * 11)}.w-20{width:calc(var(--spacing,.25rem) * 20)}.w-28{width:calc(var(--spacing,.25rem) * 28)}.w-\[30px\]{width:30px}.w-\[50px\]{width:50px}.w-\[66px\]{width:66px}.w-fit{width:fit-content}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-5xl{max-width:var(--container-5xl,64rem)}.max-w-24{max-width:calc(var(--spacing,.25rem) * 24)}.max-w-40{max-width:calc(var(--spacing,.25rem) * 40)}.max-w-\[70ch\]{max-width:70ch}.max-w-full{max-width:100%}.max-w-lg{max-width:var(--container-lg,32rem)}.max-w-md{max-width:var(--container-md,28rem)}.max-w-none{max-width:none}.min-w-0{min-width:0}.min-w-24{min-width:calc(var(--spacing,.25rem) * 24)}.min-w-30{min-width:calc(var(--spacing,.25rem) * 30)}.min-w-full{min-width:100%}.flex-1{flex:1}.shrink-0{flex-shrink:0}.basis-0{flex-basis:0}.border-collapse{border-collapse:collapse}.border-separate{border-collapse:separate}.border-spacing-0{--tw-border-spacing-x:0px;--tw-border-spacing-y:0px;border-spacing:var(--tw-border-spacing-x) var(--tw-border-spacing-y)}.-translate-y-1{--tw-translate-y:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-rotate-1{rotate:-1deg}.rotate-90{rotate:90deg}.transform{transform:var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, )}.animate-pulse{animation:var(--animate-pulse,pulse 2s cubic-bezier(.4, 0, .6, 1) infinite)}.cursor-default{cursor:default}.cursor-grab{cursor:grab}.cursor-pointer{cursor:pointer}.touch-pan-y{--tw-pan-y:pan-y;touch-action:var(--tw-pan-x, ) var(--tw-pan-y, ) var(--tw-pinch-zoom, )}.touch-none{touch-action:none}.grid-cols-\[6rem_1fr\]{grid-template-columns:6rem 1fr}.grid-cols-\[12px_1fr_auto_64px\]{grid-template-columns:12px 1fr auto 64px}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.place-items-center{place-items:center}.items-center{align-items:center}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.justify-start{justify-content:flex-start}.gap-1{gap:var(--spacing,.25rem)}.gap-1\.5{gap:calc(var(--spacing,.25rem) * 1.5)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-2\.5{gap:calc(var(--spacing,.25rem) * 2.5)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-5{gap:calc(var(--spacing,.25rem) * 5)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.gap-8{gap:calc(var(--spacing,.25rem) * 8)}.gap-x-3{column-gap:calc(var(--spacing,.25rem) * 3)}.gap-x-6{column-gap:calc(var(--spacing,.25rem) * 6)}.gap-x-8{column-gap:calc(var(--spacing,.25rem) * 8)}.gap-y-1{row-gap:var(--spacing,.25rem)}.gap-y-1\.5{row-gap:calc(var(--spacing,.25rem) * 1.5)}.gap-y-8{row-gap:calc(var(--spacing,.25rem) * 8)}.self-start{align-self:flex-start}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-hidden{overflow:hidden}.overflow-x-auto{overflow-x:auto}.overflow-y-auto{overflow-y:auto}.rounded-\[3px\]{border-radius:3px}.rounded-\[10px\]{border-radius:10px}.rounded-full{border-radius:2147483647px}.rounded-lg{border-radius:var(--radius)}.rounded-md{border-radius:calc(var(--radius) - 2px)}.rounded-none{border-radius:0}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.border{border-style:var(--tw-border-style);border-width:1px}.border-0{border-style:var(--tw-border-style);border-width:0}.border-2{border-style:var(--tw-border-style);border-width:2px}.border-x-0{border-inline-style:var(--tw-border-style);border-inline-width:0}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-t-0{border-top-style:var(--tw-border-style);border-top-width:0}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-dashed{--tw-border-style:dashed;border-style:dashed}.border-foreground{border-color:var(--foreground)}.border-muted-foreground,.border-muted-foreground\/40{border-color:var(--muted-foreground)}@supports (color:color-mix(in lab, red, red)){.border-muted-foreground\/40{border-color:color-mix(in oklab, var(--muted-foreground) 40%, transparent)}}.border-warning{border-color:var(--warning)}.bg-\[\#141414\]{background-color:#141414}.bg-accent{background-color:var(--accent)}.bg-background{background-color:var(--background)}.bg-black{background-color:var(--color-black,#000)}.bg-card,.bg-card\/90{background-color:var(--card)}@supports (color:color-mix(in lab, red, red)){.bg-card\/90{background-color:color-mix(in oklab, var(--card) 90%, transparent)}}.bg-foreground{background-color:var(--foreground)}.bg-muted{background-color:var(--muted)}.bg-transparent{background-color:#0000}.bg-warning{background-color:var(--warning)}.bg-white{background-color:var(--color-white,#fff)}.p-1{padding:var(--spacing,.25rem)}.p-2{padding:calc(var(--spacing,.25rem) * 2)}.p-3{padding:calc(var(--spacing,.25rem) * 3)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-0{padding-inline:0}.px-1{padding-inline:var(--spacing,.25rem)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.px-4{padding-inline:calc(var(--spacing,.25rem) * 4)}.py-0{padding-block:0}.py-0\.5{padding-block:calc(var(--spacing,.25rem) * .5)}.py-1{padding-block:var(--spacing,.25rem)}.py-1\.5{padding-block:calc(var(--spacing,.25rem) * 1.5)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.py-3{padding-block:calc(var(--spacing,.25rem) * 3)}.py-6{padding-block:calc(var(--spacing,.25rem) * 6)}.py-\[7px\]{padding-block:7px}.pt-1{padding-top:var(--spacing,.25rem)}.pt-2{padding-top:calc(var(--spacing,.25rem) * 2)}.pt-3{padding-top:calc(var(--spacing,.25rem) * 3)}.pt-3\.5{padding-top:calc(var(--spacing,.25rem) * 3.5)}.pr-1{padding-right:var(--spacing,.25rem)}.pr-3{padding-right:calc(var(--spacing,.25rem) * 3)}.pr-4{padding-right:calc(var(--spacing,.25rem) * 4)}.pr-8{padding-right:calc(var(--spacing,.25rem) * 8)}.pb-1{padding-bottom:var(--spacing,.25rem)}.pb-1\.5{padding-bottom:calc(var(--spacing,.25rem) * 1.5)}.pb-3{padding-bottom:calc(var(--spacing,.25rem) * 3)}.pl-2{padding-left:calc(var(--spacing,.25rem) * 2)}.pl-3{padding-left:calc(var(--spacing,.25rem) * 3)}.pl-9{padding-left:calc(var(--spacing,.25rem) * 9)}.pl-14{padding-left:calc(var(--spacing,.25rem) * 14)}.pl-\[38px\]{padding-left:38px}.text-center{text-align:center}.text-left{text-align:left}.text-right{text-align:right}.align-bottom{vertical-align:bottom}.align-middle{vertical-align:middle}.font-mono{font-family:var(--font-mono,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)}.font-sans{font-family:-apple-system,BlinkMacSystemFont,Segoe UI Variable,Segoe UI,system-ui,sans-serif}.text-3xl{font-size:var(--text-3xl,1.875rem);line-height:var(--tw-leading,var(--text-3xl--line-height,calc(2.25 / 1.875)))}.text-lg{font-size:var(--text-lg,1.125rem);line-height:var(--tw-leading,var(--text-lg--line-height,calc(1.75 / 1.125)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.text-xs{font-size:var(--text-xs,.75rem);line-height:var(--tw-leading,var(--text-xs--line-height,calc(1 / .75)))}.text-\[13px\]{font-size:13px}.text-\[15px\]{font-size:15px}.leading-relaxed{--tw-leading:var(--leading-relaxed,1.625);line-height:var(--leading-relaxed,1.625)}.font-bold{--tw-font-weight:var(--font-weight-bold,700);font-weight:var(--font-weight-bold,700)}.font-extrabold{--tw-font-weight:var(--font-weight-extrabold,800);font-weight:var(--font-weight-extrabold,800)}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-normal{--tw-font-weight:var(--font-weight-normal,400);font-weight:var(--font-weight-normal,400)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.tracking-tight{--tw-tracking:var(--tracking-tight,-.025em);letter-spacing:var(--tracking-tight,-.025em)}.tracking-widest{--tw-tracking:var(--tracking-widest,.1em);letter-spacing:var(--tracking-widest,.1em)}.text-pretty{text-wrap:pretty}.\[overflow-wrap\:anywhere\]{overflow-wrap:anywhere}.break-words{overflow-wrap:break-word}.break-all{word-break:break-all}.whitespace-nowrap{white-space:nowrap}.text-background{color:var(--background)}.text-card-foreground{color:var(--card-foreground)}.text-current{color:currentColor}.text-destructive{color:var(--destructive)}.text-foreground{color:var(--foreground)}.text-muted-foreground{color:var(--muted-foreground)}.text-primary-foreground{color:var(--primary-foreground)}.text-warning{color:var(--warning)}.text-white{color:var(--color-white,#fff)}.lowercase{text-transform:lowercase}.ordinal{--tw-ordinal:ordinal;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.tabular-nums{--tw-numeric-spacing:tabular-nums;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.opacity-30{opacity:.3}.opacity-50{opacity:.5}.opacity-70{opacity:.7}.opacity-75{opacity:.75}.opacity-\[0\.12\]{opacity:.12}.shadow-\[inset_0_-2px_var\(--foreground\)\]{--tw-shadow:inset 0 -2px var(--tw-shadow-color,var(--foreground));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-lg{--tw-shadow:0 10px 15px -3px var(--tw-shadow-color,#0000001a), 0 4px 6px -4px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-none{--tw-shadow:0 0 #0000;box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-1{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-2{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-border{--tw-ring-color:var(--border)}.ring-primary{--tw-ring-color:var(--primary)}.ring-ring{--tw-ring-color:var(--ring)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.backdrop-blur-xl{--tw-backdrop-blur:blur(var(--blur-xl,24px));-webkit-backdrop-filter:var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, );backdrop-filter:var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--ease-quick));transition-duration:var(--tw-duration,var(--move-quick))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--ease-quick));transition-duration:var(--tw-duration,var(--move-quick))}.transition-shadow{transition-property:box-shadow;transition-timing-function:var(--tw-ease,var(--ease-quick));transition-duration:var(--tw-duration,var(--move-quick))}.ease-in-out{--tw-ease:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1));transition-timing-function:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1))}.outline-none{--tw-outline-style:none;outline-style:none}.select-all{-webkit-user-select:all;user-select:all}.select-none{-webkit-user-select:none;user-select:none}.select-text{-webkit-user-select:text;user-select:text}.\[-webkit-touch-callout\:none\]{-webkit-touch-callout:none}:is(:where(.group):focus-visible .group-focus-visible\:ring-\[3px\]){--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}:is(:where(.group):focus-visible .group-focus-visible\:ring-ring\/50){--tw-ring-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){:is(:where(.group):focus-visible .group-focus-visible\:ring-ring\/50){--tw-ring-color:color-mix(in oklab, var(--ring) 50%, transparent)}}@media (hover:hover){.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}}.focus-visible\:bg-accent\/50:focus-visible{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-accent\/50:focus-visible{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.focus-visible\:ring-0:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(0px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-\[3px\]:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:color-mix(in oklab, var(--ring) 50%, transparent)}}@media (prefers-reduced-motion:reduce){.motion-reduce\:animate-none{animation:none}}@container (width>=36rem){.\@xl\:flex-none{flex:none}.\@xl\:flex-row{flex-direction:row}.\@xl\:items-center{align-items:center}.\@xl\:justify-end{justify-content:flex-end}}@container (width>=42rem){.\@2xl\:h-auto{height:auto}.\@2xl\:min-h-44{min-height:calc(var(--spacing,.25rem) * 44)}.\@2xl\:w-6{width:calc(var(--spacing,.25rem) * 6)}.\@2xl\:w-16{width:calc(var(--spacing,.25rem) * 16)}.\@2xl\:min-w-40{min-width:calc(var(--spacing,.25rem) * 40)}.\@2xl\:flex-none{flex:none}.\@2xl\:rotate-0{rotate:0deg}.\@2xl\:flex-row{flex-direction:row}.\@2xl\:items-stretch{align-items:stretch}}@container (width>=48rem){.\@3xl\:grid-cols-\[minmax\(0\,1\.3fr\)_minmax\(0\,1fr\)\]{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}}@media (prefers-color-scheme:dark){.dark\:bg-transparent{background-color:#0000}}.\[\&\>svg\:last-child\]\:hidden>svg:last-child{display:none}}@property --tw-border-spacing-x{syntax:"<length>";inherits:false;initial-value:0}@property --tw-border-spacing-y{syntax:"<length>";inherits:false;initial-value:0}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-pan-x{syntax:"*";inherits:false}@property --tw-pan-y{syntax:"*";inherits:false}@property --tw-pinch-zoom{syntax:"*";inherits:false}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-ordinal{syntax:"*";inherits:false}@property --tw-slashed-zero{syntax:"*";inherits:false}@property --tw-numeric-figure{syntax:"*";inherits:false}@property --tw-numeric-spacing{syntax:"*";inherits:false}@property --tw-numeric-fraction{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-backdrop-blur{syntax:"*";inherits:false}@property --tw-backdrop-brightness{syntax:"*";inherits:false}@property --tw-backdrop-contrast{syntax:"*";inherits:false}@property --tw-backdrop-grayscale{syntax:"*";inherits:false}@property --tw-backdrop-hue-rotate{syntax:"*";inherits:false}@property --tw-backdrop-invert{syntax:"*";inherits:false}@property --tw-backdrop-opacity{syntax:"*";inherits:false}@property --tw-backdrop-saturate{syntax:"*";inherits:false}@property --tw-backdrop-sepia{syntax:"*";inherits:false}@property --tw-ease{syntax:"*";inherits:false}@keyframes pulse{50%{opacity:.5}}
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-pan-x:initial;--tw-pan-y:initial;--tw-pinch-zoom:initial;--tw-border-style:solid;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-ordinal:initial;--tw-slashed-zero:initial;--tw-numeric-figure:initial;--tw-numeric-spacing:initial;--tw-numeric-fraction:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-backdrop-blur:initial;--tw-backdrop-brightness:initial;--tw-backdrop-contrast:initial;--tw-backdrop-grayscale:initial;--tw-backdrop-hue-rotate:initial;--tw-backdrop-invert:initial;--tw-backdrop-opacity:initial;--tw-backdrop-saturate:initial;--tw-backdrop-sepia:initial;--tw-ease:initial}}}@layer theme{:root,:host{--default-transition-duration:var(--move-quick);--default-transition-timing-function:var(--ease-quick)}}@layer base,components;@layer utilities{.\@container{container-type:inline-size}.pointer-events-none{pointer-events:none}.visible{visibility:visible}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.sticky{position:sticky}.inset-y-0{inset-block:0}.top-0{top:0}.top-1{top:var(--spacing,.25rem)}.-right-1{right:calc(var(--spacing,.25rem) * -1)}.-right-1\.5{right:calc(var(--spacing,.25rem) * -1.5)}.right-2{right:calc(var(--spacing,.25rem) * 2)}.-bottom-1{bottom:calc(var(--spacing,.25rem) * -1)}.left-0{left:0}.left-3{left:calc(var(--spacing,.25rem) * 3)}.z-10{z-index:10}.z-\[60\]{z-index:60}.m-0{margin:0}.-mx-2{margin-inline:calc(var(--spacing,.25rem) * -2)}.mx-4{margin-inline:calc(var(--spacing,.25rem) * 4)}.mx-auto{margin-inline:auto}.-my-1{margin-block:calc(var(--spacing,.25rem) * -1)}.my-1{margin-block:var(--spacing,.25rem)}.-mt-2{margin-top:calc(var(--spacing,.25rem) * -2)}.-mt-3{margin-top:calc(var(--spacing,.25rem) * -3)}.mt-0{margin-top:0}.mt-0\.5{margin-top:calc(var(--spacing,.25rem) * .5)}.mt-1{margin-top:var(--spacing,.25rem)}.mt-2{margin-top:calc(var(--spacing,.25rem) * 2)}.mt-3{margin-top:calc(var(--spacing,.25rem) * 3)}.mt-3\.5{margin-top:calc(var(--spacing,.25rem) * 3.5)}.mr-2{margin-right:calc(var(--spacing,.25rem) * 2)}.mb-1{margin-bottom:var(--spacing,.25rem)}.mb-1\.5{margin-bottom:calc(var(--spacing,.25rem) * 1.5)}.-ml-4{margin-left:calc(var(--spacing,.25rem) * -4)}.-ml-\[25px\]{margin-left:-25px}.ml-auto{margin-left:auto}.block{display:block}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline-grid{display:inline-grid}.table{display:table}.size-2{width:calc(var(--spacing,.25rem) * 2);height:calc(var(--spacing,.25rem) * 2)}.size-2\.5{width:calc(var(--spacing,.25rem) * 2.5);height:calc(var(--spacing,.25rem) * 2.5)}.size-4{width:calc(var(--spacing,.25rem) * 4);height:calc(var(--spacing,.25rem) * 4)}.size-5{width:calc(var(--spacing,.25rem) * 5);height:calc(var(--spacing,.25rem) * 5)}.size-6{width:calc(var(--spacing,.25rem) * 6);height:calc(var(--spacing,.25rem) * 6)}.size-7{width:calc(var(--spacing,.25rem) * 7);height:calc(var(--spacing,.25rem) * 7)}.size-8{width:calc(var(--spacing,.25rem) * 8);height:calc(var(--spacing,.25rem) * 8)}.size-9{width:calc(var(--spacing,.25rem) * 9);height:calc(var(--spacing,.25rem) * 9)}.h-1{height:var(--spacing,.25rem)}.h-2{height:calc(var(--spacing,.25rem) * 2)}.h-2\.5{height:calc(var(--spacing,.25rem) * 2.5)}.h-3{height:calc(var(--spacing,.25rem) * 3)}.h-3\.5{height:calc(var(--spacing,.25rem) * 3.5)}.h-6{height:calc(var(--spacing,.25rem) * 6)}.h-7{height:calc(var(--spacing,.25rem) * 7)}.h-8{height:calc(var(--spacing,.25rem) * 8)}.h-9{height:calc(var(--spacing,.25rem) * 9)}.h-10{height:calc(var(--spacing,.25rem) * 10)}.h-11{height:calc(var(--spacing,.25rem) * 11)}.h-\[1\.15rem\]{height:1.15rem}.h-\[5px\]{height:5px}.h-\[120px\]{height:120px}.min-h-3{min-height:calc(var(--spacing,.25rem) * 3)}.min-h-3\.5{min-height:calc(var(--spacing,.25rem) * 3.5)}.min-h-8{min-height:calc(var(--spacing,.25rem) * 8)}.min-h-11{min-height:calc(var(--spacing,.25rem) * 11)}.min-h-12{min-height:calc(var(--spacing,.25rem) * 12)}.min-h-24{min-height:calc(var(--spacing,.25rem) * 24)}.min-h-\[4\.25rem\]{min-height:4.25rem}.w-1{width:var(--spacing,.25rem)}.w-2{width:calc(var(--spacing,.25rem) * 2)}.w-2\/3{width:66.6667%}.w-8{width:calc(var(--spacing,.25rem) * 8)}.w-10{width:calc(var(--spacing,.25rem) * 10)}.w-11{width:calc(var(--spacing,.25rem) * 11)}.w-20{width:calc(var(--spacing,.25rem) * 20)}.w-28{width:calc(var(--spacing,.25rem) * 28)}.w-\[30px\]{width:30px}.w-\[50px\]{width:50px}.w-\[66px\]{width:66px}.w-fit{width:fit-content}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-5xl{max-width:var(--container-5xl,64rem)}.max-w-24{max-width:calc(var(--spacing,.25rem) * 24)}.max-w-40{max-width:calc(var(--spacing,.25rem) * 40)}.max-w-64{max-width:calc(var(--spacing,.25rem) * 64)}.max-w-\[70ch\]{max-width:70ch}.max-w-full{max-width:100%}.max-w-lg{max-width:var(--container-lg,32rem)}.max-w-md{max-width:var(--container-md,28rem)}.max-w-none{max-width:none}.min-w-0{min-width:0}.min-w-0\.5{min-width:calc(var(--spacing,.25rem) * .5)}.min-w-24{min-width:calc(var(--spacing,.25rem) * 24)}.min-w-30{min-width:calc(var(--spacing,.25rem) * 30)}.min-w-52{min-width:calc(var(--spacing,.25rem) * 52)}.min-w-full{min-width:100%}.flex-1{flex:1}.shrink-0{flex-shrink:0}.basis-0{flex-basis:0}.border-collapse{border-collapse:collapse}.border-separate{border-collapse:separate}.border-spacing-0{--tw-border-spacing-x:0px;--tw-border-spacing-y:0px;border-spacing:var(--tw-border-spacing-x) var(--tw-border-spacing-y)}.-translate-y-1{--tw-translate-y:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-rotate-1{rotate:-1deg}.rotate-90{rotate:90deg}.transform{transform:var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, )}.animate-pulse{animation:var(--animate-pulse,pulse 2s cubic-bezier(.4, 0, .6, 1) infinite)}.cursor-default{cursor:default}.cursor-grab{cursor:grab}.cursor-pointer{cursor:pointer}.touch-pan-y{--tw-pan-y:pan-y;touch-action:var(--tw-pan-x, ) var(--tw-pan-y, ) var(--tw-pinch-zoom, )}.touch-none{touch-action:none}.grid-cols-\[12px_1fr_auto_64px\]{grid-template-columns:12px 1fr auto 64px}.grid-cols-\[minmax\(0\,14rem\)_minmax\(0\,1fr\)\]{grid-template-columns:minmax(0,14rem) minmax(0,1fr)}.grid-cols-\[repeat\(auto-fill\,minmax\(15rem\,1fr\)\)\]{grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.place-items-center{place-items:center}.items-baseline{align-items:baseline}.items-center{align-items:center}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.justify-start{justify-content:flex-start}.gap-1{gap:var(--spacing,.25rem)}.gap-1\.5{gap:calc(var(--spacing,.25rem) * 1.5)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-2\.5{gap:calc(var(--spacing,.25rem) * 2.5)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-5{gap:calc(var(--spacing,.25rem) * 5)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.gap-8{gap:calc(var(--spacing,.25rem) * 8)}.gap-x-3{column-gap:calc(var(--spacing,.25rem) * 3)}.gap-x-6{column-gap:calc(var(--spacing,.25rem) * 6)}.gap-x-8{column-gap:calc(var(--spacing,.25rem) * 8)}.gap-y-1{row-gap:var(--spacing,.25rem)}.gap-y-4{row-gap:calc(var(--spacing,.25rem) * 4)}.gap-y-8{row-gap:calc(var(--spacing,.25rem) * 8)}.self-start{align-self:flex-start}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-hidden{overflow:hidden}.overflow-x-auto{overflow-x:auto}.overflow-y-auto{overflow-y:auto}.rounded-\[3px\]{border-radius:3px}.rounded-\[10px\]{border-radius:10px}.rounded-full{border-radius:2147483647px}.rounded-lg{border-radius:var(--radius)}.rounded-md{border-radius:calc(var(--radius) - 2px)}.rounded-none{border-radius:0}.rounded-sm{border-radius:calc(var(--radius) - 4px)}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.border{border-style:var(--tw-border-style);border-width:1px}.border-0{border-style:var(--tw-border-style);border-width:0}.border-2{border-style:var(--tw-border-style);border-width:2px}.border-x-0{border-inline-style:var(--tw-border-style);border-inline-width:0}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-t-0{border-top-style:var(--tw-border-style);border-top-width:0}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-dashed{--tw-border-style:dashed;border-style:dashed}.border-solid{--tw-border-style:solid;border-style:solid}.border-border{border-color:var(--border)}.border-foreground{border-color:var(--foreground)}.border-muted-foreground,.border-muted-foreground\/40{border-color:var(--muted-foreground)}@supports (color:color-mix(in lab, red, red)){.border-muted-foreground\/40{border-color:color-mix(in oklab, var(--muted-foreground) 40%, transparent)}}.border-warning{border-color:var(--warning)}.bg-\[\#141414\]{background-color:#141414}.bg-accent{background-color:var(--accent)}.bg-background{background-color:var(--background)}.bg-black{background-color:var(--color-black,#000)}.bg-card,.bg-card\/90{background-color:var(--card)}@supports (color:color-mix(in lab, red, red)){.bg-card\/90{background-color:color-mix(in oklab, var(--card) 90%, transparent)}}.bg-foreground{background-color:var(--foreground)}.bg-muted,.bg-muted\/60{background-color:var(--muted)}@supports (color:color-mix(in lab, red, red)){.bg-muted\/60{background-color:color-mix(in oklab, var(--muted) 60%, transparent)}}.bg-popover{background-color:var(--popover)}.bg-transparent{background-color:#0000}.bg-warning{background-color:var(--warning)}.bg-white{background-color:var(--color-white,#fff)}.p-0{padding:0}.p-1{padding:var(--spacing,.25rem)}.p-2{padding:calc(var(--spacing,.25rem) * 2)}.p-3{padding:calc(var(--spacing,.25rem) * 3)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-0{padding-inline:0}.px-1{padding-inline:var(--spacing,.25rem)}.px-2{padding-inline:calc(var(--spacing,.25rem) * 2)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.px-4{padding-inline:calc(var(--spacing,.25rem) * 4)}.py-0{padding-block:0}.py-0\.5{padding-block:calc(var(--spacing,.25rem) * .5)}.py-1{padding-block:var(--spacing,.25rem)}.py-1\.5{padding-block:calc(var(--spacing,.25rem) * 1.5)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.py-3{padding-block:calc(var(--spacing,.25rem) * 3)}.py-6{padding-block:calc(var(--spacing,.25rem) * 6)}.py-\[7px\]{padding-block:7px}.pt-1{padding-top:var(--spacing,.25rem)}.pt-2{padding-top:calc(var(--spacing,.25rem) * 2)}.pt-3{padding-top:calc(var(--spacing,.25rem) * 3)}.pt-3\.5{padding-top:calc(var(--spacing,.25rem) * 3.5)}.pr-1{padding-right:var(--spacing,.25rem)}.pr-3{padding-right:calc(var(--spacing,.25rem) * 3)}.pr-4{padding-right:calc(var(--spacing,.25rem) * 4)}.pr-8{padding-right:calc(var(--spacing,.25rem) * 8)}.pb-1{padding-bottom:var(--spacing,.25rem)}.pb-1\.5{padding-bottom:calc(var(--spacing,.25rem) * 1.5)}.pb-3{padding-bottom:calc(var(--spacing,.25rem) * 3)}.pl-2{padding-left:calc(var(--spacing,.25rem) * 2)}.pl-3{padding-left:calc(var(--spacing,.25rem) * 3)}.pl-9{padding-left:calc(var(--spacing,.25rem) * 9)}.pl-14{padding-left:calc(var(--spacing,.25rem) * 14)}.pl-\[38px\]{padding-left:38px}.text-center{text-align:center}.text-left{text-align:left}.text-right{text-align:right}.align-bottom{vertical-align:bottom}.align-middle{vertical-align:middle}.font-mono{font-family:var(--font-mono,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)}.font-sans{font-family:-apple-system,BlinkMacSystemFont,Segoe UI Variable,Segoe UI,system-ui,sans-serif}.text-3xl{font-size:var(--text-3xl,1.875rem);line-height:var(--tw-leading,var(--text-3xl--line-height,calc(2.25 / 1.875)))}.text-lg{font-size:var(--text-lg,1.125rem);line-height:var(--tw-leading,var(--text-lg--line-height,calc(1.75 / 1.125)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.text-xs{font-size:var(--text-xs,.75rem);line-height:var(--tw-leading,var(--text-xs--line-height,calc(1 / .75)))}.text-\[13px\]{font-size:13px}.text-\[15px\]{font-size:15px}.leading-relaxed{--tw-leading:var(--leading-relaxed,1.625);line-height:var(--leading-relaxed,1.625)}.font-bold{--tw-font-weight:var(--font-weight-bold,700);font-weight:var(--font-weight-bold,700)}.font-extrabold{--tw-font-weight:var(--font-weight-extrabold,800);font-weight:var(--font-weight-extrabold,800)}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-normal{--tw-font-weight:var(--font-weight-normal,400);font-weight:var(--font-weight-normal,400)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.tracking-tight{--tw-tracking:var(--tracking-tight,-.025em);letter-spacing:var(--tracking-tight,-.025em)}.tracking-widest{--tw-tracking:var(--tracking-widest,.1em);letter-spacing:var(--tracking-widest,.1em)}.text-pretty{text-wrap:pretty}.\[overflow-wrap\:anywhere\]{overflow-wrap:anywhere}.break-words{overflow-wrap:break-word}.break-all{word-break:break-all}.whitespace-nowrap{white-space:nowrap}.whitespace-pre-wrap{white-space:pre-wrap}.text-background{color:var(--background)}.text-card-foreground{color:var(--card-foreground)}.text-current{color:currentColor}.text-destructive{color:var(--destructive)}.text-foreground{color:var(--foreground)}.text-muted-foreground{color:var(--muted-foreground)}.text-popover-foreground{color:var(--popover-foreground)}.text-primary-foreground{color:var(--primary-foreground)}.text-warning{color:var(--warning)}.text-white{color:var(--color-white,#fff)}.lowercase{text-transform:lowercase}.ordinal{--tw-ordinal:ordinal;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.tabular-nums{--tw-numeric-spacing:tabular-nums;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.opacity-30{opacity:.3}.opacity-50{opacity:.5}.opacity-70{opacity:.7}.opacity-75{opacity:.75}.opacity-\[0\.12\]{opacity:.12}.shadow-\[inset_0_-2px_var\(--foreground\)\]{--tw-shadow:inset 0 -2px var(--tw-shadow-color,var(--foreground));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-lg{--tw-shadow:0 10px 15px -3px var(--tw-shadow-color,#0000001a), 0 4px 6px -4px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-md{--tw-shadow:0 4px 6px -1px var(--tw-shadow-color,#0000001a), 0 2px 4px -2px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-none{--tw-shadow:0 0 #0000;box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-1{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-2{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-border{--tw-ring-color:var(--border)}.ring-primary{--tw-ring-color:var(--primary)}.ring-ring{--tw-ring-color:var(--ring)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.backdrop-blur-xl{--tw-backdrop-blur:blur(var(--blur-xl,24px));-webkit-backdrop-filter:var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, );backdrop-filter:var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--ease-quick));transition-duration:var(--tw-duration,var(--move-quick))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--ease-quick));transition-duration:var(--tw-duration,var(--move-quick))}.transition-shadow{transition-property:box-shadow;transition-timing-function:var(--tw-ease,var(--ease-quick));transition-duration:var(--tw-duration,var(--move-quick))}.ease-in-out{--tw-ease:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1));transition-timing-function:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1))}.outline-none{--tw-outline-style:none;outline-style:none}.select-all{-webkit-user-select:all;user-select:all}.select-none{-webkit-user-select:none;user-select:none}.select-text{-webkit-user-select:text;user-select:text}.\[-webkit-touch-callout\:none\]{-webkit-touch-callout:none}:is(:where(.group):focus-visible .group-focus-visible\:ring-\[3px\]){--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}:is(:where(.group):focus-visible .group-focus-visible\:ring-ring\/50){--tw-ring-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){:is(:where(.group):focus-visible .group-focus-visible\:ring-ring\/50){--tw-ring-color:color-mix(in oklab, var(--ring) 50%, transparent)}}@media (hover:hover){.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.hover\:bg-muted:hover{background-color:var(--muted)}}.focus-visible\:bg-accent\/50:focus-visible{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-accent\/50:focus-visible{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.focus-visible\:ring-0:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(0px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-\[3px\]:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:color-mix(in oklab, var(--ring) 50%, transparent)}}@media (prefers-reduced-motion:reduce){.motion-reduce\:animate-none{animation:none}}@container (width>=36rem){.\@xl\:flex-none{flex:none}.\@xl\:flex-row{flex-direction:row}.\@xl\:items-center{align-items:center}.\@xl\:justify-end{justify-content:flex-end}}@container (width>=42rem){.\@2xl\:h-auto{height:auto}.\@2xl\:min-h-44{min-height:calc(var(--spacing,.25rem) * 44)}.\@2xl\:w-6{width:calc(var(--spacing,.25rem) * 6)}.\@2xl\:w-16{width:calc(var(--spacing,.25rem) * 16)}.\@2xl\:min-w-40{min-width:calc(var(--spacing,.25rem) * 40)}.\@2xl\:flex-none{flex:none}.\@2xl\:rotate-0{rotate:0deg}.\@2xl\:flex-row{flex-direction:row}.\@2xl\:items-stretch{align-items:stretch}}@container (width>=48rem){.\@3xl\:grid-cols-\[minmax\(0\,1\.3fr\)_minmax\(0\,1fr\)\]{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}}@media (prefers-color-scheme:dark){.dark\:bg-transparent{background-color:#0000}}.\[\&\>svg\:last-child\]\:hidden>svg:last-child{display:none}}@property --tw-border-spacing-x{syntax:"<length>";inherits:false;initial-value:0}@property --tw-border-spacing-y{syntax:"<length>";inherits:false;initial-value:0}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-pan-x{syntax:"*";inherits:false}@property --tw-pan-y{syntax:"*";inherits:false}@property --tw-pinch-zoom{syntax:"*";inherits:false}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-ordinal{syntax:"*";inherits:false}@property --tw-slashed-zero{syntax:"*";inherits:false}@property --tw-numeric-figure{syntax:"*";inherits:false}@property --tw-numeric-spacing{syntax:"*";inherits:false}@property --tw-numeric-fraction{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-backdrop-blur{syntax:"*";inherits:false}@property --tw-backdrop-brightness{syntax:"*";inherits:false}@property --tw-backdrop-contrast{syntax:"*";inherits:false}@property --tw-backdrop-grayscale{syntax:"*";inherits:false}@property --tw-backdrop-hue-rotate{syntax:"*";inherits:false}@property --tw-backdrop-invert{syntax:"*";inherits:false}@property --tw-backdrop-opacity{syntax:"*";inherits:false}@property --tw-backdrop-saturate{syntax:"*";inherits:false}@property --tw-backdrop-sepia{syntax:"*";inherits:false}@property --tw-ease{syntax:"*";inherits:false}@keyframes pulse{50%{opacity:.5}}
 /*$vite$:1*/</style>
 <div id="root"></div>
 <script type="module">import { c as e } from "react/compiler-runtime";
-import { useEffect as t, useState as n } from "react";
-import { createRoot as r } from "react-dom/client";
-import { Empty as i, LargeTitle as a, List as o, ListRow as s, ListSkeleton as c, LoadFailure as l, Select as u, SelectContent as d, SelectItem as f, SelectTrigger as p, SelectValue as ee, Split as te, Tabs as ne, TabsList as re, TabsTrigger as m } from "@one/ui";
-import { Fragment as ie, jsx as h, jsxs as g } from "react/jsx-runtime";
-var _ = one.api, v = "*", y = "The One App", b = 864e5, ae = {
-	"1d": "24 Hours",
-	"7d": "7 Days"
-}, x = ["service.hop", "schedule.run"], S = {
-	watchdog: "Stopped by its watchdog",
-	abort: "It crashed"
+import { useEffect as t, useRef as n, useState as r } from "react";
+import { createRoot as i } from "react-dom/client";
+import { Button as a, Empty as o, Icon as s, Input as c, LargeTitle as l, ListSkeleton as u, LoadFailure as d, Select as f, SelectContent as p, SelectItem as m, SelectTrigger as h, SelectValue as g, Tabs as _, TabsList as v, TabsTrigger as y, useWidth as b } from "@one/ui";
+import { Fragment as x, jsx as S, jsxs as C } from "react/jsx-runtime";
+var w = 36e5, T = "*", E = [
+	[
+		"1h",
+		"1 Hour",
+		w
+	],
+	[
+		"6h",
+		"6 Hours",
+		6 * w
+	],
+	[
+		"1d",
+		"24 Hours",
+		24 * w
+	],
+	[
+		"7d",
+		"7 Days",
+		168 * w
+	],
+	[
+		"30d",
+		"30 Days",
+		720 * w
+	],
+	[
+		"90d",
+		"90 Days",
+		2160 * w
+	]
+], D = {
+	count: "Count",
+	errors: "Errors",
+	sum: "Sum",
+	avg: "Average"
+}, O = 8, k = "Other", A = [
+	["#2a78d6", "#3987e5"],
+	["#eb6834", "#d95926"],
+	["#1baf7a", "#199e70"],
+	["#eda100", "#c98500"],
+	["#e87ba4", "#d55181"],
+	["#008300", "#008300"],
+	["#6250d6", "#9085e9"],
+	["#e34948", "#e66767"]
+], j = (e) => A[e % A.length][+!!matchMedia("(prefers-color-scheme: dark)").matches], M = "var(--destructive)", N = (e) => new Date(e).toLocaleString(void 0, {
+	month: "short",
+	day: "numeric",
+	hour: "numeric",
+	minute: "2-digit",
+	second: "2-digit"
+}), P = (e) => new Date(e).toLocaleString(void 0, {
+	month: "short",
+	day: "numeric",
+	hour: "numeric"
+}), F = (e) => e == null ? "–" : new Intl.NumberFormat(void 0, {
+	notation: "compact",
+	maximumFractionDigits: 1
+}).format(e), I = (e) => e >= 6e4 ? `${(e / 6e4).toFixed(1)}m` : e >= 1e3 ? `${(e / 1e3).toFixed(2)}s` : `${e}ms`, L = (e) => {
+	let t = Math.max(0, Math.round((Date.now() - e) / 1e3));
+	return t < 60 ? `${t}s ago` : t < 3600 ? `${Math.round(t / 60)}m ago` : t < 86400 ? `${Math.round(t / 3600)}h ago` : `${Math.round(t / 86400)}d ago`;
+}, R = (e) => typeof e == "string" ? e : JSON.stringify(e), z = (e) => [...new Set(e)].sort((e, t) => String(e).localeCompare(String(t)));
+function B(e) {
+	let t = /^\s*([\d.]+)\s*(ms|s|m)?\s*$/.exec(e);
+	return t ? Number(t[1]) * {
+		ms: 1,
+		s: 1e3,
+		m: 6e4
+	}[t[2] || "ms"] : 0;
+}
+var V = (e) => {
+	let { attrs: t, key: n, ...r } = e;
+	return Object.fromEntries(Object.entries({
+		...r,
+		...t || {},
+		...n || {}
+	}).filter(([, e]) => e !== null && e !== ""));
 };
-function C(e) {
-	let t = new Date(e), n = t.toLocaleTimeString(void 0, {
-		hour: "numeric",
-		minute: "2-digit"
-	}), r = Math.round(((/* @__PURE__ */ new Date()).setHours(0, 0, 0, 0) - new Date(e).setHours(0, 0, 0, 0)) / b);
-	return r === 0 ? `Today, ${n}` : r === 1 ? `Yesterday, ${n}` : `${t.toLocaleDateString(void 0, {
-		day: "numeric",
-		month: "short"
-	})}, ${n}`;
-}
-var w = (e) => `${(e / 1e3).toFixed(1)} s`, T = (e) => e === 1 ? "Once" : `${e} times`, E = (e) => [...e].sort((e, t) => e - t)[Math.floor(e.length / 2)], D = (e) => [...new Set(e)].join(", ");
-function O(e) {
-	let t = e.type === "_OTHER" ? "Error" : e.type;
-	return e.frame === "screen.undrawn" ? "Screen never drew" : e.frame.startsWith("stage:") ? `${t} during ${e.frame.slice(6)}` : `${t} in ${e.frame.split(":").slice(0, 2).join(":")}`;
-}
-var oe = (e) => e.startsWith("screen:") ? `${e.slice(7)} screen` : e;
-function se(e, t) {
-	return e.fingerprints.filter((e) => e.fault === "internal").map((n) => {
-		let r = e.signals.filter((e) => e.status === "error" && e.app === n.app && (e.attrs["exception.stacktrace"] || "").startsWith(`at ${n.frame}`));
-		return {
-			id: `${n.app}|${n.tool}|${n.fingerprint}`,
-			app: n.app,
-			title: O(n),
-			sub: [t(n.app), oe(n.tool)].filter(Boolean).join(" · "),
-			fresh: Date.now() - n.first < b,
-			trailing: String(n.count),
-			facts: [
-				["Seen", T(n.count)],
-				["First", C(n.first)],
-				["Last", C(n.last)],
-				["Build", n.build.slice(0, 8)],
-				r.length ? ["Devices", D(r.map((e) => e.device))] : null
-			],
-			code: r[0]?.attrs["exception.stacktrace"]
-		};
-	});
-}
-function ce(e, t) {
-	return [...Map.groupBy(e.signals.filter((e) => e.kind === "span" && e.status === "ok" && e.attrs["one.tool"] && !x.includes(e.name)), (e) => e.name).values()].map((e) => {
-		let n = e.reduce((e, t) => t.ms > e.ms ? t : e), r = n.attrs["one.steps"] || [], i = r.reduce((e, t) => t.ms > (e?.ms ?? -1) ? t : e, null);
-		return {
-			id: n.name,
-			app: n.app,
-			ms: E(e.map((e) => e.ms)),
-			title: `${t(n.app)} · ${n.attrs["one.tool"]}`,
-			sub: i ? `Slowest in ${i.step}` : void 0,
-			trailing: w(E(e.map((e) => e.ms))),
-			facts: [
-				["Median", w(E(e.map((e) => e.ms)))],
-				["Worst", w(n.ms)],
-				["Slow calls", String(e.length)]
-			],
-			code: r.map((e) => `${e.step} ${e.ms} ms`).join("\n")
-		};
-	}).sort((e, t) => t.ms - e.ms);
-}
-function le(e, t) {
-	let n = [];
-	for (let t of e.signals) {
-		let e = t.attrs["one.reason"];
-		t.name === "node.start" && S[e] ? n.push({
-			id: t.span,
-			title: `${t.device} restarted`,
-			sub: S[e],
-			facts: [["When", C(t.time)], ["Build", String(t.attrs["one.build"]).slice(0, 8)]]
-		}) : t.name === "update.not_taken" && t.status === "error" ? n.push({
-			id: t.span,
-			title: `${t.device} didn't take an update`,
-			sub: e,
-			facts: [
-				["When", C(t.time)],
-				["Part", t.attrs["one.part"]],
-				["Why", e]
-			]
-		}) : t.name === "service.exit" && t.status === "error" && n.push({
-			id: t.span,
-			app: t.app,
-			title: `${t.attrs["service.name"] || "A service"} stopped on ${t.device}`,
-			sub: e,
-			facts: [["When", C(t.time)], ["Why", e]]
+function H(e) {
+	let t = e.split(/\s+/).filter(Boolean).map((e) => e.toLowerCase());
+	return (e) => {
+		let n = V(e), r = Object.entries(n).map(([e, t]) => [e.toLowerCase(), R(t).toLowerCase()]);
+		return t.every((e) => {
+			let t = e.indexOf("=");
+			return t > 0 ? r.some(([n, r]) => n === e.slice(0, t) && r === e.slice(t + 1)) : r.some(([t, n]) => t.includes(e) || n.includes(e));
 		});
-	}
-	let r = Map.groupBy(e.signals.filter((e) => e.name === "device.offline"), (e) => e.attrs["one.node"]);
-	for (let [e, i] of r) {
-		let r = i.filter((e) => e.attrs["one.says"] === "relay").length;
-		n.push({
+	};
+}
+function U(e) {
+	return [...Map.groupBy(e, (e) => e.trace).entries()].map(([e, t]) => {
+		let n = new Set(t.map((e) => e.span)), r = t.filter((e) => !e.parent || !n.has(e.parent)).sort((e, t) => e.time - t.time), i = Math.min(...t.map((e) => e.time)), a = Math.max(...t.map((e) => e.time + e.ms));
+		return {
 			id: e,
-			title: `${t(e)} went offline`,
-			sub: `The relay said so ${T(r).toLowerCase()}, other devices ${T(i.length - r).toLowerCase()}`,
-			trailing: `${i.length}×`,
-			facts: [
-				["Last", C(Math.max(...i.map((e) => e.time)))],
-				["Relay", T(r)],
-				["Other devices", T(i.length - r)]
+			spans: t,
+			root: r[0] || t[0],
+			start: i,
+			ms: a - i,
+			errors: t.filter((e) => e.status === "error").length,
+			services: z(t.map((e) => e.service))
+		};
+	}).sort((e, t) => t.start - e.start);
+}
+var W = (e) => Object.fromEntries(z(e).map((e, t) => [e, j(t)]));
+function G(t) {
+	let n = e(9), { tip: r } = t;
+	if (!r) return null;
+	let i = `translate(${r.flip ? "-100%" : "0"}, -100%)`, a;
+	n[0] !== i || n[1] !== r.x || n[2] !== r.y ? (a = {
+		left: r.x,
+		top: r.y,
+		transform: i
+	}, n[0] = i, n[1] = r.x, n[2] = r.y, n[3] = a) : a = n[3];
+	let o;
+	n[4] === r.lines ? o = n[5] : (o = r.lines.map(K), n[4] = r.lines, n[5] = o);
+	let s;
+	return n[6] !== a || n[7] !== o ? (s = /* @__PURE__ */ S("div", {
+		className: "pointer-events-none absolute z-10 max-w-64 rounded-md bg-popover px-2 py-1.5 text-xs text-popover-foreground shadow-md",
+		style: a,
+		children: o
+	}), n[6] = a, n[7] = o, n[8] = s) : s = n[8], s;
+}
+function K(e, t) {
+	return /* @__PURE__ */ S("div", {
+		className: t ? "text-muted-foreground" : "font-medium",
+		children: e
+	}, t);
+}
+function q({ ticks: e, width: t, left: n, top: r, height: i }) {
+	return e.map(({ y: e, label: a }) => /* @__PURE__ */ C("g", { children: [/* @__PURE__ */ S("line", {
+		x1: n,
+		x2: t,
+		y1: r + e * i,
+		y2: r + e * i,
+		stroke: "var(--border)"
+	}), /* @__PURE__ */ S("text", {
+		x: n - 6,
+		y: r + e * i + 4,
+		textAnchor: "end",
+		fontSize: "11",
+		fill: "var(--muted-foreground)",
+		children: a
+	})] }, a));
+}
+var J = 48, Y = 8, X = 22;
+function ee(t) {
+	let n = e(57), { traces: i, from: a, to: o, open: s, colour: c } = t, [l, u] = b(), [d, f] = r(null), p;
+	n[0] === i ? p = n[1] : (p = Math.max(1, ...i.map(te)), n[0] = i, n[1] = p);
+	let m = p, h;
+	n[2] !== a || n[3] !== o || n[4] !== u ? (h = (e) => J + (e - a) / Math.max(1, o - a) * Math.max(1, u - J - 8), n[2] = a, n[3] = o, n[4] = u, n[5] = h) : h = n[5];
+	let g = h, _;
+	n[6] === m ? _ = n[7] : (_ = (e) => 118 - e / m * 110, n[6] = m, n[7] = _);
+	let v = _, y;
+	n[8] === m ? y = n[9] : (y = I(m), n[8] = m, n[9] = y);
+	let x;
+	n[10] === y ? x = n[11] : (x = {
+		y: 0,
+		label: y
+	}, n[10] = y, n[11] = x);
+	let w;
+	n[12] === m ? w = n[13] : (w = I(Math.round(m / 2)), n[12] = m, n[13] = w);
+	let T;
+	n[14] === w ? T = n[15] : (T = {
+		y: .5,
+		label: w
+	}, n[14] = w, n[15] = T);
+	let E;
+	n[16] === Symbol.for("react.memo_cache_sentinel") ? (E = {
+		y: 1,
+		label: "0"
+	}, n[16] = E) : E = n[16];
+	let D;
+	n[17] !== x || n[18] !== T ? (D = [
+		x,
+		T,
+		E
+	], n[17] = x, n[18] = T, n[19] = D) : D = n[19];
+	let O;
+	n[20] !== D || n[21] !== u ? (O = /* @__PURE__ */ S(q, {
+		width: u,
+		left: J,
+		top: Y,
+		height: 110,
+		ticks: D
+	}), n[20] = D, n[21] = u, n[22] = O) : O = n[22];
+	let k;
+	n[23] === a ? k = n[24] : (k = P(a), n[23] = a, n[24] = k);
+	let A;
+	n[25] === k ? A = n[26] : (A = /* @__PURE__ */ S("text", {
+		x: J,
+		y: 134,
+		fontSize: "11",
+		fill: "var(--muted-foreground)",
+		children: k
+	}), n[25] = k, n[26] = A);
+	let j = u - 8, F;
+	n[27] === o ? F = n[28] : (F = P(o), n[27] = o, n[28] = F);
+	let L;
+	n[29] !== j || n[30] !== F ? (L = /* @__PURE__ */ S("text", {
+		x: j,
+		y: 134,
+		fontSize: "11",
+		textAnchor: "end",
+		fill: "var(--muted-foreground)",
+		children: F
+	}), n[29] = j, n[30] = F, n[31] = L) : L = n[31];
+	let R;
+	if (n[32] !== c || n[33] !== s || n[34] !== i || n[35] !== u || n[36] !== g || n[37] !== v) {
+		let e;
+		n[39] !== c || n[40] !== s || n[41] !== u || n[42] !== g || n[43] !== v ? (e = (e) => /* @__PURE__ */ C("g", {
+			className: "cursor-pointer",
+			onClick: () => s(e.id),
+			onMouseEnter: () => f({
+				x: g(e.start),
+				y: v(e.ms) - 8,
+				flip: g(e.start) > u / 2,
+				lines: [
+					`${e.root.service}: ${e.root.name}`,
+					I(e.ms),
+					N(e.start)
+				]
+			}),
+			onMouseLeave: () => f(null),
+			children: [/* @__PURE__ */ S("circle", {
+				cx: g(e.start),
+				cy: v(e.ms),
+				r: "10",
+				fill: "transparent"
+			}), /* @__PURE__ */ S("circle", {
+				cx: g(e.start),
+				cy: v(e.ms),
+				r: "4",
+				fill: e.errors ? M : c[e.root.service],
+				stroke: "var(--background)",
+				strokeWidth: "2"
+			})]
+		}, e.id), n[39] = c, n[40] = s, n[41] = u, n[42] = g, n[43] = v, n[44] = e) : e = n[44], R = i.map(e), n[32] = c, n[33] = s, n[34] = i, n[35] = u, n[36] = g, n[37] = v, n[38] = R;
+	} else R = n[38];
+	let z;
+	n[45] !== O || n[46] !== A || n[47] !== L || n[48] !== R || n[49] !== u ? (z = /* @__PURE__ */ C("svg", {
+		width: u,
+		height: 140,
+		role: "img",
+		"aria-label": "Traces by time and duration",
+		children: [
+			O,
+			A,
+			L,
+			R
+		]
+	}), n[45] = O, n[46] = A, n[47] = L, n[48] = R, n[49] = u, n[50] = z) : z = n[50];
+	let B;
+	n[51] === d ? B = n[52] : (B = /* @__PURE__ */ S(G, { tip: d }), n[51] = d, n[52] = B);
+	let V;
+	return n[53] !== l || n[54] !== z || n[55] !== B ? (V = /* @__PURE__ */ C("div", {
+		ref: l,
+		className: "relative",
+		children: [z, B]
+	}), n[53] = l, n[54] = z, n[55] = B, n[56] = V) : V = n[56], V;
+}
+function te(e) {
+	return e.ms;
+}
+function Z(t) {
+	let n = e(69), { times: i, series: a, height: o, plain: s } = t, c = o === void 0 ? 240 : o, [l, u] = b(), [d, f] = r(null), p = s ? 4 : Y, m = s ? 4 : X, h = s ? 0 : J, g = c - p - m, _;
+	n[0] === a ? _ = n[1] : (_ = Math.max(1, ...a.flatMap(oe)), n[0] = a, n[1] = _);
+	let v = _, y;
+	n[2] !== h || n[3] !== i.length || n[4] !== u ? (y = (e) => h + e / Math.max(1, i.length - 1) * Math.max(1, u - h - 8), n[2] = h, n[3] = i.length, n[4] = u, n[5] = y) : y = n[5];
+	let x = y, w;
+	n[6] !== v || n[7] !== g || n[8] !== p ? (w = (e) => p + g - e / v * g, n[6] = v, n[7] = g, n[8] = p, n[9] = w) : w = n[9];
+	let T = w, E;
+	n[10] !== x || n[11] !== T ? (E = (e) => {
+		let t = "", n = !1;
+		return e.forEach((e, r) => {
+			if (e == null) return n = !1;
+			t += `${n ? "L" : "M"}${x(r).toFixed(1)} ${T(e).toFixed(1)}`, n = !0;
+		}), t;
+	}, n[10] = x, n[11] = T, n[12] = E) : E = n[12];
+	let D = E, k;
+	n[13] !== h || n[14] !== s || n[15] !== i.length || n[16] !== u ? (k = function(e) {
+		if (s) return;
+		let t = e.currentTarget.getBoundingClientRect();
+		f(Math.max(0, Math.min(i.length - 1, Math.round((e.clientX - t.left - h) / Math.max(1, u - h - 8) * (i.length - 1)))));
+	}, n[13] = h, n[14] = s, n[15] = i.length, n[16] = u, n[17] = k) : k = n[17];
+	let A = k, j;
+	if (n[18] !== d || n[19] !== c || n[20] !== A || n[21] !== h || n[22] !== v || n[23] !== D || n[24] !== s || n[25] !== g || n[26] !== l || n[27] !== a || n[28] !== i || n[29] !== p || n[30] !== u || n[31] !== x || n[32] !== T) {
+		let e = d == null ? [] : a.map((e) => ({
+			...e,
+			v: e.values[d]
+		})).filter(ae).sort(ie).slice(0, O), t;
+		n[34] === Symbol.for("react.memo_cache_sentinel") ? (t = () => f(null), n[34] = t) : t = n[34];
+		let r;
+		n[35] === a ? r = n[36] : (r = a.map(re).join(", "), n[35] = a, n[36] = r);
+		let o;
+		n[37] !== h || n[38] !== v || n[39] !== s || n[40] !== g || n[41] !== p || n[42] !== u ? (o = !s && /* @__PURE__ */ S(q, {
+			width: u,
+			left: h,
+			top: p,
+			height: g,
+			ticks: [
+				{
+					y: 0,
+					label: F(v)
+				},
+				{
+					y: .5,
+					label: F(v / 2)
+				},
+				{
+					y: 1,
+					label: "0"
+				}
 			]
+		}), n[37] = h, n[38] = v, n[39] = s, n[40] = g, n[41] = p, n[42] = u, n[43] = o) : o = n[43];
+		let m;
+		n[44] !== c || n[45] !== h || n[46] !== s || n[47] !== i[0] || n[48] !== i.length ? (m = !s && i.length > 1 && /* @__PURE__ */ S("text", {
+			x: h,
+			y: c - 6,
+			fontSize: "11",
+			fill: "var(--muted-foreground)",
+			children: P(i[0])
+		}), n[44] = c, n[45] = h, n[46] = s, n[47] = i[0], n[48] = i.length, n[49] = m) : m = n[49];
+		let _;
+		n[50] !== c || n[51] !== s || n[52] !== i || n[53] !== u ? (_ = !s && /* @__PURE__ */ S("text", {
+			x: u - 8,
+			y: c - 6,
+			fontSize: "11",
+			textAnchor: "end",
+			fill: "var(--muted-foreground)",
+			children: P(i.at(-1))
+		}), n[50] = c, n[51] = s, n[52] = i, n[53] = u, n[54] = _) : _ = n[54];
+		let y;
+		if (n[55] !== D || n[56] !== a) {
+			let e;
+			n[58] === D ? e = n[59] : (e = (e) => /* @__PURE__ */ S("path", {
+				d: D(e.values),
+				fill: "none",
+				stroke: e.colour,
+				strokeWidth: "2",
+				strokeLinejoin: "round",
+				strokeLinecap: "round"
+			}, e.name), n[58] = D, n[59] = e), y = a.map(e), n[55] = D, n[56] = a, n[57] = y;
+		} else y = n[57];
+		let b;
+		n[60] !== d || n[61] !== g || n[62] !== p || n[63] !== x ? (b = d != null && /* @__PURE__ */ S("line", {
+			x1: x(d),
+			x2: x(d),
+			y1: p,
+			y2: p + g,
+			stroke: "var(--muted-foreground)"
+		}), n[60] = d, n[61] = g, n[62] = p, n[63] = x, n[64] = b) : b = n[64];
+		let w;
+		n[65] !== d || n[66] !== x || n[67] !== T ? (w = (e) => /* @__PURE__ */ S("circle", {
+			cx: x(d),
+			cy: T(e.v),
+			r: "4",
+			fill: e.colour,
+			stroke: "var(--background)",
+			strokeWidth: "2"
+		}, e.name), n[65] = d, n[66] = x, n[67] = T, n[68] = w) : w = n[68], j = /* @__PURE__ */ C("div", {
+			ref: l,
+			className: "relative",
+			children: [/* @__PURE__ */ C("svg", {
+				width: u,
+				height: c,
+				onMouseMove: A,
+				onMouseLeave: t,
+				role: "img",
+				"aria-label": r,
+				children: [
+					o,
+					m,
+					_,
+					y,
+					b,
+					e.map(w)
+				]
+			}), d != null && /* @__PURE__ */ S(G, { tip: {
+				x: x(d) + (x(d) > u / 2 ? -10 : 10),
+				y: p + 40,
+				flip: x(d) > u / 2,
+				lines: [P(i[d]), ...e.map(ne)]
+			} })]
+		}), n[18] = d, n[19] = c, n[20] = A, n[21] = h, n[22] = v, n[23] = D, n[24] = s, n[25] = g, n[26] = l, n[27] = a, n[28] = i, n[29] = p, n[30] = u, n[31] = x, n[32] = T, n[33] = j;
+	} else j = n[33];
+	return j;
+}
+function ne(e) {
+	return `${e.name}: ${F(e.v)}`;
+}
+function re(e) {
+	return e.name;
+}
+function ie(e, t) {
+	return t.v - e.v;
+}
+function ae(e) {
+	return e.v != null;
+}
+function oe(e) {
+	return e.values.filter(se);
+}
+function se(e) {
+	return e != null;
+}
+function ce(t) {
+	let n = e(16), { rows: r, from: i, to: a } = t, [o, s] = b(), c;
+	if (n[0] !== i || n[1] !== r || n[2] !== a) {
+		c = Array.from({ length: 48 }, ue);
+		for (let e of r) {
+			let t = Math.min(47, Math.max(0, Math.floor((e.time - i) / Math.max(1, a - i) * 48))), n = c[t], r = +(e.status === "error"), o = n[r];
+			o++, n[r] = o;
+		}
+		n[0] = i, n[1] = r, n[2] = a, n[3] = c;
+	} else c = n[3];
+	let l;
+	n[4] === c ? l = n[5] : (l = c.map(le), n[4] = c, n[5] = l);
+	let u = Math.max(1, ...l), d = s / 48, f;
+	n[6] !== c || n[7] !== u || n[8] !== d ? (f = c.map((e, t) => {
+		let [n, r] = e;
+		return /* @__PURE__ */ C("g", { children: [n > 0 && /* @__PURE__ */ S("rect", {
+			x: t * d + 1,
+			width: Math.max(1, d - 2),
+			y: 56 - (n + r) / u * 56,
+			height: n / u * 56,
+			rx: "2",
+			fill: "var(--muted-foreground)",
+			opacity: ".5"
+		}), r > 0 && /* @__PURE__ */ S("rect", {
+			x: t * d + 1,
+			width: Math.max(1, d - 2),
+			y: 56 - r / u * 56,
+			height: r / u * 56,
+			rx: "2",
+			fill: M
+		})] }, t);
+	}), n[6] = c, n[7] = u, n[8] = d, n[9] = f) : f = n[9];
+	let p;
+	n[10] !== f || n[11] !== s ? (p = /* @__PURE__ */ S("svg", {
+		width: s,
+		height: 56,
+		role: "img",
+		"aria-label": "How many over time",
+		children: f
+	}), n[10] = f, n[11] = s, n[12] = p) : p = n[12];
+	let m;
+	return n[13] !== o || n[14] !== p ? (m = /* @__PURE__ */ S("div", {
+		ref: o,
+		children: p
+	}), n[13] = o, n[14] = p, n[15] = m) : m = n[15], m;
+}
+function le(e) {
+	let [t, n] = e;
+	return t + n;
+}
+function ue() {
+	return [0, 0];
+}
+function Q(t) {
+	let n = e(6), { row: r } = t, i, a;
+	if (n[0] !== r) {
+		let e = V(r);
+		i = "m-0 grid grid-cols-[minmax(0,14rem)_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono text-xs", a = Object.keys(e).sort().map((t) => [/* @__PURE__ */ S("dt", {
+			className: "break-all text-muted-foreground",
+			children: t
+		}, t), /* @__PURE__ */ S("dd", {
+			className: "m-0 whitespace-pre-wrap break-all",
+			children: R(e[t])
+		}, `${t}=`)]), n[0] = r, n[1] = i, n[2] = a;
+	} else i = n[1], a = n[2];
+	let o;
+	return n[3] !== i || n[4] !== a ? (o = /* @__PURE__ */ S("dl", {
+		className: i,
+		children: a
+	}), n[3] = i, n[4] = a, n[5] = o) : o = n[5], o;
+}
+function de(t) {
+	let n = e(46), { rows: i, from: a, to: s, open: l, colour: u, more: d, query: f } = t, [p, m] = f, [h, g] = r(T), [_, v] = r(T), [y, b] = r(""), w;
+	n[0] === i ? w = n[1] : (w = z(i.map(me)), n[0] = i, n[1] = w);
+	let E = w, D;
+	if (n[2] !== i || n[3] !== h) {
+		let e;
+		n[5] === h ? e = n[6] : (e = (e) => h === T || e.service === h, n[5] = h, n[6] = e), D = z(i.filter(e).map(pe)), n[2] = i, n[3] = h, n[4] = D;
+	} else D = n[4];
+	let O = D, k;
+	if (n[7] !== y || n[8] !== _ || n[9] !== p || n[10] !== i || n[11] !== h) {
+		let e = H(p), t = B(y);
+		k = U(i).filter((n) => n.ms >= t && n.spans.some((t) => (h === T || t.service === h) && (_ === T || t.name === _) && e(t))), n[7] = y, n[8] = _, n[9] = p, n[10] = i, n[11] = h, n[12] = k;
+	} else k = n[12];
+	let A = k, j;
+	n[13] === A ? j = n[14] : (j = Math.max(1, ...A.map(fe)), n[13] = A, n[14] = j);
+	let P = j, F;
+	n[15] === Symbol.for("react.memo_cache_sentinel") ? (F = (e) => (g(e), v(T)), n[15] = F) : F = n[15];
+	let R;
+	n[16] !== h || n[17] !== E ? (R = /* @__PURE__ */ S($, {
+		label: "Service",
+		value: h,
+		set: F,
+		all: "All Services",
+		options: E
+	}), n[16] = h, n[17] = E, n[18] = R) : R = n[18];
+	let V;
+	n[19] !== _ || n[20] !== O ? (V = /* @__PURE__ */ S($, {
+		label: "Operation",
+		value: _,
+		set: v,
+		all: "All Operations",
+		options: O
+	}), n[19] = _, n[20] = O, n[21] = V) : V = n[21];
+	let W;
+	n[22] === Symbol.for("react.memo_cache_sentinel") ? (W = (e) => b(e.target.value), n[22] = W) : W = n[22];
+	let G;
+	n[23] === y ? G = n[24] : (G = /* @__PURE__ */ S(c, {
+		className: "w-28",
+		"aria-label": "Minimum duration",
+		placeholder: "Min 1.2s",
+		value: y,
+		onChange: W
+	}), n[23] = y, n[24] = G);
+	let K;
+	n[25] === m ? K = n[26] : (K = (e) => m(e.target.value), n[25] = m, n[26] = K);
+	let q;
+	n[27] !== p || n[28] !== K ? (q = /* @__PURE__ */ S(c, {
+		className: "min-w-52 flex-1",
+		"aria-label": "Tags",
+		placeholder: "Tags: error.type=timeout one.device=…",
+		value: p,
+		onChange: K
+	}), n[27] = p, n[28] = K, n[29] = q) : q = n[29];
+	let J;
+	n[30] !== G || n[31] !== q || n[32] !== R || n[33] !== V ? (J = /* @__PURE__ */ C("div", {
+		className: "flex flex-wrap items-center gap-2",
+		children: [
+			R,
+			V,
+			G,
+			q
+		]
+	}), n[30] = G, n[31] = q, n[32] = R, n[33] = V, n[34] = J) : J = n[34];
+	let Y;
+	n[35] !== u || n[36] !== A || n[37] !== a || n[38] !== P || n[39] !== d || n[40] !== l || n[41] !== s ? (Y = A.length ? /* @__PURE__ */ C(x, { children: [
+		/* @__PURE__ */ S(ee, {
+			traces: A,
+			from: a,
+			to: s,
+			open: l,
+			colour: u
+		}),
+		/* @__PURE__ */ C("p", {
+			className: "m-0 text-sm text-muted-foreground",
+			children: [
+				A.length,
+				" ",
+				A.length === 1 ? "Trace" : "Traces",
+				d ? ", newest only" : ""
+			]
+		}),
+		/* @__PURE__ */ S("div", {
+			className: "flex flex-col",
+			children: A.map((e) => /* @__PURE__ */ C("button", {
+				type: "button",
+				onClick: () => l(e.id),
+				className: "flex cursor-pointer flex-col gap-1 border-0 border-b border-solid border-border bg-transparent px-1 py-2.5 text-left text-foreground hover:bg-muted",
+				children: [
+					/* @__PURE__ */ C("span", {
+						className: "flex items-baseline justify-between gap-3",
+						children: [/* @__PURE__ */ C("span", {
+							className: "min-w-0 truncate font-medium",
+							children: [
+								e.root.service,
+								": ",
+								e.root.name
+							]
+						}), /* @__PURE__ */ S("span", {
+							className: "shrink-0 tabular-nums text-sm",
+							children: I(e.ms)
+						})]
+					}),
+					/* @__PURE__ */ S("span", {
+						className: "block h-1 rounded-sm bg-muted",
+						children: /* @__PURE__ */ S("span", {
+							className: "block h-1 rounded-sm",
+							style: {
+								width: `${Math.max(1, e.ms / P * 100)}%`,
+								background: e.errors ? M : u[e.root.service]
+							}
+						})
+					}),
+					/* @__PURE__ */ C("span", {
+						className: "flex flex-wrap justify-between gap-x-3 text-sm text-muted-foreground",
+						children: [/* @__PURE__ */ C("span", { children: [
+							e.spans.length,
+							" ",
+							e.spans.length === 1 ? "Span" : "Spans",
+							e.errors ? /* @__PURE__ */ C("span", {
+								className: "text-destructive",
+								children: [
+									" · ",
+									e.errors,
+									" ",
+									e.errors === 1 ? "Error" : "Errors"
+								]
+							}) : null,
+							e.services.length > 1 ? ` · ${e.services.join(", ")}` : ""
+						] }), /* @__PURE__ */ S("span", {
+							title: N(e.start),
+							children: L(e.start)
+						})]
+					})
+				]
+			}, e.id))
+		})
+	] }) : /* @__PURE__ */ S(o, { children: "No traces match." }), n[35] = u, n[36] = A, n[37] = a, n[38] = P, n[39] = d, n[40] = l, n[41] = s, n[42] = Y) : Y = n[42];
+	let X;
+	return n[43] !== J || n[44] !== Y ? (X = /* @__PURE__ */ C("div", {
+		className: "flex flex-col gap-4",
+		children: [J, Y]
+	}), n[43] = J, n[44] = Y, n[45] = X) : X = n[45], X;
+}
+function fe(e) {
+	return e.ms;
+}
+function pe(e) {
+	return e.name;
+}
+function me(e) {
+	return e.service;
+}
+function he(t) {
+	let n = e(55), { trace: i, back: o, colour: c } = t, [l, u] = r(be), [d, f] = r(null), p, m, h, g, _, v;
+	if (n[0] !== o || n[1] !== l || n[2] !== c || n[3] !== d || n[4] !== i.errors || n[5] !== i.id || n[6] !== i.ms || n[7] !== i.root.name || n[8] !== i.root.service || n[9] !== i.services || n[10] !== i.spans || n[11] !== i.start) {
+		let e = Map.groupBy(i.spans, ye), t = new Set(i.spans.map(ve)), r = [], y = (t, n) => {
+			if (r.push({
+				s: t,
+				depth: n
+			}), !l.has(t.span)) for (let r of (e.get(t.span) || []).sort(_e)) y(r, n + 1);
+		};
+		i.spans.filter((e) => !e.parent || !t.has(e.parent)).sort(ge).forEach((e) => y(e, 0));
+		let b = Math.max(1, i.ms), x = (e) => u((t) => {
+			let n = new Set(t);
+			return n.has(e) ? n.delete(e) : n.add(e), n;
 		});
-	}
+		h = "flex flex-col gap-4";
+		let w;
+		n[18] === Symbol.for("react.memo_cache_sentinel") ? (w = /* @__PURE__ */ S(s, { name: "caret-left" }), n[18] = w) : w = n[18], n[19] === o ? g = n[20] : (g = /* @__PURE__ */ S("div", { children: /* @__PURE__ */ C(a, {
+			variant: "ghost",
+			onClick: o,
+			children: [w, "Traces"]
+		}) }), n[19] = o, n[20] = g);
+		let T;
+		n[21] !== i.root.name || n[22] !== i.root.service ? (T = /* @__PURE__ */ C("h2", {
+			className: "m-0 break-words text-xl font-semibold",
+			children: [
+				i.root.service,
+				": ",
+				i.root.name
+			]
+		}), n[21] = i.root.name, n[22] = i.root.service, n[23] = T) : T = n[23];
+		let E;
+		n[24] === i.start ? E = n[25] : (E = N(i.start), n[24] = i.start, n[25] = E);
+		let D;
+		n[26] === i.ms ? D = n[27] : (D = I(i.ms), n[26] = i.ms, n[27] = D);
+		let O = i.spans.length, k = i.spans.length === 1 ? "Span" : "Spans", A;
+		n[28] === i.services ? A = n[29] : (A = i.services.join(", "), n[28] = i.services, n[29] = A);
+		let j = i.errors ? ` · ${i.errors} failed` : "", P;
+		n[30] !== D || n[31] !== k || n[32] !== A || n[33] !== j || n[34] !== E || n[35] !== i.spans.length ? (P = /* @__PURE__ */ C("p", {
+			className: "m-0 text-sm text-muted-foreground",
+			children: [
+				E,
+				" · ",
+				D,
+				" · ",
+				O,
+				" ",
+				k,
+				" · ",
+				A,
+				j
+			]
+		}), n[30] = D, n[31] = k, n[32] = A, n[33] = j, n[34] = E, n[35] = i.spans.length, n[36] = P) : P = n[36];
+		let F;
+		n[37] === i.id ? F = n[38] : (F = /* @__PURE__ */ S("p", {
+			className: "m-0 break-all font-mono text-xs text-muted-foreground",
+			children: i.id
+		}), n[37] = i.id, n[38] = F), n[39] !== P || n[40] !== F || n[41] !== T ? (_ = /* @__PURE__ */ C("div", { children: [
+			T,
+			P,
+			F
+		] }), n[39] = P, n[40] = F, n[41] = T, n[42] = _) : _ = n[42];
+		let L;
+		n[43] === Symbol.for("react.memo_cache_sentinel") ? (L = [
+			0,
+			.25,
+			.5,
+			.75,
+			1
+		], n[43] = L) : L = n[43], n[44] === b ? v = n[45] : (v = /* @__PURE__ */ S("div", {
+			className: "flex justify-between font-mono text-xs text-muted-foreground @container",
+			children: L.map((e) => /* @__PURE__ */ S("span", { children: I(Math.round(e * b)) }, e))
+		}), n[44] = b, n[45] = v), p = "flex flex-col", m = r.map((t) => {
+			let { s: n, depth: r } = t, a = (e.get(n.span) || []).length > 0, o = d === n.span;
+			return /* @__PURE__ */ C("div", {
+				className: "border-0 border-b border-solid border-border",
+				children: [/* @__PURE__ */ C("div", {
+					className: "flex cursor-pointer flex-col gap-1 py-1.5 hover:bg-muted",
+					onClick: () => f(o ? null : n.span),
+					children: [/* @__PURE__ */ C("div", {
+						className: "flex items-center gap-1 text-sm",
+						style: { paddingLeft: Math.min(r, 8) * 14 },
+						children: [
+							a ? /* @__PURE__ */ S("button", {
+								type: "button",
+								"aria-label": l.has(n.span) ? "Expand" : "Collapse",
+								onClick: (e) => (e.stopPropagation(), x(n.span)),
+								className: "grid size-5 cursor-pointer place-items-center border-0 bg-transparent p-0 text-muted-foreground",
+								children: /* @__PURE__ */ S(s, { name: l.has(n.span) ? "caret-right" : "caret-down" })
+							}) : /* @__PURE__ */ S("span", { className: "size-5" }),
+							/* @__PURE__ */ C("span", {
+								className: "min-w-0 truncate",
+								children: [
+									/* @__PURE__ */ S("span", {
+										className: "text-muted-foreground",
+										children: n.service
+									}),
+									" ",
+									n.name
+								]
+							}),
+							/* @__PURE__ */ S("span", {
+								className: "ml-auto shrink-0 tabular-nums text-muted-foreground",
+								children: I(n.ms)
+							})
+						]
+					}), /* @__PURE__ */ S("div", {
+						className: "relative h-2.5 rounded-sm bg-muted/60",
+						children: /* @__PURE__ */ S("div", {
+							className: "absolute inset-y-0 min-w-0.5 rounded-sm",
+							style: {
+								left: `${(n.time - i.start) / b * 100}%`,
+								width: `${n.ms / b * 100}%`,
+								background: n.status === "error" ? M : c[n.service]
+							}
+						})
+					})]
+				}), o && /* @__PURE__ */ S("div", {
+					className: "px-1 pb-3 pt-1",
+					children: /* @__PURE__ */ S(Q, { row: n })
+				})]
+			}, n.span);
+		}), n[0] = o, n[1] = l, n[2] = c, n[3] = d, n[4] = i.errors, n[5] = i.id, n[6] = i.ms, n[7] = i.root.name, n[8] = i.root.service, n[9] = i.services, n[10] = i.spans, n[11] = i.start, n[12] = p, n[13] = m, n[14] = h, n[15] = g, n[16] = _, n[17] = v;
+	} else p = n[12], m = n[13], h = n[14], g = n[15], _ = n[16], v = n[17];
+	let y;
+	n[46] !== p || n[47] !== m ? (y = /* @__PURE__ */ S("div", {
+		className: p,
+		children: m
+	}), n[46] = p, n[47] = m, n[48] = y) : y = n[48];
+	let b;
+	return n[49] !== h || n[50] !== g || n[51] !== _ || n[52] !== v || n[53] !== y ? (b = /* @__PURE__ */ C("div", {
+		className: h,
+		children: [
+			g,
+			_,
+			v,
+			y
+		]
+	}), n[49] = h, n[50] = g, n[51] = _, n[52] = v, n[53] = y, n[54] = b) : b = n[54], b;
+}
+function ge(e, t) {
+	return e.time - t.time;
+}
+function _e(e, t) {
+	return e.time - t.time;
+}
+function ve(e) {
+	return e.span;
+}
+function ye(e) {
+	return e.parent || "";
+}
+function be() {
+	return /* @__PURE__ */ new Set();
+}
+function $(t) {
+	let n = e(15), { label: r, value: i, set: a, all: o, options: s } = t, c;
+	n[0] === Symbol.for("react.memo_cache_sentinel") ? (c = /* @__PURE__ */ S(g, {}), n[0] = c) : c = n[0];
+	let l;
+	n[1] === r ? l = n[2] : (l = /* @__PURE__ */ S(h, {
+		"aria-label": r,
+		children: c
+	}), n[1] = r, n[2] = l);
+	let u;
+	n[3] === o ? u = n[4] : (u = /* @__PURE__ */ S(m, {
+		value: T,
+		children: o
+	}), n[3] = o, n[4] = u);
+	let d;
+	n[5] === s ? d = n[6] : (d = s.map(xe), n[5] = s, n[6] = d);
+	let _;
+	n[7] !== u || n[8] !== d ? (_ = /* @__PURE__ */ C(p, { children: [u, d] }), n[7] = u, n[8] = d, n[9] = _) : _ = n[9];
+	let v;
+	return n[10] !== a || n[11] !== l || n[12] !== _ || n[13] !== i ? (v = /* @__PURE__ */ C(f, {
+		value: i,
+		onValueChange: a,
+		children: [l, _]
+	}), n[10] = a, n[11] = l, n[12] = _, n[13] = i, n[14] = v) : v = n[14], v;
+}
+function xe(e) {
+	return /* @__PURE__ */ S(m, {
+		value: String(e),
+		children: String(e)
+	}, e);
+}
+function Se(t) {
+	let n = e(26), { rows: i, from: a, to: s, more: l, query: u } = t, [d, f] = u, [p, m] = r(T), [h, g] = r(null), _;
+	if (n[0] !== d || n[1] !== i || n[2] !== p) {
+		let e = H(d);
+		_ = i.filter((t) => (p === T || t.service === p) && e(t)), n[0] = d, n[1] = i, n[2] = p, n[3] = _;
+	} else _ = n[3];
+	let v = _, y;
+	n[4] === i ? y = n[5] : (y = z(i.map(we)), n[4] = i, n[5] = y);
+	let b;
+	n[6] !== p || n[7] !== y ? (b = /* @__PURE__ */ S($, {
+		label: "Service",
+		value: p,
+		set: m,
+		all: "All Services",
+		options: y
+	}), n[6] = p, n[7] = y, n[8] = b) : b = n[8];
+	let w;
+	n[9] === f ? w = n[10] : (w = (e) => f(e.target.value), n[9] = f, n[10] = w);
+	let E;
+	n[11] !== d || n[12] !== w ? (E = /* @__PURE__ */ S(c, {
+		className: "min-w-52 flex-1",
+		"aria-label": "Search",
+		placeholder: "Search, or key=value",
+		value: d,
+		onChange: w
+	}), n[11] = d, n[12] = w, n[13] = E) : E = n[13];
+	let D;
+	n[14] !== b || n[15] !== E ? (D = /* @__PURE__ */ C("div", {
+		className: "flex flex-wrap items-center gap-2",
+		children: [b, E]
+	}), n[14] = b, n[15] = E, n[16] = D) : D = n[16];
+	let O;
+	n[17] !== v || n[18] !== a || n[19] !== l || n[20] !== h || n[21] !== s ? (O = v.length ? /* @__PURE__ */ C(x, { children: [
+		/* @__PURE__ */ S(ce, {
+			rows: v,
+			from: a,
+			to: s
+		}),
+		/* @__PURE__ */ C("p", {
+			className: "m-0 text-sm text-muted-foreground",
+			children: [
+				v.length,
+				" ",
+				v.length === 1 ? "Log" : "Logs",
+				l ? ", newest only" : ""
+			]
+		}),
+		/* @__PURE__ */ S("div", {
+			className: "flex flex-col font-mono text-xs",
+			children: v.map((e) => /* @__PURE__ */ C("div", {
+				className: "border-0 border-b border-solid border-border",
+				children: [/* @__PURE__ */ C("div", {
+					className: "flex cursor-pointer gap-3 py-1.5 hover:bg-muted",
+					onClick: () => g(h === e.span ? null : e.span),
+					children: [
+						/* @__PURE__ */ S("span", {
+							className: "shrink-0 tabular-nums text-muted-foreground",
+							children: N(e.time)
+						}),
+						/* @__PURE__ */ S("span", {
+							className: `w-10 shrink-0 ${e.status === "error" ? "text-destructive" : "text-muted-foreground"}`,
+							children: e.status === "error" ? "ERROR" : "INFO"
+						}),
+						/* @__PURE__ */ C("span", {
+							className: "min-w-0 truncate",
+							children: [
+								e.service,
+								" ",
+								e.name,
+								" ",
+								/* @__PURE__ */ S("span", {
+									className: "text-muted-foreground",
+									children: Object.entries(e.attrs || {}).map(Ce).join(" ")
+								})
+							]
+						})
+					]
+				}), h === e.span && /* @__PURE__ */ S("div", {
+					className: "px-1 pb-3 pt-1",
+					children: /* @__PURE__ */ S(Q, { row: e })
+				})]
+			}, e.span))
+		})
+	] }) : /* @__PURE__ */ S(o, { children: "No logs match." }), n[17] = v, n[18] = a, n[19] = l, n[20] = h, n[21] = s, n[22] = O) : O = n[22];
+	let k;
+	return n[23] !== D || n[24] !== O ? (k = /* @__PURE__ */ C("div", {
+		className: "flex flex-col gap-4",
+		children: [D, O]
+	}), n[23] = D, n[24] = O, n[25] = k) : k = n[25], k;
+}
+function Ce(e) {
+	let [t, n] = e;
+	return `${t}=${R(n)}`;
+}
+function we(e) {
+	return e.service;
+}
+function Te(e, t) {
+	let n = [];
+	for (let r = Math.floor(e / w); r <= Math.floor(t / w); r++) n.push(r);
 	return n;
 }
-var k = {
-	Errors: "No errors.",
-	Slow: "Nothing's been slow.",
-	Devices: "Nothing's gone wrong with a device."
-};
-function A() {
-	let r = e(68), [m, b] = n(null), [x, S] = n(null), C;
-	r[0] === Symbol.for("react.memo_cache_sentinel") ? (C = {
-		apps: {},
-		devices: {}
-	}, r[0] = C) : C = r[0];
-	let [w, T] = n(C), [E, D] = n("Errors"), [O, oe] = n("7d"), [A, P] = n(v), [F, I] = n(null), L;
-	r[1] === O ? L = r[2] : (L = async function() {
-		try {
-			let [e, t, n] = await Promise.all([
-				_("POST", "/v1/insights/insights", {
-					since: O,
-					limit: 500
-				}),
-				_("GET", "/v1/state"),
-				_("GET", "/v1/apps")
-			]);
-			b(e), T({
-				apps: Object.fromEntries(n.map(M)),
-				devices: Object.fromEntries((t.network?.devices || []).map(j))
-			}), S(null);
-		} catch (e) {
-			let t = e;
-			S(one.plain(t));
-		}
-	}, r[1] = O, r[2] = L);
-	let R = L, z;
-	r[3] === R ? z = r[4] : (z = () => void R(), r[3] = R, r[4] = z);
-	let B;
-	if (r[5] === O ? B = r[6] : (B = [O], r[5] = O, r[6] = B), t(z, B), !m) {
-		let e;
-		r[7] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ h(a, { children: "Insights" }), r[7] = e) : e = r[7];
-		let t;
-		return r[8] !== R || r[9] !== x ? (t = /* @__PURE__ */ g("div", {
-			className: "flex max-w-2xl flex-col gap-6",
-			children: [e, x ? /* @__PURE__ */ h(l, {
-				problem: x,
-				retry: R
-			}) : /* @__PURE__ */ h(c, { rows: 3 })]
-		}), r[8] = R, r[9] = x, r[10] = t) : t = r[10], t;
-	}
-	let V;
-	r[11] === w ? V = r[12] : (V = (e) => e ? w.apps[e] || e : y, r[11] = w, r[12] = V);
-	let H = V, U, W, G, K, q, J, Y, X;
-	if (r[13] !== A || r[14] !== m || r[15] !== w || r[16] !== F || r[17] !== O || r[18] !== E || r[19] !== H) {
-		let e;
-		r[28] === w ? e = r[29] : (e = (e) => w.devices[e] || "A device", r[28] = w, r[29] = e);
-		let t = {
-			Errors: se(m, H),
-			Slow: ce(m, H),
-			Devices: le(m, e)
-		}, n;
-		r[30] === A ? n = r[31] : (n = (e) => A === v || e.app === A, r[30] = A, r[31] = n);
-		let c = t[E].filter(n), l;
-		r[32] === F ? l = r[33] : (l = (e) => e.id === F, r[32] = F, r[33] = l), W = c.find(l);
-		let _;
-		r[34] === H ? _ = r[35] : (_ = (e, t) => H(e).localeCompare(H(t)), r[34] = H, r[35] = _);
-		let y = [...new Set(t.Errors.concat(t.Slow).map(fe))].sort(_);
-		U = te, X = W?.title, r[36] === Symbol.for("react.memo_cache_sentinel") ? (G = () => I(null), r[36] = G) : G = r[36], K = "flex max-w-2xl flex-col gap-4", r[37] === Symbol.for("react.memo_cache_sentinel") ? (q = /* @__PURE__ */ h(a, { children: "Insights" }), r[37] = q) : q = r[37];
-		let b;
-		r[38] === Symbol.for("react.memo_cache_sentinel") ? (b = (e) => (D(e), I(null)), r[38] = b) : b = r[38];
-		let x;
-		r[39] === Symbol.for("react.memo_cache_sentinel") ? (x = /* @__PURE__ */ h(re, { children: Object.keys(k).map(de) }), r[39] = x) : x = r[39];
-		let S;
-		r[40] === E ? S = r[41] : (S = /* @__PURE__ */ h(ne, {
-			value: E,
-			onValueChange: b,
-			children: x
-		}), r[40] = E, r[41] = S);
-		let C;
-		r[42] === Symbol.for("react.memo_cache_sentinel") ? (C = (e) => (P(e), I(null)), r[42] = C) : C = r[42];
-		let T;
-		r[43] === Symbol.for("react.memo_cache_sentinel") ? (T = /* @__PURE__ */ h(p, {
-			"aria-label": "Which app",
-			children: /* @__PURE__ */ h(ee, {})
-		}), r[43] = T) : T = r[43];
-		let j;
-		r[44] === Symbol.for("react.memo_cache_sentinel") ? (j = /* @__PURE__ */ h(f, {
-			value: v,
-			children: "All Apps"
-		}), r[44] = j) : j = r[44];
-		let M;
-		r[45] === H ? M = r[46] : (M = (e) => /* @__PURE__ */ h(f, {
-			value: e,
-			children: H(e)
-		}, e), r[45] = H, r[46] = M);
-		let N = /* @__PURE__ */ g(u, {
-			value: A,
-			onValueChange: C,
-			children: [T, /* @__PURE__ */ g(d, { children: [j, y.map(M)] })]
-		}), L;
-		r[47] === Symbol.for("react.memo_cache_sentinel") ? (L = /* @__PURE__ */ h(p, {
-			"aria-label": "How far back",
-			children: /* @__PURE__ */ h(ee, {})
-		}), r[47] = L) : L = r[47];
-		let R;
-		r[48] === Symbol.for("react.memo_cache_sentinel") ? (R = /* @__PURE__ */ h(d, { children: Object.entries(ae).map(ue) }), r[48] = R) : R = r[48];
-		let z;
-		r[49] === O ? z = r[50] : (z = /* @__PURE__ */ g(u, {
-			value: O,
-			onValueChange: oe,
-			children: [L, R]
-		}), r[49] = O, r[50] = z), r[51] !== S || r[52] !== N || r[53] !== z ? (J = /* @__PURE__ */ g("div", {
-			className: "flex flex-wrap items-center gap-2",
-			children: [
-				S,
-				N,
-				z
-			]
-		}), r[51] = S, r[52] = N, r[53] = z, r[54] = J) : J = r[54], Y = c.length ? /* @__PURE__ */ h(o, { children: c.map((e) => /* @__PURE__ */ h(s, {
-			title: e.title,
-			sub: e.fresh ? /* @__PURE__ */ g(ie, { children: [
-				e.sub,
-				" · ",
-				/* @__PURE__ */ h("span", {
-					className: "text-warning",
-					children: "New today"
-				})
-			] }) : e.sub,
-			trailing: e.trailing,
-			selected: e.id === F,
-			onClick: () => I(e.id)
-		}, e.id)) }) : /* @__PURE__ */ h(i, { children: k[E] }), r[13] = A, r[14] = m, r[15] = w, r[16] = F, r[17] = O, r[18] = E, r[19] = H, r[20] = U, r[21] = W, r[22] = G, r[23] = K, r[24] = q, r[25] = J, r[26] = Y, r[27] = X;
-	} else U = r[20], W = r[21], G = r[22], K = r[23], q = r[24], J = r[25], Y = r[26], X = r[27];
-	let Z;
-	r[55] !== K || r[56] !== q || r[57] !== J || r[58] !== Y ? (Z = /* @__PURE__ */ g("div", {
-		className: K,
-		children: [
-			q,
-			J,
-			Y
-		]
-	}), r[55] = K, r[56] = q, r[57] = J, r[58] = Y, r[59] = Z) : Z = r[59];
-	let Q;
-	r[60] === W ? Q = r[61] : (Q = W && /* @__PURE__ */ h(N, { row: W }), r[60] = W, r[61] = Q);
-	let $;
-	return r[62] !== U || r[63] !== G || r[64] !== Z || r[65] !== Q || r[66] !== X ? ($ = /* @__PURE__ */ h(U, {
-		title: X,
-		onClose: G,
-		list: Z,
-		detail: Q
-	}), r[62] = U, r[63] = G, r[64] = Z, r[65] = Q, r[66] = X, r[67] = $) : $ = r[67], $;
+function Ee(e, t) {
+	let n = e.reduce((e, t) => e + t.count, 0), r = e.reduce((e, t) => e + t.ms, 0);
+	return t === "count" ? n : t === "errors" ? e.reduce((e, t) => e + t.errors, 0) : t === "sum" ? r : n ? r / n : null;
 }
-function ue(e) {
+var De = (e) => e === "avg" ? null : 0;
+function Oe(e, t, n, r) {
+	let i = Map.groupBy(e, (e) => r === T ? "All" : R(V(e)[r] ?? "–")), a = (e) => e.reduce((e, t) => e + t.count, 0), o = [...i.entries()].sort((e, t) => a(t[1]) - a(e[1])), s = z([...i.keys()]), c = (e, r, i) => {
+		let a = Map.groupBy(r, (e) => e.hour);
+		return {
+			name: e,
+			colour: i,
+			values: t.map((e) => a.has(e) ? Ee(a.get(e), n) : De(n))
+		};
+	}, l = o.slice(0, O).map(([e, t]) => c(e, t, j(s.indexOf(e))));
+	return o.length > O && l.push(c(k, o.slice(O).flatMap(([, e]) => e), "var(--muted-foreground)")), l;
+}
+function ke(t) {
+	let n = e(48), { rows: i, from: l, to: u, more: d, query: m } = t, [_, v] = m, [y, b] = r(null), [w, E] = r("count"), [O, k] = r(T), A, M;
+	if (n[0] !== l || n[1] !== d || n[2] !== y || n[3] !== _ || n[4] !== i || n[5] !== v || n[6] !== O || n[7] !== w || n[8] !== u) {
+		M = Symbol.for("react.early_return_sentinel");
+		bb0: {
+			let e = Te(l, u), t = e.map(Le), r;
+			if (n[11] !== _ || n[12] !== i) {
+				let e = H(_);
+				r = i.filter(e), n[11] = _, n[12] = i, n[13] = r;
+			} else r = n[13];
+			let m = r, N;
+			n[14] === v ? N = n[15] : (N = (e) => v(e.target.value), n[14] = v, n[15] = N);
+			let P;
+			n[16] !== _ || n[17] !== N ? (P = /* @__PURE__ */ S(c, {
+				className: "min-w-52 flex-1",
+				"aria-label": "Filter",
+				placeholder: "Filter: one.device=…  or a name",
+				value: _,
+				onChange: N
+			}), n[16] = _, n[17] = N, n[18] = P) : P = n[18];
+			let I = P;
+			if (y) {
+				let r;
+				n[19] === y ? r = n[20] : (r = (e) => e.name === y, n[19] = y, n[20] = r);
+				let c = m.filter(r), l;
+				if (n[21] !== y || n[22] !== i) {
+					let e;
+					n[24] === y ? e = n[25] : (e = (e) => e.name === y, n[24] = y, n[25] = e), l = z(i.filter(e).flatMap(Ie)).filter(Fe), n[21] = y, n[22] = i, n[23] = l;
+				} else l = n[23];
+				let u = l, d = Oe(c, e, w, O), _;
+				n[26] === Symbol.for("react.memo_cache_sentinel") ? (_ = /* @__PURE__ */ S("div", { children: /* @__PURE__ */ C(a, {
+					variant: "ghost",
+					onClick: () => (b(null), k(T)),
+					children: [/* @__PURE__ */ S(s, { name: "caret-left" }), "Metrics"]
+				}) }), n[26] = _) : _ = n[26];
+				let v;
+				n[27] === y ? v = n[28] : (v = /* @__PURE__ */ S("h2", {
+					className: "m-0 break-all text-xl font-semibold",
+					children: y
+				}), n[27] = y, n[28] = v);
+				let A;
+				n[29] === Symbol.for("react.memo_cache_sentinel") ? (A = /* @__PURE__ */ S(h, {
+					"aria-label": "Statistic",
+					children: /* @__PURE__ */ S(g, {})
+				}), n[29] = A) : A = n[29];
+				let j;
+				n[30] === Symbol.for("react.memo_cache_sentinel") ? (j = /* @__PURE__ */ S(p, { children: Object.entries(D).map(Pe) }), n[30] = j) : j = n[30];
+				let N;
+				n[31] === w ? N = n[32] : (N = /* @__PURE__ */ C(f, {
+					value: w,
+					onValueChange: E,
+					children: [A, j]
+				}), n[31] = w, n[32] = N);
+				let P;
+				n[33] !== u || n[34] !== O ? (P = /* @__PURE__ */ S($, {
+					label: "Group by",
+					value: O,
+					set: k,
+					all: "No Grouping",
+					options: u
+				}), n[33] = u, n[34] = O, n[35] = P) : P = n[35];
+				let F;
+				n[36] !== I || n[37] !== N || n[38] !== P ? (F = /* @__PURE__ */ C("div", {
+					className: "flex flex-wrap items-center gap-2",
+					children: [
+						N,
+						P,
+						I
+					]
+				}), n[36] = I, n[37] = N, n[38] = P, n[39] = F) : F = n[39];
+				let L = c.length ? /* @__PURE__ */ C(x, { children: [/* @__PURE__ */ S(Z, {
+					times: t,
+					series: d
+				}), /* @__PURE__ */ C("table", {
+					className: "w-full border-collapse text-sm",
+					children: [/* @__PURE__ */ S("thead", { children: /* @__PURE__ */ C("tr", {
+						className: "text-left text-muted-foreground",
+						children: [
+							/* @__PURE__ */ S("th", {
+								className: "py-1 font-normal",
+								children: "Series"
+							}),
+							/* @__PURE__ */ S("th", {
+								className: "py-1 text-right font-normal",
+								children: "Peak"
+							}),
+							/* @__PURE__ */ S("th", {
+								className: "py-1 text-right font-normal",
+								children: "Last"
+							})
+						]
+					}) }), /* @__PURE__ */ S("tbody", { children: d.map(Me) })]
+				})] }) : /* @__PURE__ */ S(o, { children: "No data in this range." }), R;
+				n[40] !== v || n[41] !== F || n[42] !== L ? (R = /* @__PURE__ */ C("div", {
+					className: "flex flex-col gap-4",
+					children: [
+						_,
+						v,
+						F,
+						L
+					]
+				}), n[40] = v, n[41] = F, n[42] = L, n[43] = R) : R = n[43], M = R;
+				break bb0;
+			}
+			let L = [...Map.groupBy(m, je).entries()].sort(Ae), R;
+			n[44] === I ? R = n[45] : (R = /* @__PURE__ */ S("div", {
+				className: "flex flex-wrap items-center gap-2",
+				children: I
+			}), n[44] = I, n[45] = R);
+			let B;
+			n[46] === d ? B = n[47] : (B = d && /* @__PURE__ */ S("p", {
+				className: "m-0 text-sm text-muted-foreground",
+				children: "Newest only"
+			}), n[46] = d, n[47] = B), A = /* @__PURE__ */ C("div", {
+				className: "flex flex-col gap-4",
+				children: [
+					R,
+					B,
+					L.length ? /* @__PURE__ */ S("div", {
+						className: "grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-x-6 gap-y-4",
+						children: L.map((n) => {
+							let [r, i] = n;
+							return /* @__PURE__ */ C("button", {
+								type: "button",
+								onClick: () => b(r),
+								className: "flex cursor-pointer flex-col gap-1 border-0 bg-transparent p-0 text-left text-foreground",
+								children: [/* @__PURE__ */ C("span", {
+									className: "flex items-baseline justify-between gap-2",
+									children: [/* @__PURE__ */ S("span", {
+										className: "min-w-0 truncate text-sm font-medium",
+										children: r
+									}), /* @__PURE__ */ S("span", {
+										className: "tabular-nums text-sm",
+										children: F(Ee(i, "count"))
+									})]
+								}), /* @__PURE__ */ S(Z, {
+									plain: !0,
+									height: 56,
+									times: t,
+									series: [{
+										name: r,
+										colour: j(0),
+										values: Oe(i, e, "count", T)[0].values
+									}]
+								})]
+							}, r);
+						})
+					}) : /* @__PURE__ */ S(o, { children: "No metrics match." })
+				]
+			});
+		}
+		n[0] = l, n[1] = d, n[2] = y, n[3] = _, n[4] = i, n[5] = v, n[6] = O, n[7] = w, n[8] = u, n[9] = A, n[10] = M;
+	} else A = n[9], M = n[10];
+	return M === Symbol.for("react.early_return_sentinel") ? A : M;
+}
+function Ae(e, t) {
+	return e[0].localeCompare(t[0]);
+}
+function je(e) {
+	return e.name;
+}
+function Me(e) {
+	let t = e.values.filter(Ne);
+	return /* @__PURE__ */ C("tr", {
+		className: "border-0 border-t border-solid border-border",
+		children: [
+			/* @__PURE__ */ S("td", {
+				className: "py-1.5",
+				children: /* @__PURE__ */ C("span", {
+					className: "flex items-center gap-2",
+					children: [/* @__PURE__ */ S("span", {
+						className: "size-2.5 shrink-0 rounded-full",
+						style: { background: e.colour }
+					}), /* @__PURE__ */ S("span", {
+						className: "break-all",
+						children: e.name
+					})]
+				})
+			}),
+			/* @__PURE__ */ S("td", {
+				className: "py-1.5 text-right tabular-nums",
+				children: F(t.length ? Math.max(...t) : null)
+			}),
+			/* @__PURE__ */ S("td", {
+				className: "py-1.5 text-right tabular-nums",
+				children: F(t.at(-1))
+			})
+		]
+	}, e.name);
+}
+function Ne(e) {
+	return e != null;
+}
+function Pe(e) {
 	let [t, n] = e;
-	return /* @__PURE__ */ h(f, {
+	return /* @__PURE__ */ S(m, {
 		value: t,
 		children: n
 	}, t);
 }
-function de(e) {
-	return /* @__PURE__ */ h(m, {
-		value: e,
-		children: e
-	}, e);
+function Fe(e) {
+	return ![
+		"count",
+		"errors",
+		"ms",
+		"hour",
+		"name"
+	].includes(e) && !e.startsWith("under_") && e !== "over";
 }
-function fe(e) {
+function Ie(e) {
+	return Object.keys(V(e));
+}
+function Le(e) {
+	return e * w;
+}
+function Re(t) {
+	let n = e(24), { rows: i, showTraces: s, query: l } = t, [u, d] = l, [f, p] = r(T), [m, h] = r(null), g;
+	if (n[0] !== u || n[1] !== i || n[2] !== f) {
+		let e = H(u);
+		g = i.filter((t) => (f === T || t.app === f) && e(t)), n[0] = u, n[1] = i, n[2] = f, n[3] = g;
+	} else g = n[3];
+	let _ = g, v;
+	n[4] === i ? v = n[5] : (v = z(i.map(ze).filter(Boolean)), n[4] = i, n[5] = v);
+	let y;
+	n[6] !== f || n[7] !== v ? (y = /* @__PURE__ */ S($, {
+		label: "Service",
+		value: f,
+		set: p,
+		all: "All Services",
+		options: v
+	}), n[6] = f, n[7] = v, n[8] = y) : y = n[8];
+	let b;
+	n[9] === d ? b = n[10] : (b = (e) => d(e.target.value), n[9] = d, n[10] = b);
+	let x;
+	n[11] !== u || n[12] !== b ? (x = /* @__PURE__ */ S(c, {
+		className: "min-w-52 flex-1",
+		"aria-label": "Search",
+		placeholder: "Search, or key=value",
+		value: u,
+		onChange: b
+	}), n[11] = u, n[12] = b, n[13] = x) : x = n[13];
+	let w;
+	n[14] !== y || n[15] !== x ? (w = /* @__PURE__ */ C("div", {
+		className: "flex flex-wrap items-center gap-2",
+		children: [y, x]
+	}), n[14] = y, n[15] = x, n[16] = w) : w = n[16];
+	let E;
+	n[17] !== _ || n[18] !== m || n[19] !== s ? (E = _.length ? /* @__PURE__ */ S("div", {
+		className: "flex flex-col",
+		children: _.map((e) => {
+			let t = `${e.app}|${e.tool}|${e.fingerprint}`;
+			return /* @__PURE__ */ C("div", {
+				className: "border-0 border-b border-solid border-border",
+				children: [/* @__PURE__ */ C("div", {
+					className: "flex cursor-pointer items-baseline justify-between gap-3 px-1 py-2.5 hover:bg-muted",
+					onClick: () => h(m === t ? null : t),
+					children: [/* @__PURE__ */ C("span", {
+						className: "min-w-0",
+						children: [/* @__PURE__ */ C("span", {
+							className: "block break-all font-medium",
+							children: [
+								e.type,
+								" ",
+								/* @__PURE__ */ S("span", {
+									className: "font-normal text-muted-foreground",
+									children: e.frame
+								})
+							]
+						}), /* @__PURE__ */ C("span", {
+							className: "block text-sm text-muted-foreground",
+							children: [
+								[
+									e.app,
+									e.tool,
+									e.fault
+								].filter(Boolean).join(" · "),
+								" · ",
+								L(e.last)
+							]
+						})]
+					}), /* @__PURE__ */ S("span", {
+						className: "shrink-0 tabular-nums",
+						children: F(e.count)
+					})]
+				}), m === t && /* @__PURE__ */ C("div", {
+					className: "flex flex-col items-start gap-2 px-1 pb-3 pt-1",
+					children: [/* @__PURE__ */ S(Q, { row: e }), /* @__PURE__ */ S(a, {
+						variant: "secondary",
+						onClick: () => s(`error.type=${e.type}`),
+						children: "Show Traces"
+					})]
+				})]
+			}, t);
+		})
+	}) : /* @__PURE__ */ S(o, { children: "No errors match." }), n[17] = _, n[18] = m, n[19] = s, n[20] = E) : E = n[20];
+	let D;
+	return n[21] !== w || n[22] !== E ? (D = /* @__PURE__ */ C("div", {
+		className: "flex flex-col gap-4",
+		children: [w, E]
+	}), n[21] = w, n[22] = E, n[23] = D) : D = n[23], D;
+}
+function ze(e) {
 	return e.app;
 }
-function j(e) {
-	return [e.key, e.name];
-}
-function M(e) {
-	return [e.name, e.title || e.name];
-}
-function N(t) {
-	let n = e(12), { row: r } = t, i;
-	n[0] === r.sub ? i = n[1] : (i = r.sub && /* @__PURE__ */ h("p", {
-		className: "text-sm text-muted-foreground",
-		children: r.sub
-	}), n[0] = r.sub, n[1] = i);
-	let a;
-	n[2] === r.facts ? a = n[3] : (a = r.facts.filter(Boolean).map(P), n[2] = r.facts, n[3] = a);
-	let o;
-	n[4] === a ? o = n[5] : (o = /* @__PURE__ */ h("dl", {
-		className: "grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm",
-		children: a
-	}), n[4] = a, n[5] = o);
-	let s;
-	n[6] === r.code ? s = n[7] : (s = r.code && /* @__PURE__ */ h("pre", {
-		className: "m-0 overflow-x-auto font-mono text-xs leading-relaxed",
-		children: r.code
-	}), n[6] = r.code, n[7] = s);
-	let c;
-	return n[8] !== i || n[9] !== o || n[10] !== s ? (c = /* @__PURE__ */ g("div", {
+function Be() {
+	let [e, i] = r(null), [o, c] = r(null), [b, x] = r("Traces"), [w, T] = r("1d"), [D, O] = r(!1), [k, A] = r(null), j = {
+		Traces: r(""),
+		Logs: r(""),
+		Metrics: r(""),
+		Errors: r("")
+	}, M = n(0);
+	async function N() {
+		let e = ++M.current;
+		O(!0);
+		try {
+			let t = await one.api("POST", "/v1/insights/insights", {
+				since: w,
+				limit: 2e3
+			});
+			if (e !== M.current) return;
+			i({
+				...t,
+				at: Date.now()
+			}), c(null);
+		} catch (t) {
+			e === M.current && c(one.plain(t));
+		} finally {
+			e === M.current && O(!1);
+		}
+	}
+	if (t(() => void N(), [w]), !e) return /* @__PURE__ */ C("div", {
+		className: "flex flex-col gap-6",
+		children: [/* @__PURE__ */ S(l, { children: "Insights" }), o ? /* @__PURE__ */ S(d, {
+			problem: o,
+			retry: N
+		}) : /* @__PURE__ */ S(u, { rows: 3 })]
+	});
+	let P = e.at, F = P - E.find(([e]) => e === w)[2], I = e.signals.filter((e) => e.kind === "span"), L = e.signals.filter((e) => e.kind !== "span"), R = W(e.signals.map((e) => e.service)), z = k && U(I).find((e) => e.id === k);
+	return z ? /* @__PURE__ */ S(he, {
+		trace: z,
+		back: () => A(null),
+		colour: R
+	}) : /* @__PURE__ */ C("div", {
 		className: "flex flex-col gap-4",
 		children: [
-			i,
-			o,
-			s
+			/* @__PURE__ */ S(l, {
+				action: /* @__PURE__ */ C("span", {
+					className: "flex items-center gap-2",
+					children: [/* @__PURE__ */ C(f, {
+						value: w,
+						onValueChange: T,
+						children: [/* @__PURE__ */ S(h, {
+							"aria-label": "Lookback",
+							children: /* @__PURE__ */ S(g, {})
+						}), /* @__PURE__ */ S(p, { children: E.map(([e, t]) => /* @__PURE__ */ S(m, {
+							value: e,
+							children: t
+						}, e)) })]
+					}), /* @__PURE__ */ S(a, {
+						variant: "ghost",
+						size: "icon",
+						"aria-label": "Refresh",
+						disabled: D,
+						onClick: N,
+						children: /* @__PURE__ */ S(s, { name: "arrow-clockwise" })
+					})]
+				}),
+				children: "Insights"
+			}),
+			o && /* @__PURE__ */ S(d, {
+				problem: o,
+				retry: N
+			}),
+			/* @__PURE__ */ S("div", { children: /* @__PURE__ */ S(_, {
+				value: b,
+				onValueChange: x,
+				children: /* @__PURE__ */ S(v, { children: Object.keys(j).map((e) => /* @__PURE__ */ S(y, {
+					value: e,
+					children: e
+				}, e)) })
+			}) }),
+			b === "Traces" && /* @__PURE__ */ S(de, {
+				rows: I,
+				query: j.Traces,
+				from: F,
+				to: P,
+				open: A,
+				colour: R,
+				more: e.more_signals
+			}),
+			b === "Logs" && /* @__PURE__ */ S(Se, {
+				rows: L,
+				from: F,
+				to: P,
+				more: e.more_signals,
+				query: j.Logs
+			}),
+			b === "Metrics" && /* @__PURE__ */ S(ke, {
+				rows: e.rollups,
+				from: F,
+				to: P,
+				more: e.more_rollups,
+				query: j.Metrics
+			}),
+			b === "Errors" && /* @__PURE__ */ S(Re, {
+				rows: e.fingerprints,
+				query: j.Errors,
+				showTraces: (e) => (j.Traces[1](e), x("Traces"))
+			})
 		]
-	}), n[8] = i, n[9] = o, n[10] = s, n[11] = c) : c = n[11], c;
+	});
 }
-function P(e) {
-	let [t, n] = e;
-	return [/* @__PURE__ */ h("dt", {
-		className: "text-muted-foreground",
-		children: t
-	}, t), /* @__PURE__ */ h("dd", {
-		className: "m-0",
-		children: n
-	}, `${t}:`)];
-}
-r(document.getElementById("root")).render(/* @__PURE__ */ h(A, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ S(Be, {}));
 </script>

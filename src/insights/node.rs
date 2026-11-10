@@ -10,8 +10,8 @@ use super::*;
 
 /// How often a device writes what it has to say. A write per call would cost far more than what it says is worth.
 const FLUSH_EVERY: Duration = Duration::from_secs(300);
-const MOST_SIGNALS_READ: usize = 500;
-const MOST_ROLLUPS_READ: usize = 1000;
+const MOST_SIGNALS_READ: usize = 2000;
+const MOST_ROLLUPS_READ: usize = 20_000;
 const MOST_PRINTS_READ: usize = 200;
 /// The most reports a client's device may make a minute, and events a report may hold.
 const REPORTS_A_MINUTE: u32 = 10;
@@ -59,7 +59,7 @@ impl Node {
             Reply::Elsewhere(_) | Reply::Needs(_) => return,
         };
         let ms = started.elapsed().as_millis() as u64;
-        let kept = !ok || ms >= insights::SLOW_MS;
+        let kept = !ok || ms >= insights::SLOW_MS || insights::sampled(&trace.trace_id());
         let steps = trace.since(from);
         let exception = steps.iter().rev().find(|s| s["step"] == "exception").and_then(|s| Exception::from_json(&s["exception"]));
         let at = trace.stage();
@@ -303,7 +303,9 @@ impl Node {
         let ok = answer.is_some_and(|a| a.get("error").is_none());
         let code = answer.and_then(|a| a["code"].as_str());
         let fault = (!ok).then(|| insights::fault(code, stage::RUN, None));
-        let kept = !ok || ms >= insights::SLOW_MS;
+        let (parent_trace, parent) = trace::parent_now();
+        let trace = parent_trace.unwrap_or_else(trace::ids::trace);
+        let kept = !ok || ms >= insights::SLOW_MS || insights::sampled(&trace);
         let mut attrs = Attrs::default().device(&hex(&self.0.id)).client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(crate::config::BUILD);
         attrs = attrs.tried(&hex(&device), if ok { "answered" } else if answer.is_some() { "failed" } else { "unreachable" });
         if destination.named {
@@ -315,9 +317,8 @@ impl Node {
         if !ok {
             attrs = attrs.error(code.unwrap_or(insights::OTHER));
         }
-        let (trace, parent) = trace::parent_now();
         let app = if destination.named { req.app.clone() } else { String::new() };
-        let signal = Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: "service.hop".into(), app, trace: trace.unwrap_or_else(trace::ids::trace), span: trace::ids::span(), parent, ms, ok, fault, attrs };
+        let signal = Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: "service.hop".into(), app, trace, span: trace::ids::span(), parent, ms, ok, fault, attrs };
         self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, kept, None);
     }
 
@@ -340,7 +341,7 @@ impl Node {
         }
         let app = if destination.named { app.to_string() } else { String::new() };
         let signal = Signal { time: now_ms().saturating_sub(ms), device: hex(&self.0.id), kind: Kind::Span, name: "schedule.run".into(), app, trace: traced.trace_id(), span: trace::ids::span(), parent: None, ms, ok, fault, attrs };
-        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, !ok || ms >= insights::SLOW_MS, None);
+        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, !ok || ms >= insights::SLOW_MS || insights::sampled(&traced.trace_id()), None);
     }
 
     /// What a service's endpoint says for insights: its program starting and ending, and OTLP. Only one of the network's
@@ -380,7 +381,8 @@ impl Node {
             if let Some(ids) = span.ids {
                 (built.trace, built.span, built.parent) = ids;
             }
-            say(built, !span.ok || span.ms >= insights::SLOW_MS);
+            let kept = !span.ok || span.ms >= insights::SLOW_MS || insights::sampled(&built.trace);
+            say(built, kept);
         }
     }
 
@@ -430,10 +432,12 @@ impl Node {
             rows.sort_by_key(|r| std::cmp::Reverse(r[key].as_u64()));
             rows.truncate(most);
         };
+        let more_signals = signals.len() > limit;
+        let more_rollups = rollups.len() > MOST_ROLLUPS_READ;
         newest(&mut signals, "time", limit);
         newest(&mut rollups, "hour", MOST_ROLLUPS_READ);
         newest(&mut prints, "last", MOST_PRINTS_READ);
-        Ok(json!({ "signals": signals, "rollups": rollups, "fingerprints": prints }))
+        Ok(json!({ "signals": signals.into_iter().flat_map(with_steps).collect::<Vec<_>>(), "rollups": rollups, "fingerprints": prints, "more_signals": more_signals, "more_rollups": more_rollups }))
     }
 
     fn may_see(&self, viewer: &Caller, scope: &Scope, app: &str) -> bool {
@@ -451,6 +455,7 @@ impl Node {
         let device = unhex(row["device"].as_str().unwrap_or("")).map_or_else(|_| "a device".to_string(), |k| self.name_of(&k));
         let mut read = row_read(row, "attrs");
         read["device"] = json!(device);
+        read["service"] = if read["app"] == "" { json!(crate::config::CLI) } else { read["app"].clone() };
         read
     }
 }
@@ -458,6 +463,30 @@ impl Node {
 /// `error.type`: the code it carries, or the type of what was thrown, or that it ran out of time, or none known.
 fn exception_kind(code: Option<&str>, exception: Option<&Exception>, stage: &str) -> String {
     code.map(str::to_string).or(exception.map(|e| e.kind.clone())).unwrap_or_else(|| if stage == insights::stage::LIMIT { insights::TIMEOUT } else { insights::OTHER }.to_string())
+}
+
+/// A span and, as OTEL's readers expect them, each step it went through as a child span.
+fn with_steps(mut span: Value) -> Vec<Value> {
+    let steps = span["attrs"].as_object_mut().and_then(|a| a.remove("one.steps")).and_then(|s| s.as_array().cloned()).unwrap_or_default();
+    let mut all = Vec::with_capacity(steps.len() + 1);
+    for (i, step) in steps.iter().enumerate() {
+        let mut attrs = Map::new();
+        for (key, value) in step.as_object().into_iter().flatten().filter(|(k, _)| !["step", "at", "ms"].contains(&k.as_str())) {
+            attrs.insert(format!("one.{key}"), value.clone());
+        }
+        let mut child = span.clone();
+        child["name"] = step["step"].clone();
+        child["time"] = json!(span["time"].as_u64().unwrap_or(0) + step["at"].as_u64().unwrap_or(0));
+        child["ms"] = step["ms"].clone();
+        child["span"] = json!(format!("{}.{i}", span["span"].as_str().unwrap_or("")));
+        child["parent"] = span["span"].clone();
+        child["status"] = json!("ok");
+        child["fault"] = Value::Null;
+        child["attrs"] = Value::Object(attrs);
+        all.push(child);
+    }
+    all.insert(0, span);
+    all
 }
 
 /// `row` with its JSON column `key` as JSON.

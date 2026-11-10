@@ -1,188 +1,545 @@
-// Insights: what the network recorded of how things went, as far as this user may see it (the `insights` tool decides).
+// Insights: an OpenTelemetry viewer, laid out as Jaeger's and Grafana's are. It knows OTEL's shapes (a span's id, parent,
+// name, time, duration and status; a histogram's count, sum and errors; attributes as keys and values) and no particular
+// signal: services, operations, filters, metrics and group-bys all come from what the `insights` tool gives it.
 //
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/insights.html.
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Empty, LargeTitle, List, ListRow, ListSkeleton, LoadFailure, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Split, Tabs, TabsList, TabsTrigger } from "@one/ui"
+import { Button, Empty, Icon, Input, LargeTitle, ListSkeleton, LoadFailure, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
 
-const api = one.api
+const HOUR = 3600000
 const ALL = "*"
-const NETWORK = "The One App"
-const DAY = 86400000
-const RANGES = { "1d": "24 Hours", "7d": "7 Days" }
-// What a call's own span already covers.
-const INSIDE_A_CALL = ["service.hop", "schedule.run"]
-const STOPPED = { watchdog: "Stopped by its watchdog", abort: "It crashed" }
+const RANGES = [["1h", "1 Hour", HOUR], ["6h", "6 Hours", 6 * HOUR], ["1d", "24 Hours", 24 * HOUR], ["7d", "7 Days", 168 * HOUR], ["30d", "30 Days", 720 * HOUR], ["90d", "90 Days", 2160 * HOUR]]
+const STATS = { count: "Count", errors: "Errors", sum: "Sum", avg: "Average" }
+const MOST_SERIES = 8
+const OTHER = "Other"
+// Categorical hues in a fixed order, each validated for its own theme (light, dark).
+const HUES = [["#2a78d6", "#3987e5"], ["#eb6834", "#d95926"], ["#1baf7a", "#199e70"], ["#eda100", "#c98500"], ["#e87ba4", "#d55181"], ["#008300", "#008300"], ["#6250d6", "#9085e9"], ["#e34948", "#e66767"]]
+const hue = (i) => HUES[i % HUES.length][matchMedia("(prefers-color-scheme: dark)").matches ? 1 : 0]
+const ERROR = "var(--destructive)"
 
-function when(ms) {
-  const d = new Date(ms), time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(ms).setHours(0, 0, 0, 0)) / DAY)
-  return days === 0 ? `Today, ${time}` : days === 1 ? `Yesterday, ${time}` : `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${time}`
+const when = (ms) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })
+const hourOf = (ms) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric" })
+const number = (n) => (n == null ? "–" : new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n))
+const took = (ms) => (ms >= 60000 ? `${(ms / 60000).toFixed(1)}m` : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`)
+const ago = (ms) => {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`
 }
-const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`
-const times = (n) => (n === 1 ? "Once" : `${n} times`)
-const middle = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
-const unique = (values) => [...new Set(values)].join(", ")
+const text = (v) => (typeof v === "string" ? v : JSON.stringify(v))
+const sorted = (values) => [...new Set(values)].sort((a, b) => String(a).localeCompare(String(b)))
 
-function errorTitle(p) {
-  const kind = p.type === "_OTHER" ? "Error" : p.type
-  if (p.frame === "screen.undrawn") return "Screen never drew"
-  if (p.frame.startsWith("stage:")) return `${kind} during ${p.frame.slice(6)}`
-  return `${kind} in ${p.frame.split(":").slice(0, 2).join(":")}`
-}
-const whereIn = (tool) => (tool.startsWith("screen:") ? `${tool.slice(7)} screen` : tool)
-
-function errors(data, title) {
-  return data.fingerprints.filter((p) => p.fault === "internal").map((p) => {
-    const seen = data.signals.filter((s) => s.status === "error" && s.app === p.app && (s.attrs["exception.stacktrace"] || "").startsWith(`at ${p.frame}`))
-    return {
-      id: `${p.app}|${p.tool}|${p.fingerprint}`,
-      app: p.app,
-      title: errorTitle(p),
-      sub: [title(p.app), whereIn(p.tool)].filter(Boolean).join(" · "),
-      fresh: Date.now() - p.first < DAY,
-      trailing: String(p.count),
-      facts: [["Seen", times(p.count)], ["First", when(p.first)], ["Last", when(p.last)], ["Build", p.build.slice(0, 8)], seen.length ? ["Devices", unique(seen.map((s) => s.device))] : null],
-      code: seen[0]?.attrs["exception.stacktrace"],
-    }
-  })
+// "1.5s", "200ms" or "2m" as milliseconds.
+function duration(s) {
+  const m = /^\s*([\d.]+)\s*(ms|s|m)?\s*$/.exec(s)
+  return m ? Number(m[1]) * { ms: 1, s: 1000, m: 60000 }[m[2] || "ms"] : 0
 }
 
-function slow(data, title) {
-  const groups = Map.groupBy(data.signals.filter((s) => s.kind === "span" && s.status === "ok" && s.attrs["one.tool"] && !INSIDE_A_CALL.includes(s.name)), (s) => s.name)
-  return [...groups.values()].map((calls) => {
-    const worst = calls.reduce((a, b) => (b.ms > a.ms ? b : a))
-    const steps = worst.attrs["one.steps"] || []
-    const longest = steps.reduce((a, b) => (b.ms > (a?.ms ?? -1) ? b : a), null)
-    return {
-      id: worst.name,
-      app: worst.app,
-      ms: middle(calls.map((c) => c.ms)),
-      title: `${title(worst.app)} · ${worst.attrs["one.tool"]}`,
-      sub: longest ? `Slowest in ${longest.step}` : undefined,
-      trailing: seconds(middle(calls.map((c) => c.ms))),
-      facts: [["Median", seconds(middle(calls.map((c) => c.ms)))], ["Worst", seconds(worst.ms)], ["Slow calls", String(calls.length)]],
-      code: steps.map((s) => `${s.step} ${s.ms} ms`).join("\n"),
-    }
-  }).sort((a, b) => b.ms - a.ms)
+// A row's own columns and attributes as one set of fields, what search looks through.
+const fields = (row) => {
+  const { attrs, key, ...own } = row
+  return Object.fromEntries(Object.entries({ ...own, ...(attrs || {}), ...(key || {}) }).filter(([, v]) => v !== null && v !== ""))
 }
 
-function devices(data, nameOf) {
-  const rows = []
-  for (const s of data.signals) {
-    const reason = s.attrs["one.reason"]
-    if (s.name === "node.start" && STOPPED[reason]) {
-      rows.push({ id: s.span, title: `${s.device} restarted`, sub: STOPPED[reason], facts: [["When", when(s.time)], ["Build", String(s.attrs["one.build"]).slice(0, 8)]] })
-    } else if (s.name === "update.not_taken" && s.status === "error") {
-      rows.push({ id: s.span, title: `${s.device} didn't take an update`, sub: reason, facts: [["When", when(s.time)], ["Part", s.attrs["one.part"]], ["Why", reason]] })
-    } else if (s.name === "service.exit" && s.status === "error") {
-      rows.push({ id: s.span, app: s.app, title: `${s.attrs["service.name"] || "A service"} stopped on ${s.device}`, sub: reason, facts: [["When", when(s.time)], ["Why", reason]] })
-    }
-  }
-  const offline = Map.groupBy(data.signals.filter((s) => s.name === "device.offline"), (s) => s.attrs["one.node"])
-  for (const [key, said] of offline) {
-    const relay = said.filter((s) => s.attrs["one.says"] === "relay").length
-    rows.push({
-      id: key,
-      title: `${nameOf(key)} went offline`,
-      sub: `The relay said so ${times(relay).toLowerCase()}, other devices ${times(said.length - relay).toLowerCase()}`,
-      trailing: `${said.length}×`,
-      facts: [["Last", when(Math.max(...said.map((s) => s.time)))], ["Relay", times(relay)], ["Other devices", times(said.length - relay)]],
+// Space-separated terms, as Jaeger's tags are: `key=value` is that field, anything else is found in any.
+function matcher(query) {
+  const terms = query.split(/\s+/).filter(Boolean).map((t) => t.toLowerCase())
+  return (row) => {
+    const all = fields(row)
+    const lower = Object.entries(all).map(([k, v]) => [k.toLowerCase(), text(v).toLowerCase()])
+    return terms.every((t) => {
+      const at = t.indexOf("=")
+      if (at > 0) return lower.some(([k, v]) => k === t.slice(0, at) && v === t.slice(at + 1))
+      return lower.some(([k, v]) => k.includes(t) || v.includes(t))
     })
   }
-  return rows
 }
 
-const TABS = { Errors: "No errors.", Slow: "Nothing's been slow.", Devices: "Nothing's gone wrong with a device." }
+// Spans by trace, each trace with its tree, its time and whether anything in it failed.
+function tracesOf(rows) {
+  return [...Map.groupBy(rows, (s) => s.trace).entries()].map(([id, spans]) => {
+    const ids = new Set(spans.map((s) => s.span))
+    const roots = spans.filter((s) => !s.parent || !ids.has(s.parent)).sort((a, b) => a.time - b.time)
+    const start = Math.min(...spans.map((s) => s.time))
+    const end = Math.max(...spans.map((s) => s.time + s.ms))
+    return { id, spans, root: roots[0] || spans[0], start, ms: end - start, errors: spans.filter((s) => s.status === "error").length, services: sorted(spans.map((s) => s.service)) }
+  }).sort((a, b) => b.start - a.start)
+}
+
+// Each service keeps its colour wherever it shows, whatever is filtered.
+const colours = (services) => Object.fromEntries(sorted(services).map((s, i) => [s, hue(i)]))
+
+function Tip({ tip }) {
+  if (!tip) return null
+  return (
+    <div className="pointer-events-none absolute z-10 max-w-64 rounded-md bg-popover px-2 py-1.5 text-xs text-popover-foreground shadow-md" style={{ left: tip.x, top: tip.y, transform: `translate(${tip.flip ? "-100%" : "0"}, -100%)` }}>
+      {tip.lines.map((l, i) => <div key={i} className={i ? "text-muted-foreground" : "font-medium"}>{l}</div>)}
+    </div>
+  )
+}
+
+function Axis({ ticks, width, left, top, height }) {
+  return ticks.map(({ y, label }) => (
+    <g key={label}>
+      <line x1={left} x2={width} y1={top + y * height} y2={top + y * height} stroke="var(--border)" />
+      <text x={left - 6} y={top + y * height + 4} textAnchor="end" fontSize="11" fill="var(--muted-foreground)">{label}</text>
+    </g>
+  ))
+}
+
+const LEFT = 48, TOP = 8, BOTTOM = 22
+
+// Duration against time, one dot a trace: Jaeger's search results.
+function Scatter({ traces, from, to, open, colour }) {
+  const [ref, width] = useWidth()
+  const [tip, setTip] = useState(null)
+  const height = 140, plot = height - TOP - BOTTOM
+  const most = Math.max(1, ...traces.map((t) => t.ms))
+  const x = (t) => LEFT + ((t - from) / Math.max(1, to - from)) * Math.max(1, width - LEFT - 8)
+  const y = (ms) => TOP + plot - (ms / most) * plot
+  return (
+    <div ref={ref} className="relative">
+      <svg width={width} height={height} role="img" aria-label="Traces by time and duration">
+        <Axis width={width} left={LEFT} top={TOP} height={plot} ticks={[{ y: 0, label: took(most) }, { y: 0.5, label: took(Math.round(most / 2)) }, { y: 1, label: "0" }]} />
+        <text x={LEFT} y={height - 6} fontSize="11" fill="var(--muted-foreground)">{hourOf(from)}</text>
+        <text x={width - 8} y={height - 6} fontSize="11" textAnchor="end" fill="var(--muted-foreground)">{hourOf(to)}</text>
+        {traces.map((t) => (
+          <g key={t.id} className="cursor-pointer" onClick={() => open(t.id)} onMouseEnter={() => setTip({ x: x(t.start), y: y(t.ms) - 8, flip: x(t.start) > width / 2, lines: [`${t.root.service}: ${t.root.name}`, took(t.ms), when(t.start)] })} onMouseLeave={() => setTip(null)}>
+            <circle cx={x(t.start)} cy={y(t.ms)} r="10" fill="transparent" />
+            <circle cx={x(t.start)} cy={y(t.ms)} r="4" fill={t.errors ? ERROR : colour[t.root.service]} stroke="var(--background)" strokeWidth="2" />
+          </g>
+        ))}
+      </svg>
+      <Tip tip={tip} />
+    </div>
+  )
+}
+
+// Lines over time, with a crosshair. `series`: `[{ name, colour, values }]`, one value per place on `times`.
+function Lines({ times, series, height = 240, plain }) {
+  const [ref, width] = useWidth()
+  const [at, setAt] = useState(null)
+  const top = plain ? 4 : TOP, bottom = plain ? 4 : BOTTOM, left = plain ? 0 : LEFT
+  const plot = height - top - bottom
+  const most = Math.max(1, ...series.flatMap((s) => s.values.filter((v) => v != null)))
+  const x = (i) => left + (i / Math.max(1, times.length - 1)) * Math.max(1, width - left - 8)
+  const y = (v) => top + plot - (v / most) * plot
+  const path = (values) => {
+    let d = "", pen = false
+    values.forEach((v, i) => {
+      if (v == null) return (pen = false)
+      d += `${pen ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`
+      pen = true
+    })
+    return d
+  }
+  function hover(e) {
+    if (plain) return
+    const r = e.currentTarget.getBoundingClientRect()
+    setAt(Math.max(0, Math.min(times.length - 1, Math.round(((e.clientX - r.left - left) / Math.max(1, width - left - 8)) * (times.length - 1)))))
+  }
+  const listed = at == null ? [] : series.map((s) => ({ ...s, v: s.values[at] })).filter((s) => s.v != null).sort((a, b) => b.v - a.v).slice(0, MOST_SERIES)
+  return (
+    <div ref={ref} className="relative">
+      <svg width={width} height={height} onMouseMove={hover} onMouseLeave={() => setAt(null)} role="img" aria-label={series.map((s) => s.name).join(", ")}>
+        {!plain && <Axis width={width} left={left} top={top} height={plot} ticks={[{ y: 0, label: number(most) }, { y: 0.5, label: number(most / 2) }, { y: 1, label: "0" }]} />}
+        {!plain && times.length > 1 && <text x={left} y={height - 6} fontSize="11" fill="var(--muted-foreground)">{hourOf(times[0])}</text>}
+        {!plain && <text x={width - 8} y={height - 6} fontSize="11" textAnchor="end" fill="var(--muted-foreground)">{hourOf(times.at(-1))}</text>}
+        {series.map((s) => <path key={s.name} d={path(s.values)} fill="none" stroke={s.colour} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />)}
+        {at != null && <line x1={x(at)} x2={x(at)} y1={top} y2={top + plot} stroke="var(--muted-foreground)" />}
+        {listed.map((s) => <circle key={s.name} cx={x(at)} cy={y(s.v)} r="4" fill={s.colour} stroke="var(--background)" strokeWidth="2" />)}
+      </svg>
+      {at != null && <Tip tip={{ x: x(at) + (x(at) > width / 2 ? -10 : 10), y: top + 40, flip: x(at) > width / 2, lines: [hourOf(times[at]), ...listed.map((s) => `${s.name}: ${number(s.v)}`)] }} />}
+    </div>
+  )
+}
+
+// How many in each slice of time, red for the failed: the volume bar above a log search.
+function Volume({ rows, from, to }) {
+  const [ref, width] = useWidth()
+  const slices = 48, height = 56
+  const buckets = Array.from({ length: slices }, () => [0, 0])
+  for (const r of rows) {
+    const i = Math.min(slices - 1, Math.max(0, Math.floor(((r.time - from) / Math.max(1, to - from)) * slices)))
+    buckets[i][r.status === "error" ? 1 : 0]++
+  }
+  const most = Math.max(1, ...buckets.map(([a, b]) => a + b))
+  const w = width / slices
+  return (
+    <div ref={ref}>
+      <svg width={width} height={height} role="img" aria-label="How many over time">
+        {buckets.map(([ok, bad], i) => (
+          <g key={i}>
+            {ok > 0 && <rect x={i * w + 1} width={Math.max(1, w - 2)} y={height - ((ok + bad) / most) * height} height={(ok / most) * height} rx="2" fill="var(--muted-foreground)" opacity=".5" />}
+            {bad > 0 && <rect x={i * w + 1} width={Math.max(1, w - 2)} y={height - (bad / most) * height} height={(bad / most) * height} rx="2" fill={ERROR} />}
+          </g>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
+function Fields({ row }) {
+  const all = fields(row)
+  return (
+    <dl className="m-0 grid grid-cols-[minmax(0,14rem)_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono text-xs">
+      {Object.keys(all).sort().map((k) => [<dt key={k} className="break-all text-muted-foreground">{k}</dt>, <dd key={`${k}=`} className="m-0 whitespace-pre-wrap break-all">{text(all[k])}</dd>])}
+    </dl>
+  )
+}
+
+function Traces({ rows, from, to, open, colour, more, query: [query, setQuery] }) {
+  const [service, setService] = useState(ALL)
+  const [operation, setOperation] = useState(ALL)
+  const [least, setLeast] = useState("")
+  const services = sorted(rows.map((s) => s.service))
+  const operations = sorted(rows.filter((s) => service === ALL || s.service === service).map((s) => s.name))
+  const found = useMemo(() => {
+    const matches = matcher(query), floor = duration(least)
+    const byTrace = tracesOf(rows)
+    return byTrace.filter((t) => t.ms >= floor && t.spans.some((s) => (service === ALL || s.service === service) && (operation === ALL || s.name === operation) && matches(s)))
+  }, [rows, service, operation, query, least])
+  const longest = Math.max(1, ...found.map((t) => t.ms))
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Pick label="Service" value={service} set={(v) => (setService(v), setOperation(ALL))} all="All Services" options={services} />
+        <Pick label="Operation" value={operation} set={setOperation} all="All Operations" options={operations} />
+        <Input className="w-28" aria-label="Minimum duration" placeholder="Min 1.2s" value={least} onChange={(e) => setLeast(e.target.value)} />
+        <Input className="min-w-52 flex-1" aria-label="Tags" placeholder="Tags: error.type=timeout one.device=…" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </div>
+      {found.length ? (
+        <>
+          <Scatter traces={found} from={from} to={to} open={open} colour={colour} />
+          <p className="m-0 text-sm text-muted-foreground">{found.length} {found.length === 1 ? "Trace" : "Traces"}{more ? ", newest only" : ""}</p>
+          <div className="flex flex-col">
+            {found.map((t) => (
+              <button key={t.id} type="button" onClick={() => open(t.id)} className="flex cursor-pointer flex-col gap-1 border-0 border-b border-solid border-border bg-transparent px-1 py-2.5 text-left text-foreground hover:bg-muted">
+                <span className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 truncate font-medium">{t.root.service}: {t.root.name}</span>
+                  <span className="shrink-0 tabular-nums text-sm">{took(t.ms)}</span>
+                </span>
+                <span className="block h-1 rounded-sm bg-muted"><span className="block h-1 rounded-sm" style={{ width: `${Math.max(1, (t.ms / longest) * 100)}%`, background: t.errors ? ERROR : colour[t.root.service] }} /></span>
+                <span className="flex flex-wrap justify-between gap-x-3 text-sm text-muted-foreground">
+                  <span>{t.spans.length} {t.spans.length === 1 ? "Span" : "Spans"}{t.errors ? <span className="text-destructive"> · {t.errors} {t.errors === 1 ? "Error" : "Errors"}</span> : null}{t.services.length > 1 ? ` · ${t.services.join(", ")}` : ""}</span>
+                  <span title={when(t.start)}>{ago(t.start)}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : <Empty>No traces match.</Empty>}
+    </div>
+  )
+}
+
+// One trace, as a waterfall: each span under its parent, its bar where it ran, and what it says under it when opened.
+function Trace({ trace, back, colour }) {
+  const [closed, setClosed] = useState(() => new Set())
+  const [open, setOpen] = useState(null)
+  const kids = Map.groupBy(trace.spans, (s) => s.parent || "")
+  const known = new Set(trace.spans.map((s) => s.span))
+  const flat = []
+  const walk = (s, depth) => {
+    flat.push({ s, depth })
+    if (closed.has(s.span)) return
+    for (const k of (kids.get(s.span) || []).sort((a, b) => a.time - b.time)) walk(k, depth + 1)
+  }
+  trace.spans.filter((s) => !s.parent || !known.has(s.parent)).sort((a, b) => a.time - b.time).forEach((s) => walk(s, 0))
+  const whole = Math.max(1, trace.ms)
+  const toggle = (id) => setClosed((c) => { const n = new Set(c); n.has(id) ? n.delete(id) : n.add(id); return n })
+  return (
+    <div className="flex flex-col gap-4">
+      <div><Button variant="ghost" onClick={back}><Icon name="caret-left" />Traces</Button></div>
+      <div>
+        <h2 className="m-0 break-words text-xl font-semibold">{trace.root.service}: {trace.root.name}</h2>
+        <p className="m-0 text-sm text-muted-foreground">{when(trace.start)} · {took(trace.ms)} · {trace.spans.length} {trace.spans.length === 1 ? "Span" : "Spans"} · {trace.services.join(", ")}{trace.errors ? ` · ${trace.errors} failed` : ""}</p>
+        <p className="m-0 break-all font-mono text-xs text-muted-foreground">{trace.id}</p>
+      </div>
+      <div className="flex justify-between font-mono text-xs text-muted-foreground @container">
+        {[0, 0.25, 0.5, 0.75, 1].map((p) => <span key={p}>{took(Math.round(p * whole))}</span>)}
+      </div>
+      <div className="flex flex-col">
+        {flat.map(({ s, depth }) => {
+          const parent = (kids.get(s.span) || []).length > 0
+          const shown = open === s.span
+          return (
+            <div key={s.span} className="border-0 border-b border-solid border-border">
+              <div className="flex cursor-pointer flex-col gap-1 py-1.5 hover:bg-muted" onClick={() => setOpen(shown ? null : s.span)}>
+                <div className="flex items-center gap-1 text-sm" style={{ paddingLeft: Math.min(depth, 8) * 14 }}>
+                  {parent ? (
+                    <button type="button" aria-label={closed.has(s.span) ? "Expand" : "Collapse"} onClick={(e) => (e.stopPropagation(), toggle(s.span))} className="grid size-5 cursor-pointer place-items-center border-0 bg-transparent p-0 text-muted-foreground">
+                      <Icon name={closed.has(s.span) ? "caret-right" : "caret-down"} />
+                    </button>
+                  ) : <span className="size-5" />}
+                  <span className="min-w-0 truncate"><span className="text-muted-foreground">{s.service}</span> {s.name}</span>
+                  <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{took(s.ms)}</span>
+                </div>
+                <div className="relative h-2.5 rounded-sm bg-muted/60">
+                  <div className="absolute inset-y-0 min-w-0.5 rounded-sm" style={{ left: `${((s.time - trace.start) / whole) * 100}%`, width: `${(s.ms / whole) * 100}%`, background: s.status === "error" ? ERROR : colour[s.service] }} />
+                </div>
+              </div>
+              {shown && <div className="px-1 pb-3 pt-1"><Fields row={s} /></div>}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function Pick({ label, value, set, all, options }) {
+  return (
+    <Select value={value} onValueChange={set}>
+      <SelectTrigger aria-label={label}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL}>{all}</SelectItem>
+        {options.map((o) => <SelectItem key={o} value={String(o)}>{String(o)}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function Logs({ rows, from, to, more, query: [query, setQuery] }) {
+  const [service, setService] = useState(ALL)
+  const [open, setOpen] = useState(null)
+  const found = useMemo(() => {
+    const matches = matcher(query)
+    return rows.filter((r) => (service === ALL || r.service === service) && matches(r))
+  }, [rows, service, query])
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Pick label="Service" value={service} set={setService} all="All Services" options={sorted(rows.map((r) => r.service))} />
+        <Input className="min-w-52 flex-1" aria-label="Search" placeholder="Search, or key=value" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </div>
+      {found.length ? (
+        <>
+          <Volume rows={found} from={from} to={to} />
+          <p className="m-0 text-sm text-muted-foreground">{found.length} {found.length === 1 ? "Log" : "Logs"}{more ? ", newest only" : ""}</p>
+          <div className="flex flex-col font-mono text-xs">
+            {found.map((r) => (
+              <div key={r.span} className="border-0 border-b border-solid border-border">
+                <div className="flex cursor-pointer gap-3 py-1.5 hover:bg-muted" onClick={() => setOpen(open === r.span ? null : r.span)}>
+                  <span className="shrink-0 tabular-nums text-muted-foreground">{when(r.time)}</span>
+                  <span className={`w-10 shrink-0 ${r.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>{r.status === "error" ? "ERROR" : "INFO"}</span>
+                  <span className="min-w-0 truncate">{r.service} {r.name} <span className="text-muted-foreground">{Object.entries(r.attrs || {}).map(([k, v]) => `${k}=${text(v)}`).join(" ")}</span></span>
+                </div>
+                {open === r.span && <div className="px-1 pb-3 pt-1"><Fields row={r} /></div>}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : <Empty>No logs match.</Empty>}
+    </div>
+  )
+}
+
+// Hourly places from `from` to `to`, and each rollup's numbers for a stat.
+function hoursOf(from, to) {
+  const out = []
+  for (let h = Math.floor(from / HOUR); h <= Math.floor(to / HOUR); h++) out.push(h)
+  return out
+}
+function statOver(rows, stat) {
+  const count = rows.reduce((n, r) => n + r.count, 0)
+  const sum = rows.reduce((n, r) => n + r.ms, 0)
+  if (stat === "count") return count
+  if (stat === "errors") return rows.reduce((n, r) => n + r.errors, 0)
+  if (stat === "sum") return sum
+  return count ? sum / count : null
+}
+const zeroAt = (stat) => (stat === "avg" ? null : 0)
+function seriesOf(rows, hours, stat, split) {
+  const named = (r) => (split === ALL ? "All" : text(fields(r)[split] ?? "–"))
+  const groups = Map.groupBy(rows, named)
+  const total = (g) => g.reduce((n, r) => n + r.count, 0)
+  const ranked = [...groups.entries()].sort((a, b) => total(b[1]) - total(a[1]))
+  const stable = sorted([...groups.keys()])
+  const line = (name, g, colour) => {
+    const byHour = Map.groupBy(g, (r) => r.hour)
+    return { name, colour, values: hours.map((h) => (byHour.has(h) ? statOver(byHour.get(h), stat) : zeroAt(stat))) }
+  }
+  const lines = ranked.slice(0, MOST_SERIES).map(([name, g]) => line(name, g, hue(stable.indexOf(name))))
+  if (ranked.length > MOST_SERIES) lines.push(line(OTHER, ranked.slice(MOST_SERIES).flatMap(([, g]) => g), "var(--muted-foreground)"))
+  return lines
+}
+
+function Metrics({ rows, from, to, more, query: [query, setQuery] }) {
+  const [open, setOpen] = useState(null)
+  const [stat, setStat] = useState("count")
+  const [split, setSplit] = useState(ALL)
+  const hours = hoursOf(from, to)
+  const times = hours.map((h) => h * HOUR)
+  const shown = useMemo(() => {
+    const matches = matcher(query)
+    return rows.filter(matches)
+  }, [rows, query])
+  const search = <Input className="min-w-52 flex-1" aria-label="Filter" placeholder="Filter: one.device=…  or a name" value={query} onChange={(e) => setQuery(e.target.value)} />
+  if (open) {
+    const these = shown.filter((r) => r.name === open)
+    const keys = sorted(rows.filter((r) => r.name === open).flatMap((r) => Object.keys(fields(r)))).filter((k) => !["count", "errors", "ms", "hour", "name"].includes(k) && !k.startsWith("under_") && k !== "over")
+    const series = seriesOf(these, hours, stat, split)
+    return (
+      <div className="flex flex-col gap-4">
+        <div><Button variant="ghost" onClick={() => (setOpen(null), setSplit(ALL))}><Icon name="caret-left" />Metrics</Button></div>
+        <h2 className="m-0 break-all text-xl font-semibold">{open}</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={stat} onValueChange={setStat}>
+            <SelectTrigger aria-label="Statistic"><SelectValue /></SelectTrigger>
+            <SelectContent>{Object.entries(STATS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+          </Select>
+          <Pick label="Group by" value={split} set={setSplit} all="No Grouping" options={keys} />
+          {search}
+        </div>
+        {these.length ? (
+          <>
+            <Lines times={times} series={series} />
+            <table className="w-full border-collapse text-sm">
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1 font-normal">Series</th><th className="py-1 text-right font-normal">Peak</th><th className="py-1 text-right font-normal">Last</th></tr></thead>
+              <tbody>
+                {series.map((s) => {
+                  const known = s.values.filter((v) => v != null)
+                  return (
+                    <tr key={s.name} className="border-0 border-t border-solid border-border">
+                      <td className="py-1.5"><span className="flex items-center gap-2"><span className="size-2.5 shrink-0 rounded-full" style={{ background: s.colour }} /><span className="break-all">{s.name}</span></span></td>
+                      <td className="py-1.5 text-right tabular-nums">{number(known.length ? Math.max(...known) : null)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{number(known.at(-1))}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </>
+        ) : <Empty>No data in this range.</Empty>}
+      </div>
+    )
+  }
+  const names = [...Map.groupBy(shown, (r) => r.name).entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">{search}</div>
+      {more && <p className="m-0 text-sm text-muted-foreground">Newest only</p>}
+      {names.length ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-x-6 gap-y-4">
+          {names.map(([name, g]) => (
+            <button key={name} type="button" onClick={() => setOpen(name)} className="flex cursor-pointer flex-col gap-1 border-0 bg-transparent p-0 text-left text-foreground">
+              <span className="flex items-baseline justify-between gap-2"><span className="min-w-0 truncate text-sm font-medium">{name}</span><span className="tabular-nums text-sm">{number(statOver(g, "count"))}</span></span>
+              <Lines plain height={56} times={times} series={[{ name, colour: hue(0), values: seriesOf(g, hours, "count", ALL)[0].values }]} />
+            </button>
+          ))}
+        </div>
+      ) : <Empty>No metrics match.</Empty>}
+    </div>
+  )
+}
+
+function Errors({ rows, showTraces, query: [query, setQuery] }) {
+  const [service, setService] = useState(ALL)
+  const [open, setOpen] = useState(null)
+  const found = useMemo(() => {
+    const matches = matcher(query)
+    return rows.filter((r) => (service === ALL || r.app === service) && matches(r))
+  }, [rows, service, query])
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Pick label="Service" value={service} set={setService} all="All Services" options={sorted(rows.map((r) => r.app).filter(Boolean))} />
+        <Input className="min-w-52 flex-1" aria-label="Search" placeholder="Search, or key=value" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </div>
+      {found.length ? (
+        <div className="flex flex-col">
+          {found.map((p) => {
+            const id = `${p.app}|${p.tool}|${p.fingerprint}`
+            return (
+              <div key={id} className="border-0 border-b border-solid border-border">
+                <div className="flex cursor-pointer items-baseline justify-between gap-3 px-1 py-2.5 hover:bg-muted" onClick={() => setOpen(open === id ? null : id)}>
+                  <span className="min-w-0">
+                    <span className="block break-all font-medium">{p.type} <span className="font-normal text-muted-foreground">{p.frame}</span></span>
+                    <span className="block text-sm text-muted-foreground">{[p.app, p.tool, p.fault].filter(Boolean).join(" · ")} · {ago(p.last)}</span>
+                  </span>
+                  <span className="shrink-0 tabular-nums">{number(p.count)}</span>
+                </div>
+                {open === id && (
+                  <div className="flex flex-col items-start gap-2 px-1 pb-3 pt-1">
+                    <Fields row={p} />
+                    <Button variant="secondary" onClick={() => showTraces(`error.type=${p.type}`)}>Show Traces</Button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      ) : <Empty>No errors match.</Empty>}
+    </div>
+  )
+}
 
 function Insights() {
   const [data, setData] = useState(null)
   const [problem, setProblem] = useState(null)
-  const [names, setNames] = useState({ apps: {}, devices: {} })
-  const [tab, setTab] = useState("Errors")
-  const [range, setRange] = useState("7d")
-  const [app, setApp] = useState(ALL)
-  const [open, setOpen] = useState(null)
+  const [tab, setTab] = useState("Traces")
+  const [range, setRange] = useState("1d")
+  const [loading, setLoading] = useState(false)
+  const [traceId, setTraceId] = useState(null)
+  const queries = { Traces: useState(""), Logs: useState(""), Metrics: useState(""), Errors: useState("") }
+  const asked = useRef(0)
 
   async function load() {
+    const mine = ++asked.current
+    setLoading(true)
     try {
-      const [got, state, listed] = await Promise.all([api("POST", "/v1/insights/insights", { since: range, limit: 500 }), api("GET", "/v1/state"), api("GET", "/v1/apps")])
-      setData(got)
-      setNames({ apps: Object.fromEntries(listed.map((a) => [a.name, a.title || a.name])), devices: Object.fromEntries((state.network?.devices || []).map((d) => [d.key, d.name])) })
+      const got = await one.api("POST", "/v1/insights/insights", { since: range, limit: 2000 })
+      if (mine !== asked.current) return
+      setData({ ...got, at: Date.now() })
       setProblem(null)
     } catch (e) {
-      setProblem(one.plain(e))
+      if (mine === asked.current) setProblem(one.plain(e))
+    } finally {
+      if (mine === asked.current) setLoading(false)
     }
   }
   useEffect(() => void load(), [range])
 
   if (!data) {
     return (
-      <div className="flex max-w-2xl flex-col gap-6">
+      <div className="flex flex-col gap-6">
         <LargeTitle>Insights</LargeTitle>
         {problem ? <LoadFailure problem={problem} retry={load} /> : <ListSkeleton rows={3} />}
       </div>
     )
   }
 
-  const title = (name) => (name ? names.apps[name] || name : NETWORK)
-  const rows = { Errors: errors(data, title), Slow: slow(data, title), Devices: devices(data, (key) => names.devices[key] || "A device") }
-  const shown = rows[tab].filter((r) => app === ALL || r.app === app)
-  const chosen = shown.find((r) => r.id === open)
-  const apps = [...new Set(rows.Errors.concat(rows.Slow).map((r) => r.app))].sort((a, b) => title(a).localeCompare(title(b)))
+  const to = data.at, from = to - RANGES.find(([v]) => v === range)[2]
+  const spans = data.signals.filter((s) => s.kind === "span")
+  const logs = data.signals.filter((s) => s.kind !== "span")
+  const colour = colours(data.signals.map((s) => s.service))
+  const opened = traceId && tracesOf(spans).find((t) => t.id === traceId)
+  if (opened) return <Trace trace={opened} back={() => setTraceId(null)} colour={colour} />
 
-  return (
-    <Split
-      title={chosen?.title}
-      onClose={() => setOpen(null)}
-      list={
-        <div className="flex max-w-2xl flex-col gap-4">
-          <LargeTitle>Insights</LargeTitle>
-          <div className="flex flex-wrap items-center gap-2">
-            <Tabs value={tab} onValueChange={(t) => (setTab(t), setOpen(null))}>
-              <TabsList>{Object.keys(TABS).map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>
-            </Tabs>
-            <Select value={app} onValueChange={(a) => (setApp(a), setOpen(null))}>
-              <SelectTrigger aria-label="Which app"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All Apps</SelectItem>
-                {apps.map((a) => <SelectItem key={a} value={a}>{title(a)}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={range} onValueChange={setRange}>
-              <SelectTrigger aria-label="How far back"><SelectValue /></SelectTrigger>
-              <SelectContent>{Object.entries(RANGES).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          {shown.length ? (
-            <List>
-              {shown.map((r) => (
-                <ListRow
-                  key={r.id}
-                  title={r.title}
-                  sub={r.fresh ? <>{r.sub} · <span className="text-warning">New today</span></> : r.sub}
-                  trailing={r.trailing}
-                  selected={r.id === open}
-                  onClick={() => setOpen(r.id)}
-                />
-              ))}
-            </List>
-          ) : <Empty>{TABS[tab]}</Empty>}
-        </div>
-      }
-      detail={chosen && <Detail row={chosen} />}
-    />
-  )
-}
-
-function Detail({ row }) {
   return (
     <div className="flex flex-col gap-4">
-      {row.sub && <p className="text-sm text-muted-foreground">{row.sub}</p>}
-      <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">
-        {row.facts.filter(Boolean).map(([label, value]) => [<dt key={label} className="text-muted-foreground">{label}</dt>, <dd key={`${label}:`} className="m-0">{value}</dd>])}
-      </dl>
-      {row.code && <pre className="m-0 overflow-x-auto font-mono text-xs leading-relaxed">{row.code}</pre>}
+      <LargeTitle
+        action={
+          <span className="flex items-center gap-2">
+            <Select value={range} onValueChange={setRange}>
+              <SelectTrigger aria-label="Lookback"><SelectValue /></SelectTrigger>
+              <SelectContent>{RANGES.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+            </Select>
+            <Button variant="ghost" size="icon" aria-label="Refresh" disabled={loading} onClick={load}><Icon name="arrow-clockwise" /></Button>
+          </span>
+        }
+      >Insights</LargeTitle>
+      {problem && <LoadFailure problem={problem} retry={load} />}
+      <div>
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList>{Object.keys(queries).map((t) => <TabsTrigger key={t} value={t}>{t}</TabsTrigger>)}</TabsList>
+        </Tabs>
+      </div>
+      {tab === "Traces" && <Traces rows={spans} query={queries.Traces} from={from} to={to} open={setTraceId} colour={colour} more={data.more_signals} />}
+      {tab === "Logs" && <Logs rows={logs} from={from} to={to} more={data.more_signals} query={queries.Logs} />}
+      {tab === "Metrics" && <Metrics rows={data.rollups} from={from} to={to} more={data.more_rollups} query={queries.Metrics} />}
+      {tab === "Errors" && <Errors rows={data.fingerprints} query={queries.Errors} showTraces={(q) => (queries.Traces[1](q), setTab("Traces"))} />}
     </div>
   )
 }

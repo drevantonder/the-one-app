@@ -4,7 +4,8 @@
 //! It speaks OpenTelemetry's data model and field names (`service.name`, `error.type`, `exception.stacktrace`, W3C trace
 //! and span ids) without its SDK. Each device keeps a batch per scope in memory and writes it to that scope's node
 //! database every few minutes (`node.rs` here): three tables, of raw signals (a week), hourly rollups (90 days) and error
-//! fingerprints (until their build is gone from the network). Telemetry may be lost.
+//! fingerprints (until their build is gone from the network). Failures, slow calls and one trace in 20 keep their spans.
+//! Telemetry may be lost.
 //!
 //! A signal holds closed-set values only (`Attrs`): never a call's arguments or answer, an app's error text, a URL, a file,
 //! repo or account's name, an email, an IP, a prompt or anything key-shaped, and never names a user or a group.
@@ -73,6 +74,14 @@ impl Ended {
 /// How long a call takes before it keeps a full span. ARCHITECTURE.md's targets state none for a whole call, and its
 /// nearest is a write seen elsewhere within 1 s.
 pub const SLOW_MS: u64 = 1_000;
+
+/// One trace in this many that went well is kept whole, to see what normal looks like.
+const SAMPLED_ONE_IN: u64 = 20;
+
+/// Whether `trace` is one of those. By its id, so every span of a trace agrees, on any device.
+pub fn sampled(trace: &str) -> bool {
+    u64::from_str_radix(trace.get(trace.len().saturating_sub(8)..).unwrap_or(""), 16).is_ok_and(|n| n % SAMPLED_ONE_IN == 0)
+}
 
 pub const RAW_KEPT_MS: u64 = 7 * 86_400_000;
 pub const ROLLUPS_KEPT_MS: u64 = 90 * 86_400_000;
