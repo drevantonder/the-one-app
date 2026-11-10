@@ -643,6 +643,7 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, st
         item("users", "Users", "user-gear", "#30b0c7"),
         item("groups", "Groups", "users-three", "#34c759"),
         item("devices", "Devices", "devices", "#8e8e93"),
+        item("insights", "Insights", "chart-line", "#5ac8fa"),
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);
     if m.may(&me.id, "change-settings", NETWORK) {
