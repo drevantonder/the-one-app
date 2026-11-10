@@ -51,10 +51,10 @@ async fn out(node: Node, req: Request) -> Result<Response> {
     if node.names_app(&host) {
         return Ok((StatusCode::FORBIDDEN, format!("{host} is an app's name, not a site's: an app reaches its own service with ctx.services, and other apps with ctx.apps")).into_response());
     }
-    let url = format!("{scheme}://{authority}{}", parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
+    let target = written(parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
     let body = axum::body::to_bytes(body, LIMIT).await?.to_vec();
     // The call's items, opened only if the request has a placeholder, from the scopes it named, with their keys.
-    let placed = url.contains("{{") || parts.headers.values().any(|v| v.as_bytes().windows(2).any(|w| w == b"{{")) || body.windows(2).any(|w| w == b"{{");
+    let placed = target.contains("{{") || parts.headers.values().any(|v| v.as_bytes().windows(2).any(|w| w == b"{{")) || body.windows(2).any(|w| w == b"{{");
     let lookup = match &grant {
         Some(g) if placed => Some(node.lookup(&g.caller, &g.app, &g.scopes).await?),
         _ => None,
@@ -68,6 +68,8 @@ async fn out(node: Node, req: Request) -> Result<Response> {
             None => Ok(text.to_string()),
         }
     };
+    // Only the path and query are filled: the host is the one the request named, which the secret's hosts are checked against.
+    let url = format!("{scheme}://{authority}{}", fill(&target)?.replace('{', "%7B").replace('}', "%7D").replace(' ', "%20"));
     let mut headers = Vec::new();
     for (name, value) in &parts.headers {
         if matches!(name.as_str(), "host" | "x-one-call" | "x-forwarded-proto" | "content-length" | "connection" | "transfer-encoding") {
@@ -94,13 +96,32 @@ async fn out(node: Node, req: Request) -> Result<Response> {
     Ok(out.body(Body::from(bytes))?)
 }
 
+/// A request's path and query as the app wrote them: workerd gives a path's `{{` and `}}` as %7B%7B and %7D%7D, and a space
+/// as %20, which a placeholder (`{{rs256 key claims}}`) can hold.
+fn written(target: &str) -> String {
+    let target = target.replace("%7B%7B", "{{").replace("%7D%7D", "}}");
+    let mut out = String::with_capacity(target.len());
+    let mut rest = target.as_str();
+    while let Some(start) = rest.find("{{") {
+        let Some(end) = rest[start..].find("}}") else { break };
+        out.push_str(&rest[..start]);
+        out.push_str(&rest[start..start + end].replace("%20", " "));
+        rest = &rest[start + end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Makes a request, filled in already, to anywhere but this machine's `ports` (the node's own, `Node::own_ports`): →
 /// its status, headers and body.
 pub fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>, ports: Vec<u16>) -> Result<(u16, Vec<(String, Vec<u8>)>, Vec<u8>)> {
     // Redirects go back to the app, whose next request comes here again: a secret never follows one to another host.
     let config = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30)));
     let agent = crate::reach::agent(config, crate::reach::not_ports(ports));
-    let mut builder = ureq::http::Request::builder().method(method).uri(url);
+    // Its secrets may be in `url`, so no error says it: only where the request went.
+    let uri: ureq::http::Uri = url.parse().context("the address isn't a web address")?;
+    let host = uri.host().unwrap_or_default().to_string();
+    let mut builder = ureq::http::Request::builder().method(method).uri(uri);
     for (name, value) in headers {
         builder = builder.header(name, value);
     }
@@ -109,7 +130,7 @@ pub fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<
         false => agent.run(builder.body(body)?),
     }
     .or_else(|err| match err {
-        ureq::Error::Timeout(_) => bail!("{url} took longer than 30s"),
+        ureq::Error::Timeout(_) => bail!("{host} took longer than 30s"),
         err => Err(err.into()),
     })?;
     let headers = resp.headers().iter().filter(|(name, _)| !matches!(name.as_str(), "content-length" | "transfer-encoding" | "connection")).map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec())).collect();
