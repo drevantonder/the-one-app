@@ -3,6 +3,8 @@
 [toolchain]
 channel = "1.99.1"
 profile = "minimal"
+# swift-rs runs its llvm-objcopy to make the Swift plugins' @_cdecl symbols visible, which Xcode 27 otherwise keeps internal.
+components = ["llvm-tools"]
 targets = [
   "wasm32-unknown-unknown",
   "aarch64-apple-darwin",

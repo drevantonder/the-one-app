@@ -41,8 +41,7 @@ fi
 
 # The app's Rust, with its Swift (iphone/Sources) and Tauri's in it, which the project links.
 release= && [ $profile = debug ] || release=--release
-# Only the static library: Cargo.toml's cdylib is Android's, and can't link here, where the Swift it calls comes later.
-CONFIG=$config ONE_BUILD=$BUILD_COMMIT cargo rustc -q --lib --crate-type staticlib --target $rust $release
+CONFIG=$config ONE_BUILD=$BUILD_COMMIT cargo build -q --lib --target $rust $release
 mkdir -p "$out/lib" && cp "target/$rust/$profile/libone_native.a" "$out/lib/"
 
 # The icon is its tile, full bleed: the icons are drawn on Apple's Mac grid, an 824-pixel tile in 1024. iPhone icons
