@@ -9,6 +9,7 @@ set -euo pipefail
 . "$(dirname "$0")/../apple.sh"
 cd "$native"
 address=$1 control=$2 name=$3
+. "$native/throwaway-build.sh"
 sim=$(xcrun simctl list devices -j | jq -r --arg n "$name" '[.devices[][] | select(.name == $n)][0].udid // empty')
 if [ -z "$sim" ]; then
 	# An iPhone like one the Mac already simulates, on a runtime it has.

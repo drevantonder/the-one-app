@@ -88,9 +88,11 @@ pub(crate) fn shell_quote(s: &str) -> String {
 }
 
 /// Runs a build script of the checkout's, at low priority, as other threads share this machine.
-pub(crate) fn build(checkout: &Path, script: &str, envs: &[(&str, &str)]) -> Result<String> {
+pub(crate) fn build(dir: &Path, checkout: &Path, script: &str, envs: &[(&str, &str)]) -> Result<String> {
     eprintln!("Building {script}…");
-    let out = std::process::Command::new("nice").arg(checkout.join(script)).envs(envs.iter().copied()).current_dir(checkout).stderr(std::process::Stdio::inherit()).output()?;
+    let mut command = std::process::Command::new("nice");
+    super::network::shares_native_build(dir, &mut command);
+    let out = command.arg(checkout.join(script)).envs(envs.iter().copied()).current_dir(checkout).stderr(std::process::Stdio::inherit()).output()?;
     anyhow::ensure!(out.status.success(), "{script} failed");
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }

@@ -17,10 +17,18 @@ ndk=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)
 bin=$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin
 case $mode in debug) profile=debug release= task=assembleDebug ;; release) profile=release release=--release task=assembleRelease ;; *) echo "build.sh [debug | release]"; exit 1 ;; esac
 generated=$android/app/build/generated
-mkdir -p "$generated/wry"
+wry=$generated/wry
+if [ -n "${CARGO_BUILD_BUILD_DIR:-}" ]; then
+	# Cargo doesn't run again the build script that writes this for a checkout it hasn't seen, when they share what it compiled.
+	wry=$CARGO_BUILD_BUILD_DIR/wry-kotlin
+	mkdir -p "$generated"
+	rm -rf "$generated/wry"
+	ln -s "$wry" "$generated/wry"
+fi
+mkdir -p "$wry"
 # What Tauri's build needs of the project: where its Gradle files are made, and the Kotlin its web view is made of (one
 # package, `app.client`, as the app's own is), named for the library.
-export TAURI_ANDROID_PROJECT_PATH=$android WRY_ANDROID_PACKAGE=app.client WRY_ANDROID_LIBRARY=one_native WRY_ANDROID_KOTLIN_FILES_OUT_DIR=$generated/wry
+export TAURI_ANDROID_PROJECT_PATH=$android WRY_ANDROID_PACKAGE=app.client WRY_ANDROID_LIBRARY=one_native WRY_ANDROID_KOTLIN_FILES_OUT_DIR=$wry
 for abi in ${ABIS:-arm64-v8a x86_64}; do
 	case $abi in arm64-v8a) target=aarch64-linux-android ;; x86_64) target=x86_64-linux-android ;; *) echo "no target for $abi" >&2; exit 1 ;; esac
 	upper=$(echo "$target" | tr a-z- A-Z_) lower=$(echo "$target" | tr - _)

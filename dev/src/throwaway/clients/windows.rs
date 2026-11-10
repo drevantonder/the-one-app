@@ -17,7 +17,7 @@ use super::super::devices::{approve_code, build, didnt_sign_in, on_device};
 /// new build keeps that sign-in.
 pub(crate) fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
-    build(checkout, "client/native/windows/build.sh", &[("DEVICE", device), ("PROFILE", "dev"), ("NO_START", "1")])?;
+    build(dir, checkout, "client/native/windows/build.sh", &[("DEVICE", device), ("PROFILE", "dev"), ("NO_START", "1")])?;
     let file = NAME.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
     let signed_in = dir.join(format!("signed-in-{device}"));
     let first = settings.throwaway_user.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();

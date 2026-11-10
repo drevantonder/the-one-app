@@ -21,7 +21,7 @@ pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one:
         abi @ ("x86_64" | "arm64-v8a") => abi.to_string(),
         other => bail!("this checkout builds the Android app for x86_64 and arm64-v8a, not {other}"),
     };
-    let apk = build(checkout, "client/native/android/build.sh", &[("ABIS", abi.as_str())])?;
+    let apk = build(dir, checkout, "client/native/android/build.sh", &[("ABIS", abi.as_str())])?;
     let package = one::config::ANDROID;
     agent_devices("install", json!({ "device": device, "app": apk.lines().last().unwrap_or_default() }))?;
     // The launcher keeps drawing home-screen widgets from the APK it replaced ("Can't load widget") until it restarts.

@@ -195,8 +195,7 @@ pub(crate) fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, 
 pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     std::fs::create_dir_all(dir)?;
     Throwaway::own_release_key(dir)?;
-    // What every throwaway network downloads or builds, shared.
-    let shared = dir.parent().unwrap().join("cache");
+    let shared = shared(dir);
     std::fs::create_dir_all(&shared)?;
     if !dir.join("cache").exists() {
         std::os::unix::fs::symlink(&shared, dir.join("cache"))?;
@@ -215,6 +214,17 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     let node = node_at(dir, &addr);
     wait_for(|| node.get("/api/state").is_ok(), node_program, &dir.join("node.log"))?;
     Ok(addr)
+}
+
+/// What every throwaway network downloads or builds, beside them.
+pub(crate) fn shared(dir: &Path) -> PathBuf {
+    dir.parent().unwrap().join("cache")
+}
+
+/// Has cargo keep what it compiles of a client in one folder for every checkout here, so a new checkout's first build
+/// compiles only this repo's own crates (its programs stay in the checkout's target/).
+pub(crate) fn shares_native_build(dir: &Path, cargo: &mut std::process::Command) {
+    cargo.env("CARGO_BUILD_BUILD_DIR", shared(dir).join("native-build"));
 }
 
 /// The throwaway network's node, asked at `addr` as one of this machine's programs: with the token in its home.
