@@ -161,6 +161,8 @@ pub fn watch() {
         return;
     }
     const STUCK_FOR: u64 = 60;
+    const CHECK_EVERY: Duration = Duration::from_secs(10);
+    const LATE: Duration = Duration::from_secs(5);
     let runtime = tokio::runtime::Handle::current();
     let beat = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let up = || STARTED.get().map_or(0, |s| s.elapsed().as_secs());
@@ -174,12 +176,22 @@ pub fn watch() {
         }
     });
     std::thread::spawn(move || {
+        let mut counting_from = 0;
         loop {
-            std::thread::sleep(Duration::from_secs(10));
+            let asleep = std::time::Instant::now();
+            std::thread::sleep(CHECK_EVERY);
             if stopped() {
                 return;
             }
-            let silent = up().saturating_sub(beat.load(std::sync::atomic::Ordering::SeqCst));
+            let late = asleep.elapsed().saturating_sub(CHECK_EVERY);
+            // This thread does nothing but wake, so its being late means the machine kept the whole process off its CPUs
+            // or disk: the runtime isn't stuck, and starting again would only add to the load.
+            if late >= LATE {
+                counting_from = up();
+                tracing::warn!("this node was held up for {} seconds by the machine it's on", late.as_secs());
+                continue;
+            }
+            let silent = up().saturating_sub(beat.load(std::sync::atomic::Ordering::SeqCst).max(counting_from));
             if silent >= STUCK_FOR {
                 tracing::error!("this node's runtime has done nothing for {silent} seconds: exiting, to be started again. {}", stuck_on(&runtime, up()));
                 crate::insights::Ended::Watchdog.write(&crate::home());
