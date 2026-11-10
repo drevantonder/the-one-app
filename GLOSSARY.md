@@ -65,7 +65,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **App**: code deployed into a scope, run in the app runtime. It publishes any of four things: **screens** (pages
   users open), **widgets** (what it shows on a home page), **tools** (what agents use, through MCP and the CLI), and
   **services**. An app with only tools is still an app (Gmail, Shell). The core's own features (the Vault, Backups,
-  Groups, Devices, Widgets, Push, logs, Insights) have tools too, named the same way (`vault_list`), but are not apps: no list of
+  Groups, Devices, Widgets, Notifications, logs, Insights) have tools too, named the same way (`vault_list`), but are not apps: no list of
   apps has them. Avoid: worker, connector, operation (for a tool).
 - **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
   linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,
@@ -92,6 +92,11 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   work.
 - **Vault**: secrets apps use without anyone seeing them: a secret leaves a node only inside a request to one of its
   hosts.
+- **Widget**: what an app shows on a home page, drawn by the screens and the native apps from the app runtime's routes.
+- **Notification**: a note sealed to one device: what to show, the screen a tap opens, and maybe an action that device
+  checks itself. The notifications Worker carries it to Apple's, Google's, Microsoft's or a browser's push service, and
+  only that device opens it. "Push" is only those services' word. Avoid: push, push notification.
+- **Labs**: features still being built, which a network's admins switch on for everyone.
 
 ## Data
 
@@ -104,6 +109,10 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   order. A scope has three kinds: **an app's database**, its data and the truth; **the node's database**, how things
   went (usage, runs); and **the scope database**, who's who, permissions and keys.
 - **Blob**: bytes a database's step names, kept in the bucket sealed with their scope's key.
+- **Backup**: an encrypted copy of everything in the bucket, kept on a disk or in S3-compatible storage, which a network
+  is restored from.
+- **Insights**: what the network records of itself (spans, logs, metrics, and the cleaned message of a real failure),
+  unsealed, read with no keys, and allowed to be lost. Neither the truth nor who can do what.
 
 ## At the network's address
 
@@ -116,6 +125,8 @@ These run on Cloudflare, each named by its job, with no name for them together. 
   endpoints. It reads nothing.
 - **URL signer**: the only holder of the bucket's credentials. It hands the network's endpoints signed URLs, which open
   nothing, since everything in the bucket is sealed.
+- **Notifications Worker**: carries each notification, sealed, to Apple's, Google's, Microsoft's or a browser's push
+  service. It sees only that a device got one, and when.
 - **Telemetry Worker**: where the network's spans, logs and metrics go and are read back, in Cloudflare Basin. It opens no
   user data: telemetry is operational, and unsealed.
 - **Remote MCP server**: the client for programs that aren't on a user's devices (claude.ai, ChatGPT, anything else that
