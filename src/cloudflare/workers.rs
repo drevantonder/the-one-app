@@ -20,8 +20,8 @@ pub struct Worker {
     /// Its module, in `cloudflare/`. Its WebAssembly is the `.wasm` files in its module's folder, modules of its own
     /// (Workers can't compile it).
     pub entry: &'static str,
-    /// Its Durable Object's class, if it keeps anything.
-    pub class: Option<&'static str>,
+    /// Its Durable Objects' classes, if it keeps anything, in the order they were added: each one's migration is its place.
+    pub classes: &'static [&'static str],
     /// Where it's reached and the local port it listens on, if anywhere but by other Workers' bindings.
     place: Option<fn(&Settings) -> (&str, u16)>,
     /// Whether it's also reached at its workers.dev address: by what mustn't come through the gateway.
@@ -42,18 +42,18 @@ pub struct Worker {
 /// Auth's Durable Object `Auth` holds every user's passkeys and accounts. The paths under `/api/auth` name the
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer, so they never change.
 pub const WORKERS: &[Worker] = &[
-    Worker { name: "auth", entry: "auth/worker.js", class: Some("Auth"), place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings, cron: None },
-    Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings, cron: None },
-    Worker { name: "signer", entry: "signer/worker.js", class: None, place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings, cron: None },
-    Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), place: None, own_address: false, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings, cron: None },
-    Worker { name: "telemetry", entry: "telemetry/worker.js", class: None, place: None, own_address: true, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *") },
-    Worker { name: "gateway", entry: "gateway/worker.js", class: None, place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None },
-    Worker { name: "push", entry: "push/worker.js", class: Some("Push"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings, cron: None },
+    Worker { name: "auth", entry: "auth/worker.js", classes: &["Auth"], place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings, cron: None },
+    Worker { name: "relay", entry: "relay/worker.js", classes: &["Relay", "List"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings, cron: None },
+    Worker { name: "signer", entry: "signer/worker.js", classes: &[], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings, cron: None },
+    Worker { name: "mcp", entry: "mcp/worker.js", classes: &["Client"], place: None, own_address: false, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings, cron: None },
+    Worker { name: "telemetry", entry: "telemetry/worker.js", classes: &[], place: None, own_address: true, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *") },
+    Worker { name: "gateway", entry: "gateway/worker.js", classes: &[], place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None },
+    Worker { name: "push", entry: "push/worker.js", classes: &["Push"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings, cron: None },
 ];
 
 /// The Cloudflare node's Worker (`cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
 /// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
-pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings, cron: None };
+pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", classes: &["Node"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings, cron: None };
 
 /// The Workers traced at 100% (`metadata`): those that open nothing but the telemetry Worker. The web client is the gateway's assets.
 const TRACED: [&str; 5] = crate::insights::TRACED;
@@ -672,8 +672,8 @@ fn push_bindings(settings: &Settings) -> Vec<Binding> {
 /// says to every device.
 fn relay_bindings(settings: &Settings) -> Vec<Binding> {
     let devices = (!settings.devices.is_empty()).then(|| plain("DEVICES", json!(settings.devices).to_string()));
-    let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("NODE", format!("object:{}:{}", NODE.name, NODE.class.unwrap()))]);
-    let mcp = plain("MCP", format!("object:mcp:{}", Worker::named("mcp").class.unwrap()));
+    let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("NODE", format!("object:{}:{}", NODE.name, NODE.classes[0]))]);
+    let mcp = plain("MCP", format!("object:mcp:{}", Worker::named("mcp").classes[0]));
     let deployed = settings.deployed.clone().map(|d| plain("DEPLOYED", d));
     devices.into_iter().chain(node.into_iter().flatten()).chain([mcp, plain("YOURS", crate::config::YOURS)]).chain(deployed).chain(location()).collect()
 }
@@ -801,7 +801,7 @@ pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_
             name: worker.name.to_string(),
             module: module_from(sources.clone(), worker.entry)?,
             modules,
-            class: worker.class.map(str::to_string),
+            classes: worker.classes.iter().map(|c| c.to_string()).collect(),
             listen: worker.place(settings).map(|(_, port)| format!("127.0.0.1:{port}")),
             bindings: worker.bindings(settings).into_iter().map(|(n, v, _)| (n, v)).collect(),
             assets: worker.serves_web.then(|| web.to_path_buf()),
@@ -826,7 +826,7 @@ pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_
 const STAND_IN: &str = "telemetry-store";
 
 fn stand_in(sources: &Files) -> Result<Served> {
-    Ok(Served { name: STAND_IN.into(), module: module_from(sources.clone(), "telemetry/stand-in.js")?, modules: vec![], class: Some("Store".into()), listen: None, bindings: vec![], assets: None, outbound: None })
+    Ok(Served { name: STAND_IN.into(), module: module_from(sources.clone(), "telemetry/stand-in.js")?, modules: vec![], classes: vec!["Store".into()], listen: None, bindings: vec![], assets: None, outbound: None })
 }
 
 /// The Android app's package, as client/native/android/app/build.gradle.kts names it.
@@ -1168,7 +1168,7 @@ pub struct Served {
     pub name: String,
     pub module: Vec<u8>,
     pub modules: Vec<(String, Vec<u8>)>,
-    pub class: Option<String>,
+    pub classes: Vec<String>,
     /// Where it listens, if anywhere but its binding.
     pub listen: Option<String>,
     pub bindings: Vec<(String, String)>,
@@ -1212,7 +1212,7 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
         if let Some(listen) = &s.listen {
             sockets.push(format!("(name = {}, address = {}, http = (), service = {})", quote(&s.name), quote(listen), quote(&s.name)));
         }
-        let mut bindings: Vec<String> = s.class.iter().map(|c| format!("(name = {}, durableObjectNamespace = {})", quote(&c.to_uppercase()), quote(c))).collect();
+        let mut bindings: Vec<String> = s.classes.iter().map(|c| format!("(name = {}, durableObjectNamespace = {})", quote(&c.to_uppercase()), quote(c))).collect();
         if let Some(assets) = &s.assets {
             // With `.well-known/`, which Windows and Android ask the address for.
             services.push(format!("(name = {}, disk = (path = {}, writable = false, allowDotfiles = true))", quote(&format!("{}-assets", s.name)), quote(&assets.to_string_lossy())));
@@ -1234,14 +1234,14 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
                 _ => format!("(name = {}, text = {})", quote(name), quote(value)),
             });
         }
-        let objects = match &s.class {
-            Some(class) => format!(
-                "  durableObjectNamespaces = [(className = {}, uniqueKey = {}, enableSql = true)],\n  durableObjectStorage = (localDisk = {}),\n",
-                quote(class),
-                quote(&s.name),
+        let objects = match s.classes.as_slice() {
+            [] => String::new(),
+            classes => format!(
+                "  durableObjectNamespaces = [{}],\n  durableObjectStorage = (localDisk = {}),\n",
+                // The first class's objects keep the Worker's own key, as they had before it had others.
+                classes.iter().enumerate().map(|(i, c)| format!("(className = {}, uniqueKey = {}, enableSql = true)", quote(c), quote(&if i == 0 { s.name.clone() } else { format!("{}-{c}", s.name) }))).collect::<Vec<_>>().join(", "),
                 quote(&format!("{}-data", s.name))
             ),
-            None => String::new(),
         };
         workers.push(format!(
             "const w{i} :Workerd.Worker = (\n  modules = [{}],\n  compatibilityDate = \"{}\",\n  bindings = [{}],\n{objects}{});",
@@ -1497,11 +1497,11 @@ pub fn worker_name(name: &str) -> String {
 }
 
 /// What a Worker's upload says besides its module: its bindings (another service's by its Worker's name), its Durable
-/// Object class, and that class's migration the first time (`migration`: the tag of the one the Worker has had).
+/// Objects' classes, and the migration that adds those it hasn't had (`migration`: the tag of the one it has had, `v<n>`
+/// for its first n classes).
 pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, exists: impl Fn(&str) -> bool) -> (Value, bool) {
     let mut complete = true;
-    let class = worker.class;
-    let mut bindings: Vec<Value> = class.iter().map(|class| json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })).collect();
+    let mut bindings: Vec<Value> = worker.classes.iter().map(|class| json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })).collect();
     for (name, value, secret) in worker.bindings(settings) {
         // The stand-in exists only on one machine: Cloudflare refuses a binding to a Worker it doesn't have, and a network
         // whose telemetry isn't set up yet still gets its Workers.
@@ -1546,8 +1546,12 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
             meta["observability"]["traces"]["persist"] = json!(true);
         }
     }
-    if let Some(class) = class.filter(|_| migration != Some("v1")) {
-        meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });
+    let had = migration.and_then(|tag| tag.strip_prefix('v')?.parse::<usize>().ok()).unwrap_or(0);
+    if had < worker.classes.len() {
+        meta["migrations"] = json!({ "new_tag": format!("v{}", worker.classes.len()), "new_sqlite_classes": worker.classes[had..] });
+        if had > 0 {
+            meta["migrations"]["old_tag"] = json!(format!("v{had}"));
+        }
     }
     (meta, complete)
 }

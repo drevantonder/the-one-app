@@ -46,7 +46,7 @@ pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u
         name: NODE.name.into(),
         module: main,
         modules: modules.into_iter().map(|(name, _, bytes)| (name, bytes)).collect(),
-        class: NODE.class.map(str::to_string),
+        classes: NODE.classes.iter().map(|c| c.to_string()).collect(),
         listen: None,
         bindings: NODE.bindings(settings).into_iter().map(|(n, v, _)| (n, v)).collect(),
         assets: None,

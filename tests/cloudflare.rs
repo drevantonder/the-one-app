@@ -312,7 +312,7 @@ impl Workers {
             sign_in.bindings.push(("PROVIDERS".to_string(), providers.to_string()));
             sign_in.bindings.extend(domain.map(|d| ("JOIN_DOMAIN".to_string(), d.to_string())));
         }
-        served.push(Served { name: "sites".into(), module: module("test/sites.js"), modules: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
+        served.push(Served { name: "sites".into(), module: module("test/sites.js"), modules: vec![], classes: vec![], listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
         let running = run(served);
         Workers { _running: running, address: settings.address, sites: format!("http://127.0.0.1:{sites}"), relay_test: format!("http://127.0.0.1:{relay_test}") }
     }

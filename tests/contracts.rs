@@ -21,7 +21,7 @@ impl Formats {
         let dir = crate::temp("formats");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap().to_string();
-        let served = one::cloudflare::Served { name: "formats".into(), module: one::cloudflare::module_from(files, "test/formats.js").unwrap(), modules: vec![], class: None, listen: Some(addr.clone()), bindings: vec![], assets: None, outbound: None };
+        let served = one::cloudflare::Served { name: "formats".into(), module: one::cloudflare::module_from(files, "test/formats.js").unwrap(), modules: vec![], classes: vec![], listen: Some(addr.clone()), bindings: vec![], assets: None, outbound: None };
         let child = one::cloudflare::start(&one::cloudflare::write_config(&dir, &[served]).unwrap(), vec![("formats".into(), listener)]).unwrap();
         Formats { addr, child, dir }
     }
@@ -952,7 +952,7 @@ fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
         name: "runner".into(),
         module: runner.into_bytes(),
         modules: vec![],
-        class: None,
+        classes: vec![],
         listen: Some(at.clone()),
         bindings: vec![("LOADER".into(), "loader:".into()), ("NODE".into(), "service:runner:Node".into())],
         assets: None,
