@@ -6,12 +6,15 @@ import { late, offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { CODES } from "../shared/protocol.js";
 import { UNANSWERED, api, call, developer } from "./request.js";
+import { report } from "./insights.js";
 import { back, go, hold, home, listed, own, route } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
 import { KEPT_SCREENS, app, config, here, joined, keeping, reads, refreshState, settingAt, settingsItems, tabTitle, titleOf } from "./store.js";
 import { $, h, reveal, ui } from "./view.js";
 
 let frames = [];
+/// How long a screen has to draw before it counts as never having drawn.
+const NEVER_DREW = 5000;
 
 /// What's beside the sidebar, which this page keeps (the screen's frame, and Developer's panel under it) while the
 /// window draws around it.
@@ -209,6 +212,7 @@ function frameFor(r, into, { sheet, kitted } = {}) {
   const f = { frame, route: r, sheet, into, key: JSON.stringify(r), kitted: !!kitted };
   f.drawn = new Promise((done) => (f.saysDrawn = done));
   frames.push(f);
+  if (r.kind === "screen") f.undrawn = setTimeout(() => f.loaded || document.hidden || report(sendReport, { name: "screen.undrawn", app: r.app, screen: r.screen, ms: NEVER_DREW }), NEVER_DREW);
   // A spinner only for a wait that's long enough to notice.
   if (!kitted) into.innerHTML = "";
   setTimeout(() => f.loaded || f.shown || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status"><span class="spinner"></span></div>`), 400);
@@ -298,6 +302,7 @@ function showStill(f, html) {
 
 /// The screen has drawn: it shows in place of its still, and its wait is over.
 function screenDrew(f) {
+  clearTimeout(f.undrawn);
   f.loaded = true;
   $(".screen-status", f.into)?.remove();
   f.frame.style.visibility = "";
@@ -578,6 +583,8 @@ export async function openRequest(scope, id) {
   return answer === true;
 }
 
+export const sendReport = (events) => api("/v1/insights/report", { method: "POST", body: { platform: platform.client(), events } });
+
 /// The bridge's messages (src/screen/bridge.js), from the screens' frames only, each acting as its screen's app; and
 /// the client's own screens', as the user, which no app's may.
 addEventListener("message", async (e) => {
@@ -686,6 +693,7 @@ addEventListener("message", async (e) => {
       blob: async (id) => (await api(`/v1/blobs/${encodeURIComponent(id)}`, { raw: true })).blob(),
       ...platform.bridge(f.frame),
       traces: () => (developer.on() ? developer.kept : null),
+      thrown: (m) => report(sendReport, mine ? { name: "page.exception", exception: m.exception } : { name: "screen.exception", app: r.app, screen: r.screen, exception: m.exception }),
       own: mine && {
         ...ownAnswers,
         appearance: (m) => (m.value == null ? appearance() : new Promise((done) => ui.transition(() => (tell({ oneScheme: setAppearance(String(m.value)) }), done(appearance()))))),

@@ -162,8 +162,8 @@ pub struct Response {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Body,
-    /// For a request that asked for one (`header::TRACE`): `{ tries, node }`, each node it tried in order, with how
-    /// long it waited and why it moved on, and what the node that answered did, as it said.
+    /// `{ tries, node }`, each node it tried in order, with how long it waited and why it moved on, and for a request that
+    /// asked for one (`header::TRACE`), what the node that answered did, as it said.
     pub trace: Option<serde_json::Value>,
 }
 
@@ -401,8 +401,7 @@ impl Client {
         let certificate = self.0.certificate.lock().unwrap().clone();
         let again = matches!(req.method.as_str(), "GET" | "HEAD");
         let mut why = unsent("there's no node to ask");
-        let traced = req.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(header::TRACE));
-        let mut tries = traced.then(|| Trace { start: Instant::now(), tries: Vec::new() });
+        let mut tries = Some(Trace { start: Instant::now(), tries: Vec::new() });
         let traces = |tries: &mut Option<Trace>, node: Option<serde_json::Value>| tries.as_mut().map(|t| serde_json::json!({ "tries": std::mem::take(&mut t.tries), "node": node }));
         let (mut skipped, mut fresh, mut only, mut followed, mut reconnected) = (Vec::new(), Vec::new(), None::<Vec<PublicKey>>, 0, false);
         loop {

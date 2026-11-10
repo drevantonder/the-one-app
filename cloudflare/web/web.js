@@ -10,13 +10,22 @@ import { late, offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { api, retryWait, sleep } from "./request.js";
 import { go, href, own, route } from "./routes.js";
-import { ask, iconPaths, openRequest } from "./screens.js";
+import { ask, iconPaths, openRequest, sendReport } from "./screens.js";
+import { report } from "./insights.js";
 import { appearance, schemed } from "./settings.js";
 import { config, forgetScreens, joined, lastAt, lastWindow, me, network, refreshApps, refreshState, setJoining, signOut, whySignedOut } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
 import { hardwareBack, listen, render, showBack, showJoin, showSignedOut, showUnreachable, watchWaiting, windowShowing } from "./window.js";
 
-window.__one = { host: async (m) => (m.type === "copy" ? platform.copy(m.text) : m.type === "icons" ? iconPaths(m.names) : null) };
+window.__one = {
+  host: async (m) => {
+    if (m.type === "copy") return platform.copy(m.text);
+    if (m.type === "icons") return iconPaths(m.names);
+    // This page's own errors: the same bridge reports them.
+    if (m.type === "thrown") report(sendReport, { name: "page.exception", exception: m.exception });
+    return null;
+  },
+};
 
 const signedIn = () => message("You’re Signed In", `Go back to ${config().name}.`);
 

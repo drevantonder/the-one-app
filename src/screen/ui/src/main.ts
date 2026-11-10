@@ -17,6 +17,7 @@ const guarded = {
     const root: ReactDOMClient.Root = ReactDOMClient.createRoot(container, {
       onUncaughtError: (error, info) => {
         console.error(error, info.componentStack)
+        ;(globalThis as { one?: { __thrown?: (e: unknown) => void } }).one?.__thrown?.(error)
         const retry = () => render(last)
         queueMicrotask(() => render(React.createElement("div", { className: "p-5" }, React.createElement(ui.Problem, { title: "This screen stopped working", text: `Something in it broke: ${String((error as Error)?.message ?? error)}`, action: { label: "Try Again", run: retry } }))))
       },

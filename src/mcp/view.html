@@ -310,6 +310,7 @@
         },
         vault: (need) => vault(s, need),
         link: async (url) => (await request("ui/open-link", { url }), null),
+        thrown: (msg) => call("screens_thrown", { app: s.app, screen: s.screen, exception: msg.exception }).catch(() => null),
         icons,
         // A chat's frame can't save a file or open one in a tab: the web client, with this screen, can.
         elsewhere: async () => {

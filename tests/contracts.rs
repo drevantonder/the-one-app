@@ -1075,3 +1075,33 @@ fn the_iphone_build_scripts_name_the_app_as_the_build_does() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), one::config::IPHONE);
 }
+
+/// What a screen's bridge reports of what threw is only its type and where: what it says goes nowhere, however it's dressed
+/// (a message with lines like a stack's, a URL's query on a frame), and what it does send is what insights keeps.
+#[test]
+fn a_screens_error_crosses_from_the_bridge_without_what_it_said() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let bridge = std::fs::read_to_string(root.join("src/screen/bridge.js")).unwrap();
+    let from = bridge.find("  function described(err) {").expect("bridge.js says what threw");
+    let body = &bridge[from..from + bridge[from..].find("\n  }\n").unwrap() + 4];
+    let cases = serde_json::json!([
+        { "message": "anna@example.org", "name": "TypeError", "stack": "TypeError: anna@example.org\n    at run (https://x.example/a.js?token=SECRET:12:3)\n    at b (about:srcdoc:2:5)" },
+        { "message": "line one\n    at SECRET (leak.js:9:9)", "name": "Weird", "stack": "Error: line one\n    at SECRET (leak.js:9:9)\n    at real (app.js:1:2)" },
+        { "message": "from safari", "name": "Error", "stack": "run@https://x.example/b.js?q=SECRET:4:5\n@about:srcdoc:6:7" },
+    ]);
+    let script = format!("{body}\nconsole.log(JSON.stringify({cases}.map((c) => described(Object.assign(new Error(c.message), {{ name: c.name, stack: c.stack }})))))");
+    let at = std::env::temp_dir().join(format!("bridge-thrown-{}.js", std::process::id()));
+    std::fs::write(&at, script).unwrap();
+    let out = std::process::Command::new(one::build::bun().unwrap()).arg(&at).output().unwrap();
+    std::fs::remove_file(&at).unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(!said.contains("anna") && !said.contains("SECRET") && !said.contains("leak") && !said.contains("example"), "{said}");
+    let said: Vec<Value> = serde_json::from_str(&said).unwrap();
+    let kept: Vec<_> = said.iter().map(|e| one::insights::Exception::from_json(e).unwrap()).collect();
+    assert_eq!(kept[0].kind, "TypeError");
+    assert_eq!(kept[0].frames, ["a.js:12:3", "srcdoc:2:5"]);
+    assert_eq!(kept[1].kind, "Error", "a name of the program's own is `Error`");
+    assert_eq!(kept[1].frames, ["app.js:1:2"]);
+    assert_eq!(kept[2].frames, ["b.js:4:5", "srcdoc:6:7"]);
+}

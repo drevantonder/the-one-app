@@ -98,7 +98,7 @@
   // or refuses it by name. Anything a user touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "opening", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
-    "icons", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer"];
+    "icons", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer", "thrown"];
 
   async function host(message) {
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
@@ -113,6 +113,28 @@
     // Nothing else answers: the node refuses browsers, which would run a screen as this machine's own programs.
     throw new Error("Open this in the app.");
   }
+
+  // What goes wrong in a screen, for its host to report (`thrown`): what threw and where, never its message, which a thrown
+  // Error can fill with anything. A few per screen, as one loop of errors is one problem.
+  let threw = 0;
+  function thrown(err) {
+    if (threw++ < 10) host({ type: "thrown", exception: described(err) }).catch(() => {});
+  }
+  function described(err) {
+    const stack = String(err?.stack ?? "");
+    const message = String(err?.message ?? "");
+    const after = message && stack.includes(message) ? stack.slice(stack.indexOf(message) + message.length) : stack;
+    const frames = [];
+    for (const line of after.split("\n")) {
+      const at = /(?:^\s*at .*?\(?|@)([^()\s@]+):(\d+):(\d+)\)?\s*$/.exec(line);
+      const file = at?.[1].split(/[?#]/)[0].split("/").pop().replace(/^about:|[<>]/g, "");
+      if (at && /^[\w.-]{1,64}$/.test(file)) frames.push({ file, line: Number(at[2]), col: Number(at[3]) });
+      if (frames.length === 8) break;
+    }
+    return { type: String(err?.name ?? "Error"), frames };
+  }
+  addEventListener("error", (e) => e.target === window && thrown(e.error));
+  addEventListener("unhandledrejection", (e) => thrown(e.reason));
 
   // The screen has drawn, for the page holding the frame to show it in place of what shows there: it's loaded and has
   // what it asked for, a moment after its last call came back; or, once that's kept the user waiting (`patient` is over),
@@ -352,6 +374,8 @@
     // A haptic on a phone: "selection" (a press), "medium" (a long press), "success" or "error". Elsewhere, nothing.
     tap: (style = "selection") => (framed ? host({ type: "haptic", style }) : Promise.resolve()).catch(() => {}),
     on: (event, fn) => (handlers[event] ||= []).push(fn),
+    // What React's error boundary caught (@one/ui's `createRoot`), which never reaches the window.
+    __thrown: thrown,
     // The host calls this with node events: an app screen's "changed" is its app's data changing; a Settings
     // screen's, any event, since what it shows is the network's.
     __event(e) {

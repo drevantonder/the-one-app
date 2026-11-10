@@ -1,5 +1,5 @@
 //! Apps' widgets and screens as MCP Apps, so chat clients that support them draw them inline: one `ui://` view, and
-//! two tools that fill it, `widgets_show` and `screens_open` (and `screens_icons`, `screens_call` and `screens_changes`,
+//! two tools that fill it, `widgets_show` and `screens_open` (and `screens_icons`, `screens_call`, `screens_thrown` and `screens_changes`,
 //! which only the view calls). Clients without MCP Apps get text from both.
 
 use serde_json::{Value, json};
@@ -85,6 +85,18 @@ pub fn tools() -> Vec<Value> {
             "annotations": crate::skills::hints(false, false),
             "_meta": { "ui": { "visibility": ["app"] } },
         }),
+        // Only the view calls it, for what threw in a screen: its type and where.
+        json!({
+            "name": "screens_thrown",
+            "description": "For the view that draws screens and widgets in a chat, not for you: says a screen threw, by its type and where.",
+            "inputSchema": { "type": "object", "required": ["app", "screen", "exception"], "properties": {
+                "app": { "type": "string", "description": "the app's name" },
+                "screen": { "type": "string", "description": "the screen's name" },
+                "exception": { "type": "object", "description": "the type and top stack frames of what threw" },
+            } },
+            "annotations": crate::skills::hints(false, false),
+            "_meta": { "ui": { "visibility": ["app"] } },
+        }),
         // Only the view calls it, again and again while it's on screen, so what it shows keeps up: a chat sends a view
         // nothing it isn't asked for.
         json!({
@@ -106,10 +118,17 @@ pub fn call(node: &Client, name: &str, input: &Value) -> Option<Value> {
         "screens_open" => screen(node, input),
         "screens_icons" => icons(input),
         "screens_call" => for_screen(node, input),
+        "screens_thrown" => thrown(node, input),
         "screens_changes" => changes(node, input),
         _ => return None,
     };
     Some(result.unwrap_or_else(|e| json!({ "isError": true, "content": [{ "type": "text", "text": format!("{e:#}") }] })))
+}
+
+/// What threw in a screen on a chat's page, to its node.
+fn thrown(node: &Client, input: &Value) -> anyhow::Result<Value> {
+    node.post("/v1/insights/report", json!({ "platform": "mcp", "events": [{ "name": "screen.exception", "app": input["app"], "screen": input["screen"], "exception": input["exception"] }] }))?;
+    Ok(json!({ "content": [] }))
 }
 
 /// `widgets_show` as a chat that draws them answers it: with what to draw, and in words for what can't.

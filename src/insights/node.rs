@@ -13,10 +13,13 @@ const FLUSH_EVERY: Duration = Duration::from_secs(300);
 const MOST_SIGNALS_READ: usize = 500;
 const MOST_ROLLUPS_READ: usize = 1000;
 const MOST_PRINTS_READ: usize = 200;
+/// The most reports a client's device may make a minute, and events a report may hold.
+const REPORTS_A_MINUTE: u32 = 10;
+const MOST_REPORTED: usize = 300;
 
 /// What this device hasn't written yet.
 #[derive(Default)]
-pub(super) struct State(Mutex<HashMap<Scope, Batch>>);
+pub(super) struct State(Mutex<HashMap<Scope, Batch>>, Mutex<HashMap<Key, (u64, u32)>>);
 
 /// A call as it runs here: its span, in the trace of the request that made it.
 pub(super) struct Call {
@@ -133,6 +136,87 @@ impl Node {
                 _ => tracing::debug!("insights for {}: this device doesn't hold it now", trace::kind(&scope)),
             }
         }
+    }
+
+    /// What a client says went wrong on it (a screen that threw or never drew, its page's own errors) and what it did
+    /// before that (`client.try`). What it says of itself is believed only as far as closed sets go: the app must exist and
+    /// the screen be one of its, and a report more than `REPORTS_A_MINUTE` a minute is dropped.
+    pub async fn report_insights(&self, me: &Caller, platform: &str, events: &[Value]) {
+        let minute = now_ms() / 60_000;
+        {
+            let mut counts = self.0.insights.1.lock().unwrap();
+            let count = counts.entry(me.key).or_insert((minute, 0));
+            *count = if count.0 == minute { (minute, count.1 + 1) } else { (minute, 1) };
+            if count.1 > REPORTS_A_MINUTE {
+                return;
+            }
+        }
+        for event in events.iter().take(MOST_REPORTED) {
+            self.reported_event(me, platform, event).await;
+        }
+    }
+
+    async fn reported_event(&self, me: &Caller, platform: &str, e: &Value) {
+        let now = now_ms();
+        let time = e["time"].as_u64().filter(|t| *t + 300_000 >= now && *t <= now + 60_000).unwrap_or(now);
+        let name = e["name"].as_str().unwrap_or("");
+        let ms = e["ms"].as_u64().unwrap_or(0);
+        let attrs = Attrs::default().device(&hex(&me.key)).client(platform).build(crate::config::BUILD);
+        let exception = e["exception"].is_object().then(|| Exception::from_json(&e["exception"])).flatten();
+        let (destination, app, screen) = match name {
+            "screen.exception" | "screen.undrawn" => {
+                let Some(app) = e["app"].as_str() else { return };
+                let Some(destination) = self.destination(app, me) else { return };
+                let screen = self.screen_named(app, e["screen"].as_str().unwrap_or("")).await;
+                (destination, app, Some(screen))
+            }
+            "page.exception" | "client.try" => (Destination { scope: Scope::Global, named: false, kind: "everyone" }, "", None),
+            _ => return,
+        };
+        let (ok, result) = match name {
+            "client.try" => (e["result"] == "answered", Some(e["result"].as_str().unwrap_or(""))),
+            _ => (false, None),
+        };
+        let bundle = self.0.bundles.lock().unwrap().get(app).cloned();
+        let app_named = if destination.named { app } else { "" };
+        let mut attrs = attrs.scope(destination.kind);
+        if destination.named && !app.is_empty() {
+            attrs = attrs.service(app);
+            if let Some(bundle) = &bundle {
+                attrs = attrs.version(bundle);
+            }
+            if let Some(screen) = &screen {
+                attrs = attrs.screen(screen);
+            }
+        }
+        if let Some(result) = result {
+            attrs = attrs.tried(e["node"].as_str().unwrap_or(""), result);
+        }
+        let exception = exception.filter(|_| destination.named || app.is_empty());
+        let mut print = None;
+        if !ok && result.is_none() {
+            let (frame, build) = match exception.as_ref().and_then(|x| x.frames.first()) {
+                Some(top) => (top.clone(), bundle.clone().unwrap_or_else(|| crate::config::BUILD.into())),
+                None => (name.to_string(), crate::config::BUILD.to_string()),
+            };
+            attrs = attrs.error(exception.as_ref().map_or(insights::OTHER, |x| x.kind.as_str()));
+            if let Some(x) = &exception {
+                attrs = attrs.exception(x);
+            }
+            let tool = match (&screen, destination.named) {
+                (Some(screen), true) => format!("screen:{screen}"),
+                _ if name == "page.exception" => "page".into(),
+                _ => "screen".into(),
+            };
+            print = Some(Print { app: app_named.to_string(), tool, kind: exception.as_ref().map_or_else(|| insights::OTHER.to_string(), |x| x.kind.clone()), frame, build, fault: Fault::Internal });
+        }
+        let signal = Signal { time, device: hex(&me.key), kind: Kind::Event, name: name.to_string(), app: app_named.to_string(), trace: trace::ids::trace(), span: trace::ids::span(), parent: None, ms, ok, fault: (!ok && result.is_none()).then_some(Fault::Internal), attrs };
+        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, true, print);
+    }
+
+    async fn screen_named(&self, app: &str, screen: &str) -> String {
+        let listed = self.0.apps.describe(app).await.is_ok_and(|d| d["screens"].as_array().is_some_and(|s| s.iter().any(|s| s["name"] == screen)));
+        if listed { screen.to_string() } else { "_unknown".into() }
     }
 
     pub(super) async fn insights_loop(self) {

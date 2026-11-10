@@ -107,6 +107,7 @@ pub fn routes() -> Routes {
         .merge(crate::node::releases::routes::routes())
         .merge(crate::node::blobs::routes::routes())
         .merge(crate::node::screens::routes::routes())
+        .merge(crate::insights::routes::routes())
 }
 
 /// Whether a client device may ask `path` (`Who::Clients`), as the node's routes match it.

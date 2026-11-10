@@ -22,6 +22,8 @@ pub mod tools;
 pub mod cli;
 #[cfg(feature = "node")]
 pub(crate) mod store;
+#[cfg(feature = "node")]
+pub mod routes;
 
 /// How long a call takes before it keeps a full span. ARCHITECTURE.md's targets state none for a whole call, and its
 /// nearest is a write seen elsewhere within 1 s.
@@ -72,6 +74,9 @@ pub const CLIENTS: &[&str] = &["cli", "mcp", "code", "mac", "phone", "android", 
 
 /// The JavaScript errors whose name is the engine's, not a program's: anything else is `Error`.
 const EXCEPTIONS: &[&str] = &["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];
+
+/// How a client's try of a node went (client/src/lib.rs).
+const TRY_RESULTS: &[&str] = &["answered", "elsewhere", "no connection", "not taking requests", "no answer", "unreachable", "lost", "failed"];
 
 /// A name of OTEL's for an error of no known kind.
 pub const OTHER: &str = "_OTHER";
@@ -166,6 +171,21 @@ impl Attrs {
 
     pub fn build(mut self, build: &str) -> Attrs {
         self.token("one.build", build);
+        self
+    }
+
+    /// A screen of an app: one its app says it has, or `_unknown`, as what a page says isn't believed.
+    pub fn screen(mut self, screen: &str) -> Attrs {
+        self.token("one.screen", screen);
+        self
+    }
+
+    /// What a client tried: which node, and how it went.
+    pub fn tried(mut self, node: &str, result: &str) -> Attrs {
+        if node.len() == 64 && node.bytes().all(|b| b.is_ascii_hexdigit()) {
+            self.0.insert("one.node", json!(node));
+        }
+        self.0.insert("one.result", json!(if TRY_RESULTS.contains(&result) { result } else { "failed" }));
         self
     }
 
