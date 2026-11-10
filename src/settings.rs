@@ -8,6 +8,7 @@
 //! which can't be read, or a node's own. Who may do what is judged by the steps' own rules wherever they're read
 //! (src/database/rules.rs): what's checked here only says why sooner.
 
+use crate::config::CLI;
 use crate::protocol::allowed;
 use std::collections::BTreeMap;
 
@@ -637,9 +638,10 @@ pub fn retire(who: &ScopeDb, user: &str, app: &str, how: &str, title: &str) -> R
 
 /// The `service` entry that switches a part of a device's oned on or off, the device found by name or key prefix; for
 /// the device's user, or to switch it off, for who may add apps where it ran. A service runs for the app added in
-/// `scope`, which its writer may add apps to.
+/// `scope`, which its writer may add apps to; switched on, every part but the app runtime has one.
 pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, scope: Option<&Scope>) -> Result<Content> {
-    if let Some(s) = scope.filter(|_| on) {
+    if on && name != scopes::APPS_PART {
+        let Some(s) = scope else { bail!("{name} is an app's service, and that app isn't added: `{CLI} add {name}` first, which sets its service up") };
         allowed!(db.may(user, "add-apps", &scopes::object(s)), "only who may add apps there runs a service for them");
     }
     let managed = |k: &Key| -> Result<bool> { Ok(!on && db.switch(k, name)?.and_then(|s| s.scope).and_then(|s| Scope::parse(&s).ok()).is_some_and(|s| db.may(user, "add-apps", &scopes::object(&s)))) };
