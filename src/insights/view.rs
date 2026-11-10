@@ -167,8 +167,8 @@ pub fn overview(rows: &Value, status: &str, since: u64, now: u64, limit: usize) 
     }
     let failing = services.iter().filter(|l| l.errors > 0).count();
     let head = match failing {
-        0 => format!("No service had an error in {}.", since_said(since, now)),
-        n => format!("{n} of {} had errors in {}.", plural(services.len() as u64, "service"), since_said(since, now)),
+        0 => format!("No service failed a request in {}.", since_said(since, now)),
+        n => format!("{n} of {} failed requests in {}.", plural(services.len() as u64, "service"), since_said(since, now)),
     };
     let mut out = format!("{head} Each counts the requests it answered, so one that went through several is in each.\n\n{}", table(&services, limit, "service"));
     if let Some(errors) = errors(rows, status, since, now, limit) {
