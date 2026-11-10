@@ -15,5 +15,5 @@ You own a change until it's seen running. `one-dev unfinished` lists what isn't,
 4. A part on its own: `one-dev update workers|web|apps|services|mac|node|dev`. Renamed or removed apps are retired by `update apps`, which says where to `one add` a renamed one afterwards.
 5. A change to Workers or the web client alone needs no node build, and isn't waited for by any device. Any change to Rust, or to anything not known to be outside the node, sends everything: `update node` sends the node, then its Workers and web client. A part is marked sent only once it has gone out, so what an update says didn't is what `one-dev changes` lists, and running `update` again sends it.
 6. A Worker change that nodes need first: `one-dev update workers` before `one-dev update node`. If Rust is in the same change, deploy it first with your build (`target/debug/one cloudflare deploy` on the Workers' home).
-7. PTC follows main's newest tested commit by itself on ptc's timer, so signed off is shipping there: the ptc-update skill, only to send it sooner.
+7. PTC builds its fork, which the ptc-sync skill brings main into each day: run that skill by hand to get a change to PTC sooner.
 8. `one-dev status --until <commit>`, to watch one commit or named devices. A Mac that's behind: the mac-behind skill.

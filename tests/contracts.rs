@@ -974,7 +974,7 @@ fn the_macs_job_takes_only_what_the_record_signs() {
     let dir = std::env::temp_dir().join(format!("one-mac-job-{}", rand::random::<u32>()));
     let home = dir.join("home");
     let bin = dir.join("bin");
-    let app = home.join("Applications/The One App.app/Contents/MacOS");
+    let app = home.join(format!("Applications/{}.app/Contents/MacOS", one::config::NAME));
     std::fs::create_dir_all(&app).unwrap();
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(dir.join("served/updates")).unwrap();
@@ -993,7 +993,9 @@ fn the_macs_job_takes_only_what_the_record_signs() {
     stub("launchctl", "exit 0");
     stub("xcrun", "exit 1");
     // ditto -x -k <zip> <fresh>: unpacks our zip, an app whose `one` says the new version. ditto <from> <to>: copies.
-    stub("ditto", &format!("if [ \"$1\" = -x ]; then mkdir -p \"$4/The One App.app/Contents/MacOS\"; cat \"$3\" > \"$4/The One App.app/Contents/MacOS/one\"; chmod 755 \"$4/The One App.app/Contents/MacOS/one\"; else cp -R \"$1\" \"$2\"; fi"));
+    let inside = format!("{}.app/Contents/MacOS", one::config::NAME);
+    let cli = one::config::CLI;
+    stub("ditto", &format!("if [ \"$1\" = -x ]; then mkdir -p \"$4/{inside}\"; cat \"$3\" > \"$4/{inside}/{cli}\"; chmod 755 \"$4/{inside}/{cli}\"; else cp -R \"$1\" \"$2\"; fi"));
     let key = ssh_key::PrivateKey::from(ssh_key::private::Ed25519Keypair::from_seed(&[9; 32]));
     let public = key.public_key().to_openssh().unwrap();
     let served = dir.join("served");
@@ -1004,13 +1006,13 @@ fn the_macs_job_takes_only_what_the_record_signs() {
         std::process::Command::new("bash").arg("-c").arg(script).env("HOME", &home).env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())).output().unwrap()
     };
     assert!(run(&job).status.success(), "putting the job in place");
-    let cache = home.join("Library/Caches/one");
+    let cache = home.join(format!("Library/Caches/{cli}"));
     let pull = || {
         let out = run(&format!("bash '{}'", cache.join("pull.sh").display()));
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         std::fs::read_to_string(cache.join("why")).unwrap_or_default().trim().to_string()
     };
-    let installed = || std::fs::read_to_string(app.join("one")).unwrap();
+    let installed = || std::fs::read_to_string(app.join(cli)).unwrap();
     let publish = |commit: &str, committed: u64, payload: &str, name: &str, signer: &ssh_key::PrivateKey| {
         let sha = one::latest::sha256(payload.as_bytes());
         std::fs::write(served.join("updates").join(&sha), payload).unwrap();
@@ -1020,8 +1022,8 @@ fn the_macs_job_takes_only_what_the_record_signs() {
         ];
         std::fs::write(served.join("updates/newest"), Latest { things }.signed(signer).unwrap()).unwrap();
     };
-    std::fs::write(app.join("one"), version("old", 100)).unwrap();
-    std::process::Command::new("chmod").args(["755", app.join("one").to_str().unwrap()]).status().unwrap();
+    std::fs::write(app.join(cli), version("old", 100)).unwrap();
+    std::process::Command::new("chmod").args(["755", app.join(cli).to_str().unwrap()]).status().unwrap();
 
     // A record signed by someone else is refused.
     let new_app = version("new", 200);

@@ -14,6 +14,9 @@ repo = "https://github.com/drevantonder/the-one-app"
 # publisher: `one-dev update` and `one-dev release` run release_signer to get it, and keep it only in memory.
 release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM"
 release_signer = "op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'"
+# A shell command each build must pass, in its clean checkout, before anything of it is signed and sent: for a repo people
+# push to whose work its publisher doesn't see first. Empty, a 'tested' sign-off is enough.
+check = ""
 # Every folder in apps/ ships built into each release, and a new network has them all, for anyone to add to their own
 # page. These are the ones it also adds to global; each `one-dev update apps` deploys the release's version of every one a network has.
 apps = ["repos", "apps"]

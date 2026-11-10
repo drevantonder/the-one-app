@@ -131,6 +131,9 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<At> {
     let part = part.map(Part::named).transpose()?;
     let _turn = turn()?;
     let at = to_send()?;
+    if !one::config::CHECK.is_empty() {
+        timed("checked the build", || run_check(one::config::CHECK, &at.src, &at.config_file, &cache().join("checked").join(at.build_name())))?;
+    }
     let started = Instant::now();
     println!("Sending out {}.", at.build_name());
     let mut failed = Vec::new();
@@ -163,6 +166,22 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<At> {
         keep(Stage::Sent, &at.commit, "Every part that changed went out");
     }
     Ok(at)
+}
+
+/// Runs a custom build's `check` on a build, once: what it said is kept in `marker`, so a timer doesn't rerun a long check
+/// every time, and a build that failed goes nowhere until a newer one comes or `marker` is deleted.
+fn run_check(command: &str, src: &Path, config: &Path, marker: &Path) -> Result<()> {
+    let refused = |said: &str| anyhow::anyhow!("its check failed, so nothing of it is sent; delete {} to run it again:\n{said}", marker.display());
+    if let Ok(said) = std::fs::read_to_string(marker) {
+        return if said.is_empty() { Ok(()) } else { Err(refused(&said)) };
+    }
+    let out = Command::new("sh").args(["-c", &format!("{command} 2>&1")]).current_dir(src).env("CONFIG", config).output().context("run the check")?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = text.lines().collect();
+    let said = if out.status.success() { String::new() } else { format!("{}\n", lines[lines.len().saturating_sub(30)..].join("\n")) };
+    std::fs::create_dir_all(marker.parent().context("the check's folder")?)?;
+    std::fs::write(marker, &said)?;
+    if said.is_empty() { Ok(()) } else { Err(refused(&said)) }
 }
 
 /// Sends `part`, if anything of it changed.
@@ -311,4 +330,28 @@ fn publish_workers(at: &At, key: &ssh_key::PrivateKey) -> Result<()> {
 fn publish_assembled_web(at: &At, key: &ssh_key::PrivateKey) -> Result<()> {
     let bundle = one::web::bundle::Bundle { commit: at.build_name(), committed: at.committed, shell: one::web::SHELL, files: one::web::with_client() };
     publish_web_bundle(&bundle, &at.version(), at.config_commit(), key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_build_that_fails_its_check_goes_nowhere_and_isnt_checked_again() {
+        let dir = std::env::temp_dir().join(format!("run-check-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("config.toml");
+        let failing = dir.join("checked/bad");
+        let err = run_check("echo it broke; exit 1", &dir, &config, &failing).unwrap_err();
+        assert!(format!("{err:#}").contains("it broke"), "{err:#}");
+        assert!(run_check("touch again; exit 0", &dir, &config, &failing).is_err(), "a failed build stays failed");
+        assert!(!dir.join("again").exists());
+
+        let passing = dir.join("checked/good");
+        run_check("touch ran", &dir, &config, &passing).unwrap();
+        std::fs::remove_file(dir.join("ran")).unwrap();
+        run_check("touch ran", &dir, &config, &passing).unwrap();
+        assert!(!dir.join("ran").exists(), "a build that passed isn't checked again");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

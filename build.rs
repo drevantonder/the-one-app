@@ -50,6 +50,7 @@ fn main() {
     let out = format!("{out}pub const MADE_HERE: &str = {:?};\n", config.get("made_here").and_then(|v| v.as_str()).unwrap_or("Made here"));
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
     let out = format!("{out}pub const JOIN_DOMAIN: &str = {:?};\n", optional("join_domain"));
+    let out = format!("{out}pub const CHECK: &str = {:?};\n", optional("check"));
     let relay_location = optional("relay_location");
     assert!(["", "wnam", "enam", "sam", "weur", "eeur", "apac", "oc", "afr", "me"].contains(&relay_location.as_str()), "relay_location is one of Cloudflare's location hints");
     let out = format!("{out}pub const RELAY_LOCATION: &str = {relay_location:?};\n");
