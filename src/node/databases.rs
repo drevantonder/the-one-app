@@ -346,8 +346,13 @@ impl Node {
     pub(super) async fn fill_copies(&self) {
         let Ok(bucket) = self.bucket() else { return };
         let mut changed = Vec::new();
+        // A database open more than once (with keys calls were handed) is filled once, from where the furthest behind is.
+        let mut open: BTreeMap<String, (String, u64)> = BTreeMap::new();
         for ((_, name), db) in self.open_dbs() {
             let Ok((prefix, at)) = db.try_lock().map(|db| (db.prefix().to_string(), db.at())) else { continue };
+            open.entry(prefix).and_modify(|(_, least)| *least = (*least).min(at)).or_insert((name, at));
+        }
+        for (prefix, (name, at)) in open {
             match bucket.fill(&prefix, at).await {
                 Ok(0) => {}
                 Ok(_) => changed.extend(name.split('/').next().filter(|app| *app != scopes::APP).map(str::to_string)),
