@@ -17,7 +17,7 @@ pub(crate) mod routes {
     }
 
     async fn widgets(State(node): State<Node>, me: Me, Query(q): Query<WidgetsAsked>) -> Reply {
-        let only = q.kind.as_deref().map(|kind| kind.split_once('.').ok_or_else(|| anyhow::anyhow!("a widget's kind is <app>.<widget>"))).transpose()?;
+        let only = q.kind.as_deref().map(|kind| kind.split_once('.').ok_or_else(|| crate::api::Invalid("a widget's kind is <app>.<widget>".into()))).transpose()?;
         Ok(Json(json!(node.widgets(me.caller, q.scope.as_deref(), only).await?)))
     }
 

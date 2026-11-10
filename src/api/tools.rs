@@ -31,7 +31,7 @@ pub(super) fn routes() -> Routes {
 }
 
 async fn serve(State(node): State<Node>, me: Me, headers: HeaderMap, Json(input): Json<Map<String, Value>>, serves: Serves, spec: Value, name: String) -> Reply {
-    crate::tools::check(&spec["input"], &Value::Object(input.clone()))?;
+    crate::tools::check(&spec["input"], &Value::Object(input.clone())).map_err(|e| super::Invalid(format!("{e:#}")))?;
     let agent = headers.get(crate::protocol::header::AGENT).and_then(|a| data_encoding::BASE64URL_NOPAD.decode(a.as_bytes()).ok()).and_then(|a| String::from_utf8(a).ok());
     let me = Caller { agent: agent.or(me.caller.agent), ..me.caller };
     let answer = serves(node, me, input).await?;

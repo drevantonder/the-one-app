@@ -145,7 +145,7 @@ impl Node {
         if traced.called() {
             return;
         }
-        let failure = Failure::of(failed.code.as_deref(), None, stage::CHECK);
+        let failure = if failed.invalid { Failure::Refused(insights::INVALID.into()) } else { Failure::of(failed.code.as_deref(), None, stage::CHECK) };
         let name = route.replace(['{', '}', '*'], "");
         let build = crate::config::BUILD;
         let attrs = Attrs::default().client("api").build(build).failed(&failure).stage(stage::CHECK).fingerprint(failure.kind(), &name, build);

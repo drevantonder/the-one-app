@@ -18,7 +18,7 @@ impl IntoResponse for Error {
         };
         let mut answer = (status, Json(failed(&self.0))).into_response();
         if self.0.downcast_ref::<crate::node::Needs>().is_none() {
-            answer.extensions_mut().insert(RouteFailed { code: crate::protocol::Coded::of(&self.0), said: format!("{:#}", self.0) });
+            answer.extensions_mut().insert(RouteFailed { code: crate::protocol::Coded::of(&self.0), said: format!("{:#}", self.0), invalid: self.0.is::<Invalid>() });
         }
         answer
     }
@@ -29,7 +29,20 @@ impl IntoResponse for Error {
 pub(crate) struct RouteFailed {
     pub(crate) code: Option<String>,
     pub(crate) said: String,
+    pub(crate) invalid: bool,
 }
+
+/// What was asked isn't something a route takes: the caller's to change, so nothing broke.
+#[derive(Debug)]
+pub(crate) struct Invalid(pub(crate) String);
+
+impl std::fmt::Display for Invalid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Invalid {}
 
 /// Why something failed, as the API says it: `{ error }`, with `{ code }` for the kinds callers act on (`protocol::code`),
 /// `{ trace }` for what to look up in insights, and `{ need, to, seal }` for keys a call wasn't handed.

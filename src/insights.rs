@@ -187,6 +187,8 @@ const TRY_RESULTS: &[&str] = &["answered", "elsewhere", "no connection", "not ta
 /// Why a process ended or an update wasn't taken.
 const REASONS: &[&str] = &["renewed", "stopped", "failed", "update", "watchdog", "abort", "signal", "first", "download", "install", "verify", "app-bundle"];
 
+/// What a refusal is listed as when what was asked isn't something its route takes (`api::Invalid`).
+pub const INVALID: &str = "invalid";
 /// A name of OTEL's for an error of no known kind.
 pub const OTHER: &str = "_OTHER";
 pub const TIMEOUT: &str = "timeout";
@@ -450,7 +452,7 @@ impl Attrs {
 
 /// `kind` if it's a name `error.type` may hold, else `_OTHER`.
 fn error_kind(kind: &str) -> &str {
-    if code::ALL.contains(&kind) || EXCEPTIONS.contains(&kind) || [TIMEOUT, UNREACHABLE, LOST, UNAVAILABLE].contains(&kind) { kind } else { OTHER }
+    if code::ALL.contains(&kind) || EXCEPTIONS.contains(&kind) || [TIMEOUT, UNREACHABLE, LOST, UNAVAILABLE, INVALID].contains(&kind) { kind } else { OTHER }
 }
 
 /// Whether a value is a plain name or hash: letters, digits and `_ . - +`, so no address, path, URL or sentence.
