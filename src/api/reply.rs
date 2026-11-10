@@ -32,21 +32,6 @@ pub(super) fn failed(err: &anyhow::Error) -> Value {
     }
 }
 
-/// What the API answers when something fails, as the OpenAPI document says it: `failed`'s kinds, 421 and 428 for what a
-/// call's client does something about.
-pub(super) fn error_responses() -> Value {
-    let error = json!({ "type": "string", "description": "why, for whoever reads it" });
-    let mut needs = crate::protocol::schema_of::<crate::node::Needs>();
-    needs["properties"]["error"] = error.clone();
-    needs["required"].as_array_mut().expect("Needs has fields").push(json!("error"));
-    let answer = |description: &str, schema: Value| json!({ "description": description, "content": { "application/json": { "schema": schema } } });
-    json!({
-        "Failed": answer("Why it failed", json!({ "type": "object", "required": ["error"], "properties": { "error": error, "code": { "type": "string", "description": "the kind of failure callers act on" } } })),
-        "Elsewhere": answer("This node can't run it: ask one of these", json!({ "type": "object", "required": ["error", "elsewhere"], "properties": { "error": error, "elsewhere": { "type": "array", "items": { "type": "string" } } } })),
-        "NeedsKeys": answer("It needs keys it wasn't handed: send it again with these", needs),
-    })
-}
-
 impl<E: Into<anyhow::Error>> From<E> for Error {
     fn from(e: E) -> Self {
         Error(e.into())

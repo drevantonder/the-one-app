@@ -52,14 +52,6 @@ impl Reader {
     }
 }
 
-/// Who runs a core tool, and how.
-pub struct Asked<'a> {
-    pub agent: Option<&'a str>,
-    pub reader: Reader,
-    /// The user agreed to what it sends or can't undo (`confirm: true`, `--confirm`).
-    pub confirmed: bool,
-}
-
 /// A request of a node's API: a tool's route, with its input as the body.
 pub struct Request {
     pub path: String,
@@ -126,15 +118,10 @@ impl Feature {
         format!("/v1/{}/{}", self.name, tool["name"].as_str().unwrap_or(""))
     }
 
-    /// The request its tool at `at` makes of this input: asked by a client of its node, or answered by the client itself.
-    pub fn request(&self, at: usize, input: &Map<String, Value>, asked: &Asked) -> Request {
+    /// The request its tool at `at` makes of this input, `confirmed` if the user agreed to what it sends or can't undo.
+    pub fn request(&self, at: usize, input: &Map<String, Value>, confirmed: bool) -> Request {
         let tool = &self.tools[at];
-        let mut body = input.clone();
-        // A tool that takes `confirm` as an input (approve: without it, it says whose device it is) gets what the reader said.
-        if tool.spec["input"]["properties"].get("confirm").is_some() {
-            body.insert("confirm".into(), json!(asked.confirmed));
-        }
-        Request { path: self.path(&tool.spec), body: Value::Object(body) }
+        Request { path: self.path(&tool.spec), body: body(&tool.spec, input.clone(), confirmed) }
     }
 
     /// A tool of its as MCP names it: `vault_list`, or `logs` for the one named as the feature.
@@ -159,6 +146,15 @@ pub fn find(name: &str) -> Option<(Feature, usize)> {
     })
 }
 
+/// A core tool's route's body: its input, and a tool that takes `confirm` as one (approve: without it, it says whose
+/// device it is) gets what the reader said.
+pub fn body(tool: &Value, mut input: Map<String, Value>, confirmed: bool) -> Value {
+    if tool["input"]["properties"].get("confirm").is_some() {
+        input.insert("confirm".into(), json!(confirmed));
+    }
+    Value::Object(input)
+}
+
 /// A string input, or what to give.
 pub fn text<'a>(input: &'a Map<String, Value>, key: &str) -> Result<&'a str> {
     input.get(key).and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("give {key}"))
@@ -172,7 +168,14 @@ pub fn said(mut answer: Value) -> Value {
     }
 }
 
+/// A time, for users: today's as its hour, else its date.
 #[cfg(feature = "node")]
-mod run;
-#[cfg(feature = "node")]
-pub use run::{and_apps, listed, mcp_tools, say_time};
+pub fn say_time(ms: u64) -> String {
+    let Ok(t) = jiff::Timestamp::from_millisecond(ms as i64) else { return String::new() };
+    let tz = jiff::tz::TimeZone::system();
+    let (t, today) = (t.to_zoned(tz.clone()), jiff::Timestamp::now().to_zoned(tz));
+    match t.date() == today.date() {
+        true => t.strftime("today at %H:%M").to_string(),
+        false => t.strftime("%-d %b at %H:%M").to_string(),
+    }
+}

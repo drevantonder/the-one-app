@@ -42,6 +42,7 @@ pub struct Client {
     elsewhere: bool,
     needed: Mutex<Option<Value>>,
     apps: Mutex<Option<Vec<Value>>>,
+    sets: Mutex<Option<Vec<Value>>>,
 }
 
 /// A call's answer, with what it did as lines when its trace was asked for (`node::trace::said`).
@@ -54,12 +55,12 @@ impl Client {
     /// `elsewhere`: it asks for someone who isn't this machine's own user, a device of theirs, whose MCP
     /// request the node answers.
     pub fn new(via: impl Via + 'static, elsewhere: bool) -> Client {
-        Client { via: std::sync::Arc::new(via), elsewhere, needed: Mutex::new(None), apps: Mutex::new(None) }
+        Client { via: std::sync::Arc::new(via), elsewhere, needed: Mutex::new(None), apps: Mutex::new(None), sets: Mutex::new(None) }
     }
 
     /// Another, asking the same way, for the next MCP message of a session that serves many.
     pub fn again(&self) -> Client {
-        Client { via: self.via.clone(), elsewhere: self.elsewhere, needed: Mutex::new(None), apps: Mutex::new(None) }
+        Client { via: self.via.clone(), elsewhere: self.elsewhere, needed: Mutex::new(None), apps: Mutex::new(None), sets: Mutex::new(None) }
     }
 
     /// Every app, the node's own among them, as `GET /v1/apps` gives them: asked once, the first time.
@@ -67,6 +68,16 @@ impl Client {
         let mut kept = self.apps.lock().unwrap();
         if kept.is_none() {
             *kept = Some(self.get("/v1/apps")?.as_array().cloned().unwrap_or_default());
+        }
+        Ok(kept.clone().unwrap_or_default())
+    }
+
+    /// Every set of tools, the core's and each app's, as the API's document lists them for this caller
+    /// (`openapi::sets`): asked once, the first time.
+    pub fn sets(&self) -> Result<Vec<Value>> {
+        let mut kept = self.sets.lock().unwrap();
+        if kept.is_none() {
+            *kept = Some(crate::openapi::sets(&self.get(crate::protocol::path::OPENAPI)?));
         }
         Ok(kept.clone().unwrap_or_default())
     }

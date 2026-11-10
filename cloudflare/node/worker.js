@@ -30,7 +30,7 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
+import { initSync, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
@@ -1015,7 +1015,7 @@ async function route(p, request) {
     p.forgetLost(who);
     return json(JSON.parse(await sealed_global_steps(p.owner, who.user, p.bucket, Number(url.searchParams.get("from") || 0), url.searchParams.get("welcome") ?? undefined)));
   }
-  if ((request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events"].includes(path))) {
+  if ((request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events", "/api/openapi.json"].includes(path))) {
     const who = p.whom(request);
     const run = new Run(p, who, await p.networkFor(who));
     // Nothing here changes but what devices write, which they'll say once one is on: no events, so the client asks again
@@ -1024,6 +1024,7 @@ async function route(p, request) {
     const scope = url.searchParams.get("scope");
     if (path === "/v1/state") return json(run.view.state);
     if (path === "/v1/apps") return tagged(request, JSON.stringify(await run.apps()), "application/json");
+    if (path === "/api/openapi.json") return tagged(request, openapi(JSON.stringify(await run.apps())), "application/json");
     if (path === "/v1/widgets") return json(await run.widgets(scope, url.searchParams.get("kind")));
     return json(await run.badges(scope));
   }

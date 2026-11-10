@@ -46,7 +46,7 @@ pub struct Run<'a> {
 /// a wrong input says what's wrong, never runs as something else. `spec` is the tool and its set, when the caller has them.
 pub fn dispatch(node: &Client, name: &str, mut input: Map<String, Value>, reader: Reader, agent: Option<&str>, spec: Option<(Value, Value)>) -> Called {
     let checked = (|| {
-        let found = spec.or_else(|| crate::core_tools::find(name).map(|(f, at)| (f.listed(), f.tools[at].spec.clone()))).or_else(|| name.split_once('_').and_then(|(a, o)| super::find(node, a, o)));
+        let found = spec.or_else(|| super::named(node, name));
         let Some((set, tool)) = found else { bail!("{}", unknown_tool(node, name)?) };
         super::check(&super::mcp_schema(&set, &tool), &Value::Object(input.clone()))?;
         let device = if super::own_device(&tool) { None } else { input.remove("device").and_then(|d| d.as_str().map(str::to_string)) };
@@ -57,32 +57,32 @@ pub fn dispatch(node: &Client, name: &str, mut input: Map<String, Value>, reader
         let confirmed = input.remove("confirm") == Some(json!(true));
         let trace = input.remove("trace") == Some(json!(true));
         super::mcp_files(node, &tool, &mut input)?;
-        Ok((tool["confirm"] == true, Run { reader, device, scopes, agent, confirmed, trace }))
+        Ok((tool, Run { reader, device, scopes, agent, confirmed, trace }))
     })();
     match checked {
-        Ok((confirm, how)) => run(node, name, confirm, input, how),
+        Ok((tool, how)) => run(node, name, &tool, input, how),
         Err(err) => Called { ok: Err(err), trace: None },
     }
 }
 
-/// Runs the tool `name` (as MCP names it) as the user: the core's (`core_tools`), else an app's, as a call. What
-/// sends or can't be undone (`confirm`) runs only once they agreed.
-pub fn run(node: &Client, name: &str, confirm: bool, input: Map<String, Value>, how: Run) -> Called {
+/// Runs `tool` (`name` as MCP names it) as the user: at its route if it has one, else as a call of its app. What sends or
+/// can't be undone (`confirm`) runs only once they agreed.
+pub fn run(node: &Client, name: &str, tool_spec: &Value, input: Map<String, Value>, how: Run) -> Called {
     let refused = |why: String| Called { ok: Err(Failed::Refused(why).into()), trace: None };
     let (app, tool) = name.split_once('_').unwrap_or((name, ""));
-    if confirm && !how.confirmed {
+    if tool_spec["confirm"] == true && !how.confirmed {
         return refused(how.reader.unconfirmed(&how.reader.named(app, tool)));
     }
-    if let Some((feature, at)) = crate::core_tools::find(name) {
-        let ok = feature.run(at, &input, &crate::core_tools::Asked { agent: how.agent, reader: how.reader, confirmed: how.confirmed }, node);
-        return Called { ok, trace: None };
+    if let Some(route) = tool_spec["route"].as_str() {
+        let body = crate::core_tools::body(tool_spec, input, how.confirmed);
+        return Called { ok: node.post_for(how.agent, route, body).map(crate::core_tools::said), trace: None };
     }
     node.call(&json!({ "device": how.device, "scopes": how.scopes, "app": app, "tool": tool, "input": input, "agent": how.agent, "client": how.reader.client() }), how.trace)
 }
 
 /// What to say for a tool nobody here lists: an app's tools when the app is right, else the nearest tools.
 fn unknown_tool(node: &Client, name: &str) -> anyhow::Result<String> {
-    let sets = crate::core_tools::and_apps(node)?;
+    let sets = super::sets(node)?;
     if let Some((app, tool)) = name.split_once('_')
         && sets.iter().any(|a| a["name"] == app)
     {

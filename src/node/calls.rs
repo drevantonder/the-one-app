@@ -649,14 +649,14 @@ impl Node {
 
     /// `run`, but a call that lacks keys its caller can hand fails with what it needs. A call is stopped at its limit
     /// only before it writes: one that's writing is waited for, and answers as it went.
-    pub(super) async fn run_or_need(&self, req: &CallRequest, me: &Caller) -> Result<Reply, sessions::Needs> {
+    pub(super) async fn run_or_need(&self, req: &CallRequest, me: &Caller) -> Result<Reply, crate::keys::Needs> {
         let req = &self.resolve(req.clone());
         let limit = self.limit(req).await;
         let writing = AtomicBool::new(false);
         let result = unless_writing(tokio::time::Instant::now() + limit, &writing, self.run_here(req, me, limit, &writing)).await;
         Ok(match result {
             Some(Ok(reply)) => reply,
-            Some(Err(err)) => match err.downcast::<sessions::Needs>() {
+            Some(Err(err)) => match err.downcast::<crate::keys::Needs>() {
                 Ok(need) => return Err(need),
                 Err(err) => Reply::failed(&err),
             },

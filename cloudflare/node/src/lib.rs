@@ -598,6 +598,12 @@ pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, unt
     Ok(asked.to_string())
 }
 
+/// The tools `apps` (JSON, as `GET /v1/apps` gives them) offer, as this node serves the API's document.
+#[wasm_bindgen]
+pub fn openapi(apps: &str) -> Result<String, JsError> {
+    Ok(one::openapi::document(&serde_json::from_str::<Vec<Value>>(apps)?).to_string())
+}
+
 /// The network as `user` sees it, from the steps of `scopes` (JSON) `owner`'s object read: `{ state, apps, me, erased }`.
 /// `state` is `GET /v1/state`'s, for a node that knows of no device being on; `apps` is `GET /v1/apps`'s from the
 /// members alone, each with `reach`, the scopes it reaches for `user` (what its widgets and calls are given), for

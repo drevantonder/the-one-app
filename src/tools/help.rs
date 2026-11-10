@@ -129,7 +129,7 @@ fn about(tool: &Value) -> String {
 
 /// The tools of `apps` a user may call, with their set's name.
 fn callable(apps: &[Value]) -> impl Iterator<Item = (&str, &Value)> {
-    apps.iter().flat_map(|a| a["tools"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).map(move |o| (a["name"].as_str().unwrap_or(""), o)))
+    apps.iter().flat_map(|a| a["tools"].as_array().into_iter().flatten().map(move |o| (a["name"].as_str().unwrap_or(""), o)))
 }
 
 /// Every tool of `apps` as the command to type and what it does, aligned.

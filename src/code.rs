@@ -24,13 +24,12 @@ pub fn catalog(node: &Client) -> Result<Vec<Value>> {
 /// What a search looks through: `catalog`'s apps, then the apps the user could add, which have no tools for
 /// them yet: those not added where they are, nor deleted.
 pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
-    let (mut apps, mut addable) = (crate::core_tools::listed(), Vec::new());
-    for mut app in node.apps()? {
+    let (mut apps, mut addable) = (Vec::new(), Vec::new());
+    for mut app in tools::sets(node)? {
         let tools: Vec<Value> = app["tools"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_'))
             .map(|tool| {
                 let mut tool = tool.clone();
                 tool["input"] = tools::mcp_schema(&app, &tool);
@@ -318,7 +317,7 @@ fn runner() -> Result<(PathBuf, PathBuf)> {
 /// logs, truncated, toolCalls }`.
 pub fn execute(node: &Client, script: &str, agent: Option<&str>) -> Result<Value> {
     anyhow::ensure!(!script.trim().is_empty(), "give the script as code");
-    let (apps, sets) = (catalog(node)?, crate::core_tools::and_apps(node)?);
+    let (apps, sets) = (catalog(node)?, tools::sets(node)?);
     let mut tools = Vec::new();
     let mut descriptions = serde_json::Map::new();
     for app in &apps {

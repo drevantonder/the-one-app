@@ -18,6 +18,8 @@ pub use mcp::{BUDGET, MCP_FILE_LIMIT, mcp_content, mcp_files, mcp_schema, mcp_to
 pub use input::{Flags, input, split, takes};
 pub use run::{Run, dispatch};
 
+pub use crate::openapi::{own_device, runs_on_devices};
+
 use anyhow::Result;
 use serde_json::{Value, json};
 
@@ -30,13 +32,32 @@ use files::show;
 use help::help;
 use input::{from_stdin, missing, places};
 
-/// A tool as the command line reads it, with its set: the core's (`core_tools`), or an app's as `GET /v1/apps`
-/// describes it; None when nothing here lists it.
+/// A tool as the command line reads it, with its set, as the API's document lists them (`Client::sets`); None when it
+/// lists none.
 pub fn find(node: &Client, app: &str, tool: &str) -> Option<(Value, Value)> {
-    let apps = crate::core_tools::and_apps(node).ok()?;
+    let apps = sets(node).ok()?;
     let a = apps.iter().find(|a| a["name"] == app)?.clone();
     let o = a["tools"].as_array()?.iter().find(|o| o["name"] == tool)?.clone();
     Some((a, o))
+}
+
+/// A tool by the name MCP calls it, with its set.
+pub fn named(node: &Client, name: &str) -> Option<(Value, Value)> {
+    node.sets().ok()?.iter().find_map(|s| Some((s.clone(), s["tools"].as_array()?.iter().find(|t| t["id"] == name)?.clone())))
+}
+
+/// The sets of tools as commands and search read them: a core tool named as its feature (`logs`) is a command of its own
+/// (`one logs`), not one of its set's, and a feature left with none isn't a set.
+pub fn sets(node: &Client) -> Result<Vec<Value>> {
+    let mut sets = node.sets()?;
+    for set in &mut sets {
+        let name = set["name"].clone();
+        if let Some(tools) = set["tools"].as_array_mut() {
+            tools.retain(|t| t["id"] != name);
+        }
+    }
+    sets.retain(|s| s["runs"] != "client" || s["tools"].as_array().is_some_and(|t| !t.is_empty()));
+    Ok(sets)
 }
 
 /// A command's exit code for what went wrong: 2 what was typed is wrong, 3 refused (it needs --confirm, the user
@@ -102,7 +123,7 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
     // At a terminal, the user is asked here; what they said is checked where every tool runs.
     let confirmed = confirmed || (o["confirm"] == true && asked_yes(&Reader::Cli.named(app, tool))?);
     let how = Run { reader: Reader::Cli, device, scopes, agent: g.agent, confirmed, trace: g.trace };
-    let ran = run::run(node, &Reader::Mcp.named(app, tool), o["confirm"] == true, input, how);
+    let ran = run::run(node, &Reader::Mcp.named(app, tool), o, input, how);
     let mut ok = match ran.ok {
         Ok(ok) => ok,
         Err(e) => {
@@ -145,7 +166,7 @@ pub fn print_trace(lines: Option<&[String]>) {
 /// What an app says, as the command line says it: each tool it names (`gmail_sign_in`) as its command
 /// (`one gmail sign_in`), as it was when the node can't list its apps: the error that came with it matters more.
 pub fn in_cli_words(node: &Client, text: &str) -> String {
-    let apps = crate::core_tools::and_apps(node).unwrap_or_default();
+    let apps = sets(node).unwrap_or_default();
     let command = |word: &str| -> Option<String> {
         word.match_indices('_').find_map(|(i, _)| {
             let (app, tool) = (&word[..i], &word[i + 1..]);
@@ -196,8 +217,8 @@ pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, reader: R
 /// `commands` are the command line's own commands' forms, when it asks.
 pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[(String, String)]>) -> Result<String> {
     let cli = commands.is_some();
-    let apps = crate::core_tools::and_apps(node)?;
-    let tools_of = |a: &Value| -> Vec<String> { a["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
+    let apps = sets(node)?;
+    let tools_of = |a: &Value| -> Vec<String> { a["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).map(String::from).collect() };
     // One the user could add: the node lists it, without tools for them, since it isn't added where they are.
     let addable = |a: &Value| a["tools"].is_null() && a["deleted"].is_null();
     if let Some(a) = apps.iter().find(|a| a["name"] == app) {
@@ -241,18 +262,6 @@ pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[
     })
 }
 
-/// Whether a tool takes a `device` of its own (an agent device's name, say): then that's what `device` is, and
-/// it says itself where it runs, so the CLI's and MCP's `device` (which of your devices runs it) isn't offered.
-pub fn own_device(tool: &Value) -> bool {
-    tool["input"]["properties"].get("device").is_some()
-}
-
-/// Whether an app's calls run on a device of the user's choosing: it runs on every device, or uses a service (Shell
-/// on a named device, iMessage on the Mac), so MCP and search offer `device` as the CLI's `--device` does.
-pub(crate) fn runs_on_devices(app: &Value) -> bool {
-    app["runs"] == "here" || app["uses"]["services"].as_array().is_some_and(|s| !s.is_empty())
-}
-
 /// What `device` says it does: which device runs the call, and which when none is given.
 fn device_about(app: &Value) -> &'static str {
     match (app["runs"] == "here", runs_on_devices(app)) {
@@ -273,7 +282,7 @@ pub fn commands() -> crate::cli::Command {
             let args = g.args;
             match g.words().as_slice() {
                 [app] if !app.starts_with('-') => {
-                    let apps = crate::core_tools::and_apps(g.node)?;
+                    let apps = sets(g.node)?;
                     let Some(found) = apps.iter().find(|a| a["name"] == *app) else { return Err(Failed::Typed(unknown(g.node, app, None, Some(g.commands))?).into()) };
                     println!("{} ({app})", found["title"].as_str().unwrap_or(app));
                     if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {

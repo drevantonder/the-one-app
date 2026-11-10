@@ -158,7 +158,7 @@ fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8])
 /// `one::settings::answered`): one that changes who can do what, which it signs as its user's, as any device does.
 /// None for any other MCP message, which goes to a node, as its user.
 async fn tool_here(keyring: &Keyring, client: &one_client::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, one_client::Error>> {
-    use one::core_tools::{Asked, Reader};
+    use one::core_tools::Reader;
     let msg: Value = serde_json::from_slice(body).ok()?;
     if msg["method"] != "tools/call" {
         return None;
@@ -167,9 +167,8 @@ async fn tool_here(keyring: &Keyring, client: &one_client::Client, on: &On, body
     let (feature, at) = one::core_tools::find(name)?;
     let mut input = msg["params"]["arguments"].as_object().cloned().unwrap_or_default();
     let confirmed = input.remove("confirm") == Some(json!(true));
-    let asked = Asked { agent: None, reader: Reader::Mcp, confirmed };
     // Any other a node runs.
-    let asks = Some(feature.request(at, &input, &asked)).filter(|r| one::settings::answered(&r.path))?;
+    let asks = Some(feature.request(at, &input, confirmed)).filter(|r| one::settings::answered(&r.path))?;
     if feature.tools[at].spec["confirm"] == true && !confirmed {
         return Some(Ok(result(&msg, Err(Reader::Mcp.unconfirmed(name)))));
     }

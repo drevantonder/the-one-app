@@ -162,7 +162,7 @@ fn tool_names(apps: &[Value]) -> Vec<String> {
 fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bool) {
     let name = params["name"].as_str().unwrap_or("");
     // Search and the core's tools never change which tools there are.
-    let apps = (session.mode == Mode::All && name != "search" && crate::core_tools::find(name).is_none()).then(|| node.apps().ok()).flatten();
+    let apps = (session.mode == Mode::All && name != "search" && tools::named(node, name).is_none_or(|(set, _)| set["runs"] != "client")).then(|| node.apps().ok()).flatten();
     let reads = |apps: &[Value]| match name.split_once('_') {
         Some((a, o)) => apps.iter().filter(|x| x["name"] == a).flat_map(|x| x["tools"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
         None => name == "search",
@@ -244,7 +244,7 @@ fn instructions(node: &Client, mode: Mode) -> String {
     // A harness starts its MCP server at login, before the node may be up: the instructions then say less, and a
     // tool call says why it can't.
     let state = node.state().ok();
-    crate::skills::instructions(mode, &crate::core_tools::and_apps(node).unwrap_or_default(), state.as_ref().and_then(|s| s.user.as_ref()).map(|u| u.name.as_str()))
+    crate::skills::instructions(mode, &tools::sets(node).unwrap_or_default(), state.as_ref().and_then(|s| s.user.as_ref()).map(|u| u.name.as_str()))
 }
 
 /// MCP's `deploy`, `{CLI} deploy` for an agent with no shell: the app's files as text, built where it's asked.
@@ -261,18 +261,15 @@ fn deploy_tool() -> Value {
     })
 }
 
-/// The tools it lists: its own, the core's, and every app's.
+/// The tools it lists: its own, then every one the API's document lists.
 fn listed(node: &Client) -> Result<Vec<Value>, Value> {
-    let apps = node.apps().map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+    let sets = node.sets().map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
     // MCP Apps' own version of a tool wins.
     let drawn: Vec<Value> = apps::tools().iter().map(|t| t["name"].clone()).collect();
-    let core = crate::core_tools::mcp_tools().into_iter().filter(|t| !drawn.contains(&t["name"])).collect::<Vec<_>>();
-    let mut tools: Vec<Value> = std::iter::once(deploy_tool()).chain(core).collect();
-    for app in &apps {
-        let name = app["name"].as_str().unwrap_or("");
-        // Tools starting with `_` are for the screens.
-        for tool in app["tools"].as_array().into_iter().flatten().filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_')).filter(|tool| !drawn.contains(&json!(format!("{name}_{}", tool["name"].as_str().unwrap_or(""))))) {
-            tools.push(tools::mcp_tool(app, tool, format!("{name}_{}", tool["name"].as_str().unwrap_or(""))));
+    let mut tools = vec![deploy_tool()];
+    for set in &sets {
+        for tool in set["tools"].as_array().into_iter().flatten().filter(|tool| !drawn.contains(&tool["id"])) {
+            tools.push(tools::mcp_tool(set, tool, tool["id"].as_str().unwrap_or("").to_string()));
         }
     }
     Ok(tools)

@@ -653,6 +653,15 @@ pub fn forwarded(call: &Value, user: &str, client: &str, from: &[u8; 32], seal: 
     Ok(json!({ "kind": crate::protocol::message::ASK, "body": { "call": call } }))
 }
 
+/// Keys a call needs that it wasn't handed: the API answers 428 with them, and with this device's key and the key to
+/// seal them to.
+#[derive(Debug, Clone, schemars::JsonSchema)]
+pub struct Needs {
+    pub need: Vec<Need>,
+    pub to: String,
+    pub seal: String,
+}
+
 /// A key a call lacked, which its caller hands it when it sends the call again: what a node answers with 428.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Need {

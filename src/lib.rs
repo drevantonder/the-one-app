@@ -104,6 +104,7 @@ pub mod mode;
 pub mod oned;
 pub mod cloudflare;
 pub mod keys;
+pub mod openapi;
 pub mod protocol;
 pub mod push;
 pub mod screen;

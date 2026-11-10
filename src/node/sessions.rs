@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use crate::database::stored::Keys;
-use crate::keys::Need;
+use crate::keys::{Need, Needs};
 
 use super::*;
 
@@ -40,15 +40,6 @@ pub(super) struct Opened {
     /// Opened for app schedules, whose keys no session holds: forgotten with them, or at `until`.
     pub app_schedules: bool,
     pub db: Arc<tokio::sync::Mutex<Db>>,
-}
-
-/// Keys a call needs that it wasn't handed: the API answers 428 with them, and with this device's key and the key to
-/// seal them to.
-#[derive(Debug, Clone, schemars::JsonSchema)]
-pub struct Needs {
-    pub need: Vec<Need>,
-    pub to: String,
-    pub seal: String,
 }
 
 impl std::fmt::Display for Needs {

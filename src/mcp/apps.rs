@@ -45,7 +45,8 @@ pub fn tools() -> Vec<Value> {
     let ui = json!({ "ui": { "resourceUri": view_uri() } });
     vec![
         {
-            let mut show = crate::widgets::tools::feature().mcp_tools().remove(0);
+            let widgets = crate::widgets::tools::feature();
+            let mut show = crate::tools::mcp_tool(&widgets.listed(), &widgets.tools[0].spec, widgets.mcp_name(&widgets.tools[0].spec));
             show["_meta"] = ui.clone();
             show
         },
@@ -157,7 +158,8 @@ fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
 /// unless the view says the user pressed it.
 fn for_screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     let (app, tool) = (input["app"].as_str().unwrap_or_default(), input["tool"].as_str().unwrap_or_default());
-    let found = crate::tools::find(node, app, tool);
+    // The tools only screens use are in no document: the app's own list has them.
+    let found = crate::tools::find(node, app, tool).or_else(|| node.apps().ok()?.into_iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["tools"].as_array()?.iter().find(|t| t["name"] == tool)?.clone()))));
     let mut arguments = input["input"].as_object().cloned().unwrap_or_default();
     if input["confirm"] == true && found.as_ref().is_some_and(|(_, spec)| spec["confirm"] == true) {
         arguments.insert("confirm".into(), true.into());

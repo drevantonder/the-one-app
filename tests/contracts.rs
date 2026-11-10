@@ -605,7 +605,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
     };
     names("the node's widgets", &read("src/node/screens.rs"), &["[\"late\"] = json!(true)"]);
     names("the node's route", &read("src/node/widgets.rs"), &["kind: Option<String>"]);
-    names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")"]);
+    names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", one::protocol::path::OPENAPI]);
     names("the pages", &read("src/screen/home/lib/model.js"), &["w.late", "&kind="]);
     names("the native widgets", &read("client/native/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
     names("a chat's view", &read("src/mcp/view.html"), &["w.late", "widgets_show"]);

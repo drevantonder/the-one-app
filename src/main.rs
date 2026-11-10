@@ -40,13 +40,19 @@ fn commands() -> Vec<Command> {
 }
 
 /// Every built-in command, with what it takes, then the network's own tools as commands: `help all`.
-fn every_command() -> String {
-    let core = tools::forms(&one::core_tools::listed());
+fn every_command(node: &Client) -> String {
+    let core = core_forms(node);
     format!(
         "Usage:\n{}\n{NAME}'s own tools, each a command as an app's tools are (--help after one says what it takes):\n{}\n{NAME} holds one network. For another context, run that context's own app.",
         one::cli::help(commands().iter().flat_map(|c| &c.help)),
         one::cli::help(&core)
     )
+}
+
+/// The core's tools as commands' forms, when a node can say what they are.
+fn core_forms(node: &Client) -> Vec<(String, String)> {
+    let core: Vec<Value> = tools::sets(node).unwrap_or_default().into_iter().filter(|s| s["runs"] == "client").collect();
+    tools::forms(&core)
 }
 
 /// What `help` and the bare command say: what an agent needs to start, and where the rest is.
@@ -153,7 +159,7 @@ fn own() -> Command {
                     println!("{}", help(g.node));
                     println!("\n{}", connection(g.node));
                 }
-                ["help", "all"] => println!("{}", every_command()),
+                ["help", "all"] => println!("{}", every_command(g.node)),
                 ["help", rest @ ..] => match command_help(g.node, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
                     Some(text) => print!("{text}"),
                     None => return Err(one::cli::Failed::Typed(tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
@@ -177,7 +183,7 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
     {
         return None;
     }
-    let (commands, core) = (commands(), tools::forms(&one::core_tools::listed()));
+    let (commands, core) = (commands(), core_forms(node));
     let forms: Vec<&(String, String)> = commands.iter().flat_map(|c| &c.help).chain(&core).collect();
     // The forms for the most words given that have any: vault answer's, else every vault form.
     let starts = |n: usize| -> Vec<&(String, String)> { forms.iter().copied().filter(|(usage, _)| usage.split_whitespace().take(n).eq(typed[..n].iter().copied())).collect() };
