@@ -45,7 +45,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   itself, and stays small. It has a version for each platform it runs on: computers (Mac, Windows, Linux) and
   Cloudflare, and perhaps Android one day.
 - **Node**: one place oned runs: a computer's node, or the Cloudflare node. It holds no keys, except for app schedules
-  and the Vault, where a user chose that node. A phone is a device and not a node; the Cloudflare node is a node and
+  and the Vault, where a user chose that node, and a computer's node that is also its user's device, which opens that
+  user's scopes with its own keys. A phone is a device and not a node; the Cloudflare node is a node and
   not a device; a computer can be both. Avoid "node" for the app runtime. Avoid: serverless node.
 - **Platform**: what a client or oned is built for: Mac, Windows, Linux, iPhone, Android, a browser, Cloudflare.
 - **Endpoint**: an iroh identity, of its own key. Each client, node and service is one; the relay lets in only the
