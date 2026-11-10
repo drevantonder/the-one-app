@@ -23,6 +23,16 @@ export CONFIG_YOURS
 # Signed by the team of this Mac's Apple Development certificate, unless APPLE_TEAM names one.
 export APPLE_TEAM=${APPLE_TEAM:-$(security find-certificate -c "Apple Development" -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p')}
 
+# One build at a time on this Mac: two at once take it to a load nothing else can run under. `alone "$@"` from a build
+# script holds a turn until it ends; what it calls waits for nothing.
+alone() {
+	[ -z "${ONE_BUILD_TURN:-}" ] || return 0
+	export ONE_BUILD_TURN=1
+	local lock=${TMPDIR:-/tmp}/one-build.lock
+	lockf -k -t 0 "$lock" true 2>/dev/null || echo "Another build is running on this Mac: waiting for it to end."
+	exec lockf -k "$lock" "$0" "$@"
+}
+
 # Runs a command as a one-shot job in the logged-in session, and prints its output: over SSH the keychain, which
 # codesign, notarytool and Xcode's signing need, is out of reach.
 session() {

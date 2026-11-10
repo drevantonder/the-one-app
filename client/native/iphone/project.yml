@@ -77,8 +77,6 @@ targets:
               - ${CONFIG_CLI}
         # Asked the first time an app scans a document.
         NSCameraUsageDescription: Scan documents for your apps.
-        # Its encryption is the system's and standard algorithms', which needs no export papers.
-        ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]

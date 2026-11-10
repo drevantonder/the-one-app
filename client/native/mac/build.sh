@@ -4,6 +4,7 @@
 # custom build. NO_INSTALL=1 leaves it built, in client/native/target/mac/.
 set -euo pipefail
 . "$(dirname "$0")/../apple.sh"
+alone "$@"
 BUNDLE_ID=app.$CONFIG_CLI.mac
 label=$BUNDLE_ID.oned
 cd "$native"

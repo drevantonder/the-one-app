@@ -114,6 +114,14 @@ fn on_main(commit: &str) -> bool {
     succeeds(git_history().args(["merge-base", "--is-ancestor", commit, "refs/heads/main"]))
 }
 
+/// The commit given, wherever this is run from, or this checkout's.
+fn named_commit(commit: Option<&str>) -> Result<String> {
+    match commit {
+        Some(commit) => git(&history(), &["rev-parse", "--verify", &format!("{commit}^{{commit}}")]),
+        None => git(Path::new("."), &["rev-parse", "HEAD"]).context("run it in a checkout, or name the commit"),
+    }
+}
+
 fn short(commit: &str) -> &str {
     &commit[..commit.len().min(12)]
 }
@@ -140,8 +148,8 @@ pub(super) fn to_send() -> Result<At> {
 
 /// `ship [<commit>] [--timeout <10m>]`: sends what's tested and returns when every device runs it, or says which doesn't and why.
 pub(super) fn ship(commit: Option<&str>, limit: Duration) -> Result<()> {
-    let wanted = git(Path::new("."), &["rev-parse", commit.unwrap_or("HEAD")])?;
     keep_history()?;
+    let wanted = named_commit(commit)?;
     ensure!(on_main(&wanted), "{} isn't on main: push it first", short(&wanted));
     let at = update(None, false)?;
     ensure!(has(&wanted, &at.build_name(), &mut Default::default()), "{} isn't tested, so it didn't go out: {CLI}-dev signoff tested --ran \"<the tests you chose>\" in a checkout of it", short(&wanted));
@@ -173,7 +181,8 @@ fn prune() -> Result<()> {
 
 /// `signoff seen [<commit>] --checked <what>`: it was seen working, where it went.
 pub(super) fn seen(commit: Option<&str>, checked: &str) -> Result<()> {
-    let commit = git(Path::new("."), &["rev-parse", commit.unwrap_or("HEAD")])?;
+    keep_history()?;
+    let commit = named_commit(commit)?;
     record(Stage::Seen, &commit, &format!("Checked: {checked}"))?;
     println!("{} is finished.", short(&commit));
     Ok(())

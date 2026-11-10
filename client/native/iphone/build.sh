@@ -4,11 +4,16 @@
 #   build.sh               a debug build, on the booted simulator (or $SIMULATOR)
 #   build.sh device [dir]  signed with the team, on the paired iPhone (or $DEVICE); with dir, kept there for an update
 #                          to install
-#   build.sh testflight    archived, and uploaded to TestFlight with App Store Connect's API key ($ASC_KEY, a .p8 file,
-#                          its id $ASC_KEY_ID and issuer $ASC_ISSUER)
+#   build.sh testflight    archived and uploaded to TestFlight, once Apple has everything it needs for that
+#   build.sh preflight     only asks Apple that, in seconds, and installs the App Store profiles
+# Those two read the config's testflight_key (a command printing App Store Connect's .p8 key, kept only for the run),
+# testflight_key_id and testflight_issuer. The App Store profiles are named after the app ("<name> App Store", "<name>
+# Widgets App Store", "<name> Notifications App Store"), on an Apple Distribution certificate in a keychain this user
+# searches: $BUILD_KEYCHAIN and $BUILD_KEYCHAIN_PASSWORD_FILE, if that keychain isn't the login one.
 # CONFIG=path/to/config.toml builds another custom build; push is on with its `push = true`, or PUSH=1.
 set -euo pipefail
 . "$(dirname "$0")/../apple.sh"
+[ "${1:-}" = preflight ] || alone "$@"
 cd "$native"
 mode=${1:-simulator}
 out=$native/target/iphone
@@ -21,6 +26,18 @@ export BUILD_NUMBER=$BUILD_NUMBER.$config_count
 # Push needs the Push Notifications capability on the App IDs and an APNs key for the push Worker, which only the team's
 # account holder makes: so builds leave it out until the config says `push = true`, or PUSH=1.
 if [ "${PUSH:-}" = 1 ] || [ "$(field push)" = true ]; then export PUSH=YES; else export PUSH=; fi
+
+if [ "$mode" = testflight ] || [ "$mode" = preflight ]; then
+	export ASC_KEY_ID=$(field testflight_key_id) ASC_ISSUER=$(field testflight_issuer)
+	[ -n "$(field testflight_key)" ] && [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER" ] || { echo "$config needs testflight_key (a command printing App Store Connect's .p8 key), testflight_key_id and testflight_issuer"; exit 1; }
+	private=$(mktemp -d)
+	trap 'rm -rf "$private"' EXIT
+	export ASC_KEY=$private/key.p8
+	eval "$(field testflight_key)" > "$ASC_KEY"
+	export CONFIG_NAME CONFIG_IPHONE APPLE_TEAM PUSH
+	swift "$native/iphone/preflight.swift"
+	[ "$mode" = testflight ] || exit 0
+fi
 
 # The app's Rust, with its Swift (iphone/Sources) and Tauri's in it, which the project links.
 release= && [ $profile = debug ] || release=--release
@@ -93,7 +110,6 @@ device)
 	xcrun devicectl device process launch --device "$device" "$id" || true
 	;;
 testflight)
-	[ -n "${ASC_KEY:-}" ] || { echo "testflight needs App Store Connect's API key: ASC_KEY (a .p8 file), ASC_KEY_ID, ASC_ISSUER"; exit 1; }
 	rm -rf "$out/Phone.xcarchive" "$out/export"
 	signed "${build[@]}" -destination generic/platform=iOS "${auth[@]}" -archivePath "$out/Phone.xcarchive" archive
 	cat > "$out/export.plist" <<PLIST
@@ -103,12 +119,20 @@ testflight)
   <key>method</key><string>app-store-connect</string>
   <key>destination</key><string>upload</string>
   <key>teamID</key><string>$APPLE_TEAM</string>
-  <key>signingStyle</key><string>automatic</string>
+  <key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>provisioningProfiles</key><dict>
+    <key>$id</key><string>$name App Store</string>
+    <key>$id.widgets</key><string>$name Widgets App Store</string>
+$([ -z "$PUSH" ] || printf '    <key>%s.notifications</key><string>%s Notifications App Store</string>\n' "$id" "$name")  </dict>
   <key>manageAppVersionAndBuildNumber</key><false/>
 </dict></plist>
 PLIST
-	signed xcodebuild -exportArchive -archivePath "$out/Phone.xcarchive" -exportOptionsPlist "$out/export.plist" -exportPath "$out/export" "${auth[@]}"
+	# In this shell, not the logged-in session's: there codesign can't reach a keychain other than the login one
+	# (errSecInternalComponent), and unlocking one is refused.
+	[ -z "${BUILD_KEYCHAIN:-}" ] || security unlock-keychain -p "$(cat "$BUILD_KEYCHAIN_PASSWORD_FILE")" "$BUILD_KEYCHAIN"
+	xcodebuild -exportArchive -archivePath "$out/Phone.xcarchive" -exportOptionsPlist "$out/export.plist" -exportPath "$out/export" "${auth[@]}"
 	echo "Uploaded $name $BUILD_NUMBER ($BUILD_COMMIT) to TestFlight"
 	;;
-*) echo "build.sh [simulator | device [dir] | testflight]"; exit 1 ;;
+*) echo "build.sh [simulator | device [dir] | testflight | preflight]"; exit 1 ;;
 esac
