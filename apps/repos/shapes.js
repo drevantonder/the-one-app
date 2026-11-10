@@ -96,7 +96,7 @@ export const REPO_LINE = {
     branch: { type: ["string", "null"], description: "its default branch" },
     branches: { type: ["integer", "null"], description: "how many it has" },
     created: text("ISO 8601"),
-    updated: text("when it last moved, ISO 8601"),
+    updated: { type: ["string", "null"], description: "when it last moved, ISO 8601; null if nothing was pushed yet" },
     open_issues: { type: "integer" },
     deleted: { type: ["object", "null"], description: "{ time, by } once deleted", additionalProperties: true },
     yours: { type: "boolean", description: "whether you own it" },

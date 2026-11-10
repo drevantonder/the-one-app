@@ -138,7 +138,7 @@ export default {
           properties: {
             profile: { type: "string", description: "its name" },
             sites: { type: "string", description: "the sites it was used on and the day of each" },
-            saved: { type: "string", description: "when it was last saved, ISO 8601; absent if never" },
+            saved: { type: ["string", "null"], description: "when it was last saved, ISO 8601; null if never" },
           },
         },
       },
