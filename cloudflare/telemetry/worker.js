@@ -15,7 +15,7 @@
 // out here, as Basin would take it and drop it in silence. A read runs only `QUERIES`, each value a number or a token
 // (`word`), which is what makes them safe to put in SQL: Basin's SQL has no parameters.
 import { checkRequest, rolesOf } from "../shared/crypto.js";
-import { Refused, refusal, refuse, textOf } from "../shared/http.js";
+import { Refused, answer, refusal, refuse, textOf } from "../shared/http.js";
 import { TELEMETRY } from "../shared/protocol.js";
 
 /// What Basin's own limit on a request (5 MB) leaves room for.
@@ -81,7 +81,7 @@ async function who(env, by) {
   const now = Date.now();
   const had = known.get(by);
   if (had && now - had.at < ALLOWED_FOR) return had.said;
-  const said = (await env.RELAY.allowed(by)) || null;
+  const said = (await answer(env.RELAY.allowed(by))) || null;
   if (known.size > 10_000) known.clear();
   known.set(by, { at: now, said });
   return said;

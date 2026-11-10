@@ -34,7 +34,7 @@ import { initSync, call_span, openapi, check_certificate, open, opens, refresh, 
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
-import { Refused, json, near, refuse, textOf } from "./http.js";
+import { Refused, answer, json, near, refuse, textOf } from "./http.js";
 import { ASKS, BLOBS, CODES, HEADER, LATE_WIDGET, LOG, MOST_URLS, NODE_APP, READS, TELEMETRY, URLS, VAULT, WIDGET_LIMIT_MS } from "./protocol.js";
 
 initSync({ module: wasm });
@@ -1051,7 +1051,7 @@ async function route(p, request) {
   if (request.headers.get(HEADER.elsewhere)) {
     const view = await p.networkFor(p.whom(request));
     const theirs = view.state.network.devices.filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
-    const on = new Set(await p.env.RELAY.connected(theirs));
+    const on = new Set(await answer(p.env.RELAY.connected(theirs)));
     const elsewhere = theirs.filter((k) => on.has(k));
     if (elsewhere.length) return json({ error: "a machine does that", elsewhere }, 421);
   }
@@ -1148,7 +1148,7 @@ export class Node extends DurableObject {
         queueMicrotask(() => {
           const items = this.out;
           this.out = [];
-          this.sent = this.relay().fromNode(items).catch(() => {});
+          this.sent = answer(this.relay().fromNode(items)).catch(() => {});
           this.ctx.waitUntil(this.sent);
         });
       };
@@ -1179,7 +1179,7 @@ export class Node extends DurableObject {
     this.awake();
     try {
       // Only those connected to the relay can be reached from here; with none, it needn't start its endpoint.
-      const here = new Set(await this.relay().connected(to));
+      const here = new Set(await answer(this.relay().connected(to)));
       if (here.size) await this.start();
       const why = [];
       for (const key of to) {

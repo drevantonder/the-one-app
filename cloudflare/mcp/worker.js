@@ -30,7 +30,7 @@ import { DurableObject } from "cloudflare:workers";
 import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { b64u, ed25519Public, hex, joinCode, random, signBytes, signedRequest, untilTaken } from "../shared/crypto.js";
-import { CORS, json, near, textOf } from "../shared/http.js";
+import { CORS, answer, json, near, textOf } from "../shared/http.js";
 import { CODES, IROH_PATHS, READS, RELAY } from "../shared/protocol.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
@@ -283,7 +283,7 @@ export class Client extends DurableObject {
 
   async approved(device) {
     if (this.isApproved) return true;
-    this.isApproved = !!(await this.relay().allowed(device.key));
+    this.isApproved = !!(await answer(this.relay().allowed(device.key)));
     return this.isApproved;
   }
 
@@ -322,7 +322,7 @@ export class Client extends DurableObject {
         const items = this.out;
         this.out = [];
         if (!run.ticket) return;
-        this.sent = this.relay().fromClient(run.key, run.ticket, items).catch(() => {});
+        this.sent = answer(this.relay().fromClient(run.key, run.ticket, items)).catch(() => {});
         this.ctx.waitUntil(this.sent);
       });
     };
@@ -345,7 +345,7 @@ export class Client extends DurableObject {
     const name = await this.ctx.storage.get("name");
     let bound;
     await untilTaken(async (at) => {
-      bound = await this.relay().bind(await signedRequest(me.seed, hex.decode(me.key), RELAY, { bind: true }, at), name);
+      bound = await answer(this.relay().bind(await signedRequest(me.seed, hex.decode(me.key), RELAY, { bind: true }, at), name));
       return bound?.error ? bound : null;
     });
     if (!bound?.ticket) throw Object.assign(new Error(`the relay didn't take its key: ${bound?.error}`), { code: bound?.code });
@@ -370,7 +370,7 @@ export class Client extends DurableObject {
 
   async reorder(me) {
     const nodes = this.view?.nodes || new Map();
-    const online = new Set(await this.relay().connected([...nodes.keys()]));
+    const online = new Set(await answer(this.relay().connected([...nodes.keys()])));
     const kept = ((await this.ctx.storage.get("order")) || []).filter((k) => nodes.has(k));
     this.order = [...kept.filter((k) => online.has(k)), ...[...online].filter((k) => !kept.includes(k))];
     if (this.run?.endpoint && this.run.key === me.key) device_nodes(me.key, this.order);
@@ -417,7 +417,7 @@ export class Client extends DurableObject {
       get: async (name) => (await storage.get(KEPT + name)) ?? null,
       put: (name, bytes) => storage.put(KEPT + name, bytes),
       delete: (name) => storage.delete(KEPT + name),
-      letIn: async () => !!(await this.relay().allowed(me.key)),
+      letIn: async () => !!(await answer(this.relay().allowed(me.key))),
     };
   }
 
@@ -484,7 +484,7 @@ export class Client extends DurableObject {
   async unbindStale(key) {
     const bound = await this.ctx.storage.get("bound");
     if (!bound || (key && bound.key !== key)) return;
-    await this.relay().unbind(bound.key, bound.ticket).catch(() => {});
+    await answer(this.relay().unbind(bound.key, bound.ticket)).catch(() => {});
     if ((await this.ctx.storage.get("bound"))?.ticket === bound.ticket) await this.ctx.storage.delete("bound");
   }
 
@@ -533,7 +533,7 @@ export class Client extends DurableObject {
       if (run.endpoint) await device_close(run.key);
       await this.sent;
       if (run.ticket) {
-        await this.relay().unbind(run.key, run.ticket).catch(() => {});
+        await answer(this.relay().unbind(run.key, run.ticket)).catch(() => {});
         const bound = await this.ctx.storage.get("bound");
         if (bound?.ticket === run.ticket) await this.ctx.storage.delete("bound");
       }

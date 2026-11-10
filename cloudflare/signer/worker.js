@@ -25,7 +25,7 @@
 // client alone. A machine that runs things still reads, so a node takes the release it updates to.
 
 import { b64u, behind, checkRequest, rolesOf } from "../shared/crypto.js";
-import { Refused, refusal, refuse } from "../shared/http.js";
+import { Refused, answer, refusal, refuse } from "../shared/http.js";
 import { COPY, MOST_URLS, NEWEST, STEP_DIGITS, UPDATES, URLS, copyName, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { bucketUrls } from "../shared/s3.js";
 
@@ -52,7 +52,7 @@ async function allowed(env, key) {
   const now = Date.now();
   const kept = known.get(key);
   if (kept && now - kept.at < ALLOWED_FOR) return kept.said;
-  const said = (await env.RELAY.allowed(key)) || null;
+  const said = (await answer(env.RELAY.allowed(key))) || null;
   if (known.size > 10_000) known.clear();
   known.set(key, { at: now, said });
   return said;

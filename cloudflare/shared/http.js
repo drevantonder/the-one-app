@@ -21,6 +21,18 @@ export const refusal = (status, why, headers = {}) => json(typeof why === "strin
 
 export const CORS = { "access-control-allow-origin": "*" };
 
+/// What another Worker's RPC method answered, as plain data, with the answer let go of at once. Cloudflare keeps the call
+/// open on the callee until its caller lets go of the answer, and a Durable Object never ends the context that would, so
+/// each answer it kept left a call open until the callee ran out of memory (11-10, the relay every 1¾ hours).
+export async function answer(call) {
+  const said = await call;
+  try {
+    return said !== null && typeof said === "object" ? structuredClone(said) : said;
+  } finally {
+    said?.[Symbol.dispose]?.();
+  }
+}
+
 /// Where a Durable Object is made: near its users (`LOCATION`, a location hint), not wherever its first request came from.
 export const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 

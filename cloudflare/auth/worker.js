@@ -64,7 +64,7 @@ import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import { genericOAuth, jwt } from "better-auth/plugins";
 import { b64u, behind, checkRequest, discoveryUrl, hex, isKey, joinChallenge, joinCode, joinNonce, random, sha256 } from "../shared/crypto.js";
-import { json } from "../shared/http.js";
+import { answer, json } from "../shared/http.js";
 import { AUTH_DOMAIN, HEADER, ID_TOKEN_ALGS, updateRefusal } from "../shared/protocol.js";
 import { bearer, verify } from "../shared/token.js";
 import { pages } from "../onboarding/pages.js";
@@ -441,7 +441,7 @@ export class Auth extends DurableObject {
     sql.exec("delete from signed where at <= ?", Date.now() - 2 * 60_000);
     this.taken(asked.sig);
     if (!this.env.RELAY) refuse(503, "The network has no relay to say which devices are its own.");
-    const allowed = await this.env.RELAY.allowed(by);
+    const allowed = await answer(this.env.RELAY.allowed(by));
     if (!allowed) refuse(403, "That device isn't one of the network's.");
     return { by, fields, admin: allowed.admin === true };
   }
@@ -753,8 +753,8 @@ export class Auth extends DurableObject {
     const known = this.ctx.storage.sql.exec("select key from devices where user = ? order by at desc limit ?", r.user, PUSHED_TO).toArray().map((d) => d.key);
     try {
       // No device registered as theirs (someone new, or who lost every one): an admin answers.
-      const registered = (await this.env.PUSH.theirs(r.user, PUSHED_TO)).filter((key) => key !== r.key);
-      const admins = registered.length || !this.env.RELAY ? [] : await this.env.RELAY.admins(PUSHED_TO);
+      const registered = (await answer(this.env.PUSH.theirs(r.user, PUSHED_TO))).filter((key) => key !== r.key);
+      const admins = registered.length || !this.env.RELAY ? [] : await answer(this.env.RELAY.admins(PUSHED_TO));
       const to = [...new Set([...registered, ...known, ...admins])].filter((key) => key !== r.key).slice(0, PUSHED_TO);
       const plain = { id: hex16(), app: "settings", screen: "devices", ...note };
       if (to.length) await this.env.PUSH.send(to.map((key) => ({ to: key, plain })));

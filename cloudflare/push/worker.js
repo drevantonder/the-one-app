@@ -29,7 +29,7 @@
 
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { b64u, checkRequest, sealTo, hex, isKey, rolesOf } from "../shared/crypto.js";
-import { CORS, json, refusal, refuse } from "../shared/http.js";
+import { CORS, answer, json, refusal, refuse } from "../shared/http.js";
 import { PUSH } from "../shared/protocol.js";
 import { apns, fcm, isWebPushEndpoint, isWnsChannel, vapidKey, webPush, wns } from "./senders.js";
 
@@ -103,7 +103,7 @@ export class Push extends DurableObject {
     sql.exec("delete from signed where at <= ?", Date.now() - 2 * MINUTE);
     if (sql.exec("select 1 from signed where sig = ?", body.sig).toArray().length) refuse(403, "That request was sent already.");
     sql.exec("insert into signed (sig, at) values (?, ?)", body.sig, Date.now());
-    const allowed = await this.env.RELAY.allowed(by);
+    const allowed = await answer(this.env.RELAY.allowed(by));
     if (!allowed) refuse(403, "That device isn't one of the network's.");
     const node = rolesOf(allowed.role).includes("compute");
     if (what === "register") return this.register(by, fields);
@@ -181,7 +181,7 @@ export class Push extends DurableObject {
         const device = sql.exec("select * from devices where key = ?", to).toArray()[0];
         if (!device) return void (out[to] = { none: true });
         // Only to the network's devices: one the relay no longer lists is forgotten.
-        if (!(await this.env.RELAY.allowed(to))) {
+        if (!(await answer(this.env.RELAY.allowed(to)))) {
           sql.exec("delete from devices where key = ?", to);
           return void (out[to] = { gone: true });
         }

@@ -73,7 +73,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
 import { b64u, behind, checkCertificate, checkRequest, hex, isKey, rolesOf, sha256 } from "../shared/crypto.js";
-import { CORS, near, refusal } from "../shared/http.js";
+import { CORS, answer, near, refusal } from "../shared/http.js";
 import { CODES, FRESH, IROH_PATHS, PAIRING_LIFE, RELAY, ROLES, SOCKET, SOCKET_FRESH, updateRefusal } from "../shared/protocol.js";
 
 initSync({ module: wasm });
@@ -134,7 +134,7 @@ export default class extends WorkerEntrypoint {
     if (url.pathname === `${relay}/computes`) return this.ask(request, "computes");
     if (url.pathname === `${relay}/seen`) return this.ask(request, "seen");
     if (url.pathname === relay) return this.relay().fetch(request);
-    if (url.pathname === `${relay}/test` && this.env.TEST) return Response.json(await this.relay().testing(await request.json()));
+    if (url.pathname === `${relay}/test` && this.env.TEST) return Response.json(await answer(this.relay().testing(await request.json())));
     return refusal(404, "not the relay's");
   }
 
@@ -156,21 +156,21 @@ export default class extends WorkerEntrypoint {
     } catch (e) {
       return refusal(400, String(e.message || e));
     }
-    const said = await this.relay()[what](asked.by, asked);
+    const said = await answer(this.relay()[what](asked.by, asked));
     if (said?.update) return refusal(426, { error: updateRefusal(this.env.YOURS), code: CODES.update, ...(said.asked && { asked: said.asked }) });
-    if (what === "computes" && said?.computes) return Response.json({ ...said, online: await this.relay().connected(said.computes) });
+    if (what === "computes" && said?.computes) return Response.json({ ...said, online: await answer(this.relay().connected(said.computes)) });
     if (said?.code) return refusal(400, said);
     if (said && typeof said === "object") return Response.json({ [what]: said });
     return said === null ? refusal(403, `the relay takes only ${this.env.YOURS}'s devices`) : refusal(400, said);
   }
 
   async allowed(key) {
-    return isKey(key) ? this.relay().allowed(key) : null;
+    return isKey(key) ? answer(this.relay().allowed(key)) : null;
   }
 
   /// The keys of the network's admins' devices, for auth to push to.
   admins(most) {
-    return this.relay().adminKeys(most);
+    return answer(this.relay().adminKeys(most));
   }
 
   relay() {
@@ -188,7 +188,7 @@ async function tell(env, request) {
     if (body.byteLength > TELL_BYTES) throw new Error("a tell is small");
     const signed = JSON.parse(new TextDecoder().decode(body));
     await checkRequest(RELAY, signed);
-    const error = await relay(env).tell(signed);
+    const error = await answer(relay(env).tell(signed));
     return error ? refusal(403, error) : new Response(null, { status: 204 });
   } catch (e) {
     return refusal(403, String(e.message || e));
@@ -208,33 +208,33 @@ export class McpDevices extends WorkerEntrypoint {
   }
 
   bind(request, name) {
-    return relay(this.env).bind(request, name);
+    return answer(relay(this.env).bind(request, name));
   }
 
   unbind(key, ticket) {
-    return relay(this.env).unbind(key, ticket);
+    return answer(relay(this.env).unbind(key, ticket));
   }
 
   fromClient(key, ticket, items) {
-    return relay(this.env).fromClient(key, ticket, items);
+    return answer(relay(this.env).fromClient(key, ticket, items));
   }
 
   allowed(key) {
-    return isKey(key) ? relay(this.env).allowed(key) : null;
+    return isKey(key) ? answer(relay(this.env).allowed(key)) : null;
   }
 
   connected(keys) {
-    return Array.isArray(keys) ? relay(this.env).connected(keys.filter(isKey)) : [];
+    return Array.isArray(keys) ? answer(relay(this.env).connected(keys.filter(isKey))) : [];
   }
 }
 
 export class CloudflareNode extends WorkerEntrypoint {
   fromNode(items) {
-    return relay(this.env).fromNode(items);
+    return answer(relay(this.env).fromNode(items));
   }
 
   connected(keys) {
-    return Array.isArray(keys) ? relay(this.env).connected(keys.filter(isKey)) : [];
+    return Array.isArray(keys) ? answer(relay(this.env).connected(keys.filter(isKey))) : [];
   }
 }
 
