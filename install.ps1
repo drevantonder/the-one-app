@@ -30,7 +30,7 @@ try {
         Invoke-WebRequest -UseBasicParsing "$url/$asset" -OutFile $program
         Invoke-WebRequest -UseBasicParsing "$url/$asset.sig" -OutFile "$program.sig"
         Set-Content -NoNewline -Encoding ascii (Join-Path $tmp 'signers') "release namespaces=`"release`" $key"
-        cmd /c "ssh-keygen -Y verify -f `"$tmp\signers`" -I release -n release -s `"$program.sig`" < `"$program`"" | Out-Null
+        cmd /c "ssh-keygen -Y verify -f `"$tmp\signers`" -I release -n release -s `"$program.sig`" < `"$program`" 2>nul" | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "$asset isn't signed with the release key, so it isn't installed" }
     }
 

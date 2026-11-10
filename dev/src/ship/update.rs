@@ -228,6 +228,10 @@ fn send_node(at: &At) -> Result<()> {
     let binary = folder.join("one");
     let version = Version::of(&binary).context("ask the new build what it is")?;
     println!("{}", build::published_said(&build::publish(&crate::node(), &binary, &key, &version, None)?, None));
+    if folder.join("one.exe").is_file() {
+        let windows = Version { target: build::WINDOWS.into(), ..version.clone() };
+        println!("{}", build::published_said(&build::publish(&crate::node(), &folder.join("one.exe"), &key, &windows, None)?, None));
+    }
     let here = devices().into_iter().find(|d| d["here"] == true).and_then(|d| d["name"].as_str().map(str::to_string)).context("this device isn't listed")?;
     wait_until(&version.commit, &[here], Duration::from_secs(600))?;
     deploy_built_in()?;

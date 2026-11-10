@@ -88,15 +88,23 @@ fn build_release(at: &At) -> Result<PathBuf> {
     ensure!(!REPO.is_empty(), "this custom build names no repo, so it has nothing to build from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     let (src, config) = (&at.src, &at.config_file);
-    let mut node = cargo();
-    node.current_dir(src).env("CONFIG", config).args(["build", "--release"]);
     // Every release carries the Cloudflare node: one without it couldn't deploy to Cloudflare.
-    node.env("CLOUDFLARE_NODE", timed("built the Cloudflare node", || build::cloudflare_node(src, config, "release")).context("couldn't build the Cloudflare node")?);
+    let cloudflare = timed("built the Cloudflare node", || build::cloudflare_node(src, config, "release")).context("couldn't build the Cloudflare node")?;
     // And the web client's way to nodes: one without it couldn't reach them.
-    node.env("ONET", timed("built the web client's onet", || build::onet(src, config)).context("couldn't build the web client's WebAssembly")?);
-    timed("built the node", || quietly(&mut node))?;
+    let onet = timed("built the web client's onet", || build::onet(src, config)).context("couldn't build the web client's WebAssembly")?;
+    let release = || {
+        let mut command = cargo();
+        command.current_dir(src).env("CONFIG", config).env("CLOUDFLARE_NODE", &cloudflare).env("ONET", &onet).args(["build", "--release"]);
+        command
+    };
+    timed("built the node", || quietly(&mut release()))?;
     let binary = src.join("target/release/one");
     let version = Version::of(&binary).context("ask the new build what it is")?;
+    // Windows' too, cross-built here. A device that can't only leaves Windows behind: Linux and Macs go out regardless.
+    let windows = timed("built Windows' program", || quietly(release().args(["--target", build::WINDOWS, "--bin", "one"])))
+        .map(|()| src.join("target").join(build::WINDOWS).join("release/one.exe"))
+        .inspect_err(|err| println!("  couldn't build for Windows (rustup target add {}, and mingw-w64): {err:#}", build::WINDOWS))
+        .ok();
     let builds = cache().join("builds");
     // A day is longer than any send-out takes; each is the size of two programs.
     for old in std::fs::read_dir(&builds).into_iter().flatten().flatten() {
@@ -107,7 +115,7 @@ fn build_release(at: &At) -> Result<PathBuf> {
     let out = builds.join(&version.commit);
     std::fs::create_dir_all(&out)?;
     // Beside it and moved into place, so a program running from this folder isn't written over.
-    for (made, name) in [(binary, "one"), (src.join("target/release/one-dev"), "one-dev")] {
+    for (made, name) in [(binary, "one"), (src.join("target/release/one-dev"), "one-dev")].into_iter().chain(windows.map(|w| (w, "one.exe"))) {
         std::fs::copy(&made, out.join(format!("{name}.new")))?;
         std::fs::rename(out.join(format!("{name}.new")), out.join(name))?;
     }
@@ -172,6 +180,14 @@ fn github_release(tag: &str) -> Result<()> {
     // state::install_line() fetches it from the latest release.
     std::fs::write(dir.join("install.sh"), include_str!("../../install.sh"))?;
     assets.push("install.sh".into());
+    std::fs::write(dir.join("install.ps1"), include_str!("../../install.ps1"))?;
+    assets.push("install.ps1".into());
+    if let Some(windows) = PLATFORMS.iter().find(|p| p.target == build::WINDOWS)
+        && folder.join("one.exe").is_file()
+    {
+        std::fs::copy(folder.join("one.exe"), dir.join(windows.asset()))?;
+        assets.push(windows.asset());
+    }
     // The native app for this platform (client/native, its own workspace), which install.sh puts on a desktop.
     if cfg!(target_os = "linux") {
         println!("Building the Linux app");

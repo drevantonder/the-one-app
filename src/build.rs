@@ -20,20 +20,34 @@ pub struct Platform {
 }
 
 /// Platforms the installer knows. A release has each one some device here can build.
-pub static PLATFORMS: [Platform; 3] = [
+pub static PLATFORMS: [Platform; 4] = [
     Platform { target: "x86_64-unknown-linux-gnu", os: "linux", arch: "amd64", said: "Linux" },
     Platform { target: "aarch64-unknown-linux-gnu", os: "linux", arch: "arm64", said: "Linux on ARM" },
     Platform { target: "aarch64-apple-darwin", os: "darwin", arch: "arm64", said: "Mac" },
+    Platform { target: WINDOWS, os: "windows", arch: "amd64", said: "Windows" },
 ];
+
+/// Windows' target: only the program itself is built for it, on a Linux device that has the toolchain (`mingw-w64`).
+pub const WINDOWS: &str = "x86_64-pc-windows-gnu";
 
 impl Platform {
     pub fn is_mac(target: &str) -> bool {
         target.ends_with("-apple-darwin")
     }
 
-    /// What install.sh downloads on it: the program, on a Mac the app, which holds it.
+    /// What the installers download on it: the program, on a Mac the app, which holds it.
     pub fn asset(&self) -> String {
-        if Platform::is_mac(self.target) { format!("{CLI}-macos.zip") } else { format!("{CLI}-{}", self.target) }
+        match self.target {
+            target if Platform::is_mac(target) => format!("{CLI}-macos.zip"),
+            WINDOWS => format!("{CLI}-{WINDOWS}.exe"),
+            target => format!("{CLI}-{target}"),
+        }
+    }
+
+    /// Whether a service can run on it. A Windows computer runs apps but no services yet: the sandbox each needs isn't
+    /// made for Windows (ARCHITECTURE.md's Decided says why).
+    pub fn runs_services(&self) -> bool {
+        self.target != WINDOWS
     }
 }
 
@@ -66,7 +80,7 @@ pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item 
     std::fs::create_dir_all(out)?;
     let out = &std::fs::canonicalize(out)?;
     let mut done = Built { made: Vec::new(), missed: Vec::new() };
-    for platform in platforms {
+    for platform in platforms.into_iter().filter(|p| p.runs_services()) {
         if rust && platform.target != TARGET {
             done.missed.push(platform);
             continue;
@@ -277,9 +291,10 @@ mod tests {
         assert_eq!(pinned("go"), go);
     }
 
-    /// install.ps1 is PowerShell, so it says config.toml's repo, cli and key again, as install.sh does.
+    /// install.ps1 is PowerShell, so it says config.toml's repo, cli and key again, as install.sh does, and the asset's name.
     #[test]
     fn the_windows_installer_says_what_the_config_does() {
+        assert!(include_str!("../install.ps1").contains(&format!("$cli-{WINDOWS}.exe\"")), "install.ps1 fetches the asset the table names");
         let says = |name: &str| include_str!("../install.ps1").lines().find_map(|l| l.strip_prefix(&format!("${name} = '"))?.strip_suffix('\''));
         if crate::state::installer_says("cli") == Some(CLI) {
             assert_eq!(says("cli"), Some(CLI));
@@ -297,7 +312,7 @@ mod tests {
             assert_eq!(crate::state::installer_says("repo"), Some(crate::config::REPO));
             assert_eq!(crate::state::installer_says("key"), Some(crate::config::RELEASE_KEY));
         }
-        for p in &PLATFORMS {
+        for p in PLATFORMS.iter().filter(|p| p.target != WINDOWS) {
             let (arch, rest) = p.target.split_once('-').unwrap();
             let fetched = if Platform::is_mac(p.target) { "$cli-macos.zip".to_string() } else { format!("$cli-$arch-{}", rest) };
             assert!(installer.contains(&format!("fetch \"{fetched}\"")), "install.sh fetches {fetched} for {}", p.target);

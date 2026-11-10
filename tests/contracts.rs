@@ -1064,3 +1064,26 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
     assert!(computes(&device, json!({ "computes": true, "reads": one::database::READS, "version": version })).1.get("asked").is_none(), "heard once");
     assert_eq!(tell(&device, json!({ "update": data_encoding::HEXLOWER.encode(&[9u8; 32]) })).0, 403, "an ask for no one on the list");
 }
+
+/// A release for Windows adds its own line to the signed record. Signed once, as a record with that line is: every device
+/// elsewhere goes on reading the record and takes only its own line, and one on Windows finds its own.
+#[test]
+fn a_windows_line_in_the_record_leaves_every_other_reader_as_it_was() {
+    const KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILc1vQtY8RWeBKRF1BZhK7L6CpWUhLdZE9wrxPTJihkp";
+    const RECORD: &str = "node/x86_64-unknown-linux-gnu abc123 1700000000 0000000000000000000000000000000000000000000000000000000000000001 3 -
+node/x86_64-pc-windows-gnu def456 1700000100 0000000000000000000000000000000000000000000000000000000000000002 4 -
+not a line a reader knows
+-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgtzW9C1jxFZ4EpEXUFmErsvoKlZ
+SEt1kT3CvE9MmKGSkAAAAOcmVsZWFzZS1sYXRlc3QAAAAAAAAABnNoYTUxMgAAAFMAAAAL
+c3NoLWVkMjU1MTkAAABAUeB9U2B9jrEiyXjrLWnEvrqlbLS56VB86VjOfE1OkDAZmMhXQd
++uZ1kk/Nq2ixRFKuLKAomwCijyssLtuhcEBg==
+-----END SSH SIGNATURE-----
+";
+    let latest = one::latest::Latest::read(KEY, RECORD).unwrap();
+    assert_eq!(latest.things.len(), 2, "a line it doesn't understand is ignored");
+    assert_eq!(latest.get("node/x86_64-unknown-linux-gnu").unwrap().commit, "abc123");
+    assert_eq!(latest.for_target("x86_64-unknown-linux-gnu").unwrap().commit, "abc123", "Linux takes its own line");
+    assert_eq!(latest.for_target(one::build::WINDOWS).unwrap().commit, "def456", "Windows takes its own");
+    assert!(latest.for_target("aarch64-unknown-linux-gnu").is_none(), "a platform with no line has nothing, as before");
+}
