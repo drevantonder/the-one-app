@@ -43,7 +43,13 @@ fn at_home(settings: &mut crate::cloudflare::Settings) -> Result<()> {
 /// Puts `newest` on Cloudflare: each Worker, and the Cloudflare node if the network has one. The relay says what they're on
 /// (`Newest::deployed`), for every client to show.
 fn put_up(cf: &crate::cloudflare::Cloudflare, settings: &mut crate::cloudflare::Settings, newest: crate::cloudflare::Newest) -> Result<()> {
-    crate::cloudflare::basin::provision(cf, settings)?;
+    // Setting up Basin needs more of the Cloudflare account than a deploy token has, and is done once: a network whose token
+    // can't yet still gets its Workers.
+    if settings.telemetry.is_none() {
+        if let Err(err) = crate::cloudflare::basin::provision(cf, settings) {
+            eprintln!("Insights won't have data until this is done, by a deploy with a token that may: {err:#}");
+        }
+    }
     settings.deployed = Some(newest.deployed(settings));
     let mut web = settings.web_with(newest.web);
     web.extend(crate::cloudflare::precompressed(&web)?);

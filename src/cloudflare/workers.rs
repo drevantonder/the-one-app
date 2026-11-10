@@ -1374,6 +1374,11 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
     let class = worker.class;
     let mut bindings: Vec<Value> = class.iter().map(|class| json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })).collect();
     for (name, value, secret) in worker.bindings(settings) {
+        // The stand-in exists only on one machine: Cloudflare refuses a binding to a Worker it doesn't have, and a network
+        // whose telemetry isn't set up yet still gets its Workers.
+        if reaches(&value) == Some(STAND_IN) {
+            continue;
+        }
         let object = value.strip_prefix("object:").and_then(|o| o.split_once(':'));
         // `service:<name>` or `service:<name>:<entrypoint>`, one of its named entrypoints.
         let service = value.strip_prefix("service:").map(|s| s.split_once(':').map_or((s, None), |(s, e)| (s, Some(e))));
