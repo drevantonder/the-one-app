@@ -229,6 +229,8 @@ const app = {
       insert or ignore into relations select 'user:' || user, 'collaborator', 'repo:' || repo, null, by, time from collaborators;
       drop table collaborators;`,
       `update relations set subject = 'user:' || substr(subject, 8) where subject like 'person:%';`,
+      // Sign-offs on a repo's commits, as git refs (refs/signoff/…), which aren't branches: one-dev's.
+      `create table signoffs (repo text not null, ref text not null, head text not null, primary key (repo, ref));`,
     ],
   },
 
@@ -558,7 +560,7 @@ const app = {
         const packs = await g.query("select hash from packs where repo = ?", [r.id]);
         // Erased, it's gone, and its name is free again; its forks keep their code, no longer forked from it.
         for (const p of packs) await http.forgetUnshared(g, r.id, p.hash);
-        for (const table of ["branches", "packs", "pushes", "issues", "labels", "issue_labels", "issue_assignees", "comments"]) g.exec(`delete from ${table} where repo = ?`, [r.id]);
+        for (const table of ["branches", "signoffs", "packs", "pushes", "issues", "labels", "issue_labels", "issue_assignees", "comments"]) g.exec(`delete from ${table} where repo = ?`, [r.id]);
         g.exec("delete from relations where object = ?", [object(r)]);
         g.exec("delete from repos where id = ?", [r.id]);
         g.exec(`update repos set "from" = null where "from" = ?`, [r.id]);

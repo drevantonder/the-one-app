@@ -127,17 +127,16 @@ pub(super) fn services_due(at: &At, parts: &Parts) -> Vec<String> {
 }
 
 /// `update [<part>] [--release]`.
-pub(super) fn update(part: Option<&str>, release: bool) -> Result<()> {
+pub(super) fn update(part: Option<&str>, release: bool) -> Result<At> {
     let part = part.map(Part::named).transpose()?;
     let _turn = turn()?;
-    let at = At::at(None)?;
+    let at = to_send()?;
     let started = Instant::now();
     println!("Sending out {}.", at.build_name());
     let mut failed = Vec::new();
     let mut attempt = |what: &str, result: Result<()>| {
         if let Err(err) = result {
-            println!("{what}: {err:#}");
-            failed.push(what.to_string());
+            failed.push(format!("{what} ({err:#})"));
         }
     };
     match part {
@@ -160,7 +159,10 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<()> {
     }
     ensure!(failed.is_empty(), "{} didn't go out: {CLI}-dev update again sends what's still due", failed.join(", "));
     println!("Done in {}s.", started.elapsed().as_secs());
-    Ok(())
+    if part.is_none() {
+        keep(Stage::Sent, &at.commit, "Every part that changed went out");
+    }
+    Ok(at)
 }
 
 /// Sends `part`, if anything of it changed.

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node undeclared.mjs && vite build && node build.js"
+    "build": "node undeclared.mjs && tsc --noEmit && vite build && node build.js"
   },
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",

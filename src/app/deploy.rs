@@ -146,7 +146,7 @@ fn screen_name(file: &str) -> bool {
 /// screen's HTML that app.js imports as text (`with { type: "text" }`), opted in to @one/ui, with its own styles and
 /// module in it and React and @one/ui left to the page (src/screen.rs). Built by this machine's Bun, or else Node: the
 /// pinned Bun is only for bundling app.js, not for running build tools.
-fn screens(dir: &Path) -> Result<()> {
+pub fn screens(dir: &Path) -> Result<()> {
     let some = std::fs::read_dir(dir.join("screens")).into_iter().flatten().flatten().any(|e| screen_name(&e.file_name().to_string_lossy()));
     if !some {
         return Ok(());

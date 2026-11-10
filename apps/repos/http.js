@@ -12,6 +12,7 @@ import { check, idx, listed, merge } from "./git.js";
 
 const FROZEN = 16 << 20;
 const ZERO = "0".repeat(40);
+const SIGNOFF = /^refs\/signoff\/[a-z0-9-]+(\/[a-z0-9-]+)?\/[0-9a-f]{40}$/;
 const CAPS = "report-status delete-refs ofs-delta no-thin";
 const enc = new TextEncoder();
 const utf8 = new TextDecoder();
@@ -34,7 +35,7 @@ export async function serve(ctx, g, api, { method, path, query, body }) {
   if (!r) return missing(found.why || `There's no repo ${owner}/${name}`);
   if (r.deleted) return missing(`${r.path} was deleted: its owners restore it from Recently Deleted`);
   const branches = await g.query("select branch, head from branches where repo = ? order by branch", [r.id]);
-  if (file === "info/refs") return text(branches.map((b) => `${b.head}\trefs/heads/${b.branch}\n`).join(""));
+  if (file === "info/refs") return text((await refs(g, r.id)).map((b) => `${b.head}\t${b.ref}\n`).join(""));
   if (file === "HEAD") return text(`ref: refs/heads/${api.defaultBranch(branches.map((b) => b.branch)) || "main"}\n`);
   if (file === "objects/info/packs") return text((await indexed(g, r.id)).map((p) => `P pack-${p.name}.pack\n`).join("") + "\n");
   const want = /^objects\/pack\/pack-([0-9a-f]{40})\.(pack|idx)$/.exec(file);
@@ -51,10 +52,14 @@ const indexed = (g, repo) =>
   g.query("select p.hash as pack, i.name, i.idx, i.size from packs p join indexes i on i.pack = p.hash where p.repo = ? order by p.time, p.hash", [repo]);
 
 async function advertise(g, r) {
-  const branches = r && !r.deleted ? await g.query("select branch, head from branches where repo = ? order by branch", [r.id]) : [];
-  const refs = branches.length ? branches.map((b, i) => pkt(`${b.head} refs/heads/${b.branch}${i ? "" : "\0" + CAPS}\n`)) : [pkt(`${ZERO} capabilities^{}\0${CAPS}\n`)];
-  return text(pkt("# service=git-receive-pack\n") + "0000" + refs.join("") + "0000", 200, "application/x-git-receive-pack-advertisement");
+  const all = r && !r.deleted ? await refs(g, r.id) : [];
+  const lines = all.length ? all.map((b, i) => pkt(`${b.head} ${b.ref}${i ? "" : "\0" + CAPS}\n`)) : [pkt(`${ZERO} capabilities^{}\0${CAPS}\n`)];
+  return text(pkt("# service=git-receive-pack\n") + "0000" + lines.join("") + "0000", 200, "application/x-git-receive-pack-advertisement");
 }
+
+// Every ref a repo has, in the order git lists them: its branches, and the sign-offs on its commits.
+const refs = (g, repo) =>
+  g.query("select 'refs/heads/' || branch as ref, head from branches where repo = ? union all select ref, head from signoffs where repo = ? order by ref", [repo, repo]);
 
 async function receive(ctx, g, api, owner, name, found, hash) {
   const bytes = hash ? await ctx.blob.get(hash) : new Uint8Array();
@@ -103,8 +108,20 @@ async function receive(ctx, g, api, owner, name, found, hash) {
   const has = async (sha) => (have ??= await kept(ctx, g, r.id)).has(sha);
   const fresh = new Set(added?.entries.map((e) => e.sha));
   const branches = new Map((await g.query("select branch, head from branches where repo = ?", [r.id])).map((b) => [b.branch, b.head]));
+  const signoffs = new Map((await g.query("select ref, head from signoffs where repo = ?", [r.id])).map((s) => [s.ref, s.head]));
   const lines = [];
   for (const { old, head, ref } of commands) {
+    if (SIGNOFF.test(ref)) {
+      const why = (signoffs.get(ref) ?? ZERO) !== old ? `${ref} has moved: fetch, then push again`
+        : head !== ZERO && !fresh.has(head) && !(await has(head)) ? `the push doesn't hold ${head.slice(0, 12)}`
+        : null;
+      if (why) { lines.push(`ng ${ref} ${why}\n`); continue; }
+      if (head === ZERO) g.exec("delete from signoffs where repo = ? and ref = ?", [r.id, ref]);
+      else g.exec("insert or replace into signoffs values (?, ?, ?)", [r.id, ref, head]);
+      signoffs.set(ref, head);
+      lines.push(`ok ${ref}\n`);
+      continue;
+    }
     const branch = ref.startsWith("refs/heads/") ? ref.slice(11) : null;
     const why = !branch || !api.BRANCH.test(branch) ? "only branches can be pushed"
       : (branches.get(branch) ?? ZERO) !== old ? `${branch} has moved: fetch, then push again`

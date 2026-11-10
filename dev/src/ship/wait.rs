@@ -12,20 +12,21 @@ pub(super) fn devices() -> Vec<Value> {
 /// `status --until <commit> [--device <name>]… [--timeout <time>]`.
 pub fn wait(g: &one::cli::Given) -> Result<()> {
     g.takes_only(&["until", "device", "timeout"])?;
-    let typed = |m: &str| anyhow::Error::from(one::cli::Failed::Typed(m.into()));
     let names: Vec<String> = g.values("device").iter().flat_map(|d| d.split(',')).map(str::to_string).collect();
-    let limit = match g.flag("timeout") {
-        None => Duration::from_secs(10 * 60),
-        Some(value) => {
-            let (n, unit) = value.split_at(value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len()));
-            let n: u64 = n.parse().map_err(|_| typed("--timeout is like 90s, 10m or 1h"))?;
-            Duration::from_secs(n * match unit { "" | "s" => 1, "m" => 60, "h" => 3600, _ => return Err(typed("--timeout is like 90s, 10m or 1h")) })
-        }
-    };
+    let limit = limit(g, 10 * 60)?;
     let commit = g.flag("until").unwrap_or_default().to_lowercase();
     let (code, config) = named(&commit);
     ensure!(code.len() >= 7 && [code, config.unwrap_or("0")].iter().all(|c| c.chars().all(|c| c.is_ascii_hexdigit())), "give the commit, or a custom build's <commit>-<config>: {CLI}-dev status --until $(git rev-parse HEAD)");
     wait_until(&commit, &names, limit)
+}
+
+/// `--timeout`, or `default` seconds.
+pub(super) fn limit(g: &one::cli::Given, default: u64) -> Result<Duration> {
+    let typed = || anyhow::Error::from(one::cli::Failed::Typed("--timeout is like 90s, 10m or 1h".into()));
+    let Some(value) = g.flag("timeout") else { return Ok(Duration::from_secs(default)) };
+    let (n, unit) = value.split_at(value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len()));
+    let n: u64 = n.parse().map_err(|_| typed())?;
+    Ok(Duration::from_secs(n * match unit { "" | "s" => 1, "m" => 60, "h" => 3600, _ => return Err(typed()) }))
 }
 
 /// Waits until each of the user's devices online now (or those named, online or not) runs `commit`, or a build with it
@@ -47,18 +48,18 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
 
 /// A copy of the repo's commits, kept for asking which build holds which: wherever this is run from, and without touching
 /// the checkout an update builds in.
-fn history() -> PathBuf {
+pub(super) fn history() -> PathBuf {
     cache().join("history")
 }
 
-fn git_history() -> Command {
+pub(super) fn git_history() -> Command {
     let mut git = Command::new("git");
     git.arg("-C").arg(history());
     git
 }
 
 /// `history()`, made if it isn't there and up to date with the repo's.
-fn keep_history() -> Result<()> {
+pub(super) fn keep_history() -> Result<()> {
     if !history().join("HEAD").is_file() {
         std::fs::create_dir_all(cache())?;
         let next = cache().join(format!("history.{}", std::process::id()));

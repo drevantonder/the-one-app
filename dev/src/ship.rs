@@ -18,6 +18,7 @@ mod apps;
 mod changes;
 mod cloudflare;
 mod services;
+mod signoff;
 mod update;
 mod wait;
 
@@ -25,6 +26,7 @@ use apps::*;
 use changes::*;
 use cloudflare::*;
 use services::*;
+use signoff::*;
 use update::*;
 pub use wait::wait;
 use wait::*;
@@ -35,6 +37,10 @@ pub fn commands() -> one::cli::Command {
         help: vec![
             form("changes [<commit>]", "what has to go out for main's tip, or <commit>, part by part, since each part was last sent".into()),
             form("update [workers|web|apps|services|mac|node|dev] [--release]", format!("send out the part named, built and sent on its own, or, with none, each that changed, in order: apps, mac, services, node, workers, web, dev. A part with nothing changed does nothing, and each keeps the commit it sent. --release has a Mac notarize its app. Run it on a device with the release key: {CLI}-dev changes says what's due")),
+            form("signoff tested --ran <the tests you chose>", "sign this checkout's pushed commit off as tested: it compiles, its screens type-check and build as committed, and you say which tests you ran. Sending takes only a commit signed off this way".into()),
+            form("signoff seen [<commit>] --checked <what you checked>", "sign a commit off as seen working where it went: the last thing a change needs".into()),
+            form("ship [<commit>] [--timeout <30m>]", "send out what's tested, as a plain update does, and return when every device online runs it, or say which doesn't and why".into()),
+            form("unfinished [--here]", "the changes from the last day that aren't yet tested, sent, running everywhere and seen, or with --here only those this checkout made, and what each needs next".into()),
             form("build --dev", "build this checkout as cargo build does, with the Cloudflare node and web client in it, which a plain cargo build then keeps".into()),
             form("release <vX.Y.Z>", "publish main's tip's build on GitHub for the installer, with the Linux app and the app a Mac published for it".into()),
             form("web bundle [--out <folder>]", "write this build's web client as a bundle for the native apps, ready to sign".into()),
@@ -46,10 +52,26 @@ pub fn commands() -> one::cli::Command {
                 ["changes"] => changes(None)?,
                 ["changes", commit] => changes(Some(commit))?,
                 ["build"] if g.has("dev") => crate::throwaway::build_dev()?,
+                ["signoff", "tested"] => {
+                    g.takes_only(&["ran"])?;
+                    tested(g.flag("ran").context("say which tests you ran: --ran \"contracts auth\", or --ran none if the change needs none")?)?
+                }
+                ["signoff", "seen"] | ["signoff", "seen", _] => {
+                    g.takes_only(&["checked"])?;
+                    seen(g.words().get(2).copied(), g.flag("checked").context("say what you checked: --checked \"…\"")?)?
+                }
+                ["ship"] | ["ship", _] => {
+                    g.takes_only(&["timeout"])?;
+                    ship(g.words().get(1).copied(), wait::limit(g, 30 * 60)?)?
+                }
+                ["unfinished"] => {
+                    g.takes_only(&["here"])?;
+                    unfinished(g.has("here"))?
+                }
                 ["update"] | ["update", _] => {
                     // A flag takes the word after it, so `--release mac` would read as a release of no part.
                     ensure!(g.flag("release").is_none(), "{CLI}-dev update <part> --release: the part comes first");
-                    update(g.words().get(1).copied(), g.has("release"))?
+                    update(g.words().get(1).copied(), g.has("release"))?;
                 }
                 ["release", tag] => github_release(tag)?,
                 ["status"] if g.has("until") => wait(g)?,
@@ -98,7 +120,10 @@ fn build_release(at: &At) -> Result<PathBuf> {
 /// Says what `commit`, or main's tip, has to send out, part by part, since each was last sent.
 fn changes(commit: Option<&str>) -> Result<()> {
     let _turn = turn()?;
-    let at = At::at(commit)?;
+    let at = match commit {
+        Some(_) => At::at(commit)?,
+        None => to_send()?,
+    };
     println!("{}, against what each part last sent:", at.build_name());
     let yes = |b: bool| if b { "yes".to_string() } else { "no".to_string() };
     let list = |names: Vec<String>| if names.is_empty() { "none".to_string() } else { names.join(", ") };
@@ -130,7 +155,7 @@ fn github_release(tag: &str) -> Result<()> {
     ensure!(succeeds(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     let key = release_key()?;
     let _turn = turn()?;
-    let at = At::at(None)?;
+    let at = to_send()?;
     let folder = match at.build() {
         Some(folder) => folder,
         None => build_release(&at)?,
