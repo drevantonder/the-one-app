@@ -2,6 +2,7 @@
 //! services' builds, and the builds of a service a deploy names, which a device runs instead of any release.
 
 use super::*;
+use crate::insights::{Attrs, Fault};
 
 pub(crate) mod routes;
 
@@ -43,8 +44,16 @@ impl Node {
         let Some(text) = fetched else { return Ok(()) };
         let latest = crate::latest::Latest::read(crate::config::RELEASE_KEY, &text).context("the latest record")?;
         *self.0.latest.lock().unwrap() = latest.clone();
-        let Some(thing) = latest.get(&crate::latest::Thing::node_name(crate::config::TARGET)).cloned() else { return Ok(()) };
+        let part = crate::latest::Thing::node_name(crate::config::TARGET);
+        let Some(thing) = latest.get(&part).cloned() else { return Ok(()) };
+        let newer = thing.commit != crate::config::BUILD;
+        if newer && self.note_update_seen(&thing.commit) {
+            self.device_signal("update.seen", Attrs::default().part(&part), true, None);
+        }
         if release::in_app_bundle() {
+            if newer {
+                self.device_signal("update.not_taken", Attrs::default().part(&part).reason("app-bundle"), true, None);
+            }
             return Ok(());
         }
         let file = self.0.dir.join("release");
@@ -57,16 +66,27 @@ impl Node {
             }
             return Ok(());
         }
+        let not_taken = |reason: &'static str, err: anyhow::Error| {
+            self.device_signal("update.not_taken", Attrs::default().part(&part).reason(reason), false, Some(Fault::Internal));
+            err
+        };
         let bytes = {
             let (address, thing) = (address, thing.clone());
-            tokio::task::spawn_blocking(move || crate::latest::download(&address, &thing)).await??
+            tokio::task::spawn_blocking(move || crate::latest::download(&address, &thing)).await?.map_err(|e| not_taken("download", e))?
         };
-        let exe = release::install_commit(&thing.commit, &bytes)?;
-        std::fs::write(&file, &thing.sha256)?;
+        let exe = release::install_commit(&thing.commit, &bytes).map_err(|e| not_taken("install", e))?;
+        std::fs::write(&file, &thing.sha256).map_err(|e| not_taken("install", e.into()))?;
+        self.device_signal("update.taken", Attrs::default().part(&part), true, None);
         tracing::info!("updated {} to {}; restarting", exe.display(), thing.commit);
         *handed = Instant::now();
         crate::handoff::restart();
         Ok(())
+    }
+
+    /// Whether this is the first time this process has seen `commit` as the newest: `update.seen` is said once for each.
+    fn note_update_seen(&self, commit: &str) -> bool {
+        let mut seen = self.0.update_seen.lock().unwrap();
+        (seen.as_deref() != Some(commit)).then(|| seen.replace(commit.to_string())).is_some()
     }
 
     /// Whether this device can't update, and why, as its hello says and `status` shows: on a Mac, what the job beside
@@ -108,7 +128,14 @@ impl Node {
     pub async fn replace_latest(&self, text: &str, tag: Option<&str>) -> Result<bool> {
         use crate::bucket::Bucket;
         let bucket = self.bucket()?;
-        Bucket::replace(&bucket.place, &crate::latest::newest_name(), text.as_bytes(), tag).await
+        let was = self.latest();
+        let replaced = Bucket::replace(&bucket.place, &crate::latest::newest_name(), text.as_bytes(), tag).await?;
+        if replaced && let Ok(new) = crate::latest::Latest::read(crate::config::RELEASE_KEY, text) {
+            for thing in new.things.iter().filter(|t| was.get(&t.name).is_none_or(|w| w.sha256 != t.sha256)) {
+                self.device_signal("update.sent", Attrs::default().part(&thing.name), true, None);
+            }
+        }
+        Ok(replaced)
     }
 
     /// The file a service's or the node's build is, fetched from the network's address, once it's the one the record names.

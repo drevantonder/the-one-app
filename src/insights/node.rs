@@ -19,7 +19,7 @@ const MOST_REPORTED: usize = 300;
 
 /// What this device hasn't written yet.
 #[derive(Default)]
-pub(super) struct State(Mutex<HashMap<Scope, Batch>>, Mutex<HashMap<Key, (u64, u32)>>);
+pub(super) struct State(Mutex<HashMap<Scope, Batch>>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>);
 
 /// A call as it runs here: its span, in the trace of the request that made it.
 pub(super) struct Call {
@@ -97,8 +97,65 @@ impl Node {
             Print { app: app.to_string(), tool: tool.clone(), kind, frame, build: built, fault: fault.unwrap_or(Fault::Internal) }
         });
         let name = if destination.named { format!("{app}.{tool}") } else { "call".into() };
+        let bucket_of = |field: &str| steps.iter().filter(|s| s["step"] == "bucket").map(|s| s[field].as_u64().unwrap_or(0)).sum::<u64>();
+        let (asks, took, behind) = (bucket_of("asks"), bucket_of("ms"), steps.iter().filter(|s| s["step"] == "data").map(|s| s["new"].as_u64().unwrap_or(0)).sum::<u64>());
+        let about = Attrs::default().device(&hex(&self.0.id)).scope(destination.kind).build(build);
         let signal = Signal { time, device: hex(&self.0.id), kind: Kind::Span, name, app: app.to_string(), trace: trace.trace_id(), span, parent, ms, ok, fault, attrs };
-        self.0.insights.0.lock().unwrap().entry(destination.scope).or_default().add(signal, kept, print);
+        let mut batches = self.0.insights.0.lock().unwrap();
+        let batch = batches.entry(destination.scope).or_default();
+        batch.add(signal, kept, print);
+        for (metric, value) in [("bucket.asks", asks), ("bucket.ms", took), ("steps.behind", behind)] {
+            if value > 0 {
+                batch.metric(time, metric, app, &about, value);
+            }
+        }
+    }
+
+    /// What's only this device's own, in `global`: named `name`, with a number if it has one.
+    pub(super) fn device_signal(&self, name: &str, attrs: Attrs, ok: bool, fault: Option<Fault>) {
+        let signal = Signal { time: now_ms(), device: hex(&self.0.id), kind: Kind::Event, name: name.into(), app: String::new(), trace: trace::ids::trace(), span: trace::ids::span(), parent: None, ms: 0, ok, fault, attrs: attrs.device(&hex(&self.0.id)).scope("everyone").build(crate::config::BUILD) };
+        self.0.insights.0.lock().unwrap().entry(Scope::Global).or_default().add(signal, true, None);
+    }
+
+    /// Records a metric that's only this device's own, in `global`.
+    fn device_metric(&self, name: &str, attrs: Attrs, value: u64) {
+        let attrs = attrs.device(&hex(&self.0.id)).scope("everyone").build(crate::config::BUILD);
+        self.0.insights.0.lock().unwrap().entry(Scope::Global).or_default().metric(now_ms(), name, "", &attrs, value);
+    }
+
+    /// How long a write another device told this one about took to get here. Its clock isn't this one's, so a big gap
+    /// says more about the clocks than the network.
+    pub(super) fn write_seen(&self, sent: u64) {
+        let lag = now_ms().saturating_sub(sent);
+        if lag < 600_000 {
+            self.device_metric("write.seen", Attrs::default(), lag);
+        }
+    }
+
+    /// Which devices the relay says are on, against who it said a moment ago.
+    pub(super) fn relay_says(&self, was: &std::collections::HashSet<Key>, now: &std::collections::HashSet<Key>) {
+        for key in was.symmetric_difference(now) {
+            self.device_signal(if now.contains(key) { "device.online" } else { "device.offline" }, Attrs::default().says("relay").subject(&hex(key)), true, None);
+        }
+    }
+
+    /// Whether this node has heard from each other device lately, which may disagree with the relay.
+    pub(super) fn node_says(&self) {
+        let heard: std::collections::HashSet<Key> = self.with_or(Default::default(), |i| Ok(i.r.db().computes()?.into_iter().map(|c| c.key).filter(|k| *k != self.0.id && i.heard(k)).collect()));
+        let was = self.0.insights.2.lock().unwrap().replace(heard.clone());
+        for key in was.iter().flat_map(|was| was.symmetric_difference(&heard)) {
+            self.device_signal(if heard.contains(key) { "device.online" } else { "device.offline" }, Attrs::default().says("node").subject(&hex(key)), true, None);
+        }
+    }
+
+    /// This node starting, and why the last one ended: what it said when it stopped, or `abort` if it didn't (panics abort, so
+    /// a crash can't say), or `first` if there was none before it. An update's new node says so too.
+    pub fn node_started(&self, last: crate::insights::Ended) {
+        let reason = last.reason();
+        self.device_signal("node.start", Attrs::default().reason(reason), true, None);
+        if last == crate::insights::Ended::Update {
+            self.device_signal("update.running", Attrs::default().part(&crate::latest::Thing::node_name(crate::config::TARGET)), true, None);
+        }
     }
 
     /// `req`'s tool if its app says it has it, else `_unknown`: what a caller typed is theirs to get wrong, and may be anything.
@@ -107,9 +164,18 @@ impl Node {
         if listed { req.tool.clone() } else { "_unknown".into() }
     }
 
+    /// Counts what the URL signer failed at since the last write.
+    fn say_signer(&self) {
+        let failures = crate::bucket::signed::take_failures();
+        if failures > 0 {
+            self.device_metric("signer.failures", Attrs::default(), failures);
+        }
+    }
+
     /// Writes what this device has to say, to each scope it holds, once it has anything: telemetry may be lost, so what
     /// doesn't go is dropped.
     pub async fn flush_insights(&self) {
+        self.say_signer();
         let batches = std::mem::take(&mut *self.0.insights.0.lock().unwrap());
         for (scope, batch) in batches.into_iter().filter(|(_, b)| !b.is_empty()) {
             let live = self.with(|i| {

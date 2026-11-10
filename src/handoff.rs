@@ -139,6 +139,7 @@ pub fn watch() {
             let silent = up().saturating_sub(beat.load(std::sync::atomic::Ordering::SeqCst));
             if silent >= STUCK_FOR {
                 tracing::error!("this node's runtime has done nothing for {silent} seconds: exiting, to be started again");
+                crate::insights::Ended::Watchdog.write(&crate::home());
                 std::process::exit(1);
             }
         }

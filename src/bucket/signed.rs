@@ -59,6 +59,14 @@ impl std::fmt::Debug for Signer {
     }
 }
 
+/// The URL signer's failures since `take_failures` last read them.
+static FAILURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The URL signer's failures since this last asked, for insights.
+pub fn take_failures() -> u64 {
+    FAILURES.swap(0, std::sync::atomic::Ordering::Relaxed)
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
@@ -79,10 +87,16 @@ impl Signer {
         let address = (self.address)()?;
         fields["reads"] = serde_json::json!(crate::database::READS);
         let body = crate::keys::signed_request(&self.key, crate::protocol::URLS, fields, now_ms());
-        let mut resp = signer_requests().post(format!("{}/urls", address.trim_end_matches('/'))).send_json(body).map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({address}: {e})")))?;
+        let mut resp = signer_requests().post(format!("{}/urls", address.trim_end_matches('/'))).send_json(body).map_err(|e| {
+            FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Failed(Trouble::Unreachable, format!("couldn't be reached ({address}: {e})"))
+        })?;
         let status = resp.status().as_u16();
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         let said = out["error"].as_str().unwrap_or("nothing").to_string();
+        if status != 200 {
+            FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         match status {
             200 => Ok(out),
             401 | 403 => Err(Failed(Trouble::Refused, format!("won't sign for this device: {said}")).into()),

@@ -181,6 +181,8 @@ pub struct Inner {
     /// What the record at the network's address last said (`crate::latest`), and why it couldn't take it, if so.
     latest: Mutex<crate::latest::Latest>,
     updating: Mutex<Option<String>>,
+    /// The newest update's commit this process has seen, so `update.seen` is said once for each.
+    update_seen: Mutex<Option<String>>,
     bundles: Mutex<BTreeMap<String, String>>,
     /// The bundle of each app this release has built in, kept as a blob: any network may add them.
     built_in: BTreeMap<String, String>,
@@ -274,6 +276,7 @@ impl Node {
             changed: tokio::sync::Notify::new(),
             latest: Mutex::new(Default::default()),
             updating: Mutex::new(None),
+            update_seen: Mutex::new(None),
             bundles: Mutex::new(BTreeMap::new()),
             built_in,
             images: Mutex::new(HashMap::new()),

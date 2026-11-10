@@ -121,7 +121,7 @@ mod copied;
 #[cfg(feature = "node")]
 mod place;
 #[cfg(not(target_family = "wasm"))]
-mod signed;
+pub mod signed;
 #[cfg(feature = "node")]
 pub use copied::Copied;
 #[cfg(not(target_family = "wasm"))]

@@ -578,6 +578,9 @@ impl Node {
     /// Another device's `changed`, that something changed: `{ scope, app?, database?, at?, step?, sig? }`, `step` the sealed step written
     /// at `at` and `sig` the signature beside it, base64.
     fn changed_from(&self, changed: &Value) {
+        if let Some(sent) = changed["sent"].as_u64() {
+            self.write_seen(sent);
+        }
         let Ok(scope) = Scope::parse(changed["scope"].as_str().unwrap_or("")) else { return };
         let wrote = changed["app"].as_str().zip(changed["database"].as_str()).map(|(app, db)| (app, db, changed["at"].as_u64().unwrap_or(0)));
         let bytes = |field: &str| changed[field].as_str().and_then(|s| data_encoding::BASE64.decode(s.as_bytes()).ok());
@@ -797,6 +800,8 @@ impl Node {
 
     /// Tells each of `to` that something changed, expecting no answer.
     pub(super) fn notify(&self, to: &[Key], changed: &Value) {
+        let mut changed = changed.clone();
+        changed["sent"] = json!(now_ms());
         for device in to.iter().copied() {
             let (node, body) = (self.clone(), changed.clone());
             tokio::spawn(async move {
@@ -892,7 +897,12 @@ impl Node {
                 Err(err) => return tracing::debug!("reading who's connected: {err:#}"),
             };
             let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| crate::keys::unhex(k.as_str()?).ok()).collect();
-            if node.with_or(false, |i| Ok(std::mem::replace(&mut i.connected, connected.clone()) != connected)) {
+            let was = node.with_or(None, |i| {
+                let was = std::mem::replace(&mut i.connected, connected.clone());
+                Ok((was != connected).then_some(was))
+            });
+            if let Some(was) = was {
+                node.relay_says(&was, &connected);
                 node.emit(Event::Devices);
             }
         });

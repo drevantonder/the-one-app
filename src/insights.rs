@@ -26,6 +26,51 @@ pub(crate) mod store;
 pub mod routes;
 pub mod otlp;
 
+/// Why this node's last process ended, kept in its home so the next one can say: what it said when it stopped. A crash can't
+/// say (`panic = "abort"`), so none there, after a run that started, is `Abort`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ended {
+    Update,
+    Watchdog,
+    Signal,
+    Abort,
+    First,
+}
+
+const ENDED: &str = "ended";
+const STARTED: &str = "started";
+
+impl Ended {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Ended::Update => "update",
+            Ended::Watchdog => "watchdog",
+            Ended::Signal => "signal",
+            Ended::Abort => "abort",
+            Ended::First => "first",
+        }
+    }
+
+    pub fn write(self, home: &std::path::Path) {
+        let _ = std::fs::write(home.join(ENDED), self.reason());
+    }
+
+    /// What the last process said, and that this one is running now.
+    pub fn read(home: &std::path::Path) -> Ended {
+        let said = std::fs::read_to_string(home.join(ENDED)).unwrap_or_default();
+        let ended = match said.as_str() {
+            "update" => Ended::Update,
+            "watchdog" => Ended::Watchdog,
+            "signal" => Ended::Signal,
+            _ if home.join(STARTED).exists() => Ended::Abort,
+            _ => Ended::First,
+        };
+        let _ = std::fs::remove_file(home.join(ENDED));
+        let _ = std::fs::write(home.join(STARTED), "");
+        ended
+    }
+}
+
 /// How long a call takes before it keeps a full span. ARCHITECTURE.md's targets state none for a whole call, and its
 /// nearest is a write seen elsewhere within 1 s.
 pub const SLOW_MS: u64 = 1_000;
@@ -78,6 +123,9 @@ const EXCEPTIONS: &[&str] = &["Error", "TypeError", "RangeError", "ReferenceErro
 
 /// How a client's try of a node went (client/src/lib.rs).
 const TRY_RESULTS: &[&str] = &["answered", "elsewhere", "no connection", "not taking requests", "no answer", "unreachable", "lost", "failed"];
+
+/// Why a process ended or an update wasn't taken.
+const REASONS: &[&str] = &["renewed", "stopped", "failed", "update", "watchdog", "abort", "signal", "first", "download", "install", "verify", "app-bundle"];
 
 /// A name of OTEL's for an error of no known kind.
 pub const OTHER: &str = "_OTHER";
@@ -195,12 +243,32 @@ impl Attrs {
         self
     }
 
-    /// Why a program ended, a closed set (`service.exit`): `exit-<code>`, `signal-<n>`, `renewed`, `stopped` or `failed`.
+    /// Why a program ended or an update wasn't taken, a closed set: `exit-<code>`, `signal-<n>`, or one of `REASONS`.
     pub fn reason(mut self, reason: &str) -> Attrs {
         let numbered = |prefix: &str| reason.strip_prefix(prefix).is_some_and(|n| !n.is_empty() && n.len() <= 3 && n.bytes().all(|b| b.is_ascii_digit()));
-        if numbered("exit-") || numbered("signal-") || ["renewed", "stopped", "failed"].contains(&reason) {
+        if numbered("exit-") || numbered("signal-") || REASONS.contains(&reason) {
             self.0.insert("one.reason", json!(reason));
         }
+        self
+    }
+
+    /// The device a signal is about, when that isn't the one saying it.
+    pub fn subject(mut self, hex: &str) -> Attrs {
+        if hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            self.0.insert("one.node", json!(hex));
+        }
+        self
+    }
+
+    /// Who says a device is on or off: the relay, or this node.
+    pub fn says(mut self, who: &'static str) -> Attrs {
+        self.0.insert("one.says", json!(who));
+        self
+    }
+
+    /// A part of an update: `node.<target>`, `app.<target>`, `service.<name>.<target>`, `web`, `workers`, `source`.
+    pub fn part(mut self, part: &str) -> Attrs {
+        self.token("one.part", &part.replace('/', "."));
         self
     }
 
@@ -392,6 +460,11 @@ pub struct Batch {
 impl Batch {
     pub fn is_empty(&self) -> bool {
         self.signals.is_empty() && self.rollups.is_empty() && self.prints.is_empty()
+    }
+
+    /// Adds to a metric's rollup: for a metric, `ms` is the sum of its values and `count` how many were added.
+    pub fn metric(&mut self, time: u64, name: &str, app: &str, attrs: &Attrs, value: u64) {
+        self.rollups.entry((time / 3_600_000, name.to_string(), app.to_string(), attrs.rollup_key(None))).or_default().add(value, true);
     }
 
     /// Adds a finished signal: to the rollups always, and in full only if it's `kept`.

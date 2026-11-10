@@ -591,6 +591,7 @@ async fn serve(args: &[String]) -> Result<()> {
     let (ready_node, node_ready) = tokio::sync::oneshot::channel::<Node>();
     tokio::spawn(async move {
         stop.await;
+        crate::insights::Ended::Signal.write(&crate::home());
         if let Ok(Ok(node)) = tokio::time::timeout(LAST_SAY, node_ready).await {
             let _ = tokio::time::timeout(LAST_SAY, node.flush_insights()).await;
         }
@@ -609,6 +610,7 @@ async fn serve(args: &[String]) -> Result<()> {
     // Its app runtime is a program of its own, which oned starts as its parts.
     let node = Node::start(&dir, true).await?;
     let _ = ready_node.send(node.clone());
+    node.node_started(crate::insights::Ended::read(&dir));
     // Its parts that run as processes of their own, as its steps switch them.
     crate::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
     // Git here reaches the network's repos at their address, as on every computer of its user's, and the harnesses
@@ -651,6 +653,7 @@ async fn serve(args: &[String]) -> Result<()> {
             loop {
                 crate::handoff::wanted().await;
                 tracing::info!("handing over to {}", crate::this_program().unwrap_or_default().display());
+                crate::insights::Ended::Update.write(&crate::home());
                 let _ = tokio::time::timeout(LAST_SAY, node.flush_insights()).await;
                 node.handing_over(true).await;
                 match crate::handoff::hand_over(fd, &args).await {
