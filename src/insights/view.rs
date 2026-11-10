@@ -282,6 +282,7 @@ fn add_span(span: &Value, spans: &[&Value], depth: usize, limit: usize, out: &mu
     let mut said = vec![took(span["duration"].as_f64()), span["status"].as_str().unwrap_or("").to_string()];
     said.extend(span["kind"].as_str().map(str::to_string));
     said.extend(attr("error.type"));
+    said.extend(attr("one.code").map(|code| format!("refused: {code}")));
     said.extend(span["attrs"]["http.response.status_code"].as_u64().map(|code| code.to_string()));
     said.extend(attr("one.result"));
     out.push(format!("{}{} {} ({})", "  ".repeat(depth + 1), span["service"].as_str().unwrap_or(""), span["name"].as_str().unwrap_or(""), [said.join(", "), span["device"].as_str().unwrap_or("").to_string()].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", on ")));
