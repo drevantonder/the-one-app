@@ -24,7 +24,7 @@ mod rebuild;
 pub(crate) mod sign_in;
 
 pub(crate) use network::node_at;
-use network::{ older_build, no_client_running, running, start, stop, stop_some};
+use network::{ NO_NODE, older_build, no_client_running, running, start, stop, stop_node, stop_some};
 
 fn is_checkout(top: &Path) -> bool {
     top.join(".git").exists() && top.join("Cargo.toml").exists() && top.join("ARCHITECTURE.md").exists()
@@ -55,6 +55,12 @@ fn folder() -> Option<(PathBuf, PathBuf)> {
 /// the command as one of its programs, by the `one` program built with this one (`Throwaway::tell`).
 pub fn run(rest: &[String]) -> Result<()> {
     let (build, ui, rest) = chosen(rest)?;
+    // What `node stop` leaves serving the bucket, as the network's own program started it: in its mode.
+    if let ([bucket], one::mode::Mode::Throwaway(network)) = (rest, one::mode::here())
+        && bucket == "bucket"
+    {
+        return network.serve_bucket();
+    }
     if matches!(rest.first().map(String::as_str), Some("--help" | "-h")) || (rest.len() == 1 && rest[0] == "help") || (rest.len() > 1 && matches!(rest[0].as_str(), "stop" | "client" | "sign-in") && rest.iter().any(|a| a == "--help" || a == "-h")) {
         println!("{}", usage());
         return Ok(());
@@ -84,6 +90,12 @@ pub fn run(rest: &[String]) -> Result<()> {
             return Ok(());
         }
         Some("cloudflare") if rest.get(1).map(String::as_str) == Some("serve") => bail!("the throwaway network runs its own Workers"),
+        Some("node") if rest.get(1).map(String::as_str) == Some("stop") => return stop_node(&dir),
+        // A computer with no node of its own needs none here: it asks the network's, whichever answer.
+        Some("client") if rest.get(1).map(String::as_str) == Some("cli") && dir.join(NO_NODE).exists() => {
+            drop(starting);
+            return clients::client(&dir, &checkout, &one::cloudflare::Settings::load_in(&dir)?, &rest[1..]);
+        }
         _ => {}
     }
     let addr = match running(&dir) {
@@ -267,6 +279,7 @@ fn commands(mcp: &str) -> one::cli::Command {
             form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows".into()),
             form("throwaway client <kind> --as sam", "the same, as someone else, invited by you with Add Someone's link".into()),
             form("throwaway client cli <command>", format!("a command from a computer that's only a device of its user's (no node), asking their nodes over iroh in run priority's order, as every client does: --device cloudflare asks the Cloudflare node, once deployed")),
+            form("throwaway node stop", format!("stop its node alone, as a Linux node that is gone: its Workers, the Cloudflare node and its storage stay, and any command but client cli starts the node again")),
             form("throwaway stop", format!("stop and delete it, and give back its devices; {CLI}-dev throwaway then starts a new one")),
         ],
         run: |_| Ok(false),

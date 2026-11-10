@@ -14,6 +14,10 @@ use crate::agent;
 
 const BUILD: &str = "build";
 
+/// Written in the throwaway network's folder while its node is stopped on purpose (`stop_node`): a client that needs no node
+/// (`client cli`) runs without starting it, and starting the network again (`spawn_node`) removes it.
+pub(crate) const NO_NODE: &str = "no-node";
+
 /// Holds the throwaway network's folder locked until the returned file is dropped, or the process ends: starting it, stopping it
 /// and what they write are one command's at a time, as starting a new one deletes what another command just wrote, and
 /// two starting it at once start two. A command that finds it running again waits no longer than that. The folder itself is
@@ -208,6 +212,7 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     std::os::unix::process::CommandExt::arg0(&mut command, one::oned::name());
     Throwaway::tell(&mut command, dir, &addr);
     let node_program = spawn(dir, &mut command, "node.log", false)?;
+    let _ = std::fs::remove_file(dir.join(NO_NODE));
     for (name, text) in [("pid", node_program.to_string()), ("addr", addr.clone())] {
         std::fs::write(dir.join(name), text).with_context(|| format!("writing {}", dir.join(name).display()))?;
     }
@@ -284,15 +289,9 @@ pub(crate) fn wait_for(ready: impl Fn() -> bool, program: u32, log: &Path) -> Re
     Ok(())
 }
 
-/// Stops the throwaway network's programs, if they run, and with `delete`, deletes all of it but what it downloaded or built.
-pub(crate) fn stop(dir: &Path, delete: bool) -> Result<()> {
-    stop_some(dir, delete, true)
-}
-
-/// `stop`, and with `clients` false, leaving the clients' browsers running, as starting the network again does.
-pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
-    let pids = programs(dir, clients);
-    for pid in &pids {
+/// Stops the programs `pids` lead (process groups), if they run: asked, then killed.
+fn end(pids: &[i32]) {
+    for pid in pids {
         unsafe { libc::kill(-pid, libc::SIGTERM) };
     }
     // Gone is every process of a program's group, not only the one that leads it: a Worker's workerd keeps its ports for as
@@ -308,10 +307,20 @@ pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
         }
     };
     gone(Duration::from_secs(10));
-    for pid in &pids {
+    for pid in pids {
         unsafe { libc::kill(-pid, libc::SIGKILL) };
     }
     gone(Duration::from_secs(5));
+}
+
+/// Stops the throwaway network's programs, if they run, and with `delete`, deletes all of it but what it downloaded or built.
+pub(crate) fn stop(dir: &Path, delete: bool) -> Result<()> {
+    stop_some(dir, delete, true)
+}
+
+/// `stop`, and with `clients` false, leaving the clients' browsers running, as starting the network again does.
+pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
+    end(&programs(dir, clients));
     // What still runs stays listed: its browsers.
     let kept: String = std::fs::read_to_string(dir.join("pids")).unwrap_or_default().lines().filter(|l| !clients && l.ends_with(" client")).map(|l| format!("{l}\n")).collect();
     if kept.is_empty() {
@@ -348,5 +357,28 @@ pub(crate) fn write_private(path: &Path, text: &str) -> Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
     std::io::Write::write_all(&mut file, text.as_bytes())?;
+    Ok(())
+}
+
+/// Stops the throwaway network's node alone, its Workers and Cloudflare node left running: the node serves its bucket, so
+/// its data goes to a program of its own that only does that (`throwaway bucket`), until the network starts again.
+/// Anything else run here starts the node again, but `client cli`.
+pub(crate) fn stop_node(dir: &Path) -> Result<()> {
+    let node: Option<i32> = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse().ok()).filter(|n| programs(dir, false).contains(n));
+    let Some(node) = node else {
+        println!("The throwaway network's node isn't running.");
+        return Ok(());
+    };
+    end(&[node]);
+    let _ = std::fs::remove_file(dir.join("pid"));
+    std::fs::write(dir.join(NO_NODE), "")?;
+    let mut bucket = std::process::Command::new(std::env::current_exe()?);
+    bucket.args(["throwaway", "bucket"]);
+    Throwaway::tell(&mut bucket, dir, "");
+    let holder = spawn(dir, &mut bucket, "bucket.log", false)?;
+    let at = std::fs::read_to_string(dir.join("bucket-addr"))?;
+    let url = format!("http://{}/throwaway/", at.trim());
+    wait_for(|| agent().get(&url).call().is_ok_and(|r| r.status().is_success()), holder, &dir.join("bucket.log"))?;
+    println!("Stopped the throwaway network's node. Its Workers and storage run on: {CLI}-dev throwaway client cli <command> asks the Cloudflare node alone, and any other command here starts the node again.");
     Ok(())
 }
