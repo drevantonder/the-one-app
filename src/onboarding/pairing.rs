@@ -111,7 +111,8 @@ impl Node {
     }
 
     /// Joins the network a pairing code is for, as a device.
-    pub async fn join(&self, code: &str) -> Result<()> {
+    /// Joins the network a pairing code is from → that network's address.
+    pub async fn join(&self, code: &str) -> Result<String> {
         let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).map_err(|_| Coded::error(code::BAD_PAIRING_CODE, "that isn't a pairing code: copy it again, or ask for a new one"))?;
         let code: PairingCode = ciborium::from_reader(bytes.as_slice()).map_err(|_| Coded::error(code::BAD_PAIRING_CODE, "that isn't a pairing code: copy it again, or ask for a new one"))?;
         self.ensure_no_network()?;
@@ -141,7 +142,7 @@ impl Node {
             }
         });
         self.emit(Event::Network);
-        Ok(())
+        Ok(code.address)
     }
 
     /// Joins a machine with a pairing code: used up once it's in, and kept for that machine alone when its join didn't

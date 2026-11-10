@@ -619,12 +619,8 @@ async fn serve(args: &[String]) -> Result<()> {
     if matches!(mode, crate::mode::Mode::Own) {
         tokio::spawn(crate::harnesses::keep(node.clone(), dir.clone(), api::addr()));
     }
-    if matches!(mode, crate::mode::Mode::Own) && let Ok(address) = node.address() {
-        std::thread::spawn(move || {
-            if let Err(err) = crate::git_wire::wire(&address) {
-                tracing::warn!("{err:#}");
-            }
-        });
+    if let Ok(address) = node.address() {
+        crate::git_wire::wire_here(address);
     }
     if handed.is_some() {
         node.warm().await;

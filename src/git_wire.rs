@@ -37,6 +37,17 @@ pub fn link_in(dir: &std::path::Path) -> Result<()> {
     crate::os::link_program(&me, &link).with_context(|| format!("git reaches your repos through {}, which couldn't be made: ln -s {} {}", link.display(), me.display(), link.display()))
 }
 
+/// `wire`, in the background, for a device that's this computer's own: a throwaway network leaves its git as it is.
+pub fn wire_here(address: String) {
+    if matches!(crate::mode::here(), crate::mode::Mode::Own) {
+        std::thread::spawn(move || {
+            if let Err(err) = wire(&address) {
+                tracing::warn!("{err:#}");
+            }
+        });
+    }
+}
+
 /// Tells git on this machine to reach `address`'s repos through this program, and makes sure git finds it as
 /// `git-remote-<CLI>`, linked beside it.
 pub fn wire(address: &str) -> Result<()> {

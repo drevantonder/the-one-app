@@ -80,7 +80,7 @@ struct Join {
 }
 
 async fn join(State(node): State<Node>, Body(body): Body<Join>) -> Reply {
-    node.join(given(&body.code, "code")?).await?;
+    crate::git_wire::wire_here(node.join(given(&body.code, "code")?).await?);
     done()
 }
 
