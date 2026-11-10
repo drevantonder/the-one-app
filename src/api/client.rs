@@ -29,6 +29,11 @@ pub trait Via: Send + Sync {
     fn tries(&self) -> Option<Value> {
         None
     }
+
+    /// The home it reads the token it shows the node from, for the refusal that says it was the wrong one.
+    fn home(&self) -> std::path::PathBuf {
+        crate::home()
+    }
 }
 
 /// A client of the node: what the CLI's commands and the MCP server ask it with, one for each command or MCP message.
@@ -154,16 +159,19 @@ impl Client {
         if body.get("error").is_some() && body.get("need").is_some() {
             *self.needed.lock().unwrap() = Some(body.clone());
         }
-        answered(answer.status, body)
+        answered(answer.status, body, &self.via.home())
     }
 }
 
 /// What the node answered, or what it says failed: refused (401, 403 or `code::REFUSED`) as `cli::Failed::Refused`, the
-/// rest with its code, if it has one (`protocol::Coded`).
-pub fn answered(status: u16, body: Value) -> Result<Value> {
+/// rest with its code, if it has one (`protocol::Coded`). `home` is where the asker read its token from.
+pub fn answered(status: u16, body: Value, home: &std::path::Path) -> Result<Value> {
     let Some(err) = body.get("error") else { return Ok(body) };
-    let err = err.as_str().unwrap_or("failed").to_string();
     let code = body.get("code").and_then(Value::as_str).map(str::to_string);
+    let err = match code.as_deref() {
+        Some(crate::protocol::code::NOT_THIS_MACHINE) => super::token_refused(home),
+        _ => err.as_str().unwrap_or("failed").to_string(),
+    };
     Err(match matches!(status, 401 | 403) || code.as_deref() == Some(crate::protocol::code::REFUSED) {
         true => crate::cli::Failed::Refused(err).into(),
         false => crate::protocol::Coded::or_plain(code, err),

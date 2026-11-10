@@ -232,6 +232,10 @@ struct Direct {
 }
 
 impl Via for Direct {
+    fn home(&self) -> PathBuf {
+        self.dir.clone()
+    }
+
     fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<Duration>) -> Result<Answer> {
         let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", self.addr));
         for (name, value) in headers {

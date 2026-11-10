@@ -29,7 +29,7 @@ pub use calls::app_route;
 pub(crate) use calls::call_from_cloudflare_node;
 pub use guard::{FromClient, guarded};
 pub(crate) use guard::Me;
-pub use local::{LOCAL_TOKEN, agent, as_this_machine, local_token};
+pub use local::{LOCAL_TOKEN, agent, as_this_machine, local_token, token_refused};
 pub(crate) use reply::{Body, Error, Reply, done, given, tagged};
 pub use serve::{serve, serve_until};
 

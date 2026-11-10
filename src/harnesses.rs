@@ -190,12 +190,14 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
 }
 
 /// Git reaches Repos at the node (`git clone http://localhost:<port>/repos/<owner>/<repo>.git`) as one of this machine's own
-/// programs: the user's git config includes one of the node's, which only they can read, sending its token there.
+/// programs: the user's git config includes one of the node's, which only they can read, sending its token there and telling
+/// the remote helper (src/git_remote.rs) the node's home.
 fn git(node_home: &Path, addr: &str) {
     let Some(token) = crate::api::local_token(node_home) else { return };
     let port = crate::api::port_of(addr);
     let file = node_home.join("git-config");
-    let text: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", crate::protocol::header::LOCAL_TOKEN)).collect();
+    let hosts: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", crate::protocol::header::LOCAL_TOKEN)).collect();
+    let text = format!("{hosts}{}", crate::git_wire::home_config(node_home));
     if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;

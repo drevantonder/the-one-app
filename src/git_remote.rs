@@ -18,6 +18,12 @@ use one::git_wire::helper;
 /// Run as git's remote helper, `git-remote-<CLI> <remote> <url>`: → the exit code of git's HTTP transport.
 pub fn run(args: &[String]) -> Result<i32> {
     let [remote, url] = args else { bail!("{} is git's, for {CLI}:: addresses: git clone <your repo's address>", helper()) };
+    // Before any thread starts. A home the user gave rules; else the node's, as it told git.
+    if std::env::var_os(one::config::env("HOME")).is_none()
+        && let Some(home) = one::git_wire::node_home()
+    {
+        unsafe { std::env::set_var(one::config::env("HOME"), home) };
+    }
     let bad = || format!("{url} isn't an address in {NAME}: <address>/<app>/…");
     let (scheme, rest) = url.split_once("://").with_context(bad)?;
     let (host, path) = rest.split_once('/').with_context(bad)?;
@@ -125,7 +131,10 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
         // What the node says is wrong, as git shows it: each line of a plain answer, after "remote:".
         if status >= 400 && kind.starts_with("application/json") {
             let said: serde_json::Value = resp.body_mut().read_json().unwrap_or_default();
-            let error = said["error"].as_str().unwrap_or("that didn't work").to_string();
+            let error = match said["code"].as_str() {
+                Some(one::protocol::code::NOT_THIS_MACHINE) => one::api::token_refused(&one::home()),
+                _ => said["error"].as_str().unwrap_or("that didn't work").to_string(),
+            };
             return drop(head.send((status, "text/plain".into(), Some(one::tools::in_cli_words(&crate::node(), &error)))));
         }
         if head.send((status, kind, None)).is_err() {

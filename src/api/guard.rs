@@ -61,7 +61,7 @@ async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<st
         return from_client(&node, key, until, who, req, next).await;
     }
     if !from_this_machine(&node, &req) {
-        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine() }))).into_response()).await;
+        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine(), "code": crate::protocol::code::NOT_THIS_MACHINE }))).into_response()).await;
     }
     next.run(req).await
 }

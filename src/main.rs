@@ -238,7 +238,7 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
     // Not even reached: the nodes tried are all there is to say.
     let mut resp = resp.map_err(unreached)?;
     let status = resp.status().as_u16();
-    one::api::client::answered(status, resp.body_mut().read_json()?)
+    one::api::client::answered(status, resp.body_mut().read_json()?, &one::home())
 }
 
 fn unreached(err: ureq::Error) -> anyhow::Error {

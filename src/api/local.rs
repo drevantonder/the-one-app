@@ -32,11 +32,22 @@ pub fn local_token(home: &std::path::Path) -> Option<String> {
 /// Headers that say a request was passed on from elsewhere, as proxies add them.
 const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "cf-worker"];
 
-/// What a program that didn't show the token is told, as JSON. One
-/// started before the node updated (an agent's MCP server, most often) is this machine's, and starting it again mends it.
+/// What a program that didn't show the token is told by the node, with `code::NOT_THIS_MACHINE`: the node can't know which
+/// home the program read its token from, so the program says that (`token_refused`) where it can.
 pub(super) fn not_this_machine() -> String {
     let name = crate::config::NAME;
-    format!("{name} on this machine was updated after this program started, or this isn't one of this machine's own programs: start it again. An agent reconnects its {name} MCP server (/mcp in Claude Code) or starts a new session.")
+    format!("{name} on this machine didn't take this request as from one of its own programs: it needs the token in the node's home, which only this machine's user can read.")
+}
+
+/// `not_this_machine` as the program refused tells it, which knows the `home` it read its token from: whether that was
+/// the node's, and what sets it. One started before the node updated (an agent's MCP server, most often) is this
+/// machine's, and starting it again mends it.
+pub fn token_refused(home: &std::path::Path) -> String {
+    let (name, var) = (crate::config::NAME, crate::config::env("HOME"));
+    let how = if std::env::var_os(&var).is_some() { format!("{var} sets it") } else { format!("{var} isn't set, so it is the default") };
+    let found = if local_token(home).is_some() { "the token in" } else { "no token in" };
+    let file = home.join(LOCAL_TOKEN);
+    format!("{name} on this machine didn't take this program as one of its own: it read {found} {} ({how}). If that isn't the folder where {name} keeps its data on this machine, set {var} to it. If the node was updated after this program started, start it again: an agent reconnects its {name} MCP server (/mcp in Claude Code) or starts a new session.", file.display())
 }
 
 /// Whether a request is from one of this machine's own programs: over a connection from this machine (its loopback),

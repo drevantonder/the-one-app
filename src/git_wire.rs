@@ -16,6 +16,20 @@ pub fn instead_of(address: &str) -> (String, String) {
     (format!("url.{CLI}::{address}/.insteadOf"), format!("{address}/"))
 }
 
+/// What a node's git config (`<home>/git-config`, which the user's includes) says of its home: git runs the remote
+/// helper with the user's environment, not the node's, so on a machine where `<CLI>_HOME` isn't the default the helper
+/// is told here where its node is.
+pub fn home_config(home: &std::path::Path) -> String {
+    let quoted = home.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    format!("[{CLI}]\n\thome = \"{quoted}\"\n")
+}
+
+/// The home of the node that told git of it (`home_config`), if one did.
+pub fn node_home() -> Option<std::path::PathBuf> {
+    let out = std::process::Command::new("git").args(["config", "--get", &format!("{CLI}.home")]).output().ok().filter(|o| o.status.success())?;
+    Some(String::from_utf8_lossy(&out.stdout).trim_end_matches('\n').into()).filter(|p: &std::path::PathBuf| !p.as_os_str().is_empty())
+}
+
 pub fn link_in(dir: &std::path::Path) -> Result<()> {
     let me = std::env::current_exe()?.canonicalize()?;
     let link = dir.join(helper());

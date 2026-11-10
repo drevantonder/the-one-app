@@ -134,6 +134,9 @@ pub mod code {
         NOT_LET_IN = "not_let_in",
         /// What was asked isn't the caller's to do, or needs `--confirm`.
         REFUSED = "refused",
+        /// A request to the node that didn't show the token in its home, as the machine's own programs do: the caller
+        /// knows which home it read (`api::token_refused`), the node doesn't.
+        NOT_THIS_MACHINE = "not_this_machine",
         /// What was asked needs an account or a sign-in that isn't there.
         NOT_SIGNED_IN = "not_signed_in",
         /// No device runs what was asked now: its node or service is starting, asking again in a moment answers.
