@@ -1266,15 +1266,21 @@ impl Cloudflare {
         Ok(list.as_array().into_iter().flatten().filter_map(|s| Some((s["id"].as_str()?.to_string(), script(s)))).collect())
     }
 
-    /// Whether the Worker `name` runs what `what` names (`upload_hash`), as Cloudflare says of the one version it serves:
-    /// a Worker that would get the same isn't uploaded again, which would restart its Durable Objects, and whatever
-    /// else put a version there (an edit, a rollback) counts as what it is.
-    pub(crate) fn runs(&self, name: &str, what: &str) -> Result<bool> {
+    /// The id of the one version the Worker `name` serves, if it's the one `what` names (`upload_hash`): a Worker that would
+    /// get the same isn't uploaded again, which would restart its Durable Objects, and whatever else put a version there
+    /// (an edit, a rollback) counts as what it is.
+    fn serving(&self, name: &str, what: &str) -> Result<Option<String>> {
         let list = self.call("GET", &format!("/accounts/{}/workers/scripts/{name}/deployments", self.account), None)?;
         let versions = list["deployments"][0]["versions"].as_array().cloned().unwrap_or_default();
-        let [only] = versions.as_slice() else { return Ok(false) };
-        let version = self.call("GET", &format!("/accounts/{}/workers/scripts/{name}/versions/{}", self.account, only["version_id"].as_str().context("Cloudflare named no version")?), None)?;
-        Ok(version["annotations"]["workers/message"] == what)
+        let [only] = versions.as_slice() else { return Ok(None) };
+        let id = only["version_id"].as_str().context("Cloudflare named no version")?;
+        let version = self.call("GET", &format!("/accounts/{}/workers/scripts/{name}/versions/{id}", self.account), None)?;
+        Ok((version["annotations"]["workers/message"] == what).then(|| id.to_string()))
+    }
+
+    /// Whether the Worker `name` runs what `what` names.
+    pub(crate) fn runs(&self, name: &str, what: &str) -> Result<bool> {
+        Ok(self.serving(name, what)?.is_some())
     }
 
     /// Uploads a Worker: its modules (name, type, bytes), the first its main one, and its bindings and Durable Object
@@ -1292,7 +1298,12 @@ impl Cloudflare {
         }
         body.extend(format!("--{boundary}--\r\n").as_bytes());
         self.call("PUT", &format!("/accounts/{}/workers/scripts/{name}", self.account), Some((format!("multipart/form-data; boundary={boundary}"), body)))?;
-        ensure!(self.runs(name, what)?, "Cloudflare took the upload of {name}, but serves another version");
+        let version = self.serving(name, what)?.with_context(|| format!("Cloudflare took the upload of {name}, but serves another version"))?;
+        // Cloudflare's default lets a Durable Object that's running keep the old code for up to five minutes (a deferred
+        // update), so auth and the relay would answer on the old build, or the old secrets, after "Deployed". A deploy
+        // is the moment to take the new one.
+        self.send("POST", &format!("/accounts/{}/workers/scripts/{name}/deployments", self.account), json!({ "strategy": "percentage", "versions": [{ "percentage": 100, "version_id": version }], "annotations": { "workers/message": what }, "code_update_strategy": { "mode": "immediate" } }))
+            .with_context(|| format!("{name} is uploaded, but its Durable Objects weren't told to take it at once"))?;
         Ok(())
     }
 
