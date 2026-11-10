@@ -153,8 +153,9 @@ fn since_said(since: u64, now: u64) -> String {
 
 fn table(lines: &[Line], limit: usize, label: &str) -> String {
     let width = lines.iter().take(limit).map(|l| l.name.len()).max().unwrap_or(0).max(label.len());
-    let rows = listed(lines, limit, |l| format!("{:<width$}  {:>7}  {:<16}  {}", l.name, l.requests, rate(l), p95(l)));
-    format!("  {label:<width$}  {:>7}  {:<16}  P95\n{rows}", "requests", "errors")
+    let rates = lines.iter().take(limit).map(|l| rate(l).len()).max().unwrap_or(0).max("errors".len());
+    let rows = listed(lines, limit, |l| format!("{:<width$}  {:>8}  {:<rates$}  {}", l.name, l.requests, rate(l), p95(l)));
+    format!("  {label:<width$}  {:>8}  {:<rates$}  P95\n{rows}", "requests", "errors")
 }
 
 /// What's going on across the network: each service on its own, and the top errors. Never a total of them: one request
