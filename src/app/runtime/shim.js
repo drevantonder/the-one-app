@@ -357,12 +357,12 @@ async function handle(what, name, body, send, waitUntil, out) {
     const call = { token: body.token, out };
     const result = await calls.run(call, run);
     const keep = what === "call" && later.length > 0;
-    const reply = { ok: result, appends: what === "call" ? appends.splice(0) : [], later: keep, spans };
+    const reply = { ok: result, appends: what === "call" ? appends.splice(0) : [], later: keep, ...(spans.length ? { spans } : {}) };
     if (keep) waitUntil(calls.run(call, () => finish(ask, later, appends)));
     return reply;
   } catch (err) {
     // An error with a `code` (`not_signed_in`, `refused`…: src/protocol.rs) says what kind it is, which callers act on.
-    return { error: String(err?.message ?? err), ...(typeof err?.code === "string" ? { code: err.code } : {}), exception: exception(err), spans };
+    return { error: String(err?.message ?? err), ...(typeof err?.code === "string" ? { code: err.code } : {}), exception: exception(err), ...(spans.length ? { spans } : {}) };
   }
 }
 
