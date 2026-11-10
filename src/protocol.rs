@@ -5,7 +5,8 @@
 //! from it whenever they're built, so nothing is copied by hand. Where a name can't be imported (a screen's request for a
 //! path, a Go service), `tests/contracts.rs` holds it to what's written here or in the routes.
 
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 /// What a device signs its requests to the URL signer under.
 pub const URLS: &str = "one/urls";
@@ -334,3 +335,67 @@ pub fn schema_of<T: schemars::JsonSchema>() -> serde_json::Value {
     schema.remove("title");
     schema.to_value()
 }
+
+/// A call to run (`POST /api/call`): an app's tool, or a service's function.
+#[derive(Clone, Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CallRequest {
+    /// Names this call wherever it's tried, so a call that writes runs on one device only: the first to take its lease.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// The app, or for a service's call, the service.
+    #[serde(default)]
+    pub app: String,
+    /// The service whose function this is, when it is one: an app and the service it wraps may share a name.
+    #[serde(default)]
+    pub service: Option<String>,
+    /// The tool it runs, for an app's call.
+    #[serde(default)]
+    pub tool: String,
+    /// The function it runs, for a service's call.
+    #[serde(default)]
+    pub function: String,
+    #[serde(default)]
+    pub input: Value,
+    /// The scopes the call touches, named before it runs; by default every scope it may reach.
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+    /// The device to run it on, by name or key prefix; by default the nearest that can.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// The agent that asked (an MCP client's name), credited on the call.
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// How many app-to-app calls deep it is: 0 when a user, an agent or a schedule made it.
+    #[serde(default)]
+    #[schemars(skip)]
+    pub depth: u32,
+    /// The app whose `ctx.apps` made it, if one did.
+    #[serde(default)]
+    #[schemars(skip)]
+    pub from: Option<String>,
+    /// What made it, for its app's insights: `cli`, `mcp`, `mac`, `phone`, `browser`, `schedule` or `app`.
+    #[serde(default)]
+    pub client: Option<String>,
+    /// Files put on this device for this call alone (an app's `_http` body), which go with it to the device that runs
+    /// it (`Node::carried`): never a client's to name.
+    #[serde(skip)]
+    pub puts: Vec<String>,
+    /// This node named the call (`Node::identified`), no client did.
+    #[serde(skip)]
+    pub named_here: bool,
+    /// It runs where it was named, first, so no other device has it or the id: it takes no lease.
+    #[serde(skip)]
+    pub unleased: bool,
+}
+
+/// What `GET /api/events` says changed.
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum Event {
+    Changed { apps: Vec<String> },
+    Devices,
+    /// This device created or joined a network.
+    Network,
+}
+

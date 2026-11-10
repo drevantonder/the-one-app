@@ -1,11 +1,14 @@
-//! The tools of a network's API as an OpenAPI 3.2 document, made from what's defined already: the core's tools and each
-//! app's as `GET /api/apps` gives them to this caller. What OpenAPI has no word for goes in `x-one-` extensions, which `ABOUT`
-//! says. Every node serves it, a node on a machine with its own routes added (src/api/openapi.rs); what lists tools
-//! reads it back (`sets`).
+//! A network's API as an OpenAPI 3.2 document, made from what's defined already: the core's tools, each app's as
+//! `GET /api/apps` gives them to this caller, the routes that say what they are (src/says.rs) and what a client answers
+//! itself (`settings`). What OpenAPI has no word for goes in `x-one-` extensions, which `ABOUT` says. Every host makes it
+//! the same way, a node for those it serves and onet for its own client; what lists tools reads it back (`sets`). Not in it:
+//! a client's keys and signed steps (`/api/keys`, `/api/steps`), and what isn't the product's API, an app's own requests
+//! (`/<app>/…`, Repos' git among them).
 
 use serde_json::{Map, Value, json};
 
 use crate::keys::{self, Route};
+use crate::says::{Op, Who};
 use crate::settings;
 
 const ABOUT: &str = "Your network's API, as you can use it now: your apps, the core's tools and routes. Its extensions: `x-one-who`, who may ask (clients, this-machine); `x-one-runs: client`, the caller's client answers it itself, with its own keys, and no node runs it; `x-one-keys`, which keys a client may hand a node with it; `x-one-call`, an app's tool, with no route of its own yet: a client asks POST /api/call with `{ app, tool, input }`, answered `{ ok: <this operation's answer> }`; `x-one-device`, the call can name the device it runs on; `x-one-confirm`, it sends or can't be undone, and each client decides how its user agrees; `x-one-reads`, it only reads; `x-one-accounts`, it lists the accounts signed in to the app; `x-one-words`, the inputs a command line takes as bare words; an input's `x-one-file`, the file it takes, which it's sent as; a tag's `x-one-guide`, how to use it, and `x-one-app`, what a client needs to say of the app: how it runs (`runs`), the services it needs (`uses`) and what setting those up takes (`needs`), `tagline`, and for one with no operations here, `deleted` or `not_added`.";
@@ -13,8 +16,38 @@ const ABOUT: &str = "Your network's API, as you can use it now: your apps, the c
 /// What OpenAPI calls what a tool says of itself, as a tool (`GET /api/apps`) and an operation say it.
 const TOOL_AS_OPERATION: [(&str, &str); 6] = [("title", "summary"), ("description", "description"), ("words", "x-one-words"), ("reads", "x-one-reads"), ("confirm", "x-one-confirm"), ("accounts", "x-one-accounts")];
 
-/// The document for a caller who has `apps`, as `GET /api/apps` gives them.
-pub fn document(apps: &[Value]) -> Value {
+/// The document for a caller who has `apps`, as `GET /api/apps` gives them. Only this machine's own programs see what only
+/// they may ask.
+pub fn document(apps: &[Value], this_machine: bool) -> Value {
+    let mut doc = tools(apps);
+    let mut add = |path: &str, method: &str, op: Value| {
+        doc["paths"][path][method] = op;
+    };
+    let tool_paths: Vec<String> = crate::core_tools::all().iter().flat_map(|f| f.tools.iter().map(|t| f.path(&t.spec)).collect::<Vec<_>>()).collect();
+
+    for (at, by, op) in crate::says::listed() {
+        if by != Who::ThisMachine || this_machine {
+            let method = op.method;
+            let mut op = operation(at, op);
+            (op["x-one-who"], op["x-one-keys"]) = (who(by), hands(at));
+            if at == crate::protocol::path::CALL {
+                keys_and_routing(&mut op);
+            }
+            add(at, method, op);
+        }
+    }
+
+    for (method, at, summary, body) in settings::answered_routes().filter(|(_, at, ..)| !tool_paths.iter().any(|t| t == at)) {
+        let mut op = operation(at, Op::answered(method, summary, body));
+        op["x-one-runs"] = json!("client");
+        add(at, &method.to_lowercase(), op);
+    }
+
+    doc
+}
+
+/// The core's tools and each app's, with their tags.
+fn tools(apps: &[Value]) -> Value {
     let (mut paths, mut tags) = (Map::new(), Vec::new());
     let mut add = |path: &str, method: &str, op: Value| {
         paths.entry(path.to_string()).or_insert_with(|| json!({}))[method] = op;
@@ -194,6 +227,49 @@ fn error_responses() -> Value {
         "Elsewhere": answer("This node can't run it: ask one of these", json!({ "type": "object", "required": ["error", "elsewhere"], "properties": { "error": error, "elsewhere": { "type": "array", "items": { "type": "string" } } } })),
         "NeedsKeys": answer("It needs keys it wasn't handed: send it again with these", needs),
     })
+}
+
+/// A tool as an app lists it (`GET /api/apps`), and the core's as `core_tools` do.
+pub fn tool_spec() -> Value {
+    json!({
+        "type": "object",
+        "required": ["name", "description", "input"],
+        "properties": {
+            "name": { "type": "string" },
+            "title": { "type": "string", "description": "a few words for what it does" },
+            "description": { "type": "string" },
+            "input": { "type": "object", "description": "JSON Schema of what it takes" },
+            "output": { "description": "JSON Schema of what it answers" },
+            "reads": { "type": "boolean" },
+            "confirm": { "type": "boolean" },
+            "accounts": { "type": "boolean" },
+            "words": { "type": "array", "items": { "type": "string" } },
+            "lab": { "type": "string" }
+        }
+    })
+}
+
+fn who(by: Who) -> Value {
+    json!(match by {
+        Who::Clients => "clients",
+        Who::ThisMachine => "this-machine",
+    })
+}
+
+fn operation(at: &str, op: Op) -> Value {
+    let mut parameters: Vec<Value> = at.split('/').filter_map(|s| s.strip_prefix('{')?.strip_suffix('}')).map(|name| json!({ "name": name, "in": "path", "required": true, "schema": { "type": "string" } })).collect();
+    if let Some(query) = &op.query {
+        let required: Vec<&str> = query["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        parameters.extend(query["properties"].as_object().into_iter().flatten().map(|(name, schema)| json!({ "name": name, "in": "query", "required": required.contains(&name.as_str()), "schema": schema })));
+    }
+    let mut out = json!({ "summary": op.summary, "responses": responses(op.answer) });
+    if !parameters.is_empty() {
+        out["parameters"] = json!(parameters);
+    }
+    if let Some(body) = op.body {
+        out["requestBody"] = json!({ "required": true, "content": body });
+    }
+    out
 }
 
 /// Whether a tool takes a `device` of its own (an agent device's name, say): then that's what `device` is, and

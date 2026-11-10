@@ -299,7 +299,8 @@ impl<O: Opens> Keyring<O> {
     /// sent to until `until` (ms). One a node needs others for (428) is sent again with them, a few times, as a node may
     /// find what it needs as it goes (the Cloudflare node, its logs' keys first, then a call's); one a node refuses as
     /// it doesn't list this device yet, again in a moment while the relay lets it in. `fetches` gets each try's trace.
-    /// One this device answers itself (`answer`: what it signs as its user) never reaches a node.
+    /// One this device answers itself (`answer`: what it signs as its user) never reaches a node, and the API's document
+    /// (`one::openapi`) is made here from the apps a node lists for it.
     pub async fn request(&self, client: &Client, on: &(impl Address + Keep + Signs), request: Request, until: u64, fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
         if let Some(answer) = self.answer(client, on, &request.method, &request.path, request.body.bytes()).await {
             let (status, out) = match answer {
@@ -310,7 +311,23 @@ impl<O: Opens> Keyring<O> {
             let headers = vec![("content-type".to_string(), "application/json".to_string())];
             return Ok(Response { node: [0; 32], status, headers, body: Body::whole(out.to_string().into_bytes()), trace: None });
         }
+        if request.method == "GET" && request.path.split('?').next() == Some(one::protocol::path::OPENAPI) {
+            return self.document(client, on, request, until, fetches).await;
+        }
         self.to_nodes(client, on, request, until, fetches).await
+    }
+
+    /// The API's document for this device's user, from the apps a node lists for them.
+    async fn document(&self, client: &Client, on: &(impl Address + Keep), mut request: Request, until: u64, fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
+        request.path = one::protocol::path::APPS.into();
+        let response = self.to_nodes(client, on, request, until, fetches).await?;
+        if response.status != 200 {
+            return Ok(response);
+        }
+        let apps: Vec<Value> = serde_json::from_slice(&response.body.bytes().await?).map_err(|err| failed(format!("{} answered with a reply that wasn't JSON: {err}", one::protocol::path::APPS)))?;
+        let body = one::openapi::document(&apps, false).to_string().into_bytes();
+        let headers = vec![("content-type".to_string(), "application/json".to_string())];
+        Ok(Response { headers, body: Body::whole(body), ..response })
     }
 
     /// `request`, of its nodes.

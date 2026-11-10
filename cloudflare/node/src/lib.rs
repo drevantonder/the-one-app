@@ -598,10 +598,11 @@ pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, unt
     Ok(asked.to_string())
 }
 
-/// The tools `apps` (JSON, as `GET /api/apps` gives them) offer, as this node serves the API's document.
+/// The API's document for a client of `apps` (JSON, as `GET /api/apps` gives them): what a node on a machine serves a
+/// client, the routes this node doesn't serve itself among them.
 #[wasm_bindgen]
 pub fn openapi(apps: &str) -> Result<String, JsError> {
-    Ok(one::openapi::document(&serde_json::from_str::<Vec<Value>>(apps)?).to_string())
+    Ok(one::openapi::document(&serde_json::from_str::<Vec<Value>>(apps)?, false).to_string())
 }
 
 /// The network as `user` sees it, from the steps of `scopes` (JSON) `owner`'s object read: `{ state, apps, me, erased }`.

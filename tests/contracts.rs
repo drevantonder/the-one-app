@@ -604,7 +604,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
         }
     };
     names("the node's widgets", &read("src/node/screens.rs"), &["[\"late\"] = json!(true)"]);
-    names("the node's route", &read("src/node/widgets.rs"), &["kind: Option<String>"]);
+    names("the node's route", &read("src/node/widgets/says.rs"), &["kind: Option<String>"]);
     names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", one::protocol::path::OPENAPI]);
     names("the pages", &read("src/screen/home/lib/model.js"), &["w.late", "&kind="]);
     names("the native widgets", &read("client/native/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
@@ -758,7 +758,10 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
         })
     };
     const UNLISTED: [&str; 4] = ["/api/keys", "/api/steps", "/api/steps/global", "/api/openapi.json"];
-    let document = one::api::openapi::document(&[], true);
+    let document = one::openapi::document(&[], true);
+    for (path, who, _) in one::says::listed() {
+        assert!(one::api::routes().who().iter().any(|(p, w)| *p == path && *w == who), "src/says.rs says {path} is asked by {who:?}, which no route of the node (src/api.rs) is");
+    }
     let listed: Vec<Vec<String>> = document["paths"].as_object().unwrap().keys().map(|path| path.trim_start_matches('/').split('/').map(str::to_string).collect()).collect();
     for path in document["paths"].as_object().unwrap().keys() {
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
@@ -815,7 +818,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
         }
     }
     assert!(unserved.is_empty(), "these paths aren't routes of the node (src/api.rs):\n{}", unserved.join("\n"));
-    assert!(unlisted.is_empty(), "these paths aren't in the OpenAPI document (src/api/openapi.rs): add `says` to their route:\n{}", unlisted.join("\n"));
+    assert!(unlisted.is_empty(), "these paths aren't in the OpenAPI document (src/openapi.rs): add the route to its feature's `says.rs` (src/says.rs):\n{}", unlisted.join("\n"));
 }
 
 /// What isn't an app's own request (`protocol::path::ROOTS`) is every first segment the API's routes have: a route under

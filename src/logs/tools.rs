@@ -36,7 +36,8 @@ mod serve {
 
     use crate::core_tools::{say_time, text};
     use crate::database::scopes;
-    use crate::node::{CallRequest, Caller, Node};
+    use crate::node::{Caller, Node};
+    use crate::protocol::CallRequest;
 
     /// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the
     /// node there says no unless the caller may remove that device (src/node/calls/running.rs).

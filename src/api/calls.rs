@@ -7,9 +7,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, post};
 use serde_json::{Value, json};
 
-use crate::node::{CallRequest, Caller, Node};
+use crate::node::{Caller, Node};
+use crate::protocol::CallRequest;
 
-use super::openapi::Op;
 use super::{Routes, Who};
 use super::guard::Me;
 use super::reply::{Body, Error, Reply, failed};
@@ -28,7 +28,6 @@ pub fn app_route(path: &str) -> bool {
 pub(super) fn routes() -> Routes {
     Routes::default()
         .route("/api/call", Who::Clients, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
-        .says(Op::post("Run one call of an app's tool or a service's function").body::<CallRequest>().answers_as(json!({ "type": "object", "required": ["ok"], "properties": { "ok": { "description": "the tool's or function's answer, as its output schema says" } } })))
         // An app's own requests, run as its tool `_http` for its user, whose checks are the app's: git's, to Repos.
         .route(APP_ROUTE, Who::Clients, any(app_http))
 }

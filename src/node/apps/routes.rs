@@ -5,60 +5,19 @@ use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::routing::{get, post};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
 
-use crate::api::openapi::Op;
 use crate::api::{Body, Error, Me, Reply, Routes, Who, done, given, tagged};
 use crate::node::{Caller, Node};
+use crate::says::apps::{Arrange, Deploy};
 
 pub fn routes() -> Routes {
     Routes::default()
         .route("/api/apps", Who::Clients, get(apps))
-        .says(Op::get("Every app the caller can see, with its tools where it's added for them").answers_as(json!({
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": ["name", "owner", "deploys", "added"],
-                "properties": {
-                    "name": { "type": "string" },
-                    "title": { "type": "string" },
-                    "owner": { "type": "string", "description": "user:<id>, group:<id> or admins" },
-                    "from": { "type": ["string", "null"], "description": "the app it was forked from" },
-                    "forks": { "type": "array", "items": { "type": "string" } },
-                    "deploys": { "type": "integer" },
-                    "bundle": { "type": ["string", "null"], "description": "its latest deploy" },
-                    "added": { "type": "array", "items": { "type": "string" }, "description": "the scopes the caller sees it added in" },
-                    "deleted": { "type": "object", "description": "{ time, by, yours }, once deleted", "additionalProperties": true },
-                    "tools": { "type": "array", "items": crate::api::openapi::tool_spec(), "description": "where it's added for the caller" },
-                    "widgets": { "type": "array", "items": { "type": "object" } },
-                    "screens": { "type": "array", "items": { "type": "object" } },
-                    "schedules": { "type": "array", "items": { "type": "object" } }
-                },
-                "additionalProperties": true
-            }
-        })))
         .route("/api/labs", Who::Clients, get(labs))
-        .says(Op::get("Every lab, for an admin").answers_as(json!({
-            "type": "array",
-            "items": { "type": "object", "required": ["title", "description", "on", "setting"], "properties": { "title": { "type": "string" }, "description": { "type": "string" }, "on": { "type": "boolean" }, "setting": { "type": "string" } }, "additionalProperties": true }
-        })))
         .route("/api/deploy", Who::Clients, post(deploy))
-        .says(Op::post("Deploy an app, making it first if there's none by that name").body::<Deploy>().answers_as(json!({
-            "type": "object",
-            "required": ["bundle", "made", "here"],
-            "properties": {
-                "bundle": { "type": "string", "description": "the deploy's hash" },
-                "made": { "type": "boolean", "description": "whether the app is new" },
-                "before": { "type": ["string", "null"], "description": "the deploy it replaced" },
-                "here": { "type": "boolean", "description": "whether this device runs it yet" },
-                "tools": { "type": "array", "items": { "type": "string" }, "description": "its tools, once this device runs it" },
-                "lacking": { "type": "array", "items": { "type": "string" }, "description": "those that give no title or no output" },
-                "failed": { "type": "string", "description": "why it doesn't start" }
-            }
-        })))
         .route("/api/schedule", Who::ThisMachine, post(schedule))
         .route("/api/arrange", Who::Clients, post(arrange))
-        .says(Op::post("Arrange one of the caller's pages").body::<Arrange>().done())
         .route("/api/fork", Who::ThisMachine, post(fork))
         .route("/api/source/{app}", Who::ThisMachine, get(source))
 }
@@ -78,19 +37,6 @@ async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap) 
 /// Every lab, for an admin's Settings › Labs (`Node::labs`).
 async fn labs(State(node): State<Node>, me: Me) -> Reply {
     Ok(Json(json!(node.labs(&me.caller).await?)))
-}
-
-/// An app's `bundle`, or its `files` (each file's path → its text, built here as `one deploy` builds a folder), to
-/// deploy, making the app first if there's none by that name, owned by `owner` (as `owner` reads it) or the caller.
-#[derive(Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct Deploy {
-    app: String,
-    bundle: Option<String>,
-    files: Option<serde_json::Map<String, Value>>,
-    owner: Option<String>,
-    #[serde(default)]
-    wait: bool,
 }
 
 /// → what `Node::deploy_making` says.
@@ -135,20 +81,6 @@ async fn schedule(State(node): State<Node>, me: Me, Body(body): Body<Schedule>) 
     let scope = node.scope_for(&me.caller, body.scope.as_deref().unwrap_or("user"))?;
     node.switch_schedule(&me.caller, given(&body.app, "app")?, given(&body.schedule, "schedule")?, &scope, body.on).await?;
     done()
-}
-
-/// How the local user arranges one of their pages (`pages` with their own: the order of their groups' pages,
-/// `{ order, hidden }`).
-#[derive(Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct Arrange {
-    page: String,
-    #[serde(default)]
-    items: Value,
-    #[serde(default)]
-    hidden: Value,
-    #[serde(default)]
-    pages: Value,
 }
 
 async fn arrange(State(node): State<Node>, me: Me, Body(body): Body<Arrange>) -> Reply {

@@ -6,30 +6,19 @@ use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::Response;
 use axum::routing::get;
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::api::openapi::Op;
 use crate::api::{Error, Me, Routes, Who, tagged};
 use crate::node::Node;
+use crate::says::screens::ScreenQuery;
 
 pub fn routes() -> Routes {
     Routes::default()
         .route("/api/events", Who::Clients, get(events))
-        .says(Op::get("What changed, as it happens").events::<crate::node::Event>())
         .route("/api/screens/{app}/{screen}", Who::Clients, get(screen))
-        .says(Op::get("An app's screen, as a page").query::<ScreenQuery>().html())
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct ScreenQuery {
-    params: Option<String>,
-    scope: Option<String>,
-    /// `@one/ui` and the bridge as the address's files (`crate::screen::page`), for the web client, which has them.
-    linked: Option<bool>,
 }
 
 /// An app screen as a page, for shells' web views and the web client's frames.

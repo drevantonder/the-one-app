@@ -11,6 +11,7 @@ use axum::Router;
 use axum::routing::post;
 
 use crate::node::Node;
+pub use crate::says::Who;
 
 pub mod client;
 pub use client::Client;
@@ -42,21 +43,12 @@ pub fn router(node: Node) -> Router {
     guarded(routes(), node)
 }
 
-/// Who may ask a route. This machine's own programs may ask any; the rest only what its route says.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Who {
-    /// Also the network's client devices over iroh, each as their user, with what that user may do.
-    Clients,
-    /// Only this machine's own programs.
-    ThisMachine,
-}
-
-/// The local API's routes, each with who may ask it (`Who`): what `guarded` lets in.
+/// The local API's routes, each with who may ask it (`Who`): what `guarded` lets in. What a route says of itself in the
+/// OpenAPI document is in src/says.rs.
 #[derive(Default)]
 pub struct Routes {
     router: Router<Node>,
     who: Vec<(String, Who)>,
-    listed: Vec<(String, Who, openapi::Op)>,
 }
 
 impl Routes {
@@ -66,17 +58,9 @@ impl Routes {
         self
     }
 
-    /// What the route before says of itself in the OpenAPI document, one for each method it answers.
-    pub fn says(mut self, op: openapi::Op) -> Routes {
-        let (path, who) = self.who.last().expect("a route to say it of").clone();
-        self.listed.push((path, who, op));
-        self
-    }
-
     pub fn merge(mut self, other: Routes) -> Routes {
         self.router = self.router.merge(other.router);
         self.who.extend(other.who);
-        self.listed.extend(other.listed);
         self
     }
 

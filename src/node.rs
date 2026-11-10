@@ -15,6 +15,7 @@ use tokio::sync::broadcast;
 use crate::app::runtime::{Apps, Context};
 use crate::state::{Me, handles, whose};
 use crate::call::Append;
+use crate::protocol::{CallRequest, Event};
 use crate::bucket::{Copied, Place};
 use crate::database::stored::Db;
 use crate::database::content::Content;
@@ -50,7 +51,7 @@ mod sessions;
 mod insights;
 pub use databases::NotGiven;
 pub use net::{alpn, relay, service_alpn};
-pub use calls::{CallRequest, Elsewhere, Grant};
+pub use calls::{Elsewhere, Grant};
 use calls::{Granted, Reply};
 use apps::built_in_bundle;
 use scheduled::switch_entry;
@@ -150,15 +151,6 @@ impl Network {
     fn heard(&self, device: &Key) -> bool {
         self.peers.get(device).is_some_and(|p| p.seen.elapsed() < 3 * PRESENCE_EVERY)
     }
-}
-
-#[derive(Clone, Debug, Serialize, schemars::JsonSchema)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum Event {
-    Changed { apps: Vec<String> },
-    Devices,
-    /// This device created or joined a network.
-    Network,
 }
 
 /// What a machine's node is: the device its user's CLI, MCP and Mac app sign with, and compute.

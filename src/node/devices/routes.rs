@@ -7,31 +7,19 @@ use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::api::openapi::Op;
 use crate::api::{Body, Me, Reply, Routes, Who, done, given};
 use crate::node::Node;
+use crate::says::devices::{Device, Pair};
 
 pub fn routes() -> Routes {
     Routes::default()
         .route("/api/pair", Who::Clients, post(pair))
-        .says(Op::post("A pairing code for a new device or someone new").body::<Pair>().answers_as(json!({
-            "type": "object",
-            "required": ["code", "user"],
-            "properties": { "code": { "type": "string", "description": "to give the new device" }, "user": { "type": "string", "description": "whose it will be" } }
-        })))
         .route("/api/name", Who::ThisMachine, post(name))
         .route("/api/erase", Who::Clients, post(erase))
-        .says(Op::post("Erase what a device keeps").body::<Device>().answers_as(json!({ "type": "object", "required": ["erasing"], "properties": { "erasing": { "type": "string", "description": "the device's name" } } })))
         .route("/api/devices/approve-with-recovery", Who::ThisMachine, post(approve_with_recovery))
         .route("/api/devices/recovery-key/replace", Who::ThisMachine, post(replace_recovery))
         .route("/api/devices/recovery-holders", Who::Clients, get(recovery_holders))
         .route("/api/devices/recovery-holders/seal", Who::ThisMachine, post(seal_recovery))
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct Pair {
-    user: Option<String>,
 }
 
 async fn pair(State(node): State<Node>, me: Me, Body(body): Body<Pair>) -> Reply {
@@ -50,13 +38,6 @@ struct Name {
 async fn name(State(node): State<Node>, Body(body): Body<Name>) -> Reply {
     node.rename_device(given(&body.name, "name")?).await?;
     done()
-}
-
-/// A device, by its key.
-#[derive(Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct Device {
-    key: String,
 }
 
 /// Erases what a device keeps, asked of it directly (`Node::erase`), before it's removed.

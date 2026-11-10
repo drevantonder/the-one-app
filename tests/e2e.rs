@@ -2,7 +2,8 @@
 
 use std::time::Duration;
 
-use one::node::{CallRequest, Node};
+use one::node::Node;
+use one::protocol::CallRequest;
 use serde_json::{Value, json};
 
 use crate::temp;
@@ -817,7 +818,7 @@ async fn a_tool_answers_what_its_output_says() {
     let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("answers/app.js").to_vec())]).unwrap()).unwrap();
     let deployed = a.deploy_making(&me, "answers", &bundle, Some("admins"), true).await.unwrap();
     assert_eq!(deployed["lacking"], json!(["unsaid"]), "the deploy names the tool that says nothing of its answer: {deployed}");
-    let schema = &one::api::openapi::document(&[], true)["paths"]["/api/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
+    let schema = &one::openapi::document(&[], true)["paths"]["/api/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
     one::tools::check(schema, &deployed).unwrap_or_else(|err| panic!("a deploy answers what the document doesn't say: {err:#}\n{deployed}"));
     a.add(&me, "answers", &one::database::scopes::Scope::Global, true, None).await.unwrap();
     let call = |tool: &str| CallRequest { app: "answers".into(), tool: tool.into(), input: json!({}), ..Default::default() };
@@ -860,7 +861,7 @@ async fn a_routes_answer_is_what_the_document_says() {
     add_notes(&a).await;
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
-    let document = one::api::openapi::document(&a.apps(&me).await.unwrap(), true);
+    let document = one::openapi::document(&a.apps(&me).await.unwrap(), true);
     // As this machine's own programs ask: over its loopback, with the token in the node's home.
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(one::protocol::header::LOCAL_TOKEN, one::api::local_token(a.dir()).unwrap().parse().unwrap());

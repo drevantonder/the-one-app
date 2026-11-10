@@ -6,16 +6,11 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde_json::json;
 
-use crate::api::openapi::Op;
 use crate::api::{Error, Me, Reply, Routes, Who};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
-    Routes::default()
-        .route("/api/blobs", Who::Clients, post(put_blob))
-        .says(Op::post("Keep a file, read as it comes").takes_file().answers_as(json!({ "type": "object", "required": ["blob", "size"], "properties": { "blob": { "type": "string", "description": "its hash" }, "size": { "type": "integer", "description": "bytes" } } })))
-        .route("/api/blobs/{hash}", Who::Clients, get(blob))
-        .says(Op::get("Read back a kept file").file())
+    Routes::default().route("/api/blobs", Who::Clients, post(put_blob)).route("/api/blobs/{hash}", Who::Clients, get(blob))
 }
 
 /// A file to keep, read as it comes: from elsewhere, within the room `Node::put_blob_from` gives its user.

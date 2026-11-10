@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::e2e::{create, eventually, let_sam_in, signed_by, start};
 use crate::temp;
-use one::node::CallRequest;
+use one::protocol::CallRequest;
 
 /// In Repos, a repo's owner and its collaborators push to it, and its owners alone delete it: someone else is refused,
 /// from a client device or a sign-in from elsewhere, whose git reaches Repos' `_http` as them, until its owner adds them

@@ -7,9 +7,9 @@ use serde_json::json;
 
 
 use crate::node::Node;
+use crate::says::api::Join;
 
 use super::guard::Me;
-use super::openapi::Op;
 use super::{Routes, Who};
 use super::reply::{Body, Reply, done, given};
 
@@ -17,11 +17,9 @@ pub(super) fn routes() -> Routes {
     use Who::*;
     Routes::default()
         .route("/api/state", Clients, get(state))
-        .says(Op::get("Who's who and what this device reads of the network").answers::<crate::state::State>())
         .route("/api/keys", Clients, get(keys_get).post(keys_post))
         .route("/api/create", ThisMachine, post(create))
         .route("/api/join", ThisMachine, post(join))
-        .says(Op::post("Join a network with a pairing code").body::<Join>().done())
         .route("/api/steps", Clients, post(steps))
         .route("/api/steps/global", Clients, get(global_steps))
 }
@@ -71,12 +69,6 @@ struct Create {
 async fn create(State(node): State<Node>, Body(body): Body<Create>) -> Reply {
     let recovery = node.create_with(given(&body.name, "name")?, given(&body.user_name, "user_name")?, body.user.as_deref(), crate::config::STARTERS).await?;
     Ok(Json(json!({ "recovery": recovery })))
-}
-
-#[derive(serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct Join {
-    code: String,
 }
 
 async fn join(State(node): State<Node>, Body(body): Body<Join>) -> Reply {
