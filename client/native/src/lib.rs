@@ -373,9 +373,22 @@ async fn start_over_if_taken_out(address: &str, user: &str) {
 }
 
 /// Makes this device its user's: one already, or asking to be let in. → `{ in: true }`, or the code to approve
-/// it by (`{ code }`), after which `wait`.
+/// it by (`{ code }`), after which `wait`. Where the page has no client of its own, this is how it asks.
 #[tauri::command]
 async fn join() -> Result<Value, Failure> {
+    let joined = join_here().await;
+    browser_goes_on(joined.as_ref().ok().and_then(|j| j["code"].as_str()));
+    joined
+}
+
+/// This device has asked to join (by `code`), or needn't: the browser it signed in with goes on (`SignIn::asked`).
+fn browser_goes_on(code: Option<&str>) {
+    if let Ok(signing) = app().sign_in() {
+        signing.asked(code.map(device_code).as_deref());
+    }
+}
+
+async fn join_here() -> Result<Value, Failure> {
     let a = app();
     let address = a.address().ok_or("Enter your address first.")?;
     let token = token().await?;
@@ -501,17 +514,21 @@ async fn access_token() -> Result<String, Failure> {
 }
 
 /// The code its own client in the page is waiting to be approved by, where this device can approve it itself (a Mac's node).
+/// The browser it signed in with goes on with it.
 #[tauri::command]
 fn waiting(code: String) {
     println!("Code: {code}");
+    browser_goes_on(Some(&code));
     platform::approve_here(code);
 }
 
 /// The page's own client was let in: the app's own (Rust) client starts beside it, for what runs with no window (widgets,
-/// pushes). It may be behind what the network reads; the page isn't held up by it. Its invite is used, so it goes.
+/// pushes). It may be behind what the network reads; the page isn't held up by it. Its invite is used, so it goes. The
+/// browser it signed in with, if it's held, is let go: this device needed no one's yes.
 #[tauri::command]
 fn joined() {
     app().keep("invite", None);
+    browser_goes_on(None);
     tauri::async_runtime::spawn(async {
         let a = app();
         let (Some(address), Some(user)) = (a.address(), a.kept("user")) else { return };

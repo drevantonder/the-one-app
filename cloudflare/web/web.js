@@ -12,11 +12,13 @@ import { api, retryWait, sleep } from "./request.js";
 import { go, href, own, route } from "./routes.js";
 import { ask, iconPaths, openRequest } from "./screens.js";
 import { appearance, schemed } from "./settings.js";
-import { forgetScreens, joined, lastAt, lastWindow, me, network, refreshApps, refreshState, setJoining, signOut, whySignedOut } from "./store.js";
+import { config, forgetScreens, joined, lastAt, lastWindow, me, network, refreshApps, refreshState, setJoining, signOut, whySignedOut } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
 import { hardwareBack, listen, render, showBack, showJoin, showSignedOut, showUnreachable, watchWaiting, windowShowing } from "./window.js";
 
 window.__one = { host: async (m) => (m.type === "copy" ? platform.copy(m.text) : m.type === "icons" ? iconPaths(m.names) : null) };
+
+const signedIn = () => message("You’re Signed In", `Go back to ${config().name}.`);
 
 async function start() {
   schemed(document, appearance());
@@ -44,6 +46,10 @@ async function start() {
     else if (platform.signedIn()) history.replaceState(null, "", href({ kind: "screen", app, screen, params }));
     else return showBack(app, screen, params);
   }
+  // `/signed-in#<code>`: where a native app sends the browser the user signed in with, once it has asked to join. Not signed
+  // in here, or the app's request not one this device can answer, it's only told to go back.
+  const handedOver = location.pathname === "/signed-in";
+  if (handedOver && !platform.signedIn()) return show(signedIn());
   if (!platform.signedIn()) {
     // However the sign-in ended (it ran out, another tab signed out), nothing of who it was stays for the next person.
     forgetScreens().catch(() => {});
@@ -81,6 +87,13 @@ async function start() {
       if (err.removed) return;
       return signOut();
     }
+  }
+  if (handedOver) {
+    const code = location.hash.slice(1);
+    const asked = await api("/v1/devices/requests", { method: "POST", body: {} }).catch(() => []);
+    // A request names its device by as much of its code as its sign-in leaves to check (`JOIN_CODE_SHORT`), the app by all of it.
+    if (!asked.some((r) => r.code && code.startsWith(r.code.replaceAll(" ", "")))) return show(signedIn());
+    history.replaceState(null, "", href(own("devices", { approve: code })));
   }
   // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
   const away = setTimeout(() => windowShowing() || showUnreachable(), 15000);

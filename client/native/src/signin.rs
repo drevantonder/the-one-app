@@ -2,7 +2,8 @@
 //! port on this machine (RFC 8252's loopback redirect), or on a phone to the app's own link (`<cli>://signed-in/`),
 //! which an iPhone's system sign-in sheet takes and an Android phone's Chrome Custom Tab opens the app on. The refresh
 //! token is kept in the OS's secret store; access tokens only in memory. It names the device it's for (`join`), so the
-//! user's devices can check this sign-in.
+//! user's devices can check this sign-in. The browser that signed in is held at its callback until this app has asked to
+//! join, then sent on to the network's page where the user may answer that request if they're signed in there too.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -25,10 +26,19 @@ pub struct SignIn {
     data: std::path::PathBuf,
     access: Mutex<Option<(String, Instant)>>,
     auth: Mutex<Option<Arc<Auth>>>,
+    /// Where the browser that signed in waits for its answer (`asked`).
+    browser: Mutex<Option<mpsc::Sender<String>>>,
 }
 
 /// Where the loopback's sign-in comes back to, as it registers it (the port is any).
 const LOOPBACK: &str = "http://127.0.0.1/callback";
+
+/// Tells the browser it's signed in, with nowhere else to go.
+fn closing(s: &mut TcpStream) {
+    let page = "<!doctype html><meta charset=utf-8><meta name=color-scheme content=\"light dark\"><body style=\"font:15px system-ui;display:grid;place-items:center;height:90vh;color:GrayText\"><p>You’re signed in. Go back to {}.</p>";
+    let page = page.replace("{}", one::config::NAME);
+    let _ = write!(s, "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{page}", page.len());
+}
 
 fn failed(message: impl Into<String>) -> Failed {
     Failed { signed_out: false, message: message.into() }
@@ -36,7 +46,7 @@ fn failed(message: impl Into<String>) -> Failed {
 
 impl SignIn {
     pub fn new(address: &str, name: &str, data: std::path::PathBuf) -> SignIn {
-        SignIn { address: address.trim_end_matches('/').into(), name: name.into(), data, access: Mutex::default(), auth: Mutex::default() }
+        SignIn { address: address.trim_end_matches('/').into(), name: name.into(), data, access: Mutex::default(), auth: Mutex::default(), browser: Mutex::default() }
     }
 
     /// The registration kept: `(address, client id, where it comes back to)`.
@@ -97,6 +107,9 @@ impl SignIn {
         let asked = s.ask(&id, &redirect, Some(join));
         let (came, given_up) = (mpsc::channel(), Arc::new(AtomicBool::new(false)));
         let (tx, stop) = (came.0, given_up.clone());
+        let (answer, answered) = mpsc::channel();
+        *self.browser.lock().unwrap() = Some(answer);
+        let address = self.address.clone();
         std::thread::spawn(move || {
             for mut s in listener.incoming().flatten() {
                 if stop.load(Ordering::Relaxed) {
@@ -105,15 +118,20 @@ impl SignIn {
                 let mut line = String::new();
                 BufReader::new(&s).read_line(&mut line).ok();
                 let path = line.split(' ').nth(1).unwrap_or_default().to_string();
-                let page = "<!doctype html><meta charset=utf-8><meta name=color-scheme content=\"light dark\"><body style=\"font:15px system-ui;display:grid;place-items:center;height:90vh;color:GrayText\"><p>You’re signed in. Go back to {}.</p>";
-                let page = page.replace("{}", one::config::NAME);
-                let _ = write!(s, "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{page}", page.len());
-                if path.starts_with("/callback")
-                    && let Ok(u) = url::Url::parse(&format!("http://x{path}"))
-                {
-                    let _ = tx.send(u.query_pairs().into_owned().collect::<HashMap<_, _>>());
-                    return;
+                let sent = path.starts_with("/callback").then(|| url::Url::parse(&format!("http://x{path}")).ok()).flatten();
+                let Some(u) = sent else {
+                    closing(&mut s);
+                    continue;
+                };
+                let _ = tx.send(u.query_pairs().into_owned().collect::<HashMap<_, _>>());
+                // A browser waits on its connection for as long as it's held, and the app's page may never ask (an error, closed).
+                match answered.recv_timeout(Duration::from_secs(30)) {
+                    Ok(code) => {
+                        let _ = write!(s, "HTTP/1.1 303 See Other\r\nlocation: {address}/signed-in#{code}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+                    }
+                    Err(_) => closing(&mut s),
                 }
+                return;
             }
         });
         open(s.url(&asked)?).map_err(failed)?;
@@ -123,7 +141,20 @@ impl SignIn {
             let _ = TcpStream::connect(at);
             failed("Signing in took too long. Try again.")
         })?;
-        self.keep(s.finish(&asked, &got)?)
+        let signed = s.finish(&asked, &got).and_then(|tokens| self.keep(tokens));
+        if signed.is_err() {
+            self.browser.lock().unwrap().take();
+        }
+        signed
+    }
+
+    /// This app has asked to join, to be answered by `code`, or needed not to (`None`): the browser it signed in with,
+    /// held until now, goes to the network's page that has the request, or says it's signed in.
+    pub fn asked(&self, code: Option<&str>) {
+        let held = self.browser.lock().unwrap().take();
+        if let (Some(held), Some(code)) = (held, code) {
+            let _ = held.send(code.into());
+        }
     }
 
     /// The tokens a grant gave: the refresh token kept before anything else can ask, as each works once.
