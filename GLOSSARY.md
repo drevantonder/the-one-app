@@ -7,11 +7,11 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 
 - **Network**: one user's or one workplace's whole: its users, their devices and nodes, their apps, its bucket, and
   the pieces at its address on Cloudflare. A key belongs to one network forever, and networks never talk to each other.
-  Users see "your One App network", or a custom build's, "the PTC App network". Avoid: install.
+  Users see "your One App network", or a custom build's, "the Acme App network". Avoid: install.
 - **Demo**: a build's real screens answered from a recording of sample data, on the device, with no network, for a store's
   reviewer. Nothing entered in it is kept.
 - **Custom build**: this code built with its own `config.toml`, the only place the product is named (The One App, The
-  PTC App). It usually serves one workplace's network, but can serve many. Avoid: white label.
+  Acme App). It usually serves one workplace's network, but can serve many. Avoid: white label.
 - **Throwaway network**: what `one-dev throwaway` makes from your checkout's build: a network on your machine, with its own
   pieces at its own address, where you're a new user signing in with no passkey. For testing. Avoid: try install.
 - **User**: someone in the network. An **admin** is a user who may change what's everyone's. Avoid: person.

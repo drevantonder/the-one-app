@@ -1,6 +1,6 @@
 # Design
 
-What users see, as Andre decided it. Only his decisions are here: what an agent picked and he hasn't corrected is not, and is free to change. Before changing how a screen looks or behaves, read its section; a rewrite carries every line of it over. A decision that replaces one here deletes it in the same change. Nothing here describes a screen: the code does that.
+What users see, as the project's owner decided it. Only their decisions are here: what an agent picked and they haven't corrected is not, and is free to change. Before changing how a screen looks or behaves, read its section; a rewrite carries every line of it over. A decision that replaces one here deletes it in the same change. Nothing here describes a screen: the code does that.
 
 ## Everywhere
 
