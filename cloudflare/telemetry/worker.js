@@ -123,6 +123,9 @@ const REQUEST = /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)(\s|$)/;
 const sampledTrace = (trace) => parseInt(trace.slice(-8), 16) % SAMPLED_ONE_IN === 0;
 /// What every Worker's requests add up to, kept or not, as OTEL's span metrics connector names it.
 const SPAN_METRIC = "traces.span.metrics.duration";
+/// How Cloudflare says an invocation that failed ended (`cloudflare.outcome`), kept as its `error.type` when it threw nothing:
+/// what tells running out of memory or CPU, or being cut off, from a bug. Any other is `_OTHER`.
+const OUTCOMES = ["exceededCpu", "exceededMemory", "canceled", "responseStreamDisconnected", "scriptNotFound", "loadShed", "killSwitch", "daemonDown"];
 /// The errors a JavaScript engine names (src/insights.rs's `EXCEPTIONS`): any other name is `Error`.
 export const EXCEPTIONS = ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];
 
@@ -150,8 +153,9 @@ function exceptionOf(s) {
 }
 
 /// OTLP/JSON from Cloudflare, each Worker's spans as rows for the spans table, `spans`: only its name if that's a plain
-/// token, its ids, timing, kind and status, a status code, and an exception's type, frame and plain words. Its other
-/// attributes are Cloudflare's, and may name a URL: none are kept. And `metrics`, what every request adds up to, a minute
+/// token, an RPC's as what it called (`<entrypoint>.<method>`), its ids, timing, kind and status, a status code, how it
+/// ended if that's why it failed, and an exception's type, frame and plain words. Its other attributes are Cloudflare's,
+/// and may name a URL: none are kept. And `metrics`, what every request adds up to, a minute
 /// at a time, kept or not.
 export function workerSpans(request, cli) {
   const spans = [];
@@ -164,7 +168,11 @@ export function workerSpans(request, cli) {
   const failed = ({ s }) => s.status?.code === 2 || s.status?.code === "STATUS_CODE_ERROR";
   const took = ({ s }) => Math.max(0, nanos(s.endTimeUnixNano) - nanos(s.startTimeUnixNano));
   const server = ({ s }) => s.kind === 2 || s.kind === "SPAN_KIND_SERVER";
-  const nameOf = ({ s }) => (token(s.name) ? s.name : "span");
+  const nameOf = ({ s }) => {
+    const method = attribute(s.attributes, "jsrpc.method");
+    if (token(method)) return [attribute(s.attributes, "cloudflare.entrypoint"), method].filter(token).join(".");
+    return token(s.name) ? s.name : "span";
+  };
   const counts = new Map();
   for (const x of spans.filter((x) => server(x) && REQUEST.test(x.s.name))) {
     const minute = nanos(x.s.startTimeUnixNano) - (nanos(x.s.startTimeUnixNano) % 60_000);
@@ -187,7 +195,8 @@ export function workerSpans(request, cli) {
     const thrown = failed(x) ? exceptionOf(s) : null;
     // Kept whole for failing or being slow, it stands for itself alone; sampled, for each of the 20 it was one of.
     const attrs = { ...(code !== undefined ? { "http.response.status_code": Number(code) } : {}), "one.sampled": worth.has(s.traceId) ? 1 : SAMPLED_ONE_IN };
-    if (failed(x)) attrs["error.type"] = thrown?.type ?? "_OTHER";
+    const outcome = attribute(s.attributes, "cloudflare.outcome");
+    if (failed(x)) attrs["error.type"] = thrown?.type ?? (OUTCOMES.includes(outcome) ? outcome : "_OTHER");
     if (thrown) {
       attrs.events = [{ name: "exception", attributes: { "exception.type": thrown.type, ...(thrown.frame ? { "exception.stacktrace": `at ${thrown.frame}` } : {}) } }];
       attrs["one.fingerprint"] = `${thrown.type}|${thrown.frame}|`;
