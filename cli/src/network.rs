@@ -77,7 +77,7 @@ pub fn commands() -> Command {
     }
 }
 
-fn status(node: &Client, state: &State) {
+fn status(api: &Client, state: &State) {
     let device = &state.device;
     println!("{} ({}){}", device.name, &device.key[..8.min(device.key.len())], if device.ready { "" } else { ", not ready yet" });
     let Some(i) = &state.network else {
@@ -99,7 +99,7 @@ fn status(node: &Client, state: &State) {
             println!("  {}  {}", g.name, members.join(", "));
         }
     }
-    let apps = node.apps().unwrap_or_default();
+    let apps = api.apps().unwrap_or_default();
     let title = |app: &str| apps.iter().find(|a| a["name"] == app).and_then(|a| a["title"].as_str()).unwrap_or(app).to_string();
     println!("\nDevices");
     for s in &i.devices {

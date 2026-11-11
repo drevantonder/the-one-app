@@ -22,7 +22,7 @@ pub struct Session {
 }
 
 /// The answer to one MCP message, and whether the tools the session lists changed: None for a notification.
-pub fn answer(node: &Client, msg: &Value, session: &mut Session) -> Option<(Value, bool)> {
+pub fn answer(api: &Client, msg: &Value, session: &mut Session) -> Option<(Value, bool)> {
     let id = msg.get("id")?.clone();
     let mode = session.mode;
     let mut changed = false;
@@ -35,11 +35,11 @@ pub fn answer(node: &Client, msg: &Value, session: &mut Session) -> Option<(Valu
             "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
             "capabilities": { "tools": { "listChanged": session.stdio }, "resources": {}, "extensions": { "io.modelcontextprotocol/skills": {} } },
             "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
-            "instructions": instructions(node, mode),
+            "instructions": instructions(api, mode),
             })
         }),
         "ping" => Ok(json!({})),
-        "tools/list" => listed(node).map(|t| {
+        "tools/list" => listed(api).map(|t| {
             let mut t = match mode {
                 Mode::All => [vec![code::search_tool(mode)], t].concat(),
                 Mode::Code => code::code_tools(t),
@@ -48,21 +48,21 @@ pub fn answer(node: &Client, msg: &Value, session: &mut Session) -> Option<(Valu
             json!({ "tools": t })
         }),
         "tools/call" => Ok({
-            let (out, did) = call_and_tell(node, &msg["params"], session);
+            let (out, did) = call_and_tell(api, &msg["params"], session);
             changed = did;
             out
         }),
         // Apps' widgets and screens, as MCP Apps (src/mcp/apps.rs).
         "resources/list" => Ok(json!({ "resources": apps::resources() })),
         "resources/read" => match msg["params"]["uri"].as_str().unwrap_or("") {
-            uri if uri.starts_with("skill://") => skill_resource(node, uri),
+            uri if uri.starts_with("skill://") => skill_resource(api, uri),
             uri => apps::read(uri),
         },
         // Skills over MCP (SEP-2640): the same skills the agents service writes into harnesses' folders.
-        "skills/list" => Ok(json!({ "resultType": "complete", "skills": skills(node).iter().map(skill_entry).collect::<Vec<_>>(), "ttlMs": 60_000, "cacheScope": "session" })),
+        "skills/list" => Ok(json!({ "resultType": "complete", "skills": skills(api).iter().map(skill_entry).collect::<Vec<_>>(), "ttlMs": 60_000, "cacheScope": "session" })),
         "skills/get" => {
             let uri = msg["params"]["uri"].as_str().unwrap_or("");
-            skills(node).iter().find(|s| format!("skill://{}/SKILL.md", s.name) == uri).map(|s| json!({ "skill": skill_entry(s) })).ok_or_else(|| json!({ "code": -32602, "message": format!("no skill {uri}") }))
+            skills(api).iter().find(|s| format!("skill://{}/SKILL.md", s.name) == uri).map(|s| json!({ "skill": skill_entry(s) })).ok_or_else(|| json!({ "code": -32602, "message": format!("no skill {uri}") }))
         }
         other => Err(json!({ "code": -32601, "message": format!("unknown method {other}") })),
     };
@@ -82,18 +82,18 @@ fn tool_names(apps: &[Value]) -> Vec<String> {
 
 /// A tool call, and whether it changed the tools a session lists (adding an app, say): over stdio, the server sends
 /// MCP's notification after the answer; over HTTP, which sends nothing unasked, the answer says which tools are new.
-fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bool) {
+fn call_and_tell(api: &Client, params: &Value, session: &Session) -> (Value, bool) {
     let name = params["name"].as_str().unwrap_or("");
     // Search and the core's tools never change which tools there are.
-    let apps = (session.mode == Mode::All && name != "search" && tools::named(node, name).is_none_or(|(set, _)| set["runs"] != "client")).then(|| node.apps().ok()).flatten();
+    let apps = (session.mode == Mode::All && name != "search" && tools::named(api, name).is_none_or(|(set, _)| set["runs"] != "client")).then(|| api.apps().ok()).flatten();
     let reads = |apps: &[Value]| match name.split_once('_') {
         Some((a, o)) => apps.iter().filter(|x| x["name"] == a).flat_map(|x| x["tools"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
         None => name == "search",
     };
     let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
-    let mut out = call_tool(node, params, session);
+    let mut out = call_tool(api, params, session);
     let Some(before) = before else { return (out, false) };
-    let Ok(after) = node.get("/api/apps").map(|a| tool_names(a.as_array().map(Vec::as_slice).unwrap_or_default())) else { return (out, false) };
+    let Ok(after) = api.get("/api/apps").map(|a| tool_names(a.as_array().map(Vec::as_slice).unwrap_or_default())) else { return (out, false) };
     if after == before {
         return (out, false);
     }
@@ -109,8 +109,8 @@ fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bo
 }
 
 /// The skills for this user, of the sets of tools the API's document lists: the root first (src/skills.rs).
-pub fn skills(node: &Client) -> Vec<crate::skills::Skill> {
-    crate::skills::all(&node.sets().unwrap_or_default())
+pub fn skills(api: &Client) -> Vec<crate::skills::Skill> {
+    crate::skills::all(&api.sets().unwrap_or_default())
 }
 
 /// A skill as `skills/list` lists it: where its SKILL.md is, its frontmatter, and each of its files with its digest.
@@ -125,9 +125,9 @@ fn skill_entry(s: &crate::skills::Skill) -> Value {
 }
 
 /// One of a skill's files, as `resources/read` gives it: `skill://<name>/<path>`.
-fn skill_resource(node: &Client, uri: &str) -> Result<Value, Value> {
+fn skill_resource(api: &Client, uri: &str) -> Result<Value, Value> {
     let (name, path) = uri.trim_start_matches("skill://").split_once('/').unwrap_or((uri, ""));
-    let text = skills(node).into_iter().find(|s| s.name == name).and_then(|s| s.file(path)).ok_or_else(|| json!({ "code": -32002, "message": format!("no resource {uri}") }))?;
+    let text = skills(api).into_iter().find(|s| s.name == name).and_then(|s| s.file(path)).ok_or_else(|| json!({ "code": -32002, "message": format!("no resource {uri}") }))?;
     let mime = if path.ends_with(".js") { "text/javascript" } else { "text/markdown" };
     Ok(json!({ "contents": [{ "uri": uri, "mimeType": mime, "text": text }] }))
 }
@@ -149,11 +149,11 @@ pub fn agent_name(raw: &str) -> String {
 }
 
 /// The MCP server's instructions (src/skills.rs): the rules first, short enough that every harness keeps all of them.
-fn instructions(node: &Client, mode: Mode) -> String {
+fn instructions(api: &Client, mode: Mode) -> String {
     // A harness starts its MCP server at login, before the app runtime may be up: the instructions then say less, and a
     // tool call says why it can't.
-    let state = node.state().ok();
-    crate::skills::instructions(mode, &tools::sets(node).unwrap_or_default(), state.as_ref().and_then(|s| s.user.as_ref()).map(|u| u.name.as_str()))
+    let state = api.state().ok();
+    crate::skills::instructions(mode, &tools::sets(api).unwrap_or_default(), state.as_ref().and_then(|s| s.user.as_ref()).map(|u| u.name.as_str()))
 }
 
 /// MCP's `deploy`, `{CLI} deploy` for an agent with no shell: the app's files as text, built where it's asked.
@@ -171,8 +171,8 @@ fn deploy_tool() -> Value {
 }
 
 /// The tools it lists: its own, then every one the API's document lists.
-fn listed(node: &Client) -> Result<Vec<Value>, Value> {
-    let sets = node.sets().map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+fn listed(api: &Client) -> Result<Vec<Value>, Value> {
+    let sets = api.sets().map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
     // MCP Apps' own version of a tool wins.
     let drawn: Vec<Value> = apps::tools().iter().map(|t| t["name"].clone()).collect();
     let mut tools = vec![deploy_tool()];
@@ -185,21 +185,21 @@ fn listed(node: &Client) -> Result<Vec<Value>, Value> {
 }
 
 /// A tool's answer, within the budget an agent reads (tools::BUDGET).
-fn call_tool(node: &Client, params: &Value, session: &Session) -> Value {
-    let mut out = answer_tool(node, params, session);
+fn call_tool(api: &Client, params: &Value, session: &Session) -> Value {
+    let mut out = answer_tool(api, params, session);
     let name = params["name"].as_str().unwrap_or("");
     let chars: usize = out["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).map(str::len).sum();
     if chars > tools::BUDGET {
         let tool = match name {
             "search" => Some(code::search_tool(session.mode)["inputSchema"].clone()).map(|input| json!({ "input": input })),
-            _ => name.split_once('_').and_then(|(a, o)| tools::find(node, a, o)).map(|(_, o)| o),
+            _ => name.split_once('_').and_then(|(a, o)| tools::find(api, a, o)).map(|(_, o)| o),
         };
         tools::within_budget(&mut out["content"], tool.as_ref());
     }
     out
 }
 
-fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
+fn answer_tool(api: &Client, params: &Value, session: &Session) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let agent = session.agent.as_deref();
     let input = params["arguments"].as_object().cloned().unwrap_or_default();
@@ -209,7 +209,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
     if let Some(Err(e)) = own.map(|t| ::api::tools::check(&t["inputSchema"], &Value::Object(input.clone()))) {
         return failed(format!("{e:#}"));
     }
-    if let Some(out) = apps::call(node, name, &Value::Object(input.clone())) {
+    if let Some(out) = apps::call(api, name, &Value::Object(input.clone())) {
         return out;
     }
     let with_trace = |mut out: Value, trace: Option<Vec<String>>| {
@@ -221,7 +221,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
     match name {
         "search" => {
             let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
-            match code::catalogs(node) {
+            match code::catalogs(api) {
                 Ok((apps, addable)) => json!({ "content": [{ "type": "text", "text": code::search(&apps, &addable, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, session.mode.reader()) }] }),
                 Err(e) => failed(format!("{e:#}")),
             }
@@ -231,7 +231,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             let mut service = String::new();
             let body = match (input.get("files"), input.get("version")) {
                 // React screens and a service are built here, on the machine that deploys, as `deploy <folder>` builds them.
-                (Some(Value::Object(files)), None) if !node.elsewhere() && (::deploy::build::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match ::deploy::service::built_here(node, files) {
+                (Some(Value::Object(files)), None) if !api.elsewhere() && (::deploy::build::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match ::deploy::service::built_here(api, files) {
                     Ok((bundle, built)) => {
                         service = built;
                         json!({ "app": app, "bundle": bundle, "wait": true })
@@ -242,26 +242,26 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
                 (None, Some(version)) => json!({ "app": app, "bundle": version, "wait": true }),
                 _ => return failed("give files, the app's files, or version, an earlier one to put back".into()),
             };
-            match node.post("/api/deploy", body) {
+            match api.post("/api/deploy", body) {
                 Ok(r) => {
-                    let text = format!("{}{service}", ::deploy::build::said(node, app, &r, ::api::Reader::Mcp));
+                    let text = format!("{}{service}", ::deploy::build::said(api, app, &r, ::api::Reader::Mcp));
                     json!({ "isError": r["failed"].is_string(), "content": [{ "type": "text", "text": text }] })
                 }
                 Err(e) => failed(format!("{e:#}")),
             }
         }
-        "execute" => match code::execute(node, input.get("code").and_then(Value::as_str).unwrap_or(""), agent) {
+        "execute" => match code::execute(api, input.get("code").and_then(Value::as_str).unwrap_or(""), agent) {
             Ok(result) => json!({ "isError": result["ok"] != true, "content": [{ "type": "text", "text": code::shown(&result) }] }),
             Err(e) => failed(format!("{e:#}")),
         },
         _ => {
-            let ran = tools::dispatch(node, name, input, ::api::Reader::Mcp, agent, None);
+            let ran = tools::dispatch(api, name, input, ::api::Reader::Mcp, agent, None);
             with_trace(
                 match ran.ok {
                     // A script gets an empty list as it is; an agent reading gets it in words.
-                    Ok(ok) => match name.split_once('_').filter(|_| ok == json!([])).and_then(|(app, tool)| tools::find(node, app, tool)).and_then(|(a, o)| tools::none_said(node, &a, &o, &ok, ::api::Reader::Mcp)) {
+                    Ok(ok) => match name.split_once('_').filter(|_| ok == json!([])).and_then(|(app, tool)| tools::find(api, app, tool)).and_then(|(a, o)| tools::none_said(api, &a, &o, &ok, ::api::Reader::Mcp)) {
                         Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
-                        None => json!({ "content": tools::mcp_content(node, &ok) }),
+                        None => json!({ "content": tools::mcp_content(api, &ok) }),
                     },
                     Err(e) => failed(format!("{e:#}")),
                 },

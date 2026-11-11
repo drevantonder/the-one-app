@@ -11,8 +11,8 @@ use ::api::Client;
 /// `settings` with the network's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
 /// app runtime on this machine knows them, for the relay to take only them; none when no device answers here, which `needed`
 /// refuses, since that relay would take no one.
-fn devices_here(node: &Client, settings: crate::Settings, needed: bool) -> Result<crate::Settings> {
-    let network = node.state().ok().and_then(|s| s.network);
+fn devices_here(api: &Client, settings: crate::Settings, needed: bool) -> Result<crate::Settings> {
+    let network = api.state().ok().and_then(|s| s.network);
     let admin = |user: &str| network.iter().flat_map(|n| &n.users).any(|u| u.id == user && u.role == Role::Admin);
     let mut devices: Vec<Value> = network
         .iter()
@@ -73,9 +73,9 @@ const WORKERS_AI_PERMISSIONS: [&str; 2] = ["Workers AI Read", "Workers AI Write"
 /// Everyone's `AI key: workers-ai`, so every app's `ctx.ai.run` answers with Workers AI from the network's first deploy
 /// (AI Gateway, ai-gateway/): a token that runs the account's models and nothing else, kept in Everyone's Vault through
 /// this computer's app runtime, never anywhere else. Made once, by the first deploy whose token may make tokens.
-fn workers_ai_key(cf: &crate::Cloudflare, node: &Client) -> Result<()> {
+fn workers_ai_key(cf: &crate::Cloudflare, api: &Client) -> Result<()> {
     let kind = ::ai_gateway::Company::WorkersAi.key_kind();
-    let items = node.get("/api/vault?scope=global")?;
+    let items = api.get("/api/vault?scope=global")?;
     if items.as_array().into_iter().flatten().any(|it| it["type"] == kind.as_str()) {
         return Ok(());
     }
@@ -85,7 +85,7 @@ fn workers_ai_key(cf: &crate::Cloudflare, node: &Client) -> Result<()> {
     let made = cf.post(&format!("/accounts/{}/tokens", cf.account), json!({ "name": format!("{CLI}-workers-ai"), "policies": policies })).context("making the token apps run Workers AI's models with, which needs a Cloudflare API token with Account API Tokens Write")?;
     let token = made["value"].as_str().context("Cloudflare made the token and didn't give its value")?;
     let host = ::ai_gateway::Company::WorkersAi.host();
-    node.post("/api/vault", json!({ "scope": "global", "title": "Workers AI Key", "type": kind, "domain": "cloudflare.com", "fields": { "account_id": { "value": cf.account, "secret": false }, "api_key": { "value": token, "secret": true } }, "hosts": [host], "apps": [::key::APP] }))?;
+    api.post("/api/vault", json!({ "scope": "global", "title": "Workers AI Key", "type": kind, "domain": "cloudflare.com", "fields": { "account_id": { "value": cf.account, "secret": false }, "api_key": { "value": token, "secret": true } }, "hosts": [host], "apps": [::key::APP] }))?;
     Ok(())
 }
 
@@ -130,7 +130,7 @@ pub fn commands() -> Command {
             ("cloudflare use <address>".into(), "point this network at its Workers: its devices take sign-ins made at the address".into()),
         ],
         run: |g| {
-            let node = g.api;
+            let api = g.api;
             match g.words().as_slice() {
                 ["cloudflare"] => print!("{}", cloudflare_said(&crate::Settings::load()?)),
                 ["cloudflare", "serve"] => {
@@ -205,15 +205,15 @@ pub fn commands() -> Command {
                     let mut settings = settings;
                     put_up(&cf, &mut settings, newest)?;
                     settings.save()?;
-                    if let Err(err) = workers_ai_key(&cf, node) {
+                    if let Err(err) = workers_ai_key(&cf, api) {
                         eprintln!("Apps' AI won't answer with Workers AI until a deploy makes its key, with a token that may make tokens, beside a computer of the network: {err:#}");
                     }
                     // The clients its users sign in with, signed by this admin's device: a new device's sign-in counts
                     // only for one of them (`sign_in_proof::CLIENTS`), whatever auth says.
                     if let Some(clients) = settings.sign_in_clients() {
-                        let had = node.state().ok().and_then(|s| s.network?.settings.get(::scope::sign_in_proof::CLIENTS).cloned());
+                        let had = api.state().ok().and_then(|s| s.network?.settings.get(::scope::sign_in_proof::CLIENTS).cloned());
                         if had.as_deref() != Some(clients.as_str())
-                            && let Err(err) = node.post("/api/settings", json!({ "name": ::scope::sign_in_proof::CLIENTS, "value": clients }))
+                            && let Err(err) = api.post("/api/settings", json!({ "name": ::scope::sign_in_proof::CLIENTS, "value": clients }))
                         {
                             eprintln!("A new device's sign-in can't be checked until an admin's device runs {CLI} settings {} {clients}: {err:#}", ::scope::sign_in_proof::CLIENTS);
                         }
@@ -241,7 +241,7 @@ pub fn commands() -> Command {
                     }
                     // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
                     // things run in.
-                    node.post("/api/settings", json!({ "name": ::scope::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
+                    api.post("/api/settings", json!({ "name": ::scope::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
                     println!("oned is on your Cloudflare account: devices ask it over iroh when none of your computers answers.");
                 }
                 ["cloudflare", "set", name, value] => {
@@ -272,7 +272,7 @@ pub fn commands() -> Command {
                     println!("Set {name}. {CLI} cloudflare serve takes it at its next start, and {CLI} cloudflare deploy when it next runs.");
                 }
                 ["cloudflare", "use", address] => {
-                    node.post("/api/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
+                    api.post("/api/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
                     println!("This network is at {address}: its devices take sign-ins made there.");
                 }
                 _ => return Ok(false),

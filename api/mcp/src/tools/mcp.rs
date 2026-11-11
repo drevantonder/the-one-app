@@ -65,30 +65,30 @@ pub fn mcp_tool(app: &Value, tool: &Value, name: String) -> Value {
 
 /// Brings an agent's file inputs to what apps take, `{ name, type, size, base64 }`: from base64, a file id (a blob
 /// this device can get) or a public URL.
-pub fn mcp_files(node: &Client, tool: &Value, input: &mut Map<String, Value>) -> Result<()> {
+pub fn mcp_files(api: &Client, tool: &Value, input: &mut Map<String, Value>) -> Result<()> {
     let props = tool["input"]["properties"].as_object().cloned().unwrap_or_default();
     for (name, prop) in props {
         let (Some(list), Some(v)) = (takes_file(&prop), input.get_mut(&name)) else { continue };
         match (list, v) {
             (true, Value::Array(items)) => {
                 for item in items {
-                    *item = mcp_file(node, item).with_context(|| format!("{name}"))?;
+                    *item = mcp_file(api, item).with_context(|| format!("{name}"))?;
                 }
             }
-            (_, v) => *v = mcp_file(node, v).with_context(|| format!("{name}"))?,
+            (_, v) => *v = mcp_file(api, v).with_context(|| format!("{name}"))?,
         }
     }
     Ok(())
 }
 
-fn mcp_file(node: &Client, v: &Value) -> Result<Value> {
+fn mcp_file(api: &Client, v: &Value) -> Result<Value> {
     let name = v["name"].as_str().map(str::to_string);
     let (bytes, ty, name) = if let Some(data) = v["base64"].as_str() {
         let bytes = data_encoding::BASE64.decode(data.trim().as_bytes()).context("base64 that doesn't decode")?;
         ensure!(bytes.len() <= MCP_FILE_LIMIT, "a file given as base64 is at most 1 MiB; give a file id or URL for a bigger one");
         (bytes, v["type"].as_str().or(v["mimeType"].as_str()).map(str::to_string), name)
     } else if let Some(id) = v["file"].as_str().or(v["blob"].as_str()) {
-        let blob = node.open(&format!("/api/blobs/{id}"), None)?;
+        let blob = api.open(&format!("/api/blobs/{id}"), None)?;
         ensure!(blob.status == 200, "no file {id} for you");
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(&mut std::io::Read::take(blob.body, FILE_LIMIT as u64 + 1), &mut bytes)?;
@@ -96,7 +96,7 @@ fn mcp_file(node: &Client, v: &Value) -> Result<Value> {
         (bytes, v["type"].as_str().map(str::to_string), name)
     } else if let Some(url) = v["url"].as_str() {
         ensure!(url.starts_with("https://") || url.starts_with("http://"), "a file's url is http or https");
-        let mut resp = fetch_file(node, url)?;
+        let mut resp = fetch_file(api, url)?;
         ensure!(resp.status().is_success(), "{url} answered {}", resp.status());
         let ty = resp.headers().get("content-type").and_then(|t| t.to_str().ok()).map(|t| t.split(';').next().unwrap_or(t).to_string());
         let named = url.split(['?', '#']).next().and_then(|u| u.rsplit('/').next()).filter(|n| !n.is_empty()).map(str::to_string);
@@ -112,8 +112,8 @@ fn mcp_file(node: &Client, v: &Value) -> Result<Value> {
 /// Gets a file an agent gave as a URL. For someone signed in elsewhere, only from the internet, each redirect too: this
 /// machine's addresses (its local API, which takes this device for its own programs), its network's and its tailnet's
 /// are its user's, not theirs.
-fn fetch_file(node: &Client, url: &str) -> Result<ureq::http::Response<ureq::Body>> {
-    let agent = match node.elsewhere() {
+fn fetch_file(api: &Client, url: &str) -> Result<ureq::http::Response<ureq::Body>> {
+    let agent = match api.elsewhere() {
         true => platform::reach::agent(ureq::Agent::config_builder().http_status_as_error(false), platform::reach::public),
         false => ::api::local::agent(),
     };
@@ -177,13 +177,13 @@ fn group(n: usize) -> String {
 
 /// A result as MCP content: text, or JSON with each file in it kept as a file this device serves, given back as a
 /// reference (name, type, size, its id and a link), with images also shown.
-pub fn mcp_content(node: &Client, ok: &Value) -> Value {
+pub fn mcp_content(api: &Client, ok: &Value) -> Value {
     if ok["content"].is_array() {
         return ok["content"].clone();
     }
     let mut shown = Vec::new();
     let mut ok = ok.clone();
-    keep_files(node, &mut ok, &mut shown, 0);
+    keep_files(api, &mut ok, &mut shown, 0);
     no_pictures(&mut ok);
     let text = match &ok {
         Value::String(s) => s.clone(),
@@ -211,9 +211,9 @@ fn no_pictures(v: &mut Value) {
 }
 
 /// Replaces each file in `v` (to a few levels deep) with a reference to a blob that holds it.
-fn keep_files(node: &Client, v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
+fn keep_files(api: &Client, v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
     if let Some((name, ty, bytes)) = as_file(v) {
-        if let Ok(id) = node.put_blob(&bytes) {
+        if let Ok(id) = api.put_blob(&bytes) {
             if ty.starts_with("image/") && bytes.len() <= MCP_FILE_LIMIT {
                 shown.push(json!({ "type": "image", "data": data_encoding::BASE64.encode(&bytes), "mimeType": ty }));
             }
@@ -227,8 +227,8 @@ fn keep_files(node: &Client, v: &mut Value, shown: &mut Vec<Value>, depth: usize
         return;
     }
     match v {
-        Value::Array(items) => items.iter_mut().for_each(|i| keep_files(node, i, shown, depth + 1)),
-        Value::Object(map) => map.values_mut().for_each(|i| keep_files(node, i, shown, depth + 1)),
+        Value::Array(items) => items.iter_mut().for_each(|i| keep_files(api, i, shown, depth + 1)),
+        Value::Object(map) => map.values_mut().for_each(|i| keep_files(api, i, shown, depth + 1)),
         _ => {}
     }
 }

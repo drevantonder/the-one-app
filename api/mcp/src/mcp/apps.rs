@@ -107,36 +107,36 @@ pub fn tools() -> Vec<Value> {
 }
 
 /// Answers `widgets_show` and `screens_open`; None for any other tool.
-pub fn call(node: &Client, name: &str, input: &Value) -> Option<Value> {
+pub fn call(api: &Client, name: &str, input: &Value) -> Option<Value> {
     let result = match name {
-        "widgets_show" => shown(node, input),
-        "screens_open" => screen(node, input),
+        "widgets_show" => shown(api, input),
+        "screens_open" => screen(api, input),
         "screens_icons" => icons(input),
-        "screens_call" => for_screen(node, input),
-        "screens_thrown" => thrown(node, input),
-        "screens_changes" => changes(node, input),
+        "screens_call" => for_screen(api, input),
+        "screens_thrown" => thrown(api, input),
+        "screens_changes" => changes(api, input),
         _ => return None,
     };
     Some(result.unwrap_or_else(|e| json!({ "isError": true, "content": [{ "type": "text", "text": format!("{e:#}") }] })))
 }
 
 /// What threw in a screen on a chat's page, to its app runtime.
-fn thrown(node: &Client, input: &Value) -> anyhow::Result<Value> {
-    node.post("/api/insights/report", json!({ "platform": "mcp", "events": [{ "name": "screen.exception", "app": input["app"], "screen": input["screen"], "exception": input["exception"] }] }))?;
+fn thrown(api: &Client, input: &Value) -> anyhow::Result<Value> {
+    api.post("/api/insights/report", json!({ "platform": "mcp", "events": [{ "name": "screen.exception", "app": input["app"], "screen": input["screen"], "exception": input["exception"] }] }))?;
     Ok(json!({ "content": [] }))
 }
 
 /// `widgets_show` as a chat that draws them answers it: with what to draw, and in words for what can't.
-fn shown(node: &Client, input: &Value) -> anyhow::Result<Value> {
-    let shown = node.post("/api/widgets/show", input.clone())?;
+fn shown(api: &Client, input: &Value) -> anyhow::Result<Value> {
+    let shown = api.post("/api/widgets/show", input.clone())?;
     Ok(json!({ "content": [{ "type": "text", "text": shown["said"] }], "structuredContent": { "widgets": shown["widgets"] } }))
 }
 
-fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
+fn screen(api: &Client, input: &Value) -> anyhow::Result<Value> {
     let app = input["app"].as_str().unwrap_or_default();
     let screen = input["screen"].as_str().unwrap_or("main");
     // An app runtime shows a page for what isn't there, with the way home: from a chat, the agent should hear it.
-    let apps = node.apps().unwrap_or_default();
+    let apps = api.apps().unwrap_or_default();
     let found = apps.iter().find(|a| a["name"] == app);
     let screens = found.map(|a| a["screens"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
     anyhow::ensure!(found.is_some(), "no app named {app}: apps_list lists them");
@@ -149,7 +149,7 @@ fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     }
     url.push('?');
     url.push_str(&query.iter().map(|(k, v)| format!("{k}={}", urlencode(v))).collect::<Vec<_>>().join("&"));
-    let page = node.open(&url, None)?;
+    let page = api.open(&url, None)?;
     let mut html = String::new();
     std::io::Read::read_to_string(&mut { page.body }, &mut html)?;
     anyhow::ensure!(page.status == 200, "{}", html.trim());
@@ -158,7 +158,7 @@ fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
         .and_then(|a| a["screens"].as_array().into_iter().flatten().find(|s| s["name"] == screen)?["title"].as_str())
         .or_else(|| found.and_then(|a| a["title"].as_str().or(a["name"].as_str())))
         .unwrap_or(app);
-    let address = node.state().ok().and_then(|s| s.address().map(|a| a.trim_end_matches('/').to_string()));
+    let address = api.state().ok().and_then(|s| s.address().map(|a| a.trim_end_matches('/').to_string()));
     let web = address.map(|a| format!("{a}/app/{}/{}?{}", urlencode(app), urlencode(screen), query.iter().map(|(k, v)| format!("{k}={}", urlencode(v))).collect::<Vec<_>>().join("&")));
     Ok(json!({
         "content": [{ "type": "text", "text": format!("Opened {app}'s {screen} screen for the user.") }],
@@ -170,26 +170,26 @@ fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
 /// (cut to a budget, its pictures taken out, an empty list in words). It reaches the tools only screens use, which a chat
 /// won't let a view call unless they're listed for it, and what's still refused without `confirm` here is refused
 /// unless the view says the user pressed it.
-fn for_screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
+fn for_screen(api: &Client, input: &Value) -> anyhow::Result<Value> {
     let (app, tool) = (input["app"].as_str().unwrap_or_default(), input["tool"].as_str().unwrap_or_default());
     // The tools only screens use are in no document: the app's own list has them.
-    let found = crate::tools::find(node, app, tool).or_else(|| node.apps().ok()?.into_iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["tools"].as_array()?.iter().find(|t| t["name"] == tool)?.clone()))));
+    let found = crate::tools::find(api, app, tool).or_else(|| api.apps().ok()?.into_iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["tools"].as_array()?.iter().find(|t| t["name"] == tool)?.clone()))));
     let mut arguments = input["input"].as_object().cloned().unwrap_or_default();
     if input["confirm"] == true && found.as_ref().is_some_and(|(_, spec)| spec["confirm"] == true) {
         arguments.insert("confirm".into(), true.into());
     }
-    let ok = crate::tools::dispatch(node, &format!("{app}_{tool}"), arguments, ::api::Reader::Mcp, None, found).ok?;
+    let ok = crate::tools::dispatch(api, &format!("{app}_{tool}"), arguments, ::api::Reader::Mcp, None, found).ok?;
     Ok(json!({ "content": [{ "type": "text", "text": "Done." }], "structuredContent": { "ok": ok } }))
 }
 
 /// The app runtime's next event that changes what the view shows of `apps` (their data, or which apps there are), within 25
 /// seconds; none if nothing does by then.
-fn changes(node: &Client, input: &Value) -> anyhow::Result<Value> {
+fn changes(api: &Client, input: &Value) -> anyhow::Result<Value> {
     use std::io::BufRead;
     const WAIT: std::time::Duration = std::time::Duration::from_secs(25);
     let apps: Vec<&str> = input["apps"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     let mut events = vec![];
-    let resp = node.open("/api/events", Some(WAIT))?;
+    let resp = api.open("/api/events", Some(WAIT))?;
     if resp.status == 204 {
         // An app runtime with none to say (oned on Cloudflare, while no machine is on): the view asks again after the wait.
         std::thread::sleep(WAIT);

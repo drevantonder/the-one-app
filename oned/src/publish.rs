@@ -12,7 +12,7 @@ use oned_update::release::Version;
 
 /// Puts `things`' files where devices take them, and adds them to the record at the network's address, signed with the
 /// release key: each `(name, file, version, config commit)`, with no file for what's built, not fetched (`source`).
-pub fn publish_latest(node: &::api::Client, key: &ssh_key::PrivateKey, things: &[(String, Option<PathBuf>, Version, String)]) -> Result<()> {
+pub fn publish_latest(api: &::api::Client, key: &ssh_key::PrivateKey, things: &[(String, Option<PathBuf>, Version, String)]) -> Result<()> {
     if let Some((_, _, version, _)) = things.iter().find(|(_, _, v, _)| v.commit.ends_with("+dirty")) {
         bail!("{} has uncommitted changes; commit, build again, then publish", version.commit);
     }
@@ -22,7 +22,7 @@ pub fn publish_latest(node: &::api::Client, key: &ssh_key::PrivateKey, things: &
         let (sha256, size) = match path {
             None => ("-".to_string(), 0),
             Some(path) => {
-                let put = node.post("/api/latest/put", json!({ "path": path }))?;
+                let put = api.post("/api/latest/put", json!({ "path": path }))?;
                 (put["sha256"].as_str().context("no hash")?.to_string(), put["size"].as_u64().unwrap_or(0))
             }
         };
@@ -30,10 +30,10 @@ pub fn publish_latest(node: &::api::Client, key: &ssh_key::PrivateKey, things: &
     }
     let public = key.public_key().to_openssh()?;
     for _ in 0..16 {
-        let now = node.get("/api/latest")?;
+        let now = api.get("/api/latest")?;
         let here = now["text"].as_str().and_then(|t| Latest::read(&public, t).ok()).unwrap_or_default();
         let text = here.merged(made.iter().cloned()).signed(key)?;
-        if node.post("/api/latest", json!({ "text": text, "tag": now["tag"] }))?["replaced"] == true {
+        if api.post("/api/latest", json!({ "text": text, "tag": now["tag"] }))?["replaced"] == true {
             return Ok(());
         }
     }

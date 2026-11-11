@@ -114,21 +114,21 @@ pub fn commands() -> Command {
 /// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the network hasn't one by that
 /// name, and deploys it, saying whether this device runs it yet.
 fn deploy(g: &Given, dir: &std::path::Path) -> Result<()> {
-    let node = g.api;
+    let api = g.api;
     anyhow::ensure!(dir.is_dir(), "no folder {} in {}: give the app's folder", dir.display(), std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default());
     let name = match g.flag("name") {
         Some(name) => name.to_string(),
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
     };
-    let (blob, service) = ::deploy::service::built_with_service(node, dir)?;
-    let deployed = node.post("/api/deploy", json!({ "app": name, "bundle": blob, "owner": g.flag("owner"), "wait": true }))?;
-    deployed_said(node, &name, &deployed, &service)?;
+    let (blob, service) = ::deploy::service::built_with_service(api, dir)?;
+    let deployed = api.post("/api/deploy", json!({ "app": name, "bundle": blob, "owner": g.flag("owner"), "wait": true }))?;
+    deployed_said(api, &name, &deployed, &service)?;
     Ok(())
 }
 
 /// Says what the deploy did. One that doesn't start is deployed, but this command failed.
-fn deployed_said(node: &Client, app: &str, deployed: &Value, service: &str) -> Result<()> {
-    let said = format!("{}{service}", ::deploy::build::said(node, app, deployed, ::api::Reader::Cli));
+fn deployed_said(api: &Client, app: &str, deployed: &Value, service: &str) -> Result<()> {
+    let said = format!("{}{service}", ::deploy::build::said(api, app, deployed, ::api::Reader::Cli));
     if deployed["failed"].is_string() {
         anyhow::bail!("{said}");
     }

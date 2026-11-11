@@ -22,22 +22,22 @@ use ::api::Reader;
 
 /// A tool as the command line reads it, with its set, as the API's document lists them (`Client::sets`); None when it
 /// lists none.
-pub fn find(node: &Client, app: &str, tool: &str) -> Option<(Value, Value)> {
-    let apps = sets(node).ok()?;
+pub fn find(api: &Client, app: &str, tool: &str) -> Option<(Value, Value)> {
+    let apps = sets(api).ok()?;
     let a = apps.iter().find(|a| a["name"] == app)?.clone();
     let o = a["tools"].as_array()?.iter().find(|o| o["name"] == tool)?.clone();
     Some((a, o))
 }
 
 /// A tool by the name MCP calls it, with its set.
-pub fn named(node: &Client, name: &str) -> Option<(Value, Value)> {
-    node.sets().ok()?.iter().find_map(|s| Some((s.clone(), s["tools"].as_array()?.iter().find(|t| t["id"] == name)?.clone())))
+pub fn named(api: &Client, name: &str) -> Option<(Value, Value)> {
+    api.sets().ok()?.iter().find_map(|s| Some((s.clone(), s["tools"].as_array()?.iter().find(|t| t["id"] == name)?.clone())))
 }
 
 /// The sets of tools as commands and search read them: a core tool named as its feature (`logs`) is a command of its own
 /// (`one logs`), not one of its set's, and a feature left with none isn't a set.
-pub fn sets(node: &Client) -> Result<Vec<Value>> {
-    let mut sets = node.sets()?;
+pub fn sets(api: &Client) -> Result<Vec<Value>> {
+    let mut sets = api.sets()?;
     for set in &mut sets {
         let name = set["name"].clone();
         if let Some(tools) = set["tools"].as_array_mut() {
@@ -55,7 +55,7 @@ pub fn sets(node: &Client) -> Result<Vec<Value>> {
 
 /// An empty list of accounts, from a tool that says it lists them (`accounts: true`), in words, with what to do:
 /// screens want the list, a user or agent reading wants this.
-pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, reader: Reader) -> Option<String> {
+pub fn none_said(api: &Client, app: &Value, tool: &Value, ok: &Value, reader: Reader) -> Option<String> {
     if tool["accounts"] != true || ok.as_array().is_none_or(|a| !a.is_empty()) {
         return None;
     }
@@ -64,7 +64,7 @@ pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, reader: R
     // One that needs a part on a device, with none of yours running it: signing in can't work yet.
     let parts: Vec<&Value> = app["uses"]["services"].as_array().into_iter().flatten().collect();
     let on_none = || {
-        let state = node.state().ok()?;
+        let state = api.state().ok()?;
         Some(!state.network?.devices.iter().any(|d| d.now.services.iter().any(|s| parts.iter().any(|p| *p == s))))
     };
     Some(match (signs_in, app["needs"].as_str()) {
@@ -78,9 +78,9 @@ pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, reader: R
 /// What to say for an app or tool nobody here lists, with the nearest names: `gmail has no tool serch:
 /// did you mean search?`, `no app gmial: did you mean gmail?`. On the command line, built-in commands are names too.
 /// `commands` are the command line's own commands' forms, when it asks.
-pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[(String, String)]>) -> Result<String> {
+pub fn unknown(api: &Client, app: &str, tool: Option<&str>, commands: Option<&[(String, String)]>) -> Result<String> {
     let cli = commands.is_some();
-    let apps = sets(node)?;
+    let apps = sets(api)?;
     let tools_of = |a: &Value| -> Vec<String> { a["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).map(String::from).collect() };
     // One the user could add: the app runtime lists it, without tools for them, since it isn't added where they are.
     let addable = |a: &Value| a["tools"].is_null() && a["deleted"].is_null();

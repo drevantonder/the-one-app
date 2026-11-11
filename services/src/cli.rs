@@ -82,10 +82,10 @@ pub fn commands() -> Command {
 
 /// Every service there is: those an app uses (an app's service may not be on a device yet, and is switched on there
 /// to put it on), and the parts devices list.
-fn known(node: &Client) -> Result<BTreeSet<String>> {
-    let mut names: BTreeSet<String> = node.apps()?.iter().flat_map(|a| a["uses"]["services"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect::<Vec<_>>()).collect();
+fn known(api: &Client) -> Result<BTreeSet<String>> {
+    let mut names: BTreeSet<String> = api.apps()?.iter().flat_map(|a| a["uses"]["services"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect::<Vec<_>>()).collect();
     names.insert(scope::scopes::APPS_PART.into());
-    if let Some(network) = node.state()?.network {
+    if let Some(network) = api.state()?.network {
         for s in &network.devices {
             names.extend(s.now.parts.iter().flatten().map(|p| p.name.clone()));
             names.extend(s.now.installed_services.iter().map(|d| d.name.clone()));

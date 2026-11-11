@@ -18,15 +18,15 @@ use crate::tools;
 
 /// The core's tools, then every app added for this user that has tools, as `GET /api/apps` gives them, with each
 /// tool's input as MCP takes it (files explained, `device` and `confirm` where they apply).
-pub fn catalog(node: &Client) -> Result<Vec<Value>> {
-    Ok(catalogs(node)?.0)
+pub fn catalog(api: &Client) -> Result<Vec<Value>> {
+    Ok(catalogs(api)?.0)
 }
 
 /// What a search looks through: `catalog`'s apps, then the apps the user could add, which have no tools for
 /// them yet: those not added where they are, nor deleted.
-pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
+pub fn catalogs(api: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
     let (mut apps, mut addable) = (Vec::new(), Vec::new());
-    for mut app in node.sets()? {
+    for mut app in api.sets()? {
         let tools: Vec<Value> = app["tools"]
             .as_array()
             .into_iter()
@@ -316,9 +316,9 @@ fn runner() -> Result<(PathBuf, PathBuf)> {
 /// Runs a script: each call it makes is checked against its tool's inputs and run as the user, as an MCP call
 /// is, what sends or can't be undone only with confirm: true. Gives back code mode's result: `{ ok, value | error,
 /// logs, truncated, toolCalls }`.
-pub fn execute(node: &Client, script: &str, agent: Option<&str>) -> Result<Value> {
+pub fn execute(api: &Client, script: &str, agent: Option<&str>) -> Result<Value> {
     anyhow::ensure!(!script.trim().is_empty(), "give the script as code");
-    let (apps, sets) = (catalog(node)?, tools::sets(node)?);
+    let (apps, sets) = (catalog(api)?, tools::sets(api)?);
     let mut tools = Vec::new();
     let mut descriptions = serde_json::Map::new();
     for app in &apps {
@@ -354,7 +354,7 @@ pub fn execute(node: &Client, script: &str, agent: Option<&str>) -> Result<Value
             let answer = (|| {
                 let spec = spec.with_context(|| format!("no tool {app}_{tool}"))?;
                 anyhow::ensure!(input.is_object() || input.is_null(), "a tool's input is an object, not {input}");
-                tools::dispatch(node, &Reader::Mcp.named(app, tool), input.as_object().cloned().unwrap_or_default(), Reader::Code, agent, Some(spec)).ok
+                tools::dispatch(api, &Reader::Mcp.named(app, tool), input.as_object().cloned().unwrap_or_default(), Reader::Code, agent, Some(spec)).ok
             })();
             let reply = match answer {
                 Ok(ok) => json!({ "reply": id, "ok": ok }),

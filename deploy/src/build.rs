@@ -206,11 +206,11 @@ fn lacking_said(names: &[String]) -> Option<String> {
 }
 
 /// What a deploy did, and what's next, as `reader` would do it. `node` says whether the app is on a page of the caller's.
-pub fn said(node: &::api::Client, app: &str, r: &serde_json::Value, reader: ::api::Reader) -> String {
+pub fn said(api: &::api::Client, app: &str, r: &serde_json::Value, reader: ::api::Reader) -> String {
     use ::custom_build::config::CLI;
     use ::api::Reader;
     let short = |b: &serde_json::Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
-    let added = node.get("/api/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["added"].as_array().is_some_and(|i| !i.is_empty()))) == Some(true);
+    let added = api.get("/api/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["added"].as_array().is_some_and(|i| !i.is_empty()))) == Some(true);
     let tools: Vec<String> = r["tools"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(|t| match reader { Reader::Cli => format!("{CLI} {app} {t}"), _ => format!("{app}_{t}") }).collect();
     let add = match reader { Reader::Cli => format!("{CLI} add {app}"), _ => format!("add {{ app: \"{app}\", scope: \"user\" }}") };
     let mut out = vec![format!("Deployed {app} ({}){}.", short(&r["bundle"]), if r["made"] == true { ", a new app of yours" } else { "" })];
@@ -262,7 +262,7 @@ pub fn screens(dir: &Path) -> Result<()> {
     // Bun runs the build and installs its tools; App runtime runs it, and npm, which comes with it, installs them.
     let (runtime, install): (PathBuf, (PathBuf, &[&str])) = match (runs("bun"), runs("node"), runs("npm")) {
         (Some(bun), _, _) => (bun.clone(), (bun, &["install", "--frozen-lockfile", "--ignore-scripts"])),
-        (None, Some(node), Some(npm)) => (node, (npm, &["install", "--ignore-scripts", "--no-audit", "--no-fund"])),
+        (None, Some(api), Some(npm)) => (api, (npm, &["install", "--ignore-scripts", "--no-audit", "--no-fund"])),
         _ => bail!(
             "{}'s React screens (screens/*.jsx) are built on the machine that deploys it, which needs Bun (bun.sh, recommended) or Node (nodejs.org): install one and deploy again",
             dir.canonicalize().ok().and_then(|d| Some(d.file_name()?.to_string_lossy().to_string())).unwrap_or_else(|| "this app".into())
