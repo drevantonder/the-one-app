@@ -105,7 +105,8 @@ impl Node {
     /// the hash it kept with it. One that doesn't check out is read again from the bucket.
     pub(super) fn start_kept(&self) {
         let Some(kept) = self.kept_scope_db(&Scope::Global) else { return };
-        if let Err(err) = self.with(|i| i.r.restart(&kept, now_ms())) {
+        // Its state as kept is its view, so what it forgot before is no news to the next step.
+        if let Err(err) = self.with(|i| i.r.restart(&kept, now_ms()).and_then(|_| update_views(i))) {
             tracing::warn!("who's who this device kept: {err:#}: it's read again from the bucket");
             return;
         }
@@ -233,8 +234,9 @@ impl Node {
         let read = steps::read(&bucket, &keys, scope, from, made).await?;
         let (kept, took, forgotten) = self.with(|i| {
             let mut reader = i.scope_dbs.remove(scope).context("no database")?;
+            // As its database kept it, which a restart doesn't lose.
+            let was = reader.db.state()?.forgotten;
             let took = reader.take(from, &read, i.r.db(), scope, now_ms());
-            let was = i.views.get(&scope.to_string()).map(|s| s.forgotten.clone()).unwrap_or_default();
             let state = reader.db.state()?;
             // The blobs its steps said its apps no longer need, as `forget` entries did.
             let forgotten: Vec<(String, String)> = state.forgotten.iter().filter(|b| !was.contains(*b)).map(|b| (scope.to_string(), b.clone())).collect();
