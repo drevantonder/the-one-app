@@ -1080,11 +1080,12 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     let mut failed = span("GET /users/anna@example.org", 'a', 2, None);
     failed["events"] = json!([{ "name": "exception", "attributes": [{ "key": "exception.type", "value": { "stringValue": "TypeError" } }, { "key": "exception.message", "value": { "stringValue": "internal error; reference = l1kprhha71iut801 for anna@example.org" } }, { "key": "exception.stacktrace", "value": { "stringValue": "    at async worker_default.ask (worker.js:474:18)" } }] }]);
     // Trace `0…` is one in 20; trace `d…` isn't.
-    let request = json!({ "resourceSpans": [of("one-gateway", vec![failed, span("GET", 'd', 0, None), span("GET", '0', 0, None)]), of("one-relay", vec![span("hibernatableWebSocket", 'e', 0, None)]), of("one-telemetry", vec![span("fetch", 'c', 2, None)]), of("one-mcp", vec![span("fetch", 'b', 2, None)]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
+    let request = json!({ "resourceSpans": [of("one-gateway", vec![failed, span("GET", 'd', 0, None), span("GET", '0', 0, None)]), of("one-relay", vec![span("hibernatableWebSocket", 'e', 0, None)]), of("one-telemetry", vec![span("fetch", 'c', 2, None)]), of("one-mcp", vec![span("fetch", 'b', 2, None), span("GET", '0', 0, Some(&"2".repeat(16)))]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
     let read = formats.js(json!({ "op": "telemetryWorkerSpans", "request": request, "cli": "one" }));
     let rows = read["spans"].as_array().unwrap();
-    assert_eq!(rows.len(), 3, "the gateway's failure, the one request in 20, and mcp's failure: not another request, a WebSocket message, nor what node or telemetry did: {rows:?}");
+    assert_eq!(rows.len(), 4, "the gateway's failure, the one request in 20 wherever it's handled, and mcp's failure: not another request, a WebSocket message, nor what node or telemetry did: {rows:?}");
     assert_eq!((rows[2]["service"].as_str(), rows[2]["name"].as_str()), (Some("worker.mcp"), Some("fetch")));
+    assert_eq!((rows[3]["service"].as_str(), rows[3]["trace"].as_str(), rows[3]["parent"].as_str()), (Some("worker.mcp"), Some("0".repeat(32).as_str()), Some("2".repeat(16).as_str())), "a request reached through the gateway's binding, in an export of its own, is picked by its trace id as the gateway's is");
     assert!(!rows[2].to_string().contains("anna"), "{}", rows[2]);
     let stored = rows[0].to_string();
     assert!(!stored.contains("anna") && !stored.contains("example") && !stored.contains("url.full") && !stored.contains("l1kp"), "{stored}");
@@ -1095,7 +1096,7 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     assert_eq!((rows[1]["trace"].as_str(), serde_json::from_str::<Value>(rows[1]["attrs"].as_str().unwrap()).unwrap()["one.sampled"].as_u64()), (Some("0".repeat(32).as_str()), Some(20)), "a sampled request stands for the 20 it's one of");
     let counted: Vec<(String, String, String, u64)> = read["metrics"].as_array().unwrap().iter().map(|m| { let a: Value = serde_json::from_str(m["attrs"].as_str().unwrap()).unwrap(); (m["service"].as_str().unwrap().to_string(), a["span.name"].as_str().unwrap().to_string(), a["status.code"].as_str().unwrap().to_string(), m["count"].as_u64().unwrap()) }).collect();
     let want = |s: &str, n: &str, st: &str, c: u64| (s.to_string(), n.to_string(), st.to_string(), c);
-    assert_eq!(counted, [want("worker.gateway", "span", "STATUS_CODE_ERROR", 1), want("worker.gateway", "GET", "STATUS_CODE_UNSET", 2)], "every request is counted, kept or not, and a WebSocket message isn't one");
+    assert_eq!(counted, [want("worker.gateway", "span", "STATUS_CODE_ERROR", 1), want("worker.gateway", "GET", "STATUS_CODE_UNSET", 2), want("worker.mcp", "GET", "STATUS_CODE_UNSET", 1)], "every request is counted, kept or not, and a WebSocket message isn't one");
     let program = one::insights::otlp::items(&json!({ "resourceSpans": [{ "scopeSpans": [{ "spans": [span("GET /users/anna@example.org", 'a', 2, None)] }] }] }));
     assert_eq!((program[0].name.as_str(), program[0].ms, program[0].ok, program[0].status_code), ("span", 500, false, Some(500)), "the same span reads the same on a device");
     let named: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryExceptions" }))).unwrap();

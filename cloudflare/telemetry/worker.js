@@ -215,7 +215,9 @@ export function workerSpans(request, cli) {
   }
   const metrics = [...counts.values()].map((m) => ({ ...m, buckets: JSON.stringify(m.buckets), attrs: JSON.stringify(m.attrs) })).filter((row) => kept(row, TABLES.metrics, NOBODY, false));
   const worth = new Set(spans.filter((x) => failed(x) || took(x) >= SLOW_MS).map(({ s }) => s.traceId));
-  const requests = new Set(spans.filter(({ s }) => !hex(s.parentSpanId, 16) && REQUEST.test(s.name)).map(({ s }) => s.traceId));
+  // A request reached through another Worker's binding has that Worker's span as its parent, and comes in an export of its
+  // own: by its id alone, every export picks the same traces.
+  const requests = new Set(spans.filter((x) => server(x) && REQUEST.test(x.s.name)).map(({ s }) => s.traceId));
   const rows = spans.filter(({ s }) => worth.has(s.traceId) || (requests.has(s.traceId) && sampledTrace(s.traceId))).map((x) => {
     const { s, job } = x;
     const code = attribute(s.attributes, "http.response.status_code");
