@@ -89,3 +89,32 @@ mod tests {
         }
     }
 }
+
+/// The most a request someone gave sends or is answered with.
+pub const LIMIT: usize = 64 << 20;
+
+/// Makes a request, filled in already, to anywhere but this machine's `ports` (its app runtime's own): → its status,
+/// headers and body, of at most `LIMIT` bytes.
+pub fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>, ports: Vec<u16>) -> anyhow::Result<(u16, Vec<(String, Vec<u8>)>, Vec<u8>)> {
+    // Redirects go back to the app, whose next request comes here again: a secret never follows one to another host.
+    let config = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(std::time::Duration::from_secs(30)));
+    let agent = agent(config, not_ports(ports));
+    // Its secrets may be in `url`, so no error says it: only where the request went.
+    let uri: ureq::http::Uri = anyhow::Context::context(url.parse(), "the address isn't a web address")?;
+    let host = uri.host().unwrap_or_default().to_string();
+    let mut builder = ureq::http::Request::builder().method(method).uri(uri);
+    for (name, value) in headers {
+        builder = builder.header(name, value);
+    }
+    let mut resp = match body.is_empty() {
+        true => agent.run(builder.body(())?),
+        false => agent.run(builder.body(body)?),
+    }
+    .or_else(|err| match err {
+        ureq::Error::Timeout(_) => anyhow::bail!("{host} took longer than 30s"),
+        err => Err(err.into()),
+    })?;
+    let headers = resp.headers().iter().filter(|(name, _)| !matches!(name.as_str(), "content-length" | "transfer-encoding" | "connection")).map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec())).collect();
+    let bytes = resp.body_mut().with_config().limit(LIMIT as u64).read_to_vec()?;
+    Ok((resp.status().as_u16(), headers, bytes))
+}

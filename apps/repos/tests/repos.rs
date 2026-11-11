@@ -276,10 +276,10 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_users_gith
     let pem = String::from_utf8(std::process::Command::new("openssl").args(["genrsa", "-traditional", "2048"]).output().unwrap().stdout).unwrap();
     let global = scope::scopes::Scope::Global;
     scope::settings::answer(&a, "POST", "/api/vault/grant", json!({ "scope": "global", "device": a.device_name() }).to_string().as_bytes()).await.unwrap().unwrap();
-    a.set_item(&me, &global, json!({ "title": "GitHub App", "type": "GitHub App", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
+    vault_runtime::set_item(&a.rt(), &me, &global, json!({ "title": "GitHub App", "type": "GitHub App", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
         "app_id": { "value": "1" }, "slug": { "value": "app" }, "client_id": { "value": "Iv1" }, "client_secret": { "value": "s", "secret": true },
         "private_key": { "value": pem, "secret": true }, "web": { "value": base }, "api": { "value": format!("{base}/api/v3") } } })).await.unwrap();
-    a.set_item(&me, &scope::scopes::Scope::User(me.user.clone()), json!({ "title": "GitHub andre-gh", "type": "GitHub account", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
+    vault_runtime::set_item(&a.rt(), &me, &scope::scopes::Scope::User(me.user.clone()), json!({ "title": "GitHub andre-gh", "type": "GitHub account", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
         "login": { "value": "andre-gh" }, "access_token": { "value": "andre-token", "secret": true }, "expires": { "value": "0" } } })).await.unwrap();
 
     let group = scope::settings::answer(&a, "POST", "/api/group", br#"{ "name": "Team" }"#).await.unwrap().unwrap()["group"].as_str().unwrap().to_string();

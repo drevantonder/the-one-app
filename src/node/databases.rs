@@ -27,17 +27,6 @@ pub(super) struct State {
 const TRIES: usize = 20;
 const TIDY_EVERY: u64 = 24 * 60 * 60 * 1000;
 
-/// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
-#[derive(Debug)]
-pub struct NotGiven(pub Scope, pub String);
-
-impl std::fmt::Display for NotGiven {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} wasn't given {}'s newest key: a device of someone who opens it gives it when it's next on", self.1, self.0)
-    }
-}
-
-impl std::error::Error for NotGiven {}
 
 /// The keys a call was handed for a database, with the bucket as that call reaches it, and until when they're kept (and
 /// whether app schedules handed them).

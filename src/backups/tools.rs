@@ -93,6 +93,10 @@ pub fn runs() -> ::api::Runs {
             ("remove_place", node_serves!(serve::remove_place)),
             ("check", node_serves!(serve::check)),
         ],
+        start: Some(|rt| {
+            let saved: fn(::api::Rt, ::api::Caller, String) -> ::api::runtime::Fut<'static, ()> = |rt, caller, id| Box::pin(async move { crate::node::Node::of(&rt).saved_place(&caller, &id).await });
+            vault_runtime::watch(rt, vault_runtime::Watch { scope: ::scope::scopes::Scope::Global, kind: crate::backups::KIND, saved });
+        }),
         ..::api::Runs::named("backups")
     }
 }

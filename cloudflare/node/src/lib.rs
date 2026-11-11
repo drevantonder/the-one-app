@@ -285,7 +285,7 @@ pub fn close(handle: u32) {
 
 #[wasm_bindgen]
 pub fn vault_schema() -> String {
-    json!([one::vault::SCHEMA]).to_string()
+    json!([vault::SCHEMA]).to_string()
 }
 
 /// The items `app` is switched on for in a call's scopes, as `ctx.vault.items()` gives them (never a secret field's
@@ -301,7 +301,7 @@ pub fn vault_items(opened: &str, app: &str, user: &str) -> Result<String, JsErro
 #[wasm_bindgen]
 pub fn vault_fill(opened: &str, app: &str, user: &str, host: &str, request: &str) -> Result<String, JsError> {
     let found = lookup(opened, app, user)?;
-    let fill = |text: &str| one::vault::fill(text, host, |name| found.get(name)).map_err(thrown);
+    let fill = |text: &str| vault::fill(text, host, |name| found.get(name)).map_err(thrown);
     let mut req: Value = serde_json::from_str(request)?;
     req["url"] = json!(fill(req["url"].as_str().unwrap_or(""))?);
     if let Some(headers) = req["headers"].as_object_mut() {
@@ -315,14 +315,14 @@ pub fn vault_fill(opened: &str, app: &str, user: &str, host: &str, request: &str
     Ok(req.to_string())
 }
 
-fn lookup(opened: &str, app: &str, user: &str) -> Result<one::vault::Lookup, JsError> {
+fn lookup(opened: &str, app: &str, user: &str) -> Result<vault::Lookup, JsError> {
     let opened: Vec<(String, u32)> = serde_json::from_str(opened)?;
     let mut scopes = Vec::new();
     for (scope, handle) in opened {
-        let items = OPEN.with(|o| o.borrow().1.get(&handle).context("that database isn't open").and_then(|(_, db)| one::vault::load(db.connection()))).map_err(thrown)?;
+        let items = OPEN.with(|o| o.borrow().1.get(&handle).context("that database isn't open").and_then(|(_, db)| vault::load(db.connection()))).map_err(thrown)?;
         scopes.push((Scope::parse(&scope).map_err(thrown)?, items));
     }
-    Ok(one::vault::Lookup { app: app.into(), user: user.into(), scopes })
+    Ok(vault::Lookup { app: app.into(), user: user.into(), scopes })
 }
 
 /// A call's appends (JSON, as the shim gives them) as each scope's statements, `{ <scope>: [[sql, params, check]] }`,
@@ -733,7 +733,7 @@ struct Gateway {
     bucket: Js,
     own: u32,
     everyone: u32,
-    items: Vec<(Scope, one::vault::Items)>,
+    items: Vec<(Scope, vault::Items)>,
     app: Option<String>,
     user: String,
     out: Js,
@@ -777,7 +777,7 @@ impl ai_gateway_runtime::Host for Gateway {
             let item = self.items.iter().find_map(|(_, items)| items.get(&key.item)).context("that AI key left the Vault as the call began: ask again")?;
             anyhow::ensure!(item.opened, "the {} that pays is opened only by the machines its Vault's admins grant, and the Cloudflare node holds no Vault key: run this app on one of your machines, or pay with Workers AI", item.kind);
             let host = out.url.split("://").nth(1).and_then(|r| r.split(['/', ':']).next()).unwrap_or_default().to_string();
-            let fill = |text: &str| one::vault::fill(text, &host, |name| name.strip_prefix(&format!("{}:", key.item)).and_then(|field| one::vault::filled(item, field)));
+            let fill = |text: &str| vault::fill(text, &host, |name| name.strip_prefix(&format!("{}:", key.item)).and_then(|field| vault::filled(item, field)));
             let url = fill(&out.url)?;
             let headers: serde_json::Map<String, Value> = out.headers.iter().map(|(n, v)| Ok((n.clone(), json!(fill(v)?)))).collect::<Result<_>>()?;
             let got = self.out.ask("fetch", &[url.into(), Value::Object(headers).to_string().into(), String::from_utf8(out.body)?.into()]).await?;

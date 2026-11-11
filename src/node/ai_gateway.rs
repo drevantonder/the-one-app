@@ -20,7 +20,7 @@ pub(super) struct Gateway<'a> {
     pub scopes: Vec<Scope>,
     pub trace: Option<&'a trace::Trace>,
     /// The Vault's items in `scopes`, read once for the call.
-    items: tokio::sync::OnceCell<Vec<(Scope, crate::vault::Items)>>,
+    items: tokio::sync::OnceCell<Vec<(Scope, ::vault::Items)>>,
 }
 
 impl<'a> Gateway<'a> {
@@ -45,8 +45,8 @@ impl<'a> Gateway<'a> {
         }
     }
 
-    async fn items(&self) -> Result<&Vec<(Scope, crate::vault::Items)>> {
-        self.items.get_or_try_init(|| self.node.items_of(self.caller, &self.scopes)).await
+    async fn items(&self) -> Result<&Vec<(Scope, ::vault::Items)>> {
+        self.items.get_or_try_init(|| async { vault_runtime::items_of(&self.node.rt(), self.caller, &self.scopes).await }).await
     }
 
     async fn db(&self, scope: &Scope) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
@@ -68,7 +68,7 @@ impl Host for Gateway<'_> {
             let uri: ureq::http::Uri = out.url.parse().context("an AI request's address isn't a web address")?;
             let host = uri.host().unwrap_or_default().to_string();
             ensure!(!item.fields.values().any(|f| f.secret) || item.opened, "the {} that pays is opened only by the devices its Vault's admins grant, and this one isn't: grant it with one vault grant <this device>", item.kind);
-            let fill = |text: &str| crate::vault::fill(text, &host, |name| name.strip_prefix(&format!("{}:", key.item)).and_then(|field| crate::vault::filled(item, field)));
+            let fill = |text: &str| ::vault::fill(text, &host, |name| name.strip_prefix(&format!("{}:", key.item)).and_then(|field| ::vault::filled(item, field)));
             let url = fill(&out.url)?;
             let headers = out.headers.iter().map(|(n, v)| Ok((n.clone(), fill(v)?))).collect::<Result<Vec<_>>>()?;
             let ports = self.node.own_ports();

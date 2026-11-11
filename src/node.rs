@@ -54,7 +54,7 @@ pub(crate) mod screens;
 mod sessions;
 #[path = "insights/node.rs"]
 mod insights;
-pub use databases::NotGiven;
+use ::api::runtime::NotGiven;
 pub use net::{Endpoints, alpn, relay};
 pub use calls::Grant;
 use calls::{Granted, Reply};
@@ -72,7 +72,6 @@ mod status;
 mod steps;
 pub mod storage;
 use ::api::trace;
-pub mod vault;
 pub mod widgets;
 mod caller;
 pub mod runtime;
@@ -160,8 +159,6 @@ struct Network {
     views: HashMap<String, ScopeState>,
     /// When this device first and last saw each scope's database change since it started (ms): what backups wait on.
     changed: HashMap<Scope, (u64, u64)>,
-    /// `global`'s Vault items, as this device last read them with its own keys: what the node itself keeps there.
-    vault: crate::vault::Items,
     /// The folders on this device it backs up to, by their place's id (`NetworkFile::folders`).
     folders: BTreeMap<String, String>,
     /// How long each device took to answer a call lately.
@@ -379,7 +376,7 @@ impl Node {
         for (app, files) in crate::carried::BUILT_IN {
             built_in.insert(app.to_string(), release::put_blob(dir, &built_in_bundle(files)?)?);
         }
-        let (kept, loops) = runtime::Kept::of(runtime::features());
+        let (kept, starts) = runtime::Kept::of(runtime::features());
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),
             local_token,
@@ -444,7 +441,7 @@ impl Node {
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
         tokio::spawn(node.clone().insights_loop());
-        node.run_loops(loops);
+        node.start_features(starts);
         let worker = node.clone();
         tokio::spawn(async move {
             loop {
@@ -581,7 +578,6 @@ impl Node {
         }
         self.with(update_views)?;
         self.keep_alone_here()?;
-        self.read_own_items();
         self.wake_all();
         self.follow_net();
         self.read_all_status(false);
@@ -649,7 +645,6 @@ impl Node {
                 }
                 self.forget_sessions();
                 self.read_all_status(!read);
-                self.read_own_items();
             }
             if tick % 6 == 0 && self.has_network() {
                 self.share_unshared().await;

@@ -1,5 +1,5 @@
 //! The Vault: items, each in one scope, with named fields (secret ones set, never read back), the hosts its secret
-//! fields go to, and the apps switched on for it. A scope's items are rows of the node's database `vault` there,
+//! fields go to, and the apps switched on for it. A scope's items are rows of the runtime's database `vault` there,
 //! sealed under the scope's epoch like any data; and in each, its secret fields' values, its hosts and its apps are
 //! sealed again to the scope's Vault key (`Sealed`), whose secret half only the machines its admins grant hold
 //! (`keys::vault_key_name`). So a member who opens the scope adds an item and never reads one back, and nobody who
@@ -7,6 +7,9 @@
 //! field goes, and a granted machine fills it in on the way out: into a web request to one of its hosts, or into the
 //! input of a call to a service whose name is one of them.
 
+#[cfg(not(target_family = "wasm"))]
+pub mod cli;
+pub mod says;
 pub mod tools;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -368,7 +371,7 @@ pub fn fill(text: &str, host: &str, lookup: impl Fn(&str) -> Option<(Vec<String>
 
 /// A JWT of `claims` (base64url JSON), signed RS256 with `pem`, an RSA private key (PKCS#1 or PKCS#8), on the device
 /// that holds it: never in a browser or the Cloudflare node.
-#[cfg(feature = "node")]
+#[cfg(not(target_family = "wasm"))]
 fn rs256(pem: &str, claims: &str) -> Result<String> {
     use ring::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
     ensure!(!claims.is_empty() && claims.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "a JWT's claims go as base64url JSON");
@@ -380,7 +383,7 @@ fn rs256(pem: &str, claims: &str) -> Result<String> {
     key.sign(&RSA_PKCS1_SHA256, &ring::rand::SystemRandom::new(), signing.as_bytes(), &mut sig).map_err(|_| anyhow::anyhow!("signing with that key failed"))?;
     Ok(format!("{signing}.{}", data_encoding::BASE64URL_NOPAD.encode(&sig)))
 }
-#[cfg(not(feature = "node"))]
+#[cfg(target_family = "wasm")]
 fn rs256(_: &str, _: &str) -> Result<String> {
     bail!("a key in the Vault signs only on one of your devices: turn one on, and try again")
 }
@@ -513,7 +516,7 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     assert!([id, plain].iter().all(|i| items[*i].apps.iter().eq([::scope::scopes::AGENTS])));
 }
 
-#[cfg(feature = "node")]
+#[cfg(not(target_family = "wasm"))]
 #[test]
 fn a_key_signs_a_jwt_only_for_its_hosts_and_the_jwt_carries_no_key() {
     use ring::signature::{KeyPair, RSA_PKCS1_2048_8192_SHA256, RsaKeyPair, UnparsedPublicKey};

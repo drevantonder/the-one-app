@@ -15,6 +15,7 @@ bucket = { path = "../../bucket" }
 database = { path = "../../database" }
 scope = { path = "../../scope" }
 api = { path = "../../api" }
+vault = { path = "../../vault" }
 # AI Gateway's `ctx.ai.run` for the apps it runs (`ai_run`), with the same code a machine's node runs.
 ai-gateway = { path = "../../ai-gateway" }
 ai-gateway-runtime = { path = "../../ai-gateway/runtime" }

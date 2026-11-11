@@ -12,9 +12,9 @@ impl Node {
         let used = std::sync::Mutex::new(Vec::<String>::new());
         if let Some(from) = from.filter(|_| input.to_string().contains("{{")) {
             let scopes = self.with(|i| Ok(reachable(i, from, &me.user)?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>()))?;
-            let lookup = self.lookup(me, from, &scopes).await?;
+            let lookup = vault_runtime::lookup(&self.rt(), me, from, &scopes).await?;
             lookup.refuse_shut(&input.to_string())?;
-            crate::vault::fill_value(input, app, &|name| {
+            ::vault::fill_value(input, app, &|name| {
                 let found = lookup.get(name);
                 if let Some((hosts, value)) = &found
                     && !hosts.is_empty()
@@ -210,14 +210,14 @@ impl Node {
                 };
                 ok(json!({ "ok": self.with(|i| Ok(i.r.db().app_may(&grant.caller.user, &asks, &types, &rows, now_ms())))? }))
             }
-            Ask::Vault => ok(json!(self.lookup(&grant.caller, &grant.app, &grant.scopes).await?.for_app())),
+            Ask::Vault => ok(json!(vault_runtime::lookup(&self.rt(), &grant.caller, &grant.app, &grant.scopes).await?.for_app())),
             Ask::VaultMatch => {
                 // The item a sign-in would change rather than make: one of that type whose plain field has that value.
                 let req: Value = serde_json::from_slice(&body)?;
                 let scope = Scope::parse_for(req["scope"].as_str().unwrap_or("user"), &grant.caller.user)?;
                 ensure!(grant.scopes.contains(&scope), "the call didn't name {scope}");
                 let (kind, field, value) = (req["type"].as_str().unwrap_or(""), req["field"].as_str().unwrap_or(""), req["value"].as_str());
-                let items = self.items(&grant.caller, &scope).await?;
+                let items = vault_runtime::items(&self.rt(), &grant.caller, &scope).await?;
                 let id = items.iter().filter(|(_, it)| it.kind == kind && it.fields.get(field).is_some_and(|f| !f.secret && Some(f.value.as_str()) == value)).min_by_key(|(_, it)| it.made).map(|(id, _)| id.clone());
                 ok(json!({ "id": id }))
             }

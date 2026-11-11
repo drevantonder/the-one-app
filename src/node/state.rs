@@ -48,7 +48,7 @@ impl Node {
         let node = self.clone();
         tokio::spawn(async move { node.know_states(runtimes, false).await });
         let ready = self.ready();
-        let waiting = self.waiting_requests(viewer).unwrap_or(0);
+        let waiting = vault_runtime::waiting(&self.rt(), viewer).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
         let Ok(network) = self.0.network.lock() else { bail!("this device couldn't answer that: a bug in it, which its log shows") };
         // The device looking, if it's one: for a device's own programs, which its app runtime answers as itself, the device.

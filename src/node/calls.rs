@@ -762,7 +762,7 @@ impl Node {
         }
         let mut reply = asked?;
         if let Some(ok) = reply.get_mut("ok") {
-            crate::vault::blot(ok, &used);
+            ::vault::blot(ok, &used);
         }
         // What a service kept for the call (on its device's oned), its caller's own scope keeps, as for one
         // run here.

@@ -12,7 +12,7 @@ pub fn features() -> Vec<Runs> {
     vec![
         crate::app::tools::add_runs(),
         crate::app::tools::remove_runs(),
-        crate::vault::tools::runs(),
+        vault_runtime::runs(),
         crate::backups::tools::runs(),
         crate::groups::tools::runs(),
         crate::devices::tools::runs(),
@@ -47,11 +47,15 @@ pub(super) struct Kept {
 /// Each feature's loop: what it is, how often, and what it runs.
 pub(super) type Loop = (&'static str, Duration, fn(Rt) -> Fut<'static, ()>);
 
+/// What each feature does once, as the runtime starts, and its loop.
+pub(super) type Starts = (Vec<fn(&Rt)>, Vec<Loop>);
+
 impl Kept {
-    /// What `features()` keep, and their loops, which `run_loops` starts.
-    pub(super) fn of(runs: Vec<Runs>) -> (Kept, Vec<Loop>) {
-        let (mut kept, mut loops) = (Kept::default(), Vec::new());
+    /// What `features()` keep, and what `start` runs.
+    pub(super) fn of(runs: Vec<Runs>) -> (Kept, Starts) {
+        let (mut kept, mut starts, mut loops) = (Kept::default(), Vec::new(), Vec::new());
         for r in runs {
+            starts.extend(r.start);
             if !r.state.is::<()>() {
                 kept.states.insert((*r.state).type_id(), r.state);
             }
@@ -60,7 +64,7 @@ impl Kept {
                 loops.push((r.feature, every, f));
             }
         }
-        (kept, loops)
+        (kept, (starts, loops))
     }
 }
 
@@ -75,8 +79,12 @@ impl Node {
         (&**rt as &dyn Any).downcast_ref::<Node>().expect("this program's features run in a Node").clone()
     }
 
-    /// Starts each feature's loop: at once, then every so often, or when it's woken.
-    pub(super) fn run_loops(&self, loops: Vec<Loop>) {
+    /// Starts each feature: what it does once, then its loop, at once, then every so often, or when it's woken.
+    pub(super) fn start_features(&self, (starts, loops): Starts) {
+        let rt = self.rt();
+        for start in starts {
+            start(&rt);
+        }
         for (feature, every, f) in loops {
             let (node, wake) = (self.clone(), self.0.kept.wakes[feature].clone());
             tokio::spawn(async move {
@@ -187,6 +195,10 @@ impl Holds for Node {
 
     fn vault_keys<'a>(&'a self, scope: &'a Scope, wanted: &'a [(u32, [u8; 32])]) -> Fut<'a, BTreeMap<u32, [u8; 32]>> {
         Box::pin(async move { self.0.holds.vault_keys(&self.bucket()?, scope, wanted).await })
+    }
+
+    fn answer_as_device<'a>(&'a self, method: &'a str, path: &'a str, body: &'a [u8]) -> Fut<'a, Value> {
+        Box::pin(async move { Ok(self.answer_as_mine(method, path, body).await.map_err(|e| e.0)?.0) })
     }
 }
 

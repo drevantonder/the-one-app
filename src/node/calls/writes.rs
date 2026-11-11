@@ -75,7 +75,7 @@ impl Node {
             }
             for item in items {
                 if let Append::Vault { id, scope, item: data, same, release } = item {
-                    self.call_item(app, me, scopes, &id, scope, data, same, release).await?;
+                    vault_runtime::call_item(&self.rt(), app, me, scopes, &id, scope, data, same, release).await?;
                 }
             }
             for append in adds {

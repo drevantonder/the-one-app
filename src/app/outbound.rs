@@ -3,9 +3,8 @@
 //! their hosts (`src/vault.rs`). Requests to `one.internal` are the shim's asks of the node for the call: other
 //! apps' tools and services' functions, blobs, and the network's apps.
 
-use std::time::Duration;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result};
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
@@ -13,7 +12,7 @@ use axum::response::{IntoResponse, Response};
 
 use crate::node::Node;
 
-const LIMIT: usize = 64 << 20;
+use platform::reach::LIMIT;
 
 pub fn router(node: Node) -> axum::Router {
     axum::Router::new().fallback(handle).with_state(node)
@@ -48,7 +47,7 @@ async fn out(node: Node, req: Request) -> Result<Response> {
         return node.internal(&header("x-one-call").unwrap_or_default(), parts.uri.path(), body.to_vec()).await;
     }
     let scheme = header("x-forwarded-proto").filter(|p| p == "https").unwrap_or_else(|| "http".into());
-    if node.names_app(&host) {
+    if vault_runtime::names_app(&node.rt(), &host) {
         return Ok((StatusCode::FORBIDDEN, format!("{host} is an app's name, not a site's: an app reaches its own service with ctx.services, and other apps with ctx.apps")).into_response());
     }
     let target = written(parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
@@ -56,14 +55,14 @@ async fn out(node: Node, req: Request) -> Result<Response> {
     // The call's items, opened only if the request has a placeholder, from the scopes it named, with their keys.
     let placed = target.contains("{{") || parts.headers.values().any(|v| v.as_bytes().windows(2).any(|w| w == b"{{")) || body.windows(2).any(|w| w == b"{{");
     let lookup = match &grant {
-        Some(g) if placed => Some(node.lookup(&g.caller, &g.app, &g.scopes).await?),
+        Some(g) if placed => Some(vault_runtime::lookup(&node.rt(), &g.caller, &g.app, &g.scopes).await?),
         _ => None,
     };
     let fill = |text: &str| -> Result<String> {
         match &lookup {
             Some(l) => {
                 l.refuse_shut(text)?;
-                crate::vault::fill(text, &host, |name| l.get(name))
+                ::vault::fill(text, &host, |name| l.get(name))
             }
             None => Ok(text.to_string()),
         }
@@ -88,7 +87,7 @@ async fn out(node: Node, req: Request) -> Result<Response> {
     };
     let method = parts.method.as_str().to_string();
     let ports = node.own_ports();
-    let (status, headers, bytes) = tokio::task::spawn_blocking(move || send(&method, &url, headers, body, ports)).await??;
+    let (status, headers, bytes) = tokio::task::spawn_blocking(move || platform::reach::send(&method, &url, headers, body, ports)).await??;
     let mut out = Response::builder().status(status);
     for (name, value) in headers {
         out = out.header(name, value);
@@ -112,28 +111,3 @@ fn written(target: &str) -> String {
     out
 }
 
-/// Makes a request, filled in already, to anywhere but this machine's `ports` (the node's own, `Node::own_ports`): →
-/// its status, headers and body.
-pub fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>, ports: Vec<u16>) -> Result<(u16, Vec<(String, Vec<u8>)>, Vec<u8>)> {
-    // Redirects go back to the app, whose next request comes here again: a secret never follows one to another host.
-    let config = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30)));
-    let agent = platform::reach::agent(config, platform::reach::not_ports(ports));
-    // Its secrets may be in `url`, so no error says it: only where the request went.
-    let uri: ureq::http::Uri = url.parse().context("the address isn't a web address")?;
-    let host = uri.host().unwrap_or_default().to_string();
-    let mut builder = ureq::http::Request::builder().method(method).uri(uri);
-    for (name, value) in headers {
-        builder = builder.header(name, value);
-    }
-    let mut resp = match body.is_empty() {
-        true => agent.run(builder.body(())?),
-        false => agent.run(builder.body(body)?),
-    }
-    .or_else(|err| match err {
-        ureq::Error::Timeout(_) => bail!("{host} took longer than 30s"),
-        err => Err(err.into()),
-    })?;
-    let headers = resp.headers().iter().filter(|(name, _)| !matches!(name.as_str(), "content-length" | "transfer-encoding" | "connection")).map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec())).collect();
-    let bytes = resp.body_mut().with_config().limit(LIMIT as u64).read_to_vec()?;
-    Ok((resp.status().as_u16(), headers, bytes))
-}

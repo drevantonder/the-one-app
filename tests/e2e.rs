@@ -117,7 +117,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     b.join(&a.pair().unwrap()).await.unwrap();
     let me = api::Caller::own(a.id(), a.user().unwrap());
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
-    a.set_item(&me, &::scope::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
+    vault_runtime::set_item(&a.rt(), &me, &::scope::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
     let bad = a.add_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" })).await.unwrap();
     assert!(bad["id"].is_null() && bad["tried"][0]["error"].is_string(), "{bad}");
@@ -197,9 +197,9 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let global = ::scope::scopes::Scope::Global;
     let planted = temp("backup-planted").join("home");
     let fields = json!({ "path": { "value": planted }, "device": { "value": ::key::hex(&a.id()) } });
-    a.set_item(&me, &global, json!({ "title": "Planted", "type": one::backups::KIND, "fields": fields, "apps": ["node"] })).await.unwrap();
+    vault_runtime::set_item(&a.rt(), &me, &global, json!({ "title": "Planted", "type": one::backups::KIND, "fields": fields, "apps": ["node"] })).await.unwrap();
     let s3 = json!({ "endpoint": { "value": "http://127.0.0.1:9" }, "bucket": { "value": "b" }, "key_id": { "value": "k" }, "secret": { "value": "s", "secret": true } });
-    a.set_item(&me, &global, json!({ "title": "Unnamed bucket", "type": one::backups::KIND, "fields": s3, "hosts": ["127.0.0.1"], "apps": ["node"] })).await.unwrap();
+    vault_runtime::set_item(&a.rt(), &me, &global, json!({ "title": "Unnamed bucket", "type": one::backups::KIND, "fields": s3, "hosts": ["127.0.0.1"], "apps": ["node"] })).await.unwrap();
     a.back_up_now();
     let place = |title: &str| a.backups().unwrap()["places"].as_array().unwrap().iter().find(|p| p["title"] == title).cloned();
     eventually("the planted folder's run to fail", &a, async || place("Planted").is_some_and(|p| !p["problem"].is_null())).await;
@@ -209,7 +209,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     // A place typed into the sheet on the user's device is a place too.
     let asked = a.request_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "title": "Sheet bucket" })).await.unwrap();
     let answer = json!({ "fields": { "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" } });
-    a.answer_request(&me, &global, asked["id"].as_str().unwrap(), &answer).await.unwrap();
+    vault_runtime::answer_request(&a.rt(), &me, &global, asked["id"].as_str().unwrap(), &answer).await.unwrap();
     assert!(place("Sheet bucket").is_some_and(|p| p["kind"] == "s3"), "{}", a.backups().unwrap());
 }
 
@@ -493,7 +493,7 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], true);
 
     let own = ::scope::scopes::Scope::User(me.user.clone());
-    a.set_item(&me, &own, json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
+    vault_runtime::set_item(&a.rt(), &me, &own, json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
     let new = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let new_secret = seal_secret(&new);
     let file_at = |name: &str| walk(&dir).into_iter().find(|p| p.to_string_lossy().ends_with(name));
@@ -789,7 +789,7 @@ async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_doe
     add_notes(&a).await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
     let item = json!({ "title": "Work", "type": "Browser profile", "hosts": ["notes"], "apps": ["notes"], "fields": { "_key": { "value": "s3cret", "secret": true } } });
-    let id = a.set_item(&me, &Scope::User(me.user.clone()), item).await.unwrap();
+    let id = vault_runtime::set_item(&a.rt(), &me, &Scope::User(me.user.clone()), item).await.unwrap();
     let asked = || json!({ "profile": { "key": format!("{{{{{id}:_key}}}}") } });
     let mut input = asked();
     let used = a.fill_for_service("notes", &mut input, &me, Some("notes")).await.unwrap();
@@ -817,13 +817,13 @@ async fn nothing_secret_is_kept_where_no_machine_opens_the_vault_and_what_is_kep
         let mut input = json!({ "key": format!("{{{{{id}:_key}}}}") });
         a.fill_for_service("notes", &mut input, &me, Some("notes")).await.is_ok_and(|_| input["key"] == "s3cret")
     };
-    let before = a.set_item(&me, &own, item("Before")).await.unwrap();
+    let before = vault_runtime::set_item(&a.rt(), &me, &own, item("Before")).await.unwrap();
     grant(false).await;
-    let refused = a.set_item(&me, &own, item("While none opens")).await.unwrap_err();
+    let refused = vault_runtime::set_item(&a.rt(), &me, &own, item("While none opens")).await.unwrap_err();
     assert!(format!("{refused:#}").contains("vault grant"), "it says to grant a machine: {refused:#}");
-    assert!(a.set_item(&me, &own, json!({ "title": "Plain", "type": "Note", "fields": { "text": { "value": "hello" } } })).await.is_ok(), "an item with no secret needs no key");
+    assert!(vault_runtime::set_item(&a.rt(), &me, &own, json!({ "title": "Plain", "type": "Note", "fields": { "text": { "value": "hello" } } })).await.is_ok(), "an item with no secret needs no key");
     grant(true).await;
-    let after = a.set_item(&me, &own, item("After")).await.unwrap();
+    let after = vault_runtime::set_item(&a.rt(), &me, &own, item("After")).await.unwrap();
     grant(true).await;
     assert!(opens(&before).await && opens(&after).await, "what was kept while a machine opened the Vault opens after each grant");
 }
@@ -838,7 +838,7 @@ async fn an_apps_schedules_see_its_vault_items_as_its_calls_do_while_theyre_set(
     add_notes(&a).await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
     for (title, app) in [("For notes", "notes"), ("For another", "another")] {
-        a.set_item(&me, &Scope::Global, json!({ "title": title, "type": "Token", "hosts": ["api.example.com"], "apps": [app], "fields": { "token": { "value": "s3cret", "secret": true } } })).await.unwrap();
+        vault_runtime::set_item(&a.rt(), &me, &Scope::Global, json!({ "title": title, "type": "Token", "hosts": ["api.example.com"], "apps": [app], "fields": { "token": { "value": "s3cret", "secret": true } } })).await.unwrap();
     }
     let run = || a.app_schedules_call(&Scope::Global, "notes", &me.user, "vault", json!({}), "schedule");
     assert!(run().await.is_err(), "nothing runs notes' schedules yet");

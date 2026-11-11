@@ -11,11 +11,6 @@ use super::*;
 pub(super) struct State {
     /// The keys app schedules gave this device, by (scope, app): kept while they're in force.
     keys: Mutex<HashMap<(Scope, String), Held>>,
-    /// The Vault secret keys sealed to this machine, by scope and number, each the one its `vault` entry names.
-    pub(super) vault: Mutex<HashMap<(Scope, u32), [u8; 32]>>,
-    /// Those the bucket hadn't, by scope and number, as of who's who at that position: each is sealed to a machine as
-    /// its key is made, so only a step after can bring one.
-    pub(super) no_vault: Mutex<HashMap<(Scope, u32), Option<u64>>>,
     /// Held while this machine renews its user's app schedules.
     renewing: tokio::sync::Mutex<()>,
 }

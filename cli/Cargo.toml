@@ -27,6 +27,7 @@ bucket = { path = "../bucket" }
 database = { path = "../database" }
 scope = { path = "../scope" }
 api = { path = "../api" }
+vault = { path = "../vault" }
 one = { path = ".." }
 # `<cli>t`, this computer's onet (onet/src/computer/), is this program run by that name.
 onet = { path = "../onet", features = ["computer"] }
@@ -49,6 +50,8 @@ ureq = { version = "3", features = ["json"] }
 # AI Gateway's own code, run against a stand-in node (ai-gateway/tests/ai_gateway.rs).
 ai-gateway = { path = "../ai-gateway" }
 ai-gateway-runtime = { path = "../ai-gateway/runtime" }
+# The Vault as the tests' devices run it: an item set or a request answered as a user (tests/e2e.rs).
+vault-runtime = { path = "../vault/runtime" }
 # What a browser's push service does with a push (RFC 8291's decryption, tests/contracts.rs): the node's own crypto.
 aes-gcm = "0.10"
 hkdf = "0.13"

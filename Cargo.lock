@@ -3016,6 +3016,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
+ "vault",
+ "vault-runtime",
  "windows-sys 0.61.2",
 ]
 
@@ -3113,6 +3115,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
+ "vault",
+ "vault-runtime",
 ]
 
 [[package]]
@@ -3144,6 +3148,7 @@ dependencies = [
  "scope",
  "serde_json",
  "sqlite-wasm-rs",
+ "vault",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
@@ -5342,6 +5347,48 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+
+[[package]]
+name = "vault"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "custom-build",
+ "data-encoding",
+ "database",
+ "key",
+ "rand 0.8.8",
+ "ring",
+ "rusqlite",
+ "schemars",
+ "scope",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "vault-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "axum",
+ "custom-build",
+ "data-encoding",
+ "database",
+ "jiff",
+ "key",
+ "platform",
+ "rusqlite",
+ "scope",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "ureq",
+ "vault",
+]
 
 [[package]]
 name = "vcpkg"

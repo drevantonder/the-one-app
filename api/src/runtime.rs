@@ -86,7 +86,8 @@ impl<T: ScopeDatabase + ?Sized> ReadExt for T {
     }
 }
 
-/// Copies of apps' and the runtime's own databases in each scope, opened for a caller as their keys open them.
+/// Copies of apps' and the runtime's own databases in each scope, opened for a caller as their keys open them: one
+/// this device can't open yet fails `NotGiven`.
 pub trait Databases: Send + Sync {
     /// `app`'s `database` in `scope`, for `caller`, read up to date: made with `schema` if it's new.
     fn open<'a>(&'a self, caller: &'a Caller, scope: &'a Scope, app: &'a str, database: &'a str, schema: &'a [&'a str]) -> Fut<'a, Arc<tokio::sync::Mutex<Db>>>;
@@ -97,11 +98,26 @@ pub trait Databases: Send + Sync {
     fn needs<'a>(&'a self, caller: &'a Caller, wants: &'a [(Scope, &'a str, &'a str)]) -> Fut<'a, ()>;
 }
 
+/// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
+#[derive(Debug)]
+pub struct NotGiven(pub Scope, pub String);
+
+impl std::fmt::Display for NotGiven {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} wasn't given {}'s newest key: a device of someone who opens it gives it when it's next on", self.1, self.0)
+    }
+}
+
+impl std::error::Error for NotGiven {}
+
 /// What its device's key opens, asked of its holder.
 pub trait Holds: Send + Sync {
     fn device(&self) -> Key;
     /// The Vault secret keys of `scope` the device's key opens, of those `wanted` (number, public key).
     fn vault_keys<'a>(&'a self, scope: &'a Scope, wanted: &'a [(u32, [u8; 32])]) -> Fut<'a, BTreeMap<u32, [u8; 32]>>;
+    /// A request of who can do what (`settings::answered`), asked by this machine's own programs and answered as its
+    /// device, which signs what it changes.
+    fn answer_as_device<'a>(&'a self, method: &'a str, path: &'a str, body: &'a [u8]) -> Fut<'a, Value>;
 }
 
 /// The apps it runs.
@@ -155,6 +171,8 @@ pub struct Runs {
     pub routes: Routes<Rt>,
     /// What it keeps while the runtime runs (`StateExt::state`).
     pub state: Box<dyn Any + Send + Sync>,
+    /// Once, as the runtime starts, before its loop: what it follows of another feature (the Vault's `watch`).
+    pub start: Option<fn(&Rt)>,
     /// Its loop: this often, at once as the runtime starts and on `wake`.
     pub every: Option<(Duration, fn(Rt) -> Fut<'static, ()>)>,
 }
@@ -162,6 +180,11 @@ pub struct Runs {
 impl Runs {
     /// One that does nothing yet: `Runs { tools, .., ..Runs::named("vault") }`.
     pub fn named(feature: &'static str) -> Runs {
-        Runs { feature, tools: Vec::new(), routes: Routes::default(), state: Box::new(()), every: None }
+        Runs { feature, tools: Vec::new(), routes: Routes::default(), state: Box::new(()), start: None, every: None }
     }
+}
+
+/// What a feature's runtime crate uses to reach its runtime: `use api::runtime::prelude::*;`.
+pub mod prelude {
+    pub use super::{AppRuntime, Apps, Databases, Features, Fut, Here, Holds, ReadExt, Rt, ScopeDatabase, StateExt};
 }

@@ -60,7 +60,6 @@ pub fn routes() -> Routes {
         .merge(calls::routes())
         .merge(tools::routes())
         .merge(openapi::routes())
-        .merge(crate::node::vault::routes::routes())
         .merge(crate::node::backups::routes::routes())
         .merge(crate::node::storage::routes::routes())
         .merge(crate::node::devices::routes::routes())

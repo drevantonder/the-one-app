@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use ::ai_gateway::{Company, Kind, Outgoing, Paid};
 use ai_gateway_runtime::{Connection, Fut, Host, Key, Sent, Span, Whose};
 use ::scope::scopes::Scope;
-use one::vault::{Field, Item, Items};
+use vault::{Field, Item, Items};
 use serde_json::{Value, json};
 
 /// An `AI key: <company>` item, with its secret `api_key`, sent only to `hosts`, switched on for `apps`, made at `made`.
@@ -139,14 +139,14 @@ fn a_key_goes_only_to_its_providers_host() {
         let out = asked.request("k1").unwrap();
         let host = out.url.split("://").nth(1).and_then(|r| r.split(['/', ':']).next()).unwrap();
         assert_eq!(host, company.host(), "{}'s request goes to its own host", company.title());
-        let lookup = |name: &str| name.strip_prefix("k1:").and_then(|f| one::vault::filled(&item, f));
-        let filled: Vec<String> = out.headers.iter().map(|(_, v)| one::vault::fill(v, host, lookup).unwrap()).collect();
+        let lookup = |name: &str| name.strip_prefix("k1:").and_then(|f| vault::filled(&item, f));
+        let filled: Vec<String> = out.headers.iter().map(|(_, v)| vault::fill(v, host, lookup).unwrap()).collect();
         assert!(filled.iter().any(|v| v.contains(secret)), "{}'s key is filled into its request", company.title());
         for elsewhere in ["evil.example", "api.openai.com.evil.example", "127.0.0.1"] {
-            let anywhere = out.headers.iter().all(|(_, v)| one::vault::fill(v, elsewhere, lookup).is_err() || !v.contains("{{"));
+            let anywhere = out.headers.iter().all(|(_, v)| vault::fill(v, elsewhere, lookup).is_err() || !v.contains("{{"));
             assert!(anywhere, "{}'s key is never filled into a request to {elsewhere}", company.title());
         }
-        let shown = one::vault::Lookup { app: "notes".into(), user: "u1".into(), scopes: vec![(Scope::Global, items(&[("k1", item.clone())]))] }.for_app();
+        let shown = vault::Lookup { app: "notes".into(), user: "u1".into(), scopes: vec![(Scope::Global, items(&[("k1", item.clone())]))] }.for_app();
         assert!(!json!(shown).to_string().contains(secret), "an app never reads a key's value");
     }
 }

@@ -83,8 +83,11 @@ mod tests {
     /// itself reads the body `settings::about` says.
     #[test]
     fn each_routes_schema_is_what_its_handler_reads() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut stack = vec![root.clone()];
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = repo.join("src");
+        // This program's, and each feature's with a runtime crate (`<feature>/src`, `<feature>/runtime/src`).
+        let features = std::fs::read_dir(repo).unwrap().flatten().map(|e| e.path()).filter(|d| d.join("runtime/Cargo.toml").exists());
+        let mut stack: Vec<_> = std::iter::once(root.clone()).chain(features.flat_map(|d| [d.join("src"), d.join("runtime/src")])).collect();
         let (mut routes, mut says) = (Vec::new(), Vec::new());
         while let Some(dir) = stack.pop() {
             for entry in std::fs::read_dir(&dir).unwrap().flatten() {

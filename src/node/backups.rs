@@ -67,12 +67,12 @@ impl Problem {
 /// Each place's problem, as this device sees it: its runs failing (worth a push from the second failure in a row),
 /// or a scope this device holds with changes that have waited a day for it, whoever should have backed them up.
 /// Both end by themselves once a run works.
-fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
+fn problems(i: &Network, own: &::vault::Items, now: u64) -> Result<Vec<Problem>> {
     let m = i.r.db();
     let status = i.status.get("global").cloned().unwrap_or_default();
     let name = |k: &Key| machine_name(m, k);
     let mut out = Vec::new();
-    for p in places(i)? {
+    for p in places(i, own)? {
         let runs: Vec<&BackupRun> = status.backups.iter().filter(|r| r.place == p.id).collect();
         let failing: Vec<&&BackupRun> = runs.iter().rev().take_while(|r| r.error.is_some()).collect();
         if let Some(last) = failing.first() {
@@ -138,9 +138,9 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
         }
     }
     // A place an admin named whose details changed since, by someone who isn't one: nothing goes there until an admin
-    // saves them, which names them again (`repin_place`), so a member can't send backups somewhere else.
+    // saves them, which names them again (`saved_place`), so a member can't send backups somewhere else.
     let pinned = pinned(m)?;
-    for (id, it) in i.vault.iter().filter(|(id, it)| it.apps.contains(key::APP) && it.kind == b::KIND && !it.fields.contains_key("device") && pinned.get(*id).is_some_and(|h| *h != item_hash(it))) {
+    for (id, it) in own.iter().filter(|(id, it)| it.apps.contains(key::APP) && it.kind == b::KIND && !it.fields.contains_key("device") && pinned.get(*id).is_some_and(|h| *h != item_hash(it))) {
         out.push(Problem {
             place: id.clone(),
             title: format!("Not backing up to {}", it.title),
@@ -156,7 +156,7 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
 }
 
 /// The hash of an item's fields, as `PINNED` names a place's.
-fn item_hash(it: &crate::vault::Item) -> String {
+fn item_hash(it: &::vault::Item) -> String {
     place_hash(&it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect())
 }
 
@@ -195,9 +195,9 @@ fn machine_name(m: &ScopeDb, k: &Key) -> Result<String> {
 /// What a place's item says, read from global's items. A folder's item names only its device: where the folder is
 /// comes from that device's own file (`NetworkFile::folders`), never from an item, which anyone may write. An S3 place
 /// counts only as `PINNED` names it.
-fn places(i: &Network) -> Result<Vec<PlaceItem>> {
+fn places(i: &Network, own: &::vault::Items) -> Result<Vec<PlaceItem>> {
     let pinned = pinned(i.r.db())?;
-    Ok(i.vault
+    Ok(own
         .iter()
         .filter(|(_, it)| it.apps.contains(key::APP) && it.kind == b::KIND)
         .filter(|(id, it)| it.fields.contains_key("device") || pinned.get(*id).is_some_and(|h| *h == item_hash(it)))
@@ -284,7 +284,7 @@ impl Node {
                 return Ok((Vec::new(), Vec::new()));
             }
             let at = line(m, &Scope::Global, "alerts")?.iter().position(|k| *k == me).unwrap_or(usize::MAX / 2) as u64;
-            let due: Vec<Problem> = problems(i, now)?
+            let due: Vec<Problem> = problems(i, &self.own_vault(), now)?
                 .into_iter()
                 .filter(|p| p.push.is_some_and(|t| now >= t + at * STAGGER) && i.status.get("global").and_then(|s| s.alerted.get(&p.place)).is_none_or(|t| *t < p.since))
                 .collect();
@@ -324,7 +324,7 @@ impl Node {
         if !i.r.db().may(user, "change-settings", scopes::NETWORK) {
             return Ok(None);
         }
-        Ok(problems(i, now_ms())?.into_iter().min_by_key(|p| p.since).map(|p| p.json()))
+        Ok(problems(i, &self.own_vault(), now_ms())?.into_iter().min_by_key(|p| p.since).map(|p| p.json()))
     }
 
     /// Backs up now, everything this device backs up, whether or not an hour has passed.
@@ -350,7 +350,7 @@ impl Node {
             let failed = self.0.backups.failed.lock().unwrap();
             let pruned = self.0.backups.pruned.lock().unwrap();
             let mut plan = Vec::new();
-            for p in places(i)? {
+            for p in places(i, &self.own_vault())? {
                 if !force && failed.get(&p.id).is_some_and(|t| now - t < b::EVERY) {
                     continue;
                 }
@@ -545,9 +545,9 @@ impl Node {
             let name = |k: &Key| machine_name(m, k);
             let runs = i.status.get("global").map(|s| s.backups.clone()).unwrap_or_default();
             let checks = i.status.get("global").map(|s| s.checks.clone()).unwrap_or_default();
-            let problems = problems(i, now_ms())?;
+            let problems = problems(i, &self.own_vault(), now_ms())?;
             let mut out = Vec::new();
-            for p in places(i)? {
+            for p in places(i, &self.own_vault())? {
                 let mine: Vec<&BackupRun> = runs.iter().filter(|r| r.place == p.id).collect();
                 let last_ok = mine.iter().rev().find(|r| r.error.is_none());
                 let (kind, place_where, endpoint) = match &p.place {
@@ -567,7 +567,7 @@ impl Node {
                     "checked": checks.iter().rev().find(|c| c.place == p.id).map(|c| Ok::<_, anyhow::Error>(json!({ "time": c.time, "device": name(&c.device)?, "error": c.error }))).transpose()?,
                 }));
             }
-            let titles: BTreeMap<String, String> = places(i)?.into_iter().map(|p| (p.id, p.title)).collect();
+            let titles: BTreeMap<String, String> = places(i, &self.own_vault())?.into_iter().map(|p| (p.id, p.title)).collect();
             // The network's snapshots, newest first: the runs of each minute, whichever devices and places, as one.
             let mut moments: Vec<(u64, BTreeSet<String>, BTreeSet<String>, BTreeSet<String>)> = Vec::new();
             for r in runs.iter().rev().filter(|r| !r.snapshots.is_empty() && titles.contains_key(&r.place)) {
@@ -637,7 +637,7 @@ impl Node {
             }
         };
         let data = json!({ "title": title, "type": b::KIND, "fields": item_fields, "hosts": hosts, "apps": [key::APP] });
-        let id = self.set_item(caller, &Scope::Global, data).await?;
+        let id = vault_runtime::set_item(&self.rt(), caller, &Scope::Global, data).await?;
         match &place {
             Place::Folder(path) => self.keep_folder(&id, Some(path))?,
             Place::S3(_) => {
@@ -656,14 +656,14 @@ impl Node {
         let fields = json!({ "endpoint": { "secret": false }, "bucket": { "secret": false }, "key_id": { "secret": false }, "secret": { "secret": true } });
         let ask = json!({ "title": body["title"].as_str().unwrap_or("Backups"), "fields": fields, "hosts": [host] });
         let why = format!("Backups go to {endpoint}, encrypted: its bucket, access key ID and secret key.");
-        self.request_item(caller, &Scope::Global, key::APP, Some(b::KIND), &ask, &why).await
+        vault_runtime::request_item(&self.rt(), caller, &Scope::Global, key::APP, Some(b::KIND), &ask, &why).await
     }
 
     /// Stops backing up to a place: deletes its item. What's in the place stays there.
     pub async fn remove_place(&self, caller: &Caller, id: &str) -> Result<()> {
-        let known = self.with(|i| Ok(places(i)?.iter().any(|p| p.id == id)))?;
+        let known = self.with(|i| Ok(places(i, &self.own_vault())?.iter().any(|p| p.id == id)))?;
         ensure!(known, "That place was already removed: there's no place {id}");
-        self.set_item(caller, &Scope::Global, json!({ "id": id, "deleted": true })).await?;
+        vault_runtime::set_item(&self.rt(), caller, &Scope::Global, json!({ "id": id, "deleted": true })).await?;
         self.keep_folder(id, None)?;
         if self.with(|i| Ok(pinned(i.r.db())?.contains_key(id)))? {
             self.pin_place(caller, id, None).await?;
@@ -671,14 +671,21 @@ impl Node {
         Ok(())
     }
 
-    /// An item in Everyone just saved by `caller`: when they're an admin and it's an S3 place the network backs up to,
-    /// its details as they are now are the ones it names, so changing its key in the Vault keeps backups going.
-    pub(super) async fn repin_place(&self, caller: &Caller, id: &str) -> Result<()> {
+    /// `global`'s Vault items, as this device's own keys read them: where its places are.
+    fn own_vault(&self) -> ::vault::Items {
+        vault_runtime::own_items(&self.rt())
+    }
+
+    /// A place's item in Everyone just saved by `caller` (`vault_runtime::watch`): when they're an admin and it's an S3
+    /// place, its details as they are now are the ones the network backs up to, so changing its key in the Vault keeps
+    /// backups going, and answering a request for one names it.
+    pub(crate) async fn saved_place(&self, caller: &Caller, id: &str) -> Result<()> {
+        let own = self.own_vault();
         let fields = self.with(|i| {
             let m = i.r.db();
             let pinned = pinned(m)?;
-            let stale = pinned.get(id).zip(i.vault.get(id)).filter(|(h, it)| m.may(&caller.user, "change-settings", scopes::NETWORK) && !it.fields.contains_key("device") && **h != item_hash(it));
-            Ok(stale.map(|(_, it)| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect::<BTreeMap<_, _>>()))
+            let changed = own.get(id).filter(|it| m.may(&caller.user, "change-settings", scopes::NETWORK) && it.apps.contains(key::APP) && !it.fields.contains_key("device") && pinned.get(id) != Some(&item_hash(it)));
+            Ok(changed.map(|it| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect::<BTreeMap<_, _>>()))
         })?;
         match fields {
             Some(fields) => self.pin_place(caller, id, Some(&fields)).await,
@@ -709,7 +716,7 @@ impl Node {
             let m = i.r.db();
             let Some(status) = i.status.get("global") else { return Ok(Vec::new()) };
             let mut due = Vec::new();
-            for p in places(i)?.into_iter().filter(|p| status.covered.keys().any(|(place, _)| *place == p.id)) {
+            for p in places(i, &self.own_vault())?.into_iter().filter(|p| status.covered.keys().any(|(place, _)| *place == p.id)) {
                 let last = status.checks.iter().rev().find(|c| c.place == p.id);
                 let next = last.map_or(0, |c| c.time + if c.error.is_some() { CHECK_AGAIN } else { CHECK_EVERY });
                 let is_due = match p.device {
@@ -739,7 +746,7 @@ impl Node {
         let epochs = self.held_epochs().await;
         let (network, places, root) = self.with(|i| {
             ensure!(i.views.contains_key("global"), "no network");
-            let places: Vec<(String, String, Place)> = places(i)?.into_iter().filter(|p| only.is_none_or(|o| o.contains(&p.id))).filter_map(|p| Some((p.id, p.title, p.place.ok()?))).filter(|(_, _, p)| p.present()).collect();
+            let places: Vec<(String, String, Place)> = places(i, &self.own_vault())?.into_iter().filter(|p| only.is_none_or(|o| o.contains(&p.id))).filter_map(|p| Some((p.id, p.title, p.place.ok()?))).filter(|(_, _, p)| p.present()).collect();
             Ok((i.r.root().map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root()))
         })?;
         let bucket = self.bucket().ok();
