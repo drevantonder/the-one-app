@@ -131,15 +131,20 @@ pub(crate) fn reserve(addr: &str) -> Result<(std::os::fd::OwnedFd, String)> {
     Ok((held, format!("{}:{}", addr.ip(), u16::from_be(got.sin_port))))
 }
 
-/// A new throwaway network, which is left only whole: one that fails to start (its Workers' code doesn't parse) is deleted,
-/// so the next `throwaway` makes another where this one stopped, as its error says why.
+/// A new throwaway network, which is left only whole: one that fails to start (its Workers' code doesn't parse) is deleted
+/// but for its programs' logs, so the next `throwaway` makes another where this one stopped, and what went wrong can be
+/// read till then.
 pub(crate) fn start_new(dir: &Path) -> Result<String> {
     eprintln!("Starting a new throwaway network for this checkout…");
     let (build, ui) = (std::fs::read_to_string(dir.join(BUILD)).ok(), Throwaway::ui_in(dir));
     stop(dir, true)?;
     choose(dir, build.as_deref().map(Path::new), ui.as_deref())?;
-    create(dir).inspect_err(|_| {
-        let _ = stop(dir, true);
+    create(dir).map_err(|err| {
+        let _ = stop(dir, false);
+        match delete_all_but(dir, |name| name.ends_with(".log")) {
+            Ok(()) => err.context(format!("a new throwaway network didn't start, and its programs' logs are kept in {} till the next start", dir.display())),
+            Err(gone) => err.context(format!("a new throwaway network didn't start, and its logs couldn't be kept ({gone})")),
+        }
     })
 }
 
@@ -354,11 +359,18 @@ pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
                 Err(err) => eprintln!("Couldn't delete its Linux devices: {err}"),
             }
         }
-        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-            if entry.file_name() != "cache" {
-                let path = entry.path();
-                if path.is_dir() { std::fs::remove_dir_all(&path)? } else { std::fs::remove_file(&path)? }
-            }
+        delete_all_but(dir, |_| false)?;
+    }
+    Ok(())
+}
+
+/// Deletes all of the throwaway network's folder but what it downloaded or built, and what `keep` names.
+fn delete_all_but(dir: &Path, keep: impl Fn(&str) -> bool) -> Result<()> {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        if name != "cache" && !keep(&name.to_string_lossy()) {
+            let path = entry.path();
+            if path.is_dir() { std::fs::remove_dir_all(&path)? } else { std::fs::remove_file(&path)? }
         }
     }
     Ok(())
