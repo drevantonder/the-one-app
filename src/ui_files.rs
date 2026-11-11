@@ -4,7 +4,11 @@
 use std::path::{Path, PathBuf};
 
 /// The folders of the Workers that have one of their own, and their names in the source tree they're built from.
-const WORKERS: [(&str, &str); 1] = [("relay", "relay")];
+const WORKERS: [(&str, &str); 2] = [("relay", "relay"), ("auth", "auth")];
+
+/// The files of those folders that are among the others of the source tree they're built from: what other Workers import
+/// (`../shared/token.js`), and the one package the Workers are installed with (`package.json`, `bun.lock`).
+const BESIDE_OTHERS: [(&str, &str); 3] = [("auth/token.js", "shared/token.js"), ("auth/package.json", "package.json"), ("auth/bun.lock", "bun.lock")];
 
 /// What stays in the repo: the relay's WebAssembly is built from `relay/protos/` by hand (`relay/build.sh`), so only what it
 /// built ships.
@@ -22,7 +26,8 @@ pub fn list(root: &Path) -> Vec<(String, PathBuf)> {
         for (rel, abs) in collect(&root.join(folder)) {
             let path = format!("{folder}/{rel}");
             if !NOT_SHIPPED.iter().any(|p| path.starts_with(p)) {
-                files.push((format!("{source}/{rel}"), abs));
+                let name = BESIDE_OTHERS.iter().find(|(from, _)| *from == path).map_or_else(|| format!("{source}/{rel}"), |(_, to)| to.to_string());
+                files.push((name, abs));
             }
         }
     }

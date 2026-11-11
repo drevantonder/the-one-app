@@ -1,5 +1,5 @@
 //! Signing in to a throwaway network as its first user would in a browser, with no passkey: only a throwaway network's
-//! auth lets anyone in this way (`cloudflare/auth`'s `throwawayNetwork`).
+//! auth lets anyone in this way (`auth/worker.js`'s `throwawayNetwork`).
 
 use std::time::Duration;
 
@@ -12,7 +12,7 @@ fn said(out: &Value, otherwise: &str) -> String {
 
 /// Approves a sign-in as a throwaway network's first user would in a browser, with no passkey: an app's authorization,
 /// which then comes back to it. Only a throwaway network's auth signs anyone in this way
-/// (`cloudflare/auth`'s `throwawayNetwork`). `user`, someone who joined it, signs in as them instead.
+/// (`auth/worker.js`'s `throwawayNetwork`). `user`, someone who joined it, signs in as them instead.
 pub fn approve_on_throwaway(address: &str, url: &str, user: Option<&str>) -> Result<()> {
     let back = approved_on_throwaway(address, url, user)?;
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();

@@ -27,7 +27,7 @@ always_on = []
 # a Demo with no network, for a store's reviewer. Empty, none.
 demo = ""
 # A workplace's domain: where its users sign in with a provider's account, whose signed token must say it's at this
-# domain (cloudflare/auth/worker.js). Empty for a network with no domain. Which providers a network has is its own
+# domain (auth/worker.js). Empty for a network with no domain. Which providers a network has is its own
 # (`providers` in its Workers' settings, each one's client beside their secrets).
 join_domain = ""
 # Where the network's relay is made (a Cloudflare location hint: wnam, enam, sam, weur, eeur, apac, oc, afr or me), near

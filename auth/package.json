@@ -1,0 +1,12 @@
+{
+  "description": "What the sign-in Worker is built with (Better Auth, Kysely), which every Worker is installed with.",
+  "name": "cloudflare",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@better-auth/oauth-provider": "1.7.15",
+    "@better-auth/passkey": "1.7.15",
+    "better-auth": "1.7.15",
+    "kysely": "0.29.8"
+  }
+}

@@ -556,7 +556,7 @@ pub async fn written(bucket: &impl ::bucket::Bucket, keys: &database::stored::Ke
 /// the last step it had taken, and the database's state hash there, in its release's form. The new device starts from
 /// the copy at or before that step, takes the steps after it up to there, and keeps what it made only if it comes to
 /// that hash: the steps from the freeze on are never all read again. Said `<freeze>.<at>.<hash>`, as auth passes it on
-/// beside the network's root (`cloudflare/auth/worker.js`), which a device that knows none of it never reads.
+/// beside the network's root (`auth/worker.js`), which a device that knows none of it never reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Welcome {
     pub freeze: u64,

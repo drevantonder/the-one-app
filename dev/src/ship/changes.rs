@@ -112,7 +112,7 @@ impl Parts {
                 // WebAssembly by hand, and the Workers' tests stay in the repo.
                 Some("cloudflare") if file.starts_with("cloudflare/test/") => {}
                 Some("relay") if file.starts_with("relay/protos/") || file == "relay/build.sh" => {}
-                Some("relay") => parts.workers = true,
+                Some("relay" | "auth") => parts.workers = true,
                 // The Cloudflare node is Rust, built with the node; the remote MCP server runs that build, so the Workers
                 // go out with it.
                 Some("cloudflare") if file.starts_with("cloudflare/node/") => (parts.node, parts.workers) = (true, true),
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(of(&["dev/src/ship.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
         assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
         assert!(of(&["src/node.rs"]).is_built_in() && of(&["onet/src/lib.rs"]).is_built_in());
-        assert_eq!(of(&["cloudflare/auth/worker.js", "relay/worker.js", "cloudflare/package.json"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
+        assert_eq!(of(&["auth/worker.js", "relay/worker.js", "auth/package.json"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
         for file in ["cloudflare/web/web.js", "cloudflare/shared/crypto.js", "src/screen/ui/dist/ui.js", "src/screen/settings/dist/vault.html", "src/screen/bridge.js", "src/onboarding/pages.js", "src/onboarding/pages.tsx"] {
             assert_eq!(of(&[file]), Parts { web: true, workers: true, ..Default::default() }, "{file}: the web client and the Workers that serve it, with no node");
         }
