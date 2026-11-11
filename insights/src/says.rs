@@ -1,4 +1,4 @@
-//! What a client's report of what went wrong says of itself (src/says.rs).
+//! What a client's report of what went wrong says of itself (api/features/src/says.rs).
 
 use serde::Deserialize;
 use serde_json::Value;

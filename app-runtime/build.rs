@@ -1,18 +1,20 @@
-// What the program carries (`one::carried`): the built-in apps. config.toml's constants are custom-build's
+// The built-in apps the app runtime carries (`built_in`). config.toml's constants are custom-build's
 // (custom-build/build.rs); the Workers' and web client's files, and the WebAssembly, ui's (ui/build.rs).
-#[path = "ui/src/ui_files.rs"]
+#[path = "../ui/src/ui_files.rs"]
 #[allow(dead_code)]
 mod ui_files;
 
 fn main() {
-    let path = std::env::var("CONFIG").unwrap_or_else(|_| "config.toml".into());
+    // config.toml is at the repo's root, the folder above this package, and a relative CONFIG is from there too.
+    let repo = std::fs::canonicalize(std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap().parent().unwrap().to_path_buf();
+    let path = repo.join(std::env::var("CONFIG").unwrap_or_else(|_| "config.toml".into())).to_string_lossy().into_owned();
     println!("cargo:rerun-if-changed={path}");
     println!("cargo:rerun-if-env-changed=CONFIG");
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
     let config: toml::Table = text.parse().expect("parse config file");
     // Every app in this repo's apps/ folder ships built in: each folder's files. The config's `apps` are the ones a new
     // network deploys and installs in `global`, by folder name.
-    let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("apps");
+    let root = repo.join("apps");
     println!("cargo:rerun-if-changed={}", root.display());
     let mut dirs: Vec<_> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.path()).filter(|p| p.join("app.js").is_file()).collect();
     dirs.sort();
@@ -40,6 +42,6 @@ fn main() {
         starters.push_str(&format!("{name:?},"));
     }
     let out = format!("pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\n");
-    let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("carried.rs");
+    let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("built_in.rs");
     std::fs::write(dest, out).unwrap();
 }

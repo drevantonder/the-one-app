@@ -1,0 +1,41 @@
+# Every feature's API as clients get it: the core's features listed, what each route says, the OpenAPI document (every
+# build, WebAssembly too); on a machine, MCP, code mode, the skills and each tool as a command.
+[package]
+name = "api-features"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[features]
+# What agents get of the API on a machine: MCP, code mode, the skills, each tool as a command.
+machine = ["platform/machine", "dep:sha2", "dep:ureq"]
+
+[dependencies]
+custom-build = { path = "../../custom-build" }
+platform = { path = "../../platform" }
+scope = { path = "../../scope" }
+api = { path = ".." }
+# The screens MCP's apps show (src/mcp/apps.rs), and what the screens' routes say.
+ui = { path = "../../ui" }
+deploy = { path = "../../deploy" }
+vault = { path = "../../vault" }
+backups = { path = "../../backups" }
+groups = { path = "../../groups" }
+devices = { path = "../../devices" }
+widgets = { path = "../../widgets" }
+notifications = { path = "../../notifications" }
+device-logs = { path = "../../device-logs" }
+insights = { path = "../../insights" }
+ai-gateway = { path = "../../ai-gateway" }
+anyhow = "1"
+data-encoding = "2"
+# A route's body in the OpenAPI document is derived from the struct its handler reads, so the two can't disagree.
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = { version = "0.11", optional = true }
+ureq = { version = "3", features = ["json"], optional = true }

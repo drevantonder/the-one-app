@@ -25,6 +25,10 @@ serde_json = "1"
 sha2 = "0.11"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+# Running cargo, Go and git where this machine has them, to build an app's service (src/service.rs).
+platform = { path = "../platform", features = ["machine"] }
+# The platforms a service is built for.
+oned-update = { path = "../oned/update" }
 rand = "0.8"
 tracing = "0.1"
 ureq = { version = "3", features = ["json"] }

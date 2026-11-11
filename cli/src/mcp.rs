@@ -1,12 +1,12 @@
-//! `mcp` on the command line: the MCP server (`one::mcp`) over stdio, for an agent on this machine, asking its onet as
+//! `mcp` on the command line: the MCP server (`api_features::mcp`) over stdio, for an agent on this machine, asking its onet as
 //! a client does.
 
 use anyhow::Result;
 use serde_json::{Value, json};
 
 use api::Client;
-use one::mcp::{Session, agent_name, answer};
-use one::skills::Mode;
+use api_features::mcp::{Session, agent_name, answer};
+use api_features::skills::Mode;
 
 /// `mcp` on the command line: this server, over stdio.
 pub fn commands() -> ::api::cli::Command {

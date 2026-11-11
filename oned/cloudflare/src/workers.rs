@@ -874,7 +874,7 @@ impl Settings {
         }
         files.push((".well-known/windows-app-web-link".into(), windows_links()));
         // How an AI connects itself, for anyone who has the address: never what apps the network has.
-        files.push(("llms.txt".into(), ::one::skills::guide(Some(&self.address)).into_bytes()));
+        files.push(("llms.txt".into(), api_features::skills::guide(Some(&self.address)).into_bytes()));
         files
     }
 }

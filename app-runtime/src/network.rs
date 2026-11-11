@@ -106,7 +106,7 @@ impl Node {
         }
         // Written first and run together: as each is written, settling would run them all again, holding up the next.
         let settling = self.0.settling.lock().await;
-        for (app, _) in one::carried::BUILT_IN {
+        for (app, _) in crate::built_in::BUILT_IN {
             self.write_built_in(&me, app).await?;
         }
         for app in apps {

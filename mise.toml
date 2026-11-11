@@ -1,6 +1,6 @@
 # Everything the build shells out to that isn't Rust (rust-toolchain.toml): `mise install` here installs it.
 # Bun's version is build.rs's BUN, and wasm-bindgen's the one Cargo.lock locks, Go's the one apps/whatsapp/service/go.mod
-# asks for: a test in src/build.rs fails when they differ.
+# asks for: a test in dev/src/build.rs fails when they differ.
 [tools]
 bun = "1.4.4"
 node = "24.21.0"

@@ -1,8 +1,11 @@
 //! What differs between the operating systems this program runs on, so the rest of it doesn't have to know: which name
-//! it was started by, stopping what it started, private files, links, replacing the running program and a disk's space.
+//! it was started by, stopping what it started, private files, links, replacing the running program, a disk's space,
+//! telling systemd it's ready, and running the tools a build uses (cargo, Go, git) wherever this machine has them.
 
-use std::path::Path;
-use std::process::{Child, Command};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+
+use anyhow::{Context, Result, bail, ensure};
 
 /// The name this program was started by, without Windows' `.exe`: it says what the program is to be (`oned`, git's helper).
 pub fn invoked_as() -> Option<String> {
@@ -261,4 +264,89 @@ pub fn child(command: &mut std::process::Command, listening: &[(&str, &std::net:
             });
         }
     }
+}
+
+/// Tells systemd `state`, when it runs oned as its service.
+pub fn notify(#[cfg_attr(not(target_os = "linux"), allow(unused_variables))] state: &str) {
+    #[cfg(target_os = "linux")]
+    if let Some(at) = std::env::var_os("NOTIFY_SOCKET") {
+        use std::os::linux::net::SocketAddrExt;
+        let at = at.to_string_lossy().into_owned();
+        let addr = match at.strip_prefix('@') {
+            Some(name) => std::os::unix::net::SocketAddr::from_abstract_name(name.as_bytes()),
+            None => std::os::unix::net::SocketAddr::from_pathname(&at),
+        };
+        let sent = std::os::unix::net::UnixDatagram::unbound().and_then(|s| s.send_to_addr(state.as_bytes(), &addr?));
+        if let Err(err) = sent {
+            tracing::warn!("couldn't tell systemd {state:?}: {err}");
+        }
+    }
+}
+
+/// A tool by its name, or where it's kept when a shell doesn't have it on its PATH: `probe` is an argument that makes it
+/// answer, and `kept` where it is under the home folder.
+fn tool(name: &str, probe: &str, kept: &str) -> PathBuf {
+    let kept = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(kept);
+    if succeeds(Command::new(name).arg(probe)) || !kept.exists() { name.into() } else { kept }
+}
+
+/// Cargo, also where rustup puts it, with sccache findable too: `.cargo/config.toml` names it bare, and a shell without it on
+/// its PATH (the ssh that runs a Linux device's update) gets it where mise's shims put it.
+pub fn cargo() -> Command {
+    cargo_behind(None)
+}
+
+/// `cargo()` at a lower priority.
+pub fn nice_cargo() -> Command {
+    cargo_behind(Some("nice"))
+}
+
+fn cargo_behind(wrapper: Option<&str>) -> Command {
+    let cargo = tool("cargo", "--version", ".cargo/bin/cargo");
+    let mut command = match wrapper {
+        Some(wrapper) => {
+            let mut command = Command::new(wrapper);
+            command.arg(cargo);
+            command
+        }
+        None => Command::new(cargo),
+    };
+    if let Some(dir) = tool("sccache", "--version", ".local/share/mise/shims/sccache").parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        command.env("PATH", std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&path))).unwrap_or(path));
+    }
+    command
+}
+
+/// Go, also where mise's shims put it.
+pub fn go() -> PathBuf {
+    tool("go", "version", ".local/share/mise/shims/go")
+}
+
+pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
+    let out = Command::new("git").current_dir(dir).args(args).output()?;
+    ensure!(out.status.success(), "git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+pub fn quietly(cmd: &mut Command) -> Result<()> {
+    let out = cmd.output().with_context(|| format!("run {:?}", cmd.get_program()))?;
+    if !out.status.success() {
+        bail!("{} failed:\n{}{}", said(cmd), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    }
+    Ok(())
+}
+
+pub fn show(cmd: &mut Command) -> Result<()> {
+    let status = cmd.status().with_context(|| format!("run {:?}", cmd.get_program()))?;
+    ensure!(status.success(), "{} failed", said(cmd));
+    Ok(())
+}
+
+pub fn succeeds(cmd: &mut Command) -> bool {
+    cmd.stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
+fn said(cmd: &Command) -> String {
+    format!("{:?} {}", cmd.get_program(), cmd.get_args().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "))
 }

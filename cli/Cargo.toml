@@ -1,6 +1,5 @@
-# The `one` program: its CLI and MCP (src/), the node it serves, which is the root crate `one`, and the computer's onet
-# (`onet`, run as `<cli>t`). A package of its own, not the root's, since it runs onet, which depends on `one` itself, and
-# Cargo allows no package to depend on its own dependent.
+# The `one` program: its CLI and MCP (src/), oned (`<cli>d`) and the app runtime it starts, and the computer's onet
+# (`onet`, run as `<cli>t`), each this program run by that name.
 [package]
 name = "one-cli"
 version = "0.1.0"
@@ -51,7 +50,8 @@ backups = { path = "../backups" }
 # `backups check --folder`: a backup on a disk opened with the recovery key alone, with no network.
 backups-runtime = { path = "../backups/runtime" }
 ui = { path = "../ui", features = ["web-bundle"] }
-one = { path = ".." }
+# Every feature's API as agents get it: MCP, code mode, the skills, each tool as a command.
+api-features = { path = "../api/features", features = ["machine"] }
 # The app runtime's words for a device not in a network (`not_joined`), and which paths are an app's (git's helper).
 app-runtime = { path = "../app-runtime" }
 # `<cli>t`, this computer's onet (onet/src/computer/), is this program run by that name.

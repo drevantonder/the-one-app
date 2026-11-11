@@ -132,7 +132,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Set
 }
 
 /// Publishes what `native-apps/mac/throwaway.sh` built on `host` in `folder` for a Mac at the throwaway network's address,
-/// under its own release key, as a Mac publishes a real build (`one::build::mac_things`): the program, which the window
+/// under its own release key, as a Mac publishes a real build (`oned::publish::mac_things`): the program, which the window
 /// sets up its computer from, the helper apps its oned runs, and the window, which `update` takes.
 fn publish_mac(dir: &Path, host: &str, folder: &str) -> Result<()> {
     let here = dir.join("mac-publish");
@@ -143,8 +143,8 @@ fn publish_mac(dir: &Path, host: &str, folder: &str) -> Result<()> {
     let said = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", host, &format!("{}/{CLI} version --json", shell_quote(folder))]).output()?;
     let version: oned_update::release::Version = serde_json::from_slice(&said.stdout).with_context(|| format!("ask what {host} built what it is"))?;
     let addr = std::fs::read_to_string(dir.join("addr"))?;
-    let things = one::build::mac_things(&here, &version, "-")?;
-    one::build::publish_latest(&crate::throwaway::node_at(dir, addr.trim()), &platform::mode::Throwaway::own_release_key(dir)?, &things)?;
+    let things = oned::publish::mac_things(&here, &version, "-")?;
+    oned::publish::publish_latest(&crate::throwaway::node_at(dir, addr.trim()), &platform::mode::Throwaway::own_release_key(dir)?, &things)?;
     eprintln!("Published {} for {} at the throwaway network's address: its program, helpers and window.", version.commit, version.target);
     Ok(())
 }

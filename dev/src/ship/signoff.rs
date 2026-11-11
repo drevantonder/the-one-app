@@ -88,7 +88,7 @@ pub(super) fn tested(ran: &str) -> Result<()> {
 fn check<'a>(here: &Path, files: impl Iterator<Item = &'a str>) -> Result<()> {
     let files: Vec<&str> = files.collect();
     if files.iter().any(|f| f.ends_with(".rs") || f.ends_with("Cargo.toml") || *f == "Cargo.lock") {
-        timed("compiled", || quietly(build::nice_cargo().current_dir(here).args(["check", "--all-targets", "-q"])))?;
+        timed("compiled", || quietly(platform::os::nice_cargo().current_dir(here).args(["check", "--all-targets", "-q"])))?;
     }
     let screen = |f: &&&str| {
         let built = ["ui/kit/", "ui/home/", "ui/settings/", "apps/"].iter().any(|top| f.starts_with(top)) || f.split('/').nth(1) == Some("screens");

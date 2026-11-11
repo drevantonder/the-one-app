@@ -560,11 +560,11 @@ impl Client {
         let token = (local.token)().ok_or_else(|| unsent("this device's own runtime hasn't started here yet"))?;
         headers.push((header::LOCAL_TOKEN.into(), token));
         let head = local_head(&req.method, &req.path, &headers, req.body.len()?)?;
-        // Waited for while it starts again (`one::loopback`): nothing is sent until it's connected.
-        let until = Instant::now() + one::loopback::BACK_WITHIN;
+        // Waited for while it starts again (`api::loopback`): nothing is sent until it's connected.
+        let until = Instant::now() + ::api::loopback::BACK_WITHIN;
         let mut stream = loop {
             match tokio::net::TcpStream::connect(&local.addr).await {
-                Err(err) if one::loopback::refused(&err) && Instant::now() < until => tokio::time::sleep(one::loopback::EVERY).await,
+                Err(err) if ::api::loopback::refused(&err) && Instant::now() < until => tokio::time::sleep(::api::loopback::EVERY).await,
                 connected => break connected.map_err(|err| unsent(format!("this device's own runtime didn't answer: {err}")))?,
             }
         };

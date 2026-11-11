@@ -1,4 +1,4 @@
-//! What the network's own routes say of themselves: its state, joining it, and running a call (src/says.rs).
+//! What the network's own routes say of themselves: its state, joining it, and running a call (api/features/src/says.rs).
 
 use serde_json::json;
 

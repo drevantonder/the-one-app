@@ -1,6 +1,6 @@
 //! What keeps a program of a computer's going: its watchdog, which exits it once its runtime has made no progress for
 //! a while, for whatever started it to start it again (oned for the app runtime; systemd, launchd or Windows' task for
-//! oned), and telling systemd it's ready.
+//! oned).
 
 use std::panic::Location;
 use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
@@ -11,31 +11,9 @@ const RESTARTS: &str = "watchdog-restarts";
 
 static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
-/// Notes that this program started now, for `since_start`.
+/// Notes that this program started now.
 pub fn started() {
     STARTED.get_or_init(std::time::Instant::now);
-}
-
-/// How long since this program started (`started`), for what waits a moment then.
-pub fn since_start() -> Option<Duration> {
-    STARTED.get().map(|s| s.elapsed())
-}
-
-/// Tells systemd `state`, when it runs oned as its service.
-pub fn notify(#[cfg_attr(not(target_os = "linux"), allow(unused_variables))] state: &str) {
-    #[cfg(target_os = "linux")]
-    if let Some(at) = std::env::var_os("NOTIFY_SOCKET") {
-        use std::os::linux::net::SocketAddrExt;
-        let at = at.to_string_lossy().into_owned();
-        let addr = match at.strip_prefix('@') {
-            Some(name) => std::os::unix::net::SocketAddr::from_abstract_name(name.as_bytes()),
-            None => std::os::unix::net::SocketAddr::from_pathname(&at),
-        };
-        let sent = std::os::unix::net::UnixDatagram::unbound().and_then(|s| s.send_to_addr(state.as_bytes(), &addr?));
-        if let Err(err) = sent {
-            tracing::warn!("couldn't tell systemd {state:?}: {err}");
-        }
-    }
 }
 
 /// Whether a supervisor starts this program again when it exits: oned, or what starts oned. Only a program started by

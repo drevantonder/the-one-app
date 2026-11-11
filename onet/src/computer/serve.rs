@@ -127,7 +127,7 @@ async fn body<T: serde::de::DeserializeOwned>(req: Request) -> Result<T> {
 
 /// Joins the network a pairing code is from, as this computer (`app_runtime::join_with`), and reaches it.
 async fn join(onet: &Arc<Onet>, req: Request) -> Result<Value> {
-    let asked: one::says::api::Join = body(req).await?;
+    let asked: api_features::says::api::Join = body(req).await?;
     anyhow::ensure!(NetworkFile::read(&onet.home)?.is_none(), "this computer is in a network already");
     let joined = app_runtime::join_with(&onet.key, &onet.name, &asked.code).await?;
     joined.network.write(&onet.home)?;

@@ -123,12 +123,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "app-schedules"
+name = "api-features"
 version = "0.1.0"
 dependencies = [
+ "ai-gateway",
  "anyhow",
- "jiff",
+ "api",
+ "backups",
+ "custom-build",
+ "data-encoding",
+ "deploy",
+ "device-logs",
+ "devices",
+ "groups",
+ "insights",
+ "notifications",
+ "platform",
+ "schemars 1.2.3",
+ "scope",
+ "serde",
  "serde_json",
+ "ui",
+ "vault",
+ "widgets",
 ]
 
 [[package]]
@@ -1371,6 +1388,7 @@ dependencies = [
  "api",
  "custom-build",
  "data-encoding",
+ "oned-update",
  "platform",
  "rand 0.8.8",
  "schemars 1.2.3",
@@ -3470,13 +3488,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "labs"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4575,66 +4586,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "onboarding"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ciborium",
- "custom-build",
- "data-encoding",
- "key",
- "platform",
- "serde",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
-
-[[package]]
-name = "one"
-version = "0.1.0"
-dependencies = [
- "ai-gateway",
- "anyhow",
- "api",
- "app-schedules",
- "backups",
- "blake3",
- "bucket",
- "ciborium",
- "custom-build",
- "data-encoding",
- "database",
- "deploy",
- "device-logs",
- "devices",
- "ed25519-dalek 3.0.0",
- "getrandom 0.2.17",
- "groups",
- "insights",
- "key",
- "labs",
- "notifications",
- "onboarding",
- "platform",
- "rand 0.8.8",
- "rusqlite",
- "schemars 1.2.3",
- "scope",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "toml 0.9.12+spec-1.1.0",
- "tracing",
- "ui",
- "ureq",
- "vault",
- "widgets",
- "windows-sys 0.61.2",
-]
 
 [[package]]
 name = "one-native"
@@ -4653,7 +4608,6 @@ dependencies = [
  "notifications",
  "objc2",
  "objc2-foundation",
- "one",
  "oned-update",
  "onet",
  "platform",
@@ -4702,6 +4656,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api",
+ "api-features",
  "bucket",
  "custom-build",
  "data-encoding",
@@ -4717,7 +4672,6 @@ dependencies = [
  "key",
  "n0-future",
  "notifications",
- "one",
  "platform",
  "rand 0.8.8",
  "rusqlite",

@@ -231,7 +231,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             let mut service = String::new();
             let body = match (input.get("files"), input.get("version")) {
                 // React screens and a service are built here, on the machine that deploys, as `deploy <folder>` builds them.
-                (Some(Value::Object(files)), None) if !node.elsewhere() && (::deploy::build::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match crate::build::built_here(node, files) {
+                (Some(Value::Object(files)), None) if !node.elsewhere() && (::deploy::build::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match ::deploy::service::built_here(node, files) {
                     Ok((bundle, built)) => {
                         service = built;
                         json!({ "app": app, "bundle": bundle, "wait": true })

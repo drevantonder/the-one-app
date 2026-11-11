@@ -19,7 +19,7 @@ pub fn run(args: &[String]) -> Result<i32> {
     let [remote, url] = args else { bail!("{} is git's, for {CLI}:: addresses: git clone <your repo's address>", ::custom_build::programs::git_helper()) };
     // Before any thread starts. A home the user gave rules; else the node's, as it told git.
     if std::env::var_os(::custom_build::config::env("HOME")).is_none()
-        && let Some(home) = one::git_wire::node_home()
+        && let Some(home) = ::api::git_wire::node_home()
     {
         unsafe { std::env::set_var(::custom_build::config::env("HOME"), home) };
     }
@@ -111,8 +111,8 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
             }
             r.send(ureq::SendBody::from_owned_reader(Fed { sent, part: Bytes::new() }))
         } else {
-            // What git asks first: again while onet starts again (`one::loopback`).
-            one::loopback::while_refused(|| {
+            // What git asks first: again while onet starts again (`api::loopback`).
+            ::api::loopback::while_refused(|| {
                 let mut r = api::local::agent().get(&url);
                 for (n, v) in &headers {
                     r = r.header(n, v);

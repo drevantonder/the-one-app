@@ -500,11 +500,11 @@ mod service_protocol {
         // Go builds the way a release does; with none installed, the build says how to get it.
         let platforms = oned_update::platform::PLATFORMS.iter().filter(|p| p.target == ::custom_build::config::TARGET);
         let out = crate::temp("go-service");
-        let built = one::build::build_service(&root.join("apps/whatsapp"), "contract-test", platforms, &out).unwrap_or_else(|err| panic!("WhatsApp's service is in Go, which these tests hold to the protocol: {err:#}")).unwrap();
-        let go = Command::new(one::build::go()).args(["test", "./..."]).current_dir(root.join("apps/whatsapp/service")).output().unwrap_or_else(|err| panic!("Go isn't installed ({err}): see go.dev/doc/install, or `mise use -g go`"));
+        let built = deploy::service::build_service(&root.join("apps/whatsapp"), "contract-test", platforms, &out).unwrap_or_else(|err| panic!("WhatsApp's service is in Go, which these tests hold to the protocol: {err:#}")).unwrap();
+        let go = Command::new(platform::os::go()).args(["test", "./..."]).current_dir(root.join("apps/whatsapp/service")).output().unwrap_or_else(|err| panic!("Go isn't installed ({err}): see go.dev/doc/install, or `mise use -g go`"));
         assert!(go.status.success(), "WhatsApp's own tests (go test) failed:\n{}{}", String::from_utf8_lossy(&go.stdout), String::from_utf8_lossy(&go.stderr));
         // Shell is built beside the program, which `cargo test` builds for its own tests but not the services.
-        assert!(one::build::cargo().args(["build", "-q", "-p", "one-shell"]).current_dir(&root).status().unwrap().success(), "Shell's service didn't build");
+        assert!(platform::os::cargo().args(["build", "-q", "-p", "one-shell"]).current_dir(&root).status().unwrap().success(), "Shell's service didn't build");
         vec![
             Case {
                 name: "shell",
@@ -643,7 +643,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
     names("the Cloudflare node", &read("oned/cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
     names("the pages", &read("ui/home/lib/model.js"), &["w.late", "&kind="]);
     names("the native widgets", &read("native-apps/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
-    names("a chat's view", &read("src/mcp/view.html"), &["w.late", "widgets_show"]);
+    names("a chat's view", &read("api/features/src/mcp/view.html"), &["w.late", "widgets_show"]);
     assert!(missing.is_empty(), "{}", missing.join("\n"));
 }
 
@@ -794,9 +794,9 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
         })
     };
     const UNLISTED: [&str; 10] = ["/api/keys", "/api/steps", "/api/steps/global", "/api/openapi.json", "/api/holds", "/api/holds/shared", "/api/holds/write", "/api/holds/sign", "/api/services", "/api/joined"];
-    let document = one::openapi::document(&[], true);
-    for (path, who, _) in one::says::listed() {
-        assert!(app_runtime::api::routes().who().iter().any(|(p, w)| *p == path && *w == who), "src/says.rs says {path} is asked by {who:?}, which no route of the node (app-runtime/src/api.rs) is");
+    let document = api_features::openapi::document(&[], true);
+    for (path, who, _) in api_features::says::listed() {
+        assert!(app_runtime::api::routes().who().iter().any(|(p, w)| *p == path && *w == who), "api/features/src/says.rs says {path} is asked by {who:?}, which no route of the node (app-runtime/src/api.rs) is");
     }
     let listed: Vec<Vec<String>> = document["paths"].as_object().unwrap().keys().map(|path| path.trim_start_matches('/').split('/').map(str::to_string).collect()).collect();
     for path in document["paths"].as_object().unwrap().keys() {
@@ -855,7 +855,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
         }
     }
     assert!(unserved.is_empty(), "these paths aren't routes of the node (app-runtime/src/api.rs):\n{}", unserved.join("\n"));
-    assert!(unlisted.is_empty(), "these paths aren't in the OpenAPI document (`api::openapi`): add the route to its feature's `says.rs` (src/says.rs):\n{}", unlisted.join("\n"));
+    assert!(unlisted.is_empty(), "these paths aren't in the OpenAPI document (`api::openapi`): add the route to its feature's `says.rs` (api/features/src/says.rs):\n{}", unlisted.join("\n"));
 }
 
 /// What isn't an app's own request (`protocol::path::ROOTS`) is every first segment the API's routes have: a route under

@@ -1,138 +1,11 @@
 [workspace]
-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "app-runtime", "oned", "oned/update", "oned/cloudflare", "cli", "dev", "oned/cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+resolver = "3"
+members = ["custom-build", "platform", "key", "bucket", "database", "scope", "api", "api/features", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "app-runtime", "oned", "oned/update", "oned/cloudflare", "cli", "dev", "oned/cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
-default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "app-runtime", "oned", "oned/update", "oned/cloudflare", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+default-members = ["custom-build", "platform", "key", "bucket", "database", "scope", "api", "api/features", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "app-runtime", "oned", "oned/update", "oned/cloudflare", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 
-[package]
-name = "one"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
-publish = false
-# The program and its tests are cli/'s, which uses this crate.
-autobins = false
-autotests = false
-
-# It has no doctests: rustdoc would build the crate again on every `cargo test` to find none.
-[lib]
-doctest = false
-
-# `node`, the node on a machine; without it, only what the Cloudflare node (oned/cloudflare/node/) and onet (onet/)
-# share with it: steps, databases, who's who and keys.
-[features]
-default = ["node"]
-node = ["bucket/machine", "platform/machine", "dep:oned-update", "oned-update/machine", "dep:services", "dep:axum", "dep:futures-util", "dep:iroh", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:image", "dep:hyper", "dep:hyper-util", "web-bundle"]
-# `web-bundle`, what the native apps take from the network: the signed web client (ui's `web-bundle`).
-web-bundle = ["ui/web-bundle"]
-
-[dependencies]
-custom-build = { path = "custom-build" }
-platform = { path = "platform" }
-key = { path = "key" }
-bucket = { path = "bucket" }
-database = { path = "database" }
-scope = { path = "scope" }
-api = { path = "api" }
-# The UI (ui/): a screen's page, the client's own screens, the web client's and the Workers' files.
-ui = { path = "ui" }
-# The update path (oned/update/): the signed record, the platforms a release is for, a release and `one update`.
-oned-update = { path = "oned/update", optional = true }
-# Deploy (deploy/): bundles, building an app with the pinned Bun, every build; what a node does for it, only a node's.
-deploy = { path = "deploy" }
-# Insights (insights/): its signals, the batch, reading rows back, every build; recording and sending them, only a node's.
-insights = { path = "insights" }
-# The Vault (vault/): items, their sealing and filling, every build; what the app runtime does for it, only a node's.
-vault = { path = "vault" }
-# Labs (labs/): which of the network's labs are on, every build.
-labs = { path = "labs" }
-# Onboarding (onboarding/): what a pairing code says and what joining with one asks, every build; its screens are the files beside it, and what serves a code the app runtime's (onboarding/runtime/).
-onboarding = { path = "onboarding" }
-# Device logs (device-logs/): what a device's programs and services print, kept and read, every build; what the app runtime does for the tool that reads them, only a node's.
-device-logs = { path = "device-logs" }
-# Devices (devices/): their tools' specs, the recovery key's commands and a machine's load, every build; what the
-# app runtime does for them, only a node's.
-devices = { path = "devices" }
-# Services (services/): what a service's program registers on, carried asks, sandboxes and their commands, a computer's;
-# what the app runtime does for them, only a node's.
-services = { path = "services", optional = true }
-# Notifications (notifications/): a note sealed to one device and what a device registers, every build; sending them, only a node's.
-notifications = { path = "notifications" }
-# Backups (backups/): a place's Vault item kind and the tools' specs, every build; running them and the format, only a node's.
-backups = { path = "backups" }
-# App schedules (app-schedules/): an app's schedules as its deploy declares them, every build; running them, only a node's.
-app-schedules = { path = "app-schedules" }
-# Groups (groups/): who's in the network and its groups, every build; what the app runtime does for it, only a node's.
-groups = { path = "groups" }
-# Widgets (widgets/): the tool that shows them, every build; what the app runtime does for them, only a node's.
-widgets = { path = "widgets" }
-anyhow = "1"
-# AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes, tools' specs, whose key pays and a call's flow, every build; running it on a machine, only a node's.
-ai-gateway = { path = "ai-gateway" }
-data-encoding = "2"
-# A route's body in the OpenAPI document (app-runtime/src/api/openapi.rs) is derived from the struct its handler reads, so the two
-# can't disagree, and no schema of those structs is written by hand.
-schemars = "1"
-# Devices sign what they send each other through the relay with Ed25519 (app-runtime/src/relay.rs).
-ed25519-dalek = "3"
-rand = "0.8"
-blake3 = "1"
-# A scope database's steps are kept in CBOR in the bucket (scope/src/steps.rs); the Cloudflare node reads them too.
-ciborium = "0.2"
-# `serialize` makes and reads an app database's copy in memory (database/src/stored.rs).
-rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"] }
-serde = { version = "1", features = ["derive"] }
-sha2 = "0.11"
-serde_json = "1"
-tracing = "0.1"
-
-# On Workers (the Cloudflare node, oned/cloudflare/node/), rand gets its randomness from the runtime's crypto.getRandomValues.
-[target.'cfg(target_family = "wasm")'.dependencies]
-getrandom = { version = "0.2", features = ["js"] }
-
-# Windows has none of what `libc` gives a node on Unix (platform/src/os.rs): a job for its children, and a disk's free space.
-# The version Cargo already builds for tokio and iroh there.
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
-
-# What only a node on a machine uses (the `node` feature): the rest of the node, which src/lib.rs keeps apart from what
-# the Cloudflare node and the native apps' client share.
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-axum = { version = "0.8", optional = true }
-# Its join_all and BoxFuture run a node's asks of several things at once (src/core_tools.rs); axum and iroh
-# already build it.
-futures-util = { version = "0.3", default-features = false, optional = true }
-# Devices reach each other over iroh (app-runtime/src/net.rs): QUIC between their device keys, direct where a path opens and
-# otherwise through the network's relay, which speaks iroh's relay protocol. Only ring's TLS and the router port mapping
-# (UPnP, NAT-PMP, PCP), with no n0 discovery or metrics. Pinned, since the relay runs iroh-relay's own code of this
-# version.
-iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "portmapper"], optional = true }
-# A device applies a database step another device sent only once the bucket confirms it holds those bytes, by their
-# ETag, which for R2's single PUT is their MD5 (bucket/src/place.rs); nothing already built gives MD5.
-md-5 = { version = "0.11", optional = true }
-# So workerd dies with its node on Linux (prctl PR_SET_PDEATHSIG).
-libc = { version = "0.2", optional = true }
-# Release signatures are OpenSSH signatures (sshsig), which install.sh checks with ssh-keygen; this reads the keys and
-# makes and checks the signatures.
-ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"], optional = true }
-# test-util is tests/sim.rs's paused clock, so links that wait seconds take none. It's here, not a dev-dependency, so
-# `cargo test` and `cargo build` build the same target/debug/one, which `one-dev throwaway` runs: as a dev-dependency it was a
-# second tokio, and every switch between them compiled this crate again. Unused, it does nothing.
-tokio = { version = "1", features = ["full", "test-util"], optional = true }
-tokio-stream = { version = "0.1", features = ["sync"], optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
-ureq = { version = "3", features = ["json"] }
-# Agent devices' screens come as PNG or JPEG and go out as JPEG at the width asked (src/agent_devices/picture.rs).
-image = { version = "0.24", default-features = false, features = ["png", "jpeg"], optional = true }
-# Client devices ask a node's local API over iroh, HTTP/1.1 on each stream (app-runtime/src/net.rs), which hyper's server
-# answers as axum's does over TCP (axum already builds hyper).
-hyper = { version = "1", features = ["server", "http1"], optional = true }
-hyper-util = { version = "0.1", features = ["tokio", "service"], optional = true }
-
-
-[build-dependencies]
-toml = "0.9"
 
 # Crypto, CBOR and SQLite are unbearably slow unoptimized, even while developing. Named, not `"*"`: that would optimize every
 # proc macro and build script too (cargo gives a package override precedence over build-override), most of a cold build.
@@ -273,9 +146,6 @@ opt-level = 1
 lto = false
 codegen-units = 256
 debug = false
-
-[profile.web-dev.package.one]
-incremental = true
 
 [profile.web-dev.package.onet]
 incremental = true

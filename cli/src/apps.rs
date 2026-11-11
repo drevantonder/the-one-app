@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use ::api::Client;
 use ::api::cli::{Command, Given, ago};
 use ::custom_build::config::CLI;
-use one::{build, tools};
+use api_features::tools;
 
 pub fn commands() -> Command {
     Command {
@@ -120,7 +120,7 @@ fn deploy(g: &Given, dir: &std::path::Path) -> Result<()> {
         Some(name) => name.to_string(),
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
     };
-    let (blob, service) = build::built_with_service(node, dir)?;
+    let (blob, service) = ::deploy::service::built_with_service(node, dir)?;
     let deployed = node.post("/api/deploy", json!({ "app": name, "bundle": blob, "owner": g.flag("owner"), "wait": true }))?;
     deployed_said(node, &name, &deployed, &service)?;
     Ok(())

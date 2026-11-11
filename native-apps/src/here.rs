@@ -3,7 +3,7 @@
 //! programs, on its loopback with the token in its home, as the CLI does: every request of the page, where the computer
 //! stands with a network, and asking to be let in with a sign-in made here, which names the computer's key. On a
 //! computer with no `one`, the window sets it up first (`platform::set_up`), from the network's signed record. While
-//! oned starts onet again (an update), the window waits for it, and asks again what only reads (`one::loopback`).
+//! oned starts onet again (an update), the window waits for it, and asks again what only reads (`api::loopback`).
 
 use std::time::Duration;
 
@@ -32,7 +32,7 @@ pub fn ask(path: &str, body: Option<Value>, secs: u64) -> Result<(u16, Value), S
     let token = token()?;
     let url = format!("http://{}{path}", addr());
     let agent = agent(secs);
-    let mut r = one::loopback::while_refused(|| match &body {
+    let mut r = ::api::loopback::while_refused(|| match &body {
         Some(body) => agent.post(&url).header(custom_build::protocol::header::LOCAL_TOKEN, &token).send_json(body),
         None => agent.get(&url).header(custom_build::protocol::header::LOCAL_TOKEN, &token).call(),
     })
@@ -51,7 +51,7 @@ pub async fn asked(path: &'static str, body: Option<Value>, secs: u64) -> Result
 }
 
 /// Where this computer stands with a network, as its onet says (`{ in, address, user, join, code }`); none if onet
-/// isn't answering. Blocks, for at most 2 s once it answers (`one::loopback::BACK_WITHIN` while it starts again).
+/// isn't answering. Blocks, for at most 2 s once it answers (`::api::loopback::BACK_WITHIN` while it starts again).
 pub fn stands() -> Option<Value> {
     ask("/api/join", None, 2).ok().filter(|(status, _)| *status == 200).map(|(_, out)| out)
 }
@@ -99,9 +99,9 @@ pub async fn fetch(method: String, path: String, headers: Vec<(String, String)>,
             agent.run(request.body(body.clone())?)
         };
         let apps = || ask(api::path::APPS, None, 30).ok().map(|(_, apps)| apps);
-        let sent = match one::loopback::while_refused(&send) {
-            Err(err) if one::loopback::lost(&err) && one::loopback::reads(&method, &path, &body, apps) => one::loopback::while_refused(&send),
-            Err(err) if one::loopback::lost(&err) => return drop(answered.send(Ok(failed(one::loopback::lost_write())))),
+        let sent = match ::api::loopback::while_refused(&send) {
+            Err(err) if ::api::loopback::lost(&err) && ::api::loopback::reads(&method, &path, &body, apps) => ::api::loopback::while_refused(&send),
+            Err(err) if ::api::loopback::lost(&err) => return drop(answered.send(Ok(failed(::api::loopback::lost_write())))),
             sent => sent,
         };
         let response = match sent {

@@ -7,7 +7,7 @@ use std::path::Path;
 pub(crate) fn web_client_and_cloudflare_node(checkout: &Path) -> anyhow::Result<()> {
     let config = checkout.join(custom_build::config::CONFIG_FILE);
     eprintln!("Building the web client's and the Cloudflare node's WebAssembly (the first time takes minutes)…");
-    one::build::onet(checkout, &config, "web-dev")?;
-    one::build::cloudflare_node(checkout, &config, "web-dev")?;
+    crate::build::onet(checkout, &config, "web-dev")?;
+    crate::build::cloudflare_node(checkout, &config, "web-dev")?;
     Ok(())
 }

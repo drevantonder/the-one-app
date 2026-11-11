@@ -1,4 +1,4 @@
-//! What the routes for files kept in the network say of themselves (src/says.rs).
+//! What the routes for files kept in the network say of themselves (api/features/src/says.rs).
 
 use serde_json::json;
 

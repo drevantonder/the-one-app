@@ -36,7 +36,7 @@ fn commands() -> Vec<Command> {
         services::cli::commands(),
         device_logs::cli::commands(),
         insights::cli::commands(),
-        one::build::commands(),
+        oned::publish::commands(),
         blobs::commands(),
         own(),
         skills::commands(),
@@ -58,8 +58,8 @@ fn every_command(node: &Client) -> String {
 
 /// The core's tools as commands' forms, when a node can say what they are.
 fn core_forms(node: &Client) -> Vec<(String, String)> {
-    let core: Vec<Value> = one::tools::sets(node).unwrap_or_default().into_iter().filter(|s| s["runs"] == "client").collect();
-    one::tools::forms(&core)
+    let core: Vec<Value> = api_features::tools::sets(node).unwrap_or_default().into_iter().filter(|s| s["runs"] == "client").collect();
+    api_features::tools::forms(&core)
 }
 
 /// What `help` and the bare command say: what an agent needs to start, and where the rest is.
@@ -182,7 +182,7 @@ fn own() -> Command {
                 ["help", "all"] => println!("{}", every_command(g.node)),
                 ["help", rest @ ..] => match command_help(g.node, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
                     Some(text) => print!("{text}"),
-                    None => return Err(api::cli::Failed::Typed(one::tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
+                    None => return Err(api::cli::Failed::Typed(api_features::tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
                 },
                 ["version"] if g.json => println!("{}", oned_update::release::Version::this().json()),
                 ["version"] => println!("{} {} ({})", NAME, ::custom_build::config::BUILD, ::custom_build::config::TARGET),
@@ -199,7 +199,7 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
     words.first()?;
     let typed: Vec<&str> = words.iter().take_while(|w| !w.starts_with('-')).map(String::as_str).collect();
     if let [set, tool, ..] = typed[..]
-        && one::tools::find(node, set, tool).is_some()
+        && api_features::tools::find(node, set, tool).is_some()
     {
         return None;
     }
@@ -225,7 +225,7 @@ fn connection(node: &Client) -> String {
     format!("You're {} in {network}, on {device}{ready}.", state.looking())
 }
 
-/// How the CLI asks this machine's onet, as one of its own programs: again while it starts again (`one::loopback`),
+/// How the CLI asks this machine's onet, as one of its own programs: again while it starts again (`api::loopback`),
 /// once it has run here, which made its token.
 struct Http;
 
@@ -241,12 +241,12 @@ impl api::client::Via for Http {
             let req = agent.configure_request(req.body(body.clone())?).timeout_global(wait).build();
             agent.run(req)
         };
-        let asked = || if api::local::local_token(&platform::home()).is_some() { one::loopback::while_refused(&ask) } else { ask() };
+        let asked = || if api::local::local_token(&platform::home()).is_some() { ::api::loopback::while_refused(&ask) } else { ask() };
         let resp = match asked() {
             Ok(resp) => resp,
-            Err(err) if one::loopback::lost(&err) => {
+            Err(err) if ::api::loopback::lost(&err) => {
                 let apps = || self.send("GET", ::api::path::APPS, &[], None, None).ok().and_then(|a| serde_json::from_reader(a.body).ok());
-                anyhow::ensure!(one::loopback::reads(method, path, &body, apps), "{}", one::loopback::lost_write());
+                anyhow::ensure!(::api::loopback::reads(method, path, &body, apps), "{}", ::api::loopback::lost_write());
                 asked().map_err(unreached)?
             }
             Err(err) => return Err(unreached(err)),

@@ -1,5 +1,5 @@
 // What a web page that holds screens does for them, the same in the web client (ui/web/web.js) and in a chat's
-// MCP view (src/mcp/view.html): their look in its frames, and the answer to each of the bridge's messages, with its
+// MCP view (api/features/src/mcp/view.html): their look in its frames, and the answer to each of the bridge's messages, with its
 // menu, alert and files drawn in HTML where a native shell uses its own: @one/ui's. Its functions need @one/ui and the
 // bridge on the page, though it may load before them.
 window.oneHost = (() => {

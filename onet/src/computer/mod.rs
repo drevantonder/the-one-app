@@ -55,13 +55,13 @@ impl Runtime {
     }
 
     /// `method` of `path` asked of the runtime, as this computer's own program, with `body`: → its status, headers and
-    /// body; again while it starts again (`one::loopback`). What it answers before this computer's onet reaches its
+    /// body; again while it starts again (`api::loopback`). What it answers before this computer's onet reaches its
     /// network (`Onet::device`).
     async fn ask(&self, method: String, path: String, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<(u16, Vec<(String, String)>, Vec<u8>)> {
         let (url, token) = (format!("http://{}{path}", self.at), api::local::local_token(&self.folder).context("this computer's own app runtime hasn't started yet")?);
         tokio::task::spawn_blocking(move || {
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-            let mut answer = one::loopback::while_refused(|| {
+            let mut answer = ::api::loopback::while_refused(|| {
                 let mut request = ureq::http::Request::builder().method(method.as_str()).uri(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, &token);
                 for (name, value) in &headers {
                     request = request.header(name, value);
@@ -160,7 +160,7 @@ impl Onet {
         }
         if self.listen == api::local::addr() && matches!(platform::mode::here(), platform::mode::Mode::Own) && !self.keeping.swap(true, std::sync::atomic::Ordering::Relaxed) {
             tracing::info!("{} {} answering {} from {}", name(), &device.key()[..8], self.listen, self.home.display());
-            one::git_wire::wire_here(device.address().to_string());
+            ::api::git_wire::wire_here(device.address().to_string());
             let asked = self.clone();
             let apps = move || {
                 let onet = asked.clone();

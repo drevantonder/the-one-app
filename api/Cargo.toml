@@ -29,6 +29,9 @@ tracing = "0.1"
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 # The runtime's interface names the bucket's place (`runtime::Databases::bucket`).
 bucket = { path = "../bucket", features = ["machine"] }
+# Telling git on this machine to reach the network's apps through this program (`git_wire`), which a throwaway network's
+# programs don't (`platform::mode`).
+platform = { path = "../platform", features = ["machine"] }
 axum = "0.8"
 futures-util = { version = "0.3", default-features = false }
 # Times said to users, in their time zone (`feature::say_time`).

@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-const ROOTS: [&str; 34] = ["src", "app-runtime", "cli", "onet", "oned", "native-apps", "cloudflare", "ui", "relay", "auth", "gateway", "url-signer", "apps", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "groups", "device-logs", "widgets", "devices", "deploy", "notifications", "services", "insights", "backups", "app-schedules", "vault", "onboarding", "ai-gateway"];
+const ROOTS: [&str; 33] = ["app-runtime", "cli", "onet", "oned", "native-apps", "cloudflare", "ui", "relay", "auth", "gateway", "url-signer", "apps", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "groups", "device-logs", "widgets", "devices", "deploy", "notifications", "services", "insights", "backups", "app-schedules", "vault", "onboarding", "ai-gateway"];
 const CODE: [&str; 9] = ["rs", "js", "jsx", "ts", "tsx", "go", "swift", "cs", "kt"];
 const PACKAGES: [&str; 4] = ["Cargo.toml", "package.json", "go.mod", "Package.swift"];
 const SKIPPED: [&str; 4] = ["dist", "node_modules", "target", "vendor"];
@@ -34,8 +34,7 @@ fn parts() -> (Vec<(String, String)>, Vec<String>) {
     let has = |dir: &str, name: &str| files.contains(&format!("{dir}/{name}"));
     let name = |dir: &str| dir.rsplit('/').next().unwrap().to_string();
     let is_part = |dir: &str| {
-        dir == "src"
-            || has(dir, "mod.rs")
+        has(dir, "mod.rs")
             || files.contains(&format!("{dir}.rs"))
             || PACKAGES.iter().chain(&["app.js", "worker.js"]).any(|f| has(dir, f))
             || has(dir, &format!("{}.js", name(dir)))

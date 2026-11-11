@@ -25,7 +25,6 @@ oned-cloudflare = { path = "../oned/cloudflare" }
 key = { path = "../key" }
 scope = { path = "../scope" }
 api = { path = "../api" }
-one = { path = ".." }
 deploy = { path = "../deploy" }
 ui = { path = "../ui", features = ["web-bundle"] }
 anyhow = "1"

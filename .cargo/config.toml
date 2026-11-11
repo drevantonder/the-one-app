@@ -9,6 +9,6 @@ LIBSQLITE3_FLAGS = "-DSQLITE_ENABLE_SESSION -DSQLITE_ENABLE_PREUPDATE_HOOK"
 # that include a file their build script wrote (`env!("OUT_DIR")`, a path in target/, which sccache hashes: serde, thiserror,
 # libsqlite3-sys...) and every crate built on those, about 40 of 310, which compile once per worktree. A fresh worktree
 # gets the other 270 from the cache. A CARGO_TARGET_DIR set in the shell makes every crate miss, as sccache
-# hashes the CARGO_* variables it sees. src/build.rs's cargo() finds it for a shell without it on its PATH.
+# hashes the CARGO_* variables it sees. platform/src/os.rs's cargo() finds it for a shell without it on its PATH.
 [build]
 rustc-wrapper = "sccache"

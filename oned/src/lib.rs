@@ -32,6 +32,7 @@ use serde_json::{Value, json};
 use ::services::{Build, Wanted};
 
 pub mod part;
+pub mod publish;
 
 use ::custom_build::config::{CLI, NAME};
 
@@ -690,7 +691,7 @@ async fn serve() -> Result<()> {
         }
     });
     tracing::info!("{NAME} oned {} keeping onet and its app runtime ({at}) running, from {}", ::custom_build::config::BUILD, dir.display());
-    ::one::watchdog::notify("READY=1");
+    platform::os::notify("READY=1");
     loop {
         {
             let [onet, runtime] = &mut *kept.lock().unwrap();

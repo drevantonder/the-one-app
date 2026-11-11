@@ -633,7 +633,7 @@ pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, unt
 /// client, the routes this node doesn't serve itself among them.
 #[wasm_bindgen]
 pub fn openapi(apps: &str) -> Result<String, JsError> {
-    Ok(one::openapi::document(&serde_json::from_str::<Vec<Value>>(apps)?, false).to_string())
+    Ok(api_features::openapi::document(&serde_json::from_str::<Vec<Value>>(apps)?, false).to_string())
 }
 
 /// The network as `user` sees it, from the steps of `scopes` (JSON) `owner`'s object read: `{ state, apps, me, erased }`.

@@ -54,7 +54,6 @@ tauri-plugin-clipboard-manager = "2"
 # showing the first; the window as big and where it was left.
 tauri-plugin-deep-link = "2"
 onet = { path = "../onet" }
-one = { path = "..", default-features = false, features = ["web-bundle"] }
 # The web client, built in and as the signed bundles it takes from the network; Phosphor's icons, for its widgets.
 ui = { path = "../ui", features = ["web-bundle"] }
 serde = { version = "1", features = ["derive"] }

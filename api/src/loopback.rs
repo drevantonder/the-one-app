@@ -58,7 +58,7 @@ pub fn reads(method: &str, path: &str, body: &[u8], mut apps: impl FnMut() -> Op
     if matches!(method, "GET" | "HEAD") {
         return true;
     }
-    if path.split('?').next() != Some(::api::path::CALL) {
+    if path.split('?').next() != Some(crate::path::CALL) {
         return false;
     }
     let Ok(call) = serde_json::from_slice::<Value>(body) else { return false };

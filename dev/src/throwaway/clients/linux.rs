@@ -37,9 +37,9 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Set
         crate::throwaway::publish_build(dir, std::fs::read_to_string(dir.join("addr"))?.trim())?;
     }
     eprintln!("Building native-apps (dev profile; the first time takes minutes)…");
-    let mut cargo = one::build::nice_cargo();
+    let mut cargo = platform::os::nice_cargo();
     shares_native_build(dir, &mut cargo);
-    one::build::quietly(cargo.arg("build").current_dir(checkout.join("native-apps")))?;
+    platform::os::quietly(cargo.arg("build").current_dir(checkout.join("native-apps")))?;
     // Its own display and control port, the same each time for this throwaway network and user.
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(home.to_string_lossy().as_bytes()).into();
     let display = format!(":{}", 200 + u16::from_le_bytes([hash[0], hash[1]]) % 600);

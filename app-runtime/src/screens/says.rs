@@ -1,4 +1,4 @@
-//! What the routes for apps' screens and events say of themselves (src/says.rs).
+//! What the routes for apps' screens and events say of themselves (api/features/src/says.rs).
 
 use serde::Deserialize;
 

@@ -1,4 +1,4 @@
-//! What the Vault's routes for its Settings screens say of themselves (src/says.rs).
+//! What the Vault's routes for its Settings screens say of themselves (api/features/src/says.rs).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

@@ -17,7 +17,7 @@ use super::Routes;
 pub(super) fn routes() -> Routes {
     let runs = crate::runtime::features();
     let mut routes = Routes::default();
-    for feature in one::core_tools::all() {
+    for feature in api_features::core_tools::all() {
         for tool in &feature.tools {
             let name = feature.mcp_name(tool);
             let serves = served(&runs, feature.name, tool).unwrap_or_else(|| panic!("{name} is listed and nothing serves it (`every_core_tool_is_served_once`)"));
@@ -46,7 +46,7 @@ async fn serve(State(rt): State<Rt>, me: Me, headers: HeaderMap, Json(input): Js
 
 #[cfg(test)]
 mod tests {
-    use one::core_tools::all;
+    use api_features::core_tools::all;
 
     /// What's generated from a tool (the CLI, MCP, later OpenAPI) has only its definition to go
     /// by, and a schema left out holds its body or answer to nothing.

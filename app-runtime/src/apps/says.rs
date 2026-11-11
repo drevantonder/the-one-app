@@ -1,4 +1,4 @@
-//! What the apps' routes say of themselves (src/says.rs).
+//! What the apps' routes say of themselves (api/features/src/says.rs).
 
 use serde::Deserialize;
 use serde_json::{Value, json};

@@ -160,15 +160,15 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     // the app to copy.
     if let Some(build) = skills.iter_mut().find(|s| s.name.ends_with("-build")) {
         build.files = [
-            ("ctx.js", include_str!("../app-runtime/src/app/runtime/shim.js")),
-            ("one.js", include_str!("../ui/bridge.js")),
-            ("ui/index.ts", include_str!("../ui/kit/src/index.ts")),
-            ("ui/layout.tsx", include_str!("../ui/kit/src/components/layout.tsx")),
-            ("ui/problem.tsx", include_str!("../ui/kit/src/components/problem.tsx")),
-            ("ui/empty.tsx", include_str!("../ui/kit/src/components/empty.tsx")),
-            ("ui/icon.tsx", include_str!("../ui/kit/src/components/icon.tsx")),
-            ("ui/app-icon.tsx", include_str!("../ui/kit/src/components/app-icon.tsx")),
-            ("ui/widget.tsx", include_str!("../ui/kit/src/components/widget.tsx")),
+            ("ctx.js", include_str!("../../../app-runtime/src/app/runtime/shim.js")),
+            ("one.js", include_str!("../../../ui/bridge.js")),
+            ("ui/index.ts", include_str!("../../../ui/kit/src/index.ts")),
+            ("ui/layout.tsx", include_str!("../../../ui/kit/src/components/layout.tsx")),
+            ("ui/problem.tsx", include_str!("../../../ui/kit/src/components/problem.tsx")),
+            ("ui/empty.tsx", include_str!("../../../ui/kit/src/components/empty.tsx")),
+            ("ui/icon.tsx", include_str!("../../../ui/kit/src/components/icon.tsx")),
+            ("ui/app-icon.tsx", include_str!("../../../ui/kit/src/components/app-icon.tsx")),
+            ("ui/widget.tsx", include_str!("../../../ui/kit/src/components/widget.tsx")),
             ("example/app.js", include_str!("skills/build/example/app.js")),
             ("example/screens/main.jsx", include_str!("skills/build/example/screens/main.jsx")),
         ]

@@ -6,7 +6,7 @@ license = "MIT"
 publish = false
 
 # A library for every client (a computer's onet, `<cli>t`; native apps by FFI), and WebAssembly for browsers, built alone as a cdylib (with
-# an rlib beside it, LTO leaves a quarter more), as `build::onet` builds it (src/build.rs):
+# an rlib beside it, LTO leaves a quarter more), as `build::onet` builds it (dev/src/build.rs):
 #   cargo rustc -p onet --profile web --target wasm32-unknown-unknown --crate-type cdylib
 # then wasm-bindgen --target web, and wasm-opt -Oz.
 [lib]
@@ -16,9 +16,9 @@ doctest = false
 # A client with no socket, in a Worker's Durable Object (src/relayed.rs): the remote MCP server's devices.
 relayed = ["iroh/unstable-custom-transports", "dep:iroh-base", "dep:n0-watcher", "dep:noq-udp"]
 # A computer's onet (src/computer/), run in the background as `<cli>t`: its loopback API, with what only a computer's
-# onet does, on the node's own code for its home, bucket, harnesses and git (`one`'s `node`), and axum, which serves
-# that API as the node serves its own.
-computer = ["one/node", "platform/machine", "bucket/machine", "dep:jiff", "dep:oned-update", "dep:app-runtime", "tokio/net", "tokio/io-util", "tokio/fs", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal", "tokio/time", "dep:axum", "dep:serde", "dep:tracing", "dep:tracing-subscriber", "dep:jsonc-parser", "dep:toml_edit", "dep:blake3"]
+# onet does (its app runtime, home, bucket, harnesses and git, and the skills it writes), and axum, which serves that API
+# as the app runtime serves its own.
+computer = ["api-features/machine", "platform/machine", "bucket/machine", "dep:jiff", "dep:oned-update", "dep:app-runtime", "tokio/net", "tokio/io-util", "tokio/fs", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal", "tokio/time", "dep:axum", "dep:serde", "dep:tracing", "dep:tracing-subscriber", "dep:jsonc-parser", "dep:toml_edit", "dep:blake3"]
 
 [dependencies]
 custom-build = { path = "../custom-build" }
@@ -44,10 +44,8 @@ n0-future = "0.3"
 httparse = "1"
 data-encoding = "2"
 tokio = { version = "1", default-features = false, features = ["sync"] }
-# A client checks the network's signed steps itself with the nodes' own Rust (src/database): who's who as they say
-# it, never as a node does, asked of the scope database they build (`one`'s `db`, SQLite) and its permissions; and a
-# new device's sign-in, before letting it in (`sign-in-proof`).
-one = { path = "..", default-features = false }
+# The OpenAPI document and what routes say, made as a node makes them.
+api-features = { path = "../api/features" }
 # A computer's onet answers what the app runtime routes (who may ask each), and holds what it asks for.
 app-runtime = { path = "../app-runtime", optional = true }
 rusqlite = "0.41"

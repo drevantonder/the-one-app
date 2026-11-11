@@ -20,8 +20,6 @@ services = { path = "../services" }
 device-logs = { path = "../device-logs" }
 insights = { path = "../insights" }
 oned-update = { path = "update", features = ["machine"] }
-# The app runtime it runs as `oned apps` (`node::serve`), until it's a program of its own.
-one = { path = ".." }
 anyhow = "1"
 # A service's part answers its program on a loopback (src/part.rs).
 axum = "0.8"
@@ -30,6 +28,8 @@ ed25519-dalek = "3"
 # Starting, waiting on and stopping its programs on Unix (src/part.rs).
 libc = "0.2"
 rand = "0.8"
+# The release key, and signing the record with it (src/publish.rs).
+ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

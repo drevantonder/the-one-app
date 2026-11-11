@@ -1,5 +1,5 @@
 //! Widgets' tool, its own route: what it takes and answers. What serves it is the runtime's (widgets/runtime/src/tools.rs);
-//! it's the user's widgets as text, for an agent, or a chat that can't draw them (src/mcp/apps.rs draws them in one that can,
+//! it's the user's widgets as text, for an agent, or a chat that can't draw them (api/features/src/mcp/apps.rs draws them in one that can,
 //! from the same answer).
 
 use serde_json::json;

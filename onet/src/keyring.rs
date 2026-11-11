@@ -368,7 +368,7 @@ impl<O: Opens> Keyring<O> {
     /// find what it needs as it goes (the Cloudflare node, its logs' keys first, then a call's); one a node refuses as
     /// it doesn't list this device yet, again in a moment while the relay lets it in.
     /// One this device answers itself (`answer`: what it signs as its user) never reaches a node, and the API's document
-    /// (`one::openapi`) is made here from the apps a node lists for it.
+    /// (`api_features::openapi`) is made here from the apps a node lists for it.
     pub async fn request(&self, client: &Client, on: &(impl Address + Keep + Signs), request: Request, until: u64) -> Result<Response, Error> {
         if let Some(answer) = self.answer(client, on, &request.method, &request.path, request.body.bytes()).await {
             let (status, out) = match answer {
@@ -393,7 +393,7 @@ impl<O: Opens> Keyring<O> {
             return Ok(response);
         }
         let apps: Vec<Value> = serde_json::from_slice(&response.body.bytes().await?).map_err(|err| failed(format!("{} answered with a reply that wasn't JSON: {err}", ::api::path::APPS)))?;
-        let body = one::openapi::document(&apps, false).to_string().into_bytes();
+        let body = api_features::openapi::document(&apps, false).to_string().into_bytes();
         let headers = vec![("content-type".to_string(), "application/json".to_string())];
         Ok(Response { headers, body: Body::whole(body), ..response })
     }

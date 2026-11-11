@@ -175,7 +175,7 @@ pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
         (Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()),
         (Thing::WEB.into(), Some(web), version.clone(), "-".into()),
     ];
-    one::build::publish_latest(&node, &key, &things)
+    oned::publish::publish_latest(&node, &key, &things)
 }
 
 /// `update`, in the throwaway network: nothing supervises its oned, so what systemd or launchd does for a device's, this does
@@ -233,7 +233,7 @@ fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
     std::fs::rename(&linking, &helper)?;
     let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())))?;
     let config: usize = std::env::var("GIT_CONFIG_COUNT").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
-    let (key, value) = one::git_wire::instead_of(&address);
+    let (key, value) = ::api::git_wire::instead_of(&address);
     let mut command = std::process::Command::new("git");
     Throwaway::tell(&mut command, dir, addr);
     let status = command

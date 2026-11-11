@@ -5,13 +5,13 @@
 
 use ::api::says::Said;
 
-#[path = "../app-runtime/src/api/says.rs"]
+#[path = "../../../app-runtime/src/api/says.rs"]
 pub mod api;
-#[path = "../app-runtime/src/apps/says.rs"]
+#[path = "../../../app-runtime/src/apps/says.rs"]
 pub mod apps;
-#[path = "../app-runtime/src/blobs/says.rs"]
+#[path = "../../../app-runtime/src/blobs/says.rs"]
 pub mod blobs;
-#[path = "../app-runtime/src/screens/says.rs"]
+#[path = "../../../app-runtime/src/screens/says.rs"]
 pub mod screens;
 
 /// Every route that says what it is.

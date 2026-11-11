@@ -8,7 +8,7 @@ use api::cli::{Failed, asked_yes};
 use api::tools::{check, from_stdin, input, missing, places, show, split};
 use api::{Client, Reader};
 use custom_build::config::CLI;
-use one::tools::{Run, find, help, list, none_said, own_device, scopes, sets, unknown, usage};
+use api_features::tools::{Run, find, help, list, none_said, own_device, scopes, sets, unknown, usage};
 
 /// Any app's tools on the command line, after every built-in command.
 pub fn commands() -> ::api::cli::Command {
@@ -85,7 +85,7 @@ pub fn run(g: &::api::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
     // At a terminal, the user is asked here; what they said is checked where every tool runs.
     let confirmed = confirmed || (o["confirm"] == true && asked_yes(&Reader::Cli.named(app, tool))?);
     let how = Run { reader: Reader::Cli, device, scopes, agent: g.agent, confirmed, trace: g.trace };
-    let ran = one::tools::run(onet, &Reader::Mcp.named(app, tool), o, input, how);
+    let ran = api_features::tools::run(onet, &Reader::Mcp.named(app, tool), o, input, how);
     let mut ok = match ran.ok {
         Ok(ok) => ok,
         Err(e) => {

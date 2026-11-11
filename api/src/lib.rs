@@ -27,6 +27,10 @@ pub mod local;
 #[cfg(not(target_family = "wasm"))]
 pub mod home;
 #[cfg(not(target_family = "wasm"))]
+pub mod git_wire;
+#[cfg(not(target_family = "wasm"))]
+pub mod loopback;
+#[cfg(not(target_family = "wasm"))]
 pub mod reply;
 #[cfg(not(target_family = "wasm"))]
 mod routes;

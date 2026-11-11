@@ -14,8 +14,8 @@ use super::Routes;
 use ::api::Who;
 use ::api::local::port;
 
-/// The skills for this machine's user (src/skills.rs).
-async fn skills(node: &Node) -> Vec<one::skills::Skill> {
+/// The skills for this machine's user (api/features/src/skills.rs).
+async fn skills(node: &Node) -> Vec<api_features::skills::Skill> {
     let apps = match node.caller() {
         Ok(me) => node.apps(&me).await.map(|a| json!(a)).unwrap_or_else(|err| {
             tracing::warn!("the skills leave out apps' own: {err:#}");
@@ -24,7 +24,7 @@ async fn skills(node: &Node) -> Vec<one::skills::Skill> {
         // A node not in a network yet has no user whose apps they'd be.
         Err(_) => json!([]),
     };
-    one::skills::all(apps.as_array().map(Vec::as_slice).unwrap_or_default())
+    api_features::skills::all(apps.as_array().map(Vec::as_slice).unwrap_or_default())
 }
 
 fn markdown(text: String) -> Response {
@@ -39,7 +39,7 @@ pub(super) fn routes() -> Routes {
 async fn llms(State(node): State<Node>, headers: axum::http::HeaderMap) -> Response {
     let host = headers.get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("127.0.0.1").to_string();
     let deeper = skills(&node).await.split_off(1);
-    markdown(one::skills::root(&deeper, |s| format!("[{}](http://{host}/skills/{}/SKILL.md)", s.name, s.name)).body)
+    markdown(api_features::skills::root(&deeper, |s| format!("[{}](http://{host}/skills/{}/SKILL.md)", s.name, s.name)).body)
 }
 
 async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, String)>) -> Response {

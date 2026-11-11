@@ -8,6 +8,7 @@ use anyhow::Result;
 use api::Client;
 use ::custom_build::config::{CLI, NAME};
 
+mod build;
 mod ship;
 mod symbols;
 mod throwaway;

@@ -97,7 +97,7 @@ pub(crate) fn browser(dir: &Path, settings: &oned_cloudflare::Settings, user: Op
         Some(port) => port,
         None => {
             let log = format!("{}.log", web.file_name().unwrap().to_string_lossy());
-            let mut chrome = one::build::chrome().context("the web client needs Chrome or Chromium on this machine: none was found (CHROME=<path> names one)")?;
+            let mut chrome = crate::build::chrome().context("the web client needs Chrome or Chromium on this machine: none was found (CHROME=<path> names one)")?;
             let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
             spawn(
                 dir,

@@ -1,4 +1,4 @@
-//! What the deploy's route says of itself (src/says.rs).
+//! What the deploy's route says of itself (api/features/src/says.rs).
 
 use serde::Deserialize;
 use serde_json::{Value, json};

@@ -86,8 +86,12 @@ serde_json = "1"
 tracing = "0.1"
 
 # On Workers (the Cloudflare node, oned/cloudflare/node/), rand gets its randomness from the runtime's crypto.getRandomValues.
-# What the one crate still has that the app runtime uses: screens, the MCP server, skills.
-one = { path = ".." }
+# Every feature's API as clients get it: the OpenAPI document, MCP at /mcp and the skills it serves.
+api-features = { path = "../api/features", features = ["machine"] }
+
+[build-dependencies]
+# config.toml, read for the apps a new network starts with (build.rs).
+toml = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }

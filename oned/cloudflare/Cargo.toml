@@ -22,9 +22,8 @@ ai-gateway = { path = "../../ai-gateway" }
 oned-update = { path = "../update" }
 # The web client's files, the Workers' sources and the Cloudflare node's WebAssembly this build carries.
 ui = { path = "../../ui" }
-# The device's own key, the guide the address serves (llms.txt) and workerd as a child, from the root crate until
-# they're the app runtime's and the CLI's.
-one = { path = "../.." }
+# The guide the address serves (llms.txt).
+api-features = { path = "../../api/features", features = ["machine"] }
 anyhow = "1"
 data-encoding = "2"
 ed25519-dalek = "3"

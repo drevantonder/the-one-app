@@ -32,6 +32,11 @@ use ::scope::rank;
 use ::app_schedules::Schedule;
 use ::scope::replica::{Handled, Replica};
 
+/// The built-in apps this build carries, and those a new network starts with (build.rs).
+pub mod built_in {
+    include!(concat!(env!("OUT_DIR"), "/built_in.rs"));
+}
+
 pub mod api;
 pub mod app;
 pub mod apps;
@@ -67,6 +72,7 @@ use ::api::trace;
 mod caller;
 pub mod runtime;
 mod exclusive;
+mod watchdog;
 mod holds;
 mod network;
 
@@ -294,7 +300,7 @@ pub async fn serve(listen: &str) -> Result<()> {
         .with_writer(::device_logs::Tee)
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "app_runtime=info,one=info,warn".into()))
         .init();
-    one::watchdog::started();
+    crate::watchdog::started();
     // Asked to stop, even while it starts: its workerd first, then at once, rather than once every blocking task
     // ends, which a stuck request would hold up. Its endpoint is closed, so other devices connect at once to the one
     // oned starts next.
@@ -324,7 +330,7 @@ pub async fn serve(listen: &str) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
     tracing::info!("{} app runtime {} answering {listen} from {}", ::custom_build::config::NAME, ::key::short(&node.id()), dir.display());
     tokio::spawn(crate::api::serve_guide(node.clone()));
-    one::watchdog::watch();
+    crate::watchdog::watch();
     let served = ::api::serve(listener, crate::api::guarded(crate::api::routes(), node)).await;
     crate::app::runtime::stop_all();
     Ok(served?)
@@ -356,7 +362,7 @@ impl Node {
         let apps = Apps::start(dir.join(RUNTIME_DIR), outbound.local_addr()?.port()).await?;
         let (events, _) = broadcast::channel(256);
         let mut built_in = BTreeMap::new();
-        for (app, files) in one::carried::BUILT_IN {
+        for (app, files) in crate::built_in::BUILT_IN {
             built_in.insert(app.to_string(), ::database::put_blob(dir, &built_in_bundle(files)?)?);
         }
         let (kept, starts) = runtime::Kept::of(runtime::features());
@@ -463,7 +469,7 @@ impl Node {
     #[track_caller]
     fn with<R>(&self, f: impl FnOnce(&mut Network) -> Result<R>) -> Result<R> {
         let mut network = self.0.network.lock()?;
-        let _held = one::watchdog::Held::new();
+        let _held = crate::watchdog::Held::new();
         f(network.as_mut().with_context(|| not_joined(&self.device_name()))?)
     }
 
