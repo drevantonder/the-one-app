@@ -53,6 +53,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-gateway"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "ai-gateway-runtime"
+version = "0.1.0"
+dependencies = [
+ "ai-gateway",
+ "anyhow",
+ "blake3",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2819,6 +2837,8 @@ name = "one"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "ai-gateway",
+ "ai-gateway-runtime",
  "anyhow",
  "axum",
  "blake3",

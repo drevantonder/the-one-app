@@ -260,6 +260,14 @@ function context(ask, body, appends, later, spans) {
         appends.push({ kind: "vault", id: String(id), release: true });
       },
     },
+    /// AI Gateway: `run({ model?, ...input }, { retryKey? })` asks a model, paid with a key in the Vault the app never
+    /// sees. Chat models take OpenAI's chat completions input and answer its ChatCompletion; decide models (Clef) take
+    /// `state` and `questions` and answer `{ answers }`; every answer has `one: { model, ran, paid, replayed }`. The same
+    /// retryKey with the same input replays the first answer for a day, unpaid. Thrown errors carry `code`: refused,
+    /// no_key, limit, retry_changed, uncertain.
+    ai: {
+      run: async (input, { retryKey } = {}) => (await post("ai.run", { input, retry_key: retryKey ?? null })).ok,
+    },
     /// Pushes a notification to each of the caller's devices that gets them, { title, body?, screen?, params? };
     /// tapping it opens this app's screen. → { sent, devices, why? }: how many it went to, and why none, if none.
     notify: async (push) => (await post("notify", push)).ok,

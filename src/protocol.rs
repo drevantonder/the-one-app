@@ -182,6 +182,14 @@ pub mod code {
         ALREADY_IN_NETWORK = "already_in_network",
         /// The device a pairing code is for couldn't be reached.
         UNREACHABLE = "unreachable",
+        /// No key in the Vault pays for that AI model's company (ai-gateway/).
+        NO_KEY = "no_key",
+        /// An AI model's company said too many: wait and ask again.
+        LIMIT = "limit",
+        /// An AI call's retryKey used before for other input.
+        RETRY_CHANGED = "retry_changed",
+        /// An AI call's retryKey whose first call was sent and never answered: it may have run.
+        UNCERTAIN = "uncertain",
     }
 
     /// `not_let_in` as `notLetIn`, as `shared/protocol.js` names it.

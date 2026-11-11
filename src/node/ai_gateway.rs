@@ -1,0 +1,151 @@
+//! What this node gives AI Gateway's runtime (`ai_gateway_runtime::Host`) for a call: Everyone's key, the Vault's fill,
+//! the caller's own `node/ai-gateway` and Everyone's, and Insights. The seam until R4's `api::AppRuntime`.
+
+use std::time::Duration;
+
+use ::ai_gateway::{Company, Outgoing, Paid};
+use ai_gateway_runtime::{Fut, Host, Key, Sent, Span, Whose};
+use serde_json::Map;
+
+use super::*;
+
+const AI_GATEWAY: (&str, &str) = (scopes::APP, scopes::CoreDb::AiGateway.name());
+
+/// A call to AI Gateway, by `caller`, for `app` (the network's own for its tools), in `trace`.
+pub(super) struct Gateway<'a> {
+    pub node: &'a Node,
+    pub caller: &'a Caller,
+    pub service: &'a str,
+    pub trace: Option<&'a trace::Trace>,
+}
+
+impl Gateway<'_> {
+    fn scope(&self, whose: Whose) -> Scope {
+        match whose {
+            Whose::Own => Scope::User(self.caller.user.clone()),
+            Whose::Everyone => Scope::Global,
+        }
+    }
+
+    async fn db(&self, scope: &Scope) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
+        let (db, bucket) = self.node.call_database(self.caller, scope, AI_GATEWAY.0, AI_GATEWAY.1, Some(ai_gateway_runtime::SCHEMA.iter().map(|s| s.to_string()).collect())).await?;
+        self.node.read_ready(&(scope.clone(), format!("{}/{}", AI_GATEWAY.0, AI_GATEWAY.1)), &mut *db.lock().await, &bucket).await?;
+        Ok((db, bucket))
+    }
+
+    /// Everyone's item of `company`'s key kind, the oldest if there are several.
+    async fn everyones(&self, company: Company) -> Result<Option<(String, crate::vault::Item)>> {
+        let items = self.node.items(self.caller, &Scope::Global).await?;
+        Ok(items.into_iter().filter(|(_, it)| it.kind == company.key_kind()).min_by_key(|(_, it)| it.made))
+    }
+}
+
+impl Host for Gateway<'_> {
+    // Next: an app's own key (its scope's item switched on for it), then the caller's (their own Vault), each looked up
+    // before Everyone's, so the most specific pays.
+    fn key(&self, company: Company) -> Fut<'_, Option<Key>> {
+        Box::pin(async move { Ok(self.everyones(company).await?.map(|(item, _)| Key { item, paid: Paid::Network })) })
+    }
+
+    fn send<'a>(&'a self, key: &'a Key, out: Outgoing) -> Fut<'a, Sent> {
+        Box::pin(async move {
+            let (_, item) = self.everyones_item(&key.item).await?;
+            let uri: ureq::http::Uri = out.url.parse().context("an AI request's address isn't a web address")?;
+            let host = uri.host().unwrap_or_default().to_string();
+            ensure!(!item.fields.values().any(|f| f.secret) || item.opened, "Everyone's {} is opened only by the devices its admins grant its Vault, and this one isn't: grant it with one vault grant <this device>", item.kind);
+            let fill = |text: &str| crate::vault::fill(text, &host, |name| name.strip_prefix(&format!("{}:", key.item)).and_then(|field| crate::vault::filled(&item, field)));
+            let url = fill(&out.url)?;
+            let headers = out.headers.iter().map(|(n, v)| Ok((n.clone(), fill(v)?))).collect::<Result<Vec<_>>>()?;
+            let ports = self.node.own_ports();
+            tokio::task::spawn_blocking(move || post(&url, headers, out.body, ports)).await?
+        })
+    }
+
+    fn query<'a>(&'a self, whose: Whose, sql: &'a str, params: Vec<Value>) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            let (db, _) = self.db(&self.scope(whose)).await?;
+            let rows = db.lock().await.query(sql, &params)?;
+            Ok(rows.into_iter().map(Value::Object).collect())
+        })
+    }
+
+    fn write<'a>(&'a self, whose: Whose, mut change: Box<dyn FnMut(&rusqlite::Connection) -> Result<Value> + Send + 'a>) -> Fut<'a, Value> {
+        Box::pin(async move {
+            let scope = self.scope(whose);
+            let (db, bucket) = self.db(&scope).await?;
+            let mut db = db.lock().await;
+            let out = self.node.write_in(&scope, &mut db, &bucket, |c| change(c)).await?;
+            self.node.ping(&scope, Some((AI_GATEWAY.0, AI_GATEWAY.1, db.at())));
+            Ok(out)
+        })
+    }
+
+    fn record(&self, span: Span) {
+        self.node.record_gen_ai(self.trace, self.service, &self.caller.user, span);
+    }
+}
+
+impl Gateway<'_> {
+    async fn everyones_item(&self, id: &str) -> Result<(String, crate::vault::Item)> {
+        let items = self.node.items(self.caller, &Scope::Global).await?;
+        items.into_iter().find(|(i, _)| i == id).context("that AI key left Everyone's Vault as the call began: ask again")
+    }
+}
+
+/// Posts a filled AI request, to anywhere but this machine's own `ports`, waiting as long as a call may.
+fn post(url: &str, headers: Vec<(String, String)>, body: Vec<u8>, ports: Vec<u16>) -> Result<Sent> {
+    let config = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(::ai_gateway::MOST_SECONDS)));
+    let agent = crate::reach::agent(config, crate::reach::not_ports(ports));
+    // Its key is in the headers or URL, so no error says either: only where it went.
+    let uri: ureq::http::Uri = url.parse().context("an AI request's address isn't a web address")?;
+    let host = uri.host().unwrap_or_default().to_string();
+    let mut builder = ureq::http::Request::builder().method("POST").uri(uri);
+    for (name, value) in headers {
+        builder = builder.header(name, value);
+    }
+    let mut resp = agent.run(builder.body(body)?).map_err(|err| match err {
+        ureq::Error::Timeout(_) => anyhow::Error::from(::ai_gateway::Failed::Broke(format!("{host} took longer than {} minutes", ::ai_gateway::MOST_SECONDS / 60))),
+        _ => anyhow!("couldn't reach {host}"),
+    })?;
+    let retry_after = resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse().ok());
+    let body = resp.body_mut().with_config().limit(::ai_gateway::MOST_BYTES as u64 * 2).read_to_vec()?;
+    Ok(Sent { status: resp.status().as_u16(), retry_after, body })
+}
+
+/// What the shim's `ai.run` throws: AI Gateway's failures with their code.
+fn coded(err: anyhow::Error) -> anyhow::Error {
+    match err.downcast_ref::<::ai_gateway::Failed>() {
+        Some(f) => match f.code() {
+            Some(code) => crate::protocol::Coded::error(code, f),
+            None => anyhow!("{f}"),
+        },
+        None => err,
+    }
+}
+
+impl Node {
+    /// `ctx.ai.run(input, { retryKey })` for a call of `app`'s.
+    pub(super) async fn ai_run(&self, caller: &Caller, app: &str, trace: Option<&trace::Trace>, input: Value, retry_key: Option<&str>) -> Result<Value> {
+        let gateway = Gateway { node: self, caller, service: app, trace };
+        ai_gateway_runtime::run(&gateway, app, input, retry_key).await.map_err(coded)
+    }
+
+    /// AI Gateway's tools, as `caller`: the network's own calls, from no app.
+    pub(crate) async fn ai_tool(&self, caller: &Caller, tool: &str, mut input: Map<String, Value>) -> Result<Value> {
+        let current = trace::current();
+        let gateway = Gateway { node: self, caller, service: crate::insights::own(), trace: current.as_ref() };
+        let answer = match tool {
+            "run" => {
+                let retry_key = input.remove("retry_key").and_then(|k| k.as_str().map(str::to_string));
+                ai_gateway_runtime::run(&gateway, crate::insights::own(), Value::Object(input), retry_key.as_deref()).await
+            }
+            "models" => ai_gateway_runtime::models(&gateway).await,
+            "set" => {
+                let admin = self.with(|i| Ok(i.r.db().may(&caller.user, "change-settings", scopes::NETWORK)))?;
+                ai_gateway_runtime::set(&gateway, &input, admin).await
+            }
+            other => Err(anyhow!("AI Gateway has no tool {other}")),
+        };
+        answer.map_err(coded)
+    }
+}

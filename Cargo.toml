@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "cli", "dev", "cloudflare/node", "onet", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = [".", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
@@ -23,12 +23,15 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
+node = ["dep:ai-gateway-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
 # `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
 web-bundle = ["dep:ssh-key", "dep:flate2"]
 
 [dependencies]
 anyhow = "1"
+# AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes and tools' specs, every build; what a node does for it, only a node's.
+ai-gateway = { path = "ai-gateway" }
+ai-gateway-runtime = { path = "ai-gateway/runtime", optional = true }
 # Backups encrypt what leaves for a place with AES-256-GCM, and seal each scope's key to the recovery key with X25519
 # (src/backups.rs).
 aes-gcm = "0.10"

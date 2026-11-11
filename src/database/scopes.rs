@@ -917,10 +917,12 @@ pub enum CoreDb {
     Vault,
     /// The blobs its steps name (`bucket::blob_name`).
     Blobs,
+    /// AI Gateway's rows: a retryKey's answers and the default models (`ai_gateway_runtime::SCHEMA`).
+    AiGateway,
 }
 
 impl CoreDb {
-    const ALL: [CoreDb; 4] = [CoreDb::Scope, CoreDb::Log, CoreDb::Vault, CoreDb::Blobs];
+    const ALL: [CoreDb; 5] = [CoreDb::Scope, CoreDb::Log, CoreDb::Vault, CoreDb::Blobs, CoreDb::AiGateway];
 
     pub const fn name(self) -> &'static str {
         match self {
@@ -928,6 +930,7 @@ impl CoreDb {
             CoreDb::Log => "log",
             CoreDb::Vault => "vault",
             CoreDb::Blobs => "blobs",
+            CoreDb::AiGateway => "ai-gateway",
         }
     }
 
@@ -948,6 +951,7 @@ impl CoreDb {
             CoreDb::Log => "history",
             CoreDb::Vault => "Vault",
             CoreDb::Blobs => "files",
+            CoreDb::AiGateway => "AI Gateway",
         }
     }
 }

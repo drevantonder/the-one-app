@@ -734,17 +734,21 @@ impl std::fmt::Display for Route {
 /// apps, which says what each does from its code, the log and that code. The Vault's routes, its Vault and log; any
 /// other, the log alone.
 ///
+/// AI Gateway's rows of a scope go with whatever may call a model: an app's request, MCP, and its own tools' routes.
+///
 /// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the network
 /// may read already: any of them may add any app, and read its code. Another scope's are its own users' files, and
 /// never go with a request.
 pub fn may_hand(route: &Route, need: &Need) -> bool {
-    use crate::{database::scopes::CoreDb::{self, Blobs as BLOBS, Log as LOG, Vault as VAULT}, protocol::path};
+    use crate::{database::scopes::CoreDb::{self, AiGateway as AI, Blobs as BLOBS, Log as LOG, Vault as VAULT}, protocol::path};
     let node = |of: &[CoreDb]| CoreDb::of(&need.app, &need.database).is_some_and(|c| of.contains(&c));
     let apps = need.app != crate::database::scopes::APP && need.database == crate::database::scopes::APP_DATABASE;
     let code = need.scope == "global" && node(&[BLOBS]);
     match (route.app(), route) {
-        (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,
-        (None, Route::Path(p)) if matches!(p.as_str(), path::MCP | path::BADGES) || p == path::WIDGETS || p.starts_with(&format!("{}/", path::WIDGETS)) => apps || node(&[VAULT, LOG]) || code,
+        (Some(app), _) => need.app == app || node(&[VAULT, LOG, AI]) || code,
+        (None, Route::Path(p)) if p == path::MCP => apps || node(&[VAULT, LOG, AI]) || code,
+        (None, Route::Path(p)) if matches!(p.as_str(), path::BADGES) || p == path::WIDGETS || p.starts_with(&format!("{}/", path::WIDGETS)) => apps || node(&[VAULT, LOG]) || code,
+        (None, Route::Path(p)) if p.starts_with(&format!("/api/{}/", ai_gateway::NAME)) => node(&[VAULT, LOG, AI]),
         (None, Route::Path(p)) if p == path::APPS || p == path::OPENAPI => node(&[LOG]) || code,
         (None, Route::Path(p)) if p == path::VAULT || p.starts_with(&format!("{}/", path::VAULT)) => node(&[VAULT, LOG]),
         (None, _) => node(&[LOG]),

@@ -646,6 +646,7 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, te
     }
     out.extend([
         item("connect-ai", "Connect Your AI", "plugs-connected", "#ff2d55"),
+        item("ai-gateway", "AI Gateway", "sparkle", "#af52de"),
         item("vault", "Vault", "lock", "#5856d6"),
         item("users", "Users", "user-gear", "#30b0c7"),
         item("groups", "Groups", "users-three", "#34c759"),

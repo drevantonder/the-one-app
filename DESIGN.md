@@ -39,6 +39,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Connect Your AI is one short prompt pointing the AI at the network's llms.txt.
 - Devices: a device is approved with no code typed, by one of the user's own clients; browsers are in the one list of devices; Priority is cards; removing a device offers "Also erase its data".
 - Every device's version shows, with Update and Update All, and Cloudflare is a row of its own in that list, which only an admin updates, last in Update All. There is no automatic-update switch. A desktop app's Update button runs `one update`.
+- AI Gateway is one page of Lists (Andre, 11-11: variant A): Default Models (Chat, Decide, each saying whose), Keys (one row per company, whose key pays, Add Key for an admin where none does, typed in the Vault's own sheet), Spending (opens Insights).
 - A device an outside program let in says "Let in by <program>", and removing a program offers to remove what it let in.
 
 ## Signing in and joining

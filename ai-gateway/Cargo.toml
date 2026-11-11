@@ -1,0 +1,15 @@
+[package]
+name = "ai-gateway"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# What every build has of AI Gateway, WebAssembly too: `ctx.ai.run`'s shapes, which model id runs where, the requests
+# each place takes and the answers it gives (two translated: Google's and Anthropic's), and its tools' specs. Nothing
+# here sends a request or holds a key: the runtime (runtime/) sends what this builds, filled by the Vault.
+[lib]
+doctest = false
+
+[dependencies]
+serde_json = "1"

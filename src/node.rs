@@ -31,6 +31,7 @@ use crate::release;
 use crate::schedules::{self, Schedule};
 use crate::replica::{Handled, Replica};
 
+mod ai_gateway;
 pub mod apps;
 pub mod backups;
 pub mod blobs;

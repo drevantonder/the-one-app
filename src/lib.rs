@@ -53,6 +53,7 @@ pub(crate) fn user_home() -> PathBuf {
 }
 // What the Cloudflare node (cloudflare/node/) and the native apps' onet (onet/) share with nodes on machines; the rest
 // is only theirs (the `node` feature).
+pub mod ai_gateway;
 pub mod backups;
 pub mod bucket;
 pub mod call;

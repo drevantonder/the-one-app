@@ -96,6 +96,9 @@ const settings = path.join(here, "..", "settings")
 const home = path.join(here, "..", "home")
 await buildScreens(settings, path.join(settings, "dist"), settings, `<meta name="@one/ui">`, shared, "src/screen/settings")
 await buildScreens(home, path.join(home, "dist"), home, `<meta name="@one/ui">`, shared, "src/screen/home")
+// Each feature's own Settings screens, in its folder (<feature>/screens/), built beside them.
+const features = ["ai-gateway"].map((f) => path.join(here, "..", "..", "..", f, "screens"))
+for (const folder of features) await buildScreens(folder, path.join(folder, "dist"), folder, `<meta name="@one/ui">`, shared, path.relative(path.join(here, "..", "..", ".."), folder))
 
 // What the built files were made from: every source file, by path and content, in order: @one/ui's, the Settings
 // screens' and what they share, everything in the pages' folder but its dist/, and onboarding's screens.
@@ -111,6 +114,7 @@ walk(here)
 walk(home, home, "../home/")
 // Onboarding's screens, how they move and their stylesheet, which auth.json and auth.css are made from and Welcome is @one/ui's.
 const onboarding = path.join(here, "..", "..", "onboarding")
+for (const folder of features) sources.push(...readdirSync(folder).filter((f) => /\.[jt]sx$/.test(f)).map((f) => path.relative(here, path.join(folder, f)).split(path.sep).join("/")))
 sources.push(...readdirSync(onboarding).filter((f) => /\.(tsx|ts|css)$/.test(f)).map((f) => `../../onboarding/${f}`))
 const hash = createHash("sha256")
 for (const file of sources.sort()) hash.update(file).update("\0").update(readFileSync(path.join(here, file))).update("\0")

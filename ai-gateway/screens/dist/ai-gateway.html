@@ -1,0 +1,262 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-outline-style:solid}}}@layer theme,base,components;@layer utilities{.-mt-4{margin-top:calc(var(--spacing,.25rem) * -4)}.flex{display:flex}.hidden{display:none}.size-4{width:calc(var(--spacing,.25rem) * 4);height:calc(var(--spacing,.25rem) * 4)}.max-w-2xl{max-width:var(--container-2xl,42rem)}.flex-col{flex-direction:column}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-1{padding-inline:var(--spacing,.25rem)}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-muted-foreground{color:var(--muted-foreground)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">globalThis.__oneScreen={name:"ai-gateway",at:new Error().stack};
+import { c as e } from "react/compiler-runtime";
+import { useEffect as t, useState as n } from "react";
+import { createRoot as r } from "react-dom/client";
+import { AppIcon as i, Button as a, Icon as o, Input as s, LargeTitle as c, List as l, ListRow as u, ListSkeleton as d, LoadFailure as f, Problem as p, ResponsiveDialog as m, Section as h, Spinner as g } from "@one/ui";
+import { jsx as _, jsxs as v } from "react/jsx-runtime";
+var y = one.api, b = (e) => one.plain(e).title, x = {
+	"workers-ai": "#f38020",
+	google: "#4285f4",
+	anthropic: "#d97757",
+	openai: "#10a37f",
+	openrouter: "#6467f2"
+}, S = (e) => ({
+	name: e.id,
+	title: e.title,
+	icon: e.id === "workers-ai" ? "cloud" : "sparkle",
+	color: x[e.id] || "#8e8e93"
+});
+function C(e) {
+	let [t, ...n] = String(e || "").split("/"), r = n.join("/").replace(/^@cf\/[^/]+\//, "").split(/[-_]/).map((e) => /^\d/.test(e) ? e : e[0]?.toUpperCase() + e.slice(1)).join(" ");
+	return t === "workers-ai" ? `${r} on Workers AI` : r;
+}
+var w = {
+	yours: "Yours",
+	everyone: "Everyone's",
+	built_in: "Built in"
+};
+function T() {
+	let r = e(31), [s, m] = n(null), [g, x] = n(!1), [T, O] = n(null), [k, A] = n(""), [j, M] = n(null), N;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (N = async function() {
+		try {
+			let [e, t] = await Promise.all([y("POST", "/api/ai-gateway/models", {}), y("GET", "/api/state")]);
+			m(e), x(t.user?.role === "admin"), O(null);
+		} catch (e) {
+			let t = e;
+			O(one.plain(t));
+		}
+	}, r[0] = N) : N = r[0];
+	let P = N, F, I;
+	r[1] === Symbol.for("react.memo_cache_sentinel") ? (F = () => {
+		one.on("changed", P), P();
+	}, I = [], r[1] = F, r[2] = I) : (F = r[1], I = r[2]), t(F, I);
+	let L;
+	r[3] === Symbol.for("react.memo_cache_sentinel") ? (L = async function(e) {
+		A("");
+		let t = e.id === "workers-ai" ? {
+			account_id: { secret: !1 },
+			api_key: { secret: !0 }
+		} : { api_key: { secret: !0 } };
+		try {
+			let n = await y("POST", "/api/vault/request", {
+				scope: "global",
+				app: "node",
+				need: e.key_kind,
+				title: `${e.title} Key`,
+				fields: t,
+				hosts: [e.host],
+				why: `Pays for everyone's calls to ${e.title}'s models.`
+			});
+			one.open("request", {
+				id: n.id,
+				scope: n.scope
+			});
+		} catch (e) {
+			A(b(e));
+		}
+	}, r[3] = L) : L = r[3];
+	let R = L;
+	if (!s) {
+		let e;
+		r[4] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ _(c, { children: "AI Gateway" }), r[4] = e) : e = r[4];
+		let t;
+		return r[5] === T ? t = r[6] : (t = /* @__PURE__ */ v("div", {
+			className: "flex max-w-2xl flex-col gap-6",
+			children: [e, T ? /* @__PURE__ */ _(f, {
+				problem: T,
+				retry: P
+			}) : /* @__PURE__ */ _(d, { rows: 4 })]
+		}), r[5] = T, r[6] = t), t;
+	}
+	let z, B;
+	r[7] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ _(c, { children: "AI Gateway" }), B = /* @__PURE__ */ _("p", {
+		className: "-mt-4 px-1 text-muted-foreground",
+		children: "How your apps use AI models."
+	}), r[7] = z, r[8] = B) : (z = r[7], B = r[8]);
+	let V;
+	r[9] === k ? V = r[10] : (V = k && /* @__PURE__ */ _(p, { title: k }), r[9] = k, r[10] = V);
+	let H;
+	r[11] === Symbol.for("react.memo_cache_sentinel") ? (H = ["chat", "decide"], r[11] = H) : H = r[11];
+	let U;
+	r[12] === s.defaults ? U = r[13] : (U = /* @__PURE__ */ _(h, {
+		title: "Default Models",
+		children: /* @__PURE__ */ _(l, { children: H.map((e) => {
+			let t = s.defaults[e];
+			return /* @__PURE__ */ _(u, {
+				title: e === "chat" ? "Chat" : "Decide",
+				sub: `${C(t.model)} · ${w[t.whose]}`,
+				trailing: /* @__PURE__ */ _(o, {
+					name: "caret-right",
+					className: "size-4 text-muted-foreground"
+				}),
+				onClick: () => M(e)
+			}, e);
+		}) })
+	}), r[12] = s.defaults, r[13] = U);
+	let W;
+	if (r[14] !== g || r[15] !== s.companies) {
+		let e;
+		r[17] === g ? e = r[18] : (e = (e) => /* @__PURE__ */ _(u, {
+			leading: /* @__PURE__ */ _(i, {
+				app: S(e),
+				size: 30
+			}),
+			title: e.title,
+			sub: e.paid === "network" ? e.id === "workers-ai" ? "Everyone's · your Cloudflare account" : "Everyone's" : "No key",
+			trailing: !e.paid && g && /* @__PURE__ */ _(a, {
+				size: "sm",
+				variant: "outline",
+				onClick: () => R(e),
+				children: "Add Key"
+			})
+		}, e.id), r[17] = g, r[18] = e), W = s.companies.map(e), r[14] = g, r[15] = s.companies, r[16] = W;
+	} else W = r[16];
+	let G;
+	r[19] === W ? G = r[20] : (G = /* @__PURE__ */ _(h, {
+		title: "Keys",
+		children: /* @__PURE__ */ _(l, { children: W })
+	}), r[19] = W, r[20] = G);
+	let K;
+	r[21] === Symbol.for("react.memo_cache_sentinel") ? (K = /* @__PURE__ */ _(h, {
+		title: "Spending",
+		children: /* @__PURE__ */ _(l, { children: /* @__PURE__ */ _(u, {
+			title: "What each call used",
+			sub: "In Insights, by app, model and person.",
+			trailing: /* @__PURE__ */ _(o, {
+				name: "caret-right",
+				className: "size-4 text-muted-foreground"
+			}),
+			onClick: E
+		}) })
+	}), r[21] = K) : K = r[21];
+	let q;
+	r[22] !== g || r[23] !== s || r[24] !== j ? (q = j && /* @__PURE__ */ _(D, {
+		kind: j,
+		models: s,
+		admin: g,
+		close: () => M(null),
+		done: P
+	}), r[22] = g, r[23] = s, r[24] = j, r[25] = q) : q = r[25];
+	let J;
+	return r[26] !== G || r[27] !== q || r[28] !== V || r[29] !== U ? (J = /* @__PURE__ */ v("div", {
+		className: "flex max-w-2xl flex-col gap-6",
+		children: [
+			z,
+			B,
+			V,
+			U,
+			G,
+			K,
+			q
+		]
+	}), r[26] = G, r[27] = q, r[28] = V, r[29] = U, r[30] = J) : J = r[30], J;
+}
+function E() {
+	return one.open("insights", {});
+}
+function D(t) {
+	let r = e(39), { kind: i, models: c, admin: d, close: f, done: h } = t, x = c.defaults[i], [S, C] = n(x.whose === "built_in" ? "" : x.model), [w, T] = n(d && x.whose !== "yours"), [E, D] = n(!1), [O, k] = n(""), A;
+	r[0] !== f || r[1] !== h || r[2] !== w || r[3] !== i || r[4] !== S ? (A = async function() {
+		D(!0), k("");
+		try {
+			await y("POST", "/api/ai-gateway/set", {
+				[i]: S.trim(),
+				everyone: w
+			}), h(), f();
+		} catch (e) {
+			k(b(e));
+		}
+		D(!1);
+	}, r[0] = f, r[1] = h, r[2] = w, r[3] = i, r[4] = S, r[5] = A) : A = r[5];
+	let j = A, M;
+	r[6] === f ? M = r[7] : (M = (e) => !e && f(), r[6] = f, r[7] = M);
+	let N = i === "chat" ? "Default Chat Model" : "Default Decide Model", P;
+	r[8] === E ? P = r[9] : (P = E && /* @__PURE__ */ _(g, {}), r[8] = E, r[9] = P);
+	let F;
+	r[10] !== E || r[11] !== j || r[12] !== P ? (F = /* @__PURE__ */ v(a, {
+		size: "sm",
+		disabled: E,
+		onClick: j,
+		children: [P, "Save"]
+	}), r[10] = E, r[11] = j, r[12] = P, r[13] = F) : F = r[13];
+	let I;
+	r[14] === j ? I = r[15] : (I = (e) => (e.preventDefault(), j()), r[14] = j, r[15] = I);
+	let L;
+	r[16] === Symbol.for("react.memo_cache_sentinel") ? (L = (e) => C(e.target.value), r[16] = L) : L = r[16];
+	let R = i === "chat" ? "google/gemini-3.5-flash-lite" : "workers-ai/@cf/cloudflare/clef-flash", z;
+	r[17] !== S || r[18] !== R ? (z = /* @__PURE__ */ _(s, {
+		value: S,
+		onChange: L,
+		placeholder: R,
+		autoFocus: !0
+	}), r[17] = S, r[18] = R, r[19] = z) : z = r[19];
+	let B = w ? "the built-in default" : "Everyone’s", V;
+	r[20] === B ? V = r[21] : (V = /* @__PURE__ */ v("p", {
+		className: "px-1 text-sm text-muted-foreground",
+		children: [
+			"Apps that don’t name a model get this one. Leave it empty for ",
+			B,
+			"."
+		]
+	}), r[20] = B, r[21] = V);
+	let H;
+	r[22] !== d || r[23] !== w ? (H = d && /* @__PURE__ */ v(l, { children: [/* @__PURE__ */ _(u, {
+		title: "For everyone",
+		trailing: w && /* @__PURE__ */ _(o, {
+			name: "check",
+			className: "size-4"
+		}),
+		onClick: () => T(!0)
+	}), /* @__PURE__ */ _(u, {
+		title: "Just for me",
+		trailing: !w && /* @__PURE__ */ _(o, {
+			name: "check",
+			className: "size-4"
+		}),
+		onClick: () => T(!1)
+	})] }), r[22] = d, r[23] = w, r[24] = H) : H = r[24];
+	let U;
+	r[25] === O ? U = r[26] : (U = O && /* @__PURE__ */ _(p, { title: O }), r[25] = O, r[26] = U);
+	let W;
+	r[27] === Symbol.for("react.memo_cache_sentinel") ? (W = /* @__PURE__ */ _("button", {
+		type: "submit",
+		hidden: !0
+	}), r[27] = W) : W = r[27];
+	let G;
+	r[28] !== V || r[29] !== H || r[30] !== U || r[31] !== I || r[32] !== z ? (G = /* @__PURE__ */ v("form", {
+		className: "flex flex-col gap-4 p-4",
+		onSubmit: I,
+		children: [
+			z,
+			V,
+			H,
+			U,
+			W
+		]
+	}), r[28] = V, r[29] = H, r[30] = U, r[31] = I, r[32] = z, r[33] = G) : G = r[33];
+	let K;
+	return r[34] !== G || r[35] !== M || r[36] !== N || r[37] !== F ? (K = /* @__PURE__ */ _(m, {
+		open: !0,
+		onOpenChange: M,
+		title: N,
+		action: F,
+		children: G
+	}), r[34] = G, r[35] = M, r[36] = N, r[37] = F, r[38] = K) : K = r[38], K;
+}
+r(document.getElementById("root")).render(/* @__PURE__ */ _(T, {}));
+</script>

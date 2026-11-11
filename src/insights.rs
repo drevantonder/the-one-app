@@ -136,7 +136,7 @@ pub enum Failure {
 }
 
 /// The codes a caller's request is refused with (`protocol::code`): everything else, and anything with no code, broke.
-const REFUSALS: &[&str] = &[code::UPDATE, code::NOT_LET_IN, code::REFUSED, code::NOT_THIS_MACHINE, code::NOT_SIGNED_IN, code::NOT_ADDED, code::APP_DELETED, code::ALREADY, code::NOT_LISTED, code::PAIRING_USED, code::BAD_PAIRING_CODE, code::ALREADY_IN_NETWORK];
+const REFUSALS: &[&str] = &[code::UPDATE, code::NOT_LET_IN, code::REFUSED, code::NOT_THIS_MACHINE, code::NOT_SIGNED_IN, code::NOT_ADDED, code::APP_DELETED, code::ALREADY, code::NOT_LISTED, code::PAIRING_USED, code::BAD_PAIRING_CODE, code::ALREADY_IN_NETWORK, code::NO_KEY, code::RETRY_CHANGED];
 
 impl Failure {
     /// What ended a call with this `code`, if it carries one, or as `exception`, at `stage`.
@@ -446,6 +446,24 @@ impl Attrs {
         self
     }
 
+    /// An AI Gateway call's attributes (`ai_gateway::span_attrs`): only those it lists, and of them only numbers, true or
+    /// false, plain names and model ids, so no prompt or answer can be one.
+    pub fn gen_ai(mut self, attrs: &[(&'static str, Value)]) -> Attrs {
+        let plain = |v: &str| !v.is_empty() && v.len() <= 128 && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-+/@:".contains(&b));
+        for (key, value) in attrs {
+            let kept = match value {
+                Value::Number(_) | Value::Bool(_) => true,
+                Value::String(s) => plain(s),
+                Value::Array(all) => all.len() <= 8 && all.iter().all(|v| v.as_str().is_some_and(plain)),
+                _ => false,
+            };
+            if kept && ai_gateway::SPAN_ATTRS.contains(key) {
+                self.0.insert(key, value.clone());
+            }
+        }
+        self
+    }
+
     fn token(&mut self, key: &'static str, value: &str) {
         if token(value) {
             self.0.insert(key, json!(value));
@@ -581,6 +599,9 @@ pub const OPEN_FRESH: Metric = Metric { name: "client.open.fresh", histogram: tr
 pub const LATE: Metric = Metric { name: "http.client.late", histogram: false, unit: "{request}" };
 pub const SIGNER_FAILURES: Metric = Metric { name: "signer.failures", histogram: false, unit: "{failure}" };
 pub const CANARY: Metric = Metric { name: "telemetry.canary", histogram: false, unit: "{check}" };
+/// What AI Gateway's calls used and took, as OTEL's GenAI conventions name them (but in ms, as every duration here is).
+pub const GEN_AI_TOKENS: Metric = Metric { name: "gen_ai.client.token.usage", histogram: true, unit: "{token}" };
+pub const GEN_AI_DURATION: Metric = Metric { name: "gen_ai.client.operation.duration", histogram: true, unit: "ms" };
 
 /// One span, as a device says it. `service` is an app, or the network's own program (`own`).
 #[derive(Clone, Debug)]

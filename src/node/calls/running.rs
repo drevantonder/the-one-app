@@ -293,6 +293,10 @@ impl Node {
                 ok(json!({}))
             }
             Ask::Fetch => bail!("{}'s requests go out as they're made here", grant.app),
+            Ask::AiRun => {
+                let req: Value = serde_json::from_slice(&body)?;
+                ok(json!({ "ok": self.ai_run(&grant.caller, &grant.app, grant.trace.as_ref(), req["input"].clone(), req["retry_key"].as_str()).await? }))
+            }
         })
     }
 }

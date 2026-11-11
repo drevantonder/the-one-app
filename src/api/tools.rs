@@ -62,11 +62,11 @@ mod tests {
     #[test]
     fn a_tool_reads_only_the_inputs_its_schema_takes() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut served: std::collections::HashMap<&str, (String, std::collections::VecDeque<String>)> = Default::default();
+        let mut served: std::collections::HashMap<String, (String, std::collections::VecDeque<String>)> = Default::default();
         for feature in all() {
-            let folder = if matches!(feature.name, "add" | "remove") { "app" } else { feature.name };
-            let (source, queue) = served.entry(folder).or_insert_with(|| {
-                let source = std::fs::read_to_string(root.join(folder).join("tools.rs")).unwrap();
+            let folder = if matches!(feature.name, "add" | "remove") { "app".to_string() } else { feature.name.replace('-', "_") };
+            let (source, queue) = served.entry(folder.clone()).or_insert_with(|| {
+                let source = std::fs::read_to_string(root.join(&folder).join("tools.rs")).unwrap();
                 let queue = source.split("serves!(serve::").skip(1).map(|s| s.split(')').next().unwrap().to_string()).collect();
                 (source, queue)
             });

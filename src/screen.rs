@@ -133,6 +133,8 @@ const CLIENT_SCREENS: &[(&str, &str, &str)] = &[
     ("labs", "src/screen/settings/dist/labs.html", include_str!("screen/settings/dist/labs.html")),
     ("devices", "src/screen/settings/dist/devices.html", include_str!("screen/settings/dist/devices.html")),
     ("connect-ai", "src/screen/settings/dist/connect-ai.html", include_str!("screen/settings/dist/connect-ai.html")),
+    // A feature's own, in its folder (<feature>/screens/), built by the same build.
+    ("ai-gateway", "ai-gateway/screens/dist/ai-gateway.html", include_str!("../ai-gateway/screens/dist/ai-gateway.html")),
 ];
 
 /// Each of the client's own screens' source maps: what a frame thrown in one of them came from (`insights::source_map`).
@@ -151,6 +153,7 @@ const CLIENT_MAPS: &[(&str, &str)] = &[
     ("labs", include_str!("screen/settings/dist/labs.html.map")),
     ("devices", include_str!("screen/settings/dist/devices.html.map")),
     ("connect-ai", include_str!("screen/settings/dist/connect-ai.html.map")),
+    ("ai-gateway", include_str!("../ai-gateway/screens/dist/ai-gateway.html.map")),
 ];
 
 /// The source map of a client's own screen.
@@ -226,6 +229,16 @@ mod tests {
         let mut shared = Vec::new();
         walk(&home, &home, &mut shared);
         files.extend(shared.into_iter().map(|f| format!("../home/{f}")));
+        // Each feature's own Settings screens (<feature>/screens/).
+        for feature in ["ai-gateway"] {
+            for entry in std::fs::read_dir(root.join("../../..").join(feature).join("screens")).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".jsx") || name.ends_with(".tsx") {
+                    assert!(super::client_screen(name.rsplit_once('.').unwrap().0).starts_with(super::UI), "{name} isn't built in as its screen");
+                    files.push(format!("../../../{feature}/screens/{name}"));
+                }
+            }
+        }
         // And onboarding's screens, which auth.json is drawn from and Welcome is @one/ui's.
         for entry in std::fs::read_dir(root.join("../../onboarding")).unwrap().flatten() {
             let name = entry.file_name().to_string_lossy().to_string();

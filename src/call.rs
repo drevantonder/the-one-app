@@ -46,11 +46,13 @@ pub enum Ask {
     /// An app's request out, on the Cloudflare node, which has no outbound to give an app: a machine's node takes each
     /// as it's made (`src/app/outbound.rs`).
     Fetch,
+    /// Asks an AI model, through AI Gateway (`ctx.ai.run`): it writes only the caller's own `node/ai-gateway`.
+    AiRun,
 }
 
 /// Each ask: its name, whether a call that only reads (a widget's, badge's or hook's) is refused it, and whether the
 /// Cloudflare node answers it yet (an app that asks one there is told to use a machine).
-const ASKS: [(Ask, &str, bool, bool); 17] = [
+const ASKS: [(Ask, &str, bool, bool); 18] = [
     (Ask::Call, "call", true, true),
     (Ask::Query, "query", false, true),
     (Ask::May, "may", false, true),
@@ -68,6 +70,7 @@ const ASKS: [(Ask, &str, bool, bool); 17] = [
     (Ask::Order, "order", false, false),
     (Ask::Priority, "priority", true, false),
     (Ask::Fetch, "fetch", false, true),
+    (Ask::AiRun, "ai.run", false, false),
 ];
 
 /// What a call that only reads is told when it writes, asks something that does, pushes or calls another app.
