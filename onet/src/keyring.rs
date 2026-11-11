@@ -405,7 +405,10 @@ impl<O: Opens> Keyring<O> {
             let kept = on.get(NEEDS).await.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
             self.needs.lock().unwrap().get_or_insert(kept);
         }
-        let (mut needed, mut behind, mut reread) = (0, 0, false);
+        // Every key this request's 428s asked for: an app runtime finds what a request needs as it goes (oned on
+        // Cloudflare, who's who's first, then a call's code, its app's and the Vault's), so it's asked again while each
+        // asks for something more.
+        let (mut asked, mut behind, mut reread) = (BTreeSet::new(), 0, false);
         loop {
             let learning = self.learning.lock().unwrap().get(&kind.name).cloned();
             if let Some(learning) = learning {
@@ -422,12 +425,17 @@ impl<O: Opens> Keyring<O> {
                 }
             }
             let response = sent?;
-            if response.status == 428 && needed < 3 {
-                needed += 1;
+            if response.status == 428 {
                 let node = response.node;
-                let answer: Value = serde_json::from_slice(&response.body.bytes().await?).map_err(|err| failed(format!("the device asked for keys in a reply that wasn't JSON: {err}")))?;
-                self.learn(client, on, &kind, &node, &answer, sent_with).await?;
-                continue;
+                let bytes = response.body.bytes().await?;
+                let answer: Value = serde_json::from_slice(&bytes).map_err(|err| failed(format!("the device asked for keys in a reply that wasn't JSON: {err}")))?;
+                let learned = self.learn(client, on, &kind, &node, &answer, sent_with, &asked).await?;
+                let before = asked.len();
+                asked.extend(learned);
+                if asked.len() > before {
+                    continue;
+                }
+                return Ok(Response { body: Body::whole(bytes), ..response });
             }
             if response.status == 403 {
                 let bytes = response.body.bytes().await?;
@@ -514,15 +522,19 @@ impl<O: Opens> Keyring<O> {
     }
 
     /// An app runtime's 428, taken only from the app runtime that answered (`node`), naming itself, asking only keys of scopes who's
-    /// who says it runs, and of databases that kind of request uses (`keys::asked_for`): what the request needed,
-    /// remembered for that kind of request and that app runtime, in place of what it needed before. Fails, remembering
-    /// nothing, if it asks for more, or this device can't open them. One of a kind of request that another learned for
-    /// since it was sent (`sent_with`, what it went with) learns nothing more.
-    async fn learn(&self, client: &Client, on: &(impl Address + Keep), kind: &Kind, node: &[u8; 32], answer: &Value, sent_with: Option<(String, Vec<Need>)>) -> Result<(), Error> {
+    /// who says it runs, and of databases that kind of request uses (`keys::asked_for`): what the request needed, with what
+    /// the same request's 428s asked before (`before`), remembered for that kind of request and that app runtime, in place
+    /// of what it needed before. Of each database asked for, every epoch a reader of it needs to its newest is handed, as
+    /// this device's who's who says: an app runtime that hasn't read who's who yet can't know the newest, and asks for
+    /// the first. Fails, remembering nothing, if it asks for more, or this device can't open them. One of a kind of
+    /// request that another learned for since it was sent (`sent_with`, what it went with) learns nothing more.
+    /// → what it remembered for that kind of request.
+    #[allow(clippy::too_many_arguments)]
+    async fn learn(&self, client: &Client, on: &(impl Address + Keep), kind: &Kind, node: &[u8; 32], answer: &Value, sent_with: Option<(String, Vec<Need>)>, before: &BTreeSet<Need>) -> Result<Vec<Need>, Error> {
         let lock = self.learning.lock().unwrap().entry(kind.name.clone()).or_default().clone();
         let _learning = lock.lock().await;
         if self.needs_of(&kind.name) != sent_with {
-            return Ok(());
+            return Ok(self.needs_of(&kind.name).map(|(_, need)| need).unwrap_or_default());
         }
         let mut need = ::api::handed::asked_for(&kind.route, &hex(node), answer).ok_or_else(|| failed("A device asked for keys that request doesn't use. Nothing was handed."))?;
         if !self.nodes().contains_key(node) {
@@ -552,24 +564,26 @@ impl<O: Opens> Keyring<O> {
         // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.
         let (hints, fetched) = n0_future::future::zip(asked, self.fetch_keys(client, &need)).await;
         fetched?;
-        let mut oldest: BTreeMap<String, u32> = BTreeMap::new();
+        let mut epochs: BTreeMap<String, (u32, u32)> = BTreeMap::new();
         for ((p, scope), hint) in each.iter().zip(hints) {
             let hint = hint.map_err(failed)?;
-            let newest = self.who(|who| who.epoch(scope)).transpose().map_err(failed)?.unwrap_or(0);
+            let newest = self.who(|who| who.epoch(scope)).transpose().map_err(failed)?.unwrap_or(0).max(1);
             let database = p.rsplit('/').next().unwrap_or_default();
-            oldest.insert(p.clone(), ::api::handed::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest));
+            epochs.insert(p.clone(), (::api::handed::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest), newest));
         }
-        need.retain(|n| n.epoch >= oldest[&prefix(n)]);
+        need.retain(|n| n.epoch >= epochs[&prefix(n)].0);
         if need.is_empty() {
             return Err(failed("A device asked for older keys than it needs. Nothing was handed."));
         }
+        let runs = |n: &Need| self.who(|who| Scope::parse(&n.scope).is_ok_and(|s| who.runs_for(node, &s))).unwrap_or(false);
+        let need = handing(need, |n| epochs[&prefix(n)], before.iter().filter(|n| runs(n)).cloned());
         for n in &need {
             self.database_key(client, on, n).await?;
         }
         let kept = {
             let mut needs = self.needs.lock().unwrap();
             let needs = needs.get_or_insert_default();
-            needs.insert(kind.name.clone(), (hex(node), need));
+            needs.insert(kind.name.clone(), (hex(node), need.clone()));
             if needs.len() > KINDS_KEPT
                 && let Some(other) = needs.keys().find(|k| **k != kind.name).cloned()
             {
@@ -579,7 +593,7 @@ impl<O: Opens> Keyring<O> {
         };
         // Kept only to save the next run of this device a 428.
         let _ = on.put(NEEDS, &kept).await;
-        Ok(())
+        Ok(need)
     }
 
     /// What `need`'s keys are opened from that this device hasn't opened yet, asked for all at once: each scope's epochs
@@ -724,6 +738,40 @@ pub fn query(s: &str) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
+/// What a device hands for `asked`: each database's every epoch from the oldest a reader of it needs to the newest
+/// (`epochs`, as this device's who's who says), as an app runtime that hasn't read who's who yet can't know the newest
+/// and asks for the first; with what the same request was asked before (`before`).
+fn handing(asked: Vec<Need>, epochs: impl Fn(&Need) -> (u32, u32), before: impl Iterator<Item = Need>) -> Vec<Need> {
+    let mut out: BTreeSet<Need> = before.collect();
+    for n in asked {
+        let (oldest, newest) = epochs(&n);
+        out.extend((oldest..=newest).map(|epoch| Need { epoch, ..n.clone() }));
+    }
+    out.into_iter().collect()
+}
+
 pub fn error(out: &Value) -> Option<String> {
     out["error"].as_str().or(out["message"].as_str()).map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn need(app: &str, database: &str, epoch: u32) -> Need {
+        Need { scope: "global".into(), epoch, app: app.into(), database: database.into() }
+    }
+
+    /// oned on Cloudflare reads who's who only with what it's handed: asking, before it has read it, for its log's first
+    /// epoch, it's handed every one, as reading the log under only the first passes over every step under the others,
+    /// and over the devices they list (the real network's global has 16). A request's later asks keep what it was asked
+    /// before, so it goes on.
+    #[test]
+    fn an_app_runtime_asking_for_a_logs_first_epoch_is_handed_each_to_the_newest() {
+        let handed = handing(vec![need("node", "log", 1)], |_| (1, 3), std::iter::empty());
+        assert_eq!(handed, [1, 2, 3].map(|e| need("node", "log", e)).to_vec());
+        let handed = handing(vec![need("notes", "main", 3)], |_| (2, 3), handed.into_iter());
+        let wanted = [need("node", "log", 1), need("node", "log", 2), need("node", "log", 3), need("notes", "main", 2), need("notes", "main", 3)];
+        assert_eq!(handed.into_iter().collect::<BTreeSet<_>>(), wanted.into_iter().collect());
+    }
 }
