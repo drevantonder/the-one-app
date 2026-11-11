@@ -37,6 +37,6 @@ upper=$(echo "$CONFIG_CLI" | tr '[:lower:]' '[:upper:]')
 export "SIMCTL_CHILD_${upper}_ADDRESS=$address" "SIMCTL_CHILD_${upper}_SIGN_IN_PRINT=1" "SIMCTL_CHILD_${upper}_CONTROL=$control"
 # What it prints, which the simulator keeps in its log: from now, into the log file, as it comes.
 pkill -f "simctl spawn $sim log stream" 2>/dev/null || true
-nohup sh -c "xcrun simctl spawn $sim log stream --style compact --predicate 'process == \"$CONFIG_NAME\"' | sed -l -n -E 's/.*\] \[std(out|err)\] //p' > '$log'" >/dev/null 2>&1 &
+nohup sh -c "xcrun simctl spawn $sim log stream --style compact --predicate 'process == \"$CONFIG_NAME\"' | sed -l -n -E 's/.*\] \[std(out|err)\] //p' > '$log'" </dev/null >/dev/null 2>&1 &
 SIMULATOR=$sim nice "$native/iphone/build.sh" simulator >/dev/null
 echo "$sim $log"

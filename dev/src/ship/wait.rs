@@ -22,7 +22,7 @@ pub fn wait(g: &one::cli::Given) -> Result<()> {
 
 /// How long a wait takes unless told: an agent's harness cuts a call off at 10 minutes, so it ends before that and says
 /// how to go on.
-pub(super) const CALL: u64 = 9 * 60;
+pub const CALL: u64 = 9 * 60;
 
 /// `--timeout`, or `default` seconds.
 pub(super) fn limit(g: &one::cli::Given, default: u64) -> Result<Duration> {

@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use one::config::{CLI, NAME};
 
 use super::super::devices::{approve_code, didnt_sign_in, shell_quote};
@@ -14,7 +14,7 @@ use super::super::network::spawn;
 /// reaching the throwaway network at its address through ports ssh forwards there. Signed in as the throwaway network's
 /// first user as linux() is: its Sign In pressed, the sign-in approved as them and opened there, its code approved.
 /// What it keeps stays on the Mac, so a new build is still signed in; it's started again each time.
-pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, iphone: bool) -> Result<()> {
+pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, iphone: bool, started: Instant) -> Result<()> {
     let address = settings.address.as_str();
     let host = std::env::var("MAC").unwrap_or_else(|_| "mac".into());
     let ssh = |command: &str| -> Result<String> {
@@ -54,7 +54,8 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{host}\n{script}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
     eprintln!("Building client/native on {host} (dev profile; the first time takes minutes)…");
-    let said = ssh(&format!("cd {there} && PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH client/native/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&simulator_name(dir))))?;
+    let build = format!("cd {there} && CARGO_TERM_COLOR=never PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH client/native/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&simulator_name(dir)));
+    let said = build_on(&host, &build, &dir.join(format!("{script}-build.log")), started + Duration::from_secs(crate::ship::CALL - 90))?;
     // The iPhone's says its simulator too.
     let (sim, log) = match said.lines().last().unwrap_or_default().rsplit_once(' ') {
         Some((sim, log)) if iphone => (sim.to_string(), log.to_string()),
@@ -117,6 +118,35 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
   What it said: {host}:{log}; {CLI}-dev throwaway stop stops it"
     );
     Ok(())
+}
+
+/// Runs the build on `host` and gives its last line, in a session of its own that the Mac hangs up when its ssh ends, for any
+/// reason, and the build with it, so none is left running there when this is killed or the connection drops. At `deadline`,
+/// before the agent's harness would cut this call off, it ends the build the same way, saying so: what it built stays, and
+/// the same command again builds on from there.
+fn build_on(host: &str, command: &str, log: &Path, deadline: Instant) -> Result<String> {
+    use std::os::unix::process::CommandExt;
+    let mut ssh = std::process::Command::new("ssh");
+    // -tt: ssh without a terminal gives the command's processes no hangup when it ends; with one the Mac sends it to them all.
+    // The terminal merges the command's errors into what it printed. Its own death takes ssh with it, as a kill that leaves it
+    // no time to end it would otherwise leave the build running.
+    ssh.args(["-tt", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", host, command]).stdin(std::process::Stdio::null()).stdout(std::fs::File::create(log)?).stderr(std::process::Stdio::null());
+    unsafe { ssh.pre_exec(|| if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }) };
+    let mut ssh = ssh.spawn().with_context(|| format!("starting ssh to {host}"))?;
+    let status = loop {
+        if let Some(status) = ssh.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            ssh.kill()?;
+            ssh.wait()?;
+            anyhow::bail!("{host} was still building when this ran out of time, so it stopped the build there (what it built stays: it would otherwise run on after the agent's call was cut off). The same command again builds on from here. What it said so far: {}", log.display());
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    };
+    let said = std::fs::read_to_string(log)?.replace('\r', "");
+    anyhow::ensure!(status.success(), "on {host}: {command}: {}", said.trim());
+    Ok(said.trim().to_string())
 }
 
 /// The name of the iPhone simulator this throwaway network made, which no other has (its folder's name is its checkout's, and

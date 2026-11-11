@@ -276,7 +276,7 @@ fn commands(mcp: &str) -> one::cli::Command {
             form("throwaway mcp", format!("its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}")),
             form("throwaway git <args>", format!("git, reaching its repos at its address: {CLI}-dev throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI}-dev throwaway git push in the clone")),
             form("throwaway cloudflare node deploy", "run its Cloudflare node beside its Workers, as Cloudflare would".into()),
-            form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows".into()),
+            form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows. mac and iphone build on the Mac and stop that build if the command is killed or takes 9 minutes: run it again to build on from what was built".into()),
             form("throwaway client <kind> --as sam", "the same, as someone else, invited by you with Add Someone's link".into()),
             form("throwaway publish", "publish this checkout's build to it under its own release key, for its device to take, and Update on Cloudflare in Devices to redeploy its Workers with; give it an older build first with --build".into()),
             form("throwaway update", format!("take what's published, as {CLI} update does on a device, and start it again on it")),

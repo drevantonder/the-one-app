@@ -28,7 +28,7 @@ use cloudflare::*;
 use services::*;
 use signoff::*;
 use update::*;
-pub use wait::wait;
+pub use wait::{CALL, wait};
 use wait::*;
 
 pub fn commands() -> one::cli::Command {

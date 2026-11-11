@@ -43,7 +43,7 @@ pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Se
         }
         Some(kind @ ("mac" | "iphone")) => {
             anyhow::ensure!(user.is_none(), "the {kind} client signs in only as the throwaway network's first user: use web, linux or android for someone else");
-            apple::apple(dir, checkout, settings, kind == "iphone")?
+            apple::apple(dir, checkout, settings, kind == "iphone", started)?
         }
         Some(kind @ ("android" | "windows")) => {
             if let Some(name) = &user {
