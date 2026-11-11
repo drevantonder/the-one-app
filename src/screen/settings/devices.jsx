@@ -214,14 +214,11 @@ function model(x, again) {
   }
 
   /// Their own devices that can run something, and Cloudflare, each with what it can run: Cloudflare always runs
-  /// apps, and runs the services built for it that an admin switches on, for the apps in the network.
+  /// apps, and no service.
   function gridColumns() {
     const cols = drawn.cards.filter((c) => c.user === me && c.runs).map((c) => ({ c, name: c.name, icon: c.icon, presence: presence(c), parts: partsOf(c) }))
     const s = state.network?.cloudflare_node
-    if ((cols.length || admin) && s) {
-      const parts = (s.parts || [{ name: "apps", on: true, fixed: true }]).filter((p) => p.name === "apps" || appOf(p.name))
-      cols.push({ c: null, name: "Cloudflare", icon: CLOUDFLARE, parts: parts.map((p) => (p.fixed || !admin ? { ...p, fixed: true } : { ...p, part: { device: s.key, name: p.name } })) })
-    }
+    if ((cols.length || admin) && s) cols.push({ c: null, name: "Cloudflare", icon: CLOUDFLARE, parts: [{ name: "apps", on: true, fixed: true }] })
     return cols
   }
 

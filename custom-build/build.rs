@@ -85,13 +85,6 @@ fn main() {
         settings.push_str(&format!("({name:?}, {:?}),", value.as_str().unwrap_or_else(|| panic!("the setting {name} isn't text"))));
     }
     let out = format!("{out}pub const SETTINGS: &[(&str, &str)] = &[{settings}];\n");
-    // The built-in apps with a service built for Cloudflare (`apps/<name>/service/cloudflare.js`), which the Cloudflare
-    // node runs: their names. The program carries what they're built of (`one::carried::CLOUDFLARE_SERVICES`).
-    let apps = manifest.join("apps");
-    println!("cargo:rerun-if-changed={}", apps.display());
-    let mut on_cloudflare: Vec<String> = std::fs::read_dir(&apps).unwrap().flatten().map(|e| e.path()).filter(|p| p.join("app.js").is_file() && p.join("service/cloudflare.js").is_file()).map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
-    on_cloudflare.sort();
-    let out = format!("{out}pub const ON_CLOUDFLARE: &[&str] = &{on_cloudflare:?};\n");
     // The apps every agent needs from the start: their guide is in MCP's instructions, and code mode keeps their tools.
     let always_on: String = config.get("always_on").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()).map(|n| format!("{n:?},")).collect();
     let out = format!("{out}pub const ALWAYS_ON: &[&str] = &[{always_on}];\n");

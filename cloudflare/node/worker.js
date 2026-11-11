@@ -26,13 +26,12 @@
 //
 // Bindings: SIGNER (the URL signer), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its endpoint's
 // key, a secret), RELAY (the relay's `CloudflareNode` entrypoint), LOCATION (where objects are made), ADDRESS (the
-// network's), NAME (its name) and AI (Workers AI, for AI Gateway's calls: `aiRun`). `built.js`, made when it's deployed, is the shim, and the services built
-// for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
+// network's), NAME (its name) and AI (Workers AI, for AI Gateway's calls: `aiRun`). `built.js`, made when it's deployed, is the shim.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
 import { initSync, bucket_read, call_span, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, ai_gateway_schema, ai_run, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
-import { shim, compatibilityDate, services } from "./built.js";
+import { shim, compatibilityDate } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
 import { Refused, answer, json, near, refuse, textOf } from "./http.js";
 import { AI_GATEWAY, ASKS, BLOBS, CODES, HEADER, LATE_WIDGET, LOG, MOST_URLS, NODE_APP, READS, TELEMETRY, URLS, VAULT, WIDGET_LIMIT_MS } from "./protocol.js";
@@ -725,7 +724,7 @@ class Run {
     if (depth > 8) refuse(400, "apps called each other too deep");
     const p = this.user;
     const d = await p.describe(this.who, app);
-    if (!servedHere(this.view, d)) refuse(503, needsDevice(d, app.name));
+    if (!servedHere(d)) refuse(503, needsDevice(d, app.name));
     if (!scopes.length) refuse(403, this.notOnPages(d.title || app.name));
     const writes = what === "call";
     const call = new Call(p, this.who, app, scopes.map((h) => h.id), this.view);
@@ -850,7 +849,7 @@ class Run {
     const out = {};
     await Promise.all(this.pages(page).map(async ({ app, scopes }) => {
       const d = await this.user.describe(this.who, app).catch(keysFirst);
-      if (d?.badge !== true || !servedHere(this.view, d)) return;
+      if (d?.badge !== true || !servedHere(d)) return;
       const n = await this.run(app, "badge", {}, scopes).catch((err) => {
         console.error(`${app.name}'s badge: ${err.message}`);
         return 0;
@@ -885,40 +884,10 @@ const keysFirst = (err) => {
 };
 
 /// Whether an app keeps to its own data: it uses no other app or Vault item, and its service, if it has one, runs here.
-const plain = (d, view) => !d.uses?.apps?.length && servedHere(view, d) && !d.vault;
+const plain = (d) => !d.uses?.apps?.length && servedHere(d) && !d.vault;
 
-/// Whether the service `name`, built for Cloudflare, runs here: an admin switched it on (scope/src/state.rs:
-/// `cloudflare_node.parts`), and this node carries its build.
-const onHere = (view, name) => Object.hasOwn(services, name) && (view.state.network.cloudflare_node?.parts || []).some((p) => p.name === name && p.on);
-
-const servedHere = (view, d) => (d?.uses?.services || []).every((s) => onHere(view, s));
-
-/// A function of a service built for Cloudflare, run here: → `{ ok }`, or null when it can't answer here (it gave
-/// nothing, as for a model it doesn't have), for a device to.
-async function hereCall(env, name, functionName, input) {
-  const fn = services[name]?.[functionName];
-  if (typeof fn !== "function") return null;
-  const ok = await fn(input ?? {}, {});
-  return ok === undefined ? null : { ok };
-}
-
-/// A call of an app's own service, from the app running here: here when it can, else on a device that runs it; with
-/// device "all", every device's answer and this node's, as "Cloudflare".
-async function ownService(run, q, d) {
-  const cloudflare = namesThisNode(q.device);
-  if (q.device === "all") {
-    const here = await hereCall(run.env, q.app, q.function, q.input).catch((err) => ({ ok: { error: err.message } }));
-    const there = await machineCall(run, q, d).catch((err) => {
-      console.error(`${q.app}'s ${q.function} on the devices: ${err.message}`);
-      return { ok: {} };
-    });
-    return { ok: { ...there.ok, ...(here ? { Cloudflare: here.ok } : {}) } };
-  }
-  const here = !q.device || cloudflare ? await hereCall(run.env, q.app, q.function, q.input) : null;
-  if (here) return here;
-  if (cloudflare) refuse(400, `the Cloudflare node can't do that for ${d?.title || q.app}`);
-  return machineCall(run, q, d);
-}
+/// Whether an app's calls run here: it uses no service, since services run only on computers.
+const servedHere = (d) => !d?.uses?.services?.length;
 
 const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and ${OFF}`;
 
@@ -992,13 +961,12 @@ class ForCall extends RpcTarget {
           // Only to the apps it says it uses, and never to a service: a service is its app's alone, and an app with one
           // runs on a machine, never here. A service, or an app this node can't run, goes to a node on a machine.
           const mine = await user.describe(who, this.app);
-          if (q.service && q.app === this.app.name && onHere(view, q.app)) return Response.json(await ownService(this.run, q, mine));
           if (q.service || q.device === "all") refuse(403, `${this.app.name} can't call the ${q.app} service: a service is only its own app's, so call the ${q.app} app's tools with ctx.apps`);
           if (!mine?.uses?.apps?.includes(q.app)) refuse(403, `${this.app.name} doesn't use ${q.app}`);
           const callee = deployed(view, q.app);
           if (!callee) refuse(404, `no app named ${q.app}`);
           const d = q.device ? null : await user.describe(who, callee);
-          if (!d || !servedHere(view, d)) return Response.json(await machineCall(this.run, q, d));
+          if (!d || !servedHere(d)) return Response.json(await machineCall(this.run, q, d));
           return Response.json(await this.run.call({ app: q.app, tool: q.tool, input: q.input }, this.app.name, this.depth + 1));
         }
         case "vault":
@@ -1088,10 +1056,10 @@ async function route(p, request) {
     const d = app && (await p.describe(who, app));
     // An app that keeps to its own data, in scopes this node runs, runs here; the rest on a machine, when one answers,
     // unless the call names this node.
-    if (d && plain(d, run.view) && p.callScopes(who, run.view, req).every((s) => run.view.runs.includes(s))) return json(await run.call(req));
+    if (d && plain(d) && p.callScopes(who, run.view, req).every((s) => run.view.runs.includes(s))) return json(await run.call(req));
     const r = named ? null : await p.onMachine(who, run.view, req, 120_000);
     if (r) return json(r, r.ok !== undefined ? 200 : 400);
-    if (!d || !servedHere(run.view, d)) refuse(503, named ? `the Cloudflare node can't run ${req.app} for you` : needsDevice(d, req.app));
+    if (!d || !servedHere(d)) refuse(503, named ? `the Cloudflare node can't run ${req.app} for you` : needsDevice(d, req.app));
     return json(await run.call(req));
   }
   const screenAt = path.match(/^\/api\/screens\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)$/);
@@ -1101,7 +1069,7 @@ async function route(p, request) {
     if (view.apps.some((a) => a.name === screenAt[1] && a.deleted)) refuse(410, `${screenAt[1]} was deleted: its owners can restore it from Recently Deleted in the App Store`, { code: CODES.appDeleted });
     const app = deployed(view, screenAt[1]);
     const d = app && (await p.describe(who, app));
-    if (!d || !servedHere(view, d)) refuse(503, needsDevice(d, screenAt[1]));
+    if (!d || !servedHere(d)) refuse(503, needsDevice(d, screenAt[1]));
     return screenOf(request, p, who, view, app, screenAt[2], JSON.parse(url.searchParams.get("params") || "{}"), url.searchParams.get("scope"));
   }
   // A scope's keys, as sealed in the bucket, where every endpoint the relay lets in may read them anyway.

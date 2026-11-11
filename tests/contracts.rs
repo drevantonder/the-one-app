@@ -710,7 +710,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
             app_schedules: vec![AppSchedule { endpoint: "e".into(), scope: "s".into(), app: "a".into(), until: 1, by: "u".into(), keys: Default::default() }],
             steps: 1,
             settings: [("address".to_string(), "a".to_string())].into(),
-            cloudflare_node: Some(CloudflareNode { priority: ::scope::rank::Priority::Last, key: "k".into(), runs_for: vec![], parts: vec![part()] }),
+            cloudflare_node: Some(CloudflareNode { priority: ::scope::rank::Priority::Last, key: "k".into(), runs_for: vec![] }),
         }),
         pages: vec![Page { scope: "user".into(), title: "You".into(), subtitle: "".into(), hidden: false }],
         arrangements: Default::default(),

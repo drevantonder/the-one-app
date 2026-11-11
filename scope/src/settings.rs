@@ -666,11 +666,10 @@ pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, sco
         allowed!(db.may(user, "add-apps", &scopes::object(s)), "only who may add apps there runs a service for them");
     }
     let managed = |k: &Key| -> Result<bool> { Ok(!on && db.switch(k, name)?.and_then(|s| s.scope).and_then(|s| Scope::parse(&s).ok()).is_some_and(|s| db.may(user, "add-apps", &scopes::object(&s)))) };
-    // The Cloudflare node, by its name in run priority or its key: its admins switch its parts.
+    // The Cloudflare node, by its name in run priority or its key: it runs apps and no service, which its admins switch.
     if let Some(k) = db.cloudflare_node()?.filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
-        allowed!(managed(&k)? || db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
-        // It always runs apps; what else it can run is the services built for it that it carries.
-        ensure!(!on || ::custom_build::config::ON_CLOUDFLARE.iter().any(|n| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
+        ensure!(name == scopes::APPS_PART, "the Cloudflare node can't run {name}: it runs apps, and services run on computers");
+        allowed!(db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
         return Ok(content::service(&k, name, on, scope));
     }
     let mut found: Vec<scopes::Machine> = db.machines()?.into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();

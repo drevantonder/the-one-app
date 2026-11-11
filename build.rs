@@ -41,13 +41,7 @@ fn main() {
         assert!(dirs.iter().any(|d| d.file_name().is_some_and(|f| f == name)), "the config's app {name} isn't in apps/");
         starters.push_str(&format!("{name:?},"));
     }
-    // Each built-in app's service built for Cloudflare (`service/cloudflare.js`), which the Cloudflare node carries.
-    let mut on_cloudflare = String::new();
-    for dir in dirs.iter().filter(|d| d.join("service/cloudflare.js").is_file()) {
-        println!("cargo:rerun-if-changed={}", dir.join("service/cloudflare.js").display());
-        on_cloudflare.push_str(&format!("({:?}, include_bytes!({:?})),", dir.file_name().unwrap().to_string_lossy(), dir.join("service/cloudflare.js")));
-    }
-    let out = format!("{out}pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\npub const CLOUDFLARE_SERVICES: &[(&str, &[u8])] = &[{on_cloudflare}];\n");
+    let out = format!("{out}pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\n");
     // The Workers' sources, built with the pinned Bun when they're run or deployed (src/cloudflare.rs), so a
     // release deploys exactly the Workers it was signed with. Which files they are is `ui_files`.
     let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());

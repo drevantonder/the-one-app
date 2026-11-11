@@ -366,9 +366,6 @@ pub struct CloudflareNode {
     pub priority: Priority,
     pub key: String,
     pub runs_for: Vec<String>,
-    /// It always runs apps, and an admin switches on each service built for it that it carries (a built-in app's
-    /// `service/cloudflare.js`).
-    pub parts: Vec<Part>,
 }
 
 /// What the node answering knows that the scope database doesn't.
@@ -547,13 +544,7 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
         }
     }
     let cloudflare_node = match m.cloudflare_node()? {
-        Some(key) => {
-            let mut parts = vec![Part { name: scopes::APPS_PART.into(), on: true, fixed: true, ..Part::off("") }];
-            for name in custom_build::config::ON_CLOUDFLARE.iter() {
-                parts.push(Part { on: m.switch(&key, name)?.is_some_and(|s| s.on), ..Part::off(name) });
-            }
-            Some(CloudflareNode { priority: rank::priority(&set, rank::CLOUDFLARE), key: hex(&key), runs_for: m.run_by(&key)?.iter().map(Scope::to_string).collect(), parts })
-        }
+        Some(key) => Some(CloudflareNode { priority: rank::priority(&set, rank::CLOUDFLARE), key: hex(&key), runs_for: m.run_by(&key)?.iter().map(Scope::to_string).collect() }),
         None => None,
     };
     Ok(Network {

@@ -12,7 +12,7 @@ pub fn commands() -> Command {
     Command {
         help: vec![
             ("services".into(), "what each of your devices can run, each on or off, and what it's doing".into()),
-            ("services on|off <name> [--device <name>]".into(), "switch a service on or off on a device of yours (here by default), which starts or stops it, fetching its program as it's published; apps is the app runtime. An admin's --device cloudflare switches a service built for Cloudflare on the Cloudflare node (Models: Workers AI)".into()),
+            ("services on|off <name> [--device <name>]".into(), "switch a service on or off on a device of yours (here by default), which starts or stops it, fetching its program as it's published; apps is the app runtime".into()),
             ("services sandbox | sudo sh".into(), "let this machine run services in their sandbox, each as its own user (Linux; the installer does it)".into()),
         ],
         run: |g| {
@@ -54,13 +54,6 @@ pub fn commands() -> Command {
                             println!("  {}  switched off {}", d.name, ago(d.time));
                         }
                     }
-                    // The Cloudflare node, whose services an admin switches (`--device cloudflare`).
-                    if let Some(cloudflare) = &network.cloudflare_node {
-                        println!("Cloudflare");
-                        for p in &cloudflare.parts {
-                            println!("  {}  {}", p.name, if p.on { "on" } else { "off" });
-                        }
-                    }
                 }
                 // What lets this machine's user start services in their sandbox, for root to run once: `| sudo sh`.
                 ["services", "sandbox"] => print!("{}", crate::services::sandbox::setup_script()?),
@@ -88,7 +81,7 @@ pub fn commands() -> Command {
 }
 
 /// Every service there is: those an app uses (an app's service may not be on a device yet, and is switched on there
-/// to put it on), and the parts devices list, with the Cloudflare node's.
+/// to put it on), and the parts devices list.
 fn known(node: &Client) -> Result<BTreeSet<String>> {
     let mut names: BTreeSet<String> = node.apps()?.iter().flat_map(|a| a["uses"]["services"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect::<Vec<_>>()).collect();
     names.insert(scope::scopes::APPS_PART.into());
@@ -98,7 +91,6 @@ fn known(node: &Client) -> Result<BTreeSet<String>> {
             names.extend(s.now.installed_services.iter().map(|d| d.name.clone()));
             names.extend(s.off_services.iter().map(|d| d.name.clone()));
         }
-        names.extend(network.cloudflare_node.iter().flat_map(|c| c.parts.iter().map(|p| p.name.clone())));
     }
     Ok(names)
 }

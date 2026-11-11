@@ -120,7 +120,7 @@ impl Node {
     /// does (tools, widgets, screens, instructions). With `not_added`, also the built-in apps the network hasn't
     /// added yet, with no deploys, each as its own code describes it. Every app that says what it is has `offers` (a
     /// main screen it `opens` to, `screens`: that or a widget, `accounts`), and, with a service, `nodes`: the names of the viewer's own nodes it can
-    /// run on, and `cloudflare` for an admin when it's built for that.
+    /// run on.
     pub async fn catalog(&self, viewer: &Caller, not_added: bool) -> Result<Vec<Value>> {
         let listed = self.with(|i| {
             let m = i.r.db();
@@ -206,8 +206,7 @@ impl Node {
     }
 
     /// Where an app that `described` itself runs its service for `viewer`, if it has one (its own, or one it uses): the
-    /// names of their own nodes on a platform the service is built for, and `cloudflare` for an admin when it's built
-    /// for that.
+    /// names of their own nodes on a platform the service is built for.
     pub(super) fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
         let platforms: Option<Vec<&str>> = described["service"]["platforms"].as_array().map(|p| p.iter().filter_map(Value::as_str).collect());
         let uses_service = described["uses"]["services"].as_array().is_some_and(|s| !s.is_empty());
@@ -222,16 +221,13 @@ impl Node {
                 t if t.contains("android") => "android",
                 _ => "linux",
             };
-            let mut nodes: Vec<String> = m
+            let nodes: Vec<String> = m
                 .machines()?
                 .into_iter()
                 .filter(|d| !d.removed && d.user == viewer.user && d.is(scopes::Kind::Compute))
                 .filter(|d| platforms.as_ref().is_none_or(|p| i.running(&d.key).is_some_and(|b| p.contains(&platform_of(&b.target)))))
                 .map(|d| d.name)
                 .collect();
-            if platforms.as_ref().is_some_and(|p| p.contains(&"cloudflare")) && m.cloudflare_node()?.is_some() && m.may(&viewer.user, "change-settings", scopes::NETWORK) {
-                nodes.push(scope::rank::CLOUDFLARE.to_string());
-            }
             Ok(nodes)
         })
         .ok()
@@ -321,7 +317,7 @@ impl Node {
 
     /// The entries that add (or remove) `app` in `scope` for `caller`, with their own rights there. Adding it
     /// also adds each app it uses, and each they use, that isn't added there yet. Each of their services runs for
-    /// the scope on one node, a node of the caller's it can run on (or `cloudflare` for an admin): `node` (a device's
+    /// the scope on one node, a node of the caller's it can run on: `node` (a device's
     /// name) for `app`'s, which is asked for when there's a choice, and added again with another node, they move
     /// there; and for an app it uses, `node` if it can run there, else its one node, if it has one, and it stays where
     /// it runs already. Removing `app` stops its services there.

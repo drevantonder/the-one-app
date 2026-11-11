@@ -22,11 +22,8 @@ pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
 /// Its modules, from its WebAssembly's glue and the WebAssembly, as wasm-bindgen makes them.
 pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, Vec<u8>)> {
     let shim = ::api::call::shim();
-    let services = crate::carried::CLOUDFLARE_SERVICES;
-    let imports: String = services.iter().enumerate().map(|(i, (name, _))| format!("import s{i} from {};\n", json!(format!("./service-{name}.js")))).collect();
-    let named: Vec<String> = services.iter().enumerate().map(|(i, (name, _))| format!("{}: s{i}", json!(name))).collect();
-    let built_js = format!("{imports}export const shim = {};\nexport const compatibilityDate = {};\nexport const services = {{ {} }};\n", json!(shim), json!(crate::app::runtime::COMPATIBILITY_DATE), named.join(", "));
-    let mut out = vec![
+    let built_js = format!("export const shim = {};\nexport const compatibilityDate = {};\n", json!(shim), json!(crate::app::runtime::COMPATIBILITY_DATE));
+    vec![
         ("worker.js".into(), "application/javascript+module", include_bytes!("../../cloudflare/node/worker.js").to_vec()),
         ("one_cloudflare_node.js".into(), "application/javascript+module", glue),
         ("one_cloudflare_node_bg.wasm".into(), "application/wasm", wasm),
@@ -34,9 +31,7 @@ pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, 
         ("protocol.js".into(), "application/javascript+module", ::api::protocol_js::javascript().into_bytes()),
         ("crypto.js".into(), "application/javascript+module", include_bytes!("../../cloudflare/shared/crypto.js").to_vec()),
         ("http.js".into(), "application/javascript+module", include_bytes!("../../gateway/http.js").to_vec()),
-    ];
-    out.extend(services.iter().map(|(name, bytes)| (format!("service-{name}.js"), "application/javascript+module", bytes.to_vec())));
-    out
+    ]
 }
 
 /// It as the workerd that runs the network's Workers here runs it, from `modules`, beside them.
