@@ -1213,6 +1213,13 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
     .await;
     let lines = async |node: &app_runtime::Host| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("through onet")).await;
+
+    // A deploy made on the computer, whose step onet writes: its bundle is in the bucket by then, so another device runs it.
+    let deploy = json!({ "app": "answers", "files": { "app.js": include_str!("answers/app.js") } });
+    let (status, deployed, _) = ask(&c.onet_at, "POST", "/api/deploy", &c.token, Some(deploy)).await;
+    assert_eq!(status, 200, "{deployed}");
+    let bundle = deployed["bundle"].as_str().unwrap_or_else(|| panic!("{deployed}")).to_string();
+    eventually("the deploy's bundle to reach another device", &b, async || database_runtime::blob(&b.rt(), &bundle).await.is_ok()).await;
 }
 
 /// A computer whose own app runtime stalls answers its programs from another device within the runtime's usual time,

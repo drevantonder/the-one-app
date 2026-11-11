@@ -79,6 +79,11 @@ impl Holds {
                 Ok(())
             }
             Holds::Asks { holder, .. } => {
+                // Its blobs go first, as `put_step`'s do, so a device that reads the steps finds them: the holder signs
+                // and writes the steps, and has none of this runtime's blobs.
+                for blob in contents.iter().flat_map(|c| &c.blobs) {
+                    database_runtime::share(&host.rt(), &Scope::Global, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
+                }
                 holder.ask("POST", "/api/holds/write", Some(json!({ "user": user, "contents": contents }))).await?;
                 host.read_steps_now().await?;
                 host.ping(&Scope::Global, None);
