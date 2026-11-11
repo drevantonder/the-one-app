@@ -226,7 +226,7 @@ impl Node {
                 .machines()?
                 .into_iter()
                 .filter(|d| !d.removed && d.user == viewer.user && d.is(scopes::Kind::Compute))
-                .filter(|d| platforms.as_ref().is_none_or(|p| i.builds.get(&d.key).is_some_and(|b| p.contains(&platform_of(&b.target)))))
+                .filter(|d| platforms.as_ref().is_none_or(|p| i.running(&d.key).is_some_and(|b| p.contains(&platform_of(&b.target)))))
                 .map(|d| d.name)
                 .collect();
             if platforms.as_ref().is_some_and(|p| p.contains(&"cloudflare")) && m.cloudflare_node()?.is_some() && m.may(&viewer.user, "change-settings", scopes::NETWORK) {

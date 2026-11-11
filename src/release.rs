@@ -101,13 +101,6 @@ impl Version {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-pub struct Running {
-    pub commit: String,
-    #[serde(default)]
-    pub target: String,
-}
-
 
 #[cfg(test)]
 mod tests {

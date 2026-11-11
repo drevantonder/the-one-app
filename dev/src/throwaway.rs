@@ -171,8 +171,8 @@ pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
 }
 
 /// `update`, in the throwaway network: nothing supervises its oned, so what systemd or launchd does for a device's, this does
-/// here, starting it again unless it runs the program's build already (its oned may have taken it by itself first): once
-/// the oned asked to stop has stopped its onet and app runtime and gone, on the same address, its Workers left running.
+/// here, starting it again unless it runs the program's build already: once the oned asked to stop has stopped its
+/// onet and app runtime and gone, on the same address, its Workers left running.
 fn update(dir: &Path, addr: &str) -> Result<()> {
     let program = network::program(dir)?;
     let mut command = std::process::Command::new(&program);

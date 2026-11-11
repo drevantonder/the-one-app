@@ -1292,7 +1292,7 @@ c3NoLWVkMjU1MTkAAABAUeB9U2B9jrEiyXjrLWnEvrqlbLS56VB86VjOfE1OkDAZmMhXQd
     let latest = one::latest::Latest::read(KEY, RECORD).unwrap();
     assert_eq!(latest.things.len(), 2, "a line it doesn't understand is ignored");
     assert_eq!(latest.get("node/x86_64-unknown-linux-gnu").unwrap().commit, "abc123");
-    assert_eq!(latest.for_target("x86_64-unknown-linux-gnu").unwrap().commit, "abc123", "Linux takes its own line");
-    assert_eq!(latest.for_target(one::build::WINDOWS).unwrap().commit, "def456", "Windows takes its own");
-    assert!(latest.for_target("aarch64-unknown-linux-gnu").is_none(), "a platform with no line has nothing, as before");
+    assert_eq!(latest.to_update_to("x86_64-unknown-linux-gnu").unwrap().commit, "abc123", "Linux takes its own line");
+    assert_eq!(latest.to_update_to(one::build::WINDOWS).unwrap().commit, "def456", "Windows takes its own");
+    assert!(latest.to_update_to("aarch64-unknown-linux-gnu").is_none(), "a platform with no line has nothing, as before");
 }

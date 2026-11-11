@@ -1,4 +1,4 @@
-//! How things went, as devices say it: schedules' runs; the build each device runs; backups' runs. Rows each scope's node database changes in place, not steps of their own: written often, and
+//! How things went, as devices say it: schedules' runs; backups' runs. Rows each scope's node database changes in place, not steps of their own: written often, and
 //! needed only as they are now. Each device reads them back into `Status`, which the rest of the node looks at.
 
 use super::*;
@@ -79,6 +79,8 @@ drop table fingerprints;
 ", "
 drop table used;
 drop table cost;
+", "
+drop table builds;
 "];
 
 pub const RUNS_KEPT: usize = 20;
@@ -93,8 +95,6 @@ pub struct Status {
     pub runs: BTreeMap<(String, String), Vec<Run>>,
     /// When a schedule's runs first followed a different definition, by (app, schedule): (was, is, when).
     pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
-    /// In `global`: the build each device runs.
-    pub builds: HashMap<Key, release::Running>,
     /// In `global`: the latest backup runs, oldest first.
     pub backups: Vec<BackupRun>,
     /// In `global`: by (place, scope), the newest step's time a snapshot there holds, and when it was written.
@@ -153,7 +153,6 @@ pub struct CheckRun {
 
 pub enum Said {
     Ran { app: String, schedule: String, run: Run },
-    Build { device: Key, build: String, target: String },
     BackedUp(BackupRun),
     Alerted { place: String },
     Checked(CheckRun),
@@ -180,7 +179,6 @@ impl Node {
                         &[json!(app), json!(schedule), json!(app), json!(schedule), json!(RUNS_KEPT)],
                     )
                 }
-                Said::Build { device, build, target } => ex("insert or replace into builds values (?, ?, ?, ?)", &[json!(hex(device)), json!(build), json!(target), json!(now)]),
                 Said::BackedUp(r) => {
                     ex(
                         "insert or replace into backups values (?, ?, ?, ?, ?, ?)",
@@ -247,11 +245,6 @@ impl Node {
             }
             runs.push(run);
         }
-        for r in rows("select * from builds")? {
-            if let Ok(device) = unhex(r["device"].as_str().unwrap_or("")) {
-                s.builds.insert(device, release::Running { commit: text(&r["build"]), target: text(&r["target"]) });
-            }
-        }
         for r in rows("select * from backups order by time")? {
             let snapshots: Vec<BackedUp> = stored(&r["snapshots"], "[]")?;
             let run = BackupRun {
@@ -284,9 +277,6 @@ impl Node {
         }
         // While it holds the database, so a read that started earlier can't land after this one.
         self.with(|i| {
-            if *scope == Scope::Global {
-                i.builds = s.builds.clone();
-            }
             i.status.insert(scope.to_string(), s);
             Ok(())
         })?;

@@ -1,6 +1,6 @@
 //! The signed "latest" record: one small file, `<address>/updates/newest`, that says what's newest of everything a device
-//! takes from `one-dev update`, so a device takes its own updates with nothing else of the network working: not the protocol,
-//! READS, the relay or a node. Each thing it names has its file beside it, `<address>/updates/<sha256>`, unsealed. A publish
+//! takes from `one-dev update`, so `one update` takes a device's update with nothing else of the network working: not the
+//! protocol, READS, the relay or a node. Each thing it names has its file beside it, `<address>/updates/<sha256>`, unsealed. A publish
 //! keeps its record there too, and removes the files none of the last few publishes names (`Node::replace_latest`).
 //!
 //! THIS FORMAT MUST NEVER BREAK. A device too old to speak anything else still reads it, and only by reading it does it
@@ -17,7 +17,7 @@
 //! ```
 //!
 //! `name` is `node/<target>`, `app/<target>` (a Mac's zip), `service/<name>/<target>`, `web` (the web client's signed
-//! bundle), `workers` (the Workers' sources, which only their home device reads), or `source` (what a Mac with nothing published builds itself, whose `sha256` is `-`); `committed` is seconds
+//! bundle), `workers` (the Workers' sources, which only their home device reads), or `source` (the commit a Mac's builder builds the Mac's app from, whose `sha256` is `-`); `committed` is seconds
 //! since 1970; `config` is the custom build's config commit, `-` if it has none. The signature (the release key's, as
 //! `ssh-keygen -Y sign -n release-latest` makes it) is over everything before its first line.
 
@@ -131,11 +131,6 @@ impl Latest {
     pub fn to_update_to(&self, target: &str) -> Option<&Thing> {
         if is_mac(target) { self.get(&Thing::app_name(target)) } else { self.get(&Thing::node_name(target)) }
     }
-
-    /// What a device on `target` should run: for a Mac, what's to be built (`source`), else its node's build.
-    pub fn for_target(&self, target: &str) -> Option<&Thing> {
-        if is_mac(target) { self.get("source") } else { self.get(&Thing::node_name(target)) }
-    }
 }
 
 /// Whether `target` is a Mac's, which takes its whole app.
@@ -144,9 +139,9 @@ pub fn is_mac(target: &str) -> bool {
 }
 
 /// Whether a device running `build`, committed at `committed`, takes `thing`: a different build, and never going
-/// backwards. (`taken` is what it last took and hasn't restarted onto.)
-pub fn wanted(thing: &Thing, build: &str, committed: u64, taken: &str) -> bool {
-    thing.commit != build && !build.starts_with(&thing.commit) && !thing.commit.starts_with(build) && thing.committed >= committed && thing.sha256 != taken
+/// backwards.
+pub fn wanted(thing: &Thing, build: &str, committed: u64) -> bool {
+    thing.commit != build && !build.starts_with(&thing.commit) && !thing.commit.starts_with(build) && thing.committed >= committed
 }
 
 fn agent(limit: Duration) -> ureq::Agent {
@@ -210,7 +205,7 @@ mod tests {
     }
 
     /// This text was signed once by an older build. It must read today exactly as it did: a device that can't read
-    /// the record can't update itself out of whatever it's stuck on.
+    /// the record can't be updated out of whatever it's stuck on.
     #[test]
     fn a_record_published_by_an_older_build_still_reads() {
         const KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO1JKMYo0cLG6ukDOJBZlWEpWSc6XGP5NjbBRhSshzfR";
@@ -244,10 +239,9 @@ c3NoLWVkMjU1MTkAAABAqZujUSIDQ+J7ZBO2M7ZM1TKgh5qsfSUYLjNbl2ogSzNGa7MdOj
 
     #[test]
     fn it_never_goes_backwards() {
-        assert!(wanted(&thing("n", "new", 20), "old", 10, ""));
-        assert!(!wanted(&thing("n", "old", 5), "new", 10, ""), "older than what it runs");
-        assert!(!wanted(&thing("n", "same", 20), "same", 10, ""));
-        assert!(!wanted(&Thing { sha256: "x".into(), ..thing("n", "new", 20) }, "old", 10, "x"), "already taken, waiting to restart");
+        assert!(wanted(&thing("n", "new", 20), "old", 10));
+        assert!(!wanted(&thing("n", "old", 5), "new", 10), "older than what it runs");
+        assert!(!wanted(&thing("n", "same", 20), "same", 10));
         let merged = Latest { things: vec![thing("a", "newer", 20)] }.merged([thing("a", "older", 10), thing("b", "b1", 5)]);
         assert_eq!(merged.get("a").unwrap().commit, "newer", "publishing doesn't take a thing backwards either");
         assert_eq!(merged.get("b").unwrap().commit, "b1");

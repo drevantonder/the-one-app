@@ -35,10 +35,9 @@ impl Node {
         // A record that's missing or doesn't read just offers no Update: the device that takes one checks it again itself.
         let builds = tokio::task::spawn_blocking(move || crate::latest::fetch(&address).ok().flatten().and_then(|text| Latest::read(crate::mode::here().release_key(), &text).ok())).await?.unwrap_or_default();
         let of = |version: &str, find: Find| -> Option<Value> {
-            let mut words = version.split(' ');
-            let (commit, committed, on) = (words.next()?, words.next()?.parse().ok()?, words.next()?);
+            let (commit, committed, on) = crate::protocol::told(version)?;
             let newest = find(&builds, on);
-            Some(json!({ "version": commit, "newest": newest.map(|b| &b.commit), "behind": newest.is_some_and(|b| wanted(b, commit, committed, "")) }))
+            Some(json!({ "version": commit, "newest": newest.map(|b| &b.commit), "behind": newest.is_some_and(|b| wanted(b, commit, committed)) }))
         };
         let mut out: serde_json::Map<String, Value> = told.as_object().map(|v| v.iter().filter_map(|(key, version)| Some((key.clone(), of(version.as_str()?, Latest::to_update_to)?))).collect()).unwrap_or_default();
         let part = |of_what: &str, find: Find| workers[of_what].as_str().and_then(|v| of(v, find));

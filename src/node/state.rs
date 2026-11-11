@@ -81,21 +81,21 @@ impl Node {
                     }
                 }
             }
-            let build = i.builds.get(&s.key);
+            let build = i.running(&s.key);
             Ok(DeviceNow {
                 kind: load.as_ref().map(|l| l.kind.clone()),
                 far: i.far.get(&s.key).is_some_and(|d| *d > FAR),
                 here: s.key == self.0.id,
                 online: s.key == self.0.id || i.online(&s.key),
-                build: build.map(|r| r.commit.clone()),
-                target: build.map(|r| r.target.clone()),
+                build: build.as_ref().map(|r| r.commit.clone()),
+                target: build.as_ref().map(|r| r.target.clone()),
                 services: services.iter().map(|d| d.0.clone()).collect(),
-                installed_services: installed_services(m, s, &services, build.map(|r| r.commit.as_str()))?,
+                installed_services: installed_services(m, s, &services, build.as_ref().map(|r| r.commit.as_str()))?,
                 // What it can run, its user's and the admins' to see.
                 // As its device's onet said them, while it's on.
                 parts: if !m.may(me, "remove", &scopes::device(&s.key)) || !(s.key == self.0.id || i.online(&s.key)) { None } else { i.parts.get(&m.device_of(&s.key)).and_then(|p| serde_json::from_value(p.clone()).ok()) },
                 load,
-                latest: build.and_then(|r| latest.for_target(&r.target)).map(|t| t.commit.clone()),
+                latest: build.as_ref().and_then(|r| latest.to_update_to(&r.target)).map(|t| t.commit.clone()),
                 updating: if s.key == self.0.id { self.updating() } else { session.and_then(|s| s.updating.clone()) },
             })
         };

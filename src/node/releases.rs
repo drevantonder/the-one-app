@@ -1,6 +1,6 @@
 //! What's published at the network's address, as a node reads the signed record there (`crate::latest`): the
-//! services' builds, and the builds of a service a deploy names, which a device runs instead of any release. A
-//! computer's oned takes its own build from the record (`oned`'s pull loop), needing nothing of a node.
+//! services' builds, and the builds of a service a deploy names, which a device runs instead of any release. A device
+//! takes its own build only by `one update`, which reads the record itself, needing nothing of a node.
 
 use super::*;
 use crate::insights::{Attrs, Status};
@@ -21,7 +21,7 @@ const UPLOADING: u64 = 60 * 60 * 1000;
 
 impl Node {
     /// Reads the record at the network's address now and then, for what's published for this platform and its
-    /// services, and keeps the network's address in its home for oned and `one update`, which can read nothing else.
+    /// services, and keeps the network's address in its home for `one update`, which can read nothing else.
     pub(super) async fn pull_loop(self) {
         if crate::mode::here().release_key().is_empty() {
             return;
@@ -45,25 +45,12 @@ impl Node {
         };
         let Some(text) = fetched else { return Ok(()) };
         let latest = crate::latest::Latest::read(crate::mode::here().release_key(), &text).context("the latest record")?;
-        *self.0.latest.lock().unwrap() = latest.clone();
-        let part = crate::latest::Thing::node_name(crate::config::TARGET);
-        if let Some(thing) = latest.get(&part)
-            && thing.commit != crate::config::BUILD
-            && self.note_update_seen(&thing.commit)
-        {
-            self.device_signal("update.seen", Attrs::default().part(&part), Status::Unset);
-        }
+        *self.0.latest.lock().unwrap() = latest;
         Ok(())
     }
 
-    /// Whether this is the first time this process has seen `commit` as the newest: `update.seen` is said once for each.
-    fn note_update_seen(&self, commit: &str) -> bool {
-        let mut seen = self.0.update_seen.lock().unwrap();
-        (seen.as_deref() != Some(commit)).then(|| seen.replace(commit.to_string())).is_some()
-    }
-
-    /// Whether this device can't update, and why, as its hello says and `status` shows: what its oned, or on a Mac its
-    /// app's install, last said.
+    /// Whether this device couldn't update, and why, as its hello says and `status` shows: what a Mac's app's install
+    /// last said.
     pub fn updating(&self) -> Option<String> {
         crate::update::why(&self.0.dir)
     }

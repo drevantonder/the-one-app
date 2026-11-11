@@ -150,7 +150,7 @@ pub fn published_said(published: &Value, service: Option<&str>) -> String {
     let (commit, target) = (published["commit"].as_str().unwrap_or(""), published["target"].as_str().unwrap_or(""));
     match service {
         Some(service) => format!("Published {service} {commit} for {target}. Every device on that platform that runs it takes it."),
-        None => format!("Published {commit} for {target}. Every device on that platform updates itself now."),
+        None => format!("Published {commit} for {target}. Each device on that platform takes it when Update is pressed for it."),
     }
 }
 

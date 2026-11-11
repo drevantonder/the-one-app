@@ -139,7 +139,6 @@ fn a_newer_build_replaces_the_program_whole() {
     let before = device.dir.join("before");
     std::fs::hard_link(&device.program, &before).unwrap();
     let new = build("newer", TARGET, NEWER);
-    let sha = sha256(&new);
     device.published("newer", NEWER, new.clone());
     let (ok, said, err) = device.update();
     assert!(ok, "{err}");
@@ -149,7 +148,6 @@ fn a_newer_build_replaces_the_program_whole() {
     assert_eq!(std::fs::metadata(&before).unwrap().ino(), was);
     assert_eq!(Version::of(&before).unwrap(), Version::this(), "the old file is whole, for what's still running it");
     assert_eq!(device.leftovers(), Vec::<String>::new());
-    assert_eq!(one::update::taken(&device.home), sha, "a device's own check agrees it's taken");
 }
 
 #[test]
@@ -329,8 +327,8 @@ fn it_makes_oned_exit_and_leaves_a_stranger_alone() {
     stranger.wait().unwrap();
 }
 
-/// The program may already be the newest while the oned running is the one before it (the device's own check put it in
-/// place and hasn't restarted onto it): Update restarts that one, and says so, instead of "current" and nothing.
+/// The program may already be the newest while the oned running is the one before it (an update before couldn't stop
+/// it): Update restarts that one, and says so, instead of "current" and nothing.
 #[test]
 fn update_restarts_an_oned_still_on_the_build_before() {
     let device = device();

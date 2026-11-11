@@ -46,7 +46,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **onet**: being built (ARCHITECTURE.md, Designed): the entry point into the network, the same on every device. Its library is the `onet` crate (`onet/`) today; on a computer it's `<cli>t` (`onet/src/computer/`), which oned starts, holding the device's key, of which the desktop app's window, the CLI and the local MCP server are views.
 - **oned**: the small program, and the spec it follows, that makes a machine a node: it connects the machine to the
   network (on a computer, by starting its onet), and installs and runs what the node's owner switches on there (the app
-  runtime, services), and on a computer takes the device's updates. It holds no key, runs nothing itself, and stays small. It has a version for each platform it runs on: computers (Mac, Windows, Linux) and
+  runtime, services). It never changes build by itself: `one update` replaces it and has it exit. It holds no key, runs nothing itself, and stays small. It has a version for each platform it runs on: computers (Mac, Windows, Linux) and
   Cloudflare, and perhaps Android one day.
 - **Node**: one place oned runs: a computer's node, or the Cloudflare node. It holds no keys, except for app schedules
   and the Vault, where a user chose that node, and a computer's node that is also its user's device, whose app runtime opens

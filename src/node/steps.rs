@@ -463,10 +463,6 @@ impl Node {
             self.emit(Event::Changed { apps: changed });
             self.say_hello();
         }
-        let running = self.with(|i| Ok(i.builds.get(&self.0.id).map(|r| r.commit.clone())))?;
-        if running.as_deref() != Some(crate::config::BUILD) {
-            self.say(&Scope::Global, status::Said::Build { device: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
-        }
         Ok(())
     }
 }

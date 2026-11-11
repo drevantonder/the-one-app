@@ -145,8 +145,9 @@ pub(super) fn to_send() -> Result<At> {
     At::at(Some(&main[newest]))
 }
 
-/// `ship [<commit>] [--timeout <9m>]`: sends what's tested and returns when every device runs it, or says which doesn't and why,
-/// within `limit` of starting, waiting at least a minute.
+/// `ship [<commit>] [--timeout <9m>]`: sends what's tested, asks every device online that's behind to take it, as Update
+/// does, and returns when every device runs it, or says which doesn't and why, within `limit` of starting, waiting at
+/// least a minute.
 pub(super) fn ship(commit: Option<&str>, limit: Duration) -> Result<()> {
     let started = Instant::now();
     keep_history()?;

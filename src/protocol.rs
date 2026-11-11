@@ -111,6 +111,12 @@ pub fn version() -> String {
     format!("{} {} {}", crate::config::BUILD, crate::config::COMMITTED, crate::config::TARGET)
 }
 
+/// A device's `version` read back: its commit, when that was made, and its target.
+pub fn told(version: &str) -> Option<(&str, u64, &str)> {
+    let mut words = version.split(' ');
+    Some((words.next()?, words.next()?.parse().ok()?, words.next()?))
+}
+
 /// What a request from a device that reads less of who's who than this build (`database::READS`) is refused with, status 426:
 /// `{yours}` is the network's name as users say it.
 pub const UPDATE_REFUSAL: &str = "Update this device: {yours}'s other devices have moved on to what this one doesn't read yet.";

@@ -1,5 +1,7 @@
 //! Waiting until devices run a commit (or a later build) and their services answer: `status --until`.
 
+use std::collections::BTreeSet;
+
 use super::*;
 
 /// This user's own devices, as this one sees them now: none while its node restarts.
@@ -33,10 +35,11 @@ pub(super) fn limit(g: &one::cli::Given, default: u64) -> Result<Duration> {
     Ok(Duration::from_secs(n * match unit { "" | "s" => 1, "m" => 60, "h" => 3600, _ => return Err(typed()) }))
 }
 
-/// Waits until each of the user's devices online now but its Macs (or those named, online or not) runs `commit`, or a build with it
+/// Presses Update for each of the user's devices online now but its Macs (or those named) that's behind, then waits until
+/// each of them (those named, online or not) runs `commit`, or a build with it
 /// in, and its services answer, or its update fails; says what each did, and fails unless all made it. One that isn't
-/// named and is offline at the start isn't waited for: it's named, with how far behind it is, and updates itself when
-/// it's back. Why one hasn't yet is what its own node says (`updating`).
+/// named and is offline at the start isn't waited for: it's named, with how far behind it is, to be updated when it's
+/// back. Why one hasn't yet is what its own node says (`updating`).
 pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     keep_history()?;
     // Says so when no node answers, which later polls (a node restarting on the new build) never do.
@@ -49,8 +52,9 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
     let (macs, wanted): (Vec<Value>, Vec<Value>) =
         all.into_iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).partition(|d| names.is_empty() && one::latest::is_mac(d["target"].as_str().unwrap_or("")));
     for d in macs {
-        println!("  {}: not waited for: a Mac takes a build when its agent builds it; --device {} to wait", d["name"].as_str().unwrap_or(""), d["name"].as_str().unwrap_or(""));
+        println!("  {}: not waited for: a Mac takes the app its agent publishes when Update is pressed for it; --device {} to wait", d["name"].as_str().unwrap_or(""), d["name"].as_str().unwrap_or(""));
     }
+    press_update(&wanted)?;
     wait_for(commit, &wanted, !names.is_empty(), limit)
 }
 
@@ -94,7 +98,7 @@ fn named(build: &str) -> (&str, Option<&str>) {
 /// and nothing between them reaches a device of that platform (a change to the Workers or the web client alone), so
 /// none will run it. Then it's what's published, and the device needn't wait for a build that will never come.
 fn goal(commit: &str, target: &str, record: Option<&Latest>, fetched: &mut std::collections::HashSet<String>) -> String {
-    let Some(published) = record.and_then(|r| r.for_target(target)) else { return commit.to_string() };
+    let Some(published) = record.and_then(|r| r.to_update_to(target)) else { return commit.to_string() };
     if has(commit, &published.commit, fetched) {
         return commit.to_string();
     }
@@ -114,8 +118,8 @@ fn record() -> Option<Latest> {
 
 /// Waits until each of `wanted` runs `commit`, or a build with it in, with its link back and its services answering,
 /// or its update fails; says what each did, and fails unless all made it. `named` says whether one offline at the
-/// start is waited for too (it was asked for by name) or only named, with how far behind it is (it updates itself when
-/// it's back). Why one hasn't yet is what its own node says (`updating`). The one place that says a device took a build.
+/// start is waited for too (it was asked for by name) or only named, with how far behind it is (to be updated when it's
+/// back). Why one hasn't yet is what its own node says (`updating`). The one place that says a device took a build.
 pub(super) fn wait_for(commit: &str, wanted: &[Value], named: bool, limit: Duration) -> Result<()> {
     let short = &commit[..commit.len().min(12)];
     let mut fetched = std::collections::HashSet::new();
@@ -130,7 +134,7 @@ pub(super) fn wait_for(commit: &str, wanted: &[Value], named: bool, limit: Durat
     for d in away {
         let build = d["build"].as_str().unwrap_or("?");
         if !has(goal_of(d), build, &mut fetched) {
-            println!("  {}: offline, on {build}{}: not waiting for it, it updates itself when it's back; --device {} to wait", d["name"].as_str().unwrap_or(""), behind(goal_of(d), build), d["name"].as_str().unwrap_or(""));
+            println!("  {}: offline, on {build}{}: not waiting for it; Update it once it's back, or --device {} to wait", d["name"].as_str().unwrap_or(""), behind(goal_of(d), build), d["name"].as_str().unwrap_or(""));
         }
     }
     let mut open: Vec<(String, String, String)> = waited.iter().map(|d| (d["key"].as_str().unwrap_or("").into(), d["name"].as_str().unwrap_or("").into(), d["build"].as_str().unwrap_or("?").into())).collect();
@@ -190,7 +194,7 @@ pub(super) fn wait_for(commit: &str, wanted: &[Value], named: bool, limit: Durat
                 println!("  {name}: {why}");
                 return false;
             }
-            reasons.insert(key.clone(), if d["online"] != true { format!("offline, on {build}; it updates itself when it's back") } else if said.is_empty() { format!("still on {build}") } else { format!("on {build}: {said}") });
+            reasons.insert(key.clone(), if d["online"] != true { format!("offline, on {build}; Update it once it's back") } else if said.is_empty() { format!("still on {build}") } else { format!("on {build}: {said}") });
             true
         });
         if open.is_empty() {
@@ -206,6 +210,32 @@ pub(super) fn wait_for(commit: &str, wanted: &[Value], named: bool, limit: Durat
         }
         std::thread::sleep(Duration::from_secs(3));
     }
+}
+
+/// Has this device take the newest build published for it: `{CLI} update`, as Update does. Nothing takes one by itself.
+pub(super) fn update_here() -> Result<()> {
+    show(Command::new(CLI).arg("update"))
+}
+
+/// Presses Update, as Settings › Devices does, for each of `devices` online that's behind what's published for it, but
+/// this one, which `update_here` updates: nothing takes a build by itself.
+fn press_update(devices: &[Value]) -> Result<()> {
+    let versions = crate::node().post("/api/devices/versions", json!({}))?;
+    // An app runtime is listed beside its device, and updates with it.
+    let here: BTreeSet<&str> = devices.iter().filter(|d| d["here"] == true).filter_map(|d| d["device"].as_str().or(d["key"].as_str())).collect();
+    let mut asked = BTreeSet::new();
+    for d in devices.iter().filter(|d| d["online"] == true) {
+        let key = d["device"].as_str().or(d["key"].as_str()).unwrap_or("");
+        if here.contains(key) || versions[key]["behind"] != true || !asked.insert(key) {
+            continue;
+        }
+        let name = d["name"].as_str().unwrap_or("");
+        match crate::node().post("/api/devices/update", json!({ "device": key })) {
+            Ok(_) => println!("  {name}: Update pressed, for {}", versions[key]["newest"].as_str().unwrap_or("the newest")),
+            Err(err) => println!("  {name}: couldn't press Update for it: {err:#}"),
+        }
+    }
+    Ok(())
 }
 
 /// How far `build` is behind `commit`, as said after its name: nothing if git can't count them

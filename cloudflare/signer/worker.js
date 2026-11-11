@@ -194,7 +194,7 @@ async function urls(request, env) {
   return { ...out, confirm: confirms.length ? await confirm(env, bucket, confirms) : {}, newest: hints.length ? await newest(env, bucket, hints) : {}, get: gets.length ? await got(env, bucket, gets) : {}, until };
 }
 
-// What a device updates itself from, read by anyone: `GET /updates/<name>`, where only what's signed by the release key
+// What `one update` takes a device's update from, read by anyone: `GET /updates/<name>`, where only what's signed by the release key
 // sits, unsealed (src/latest.rs). A device too old to speak anything else reads this: it must never need more than a GET.
 async function update(env, url) {
   if (!env.BUCKET) return refusal(503, `${env.YOURS} has no bucket yet`);

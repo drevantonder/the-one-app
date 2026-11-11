@@ -2,8 +2,8 @@
 //! and exits. It holds no key, and is a user of its onet like any other program. It keeps two programs of its own
 //! running, starting each again when it stops: the computer's onet (`<cli>t`), which holds the device's key and answers
 //! its programs, and its app runtime (`oned apps --listen=`, `node::serve`), an endpoint of its own key that onet asks on
-//! a loopback address oned gives both. And it takes the device's updates from the signed record by itself
-//! (`update::pull`), then starts again on the new build.
+//! a loopback address oned gives both. It never takes a build by itself: `one update`, which Update asks of the device,
+//! replaces its program and has it exit, for its supervisor to start it again on the new one.
 //!
 //! It runs the device's services (`keep_parts`), asking its onet what it needs (`/api/services`, which onet passes to its
 //! app runtime): each a process of oned's own (`oned <name>`, `service::run`) with its own key, which it lists as its
@@ -605,9 +605,6 @@ pub fn run(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// What a computer's oned is checking the record at its network's address every so often for (`update::pull`).
-const PULL_EVERY: Duration = Duration::from_secs(30);
-
 /// What a service whose app hasn’t said what it may reach shows, until it does.
 const UNDECLARED: &str = "Its app doesn’t say what it may reach, so it doesn’t run.";
 
@@ -665,8 +662,7 @@ impl Kept {
 }
 
 /// oned on a computer: keeps the computer's onet running, which holds its key and answers its programs, and its app
-/// runtime, which onet asks on a loopback address chosen here; and now and then takes the newest build the record at
-/// the network's address names (`update::pull`), needing nothing else of the network, then starts again on it.
+/// runtime, which onet asks on a loopback address chosen here.
 #[tokio::main(flavor = "current_thread")]
 async fn serve() -> Result<()> {
     #[cfg(windows)]
@@ -701,7 +697,6 @@ async fn serve() -> Result<()> {
     });
     tracing::info!("{NAME} oned {} keeping onet and its app runtime ({at}) running, from {}", crate::config::BUILD, dir.display());
     crate::watchdog::notify("READY=1");
-    let mut pulled: Option<Instant> = None;
     loop {
         {
             let [onet, runtime] = &mut *kept.lock().unwrap();
@@ -711,29 +706,8 @@ async fn serve() -> Result<()> {
                 runtime.keep();
             }
         }
-        if pulled.is_none_or(|p| p.elapsed() >= PULL_EVERY) {
-            pulled = Some(Instant::now());
-            let home = dir.clone();
-            if let Ok(Some(commit)) = tokio::task::spawn_blocking(move || crate::update::pull(&home)).await {
-                tracing::info!("put {commit} in place: starting again on it");
-                kept.lock().unwrap().iter_mut().for_each(Kept::stop);
-                return again();
-            }
-        }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
-}
-
-/// Starts oned again, on the program now at its path: in this process, so what started it still has it. Windows can't,
-/// so there it exits, for its task to start it again within the minute.
-fn again() -> Result<()> {
-    #[cfg(unix)]
-    {
-        let err = std::os::unix::process::CommandExt::exec(&mut command(&[])?);
-        Err(err).context("start oned again")
-    }
-    #[cfg(not(unix))]
-    std::process::exit(0)
 }
 
 /// Writes the network's address beside its bucket's fields in this computer's network file, where it's S3-compatible
