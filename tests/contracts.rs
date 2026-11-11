@@ -248,7 +248,7 @@ fn a_client_takes_only_a_network_and_a_welcome_that_are_one() {
     ];
     assert_eq!(waited(200, &said[2].1), Waited::Approved { root: Some(root.clone()), welcome: None }, "an approval names the network it's in");
     let welcomed = waited(200, &said[6].1);
-    assert!(matches!(&welcomed, Waited::Approved { welcome: Some(w), .. } if ::scope::steps::Welcome::parse(w).is_some_and(|w| (w.freeze, w.at, w.copy()) == (3, 250, Some(200)))), "and where who's who was read to: {welcomed:?}");
+    assert!(matches!(&welcomed, Waited::Approved { welcome: Some(w), .. } if ::scope::steps::Welcome::parse(w).is_some_and(|w| (w.freeze, w.at, w.copies().next()) == (3, 250, Some(200)))), "and where who's who was read to: {welcomed:?}");
     assert_eq!(said.iter().filter(|(s, b)| matches!(waited(*s, b), Waited::Approved { welcome: Some(_), .. })).count(), 3, "only a welcome that's one is taken");
 }
 
@@ -707,6 +707,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
             clients: vec![Client { key: "k".into(), seal: "s".into(), name: "n".into(), user: "u".into(), roles: [Kind::Client].into(), platform: None, passkey: Some("p".into()), device: Some("d".into()), since: 1, place: Some("p".into()), me: true, sign_in: Some(::scope::sign_in_proof::Account::Passkey { credential: "c".into(), public_key: "k".into() }), linked: Vec::new() }],
             app_schedules: vec![AppSchedule { endpoint: "e".into(), scope: "s".into(), app: "a".into(), until: 1, by: "u".into(), keys: Default::default() }],
             steps: 1,
+            welcome: Some("1.1.h".into()),
             settings: [("address".to_string(), "a".to_string())].into(),
             cloudflare_node: Some(CloudflareNode { priority: ::scope::rank::Priority::Last, key: "k".into(), runs_for: vec![] }),
         }),

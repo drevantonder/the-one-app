@@ -190,6 +190,10 @@ pub struct Settings {
     /// device names beside it (`sign_in_proof`). None for Workers made before their network.
     #[serde(skip)]
     pub root: Option<String>,
+    /// Where the app runtime on this machine had read who's who to (`steps::Welcome`), as `root` is: oned on Cloudflare
+    /// starts there.
+    #[serde(skip)]
+    pub welcome: Option<String>,
     /// oned on Cloudflare's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
     #[serde(default, skip_serializing)]
     pub cloudflare_node_key: String,
@@ -590,6 +594,7 @@ impl Settings {
             devices: vec![],
             notifications: [("VAPID_KEY".to_string(), vapid_key())].into(),
             root: None,
+            welcome: None,
             throwaway_user: None,
             telemetry: None,
             telemetry_token: None,
@@ -766,6 +771,7 @@ fn oned_bindings(settings: &Settings) -> Vec<Binding> {
     ];
     // The network's root, as auth's: its members are replayed from no other.
     out.extend(settings.root.clone().map(|root| plain("ROOT", root)));
+    out.extend(settings.welcome.clone().map(|welcome| plain("WELCOME", welcome)));
     out.extend(location());
     out
 }

@@ -27,8 +27,9 @@ fn devices_here(api: &Client, settings: crate::Settings, needed: bool) -> Result
     // The network's recovery key too, as a client, not an admin's and not an app runtime: what it lets in, the relay takes, as
     // an admin's if its user is one.
     devices.extend(network.as_ref().and_then(|n| n.recovery.as_ref()).map(|k| json!({ "key": k, "role": "client", "admin": false, "recovery": true })));
+    let welcome = network.as_ref().and_then(|n| n.welcome.clone());
     let root = network.and_then(|n| n.root).filter(|r| r.len() == 64);
-    Ok(crate::Settings { devices, root, ..settings })
+    Ok(crate::Settings { devices, root, welcome, ..settings })
 }
 
 /// Puts `newest` on Cloudflare: each Worker, and oned on Cloudflare if the network has one. The relay says what they're on

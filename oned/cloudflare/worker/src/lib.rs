@@ -460,20 +460,29 @@ async fn read_steps(id: &(String, String), scope: &Scope, bucket: &Js, keys: &::
     use ::scope::steps::{self, ScopeReader};
     let waits = if *scope == Scope::Global {
         let at = held(id, keys, |h, _| Ok(match &h.steps {
-            Steps::Global(r) => r.at(),
-            Steps::Scope(_) => 0,
+            Steps::Global(r) => (r.at(), r.truth().is_some()),
+            Steps::Scope(_) => (0, true),
         }))?;
-        let Some(at) = at else { return Ok(()) };
-        let sealed = steps::fetch(bucket, at, None).await?;
-        held(id, keys, |h, _| match &mut h.steps {
-            Steps::Global(r) => {
-                let waits = r.add(&sealed, keys, None, now(), |_, _, _| Ok(()))?;
-                let unhanded = || sealed.steps.values().filter_map(|b| ::key::epoch_of(b).ok()).filter(|e| !keys.contains_key(e)).min();
-                Ok(waits.or_else(|| r.truth().is_none().then(unhanded).flatten()))
-            }
-            Steps::Scope(_) => Ok(None),
-        })?
-        .flatten()
+        let Some((at, started)) = at else { return Ok(()) };
+        // Before it's read the freeze, from where the computer that deployed it had read to, as a new device starts
+        // from where the one that let it in had: the steps from the first are read only if that doesn't check out.
+        let welcome = WELCOME.with(|w| w.borrow().clone()).filter(|_| !started);
+        let sealed = steps::fetch(bucket, at, welcome.as_ref()).await?;
+        let add = |sealed: &steps::Sealed| {
+            held(id, keys, |h, _| match &mut h.steps {
+                Steps::Global(r) => {
+                    let waits = r.add(sealed, keys, None, now(), |_, _, _| Ok(()))?;
+                    let unhanded = || sealed.epochs().into_iter().filter(|e| !keys.contains_key(e)).min();
+                    Ok((waits.or_else(|| r.truth().is_none().then(unhanded).flatten()), r.truth().is_some()))
+                }
+                Steps::Scope(_) => Ok((None, true)),
+            })
+        };
+        let (waits, frozen) = add(&sealed)?.unwrap_or((None, true));
+        match frozen || waits.is_some() || sealed.welcome.is_none() {
+            true => waits,
+            false => add(&steps::fetch(bucket, at, None).await?)?.and_then(|(waits, _)| waits),
+        }
     } else {
         let frozen = held(id, keys, |h, global| Ok((matches!(h.steps, Steps::Scope(Some(_))), global.and_then(Held::truth).is_some())))?;
         let Some((started, true)) = frozen else { return Ok(()) };
@@ -512,6 +521,16 @@ async fn read_steps(id: &(String, String), scope: &Scope, bucket: &Js, keys: &::
 thread_local! {
     /// The network's root, as the device that deployed this app runtime holds it (`pin_root`).
     static ROOT: RefCell<Option<Hash>> = const { RefCell::new(None) };
+    /// Where that device had read `global`'s steps to (`pin_welcome`).
+    static WELCOME: RefCell<Option<::scope::steps::Welcome>> = const { RefCell::new(None) };
+}
+
+/// Pins where the computer that deployed it had read `global`'s steps to (`steps::Welcome`, as it says it), which a
+/// user's object reads who's who from, as a new device does from where the one that let it in had: a Welcome that
+/// isn't one is none.
+#[wasm_bindgen]
+pub fn pin_welcome(said: &str) {
+    WELCOME.with(|w| *w.borrow_mut() = ::scope::steps::Welcome::parse(said));
 }
 
 /// Pins the network's root to `root` (hex, the Worker's), as auth pins it: a freeze naming any other is never
@@ -672,6 +691,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
             looking: None,
             member: false,
             steps: 0,
+            welcome: None,
             arrangements,
             // Of the features, only the Vault's requests are known from who's who alone.
             features: vault::waiting(::scope::state::waiting(m, me, read(), now)).map(|v| ("vault".to_string(), v)).into_iter().collect(),

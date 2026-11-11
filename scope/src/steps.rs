@@ -573,11 +573,12 @@ impl Welcome {
         (at >= freeze && at < 1 << 53 && hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))).then(|| Welcome { freeze, at, hash: hash.to_string() })
     }
 
-    /// The copy a new device starts from: the newest at or before `at` the bucket keeps (one every `stored::COPY_EVERY`
-    /// steps), or none, for the freeze's own.
-    pub fn copy(&self) -> Option<u64> {
-        let c = self.at - self.at % database::stored::COPY_EVERY;
-        (c > self.freeze).then_some(c)
+    /// Where the copies a new device may start from are, newest first: at or before `at`, where a writer leaves one
+    /// (every `stored::COPY_EVERY` steps), and after the freeze. A step whose writer left none (an older build's) is
+    /// passed for the one before; with none, it starts from the freeze's own.
+    pub fn copies(&self) -> impl Iterator<Item = u64> {
+        let (newest, freeze) = (self.at - self.at % database::stored::COPY_EVERY, self.freeze);
+        (1..=newest / database::stored::COPY_EVERY).rev().map(|n| n * database::stored::COPY_EVERY).take_while(move |c| *c > freeze)
     }
 }
 
@@ -593,17 +594,20 @@ impl Truth {
         Ok(Welcome { freeze: self.freeze.at, at: self.at, hash: database::stored::state_hash(self.db.conn())? })
     }
 
-    /// Who's who as `welcome` says it: from `freeze`, the step at its freeze's position, and `start`, the copy at
-    /// `Welcome::copy` (its bytes, opened), or none to start from the freeze's own, then `after`, the steps after that
-    /// one up to the Welcome's, each taken as any reader takes it. Fails unless it comes to the Welcome's hash, in this
-    /// release's form: a freeze, copy or step an app runtime or another device swapped is never used.
-    pub fn welcomed(welcome: &Welcome, freeze: &Given, start: Option<&[u8]>, after: &[Option<Given>], now: u64) -> Result<Truth> {
+    /// Who's who as `welcome` says it: from `freeze`, the step at its freeze's position, and `start`, a copy of
+    /// `Welcome::copies` (its position and bytes, opened), or none to start from the freeze's own, then `after`, the
+    /// steps after that one up to the Welcome's, each taken as any reader takes it. Fails unless it comes to the
+    /// Welcome's hash, in this release's form: a freeze, copy or step an app runtime or another device swapped is never
+    /// used.
+    pub fn welcomed(welcome: &Welcome, freeze: &Given, start: Option<(u64, &[u8])>, after: &[Option<Given>], now: u64) -> Result<Truth> {
         ensure!(u64::from(freeze.step.seq()) == welcome.freeze, "that isn't the freeze it was welcomed with");
         let anchored = Truth::of_freeze(freeze, welcome.freeze, now).context("the step it was welcomed with isn't a freeze")?;
-        let (at, db) = match (welcome.copy(), start) {
-            (Some(at), Some(bytes)) => (at, normalize(connection(bytes)?, &Scope::Global, now)?),
-            (_, None) => (welcome.freeze, anchored.db),
-            (None, Some(_)) => bail!("no copy comes before the freeze's"),
+        let (at, db) = match start {
+            Some((at, bytes)) => {
+                ensure!(welcome.copies().any(|c| c == at), "no copy is kept at {at} between its freeze and its step");
+                (at, normalize(connection(bytes)?, &Scope::Global, now)?)
+            }
+            None => (welcome.freeze, anchored.db),
         };
         ensure!(after.len() as u64 == welcome.at - at, "not every step up to where it was welcomed is here");
         let mut t = Truth { freeze: anchored.freeze, at, db, whole: true };
@@ -617,7 +621,7 @@ impl Truth {
 
 /// `global`'s steps as the bucket holds them, sealed, by position: what a reader takes (`Reader::add`), fetched from the
 /// bucket itself (`fetch`) or passed on by an app runtime (`to_json`, `from_json`). With a Welcome, the step at its freeze's
-/// position and the copy at `Welcome::copy` (`start`), when the bucket has them.
+/// position and the newest copy of `Welcome::copies` the bucket has (`start`).
 #[derive(Default)]
 pub struct Sealed {
     pub welcome: Option<Welcome>,
@@ -665,7 +669,7 @@ impl Sealed {
 
 /// `global`'s steps in `bucket` after `from`, up to the first position with nothing, and the one after that if it's
 /// there, which says whether the one missing was written (`Reader::add`). With `welcome`, from its freeze's step and
-/// the copy before its step instead, if the freeze's is there.
+/// the newest copy it keeps before its step instead, if the freeze's is there.
 pub async fn fetch(bucket: &impl ::bucket::Bucket, from: u64, welcome: Option<&Welcome>) -> Result<Sealed> {
     let prefix = prefix("global");
     let get = async |name: String| Ok::<_, anyhow::Error>(bucket.get(&name).await?.map(|o| o.bytes));
@@ -675,10 +679,11 @@ pub async fn fetch(bucket: &impl ::bucket::Bucket, from: u64, welcome: Option<&W
         && let Some(freeze) = get(::bucket::names::step_name(&prefix, w.freeze)).await?
     {
         (out.welcome, out.freeze, at) = (Some(w.clone()), Some(freeze), w.freeze);
-        if let Some(c) = w.copy()
-            && let Some(copy) = get(::bucket::names::copy_name(&prefix, c)).await?
-        {
-            (out.start, at) = (Some((c, copy)), c);
+        for c in w.copies() {
+            if let Some(copy) = get(::bucket::names::copy_name(&prefix, c)).await? {
+                (out.start, at) = (Some((c, copy)), c);
+                break;
+            }
         }
     }
     loop {
@@ -836,7 +841,7 @@ impl Reader {
         self.add(&sealed, keys, None, now, |_, _, _| Ok(()))
     }
 
-    /// Who's who as `welcome` says it, from `sealed`: its freeze's step, and the copy at `Welcome::copy` with the steps
+    /// Who's who as `welcome` says it, from `sealed`: its freeze's step, and a copy of `Welcome::copies` with the steps
     /// after it up to the Welcome's, or, if that copy isn't there or doesn't come to its hash, every step after the
     /// freeze's up to there (`Truth::welcomed`), each opened with `keys`, unchecked, so each of `epochs` who's who there
     /// made must be the one it made.
@@ -849,10 +854,10 @@ impl Reader {
         };
         let after = |from: u64| (from + 1..=welcome.at).map(|at| opened(at, sealed.steps.get(&at).with_context(|| format!("global's step {at} wasn't given"))?)).collect::<Result<Vec<_>>>();
         let freeze = opened(welcome.freeze, sealed.freeze.as_deref().context("no freeze")?)?.context("the step it was welcomed with isn't a freeze")?;
-        let from_copy = sealed.start.as_ref().filter(|(c, _)| Some(*c) == welcome.copy()).map(|(c, bytes)| {
+        let from_copy = sealed.start.as_ref().map(|(c, bytes)| {
             let name = ::bucket::names::copy_name(&prefix("global"), *c);
             let key = keys.get(&::key::epoch_of(bytes)?).context("its copy is under a key this device wasn't given")?;
-            Truth::welcomed(welcome, &freeze, Some(&::key::open(key, &name, bytes)?), &after(*c)?, now)
+            Truth::welcomed(welcome, &freeze, Some((*c, &::key::open(key, &name, bytes)?)), &after(*c)?, now)
         });
         let truth = match from_copy {
             Some(Ok(t)) => t,

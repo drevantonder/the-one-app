@@ -195,10 +195,13 @@ impl<O: Opens> Keyring<O> {
                 self.read(on).await?;
                 let (at, epoch, keys) = self.next_step().ok_or_else(refused)?;
                 let step = steps::sign_by(by, &Scope::Global, at + 1, user, epoch, now(), content.clone()).await.map_err(unsent)?;
-                self.who(|db| steps::apply(db, None, &Scope::Global, &step).map(drop)).ok_or_else(refused)?.map_err(|e| unsent(format!("{e:#}")))?;
+                let after = self.who(|db| steps::apply(db, None, &Scope::Global, &step).and_then(|a| ScopeDb::open(a.db, now())?.bytes())).ok_or_else(refused)?.map_err(|e| unsent(format!("{e:#}")))?;
                 let name = bucket::names::step_name(&steps::prefix("global"), at + 1);
                 let sealed = steps::seal(&keys, &name, &steps::encode(&step, None)).map_err(unsent)?;
                 if stored::created(on.bucket(), &name, &sealed).await.map_err(|e| unsent(format!("{e:#}")))? {
+                    // A copy now and then, and the newest hint, as every writer of these steps leaves them: what a
+                    // device let in, and oned on Cloudflare, start from (`steps::Welcome`).
+                    let _ = steps::written(on.bucket(), &keys, &Scope::Global, at + 1, after).await;
                     written = true;
                     break;
                 }

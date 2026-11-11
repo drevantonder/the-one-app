@@ -29,7 +29,7 @@
 // network's), NAME (its name) and AI (Workers AI, for AI Gateway's calls: `aiRun`). `built.js`, made when it's deployed, is the shim.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, bucket_read, call_span, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, ai_gateway_schema, ai_run, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./oned_cloudflare_worker.js";
+import { initSync, bucket_read, call_span, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, ai_gateway_schema, ai_run, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, pin_welcome, sealed_global_steps } from "./oned_cloudflare_worker.js";
 import wasm from "./oned_cloudflare_worker_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
@@ -1170,6 +1170,8 @@ export class Oned extends DurableObject {
     super(ctx, env);
     // The network's root, as auth pins it: a freeze naming any other is never taken for its first.
     if (env.ROOT) pin_root(env.ROOT);
+    // Where the computer that deployed it had read who's who to: each user's object starts there, not at the first step.
+    if (env.WELCOME) pin_welcome(env.WELCOME);
     // "node" names its endpoint's object, which keeps what it held under that name.
     this.isEndpoint = ctx.id.equals(env.ONED.idFromName("node"));
     /// Datagrams it sent this turn, for the relay; asks running now, and when the last one began or ended.

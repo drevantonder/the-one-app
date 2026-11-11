@@ -112,6 +112,7 @@ impl Host {
             member: network.as_ref().map(|i| i.r.db().compute(&self.0.id)).transpose()?.flatten().is_some(),
             // `global`'s steps read.
             steps: network.as_ref().map(|i| i.r.at().unwrap_or(0)).unwrap_or(0),
+            welcome: network.as_ref().and_then(|i| i.r.welcome().ok().flatten()).map(|w| w.to_string()),
             arrangements,
             features,
             guide: self.guide(),

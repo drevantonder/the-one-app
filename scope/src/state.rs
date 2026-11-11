@@ -158,6 +158,10 @@ pub struct Network {
     pub app_schedules: Vec<AppSchedule>,
     /// `global`'s steps the app runtime answering read.
     pub steps: u64,
+    /// Where it read them to, as it would welcome a new device (`steps::Welcome`): what oned on Cloudflare starts from,
+    /// handed it by the computer that deploys it, as a new device is by the one that let it in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub welcome: Option<String>,
     pub settings: BTreeMap<String, String>,
     /// oned on Cloudflare, once an admin deployed one (`cloudflare oned deploy` sets it).
     pub cloudflare_node: Option<CloudflareNode>,
@@ -381,6 +385,7 @@ pub struct Here<'a> {
     /// Whether that app runtime is one of the network's devices.
     pub member: bool,
     pub steps: u64,
+    pub welcome: Option<String>,
     /// How this user arranged each of their pages.
     pub arrangements: BTreeMap<String, Value>,
     /// What needs this user's attention, by feature.
@@ -566,6 +571,7 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
         clients,
         app_schedules,
         steps: here.steps,
+        welcome: here.welcome.clone(),
         settings: settings.clone(),
         cloudflare_node,
     })
