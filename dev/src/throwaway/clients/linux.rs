@@ -32,9 +32,20 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Set
             addr
         }
     };
-    if !computer.join("bin").join(CLI).exists() {
+    // Set up from this build, or on an older one, it takes this one as a device whose Update is pressed does.
+    let installed = computer.join("bin").join(CLI);
+    let this = oned_update::release::Version::of(&crate::program()?).map(|v| v.commit);
+    let older = installed.exists() && oned_update::release::Version::of(&installed).map(|v| v.commit) != this;
+    if !installed.exists() || older {
         eprintln!("Publishing this build at the throwaway network's address, for the app to set up its computer from…");
         crate::throwaway::publish_build(dir, std::fs::read_to_string(dir.join("addr"))?.trim())?;
+    }
+    if older {
+        eprintln!("Its computer takes this build…");
+        let mut update = std::process::Command::new(&installed);
+        platform::mode::Throwaway::tell(&mut update, &computer, &addr);
+        update.env(::custom_build::config::env("RELEASE_KEY"), platform::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?);
+        platform::os::quietly(update.arg("update"))?;
     }
     eprintln!("Building native-apps (dev profile; the first time takes minutes)…");
     let mut cargo = platform::os::nice_cargo();
