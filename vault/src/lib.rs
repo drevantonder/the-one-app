@@ -27,7 +27,7 @@ pub const SCHEMA: &str = "create table items (id text primary key, item text not
 pub type Items = BTreeMap<String, Item>;
 
 /// An item: title, fields, hosts and the apps switched on for it.
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     pub title: String,
     pub kind: String,
@@ -55,7 +55,7 @@ pub struct Item {
 
 /// What's sealed of an item: the number of the scope's Vault key it's sealed to, and `keys`'s `seal_to` of its
 /// `Secrets` to that key's public half, base64url.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sealed {
     pub n: u32,
     pub sealed: String,
@@ -83,7 +83,7 @@ pub struct Sealing<'a> {
     pub machines: &'a str,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Field {
     pub value: String,
     pub secret: bool,

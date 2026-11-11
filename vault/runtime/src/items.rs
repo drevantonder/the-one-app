@@ -115,12 +115,20 @@ pub(crate) fn managed_scopes(rt: &Rt, viewer: &Caller, scope: Option<&Scope>) ->
 
 /// Reads `global`'s items with this device's own keys, for the secrets the runtime itself uses (the keys of the places
 /// it backs up to): each used only as an admin's setting names it, since anyone may write an item. A device that doesn't
-/// open `global` has none.
+/// open `global` has none. Tells whoever watches (Backups on Settings) when they changed.
 pub(crate) async fn refresh_own(rt: Rt) -> Result<()> {
     let me = rt.caller()?;
     ensure!(rt.read(|r| Ok(r.holds(&Scope::Global) && r.db().may(&me.user, "use", &scopes::object(&Scope::Global))))?, "this device doesn't open global");
     let items = items(&rt, &me, &Scope::Global).await?;
-    *rt.state::<State>().own.lock().unwrap() = items;
+    let changed = {
+        let mut own = rt.state::<State>().own.lock().unwrap();
+        let changed = *own != items;
+        *own = items;
+        changed
+    };
+    if changed {
+        rt.emit(Event::Changed { apps: Vec::new() });
+    }
     Ok(())
 }
 
