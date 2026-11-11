@@ -44,8 +44,11 @@
 // too old to be told anything else still hears. Every answer carries `changes`, a mark that's another once a compute's
 // socket opens or closes here or an ask is left for a device; a request that names the mark it was last given
 // (`after`) is held until it's another, for up to `HOLD`, and then answered as it is: how a computer's onet hears at
-// once that a device came or went, or that it's asked to update, with one request a minute while nothing does. That body, and the signed ask, are frozen, as the signed record is
-// (`tests/contracts.rs`): a device left behind has to be able to read them.
+// once that a device came or went, or that it's asked to update, with one request a minute while nothing does. It's held
+// here in the Worker, on a WebSocket to the Relay that the Relay takes with Hibernation and closes once the mark moves:
+// every computer has one held all the time, and a Durable Object waiting on a request is billed for every second of it,
+// while one with only hibernating sockets sleeps unbilled, and a Worker's wait is billed for none. That body, and the
+// signed ask, are frozen, as the signed record is (`tests/contracts.rs`): a device left behind has to be able to read them.
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
 // shared/crypto.js, domain `one/relay`, each `(by, at)` taken once) with one of:
@@ -106,6 +109,8 @@ const PAIRINGS_PER_DEVICE = 8;
 /// How long a computes request that names `after` is held, at most: under a minute, which nothing between a device
 /// and here cuts off.
 const HOLD = 50_000;
+/// The tag of a held computes request's socket at the Relay.
+const HELD = "held";
 const is = (it, role) => !!it && rolesOf(it.role).includes(role);
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
@@ -184,7 +189,7 @@ export default class extends WorkerEntrypoint {
     let said = await answer(this.list()[what](asked.by, asked));
     if (said?.update) return refusal(426, { error: updateRefusal(this.env.YOURS), code: CODES.update, ...(said.asked && { asked: said.asked }) });
     // Held while nothing it's told of changed, then answered as it is then: its request was taken already.
-    if (what === "computes" && said?.computes && !said.asked && asked.after !== undefined && (await answer(this.relay().held(asked.after, HOLD)))) said = await answer(this.list().computes(asked.by, { ...asked, at: undefined }));
+    if (what === "computes" && said?.computes && !said.asked && asked.after !== undefined && (await held(this.env, asked.after))) said = await answer(this.list().computes(asked.by, { ...asked, at: undefined }));
     if (what === "computes" && said?.computes) return Response.json({ ...said, online: await answer(this.relay().connected(said.computes)), changes: await answer(this.relay().changes()) });
     if (what === "seen" && said && typeof said === "object") return Response.json({ seen: said, let_in: await answer(this.list().letIn()) });
     if (said?.code) return refusal(400, said);
@@ -230,6 +235,26 @@ async function tell(env, request) {
   } catch (e) {
     return refusal(403, String(e.message || e));
   }
+}
+
+/// Waits until the Relay's change mark is another than `after`, for up to `HOLD`: → whether it waited, as it does only
+/// while it's `after` still.
+async function held(env, after) {
+  const opened = await relay(env).fetch(`https://relay${IROH_PATHS.relay}/held?after=${encodeURIComponent(after)}`, { headers: { upgrade: "websocket" } });
+  const ws = opened.webSocket;
+  if (!ws) return false;
+  ws.accept();
+  let timer;
+  await new Promise((resolve) => {
+    timer = setTimeout(resolve, HOLD);
+    ws.addEventListener("close", resolve);
+    ws.addEventListener("error", resolve);
+  });
+  clearTimeout(timer);
+  try {
+    ws.close(1000, "answered");
+  } catch {} // the Relay closed it
+  return true;
 }
 
 /// The network's one relay, and its one list, made near its users.
@@ -297,7 +322,9 @@ export class Relay extends DurableObject {
     this.sql = ctx.storage.sql;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS proofs (nonce TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');
-      CREATE TABLE IF NOT EXISTS counted (what TEXT PRIMARY KEY, n INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS counted (what TEXT PRIMARY KEY, n INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS marked (n INTEGER NOT NULL);
+      INSERT INTO marked SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM marked);`);
     // Rebuilt from the sockets' attachments, which Hibernation keeps.
     this.sockets = new Map();
     for (const ws of ctx.getWebSockets()) {
@@ -314,39 +341,31 @@ export class Relay extends DurableObject {
     this.skew = 0;
     this.log = [];
     this.waiting = [];
-    // The mark computes answers carry, another for each object (it's lost on hibernation, which a held ask waits out
-    // anyway), and the computes requests held until it's another.
-    this.mark = { of: hex.encode(crypto.getRandomValues(new Uint8Array(8))), n: 0 };
-    this.holding = new Set();
+    this.born = Date.now();
   }
 
   /// The mark computes answers carry now (`changes`).
   changes() {
-    return `${this.mark.of}.${this.mark.n}`;
+    return String(this.sql.exec("SELECT n FROM marked").one().n);
   }
 
   /// Something a held computes request is told of changed: a compute's socket opened or closed, or an ask was left.
   changed() {
-    this.mark.n++;
-    const held = this.holding;
-    this.holding = new Set();
-    for (const done of held) done();
+    this.sql.exec("UPDATE marked SET n = n + 1");
+    for (const ws of this.ctx.getWebSockets(HELD)) {
+      try {
+        ws.close(1000, "changed");
+      } catch {} // its Worker closed it
+    }
   }
 
-  /// Waits until the mark is another than `after`, for up to `ms`: → whether it waited, as it does only while it's
-  /// `after` still.
-  async held(after, ms) {
-    if (after !== this.changes()) return false;
-    await new Promise((resolve) => {
-      const done = () => {
-        clearTimeout(timer);
-        this.holding.delete(done);
-        resolve();
-      };
-      const timer = setTimeout(done, ms);
-      this.holding.add(done);
-    });
-    return true;
+  /// A held computes request's socket, from the relay's Worker (`held`): taken with Hibernation, so the Relay sleeps
+  /// while it's held, until `changed` closes it; refused if the mark is another than `after` already.
+  hold(after) {
+    if (after !== this.changes()) return new Response(null, { status: 204 });
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server, [HELD]);
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   now() {
@@ -370,7 +389,8 @@ export class Relay extends DurableObject {
 
   /// A test's way in (`/relay/test`): `{ advance: ms }` moves the clock on and ends what it ended; `{ count: [key, what] }`
   /// is how often `note` said it; `{ wait: [key, what, after] }` answers once it has said it more than `after` times;
-  /// `{ connected: [key] }` is which of those are online, with a socket here.
+  /// `{ connected: [key] }` is which of those are online, with a socket here; `{ born: true }` is when this object was
+  /// made, again each time it wakes from hibernation.
   async testing(told) {
     if (told.advance !== undefined) {
       this.skew += told.advance;
@@ -379,6 +399,7 @@ export class Relay extends DurableObject {
     }
     if (told.count) return this.count(...told.count);
     if (told.connected) return this.connected(told.connected);
+    if (told.born) return this.born;
     if (told.wait) {
       const [key, what, after] = told.wait;
       if (this.count(key, what) <= after) await new Promise((resolve) => this.waiting.push({ key, what, after, resolve }));
@@ -392,6 +413,8 @@ export class Relay extends DurableObject {
 
   async fetch(request) {
     const url = new URL(request.url);
+    // Only the relay's Worker asks for this: of what comes from outside, it passes on `/relay` alone.
+    if (url.pathname === `${IROH_PATHS.relay}/held`) return this.hold(url.searchParams.get("after"));
     if (request.headers.get("upgrade") !== "websocket") return refusal(426, "the relay takes an endpoint's WebSocket");
     const protocols = (request.headers.get("sec-websocket-protocol") || "").split(",").map((p) => p.trim());
     if (!protocols.includes(PROTOCOL)) return refusal(400, `the relay speaks ${PROTOCOL}`);
@@ -761,7 +784,7 @@ export class Relay extends DurableObject {
   }
 
   webSocketError(ws) {
-    this.note(null, "failed");
+    if (!this.ctx.getTags(ws).includes(HELD)) this.note(null, "failed");
     this.gone(ws);
   }
 

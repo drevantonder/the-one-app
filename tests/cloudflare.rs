@@ -1125,6 +1125,9 @@ mod relay {
     /// happens, as a busy machine takes seconds for what a quiet one takes milliseconds.
     const LET_IN: Duration = Duration::from_secs(60);
 
+    /// How long an idle Durable Object takes to hibernate in workerd, and then some.
+    const ASLEEP: Duration = Duration::from_secs(15);
+
     async fn online(address: &str, key: &SecretKey, ticket: Option<&str>) -> Option<Endpoint> {
         let ep = endpoint(address, key, ticket).await;
         if tokio::time::timeout(LET_IN, ep.online()).await.is_ok() {
@@ -1566,7 +1569,8 @@ mod relay {
 
     /// A computer's onet asks the computes again with the mark of the last answer (`after`), and the relay holds it until
     /// a compute's socket opens or closes, or an ask is left for it: so a device coming or going, or Update pressed,
-    /// is heard at once, with one request a minute while nothing happens.
+    /// is heard at once, with one request a minute while nothing happens. The Relay sleeps while it's held, as every
+    /// computer has one held all the time: what changes wakes it, and the request is answered as quickly.
     #[test]
     fn a_computes_request_naming_its_mark_is_answered_once_a_compute_comes_or_an_ask_is_left() {
         let first = SecretKey::generate();
@@ -1582,6 +1586,7 @@ mod relay {
             let (url, body) = (format!("{address}/relay/computes"), key::signed_request(&signer(&phone), "one/relay", fields, at()));
             tokio::task::spawn_blocking(move || super::post(&url, &[], body))
         };
+        let quickly = Duration::from_secs(1);
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
             assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
@@ -1590,18 +1595,37 @@ mod relay {
             let mark = said["changes"].clone();
 
             let held = ask(Some(&mark));
-            let _first = online(&address, &first, None).await.expect("the network's first device isn't let in");
+            let device = online(&address, &first, None).await.expect("the network's first device isn't let in");
             let (status, said) = held.await.unwrap();
             assert_eq!((status, &said["online"]), (200, &json!([hex(&first)])), "{said}");
             assert_ne!(said["changes"], mark, "answered as its hold ran out, not as the compute came");
 
             let mark = said["changes"].clone();
             let held = ask(Some(&mark));
+            let left = testing(&k, json!({ "count": [hex(&first), "left"] })).await.as_u64().unwrap();
+            device.close().await;
+            says(&k, &hex(&first), "left", left).await;
+            let (status, said) = held.await.unwrap();
+            assert_eq!((status, &said["online"]), (200, &json!([])), "{said}");
+            assert_ne!(said["changes"], mark, "answered as its hold ran out, not as the compute went");
+
+            // With nothing else keeping it, the Relay sleeps while the request is held, and wakes for the ask.
+            let born = testing(&k, json!({ "born": true })).await;
+            let mark = said["changes"].clone();
+            let held = ask(Some(&mark));
+            tokio::time::sleep(ASLEEP).await;
+            let told = std::time::Instant::now();
             assert_eq!(tell(&address, &first, json!({ "update": hex(&phone) })), 204);
             let (status, said) = held.await.unwrap();
+            assert!(told.elapsed() < quickly, "the ask was heard {:?} after it was left", told.elapsed());
             assert_eq!(status, 200);
             assert_ne!(said["changes"], mark, "answered as its hold ran out, not as the ask was left");
             assert_eq!(key::check_request("one/relay", &said["asked"], super::now()).unwrap().1["update"], hex(&phone), "{said}");
+            assert_ne!(testing(&k, json!({ "born": true })).await, born, "the Relay stayed awake while the request was held");
+
+            // A mark that moved before it's asked with is answered at once.
+            let (status, again) = ask(Some(&mark)).await.unwrap();
+            assert_eq!((status, &again["changes"]), (200, &said["changes"]));
         });
     }
 
