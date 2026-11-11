@@ -24,13 +24,19 @@ pub(super) fn routes() -> Routes {
         .route("/api/joined", ThisMachine, post(joined))
         .route("/api/steps", Clients, post(steps))
         .route("/api/steps/global", Clients, get(global_steps))
-        .route("/api/relay", ThisMachine, post(relay))
+        .route("/api/relay", ThisMachine, get(relay_heard).post(relay))
 }
 
 /// What the relay answered this computer's onet (`/relay/computes`), given as it hears it.
 async fn relay(State(host): State<Host>, Body(said): Body<serde_json::Value>) -> Reply {
     host.heard_relay(&said);
     done()
+}
+
+/// What the relay says now, for an app runtime this one holds its device's key for, as onet answers it: read first.
+async fn relay_heard(State(host): State<Host>) -> Reply {
+    host.read_relay().await;
+    Ok(Json(host.relay_heard()))
 }
 
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Host::sealed_keys`).

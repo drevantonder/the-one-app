@@ -75,6 +75,9 @@ pub(super) struct Net {
     clients: Mutex<HashMap<Key, Vec<(Connection, Arc<std::sync::atomic::AtomicUsize>)>>>,
     /// How many connections of keys the network doesn't list are waiting to show a certificate.
     unlisted: std::sync::atomic::AtomicUsize,
+    /// What the relay last answered, as this runtime read it or its device's holder gave it (`heard_relay`): what it
+    /// gives an app runtime it holds the device's key for, as its device's onet does (`relay_heard`).
+    relay: Mutex<Value>,
 }
 
 /// Which of a device's connections, oldest first with how many requests each is answering, makes room for a new one:
@@ -836,41 +839,39 @@ impl Host {
         };
     }
 
-    /// Reads which of the network's devices are connected to the relay: as its device's onet last heard it, for the
-    /// runtime of a computer (which onet gives it again each time it hears more, `heard_relay`), else of the relay itself.
-    /// What it last said stands until it answers.
+    /// Reads which of the network's devices are connected to the relay, in the background (`read_relay`). What it last
+    /// said stands until it answers.
     pub(super) fn read_connected(&self) {
+        let host = self.clone();
+        tokio::spawn(async move { host.read_relay().await });
+    }
+
+    /// Reads which of the network's devices are connected to the relay: of whatever holds its device's key, for a
+    /// computer's runtime (its onet, which gives it again each time it hears more: `heard_relay`), else of the relay
+    /// itself.
+    pub(super) async fn read_relay(&self) {
         if let holds::Holds::Asks { holder, .. } = &self.0.holds {
-            let (host, holder) = (self.clone(), holder.clone());
-            tokio::spawn(async move {
-                match holder.ask("GET", "/api/relay", None).await {
-                    Ok(said) => host.heard_relay(&said),
-                    Err(err) => tracing::debug!("reading who's connected, as onet heard it: {err:#}"),
-                }
-            });
+            match holder.ask("GET", "/api/relay", None).await {
+                Ok(said) => self.heard_relay(&said),
+                Err(err) => tracing::debug!("reading who's connected, as this device's holder heard it: {err:#}"),
+            }
             return;
         }
         let Some(address) = self.with_or(None, |i| Ok(i.r.db().setting("address")?)) else { return };
         let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());
         let url = format!("{}/relay/computes", address.trim_end_matches('/'));
-        let host = self.clone();
-        // What a device is on is its device's to say: an app runtime of its own key is on its device's build.
-        let mut asked = json!({ "computes": true, "reads": ::custom_build::protocol::READS });
-        if matches!(self.0.holds, holds::Holds::Key(_)) {
-            asked["version"] = json!(::custom_build::protocol::version());
-        }
-        tokio::spawn(async move {
-            let body = key::signed_request(&key, ::custom_build::protocol::RELAY, asked, key::next_at(now_ms()));
-            let said = match post_relay(url, body).await {
-                Ok((200, said)) => said,
-                // Too old to be told anything else, it can still be asked to update.
-                Ok((426, said)) => return host.heard_ask(&said["asked"]),
-                Ok((code, _)) => return tracing::debug!("reading who's connected: the relay answered {code}"),
-                Err(err) => return tracing::debug!("reading who's connected: {err:#}"),
-            };
-            host.heard_ask(&said["asked"]);
-            host.heard_relay(&said);
-        });
+        // What a device is on is its device's to say: this runtime holds its device's key, so it's its device.
+        let asked = json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": ::custom_build::protocol::version() });
+        let body = key::signed_request(&key, ::custom_build::protocol::RELAY, asked, key::next_at(now_ms()));
+        let said = match post_relay(url, body).await {
+            Ok((200, said)) => said,
+            // Too old to be told anything else, it can still be asked to update.
+            Ok((426, said)) => return self.heard_ask(&said["asked"]),
+            Ok((code, _)) => return tracing::debug!("reading who's connected: the relay answered {code}"),
+            Err(err) => return tracing::debug!("reading who's connected: {err:#}"),
+        };
+        self.heard_ask(&said["asked"]);
+        self.heard_relay(&said);
     }
 
     /// Takes what the relay answered (`/relay/computes`): who's online and was last seen, what each device is on and
@@ -878,6 +879,11 @@ impl Host {
     /// over.
     pub(super) fn heard_relay(&self, said: &Value) {
         let Some(online) = said["online"].as_array() else { return };
+        let mut kept = said.clone();
+        if let Some(kept) = kept.as_object_mut() {
+            kept.remove("asked");
+        }
+        *self.0.net.relay.lock().unwrap() = kept;
         self.with_or((), |i| {
             i.versions = said["versions"].clone();
             i.workers = said["workers"].clone();
@@ -897,6 +903,11 @@ impl Host {
             insights_runtime::relay_says(&self.rt(), &was, &connected);
             self.emit(Event::Devices);
         }
+    }
+
+    /// What the relay last answered, but what it left for this device.
+    pub(super) fn relay_heard(&self) -> Value {
+        self.0.net.relay.lock().unwrap().clone()
     }
 
     /// Tells the relay at the network's address something, signed by this device's key (`holds`): a device it admitted
