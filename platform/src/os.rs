@@ -307,7 +307,14 @@ pub fn handed_listener(socket: &str) -> anyhow::Result<std::net::TcpListener> {
     #[cfg(unix)]
     let listener = unsafe { <std::net::TcpListener as std::os::fd::FromRawFd>::from_raw_fd(socket) };
     #[cfg(windows)]
-    let listener = unsafe { <std::net::TcpListener as std::os::windows::io::FromRawSocket>::from_raw_socket(socket) };
+    let listener = {
+        // Winsock answers a program only once the program has started it, which std does as it makes a socket, not as it takes one.
+        let mut wsa = unsafe { std::mem::zeroed::<windows_sys::Win32::Networking::WinSock::WSADATA>() };
+        // SAFETY: wsa is written by the call.
+        let started = unsafe { windows_sys::Win32::Networking::WinSock::WSAStartup(0x0202, &mut wsa) };
+        anyhow::ensure!(started == 0, "Winsock didn't start: {}", std::io::Error::from_raw_os_error(started));
+        unsafe { <std::net::TcpListener as std::os::windows::io::FromRawSocket>::from_raw_socket(socket) }
+    };
     listener.set_nonblocking(true)?;
     Ok(listener)
 }
