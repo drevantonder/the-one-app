@@ -83,13 +83,14 @@ mod tests {
     /// schema leaves out is one that never reaches it, the same as a misspelled one.
     #[test]
     fn a_tool_reads_only_the_inputs_its_schema_takes() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = here.parent().unwrap();
         let mut served: std::collections::HashMap<String, (String, std::collections::VecDeque<String>)> = Default::default();
         for feature in all() {
             let folder = if matches!(feature.name, "add" | "remove") { "deploy".to_string() } else { feature.name.replace('-', "_") };
             let (source, queue) = served.entry(folder.clone()).or_insert_with(|| {
                 // A feature's runtime crate (`<feature>/runtime/src/tools.rs`), or one whose runtime half is still this program's.
-                let source = runtime_tools(root, feature.name).unwrap_or_else(|| std::fs::read_to_string(root.join("src").join(&folder).join("tools.rs")).unwrap());
+                let source = runtime_tools(root, feature.name).unwrap_or_else(|| std::fs::read_to_string(here.join("src").join(&folder).join("tools.rs")).unwrap());
                 let queue = source.split("serves!(").skip(1).map(|s| s.split(')').next().unwrap().rsplit("::").next().unwrap().to_string()).collect();
                 (source, queue)
             });
@@ -120,7 +121,10 @@ mod tests {
         if !seen.insert(f.to_string()) {
             return;
         }
-        let body = source[at..].split("\n    }\n").next().unwrap();
+        // To the brace that closes it, at the `fn`'s own indent.
+        let indent = &source[source[..at].rfind('\n').map_or(0, |n| n + 1)..at];
+        let indent = &indent[..indent.len() - indent.trim_start().len()];
+        let body = source[at..].split(&format!("\n{indent}}}\n")).next().unwrap();
         for form in ["input.get(\"", "input[\"", "text(&input, \"", "text(input, \""] {
             reads.extend(body.match_indices(form).map(|(i, _)| body[i + form.len()..].split('"').next().unwrap().to_string()));
         }

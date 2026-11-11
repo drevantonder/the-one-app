@@ -83,8 +83,8 @@ mod tests {
     /// itself reads the body `settings::about` says.
     #[test]
     fn each_routes_schema_is_what_its_handler_reads() {
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let root = repo.join("src");
+        let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let (repo, root) = (here.parent().unwrap(), here.join("src"));
         // This program's, and each feature's with a runtime crate (`<feature>/src`, `<feature>/runtime/src`).
         let features = std::fs::read_dir(repo).unwrap().flatten().map(|e| e.path()).filter(|d| d.join("runtime/Cargo.toml").exists());
         let mut stack: Vec<_> = std::iter::once(root.clone()).chain(features.flat_map(|d| [d.join("src"), d.join("runtime/src")])).collect();
@@ -112,14 +112,14 @@ mod tests {
             let Some((extractor, ty)) = [("Body", ".body::<"), ("Query", ".query::<")].into_iter().find_map(|(e, form)| Some((e, says.split(form).nth(1)?.split('>').next()?))) else { continue };
             let (file, source, route) = routes.iter().find(|(_, _, r)| r.split('"').nth(1) == Some(path.as_str()) && r.split(',').nth(1).is_some_and(|who| who.contains("Clients") || who.contains("ThisMachine"))).unwrap_or_else(|| panic!("{path} says what it takes, and no route is it"));
             let handler = route.split(&format!("{method}(")).nth(1).and_then(|s| s.split([')', ',']).next()).unwrap_or_default();
-            let signature = source.split(&format!("fn {handler}(")).nth(1).and_then(|s| s.split("->").next()).unwrap_or_else(|| panic!("no handler {handler} in {file:?}"));
+            let signature = source.split(&format!("fn {}(", last(handler))).nth(1).and_then(|s| s.split("->").next()).unwrap_or_else(|| panic!("no handler {handler} in {file:?}"));
             let read = signature.split(&format!("{extractor}<")).nth(1).and_then(|s| s.split('>').next()).unwrap_or_else(|| panic!("{handler} in {file:?} doesn't read a {extractor}"));
             assert_eq!(last(read), last(ty), "{file:?}: {handler} reads {read}, {path} says {ty}");
             said += 1;
         }
         assert!(said > 10, "the routes that say what they read were found");
 
-        let settings = std::fs::read_to_string(root.join("settings.rs")).unwrap();
+        let settings = std::fs::read_to_string(repo.join("scope/src/settings.rs")).unwrap();
         let about = settings.split("fn about(").nth(1).unwrap().split("\n}\n").next().unwrap();
         let answered = settings.split("async fn answered_by(").nth(1).unwrap().split("\n}\n").next().unwrap();
         for arm in about.split("Route::").skip(1) {

@@ -103,7 +103,7 @@ mod tests {
     fn a_macs_stacks_are_named_by_the_symbols_of_the_same_program() {
         let dir = std::env::temp_dir().join(format!("symbols-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let table = "0000000100000000 __mh_execute_header\n0000000100069e00 __ZN3one4node5serve17h0123456789abcdefE\n";
+        let table = "0000000100000000 __mh_execute_header\n0000000100069e00 __ZN11app_runtime5serve17h0123456789abcdefE\n";
         let file = dir.join("2FB9DA3B.gz");
         let mut gzip = Command::new("gzip").arg("-c").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
         use std::io::Write;
