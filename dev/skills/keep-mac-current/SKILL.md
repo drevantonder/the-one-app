@@ -9,7 +9,7 @@ Run this on the Mac, in the logged-in session: only there can a build be signed 
 
 For each network, with its address, `<cli>` and app name (`~/Applications/<name>.app`):
 
-1. **What's newest.** `curl -fsS <address>/updates/newest`. Check it before believing it: the signature block goes to `ssh-keygen -Y verify -n release-latest -I release`, against the config's `release_key`. Its `source` line is six fields; the second is the commit, the third when it was made, the sixth the config commit (`-` for none).
+1. **What's newest.** `curl -fsSL <address>/updates/newest` (it redirects). Check it before believing it: the signature block goes to `ssh-keygen -Y verify -n release-latest -I release`, against the config's `release_key`. Its `source` line is six fields; the second is the commit, the third when it was made, the sixth the config commit (`-` for none).
 2. **What runs.** `~/Applications/<name>.app/Contents/MacOS/<cli> version --json`. Newer than the record: stay on it.
 3. **Whether it shows.** `git diff --name-only <running>..<newest>`. Only `*.md`, `docs/`, `tools/`, `tests/`, `dev/`, or what reaches devices over the air (`cloudflare/`, `src/screen/`, `src/onboarding/`, `apps/`): nothing to build. Otherwise build, using judgement about when: hold off while another build is running or the Mac is overloaded, and let changes that land close together go out in one build.
 4. **The checkout.** `~/Library/Caches/<cli>/src` keeps its build cache: fetch, and check out the commit. A custom build's config is its clone in `~/Library/Caches/<cli>/config`, at the config commit.
