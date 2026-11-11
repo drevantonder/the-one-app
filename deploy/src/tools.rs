@@ -17,11 +17,11 @@ pub fn add_feature() -> Feature {
         "Add an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only)",
         json!({
                 "name": "add", "title": "Add an app",
-                "description": "Add an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page. An app with a service runs it on node, one of your computers it can run on (apps_devices lists them); asked when there's a choice.",
+                "description": "Add an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page. An app with a service runs it on computer, one of yours it can run on (apps_devices lists them); asked when there's a choice.",
                 "input": { "type": "object", "required": ["app", "scope"], "properties": {
                     "app": { "type": "string", "description": "an app's name, from apps_list, like gmail" },
                     "scope": place,
-                    "node": { "type": "string", "description": "the computer that runs its service: one of yours by name, as apps_devices lists them" },
+                    "computer": { "type": "string", "description": "the computer that runs its service: one of yours by name, as apps_devices lists them" },
                 } },
                 "output": { "type": "object", "required": ["said"], "properties": { "said": { "type": "string", "description": "what was added" } } },
             }),

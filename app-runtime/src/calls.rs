@@ -531,7 +531,7 @@ impl Host {
         if !added || runs.iter().any(|r| r["name"].is_string() && r["online"] == true && r["problem"].is_null()) {
             return None;
         }
-        if runs.is_empty() && info["nodes"].as_array().is_some_and(|n| n.is_empty()) {
+        if runs.is_empty() && info["computers"].as_array().is_some_and(|n| n.is_empty()) {
             return Some(format!("{title} isn't on any of your devices yet.{}", info["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()));
         }
         let r = runs.first().unwrap_or(&Value::Null);

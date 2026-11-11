@@ -79,9 +79,9 @@ impl Host {
                 }
             }
             for append in adds {
-                if let Append::Add { app, scope, added, node: host } = append {
+                if let Append::Add { app, scope, added, computer } = append {
                     let scope = Scope::parse_for(&scope, &me.user)?;
-                    writes.extend(deploy_runtime::add_entries(&self.rt(), me, &app, &scope, added, host.as_deref()).await?);
+                    writes.extend(deploy_runtime::add_entries(&self.rt(), me, &app, &scope, added, computer.as_deref()).await?);
                 }
             }
             for (scope, content) in writes {

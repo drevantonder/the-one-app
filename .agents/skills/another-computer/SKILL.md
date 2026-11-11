@@ -8,7 +8,7 @@ description: Giving a throwaway network a second or third computer of your own, 
 `one-dev throwaway client linux` (and `--as sam`) is a computer of its own already: its home is the throwaway's
 `linux/computer`, its oned a unit of your systemd. Its CLI is that home's `bin/one` with the unit's environment
 (`systemctl --user cat oned-throwaway-<hash>.service` shows it). Each is listed by this machine's name with a number
-after it (`linux 2`), which `--device` and `add --node` take.
+after it (`linux 2`), which `--device` and `add --computer` take.
 
 A bare one, joined with a pairing code, in a home and port of its own (`$H` the throwaway's folder):
 

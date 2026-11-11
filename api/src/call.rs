@@ -116,8 +116,8 @@ pub enum Append {
         #[serde(default)]
         check: Option<String>,
     },
-    /// Adds (or removes) an app in a scope; added, with its service run on `node` (a device's name, or `cloudflare`).
-    Add { app: String, scope: String, added: bool, node: Option<String> },
+    /// Adds (or removes) an app in a scope; added, with its service run on `computer` (one of the caller's, by name).
+    Add { app: String, scope: String, added: bool, computer: Option<String> },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     Switch { app: String, schedule: String, scope: String, on: bool },
     /// Says a scope no longer needs a blob it kept: once no scope does, devices delete it.

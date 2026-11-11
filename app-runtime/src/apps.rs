@@ -118,7 +118,7 @@ impl Host {
     /// title and icon, and for one built in, the bundle this release has of it; for those added for them, what it
     /// does (tools, widgets, screens, instructions). With `not_added`, also the built-in apps the network hasn't
     /// added yet, with no deploys, each as its own code describes it. Every app that says what it is has `offers` (a
-    /// main screen it `opens` to, `screens`: that or a widget, `accounts`), and, with a service, `nodes`: the names of the viewer's own app runtimes it can
+    /// main screen it `opens` to, `screens`: that or a widget, `accounts`), and, with a service, `computers`: the names of the viewer's own computers it can
     /// run on.
     pub async fn catalog(&self, viewer: &Caller, not_added: bool) -> Result<Vec<Value>> {
         let listed = self.with(|i| {
@@ -171,8 +171,8 @@ impl Host {
                     "screens": opens || d["widgets"].as_array().is_some_and(|w| !w.is_empty()),
                     "accounts": d["tools"].as_array().is_some_and(|o| o.iter().any(|o| o["accounts"] == true)),
                 });
-                if let Some(nodes) = self.nodes_for(viewer, &described) {
-                    info["nodes"] = json!(nodes);
+                if let Some(computers) = self.computers_for(viewer, &described) {
+                    info["computers"] = json!(computers);
                 }
                 // A fork's module may still give its first name; the network's name for it is the one that counts.
                 let declared = Schedule::all(&described);
@@ -205,8 +205,8 @@ impl Host {
     }
 
     /// Where an app that `described` itself runs its service for `viewer`, if it has one (its own, or one it uses): the
-    /// names of their own app runtimes on a platform the service is built for.
-    pub(super) fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
+    /// names of their own computers on a platform the service is built for.
+    pub(super) fn computers_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
         let platforms: Option<Vec<&str>> = described["service"]["platforms"].as_array().map(|p| p.iter().filter_map(Value::as_str).collect());
         let uses_service = described["uses"]["services"].as_array().is_some_and(|s| !s.is_empty());
         if described["service"].is_null() && !uses_service {
@@ -220,14 +220,14 @@ impl Host {
                 t if t.contains("android") => "android",
                 _ => "linux",
             };
-            let nodes = m
+            let computers = m
                 .machines()?
                 .into_iter()
                 .filter(|d| !d.removed && d.user == viewer.user && d.is(scopes::Kind::Compute))
                 .filter(|d| platforms.as_ref().is_none_or(|p| i.running(&d.key).is_some_and(|b| p.contains(&platform_of(&b.target)))))
                 .map(|d| m.device_name(&d))
                 .collect::<Result<Vec<String>>>()?;
-            Ok(nodes)
+            Ok(computers)
         })
         .ok()
     }
@@ -305,8 +305,8 @@ fn built_in_source(app: &str) -> Option<String> {
     Some(format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
 }
 
-/// Where `app`'s service runs for the scopes `added` names, and for `user` on their own app runtimes: `{ scope, app runtime,
-/// name, online, seen (ms), problem }` each, `name` none once that node was removed, `problem` what its app runtime said went wrong.
+/// Where `app`'s service runs for the scopes `added` names, and for `user` on their own app runtimes: `{ scope, runtime (its
+/// app runtime's key), name, online, seen (ms), problem }` each, `name` none once that device was removed, `problem` what its app runtime said went wrong.
 fn runs_on(host: &Host, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, app: &str, added: &[String], user: &str) -> Result<Vec<Value>> {
     let m = i.r.db();
     let cloudflare = m.cloudflare_node()?;
@@ -330,7 +330,7 @@ fn runs_on(host: &Host, i: &Network, switches: &BTreeMap<(Key, String), scopes::
                 _ => None,
             });
             let online = here || Some(*k) == cloudflare || i.online(k);
-            out.push(json!({ "scope": s.scope, "node": hex(k), "name": name, "online": online, "seen": i.seen(k, |k| host.down(k)), "problem": part.and_then(|p| p["problem"].as_str().map(str::to_string)) }));
+            out.push(json!({ "scope": s.scope, "runtime": hex(k), "name": name, "online": online, "seen": i.seen(k, |k| host.down(k)), "problem": part.and_then(|p| p["problem"].as_str().map(str::to_string)) }));
         }
     }
     Ok(out)

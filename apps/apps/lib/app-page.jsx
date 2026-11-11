@@ -102,12 +102,11 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
   }
 
   const w = where.data
-  const nodeName = (n) => (n === "cloudflare" ? "Cloudflare" : n)
-  // An app runtime to run its service on, from `at` (the button pressed).
+  // A computer to run its service on, from `at` (the button pressed).
   const move = async (at) => {
     const running = w.runs_on.find((r) => r.name)?.name
-    const i = await one.menu(w.nodes.map((n) => ({ title: nodeName(n), checked: n === running })), at)
-    if (i != null && w.nodes[i] !== running) run("move", () => one.call("move", { app: name, node: w.nodes[i] }))
+    const i = await one.menu(w.computers.map((n) => ({ title: n, checked: n === running })), at)
+    if (i != null && w.computers[i] !== running) run("move", () => one.call("move", { app: name, computer: w.computers[i] }))
   }
   const owner = a.mine && a.deployed && !a.deleted
   const repo = a.source && /^http:[/][/](localhost|127[.]0[.]0[.]1):[0-9]+[/]repos[/]([a-z0-9][a-z0-9._-]*?)([.]git)?[/]?$/.exec(a.source)?.[2]
@@ -159,10 +158,10 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
           <List>
             {w.runs_on.map((r) => (
               <ListRow
-                key={r.node + r.scope}
+                key={r.runtime + r.scope}
                 title={r.name || "A removed device"}
                 sub={r.name && (r.online ? r.problem || "Online" : one.seen(r))}
-                trailing={w.nodes.length > 0 && <Button size="sm" variant="outline" onClick={(e) => move(e.currentTarget)}>Move</Button>}
+                trailing={w.computers.length > 0 && <Button size="sm" variant="outline" onClick={(e) => move(e.currentTarget)}>Move</Button>}
               />
             ))}
           </List>

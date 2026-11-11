@@ -53,35 +53,35 @@ function namer(ctx) {
   };
 }
 
-const hasService = (a) => !!a.nodes;
+const hasService = (a) => !!a.computers;
 
 /// Where an app's service runs, and where it may: `runs_on` (each device it runs on for a place where it's added, by
-/// `name`, none once that device was removed, with `scope`, `online`, `seen` and `problem`); `nodes`, as the catalog gives them;
+/// `name`, none once that device was removed, with `scope`, `online`, `seen` and `problem`); `computers`, as the catalog gives them;
 /// and `problem`, its one problem box when no device it runs on is on and well, with `move` true when moving it fixes that.
 /// Null for an app with no service.
 function where(a, ctx) {
   if (!hasService(a)) return null;
-  const nodes = a.nodes;
+  const computers = a.computers;
   const runs_on = a.runs_on || [];
   const title = a.title || a.name;
   let problem = null;
   if (a.added?.length && !runs_on.some((r) => r.name && r.online && !r.problem)) {
     const r = runs_on[0];
     const text = !r ? "Choose the device it runs on." : !r.name ? "Its device was removed. Choose another." : !r.online ? `${r.seen ? `${r.name} was last seen ${ctx.ago(r.seen)}` : `${r.name} is off`}. Turn it on, or move it.` : r.problem;
-    problem = nodes.length || r ? { title: `${title} needs a device that's on`, text, move: nodes.length > 0 } : { title: `${title} can't run on your devices yet`, text: a.needs ? `${a.needs}.` : "It isn’t built for any of them.", move: false };
+    problem = computers.length || r ? { title: `${title} needs a device that's on`, text, move: computers.length > 0 } : { title: `${title} can't run on your devices yet`, text: a.needs ? `${a.needs}.` : "It isn’t built for any of them.", move: false };
   }
-  return { runs_on, nodes, problem };
+  return { runs_on, computers, problem };
 }
 
-function nodeFor(a, node, ctx) {
+function computerFor(a, computer, ctx) {
   const w = where(a, ctx);
   if (!w) return undefined;
-  if (node) {
-    if (!w.nodes.some((n) => n.toLowerCase() === String(node).toLowerCase())) throw refusal(`${a.title || a.name} can't run on ${node}: it can run on ${w.nodes.join(", ") || "none of your devices"}`);
-    return node;
+  if (computer) {
+    if (!w.computers.some((n) => n.toLowerCase() === String(computer).toLowerCase())) throw refusal(`${a.title || a.name} can't run on ${computer}: it can run on ${w.computers.join(", ") || "none of your devices"}`);
+    return computer;
   }
-  if (w.nodes.length > 1) throw refusal(`Where should ${a.title || a.name} run? Give node: ${w.nodes.join(" or ")}.`);
-  return w.nodes[0];
+  if (w.computers.length > 1) throw refusal(`Where should ${a.title || a.name} run? Give computer: ${w.computers.join(" or ")}.`);
+  return w.computers[0];
 }
 
 /// What an app's owners see: its catalog entry says who used it and what it cost, and what broke is read separately.
@@ -116,7 +116,7 @@ async function listed(ctx, { full, gone }) {
 }
 
 const APP = { type: "string", description: "an app's name, from apps_list, like gmail" };
-const NODE = { type: "string", description: "the device that runs its service: one of your computers by name, or cloudflare, as apps_devices lists them" };
+const COMPUTER = { type: "string", description: "the computer that runs its service: one of yours by name, as apps_devices lists them" };
 
 function iso(v) {
   if (Array.isArray(v)) return v.map(iso);
@@ -141,7 +141,7 @@ export default {
   icon: "squares-four",
   color: "#007aff",
   description: "Every app you can add, and its code",
-  instructions: "The App Store lists every app in this network, where each is added and its code. add puts an app, and the apps it uses, on a page: yours (scope user), a group you're an admin of (by its name) or everyone's (scope global, admins only); one with a service runs it on one of your computers it can run on (node, from apps_devices), asked when there's a choice. remove takes it off a page: it stops running there, and what it kept stays, for when it's added back. apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
+  instructions: "The App Store lists every app in this network, where each is added and its code. add puts an app, and the apps it uses, on a page: yours (scope user), a group you're an admin of (by its name) or everyone's (scope global, admins only); one with a service runs it on one of your computers it can run on (computer, from apps_devices), asked when there's a choice. remove takes it off a page: it stops running there, and what it kept stays, for when it's added back. apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
 
   // The apps whose schedule, where you may switch it, failed its last run.
   async badge(ctx) {
@@ -175,22 +175,22 @@ export default {
       output: { type: "null" },
       async run(ctx, { app, scope }) {
         const w = where(await find(ctx, app), ctx);
-        ctx.add(app, placeOf(ctx, scope), true, w?.runs_on.find((r) => r.name)?.name || w?.nodes[0]);
+        ctx.add(app, placeOf(ctx, scope), true, w?.runs_on.find((r) => r.name)?.name || w?.computers[0]);
       },
     },
     move: {
       title: "Move an app's service to another device",
       reads: false,
       description: "Move an app's service to another device, for a place it's added to (by default where it runs now): it stops on the device it ran on and starts afresh on this one. apps_devices lists the devices it can run on.",
-      input: { type: "object", required: ["app", "node"], properties: { app: APP, node: NODE, scope: placeInput } },
+      input: { type: "object", required: ["app", "computer"], properties: { app: APP, computer: COMPUTER, scope: placeInput } },
       output: { type: "string", description: "where it runs now, in words" },
-      async run(ctx, { app, node, scope }) {
+      async run(ctx, { app, computer, scope }) {
         const a = await find(ctx, app);
         if (!hasService(a)) throw refusal(`${a.title || app} has no service to move`);
         const place = scope ? placeOf(ctx, scope) : a.runs_on?.find((r) => r.scope)?.scope || a.added?.find((s) => places(ctx).some((p) => p.may && p.id === s));
         if (!place) throw refusal(`${a.title || app} isn't added anywhere you may move it: add adds it`);
-        ctx.add(app, place === `user:${ctx.me.user}` ? "user" : place, true, nodeFor(a, node, ctx));
-        return `${a.title || app} runs on ${node}.`;
+        ctx.add(app, place === `user:${ctx.me.user}` ? "user" : place, true, computerFor(a, computer, ctx));
+        return `${a.title || app} runs on ${computer}.`;
       },
     },
     _remove: {
@@ -314,14 +314,14 @@ export default {
     devices: {
       title: "Where an app's service runs",
       reads: true,
-      description: "Where an app's service runs (runs_on: each device, whether it's on, and what went wrong), the devices it can run on (nodes, for add and apps_move), and its problem when it runs on no device that's on.",
+      description: "Where an app's service runs (runs_on: each device, whether it's on, and what went wrong), the computers it can run on (computers, for add and apps_move), and its problem when it runs on no device that's on.",
       input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "the name of an app with a service, like whatsapp" } } },
       output: {
         type: ["object", "null"],
         description: "null for an app with no service",
         properties: {
           runs_on: { type: "array", items: { type: "object", additionalProperties: true }, description: "each device it runs on, { name, scope, online, seen (ms, when it was last seen), problem }" },
-          nodes: { type: "array", items: { type: "string" }, description: "the devices it can run on" },
+          computers: { type: "array", items: { type: "string" }, description: "the computers it can run on" },
           problem: { type: ["object", "null"], description: "{ title, text, move } when it runs on no device that's on", additionalProperties: true },
         },
       },

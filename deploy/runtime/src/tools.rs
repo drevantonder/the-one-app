@@ -27,10 +27,10 @@ fn page_said(rt: &Rt, scope: &Scope) -> Result<String> {
 }
 
 /// Adds `app` and the apps it uses in `scope` (user, `group:<id>` or a group's name, or global), its services on
-/// `node` (a device by name).
+/// `computer` (one of the caller's by name).
 async fn add_app(rt: Rt, me: Caller, input: Map<String, Value>) -> Result<Value> {
     let (app, scope) = (text(&input, "app")?, rt.read(|r| r.scope_for(&me.user, text(&input, "scope")?))?);
-    crate::add(&rt, &me, app, &scope, true, input.get("node").and_then(Value::as_str)).await?;
+    crate::add(&rt, &me, app, &scope, true, input.get("computer").and_then(Value::as_str)).await?;
     Ok(json!({ "said": format!("{app} is on {}, on every device.", page_said(&rt, &scope)?) }))
 }
 

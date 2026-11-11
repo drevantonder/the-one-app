@@ -67,8 +67,8 @@ pub fn logo(rt: &Rt, domain: &str, app: &str) -> Option<(String, String)> {
     url
 }
 
-/// Adds `app` and the apps it uses in `scope`, or removes it (`added`), its services on `node` (a device by name).
-pub async fn add(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, added: bool, node: Option<&str>) -> Result<()> {
+/// Adds `app` and the apps it uses in `scope`, or removes it (`added`), its services on `computer` (one of the caller's by name).
+pub async fn add(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, added: bool, computer: Option<&str>) -> Result<()> {
     rt.read_callers_scopes(caller).await?;
     if added {
         rt.read(|r| {
@@ -78,7 +78,7 @@ pub async fn add(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, added: bool
             Ok(())
         })?;
     }
-    for (scope, content) in add_entries(rt, caller, app, scope, added, node).await? {
+    for (scope, content) in add_entries(rt, caller, app, scope, added, computer).await? {
         rt.append(&scope, &caller.user, content).await?;
     }
     Ok(())
@@ -86,11 +86,11 @@ pub async fn add(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, added: bool
 
 /// The entries that add (or remove) `app` in `scope` for `caller`, with their own rights there. Adding it
 /// also adds each app it uses, and each they use, that isn't added there yet. Each of their services runs for
-/// the scope on one app runtime, an app runtime of the caller's it can run on: `node` (a device's
-/// name) for `app`'s, which is asked for when there's a choice, and added again with another app runtime, they move
-/// there; and for an app it uses, `node` if it can run there, else its one app runtime, if it has one, and it stays where
+/// the scope on one of the caller's computers it can run on: `computer` (by
+/// name) for `app`'s, which is asked for when there's a choice, and added again with another computer, they move
+/// there; and for an app it uses, `computer` if it can run there, else the one computer it can, if there's one, and it stays where
 /// it runs already. Removing `app` stops its services there.
-pub async fn add_entries(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, added: bool, node: Option<&str>) -> Result<Vec<(Scope, Content)>> {
+pub async fn add_entries(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, added: bool, computer: Option<&str>) -> Result<Vec<(Scope, Content)>> {
     let mut wanted = vec![app.to_string()];
     let mut i = 0;
     while added && i < wanted.len() {
@@ -102,20 +102,20 @@ pub async fn add_entries(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, add
         }
         i += 1;
     }
-    // Each one's title, services, and the app runtimes of the caller's they can run on.
+    // Each one's title, services, and the caller's computers they can run on.
     let mut services = Vec::new();
     let mut widget = None;
     for (n, name) in wanted.iter().enumerate() {
-        let nodes = match rt.describe_any(name).await {
+        let computers = match rt.describe_any(name).await {
             Ok(described) => {
                 if n == 0 {
                     widget = described["widgets"][0]["name"].as_str().map(str::to_string);
                 }
-                rt.nodes_for(caller, &described)
+                rt.computers_for(caller, &described)
             }
             Err(_) => None,
         };
-        services.push((rt.title(name).await?, rt.uses(name).await?.1, nodes));
+        services.push((rt.title(name).await?, rt.uses(name).await?.1, computers));
     }
     rt.read(|r| {
         let m = r.db();
@@ -133,22 +133,22 @@ pub async fn add_entries(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, add
         // Where each service runs for this scope now: stopped where it no longer should, started where it should.
         let ours = |s: &scopes::Switch| s.on && s.scope.as_deref() == Some(scope.to_string().as_str());
         let switches = m.switches()?;
-        for (n, (title, names, nodes)) in services.iter().enumerate() {
-            let listed = |node: &str| nodes.iter().flatten().find(|l| l.eq_ignore_ascii_case(node)).cloned();
-            let chosen = match (n, nodes) {
+        for (n, (title, names, computers)) in services.iter().enumerate() {
+            let listed = |name: &str| computers.iter().flatten().find(|l| l.eq_ignore_ascii_case(name)).cloned();
+            let chosen = match (n, computers) {
                 (_, _) if !added => None,
-                (0, Some(nodes)) => match node {
-                    Some(node) => Some(listed(node).with_context(|| format!("{title} can't run on {node}: it can run on {}", if nodes.is_empty() { "none of your computers".to_string() } else { nodes.join(", ") }))?),
-                    None if nodes.len() > 1 => bail!("Where should {title} run? Give node: {}.", nodes.join(" or ")),
-                    None => nodes.first().cloned(),
+                (0, Some(computers)) => match computer {
+                    Some(computer) => Some(listed(computer).with_context(|| format!("{title} can't run on {computer}: it can run on {}", if computers.is_empty() { "none of your computers".to_string() } else { computers.join(", ") }))?),
+                    None if computers.len() > 1 => bail!("Where should {title} run? Give computer: {}.", computers.join(" or ")),
+                    None => computers.first().cloned(),
                 },
-                (_, Some(nodes)) => node.and_then(listed).or_else(|| (nodes.len() == 1).then(|| nodes[0].clone())),
+                (_, Some(computers)) => computer.and_then(listed).or_else(|| (computers.len() == 1).then(|| computers[0].clone())),
                 _ => None,
             };
             for service in names {
                 let running: Vec<Key> = switches.iter().filter(|((_, name), s)| name == service && ours(s)).map(|((k, _), _)| *k).collect();
                 let to = match chosen.as_deref().filter(|_| n == 0 || running.is_empty()) {
-                    Some(node) => Some(scope::settings::service(m, &caller.user, node, service, true, Some(scope))?),
+                    Some(computer) => Some(scope::settings::service(m, &caller.user, computer, service, true, Some(scope))?),
                     None => None,
                 };
                 let to_key = to.as_ref().and_then(|c| c.data["device"].as_str()).and_then(|k| unhex(k).ok());

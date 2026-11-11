@@ -216,8 +216,8 @@ pub trait Apps: Send + Sync {
     fn bundle_here(&self, app: &str) -> Option<String>;
     /// Whether this device runs `app`'s latest deploy, waiting up to `within` for it.
     fn runs_latest<'a>(&'a self, app: &'a str, within: Duration) -> Fut<'a, bool>;
-    /// Where an app that `described` itself can run its service for `viewer`, if it has one: their own devices' names.
-    fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>>;
+    /// Where an app that `described` itself can run its service for `viewer`, if it has one: their own computers' names.
+    fn computers_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>>;
     /// The apps it runs, but those in Recently Deleted.
     fn names(&self) -> Vec<String>;
     /// Runs one of `app`'s tools here in `scope`, as `user`, with the keys of the app schedules this device holds there

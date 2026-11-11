@@ -355,8 +355,8 @@ impl Apps for Host {
         Box::pin(async move { Ok(Host::runs_latest(self, app, within).await) })
     }
 
-    fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
-        Host::nodes_for(self, viewer, described)
+    fn computers_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
+        Host::computers_for(self, viewer, described)
     }
 
     fn names(&self) -> Vec<String> {

@@ -299,9 +299,9 @@ function context(ask, body, appends, later, spans) {
       return (await ask("order")).json();
     },
     /// Adds (or with `added: false`, removes) an app in a scope, with the caller's own rights there.
-    add: (name, scope, added = true, node) => {
+    add: (name, scope, added = true, computer) => {
       writing();
-      appends.push({ kind: "add", app: name, scope, added, ...(node ? { node } : {}) });
+      appends.push({ kind: "add", app: name, scope, added, ...(computer ? { computer } : {}) });
     },
     /// Deletes an app ("deleted": to Recently Deleted), restores it ("restored") or erases it for good ("erased"),
     /// for someone acting for its owner.
