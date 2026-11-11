@@ -737,6 +737,11 @@ impl Node {
     }
 
     /// A row as a reader gets it: its attributes as JSON, and its device and the devices it names by name.
+    /// A user's name, by their id, for what Insights says: blank for one it never knew.
+    pub(crate) fn user_named(&self, id: &str) -> String {
+        self.with(|i| user_name(i.r.db(), id)).unwrap_or_default()
+    }
+
     fn read_row(&self, row: &mut Value) {
         row["attrs"] = row["attrs"].as_str().and_then(|a| serde_json::from_str(a).ok()).unwrap_or(json!({}));
         self.name_device(row);

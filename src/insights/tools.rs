@@ -13,11 +13,12 @@ pub fn feature() -> Feature {
         tools: vec![Tool::route(
             json!({
                 "name": "insights", "title": "Read how things went", "reads": true,
-                "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations, its failing and slow traces and its readings (a gauge's newest, a counter's total), then trace_id for one trace's spans. For an admin, the overview also says what the network's use of Cloudflare cost in that time, estimated at list prices. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: requests by the hour, spans, logs, metrics and errors as JSON, each up to limit, and traces, the newest traces with a span of service, name, status and min_ms over the whole range, each with all its spans. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset. What's newest takes up to a minute or two to show.",
+                "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations, its failing and slow traces and its readings (a gauge's newest, a counter's total), then trace_id for one trace's spans. For an admin, the overview also says what the network's use of Cloudflare cost in that time, estimated at list prices. The overview says what AI Gateway's calls spent too, by app, model and user, priced at list prices (of the apps you may see); give ai for that alone. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: requests by the hour, spans, logs, metrics and errors as JSON, each up to limit, and traces, the newest traces with a span of service, name, status and min_ms over the whole range, each with all its spans. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset. What's newest takes up to a minute or two to show.",
                 "input": { "type": "object", "properties": {
                     "service": { "type": "string", "description": "only this service: an app's name, or the network's own program" },
                     "trace_id": { "type": "string", "description": "one trace by its id, as its spans: a failure says its trace-id" },
                     "raw": { "type": "boolean", "description": "the rows themselves, as JSON" },
+                    "ai": { "type": "boolean", "description": "only what AI Gateway's calls spent: by app, model and user, priced" },
                     "effect_of": { "type": "string", "description": "what a build (its commit, or the start of it) changed against the build before it: newly failing and slower operations, or that there's nothing to compare yet" },
                     "parts": { "type": "array", "items": { "type": "string", "enum": ["requests", "spans", "logs", "metrics", "errors", "traces"] }, "description": "with raw, only these kinds of row (each costs a read of its own): every kind unless given" },
                     "check": { "type": "boolean", "description": "check telemetry's own path now, by sending a known signal and reading the last one back, before answering. It's checked every 15 minutes anyway" },
@@ -77,9 +78,18 @@ mod serve {
         }
         let ask = Ask { queries: queries(raw, input.get("parts").and_then(Value::as_array), trace.is_some(), service.is_some(), effect.is_some()), service, name: text("name"), trace: trace.clone(), since, status: text("status"), least: input.get("min_ms").and_then(Value::as_u64), limit: if raw { limit.unwrap_or(100) } else { ALL_ROWS } };
         let overview = !raw && trace.is_none() && effect.is_none() && ask.service.is_none();
+        let ai = input.get("ai").and_then(Value::as_bool).unwrap_or(false);
+        // What AI Gateway's calls spent, from its token metric, of every service the viewer may read.
+        let spent = Ask { queries: vec!["metrics"], name: Some(crate::insights::GEN_AI_TOKENS.name.to_string()), since, limit: ALL_ROWS, ..Default::default() };
+        let range = view::since_said(since.unwrap_or(0), now);
+        if ai {
+            let rows = node.insights(&me, &spent).await?;
+            let metrics = rows["metrics"].as_array().cloned().unwrap_or_default();
+            return Ok(json!(cost::ai_said(&metrics, &range, |u| node.user_named(u)).unwrap_or_else(|| format!("No AI calls recorded in {range}."))));
+        }
         // What the network's use of Cloudflare cost, beside the overview: an admin's only, as a service no one else may read.
         let usage = Ask { queries: vec!["metrics"], service: Some(cost::CLOUDFLARE.to_string()), name: None, trace: None, since, status: None, least: None, limit: ALL_ROWS };
-        let (rows, usage) = tokio::join!(node.insights(&me, &ask), async { if overview { node.insights(&me, &usage).await.ok() } else { None } });
+        let (rows, usage, spent) = tokio::join!(node.insights(&me, &ask), async { if overview { node.insights(&me, &usage).await.ok() } else { None } }, async { if overview { node.insights(&me, &spent).await.ok() } else { None } });
         let rows = rows?;
         if raw {
             return Ok(rows);
@@ -93,8 +103,9 @@ mod serve {
             (None, None) => {
                 let since = since.unwrap_or(0);
                 let metrics = usage.as_ref().and_then(|u| u["metrics"].as_array()).cloned().unwrap_or_default();
-                let cost = cost::said(&metrics, &view::since_said(since, now));
-                [Some(view::overview(&rows, status, since, now, limit)), cost].into_iter().flatten().collect::<Vec<_>>().join("\n\n")
+                let cost = cost::said(&metrics, &range);
+                let spent = spent.as_ref().and_then(|s| s["metrics"].as_array()).and_then(|m| cost::ai_said(m, &range, |u| node.user_named(u)));
+                [Some(view::overview(&rows, status, since, now, limit)), cost, spent].into_iter().flatten().collect::<Vec<_>>().join("\n\n")
             }
         };
         Ok(json!(view::with_problem(&rows, now, text)))

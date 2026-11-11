@@ -102,3 +102,111 @@ pub fn said(metrics: &[Value], range: &str) -> Option<String> {
     let lines: Vec<String> = products.iter().map(|(product, dollars)| format!("  {product:<width$}  ${dollars:.2}  (${:.2} a month at this rate)", dollars * a_month)).collect();
     Some(format!("Cloudflare, estimated from the {hours} hour{} of {range} recorded, at list prices less their share of the free allowances (the account's other use shares them too):\n{}", if hours == 1 { "" } else { "s" }, lines.join("\n")))
 }
+
+/// What AI Gateway's calls spent, from what its token metric (`insights::GEN_AI_TOKENS`) recorded, by app, user and
+/// model: each priced when it's read, at its hour's list price, by `genai-prices`, Pydantic's table of every company's
+/// prices, embedded at its release. A model on one of the network's devices costs nothing; one the table doesn't know
+/// has its tokens and no price, never a guess.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AiSpend {
+    pub app: String,
+    pub user: String,
+    pub model: String,
+    pub input: f64,
+    pub output: f64,
+    /// None for a model on the network's devices (`local`) or one with no price known.
+    pub dollars: Option<f64>,
+    pub on_devices: bool,
+}
+
+/// The table's company for a model id's first part, and the model's id there.
+fn priced_as(model: &str) -> Option<(&'static str, &str)> {
+    let (first, rest) = model.split_once('/')?;
+    let company = match first {
+        "openai" => "openai",
+        "google" => "google",
+        "anthropic" => "anthropic",
+        "openrouter" => "openrouter",
+        "workers-ai" => "cloudflare",
+        _ => return None,
+    };
+    Some((company, rest))
+}
+
+/// What `input` and `output` tokens of `model` cost in the hour `hour` (hours since 1970), at `tier`.
+fn ai_price(model: &str, tier: Option<&str>, hour: u64, input: f64, output: f64) -> Option<f64> {
+    use genai_prices::{PriceRequest, Usage, UsageKey};
+    let (company, id) = priced_as(model)?;
+    let usage = Usage::from([(UsageKey::INPUT_TOKENS, input), (UsageKey::OUTPUT_TOKENS, output)]);
+    let at = std::time::UNIX_EPOCH + std::time::Duration::from_millis(hour * HOUR as u64);
+    let mut asked = PriceRequest::new(id, &usage).with_provider_id(company).with_timestamp(at);
+    if let Some(tier) = tier {
+        asked = asked.with_price_context("service_tier", tier);
+    }
+    genai_prices::calculate(&asked).ok().map(|p| p.total_price)
+}
+
+/// `metrics`' AI token rows (any service's), priced: one entry for each app, user and model, most spent first.
+pub fn ai(metrics: &[Value]) -> Vec<AiSpend> {
+    let mut by: BTreeMap<(String, String, String), AiSpend> = BTreeMap::new();
+    for row in metrics.iter().filter(|r| r["name"] == crate::insights::GEN_AI_TOKENS.name) {
+        let attrs = &row["attrs"];
+        let text = |key: &str| attrs[key].as_str().unwrap_or("").to_string();
+        let (app, user, model) = (row["service"].as_str().unwrap_or("").to_string(), text("enduser.id"), text("gen_ai.request.model"));
+        let n = row["sum"].as_f64().unwrap_or(0.0);
+        let (input, output) = if attrs["gen_ai.token.type"] == "output" { (0.0, n) } else { (n, 0.0) };
+        let on_devices = attrs["one.paid"] == "device";
+        let dollars = if on_devices { None } else { ai_price(&model, attrs["one.tier"].as_str(), row["hour"].as_u64().unwrap_or(0), input, output) };
+        let spend = by.entry((app.clone(), user.clone(), model.clone())).or_insert_with(|| AiSpend { app, user, model, on_devices, ..AiSpend::default() });
+        spend.input += input;
+        spend.output += output;
+        if let Some(d) = dollars {
+            spend.dollars = Some(spend.dollars.unwrap_or(0.0) + d);
+        }
+    }
+    let mut out: Vec<AiSpend> = by.into_values().collect();
+    out.sort_by(|a, b| b.dollars.unwrap_or(0.0).total_cmp(&a.dollars.unwrap_or(0.0)).then(b.input.total_cmp(&a.input)));
+    out
+}
+
+/// `ai` as lines to read, by app, by model and by user (named by `name`), or none if no call was recorded in `range`.
+pub fn ai_said(metrics: &[Value], range: &str, name: impl Fn(&str) -> String) -> Option<String> {
+    let spent = ai(metrics);
+    if spent.is_empty() {
+        return None;
+    }
+    let tokens = |n: f64| if n >= 1e6 { format!("{:.1}M", n / 1e6) } else if n >= 1e3 { format!("{:.0}k", n / 1e3) } else { format!("{n:.0}") };
+    let group = |title: &str, key: &dyn Fn(&AiSpend) -> String| {
+        let mut sums: BTreeMap<String, (f64, f64, Option<f64>, bool)> = BTreeMap::new();
+        for s in &spent {
+            let e = sums.entry(key(s)).or_insert((0.0, 0.0, None, true));
+            e.0 += s.input;
+            e.1 += s.output;
+            if let Some(d) = s.dollars {
+                e.2 = Some(e.2.unwrap_or(0.0) + d);
+            }
+            e.3 &= s.on_devices;
+        }
+        let mut rows: Vec<(String, (f64, f64, Option<f64>, bool))> = sums.into_iter().collect();
+        rows.sort_by(|a, b| b.1.2.unwrap_or(0.0).total_cmp(&a.1.2.unwrap_or(0.0)));
+        let width = rows.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|(k, (i, o, d, devices))| {
+                let cost = match (d, devices) {
+                    (_, true) => "on your devices".to_string(),
+                    (Some(d), _) => format!("${d:.2}"),
+                    (None, _) => "no price known".to_string(),
+                };
+                format!("    {k:<width$}  {cost}  ({} in, {} out)", tokens(*i), tokens(*o))
+            })
+            .collect();
+        format!("  {title}\n{}", lines.join("\n"))
+    };
+    let parts = [
+        group("by app", &|s| s.app.clone()),
+        group("by model", &|s| s.model.clone()),
+        group("by user", &|s| if s.user.is_empty() { "(none)".to_string() } else { name(&s.user) }),
+    ];
+    Some(format!("AI, at list prices when each call was made ({range}; free allowances, like Workers AI's daily neurons, not taken off):\n{}", parts.join("\n")))
+}

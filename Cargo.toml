@@ -32,6 +32,10 @@ anyhow = "1"
 # AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes and tools' specs, every build; what a node does for it, only a node's.
 ai-gateway = { path = "ai-gateway" }
 ai-gateway-runtime = { path = "ai-gateway/runtime", optional = true }
+# What AI Gateway's calls cost, priced when Insights is read (src/insights/cost.rs): Pydantic's table of every AI company's
+# list prices by date and tier, kept current from the companies' own pages, embedded at its release (`cargo update -p
+# genai-prices` takes newer prices). Builds for WebAssembly too.
+genai-prices = "0.2.3"
 # Backups encrypt what leaves for a place with AES-256-GCM, and seal each scope's key to the recovery key with X25519
 # (src/backups.rs).
 aes-gcm = "0.10"
