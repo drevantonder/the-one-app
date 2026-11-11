@@ -33,6 +33,8 @@ const ROOT: &str = "root";
 const WELCOME: &str = "welcome";
 const NEEDS: &str = "needs.json";
 const WHO: &str = "who.json";
+/// The relay's count of writes to `global` as it read who's who (`read_if_moved`).
+const WRITES: &str = "writes";
 
 /// Where a device keeps what outlives one run of it, by name: the network's root, pinned the first time it reads it
 /// (`root`); where the device that let it in had read to (`welcome`), until it's read from there; who's who as it last
@@ -245,6 +247,21 @@ impl<O: Opens> Keyring<O> {
     }
 
 
+    /// Who's who as it last read it, if the relay's count of writes to `global` (`writes`, as its computes say) is still
+    /// what it was then: else read from the bucket, keeping that count. As nodes go by it (`one::node`): only a hint, as
+    /// the bucket is the truth, so with none it reads.
+    pub async fn read_if_moved(&self, on: &(impl Address + Keep), writes: Option<u64>) -> Result<(), Error> {
+        let kept = on.get(WRITES).await.and_then(|b| String::from_utf8(b).ok()?.trim().parse::<u64>().ok());
+        if writes.is_some() && kept == writes && self.restore(on).await {
+            return Ok(());
+        }
+        self.read(on).await?;
+        if let Some(writes) = writes {
+            let _ = on.put(WRITES, writes.to_string().as_bytes()).await;
+        }
+        Ok(())
+    }
+
     /// Reads who's who again if a node said of `nodes` one it doesn't know, the first time one's said: one who's who
     /// still doesn't list after that isn't one to ask.
     pub async fn reread_for(&self, on: &(impl Address + Keep), nodes: &[[u8; 32]]) {
@@ -341,7 +358,7 @@ impl<O: Opens> Keyring<O> {
         *self.needs.lock().unwrap() = Some(BTreeMap::new());
         self.epochs.lock().unwrap().clear();
         self.app_keys.lock().unwrap().clear();
-        for kept in [NEEDS, ROOT, WELCOME, WHO] {
+        for kept in [NEEDS, ROOT, WELCOME, WHO, WRITES] {
             on.delete(kept).await;
         }
     }

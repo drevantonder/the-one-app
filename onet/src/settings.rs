@@ -186,7 +186,7 @@ impl<O: Opens> Keyring<O> {
     /// again, and signed again for the one after, while another device's goes first. For the recovery key's steps, which
     /// no node takes from a device as its user's (`POST /api/steps`), and on a computer, the device's own steps its app
     /// runtime asks it to write (`one::node::Holder`), as the runtime signs nothing as the device.
-    pub(crate) async fn write_to_bucket(&self, on: &(impl Address + Keep), by: &impl Signs, user: &str, content: Content) -> Result<(), Error> {
+    pub(crate) async fn write_to_bucket(&self, on: &(impl Address + Keep + Signs), by: &impl Signs, user: &str, content: Content) -> Result<(), Error> {
         use one::database::{steps, stored};
         for _ in 0..50 {
             self.read(on).await?;
@@ -196,6 +196,7 @@ impl<O: Opens> Keyring<O> {
             let name = stored::step_name(&steps::prefix("global"), at + 1);
             let sealed = steps::seal(&keys, &name, &steps::encode(&step, None)).map_err(unsent)?;
             if stored::created(on.bucket(), &name, &sealed).await.map_err(|e| unsent(format!("{e:#}")))? {
+                moved(on).await;
                 return self.read(on).await;
             }
         }
@@ -244,4 +245,14 @@ impl<O: Opens> Keyring<O> {
         }
         Ok(())
     }
+}
+
+/// Tells the relay, signed by the device, that it wrote to `global`, as a node does after each write (`moved`), for
+/// devices that read who's who again only once that count moves. Only a hint: one it doesn't take changes nothing.
+async fn moved(on: &(impl Address + Signs)) {
+    if on.address().is_empty() {
+        return;
+    }
+    let Ok(told) = keys::signed_request_by(on, one::protocol::RELAY, json!({ "moved": ["global"] }), keys::next_at(now())).await else { return };
+    let _ = on.ask("POST", &format!("{}/relay/tell", on.address()), None, Some(told)).await;
 }

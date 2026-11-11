@@ -247,8 +247,8 @@ impl Device {
             Stage::Off { .. } => {}
         }
         // The relay says who's on its network: until it lets this device in, nothing else will.
-        let Some((relayed, online)) = self.computes().await? else { return Ok(false) };
-        match self.keyring.read(self).await {
+        let Some((relayed, online, writes)) = self.computes().await? else { return Ok(false) };
+        match self.keyring.read_if_moved(self, writes).await {
             Ok(()) => {}
             // Not sealed global's keys yet: its approval is still being written.
             Err(_) if relayed.is_empty() => return Ok(false),
@@ -308,8 +308,8 @@ impl Device {
     }
 
     /// Whether the relay lets this device in: → the compute endpoints on its network, which it says are there, not
-    /// what they may do; and those on it now.
-    async fn computes(&self) -> Result<Option<(Vec<[u8; 32]>, Vec<[u8; 32]>)>, Error> {
+    /// what they may do; those on it now; and its count of writes to `global`, if it said.
+    async fn computes(&self) -> Result<Option<(Vec<[u8; 32]>, Vec<[u8; 32]>, Option<u64>)>, Error> {
         let (status, out) = self.relay_computes(json!({ "computes": true, "reads": one::database::READS, "version": one::protocol::version() })).await?;
         // The relay answers 403 only for a key it doesn't let in.
         if status == 403 {
@@ -319,7 +319,7 @@ impl Device {
             return Err(failed(error(&out).unwrap_or_else(|| format!("{YOURS} answered {status}."))));
         }
         let keys = |v: &Value| v.as_array().into_iter().flatten().filter_map(|c| keys::unhex(c.as_str().unwrap_or("")).ok()).collect::<Vec<_>>();
-        Ok(Some((keys(&out["computes"]), keys(&out["online"]))))
+        Ok(Some((keys(&out["computes"]), keys(&out["online"]), out["moved"]["global"].as_u64())))
     }
 
     /// `asked` of the relay's `/relay/computes`, signed by this device: → its status and answer.
@@ -558,7 +558,7 @@ impl Address for Device {
     async fn let_in(&self) -> bool {
         match self.computes().await {
             Ok(None) => false,
-            Ok(Some((_, online))) => {
+            Ok(Some((_, online, _))) => {
                 if let Some(client) = self.client().await {
                     let _ = client.set_online(&online);
                 }
