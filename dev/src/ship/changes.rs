@@ -114,7 +114,7 @@ impl Parts {
                 Some("relay") if file.starts_with("relay/protos/") || file == "relay/build.sh" => {}
                 // What every Worker answers HTTP with, which the Cloudflare node carries too.
                 Some("gateway") if file == "gateway/http.js" => (parts.node, parts.workers) = (true, true),
-                Some("relay" | "auth" | "gateway") => parts.workers = true,
+                Some("relay" | "auth" | "gateway" | "url-signer") => parts.workers = true,
                 // The Cloudflare node is Rust, built with the node; the remote MCP server runs that build, so the Workers
                 // go out with it.
                 Some("cloudflare") if file.starts_with("cloudflare/node/") => (parts.node, parts.workers) = (true, true),

@@ -805,7 +805,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
     }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut files = Vec::new();
-    for dir in ["cloudflare", "auth", "gateway", "src/screen", "onet/src", "client/native/src", "apps"] {
+    for dir in ["cloudflare", "auth", "gateway", "url-signer", "src/screen", "onet/src", "client/native/src", "apps"] {
         let mut stack = vec![root.join(dir)];
         while let Some(dir) = stack.pop() {
             let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();

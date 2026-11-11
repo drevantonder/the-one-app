@@ -1,5 +1,5 @@
 //! The network's bucket as a device reaches it holding no credentials: each request goes to a URL the URL signer
-//! (`cloudflare/signer`) presigned, asked at the network's address with a request signed by the device's own key
+//! (`url-signer/`) presigned, asked at the network's address with a request signed by the device's own key
 //! (`keys::signed_request`, `one/urls`). URLs are kept until a minute before they stop working, and reading or
 //! creating a database's step asks for the next positions too, and the signatures beside them, so a device catching up
 //! or writing on asks once.

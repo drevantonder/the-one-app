@@ -215,7 +215,7 @@ mod tests {
         let want = [bucket::names::step_name(log, 1), bucket::names::step_name(log, 2), bucket::names::copy_name(log, 2), bucket::names::newest_name(log), bucket::names::step_name(db, 1), bucket::names::sig_name(db, 1), "user:a/blobs/abc".to_string(), "network".to_string()];
         let whole = names.iter().filter(|n| n.starts_with(&format!("{old}/")));
         assert_eq!(moved.iter().collect::<std::collections::BTreeSet<_>>(), want.iter().chain(whole).collect(), "and a database whose older steps were deleted, whole");
-        // As the URL signer creates them (`cloudflare/signer/worker.js`'s `after`), one after another in that order.
+        // As the URL signer creates them (`url-signer/worker.js`'s `after`), one after another in that order.
         let mut there = std::collections::BTreeSet::new();
         for name in &moved {
             let due = match (name.rsplit_once("/copy/"), bucket::names::position(name).filter(|(p, at)| bucket::names::step_name(p, *at) == *name)) {
