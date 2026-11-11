@@ -100,6 +100,8 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
         }
     }
     names.extend(released.iter().cloned());
+    // The app runtime's program is `<cli>-apps` and its build is released beside the services', but oned keeps it itself.
+    names.remove(::scope::scopes::APPS_PART);
     names
 }
 
