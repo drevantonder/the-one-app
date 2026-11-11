@@ -1,0 +1,17 @@
+# Groups, as every build has it, WebAssembly too: its tools' specs and its commands. What serves its tools is the
+# runtime's (runtime/).
+[package]
+name = "groups"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+api = { path = "../api" }
+custom-build = { path = "../custom-build" }
+anyhow = "1"
+serde_json = "1"

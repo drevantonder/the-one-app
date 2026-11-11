@@ -1,0 +1,19 @@
+# What the app runtime does for Groups: says who's in the network and its groups from who's who, and changes a handle as
+# this device, through `api::AppRuntime`.
+[package]
+name = "groups-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+groups = { path = ".." }
+api = { path = "../../api" }
+scope = { path = "../../scope" }
+custom-build = { path = "../../custom-build" }
+anyhow = "1"
+serde_json = "1"

@@ -21,7 +21,7 @@ fn commands() -> Vec<Command> {
         // First: it must run with nothing else of this program working.
         one::update::cli::commands(),
         network::commands(),
-        one::groups::cli::commands(),
+        groups::cli::commands(),
         one::backups::cli::commands(),
         one::devices::cli::commands(),
         apps::cli::commands(),

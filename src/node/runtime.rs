@@ -14,7 +14,7 @@ pub fn features() -> Vec<Runs> {
         crate::app::tools::remove_runs(),
         vault_runtime::runs(),
         crate::backups::tools::runs(),
-        crate::groups::tools::runs(),
+        groups_runtime::runs(),
         crate::devices::tools::runs(),
         crate::widgets::tools::runs(),
         crate::push::tools::runs(),
