@@ -39,7 +39,7 @@ pub fn erasing(rt: &Rt) -> bool {
 /// folder and data, WhatsApp's link among them), then stops. Removing it next takes it out. → what's erasing.
 pub async fn erase(rt: &Rt, caller: &Caller, device: &str) -> Result<Value> {
     let key = rt.read(|r| r.db().find_machine(device))?;
-    let name = rt.read(|r| Ok(r.db().machine(&key)?.map(|d| d.name).unwrap_or_default()))?;
+    let name = rt.read(|r| r.db().machine(&key)?.map(|d| r.db().device_name(&d)).transpose())?.unwrap_or_default();
     let me = rt.id();
     if key != me {
         ensure!(rt.reaches(&key).await, "{}, so it can't erase what it keeps. Turn it on and try again.", rt.away(&key));

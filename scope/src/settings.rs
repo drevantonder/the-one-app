@@ -611,7 +611,7 @@ async fn vault_grant(m: &impl Me, body: crate::settings::body::VaultGrant) -> Re
         allowed!(who.may(&user, "choose-devices", &scopes::object(&scope)), "Only this Vault's user, or its admins, say which machines open it.");
         let endpoint = who.find_node(&body.device)?;
         let current = who.vault(&scope)?.unwrap_or_default();
-        Ok((scope, endpoint, who.machine(&endpoint)?.map(|d| d.name).unwrap_or_default(), current))
+        Ok((scope, endpoint, who.machine(&endpoint)?.map(|d| who.device_name(&d)).transpose()?.unwrap_or_default(), current))
     })?;
     let mut to: Vec<[u8; 32]> = current.to.into_iter().filter(|k| *k != endpoint).collect();
     if body.on {
@@ -875,7 +875,7 @@ async fn update_device(m: &impl Me, device: &str) -> Result<Value> {
     let (key, name) = m.who(|who| {
         let key = who.find_node(device)?;
         allowed!(who.may(&user, "remove", &scopes::device(&key)), "Only its user or an admin updates a device.");
-        Ok((key, who.machine(&key)?.map(|d| d.name).unwrap_or_default()))
+        Ok((key, who.machine(&key)?.map(|d| who.device_name(&d)).transpose()?.unwrap_or_default()))
     })?;
     tell(m, m, json!({ "update": hex(&key) })).await?;
     Ok(json!({ "said": format!("Asked {name} to update.") }))
@@ -1522,7 +1522,7 @@ async fn app_schedules_asked(m: &impl Me, app: String, device: &str, scope: Opti
         let endpoint = who.find_node(device)?;
         let scope = Scope::parse_for(given, &user).or_else(|_| who.find_group(given).map(Scope::Group))?;
         ensure!(who.app(&app)?.is_some(), "no app called {app}");
-        Ok((endpoint, scope, who.machine(&endpoint)?.map(|d| d.name).unwrap_or_default()))
+        Ok((endpoint, scope, who.machine(&endpoint)?.map(|d| who.device_name(&d)).transpose()?.unwrap_or_default()))
     })?;
     let until = set_app_schedules(m, &endpoint, &app, &scope, days).await?;
     Ok(match until {
