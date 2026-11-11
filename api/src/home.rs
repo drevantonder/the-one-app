@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 use key::{SigningKey, hex, unhex};
+use bucket::Place;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -130,4 +131,20 @@ impl NetworkFile {
         std::fs::create_dir_all(&dir)?;
         write_private(&dir.join(NETWORK_FILE), &serde_json::to_vec_pretty(self)?)
     }
+}
+
+/// The object in a network's bucket that says whose it is: the network's root.
+pub const NETWORK_OBJECT: &str = "network";
+
+/// Whose the bucket at `place` is, as its `NETWORK_OBJECT` says: or as `install` says, the name a build from before it
+/// was called a network gave it (a bucket then, or a backup of one put back), which it puts under the new name too.
+pub fn bucket_root(place: &Place) -> Result<Option<Vec<u8>>> {
+    if let Some(root) = place.get(NETWORK_OBJECT)? {
+        return Ok(Some(root));
+    }
+    let old = place.get("install")?;
+    if let Some(root) = &old {
+        place.create(NETWORK_OBJECT, root)?;
+    }
+    Ok(old)
 }

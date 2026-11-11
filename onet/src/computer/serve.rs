@@ -106,7 +106,7 @@ async fn body<T: serde::de::DeserializeOwned>(req: Request) -> Result<T> {
 async fn join(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     let asked: api_features::says::api::Join = body(req).await?;
     anyhow::ensure!(NetworkFile::read(&onet.home)?.is_none(), "this computer is in a network already");
-    let joined = app_runtime::join_with(&onet.key, &onet.name, &asked.code).await?;
+    let joined = ::onboarding::join::join_with(&onet.key, &onet.name, &asked.code).await?;
     joined.network.write(&onet.home)?;
     // Its app runtime, started before there was a network, opens it now; one started later opens it as it starts.
     if let Some(runtime) = &onet.runtime {

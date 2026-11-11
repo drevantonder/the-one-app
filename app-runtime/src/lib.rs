@@ -53,7 +53,6 @@ pub(crate) mod releases;
 pub(crate) mod screens;
 mod sessions;
 use ::api::runtime::NotGiven;
-pub use net::{Endpoints, alpn, relay};
 pub use calls::Grant;
 use calls::{Granted, Reply};
 use ::deploy::build::built_in_bundle;
@@ -78,8 +77,6 @@ use ::api::{Caller, Credential};
 pub use holds::Holder;
 use exclusive::*;
 use ::api::home::*;
-use network::*;
-pub use pairing::{Joined, join_with};
 
 /// The folder in a node's home its app runtime's workerd keeps its files in.
 const RUNTIME_DIR: &str = "runtime";

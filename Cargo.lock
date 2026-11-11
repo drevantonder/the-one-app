@@ -120,6 +120,7 @@ dependencies = [
  "database",
  "ed25519-dalek 3.0.0",
  "futures-util",
+ "iroh",
  "jiff",
  "key",
  "platform",
@@ -3351,12 +3352,19 @@ name = "onboarding"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api",
+ "bucket",
  "ciborium",
  "custom-build",
  "data-encoding",
+ "iroh",
  "key",
  "platform",
  "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3649,7 +3657,6 @@ dependencies = [
  "anyhow",
  "api",
  "api-features",
- "app-runtime",
  "axum",
  "blake3",
  "bucket",
@@ -3672,6 +3679,7 @@ dependencies = [
  "n0-watcher",
  "noq-udp",
  "notifications",
+ "onboarding",
  "oned-update",
  "platform",
  "rand 0.8.8",

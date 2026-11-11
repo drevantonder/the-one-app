@@ -3,22 +3,6 @@
 
 use super::*;
 
-/// The object in a network's bucket that says whose it is: the network's root.
-pub(super) const NETWORK_OBJECT: &str = "network";
-
-/// Whose the bucket at `place` is, as its `NETWORK_OBJECT` says: or as `install` says, the name a build from before it
-/// was called a network gave it (a bucket then, or a backup of one put back), which it puts under the new name too.
-pub(super) fn bucket_root(place: &Place) -> Result<Option<Vec<u8>>> {
-    if let Some(root) = place.get(NETWORK_OBJECT)? {
-        return Ok(Some(root));
-    }
-    let old = place.get("install")?;
-    if let Some(root) = &old {
-        place.create(NETWORK_OBJECT, root)?;
-    }
-    Ok(old)
-}
-
 impl Host {
     pub(super) fn network_dir(&self) -> PathBuf {
         self.0.dir.join(NETWORK_DIR)

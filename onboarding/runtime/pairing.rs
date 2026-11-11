@@ -11,36 +11,6 @@ fn used() -> anyhow::Error {
     Coded::error(code::PAIRING_USED, "this pairing code was already used or has expired")
 }
 
-/// A computer that joined with a pairing code: the network's address, and the network as its home keeps it.
-pub struct Joined {
-    pub address: String,
-    pub network: NetworkFile,
-}
-
-/// Asks the device that made a pairing code, `code`, to let in the computer whose key is `key`, called `name`, over the
-/// relay at the network's address the code names, showing it the code's ticket: → the network, once it's let in.
-pub async fn join_with(key: &SigningKey, name: &str, code: &str) -> Result<Joined> {
-    let code = PairingCode::parse(code)?;
-    let request = JoinRequest { secret: code.secret, name: name.to_string(), as_: "device".into() };
-    let reply = net::ask_to_join(key, &code.address, &net::pairing_ticket(&code.secret), code.from, serde_json::to_value(&request)?).await.map_err(|err| Coded::error(code::UNREACHABLE, format!("couldn't reach the device that made the pairing code: {err:#}")))?;
-    if let Some(err) = reply.get("error") {
-        return Err(Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("the pairing code was refused")));
-    }
-    let reply: JoinReply = serde_json::from_value(reply)?;
-    // A folder on another machine isn't here: it's this network's bucket only if it says so. S3 is reached through
-    // the URL signer, which this device can ask once it knows the network's address.
-    let here = |f: &BTreeMap<String, String>| Place::from_fields(f).ok().and_then(|p| bucket_root(&p).ok().flatten()).is_some_and(|r| r == reply.root.as_bytes());
-    let mut bucket = reply.bucket.filter(|f| f.contains_key("endpoint") || here(f));
-    // Its address is in the log, read from the bucket through it: until then, it's the one the code names.
-    if let Some(f) = bucket.as_mut().filter(|f| f.contains_key("endpoint")) {
-        f.insert("address".into(), code.address.clone());
-    }
-    if bucket.is_none() {
-        tracing::warn!("this device can't reach the network's bucket: it keeps no app's data until the network moves to S3-compatible storage");
-    }
-    Ok(Joined { address: code.address, network: NetworkFile { root: reply.root, user: reply.user, bucket } })
-}
-
 /// Whether `who` may list a device of `user`'s that does `kinds`, as `rules` counts a `device` step: only of someone in
 /// the network now (one removed, or not in it yet, is added with their first device, by an invite's approval); a
 /// client or a service only from their own devices (`add-devices`), a machine that runs calls also by an admin
@@ -76,7 +46,7 @@ impl Host {
         self.add_pairing(secret, Pairing { user: asker.user.clone(), by, admits: user, until: now_ms() + PAIRING_LIFE, tried: None })?;
         // Told with the key the code names, which answers the computer joining with it: the relay lets that computer
         // reach only the key that told it of the code.
-        let (host, fields) = (self.clone(), json!({ "pairing": { "hash": net::ticket_hash(&net::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE } }));
+        let (host, fields) = (self.clone(), json!({ "pairing": { "hash": ::onboarding::join::ticket_hash(&::onboarding::join::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE } }));
         tokio::spawn(async move {
             if let Err(err) = scope::settings::tell(&host, &host.0.key, fields).await {
                 tracing::warn!("telling {YOURS}'s relay of a pairing code: {err:#}");
@@ -111,7 +81,7 @@ impl Host {
     /// Joins the network a pairing code is from → that network's address.
     pub async fn join(&self, code: &str) -> Result<String> {
         self.ensure_no_network()?;
-        let joined = join_with(&self.0.key, &self.device_name(), code).await?;
+        let joined = ::onboarding::join::join_with(&self.0.key, &self.device_name(), code).await?;
         self.save_network(&joined.network)?;
         self.joined()?;
         Ok(joined.address)

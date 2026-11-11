@@ -6,13 +6,13 @@
 
 use ::custom_build::config::YOURS;
 use ::custom_build::protocol::message as M;
-use iroh::endpoint::{Connection, QuicTransportConfig, presets};
-use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey};
+use iroh::endpoint::{Connection, QuicTransportConfig};
+use iroh::{Endpoint, EndpointAddr, PublicKey, RelayMode, SecretKey};
 
 use ::api::runtime::NotThere;
+use ::api::net::{CONNECT, Endpoints, MESSAGE_LIMIT, alpn, relay};
 use super::*;
 
-const CONNECT: Duration = Duration::from_secs(10);
 /// How long a device that isn't on the relay and hasn't talked with this one lately (`Network::reachable`) is waited
 /// for: it may have just started, but mostly it's off, and a call shouldn't wait out `CONNECT` for it.
 const UNSEEN_CONNECT: Duration = Duration::from_secs(3);
@@ -26,8 +26,6 @@ const CHANGED_WAIT: Duration = Duration::from_millis(500);
 /// it didn't, and its answer follows.
 const TAKEN: u8 = 1;
 const NOT_TAKEN: u8 = 0;
-/// The most an ask or its answer may carry: an email of a claim's receipts, base64, fits.
-const MESSAGE_LIMIT: usize = 64 << 20;
 /// The most a computer that isn't the network's yet may send: one ask to join.
 const JOIN_LIMIT: usize = 4 << 10;
 /// How many streams another device may have open on a connection at once.
@@ -100,41 +98,9 @@ impl Drop for Held {
     }
 }
 
-
-/// What devices of this custom build speak: another's never meet them.
-pub fn alpn() -> Vec<u8> {
-    format!("{}/1", ::custom_build::config::CLI).into_bytes()
-}
-
 /// What client devices of this custom build speak to a node: HTTP/1.1, one request on each stream, to its local API.
 fn http_alpn() -> Vec<u8> {
     format!("{}/http/1", ::custom_build::config::CLI).into_bytes()
-}
-
-
-/// iroh's minimal endpoint without its captive portal check, a request to the relay's address on each full net report
-/// that tells a device nothing it acts on. Every endpoint of a node and its services binds with it; onet's own is the
-/// same (onet/src/lib.rs, `Endpoints`).
-pub struct Endpoints;
-
-impl presets::Preset for Endpoints {
-    fn apply(self, builder: iroh::endpoint::Builder) -> iroh::endpoint::Builder {
-        let mut report = iroh::NetReportConfig::default();
-        report.captive_portal_check = false;
-        presets::Minimal.apply(builder).net_report_config(report)
-    }
-}
-
-/// The relay at the network's address, which serves no QUIC address discovery, a Worker having no UDP; with `ticket`,
-/// a pairing code's, which lets a computer joining in.
-pub fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)> {
-    let url: RelayUrl = address.trim_end_matches('/').parse().context("the network's address isn't a URL")?;
-    let mut config = RelayConfig::from(url.clone());
-    config.quic = None;
-    if let Some(ticket) = ticket {
-        config = config.with_auth_token(ticket);
-    }
-    Ok((url, config.into()))
 }
 
 impl Host {
@@ -944,48 +910,6 @@ impl Host {
             }
         });
     }
-}
-
-/// Asks the device `to`, which made a pairing code, to let in the computer whose key is `key` (`join`), through the relay
-/// at `address`, which lets it in for the code's `ticket`: → its answer. The device that made it may not have told the
-/// relay of it yet: it's tried for a few seconds.
-pub(super) async fn ask_to_join(key: &SigningKey, address: &str, ticket: &str, to: Key, join: Value) -> Result<Value> {
-    let (url, map) = relay(address, Some(ticket))?;
-    let endpoint = Endpoint::builder(Endpoints).secret_key(SecretKey::from_bytes(key.as_bytes())).relay_mode(RelayMode::Custom(map)).bind().await?;
-    let addr = EndpointAddr::new(PublicKey::from_bytes(&to)?).with_relay_url(url);
-    let mut tried = 0;
-    let conn = loop {
-        match tokio::time::timeout(CONNECT, endpoint.connect(addr.clone(), &alpn())).await {
-            Ok(Ok(conn)) => break conn,
-            _ if tried < 3 => tried += 1,
-            Ok(Err(err)) => bail!("the device that made the pairing code couldn't be reached: {err:#}"),
-            Err(_) => bail!("the device that made the pairing code isn't on"),
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    };
-    let answer = async {
-        let (mut send, mut recv) = conn.open_bi().await?;
-        send.write_all(json!({ "kind": M::ASK, "body": { "join": join } }).to_string().as_bytes()).await?;
-        send.finish()?;
-        let answer = tokio::time::timeout(Duration::from_secs(30), recv.read_to_end(MESSAGE_LIMIT)).await.context("the device that made the pairing code didn't answer")??;
-        anyhow::Ok(serde_json::from_slice(&answer)?)
-    }
-    .await;
-    conn.close(0u32.into(), b"joined");
-    endpoint.close().await;
-    answer
-}
-
-/// What a computer joining shows the relay for a pairing code's `secret`: not the secret, which admits it.
-pub(super) fn pairing_ticket(secret: &[u8; 16]) -> String {
-    use sha2::Digest;
-    data_encoding::HEXLOWER.encode(&sha2::Sha256::new().chain_update(b"relay pairing:").chain_update(secret).finalize())
-}
-
-/// What a device that made a pairing code tells the relay of it: the hash of its ticket.
-pub(super) fn ticket_hash(ticket: &str) -> String {
-    use sha2::Digest;
-    data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(ticket.as_bytes()))
 }
 
 /// A stream a client device opened, as one connection to the local API.

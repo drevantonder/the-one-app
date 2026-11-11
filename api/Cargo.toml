@@ -29,6 +29,8 @@ tracing = "0.1"
 
 # Serving and asking a device's API, and the runtime's interface: only a machine's.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+# What a machine's endpoint is made with (`net`), as the app runtime's (app-runtime/src/net.rs): pinned with it.
+iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring"] }
 # The runtime's interface names the bucket's place (`runtime::Databases::bucket`).
 bucket = { path = "../bucket", features = ["machine"] }
 # Telling git on this machine to reach the network's apps through this program (`git_wire`), which a throwaway network's

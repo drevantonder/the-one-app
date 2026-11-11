@@ -4,6 +4,8 @@
 //! `sign_in_proof`, which a user's devices check a sign-in with), waiting to be let in, and starting (a pairing code and
 //! admitting the machine that joins with it: its shapes are here, what serves them the app runtime's, `runtime/pairing.rs`).
 
+#[cfg(not(target_family = "wasm"))]
+pub mod join;
 mod pairing;
 
 pub use pairing::{JoinReply, JoinRequest, Pairing, PairingCode, pairings};
