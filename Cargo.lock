@@ -179,6 +179,7 @@ dependencies = [
  "notifications",
  "notifications-runtime",
  "onboarding",
+ "onboarding-runtime",
  "oned-update",
  "onet",
  "platform",
@@ -3360,6 +3361,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "onboarding-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "custom-build",
+ "data-encoding",
+ "key",
+ "onboarding",
+ "rand 0.8.8",
+ "scope",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3457,6 +3475,7 @@ dependencies = [
  "mcp",
  "notifications",
  "onboarding",
+ "onboarding-runtime",
  "oned",
  "oned-cloudflare",
  "oned-update",

@@ -116,6 +116,9 @@ pub trait Databases: Send + Sync {
     fn blob<'a>(&'a self, hash: &'a str) -> Fut<'a, Vec<u8>>;
     /// The network's bucket, as a place: where everything is kept, which a feature that copies it reads.
     fn bucket(&self) -> Result<bucket::Place>;
+    /// Where the network's bucket is, as this device keeps it (`api::home::NetworkFile`'s `bucket`): what a device it
+    /// admits starts from. None for a folder of its own.
+    fn bucket_fields(&self) -> Option<BTreeMap<String, String>>;
     /// Keeps `bytes` as a blob `caller` put, which they may then read back: → its hash.
     fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String>;
     /// Whether `caller` may read the blob `hash`: this machine's own programs, whoever put it, or someone a scope they
@@ -175,6 +178,10 @@ pub trait Holds: Send + Sync {
     /// The app schedules in force for this device to run `app`'s schedules in `scope`, their keys opened: → until when
     /// they last. Fails when this device doesn't run them.
     fn app_schedules_keys<'a>(&'a self, scope: &'a Scope, app: &'a str) -> Fut<'a, u64>;
+    /// Tells the relay something (`scope::settings::tell`), signed by its device, or by this runtime's own key.
+    fn tell_relay(&self, fields: Value, by_device: bool) -> Fut<'_, ()>;
+    /// Asks the network's auth something as its device (`scope::settings::ask_auth`).
+    fn ask_auth<'a>(&'a self, method: &'a str, path: &'a str, fields: Value) -> Fut<'a, Value>;
 }
 
 /// The apps it runs.

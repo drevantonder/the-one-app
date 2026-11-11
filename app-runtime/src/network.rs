@@ -1,9 +1,35 @@
-//! This device's network as its home keeps it: whose it is and its bucket (found by the object at its root); and making
-//! a network.
+//! This device's network as its home keeps it: whose it is and its bucket (found by the object at its root); making
+//! a network, and joining one with a pairing code (`onboarding_runtime` makes the code and admits who comes with it).
 
 use super::*;
 
 impl Host {
+    /// Joins the network a pairing code is from → that network's address.
+    pub async fn join(&self, code: &str) -> Result<String> {
+        self.ensure_no_network()?;
+        let joined = ::onboarding::join::join_with(&self.0.key, &self.device_name(), code).await?;
+        self.save_network(&joined.network)?;
+        self.joined()?;
+        Ok(joined.address)
+    }
+
+    /// Opens the network its home names now that it's joined it: by itself (`join`), or on a computer, where its onet
+    /// joins as the device, as the app runtime asked by it (`/api/joined`). Open already, it's nothing.
+    pub fn joined(&self) -> Result<()> {
+        if self.has_network() {
+            return Ok(());
+        }
+        self.open_network()?;
+        let host = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = host.read_scopes(None).await {
+                tracing::debug!("reading the bucket after joining: {err:#}");
+            }
+        });
+        self.emit(Event::Network);
+        Ok(())
+    }
+
     pub(super) fn network_dir(&self) -> PathBuf {
         self.0.dir.join(NETWORK_DIR)
     }
@@ -59,7 +85,7 @@ impl Host {
         // anything is sealed under it.
         let root = Hash::from_bytes(rand::random());
         let global: [u8; 32] = rand::random();
-        let start = content::first(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes(), &key::epoch_hash(&global));
+        let start = content::first(name.trim(), &user, user_name.trim(), &me, &self.device_name(), onboarding_runtime::MACHINE, recovery.verifying_key().as_bytes(), &key::epoch_hash(&global));
         // Until it's moved to S3-compatible storage, the network's bucket is a folder here.
         let bucket: BTreeMap<String, String> = [("path".to_string(), self.network_dir().join("bucket").display().to_string())].into();
         Place::from_fields(&bucket)?.create(NETWORK_OBJECT, root.to_hex().as_bytes())?;

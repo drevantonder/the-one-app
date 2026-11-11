@@ -462,7 +462,7 @@ impl Host {
     async fn take_joining(&self, conn: Connection) {
         use std::sync::atomic::Ordering::SeqCst;
         let remote = *conn.remote_id().as_bytes();
-        let pairing = self.0.pairings.lock().unwrap().values().any(|p| p.until > now_ms());
+        let pairing = onboarding_runtime::waiting(&self.rt());
         if !pairing || self.0.net.joining.fetch_add(1, SeqCst) >= JOINING {
             if pairing {
                 self.0.net.joining.fetch_sub(1, SeqCst);
@@ -494,7 +494,7 @@ impl Host {
     /// Admits a computer joining with a pairing code: → its reply, or why not.
     async fn joining(&self, remote: Key, join: &Value) -> Value {
         let joined = match serde_json::from_value(join.clone()) {
-            Ok(request) => self.admit(remote, request).await.and_then(|r| Ok(serde_json::to_value(r)?)),
+            Ok(request) => onboarding_runtime::admit(&self.rt(), remote, request).await.and_then(|r| Ok(serde_json::to_value(r)?)),
             Err(err) => Err(err.into()),
         };
         joined.unwrap_or_else(|err| json!({ "error": format!("{err:#}"), "code": ::custom_build::protocol::Coded::of(&err) }))

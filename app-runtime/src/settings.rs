@@ -1,4 +1,4 @@
-//! A machine with an app runtime as its user's own device (`::scope::settings::Me`), as it's listed (`MACHINE`): what its CLI,
+//! A machine with an app runtime as its user's own device (`::scope::settings::Me`), as it's listed (`onboarding_runtime::MACHINE`): what its CLI,
 //! MCP and Mac app change of who can do what is signed by it, with the one copy every client runs; and on an admin's,
 //! it lets in those an invite already said yes to, as Settings does while it lists requests.
 
@@ -181,7 +181,7 @@ mod own {
     use crate::Host;
 
     pub async fn pair(State(host): State<Host>, me: Me, Body(body): Body<Pair>) -> Reply {
-        let (code, user) = host.pair_as(&me.caller, body.user.as_deref())?;
+        let (code, user) = onboarding_runtime::pair_as(&host.rt(), &me.caller, body.user.as_deref())?;
         Ok(Json(json!({ "code": code, "user": user })))
     }
 

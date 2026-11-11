@@ -33,8 +33,10 @@ insights-runtime = { path = "../insights/runtime" }
 vault = { path = "../vault" }
 # Labs (labs/): which of the network's labs are on, every build.
 labs = { path = "../labs" }
-# Onboarding (onboarding/): what a pairing code says and what joining with one asks, every build; its screens are the files beside it, and what serves a code the app runtime's (onboarding/runtime/).
+# Onboarding (onboarding/): what a pairing code says and what joining with one asks, every build; its screens are the files beside it.
 onboarding = { path = "../onboarding" }
+# Making a pairing code and admitting the computer that comes with one.
+onboarding-runtime = { path = "../onboarding/runtime" }
 # Device logs (device-logs/): what a device's programs and services print, kept and read, every build; what the app runtime does for the tool that reads them, only an app runtime's.
 device-logs = { path = "../device-logs" }
 device-logs-runtime = { path = "../device-logs/runtime" }

@@ -114,7 +114,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let recovery = create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let _relay = relay(&a).await;
-    b.join(&a.pair().unwrap()).await.unwrap();
+    b.join(&onboarding_runtime::pair(&a.rt()).unwrap()).await.unwrap();
     let me = api::Caller::own(a.id(), a.user().unwrap());
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
     vault_runtime::set_item(&a.rt(), &me, &::scope::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
@@ -1027,7 +1027,7 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     add_notes(&k).await;
     let _relay = relay(&k).await;
     let b = start("rt-other").await;
-    b.join(&k.pair().unwrap()).await.unwrap();
+    b.join(&onboarding_runtime::pair(&k.rt()).unwrap()).await.unwrap();
     let me = api::Caller::own(k.id(), k.user().unwrap());
 
     // The device's own key, held on its loopback, where its own programs ask with the token in its home.
@@ -1100,7 +1100,7 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
     add_notes(&k).await;
     let _relay = relay(&k).await;
     let b = start("onet-other").await;
-    b.join(&k.pair().unwrap()).await.unwrap();
+    b.join(&onboarding_runtime::pair(&k.rt()).unwrap()).await.unwrap();
     let me = api::Caller::own(k.id(), k.user().unwrap());
 
     // The device's home as onet and its runtime share it: its key, network and token; the runtime's key in its folder,

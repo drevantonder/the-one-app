@@ -47,8 +47,6 @@ mod keys;
 mod sync;
 mod net;
 mod versions;
-#[path = "../../onboarding/runtime/pairing.rs"]
-mod pairing;
 pub(crate) mod releases;
 pub(crate) mod screens;
 mod sessions;
@@ -189,8 +187,6 @@ impl Network {
     }
 }
 
-/// What a computer's app runtime is: the device its user's CLI, MCP and Mac app sign with, and compute.
-pub const MACHINE: &[scopes::Kind] = &[scopes::Kind::Client, scopes::Kind::Compute];
 
 thread_local!(static HOLDING: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) });
 
@@ -206,7 +202,6 @@ pub struct Inner {
     name: Mutex<String>,
     apps: Apps,
     network: Exclusive<Option<Network>>,
-    pairings: Mutex<HashMap<[u8; 16], ::onboarding::Pairing>>,
     events: broadcast::Sender<Event>,
     /// Held while writing or replaying, so views replay in order.
     writes: tokio::sync::Mutex<()>,
@@ -368,7 +363,6 @@ impl Host {
             name: Mutex::new(name),
             apps,
             network: Exclusive::new(None),
-            pairings: Mutex::new(::onboarding::pairings(dir)),
             events,
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),

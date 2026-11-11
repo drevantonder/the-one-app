@@ -18,6 +18,7 @@ pub fn features() -> Vec<Runs> {
         app_schedules_runtime::runs(),
         groups_runtime::runs(),
         devices_runtime::runs(),
+        onboarding_runtime::runs(),
         services_runtime::runs(),
         widgets_runtime::runs(),
         notifications_runtime::runs(),
@@ -239,6 +240,10 @@ impl Databases for Host {
         Ok(Host::bucket(self)?.place)
     }
 
+    fn bucket_fields(&self) -> Option<BTreeMap<String, String>> {
+        self.with_or(None, |i| Ok(i.bucket.as_ref().map(|(_, f)| f.clone())))
+    }
+
     fn object<'a>(&'a self, name: &'a str) -> Fut<'a, Option<Vec<u8>>> {
         Box::pin(async move { Ok(::bucket::Bucket::get(&self.bucket()?, name).await?.map(|o| o.bytes)) })
     }
@@ -275,6 +280,19 @@ impl Holds for Host {
 
     fn app_schedules_keys<'a>(&'a self, scope: &'a Scope, app: &'a str) -> Fut<'a, u64> {
         Box::pin(Host::app_schedules_keys(self, scope, app))
+    }
+
+    fn tell_relay(&self, fields: Value, by_device: bool) -> Fut<'_, ()> {
+        Box::pin(async move {
+            match by_device {
+                true => ::scope::settings::tell(self, self, fields).await,
+                false => ::scope::settings::tell(self, &self.0.key, fields).await,
+            }
+        })
+    }
+
+    fn ask_auth<'a>(&'a self, method: &'a str, path: &'a str, fields: Value) -> Fut<'a, Value> {
+        Box::pin(::scope::settings::ask_auth(self, method, path, fields))
     }
 }
 
