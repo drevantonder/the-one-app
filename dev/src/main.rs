@@ -5,7 +5,6 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use api::Client;
 use ::custom_build::config::{CLI, NAME};
 
 mod build;
@@ -26,10 +25,7 @@ pub fn program() -> Result<PathBuf> {
     Ok(if installed.is_file() { installed } else { me.with_file_name("one") })
 }
 
-/// This computer's onet, asked as one of its programs.
-pub fn loopback() -> Client {
-    throwaway::loopback_at(&platform::home(), &api::local::addr())
-}
+pub use throwaway::loopback;
 
 /// What one-dev reads of a network's state (`GET /api/state`), field by field: the program answering may be a build
 /// before or after this one (a throwaway started `--build` on an older one, or this computer before it updates).

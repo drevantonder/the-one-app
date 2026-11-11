@@ -293,12 +293,10 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
         loop {
             let wanted = onet.json::<Wanted>("GET", "/api/services", None).map_err(|err| tracing::debug!("which services are on: {err:#}")).ok();
             if let Some(wanted) = wanted.as_ref().filter(|w| w.erase) {
-                for (name, (child, _)) in std::mem::take(&mut running) {
-                    stop(&name, child);
-                }
+                stop(std::mem::take(&mut running).into_iter().map(|(name, (child, _))| (name, child)).collect());
                 // Held till it exits, so neither is started again meanwhile.
                 let mut kept = kept.lock().unwrap();
-                kept.iter_mut().for_each(Kept::stop);
+                Kept::stop(&mut *kept);
                 if let Err(err) = std::fs::remove_dir_all(&home) {
                     tracing::warn!("erasing {}: {err:#}", home.display());
                 }
@@ -331,7 +329,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                         stops.remove(name);
                         say(name, Now::default());
                         if let Some((child, _)) = running.remove(name) {
-                            stop(name, child);
+                            stop(vec![(name.to_string(), child)]);
                         }
                     }
                     let here = program(name);
@@ -384,7 +382,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                         }
                     }
                     if !named && let Some((child, _)) = running.remove(name) {
-                        stop(name, child);
+                        stop(vec![(name.to_string(), child)]);
                     }
                     // Its app declares what it may reach, looked at with the builds (and while it's unknown): a declaration
                     // that changed starts it again in its sandbox.
@@ -396,7 +394,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                     let resandbox = said.lock().unwrap().held.get(name).is_some_and(|h| h.sandbox.is_some() && ::services::sandbox::unsandboxed(declares.as_ref(), device).is_none());
                     if running.contains_key(name) && (resandbox || started_with.get(name).is_some_and(|d| *d != declares)) && let Some((child, _)) = running.remove(name) {
                         tracing::info!("{name}'s app declares something else of it, or this machine can sandbox it now: oned starts it again");
-                        stop(name, child);
+                        stop(vec![(name.to_string(), child)]);
                     }
                     // Unknown, it waits a while for its app to run here; a build its deploy names never runs without one.
                     let deployed = matches!(released.get(name), Some(Build::Deployed(_)));
@@ -424,7 +422,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                             Err(err) => say(name, Now { doing: None, problem: Some(format!("Couldn’t start it: {err:#}")) }),
                         }
                     } else if !on && let Some((child, _)) = running.remove(name) {
-                        stop(name, child);
+                        stop(vec![(name.to_string(), child)]);
                     }
                     if !on {
                         said.lock().unwrap().held.remove(name);
@@ -510,19 +508,29 @@ fn start(network: &::services::Network, name: &str, declared: Option<&::services
     Ok(command(&[name, &format!("--runtime={runtime}")])?.stdin(std::process::Stdio::piped()).spawn()?)
 }
 
-/// Stops a part: asked, then made to, if it hasn't in ten seconds.
-fn stop(name: &str, mut child: std::process::Child) {
-    platform::os::ask_to_stop(&mut child);
+/// Stops parts, all at once: each asked, then made to, if it hasn't in ten seconds.
+fn stop(mut parts: Vec<(String, std::process::Child)>) {
+    for (_, child) in &mut parts {
+        platform::os::ask_to_stop(child);
+    }
     for _ in 0..100 {
-        if !matches!(child.try_wait(), Ok(None)) {
-            tracing::info!("oned stopped {name}");
+        parts.retain_mut(|(name, child)| {
+            let running = matches!(child.try_wait(), Ok(None));
+            if !running {
+                tracing::info!("oned stopped {name}");
+            }
+            running
+        });
+        if parts.is_empty() {
             return;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    let _ = child.kill();
-    let _ = child.wait();
-    tracing::info!("oned stopped {name}");
+    for (name, mut child) in parts {
+        let _ = child.kill();
+        let _ = child.wait();
+        tracing::info!("oned stopped {name}");
+    }
 }
 
 /// Puts the usual tool folders on PATH: launchd starts the Mac's app runtime with almost none, and the shell, agents and
@@ -627,10 +635,9 @@ impl Kept {
         }
     }
 
-    fn stop(&mut self) {
-        if let Some(child) = self.child.take() {
-            stop(self.what, child);
-        }
+    /// Stops each of `kept` that runs, all at once.
+    fn stop(kept: &mut [Kept]) {
+        stop(kept.iter_mut().filter_map(|k| Some((k.what.to_string(), k.child.take()?))).collect());
     }
 }
 
@@ -689,7 +696,7 @@ async fn serve() -> Result<()> {
         let kept = kept.clone();
         async move {
             stop.await;
-            kept.lock().unwrap().iter_mut().for_each(Kept::stop);
+            Kept::stop(&mut *kept.lock().unwrap());
             std::process::exit(0)
         }
     });

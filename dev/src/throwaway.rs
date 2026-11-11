@@ -24,6 +24,7 @@ mod network;
 mod rebuild;
 pub(crate) mod sign_in;
 
+pub use network::loopback;
 pub(crate) use network::loopback_at;
 use network::{older_build, no_client_running, running, start, stop, stop_some};
 

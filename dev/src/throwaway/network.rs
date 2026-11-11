@@ -261,7 +261,13 @@ pub(crate) fn shares_native_build(dir: &Path, cargo: &mut std::process::Command)
 
 /// The throwaway network's app runtime, asked at `addr` as one of this machine's programs: with the token in its home.
 pub(crate) fn loopback_at(dir: &Path, addr: &str) -> Client {
-    Client::new(Direct { dir: dir.to_path_buf(), addr: addr.to_string() }, false, api::Reader::Cli.client())
+    Client::new(Direct { dir: dir.to_path_buf(), addr: addr.to_string(), again: false }, false, api::Reader::Cli.client())
+}
+
+/// This computer's onet, asked as its other programs ask it: again while it starts again (`api::loopback`), as it does
+/// once an update this program ran has it restart.
+pub fn loopback() -> Client {
+    Client::new(Direct { dir: platform::home(), addr: api::local::addr(), again: true }, false, api::Reader::Cli.client())
 }
 
 /// The throwaway network's app runtime, at the address its folder says.
@@ -272,6 +278,7 @@ pub(crate) fn loopback_in(dir: &Path) -> Result<Client> {
 struct Direct {
     dir: PathBuf,
     addr: String,
+    again: bool,
 }
 
 impl Via for Direct {
@@ -280,15 +287,27 @@ impl Via for Direct {
     }
 
     fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<Duration>) -> Result<Answer> {
-        let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", self.addr));
-        for (name, value) in headers {
-            req = req.header(*name, *value);
-        }
-        if let Some(token) = api::local::local_token(&self.dir) {
-            req = req.header(::custom_build::protocol::header::LOCAL_TOKEN, token);
-        }
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        let resp = agent.run(agent.configure_request(req.body(body.unwrap_or_default())?).timeout_global(wait).build())?;
+        let body = body.unwrap_or_default();
+        let ask = || {
+            let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", self.addr));
+            for (name, value) in headers {
+                req = req.header(*name, *value);
+            }
+            if let Some(token) = api::local::local_token(&self.dir) {
+                req = req.header(::custom_build::protocol::header::LOCAL_TOKEN, token);
+            }
+            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+            agent.run(agent.configure_request(req.body(body.clone())?).timeout_global(wait).build())
+        };
+        let asked = || if self.again { ::api::loopback::while_refused(&ask) } else { ask() };
+        let resp = match asked() {
+            Err(err) if self.again && ::api::loopback::lost(&err) => {
+                let apps = || self.send("GET", ::api::path::APPS, &[], None, None).ok().and_then(|a| serde_json::from_reader(a.body).ok());
+                anyhow::ensure!(::api::loopback::reads(method, path, &body, apps), "{}", ::api::loopback::lost_write());
+                asked()?
+            }
+            resp => resp?,
+        };
         let trace = resp.headers().get(::custom_build::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
         Ok(Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
     }
