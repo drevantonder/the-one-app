@@ -284,7 +284,7 @@ impl Lookup {
                 && it.fields.get(field).is_some_and(|f| f.secret)
                 && !it.opened
             {
-                bail!("{name} is opened only by the devices its admins grant its Vault (one vault grant), and this isn't one");
+                bail!("{name} is opened only by the devices its admins grant its Vault, and this one doesn't hold the key it's sealed to: grant it from a device that opens the Vault, with one vault grant <this device>");
             }
         }
         Ok(())

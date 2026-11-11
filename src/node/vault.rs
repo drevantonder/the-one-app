@@ -34,38 +34,51 @@ impl Node {
     }
 
     pub(super) async fn items(&self, me: &Caller, scope: &Scope) -> Result<Items> {
-        let keys = self.vault_secrets(scope).await?;
         let (db, _) = self.vault_db(me, scope).await?;
-        let db = db.lock().await;
-        let mut items = crate::vault::load(db.connection())?;
-        if let Some(keys) = &keys {
-            crate::vault::open_all(&mut items, keys);
+        let mut items = crate::vault::load(db.lock().await.connection())?;
+        let sealed_under: BTreeSet<u32> = items.values().filter_map(|it| it.sealed.as_ref().map(|s| s.n)).collect();
+        if let Some(keys) = self.vault_secrets(scope, Some(&sealed_under)).await? {
+            crate::vault::open_all(&mut items, &keys);
         }
         Ok(items)
     }
 
-    /// The Vault secret keys of `scope` this machine holds, by number, if its device is granted the scope's Vault now:
-    /// those its holder opens (`Holds::vault_keys`). None if it isn't granted.
-    pub(super) async fn vault_secrets(&self, scope: &Scope) -> Result<Option<BTreeMap<u32, [u8; 32]>>> {
-        let publics: Vec<(u32, [u8; 32])> = self.with(|i| {
+    /// The Vault secret keys of `scope` this machine holds, by number, of those in `only` (all if none), if its device is
+    /// granted the scope's Vault now: those its holder opens (`Holds::vault_keys`). None if it isn't granted. One the
+    /// bucket hadn't is asked for again only once who's who has moved on.
+    pub(super) async fn vault_secrets(&self, scope: &Scope, only: Option<&BTreeSet<u32>>) -> Result<Option<BTreeMap<u32, [u8; 32]>>> {
+        let (publics, at): (Vec<(u32, [u8; 32])>, Option<u64>) = self.with(|i| {
             let m = i.r.db();
-            Ok(match m.opens_vault(&self.0.holds.device(), scope)? {
-                true => m.vault_publics(scope)?.into_iter().collect(),
-                false => Vec::new(),
-            })
+            Ok((
+                match m.opens_vault(&self.0.holds.device(), scope)? {
+                    true => m.vault_publics(scope)?.into_iter().collect(),
+                    false => Vec::new(),
+                },
+                i.r.at(),
+            ))
         })?;
         if publics.is_empty() {
             return Ok(None);
         }
         let mut out = BTreeMap::new();
         let mut missing = Vec::new();
-        for (n, public) in publics {
-            match self.0.app_schedules.vault.lock().unwrap().get(&(scope.clone(), n)) {
+        for (n, public) in publics.into_iter().filter(|(n, _)| only.is_none_or(|o| o.contains(n))) {
+            let id = (scope.clone(), n);
+            match self.0.app_schedules.vault.lock().unwrap().get(&id) {
                 Some(key) => drop(out.insert(n, *key)),
+                None if self.0.app_schedules.no_vault.lock().unwrap().get(&id) == Some(&at) => {}
                 None => missing.push((n, public)),
             }
         }
         let opened = self.0.holds.vault_keys(&self.bucket()?, scope, &missing).await?;
+        let mut no_vault = self.0.app_schedules.no_vault.lock().unwrap();
+        for (n, _) in &missing {
+            match opened.get(n) {
+                Some(_) => drop(no_vault.remove(&(scope.clone(), *n))),
+                None => drop(no_vault.insert((scope.clone(), *n), at)),
+            }
+        }
+        drop(no_vault);
         self.0.app_schedules.vault.lock().unwrap().extend(opened.iter().map(|(n, k)| ((scope.clone(), *n), *k)));
         out.extend(opened);
         Ok(Some(out))
@@ -74,7 +87,7 @@ impl Node {
     /// Seals what's in `scope`'s Vault to its newest key, if this machine opens it and another before it: a write that
     /// changes nothing else, done at once after this machine's own user changed which machines open it.
     pub(crate) async fn reseal_vault(&self, scope: &Scope) -> Result<()> {
-        if self.with(|i| i.r.db().opens_vault(&self.0.holds.device(), scope))? && self.vault_secrets(scope).await?.is_some_and(|k| k.len() > 1) {
+        if self.with(|i| i.r.db().opens_vault(&self.0.holds.device(), scope))? && self.vault_secrets(scope, None).await?.is_some_and(|k| k.len() > 1) {
             self.write_item(&Caller::local(self)?, scope, |items| Ok(items.iter().next().map(|(id, _)| json!({ "id": id })).unwrap_or(Value::Null))).await?;
         }
         Ok(())
@@ -314,7 +327,7 @@ impl Node {
             // A key no machine opens is no key to seal to: nothing sealed to it would open, whoever is granted later.
             Ok((m.apps()?.into_iter().filter(|a| a.erased).map(|a| a.name).collect::<BTreeSet<String>>(), m.may(&me.user, "add-apps", &scopes::object(&scope)), v.filter(|_| opened).map(|v| (v.n, v.public)), machines.join(", ")))
         })?;
-        let keys = self.vault_secrets(scope).await?;
+        let keys = self.vault_secrets(scope, None).await?;
         let scope_said = self.with(|i| scope_name(i, &scope.to_string()))?;
         let sealing = crate::vault::Sealing { keys: keys.as_ref(), public, scope: &scope_said, machines: if machines.is_empty() { "none yet" } else { &machines } };
         let (db, bucket) = self.vault_db(me, scope).await?;
