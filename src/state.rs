@@ -248,8 +248,12 @@ pub struct DeviceNow {
     /// The node answering.
     #[serde(default)]
     pub here: bool,
+    /// Its socket is open at the relay.
     #[serde(default)]
     pub online: bool,
+    /// When it was last seen (ms), if it ever was: the relay's record and what this node itself exchanged with it.
+    #[serde(default)]
+    pub seen: Option<u64>,
     #[serde(default)]
     pub far: bool,
     #[serde(default)]

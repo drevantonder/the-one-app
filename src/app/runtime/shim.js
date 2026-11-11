@@ -204,6 +204,14 @@ function context(ask, body, appends, later, spans) {
       later.push(Promise.resolve(promise));
     },
     now: () => body.now,
+    /// How long ago a time in ms was, as `<cli>` says it to a user: "just now", "5 min ago", "3 h ago", "2 days ago".
+    ago: (ms) => {
+      const s = Math.max(0, Math.floor((body.now - ms) / 1000));
+      if (s < 60) return "just now";
+      if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+      if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+      return s < 172800 ? "1 day ago" : `${Math.floor(s / 86400)} days ago`;
+    },
     /// Times `run` as a span of its own under this call, named `name` (a plain word: letters, digits, `_ . - +`), what insights
     /// shows with the call's other steps: for a failed or slow call, and one call in 20. `attrs` are numbers and true or
     /// false, never text, so a span can't say who or what. Time only passes across a wait (a fetch, a query), as in any Worker.

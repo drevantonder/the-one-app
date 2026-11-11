@@ -488,7 +488,8 @@ impl Node {
                     (kind, result) = super::insights::asking_failed(&err);
                     tried(result, json!({}));
                     self.with_or(None, |n| Ok(n.nearest.insert(device, Duration::MAX)));
-                    why.push(format!("{name}: {err:#}"));
+                    // A device that can't be reached says why itself, by its name.
+                    why.push(if err.is::<super::net::NotThere>() { format!("{err:#}") } else { format!("{name}: {err:#}") });
                 }
             }
         }
@@ -566,7 +567,7 @@ impl Node {
         let why = match (r["name"].as_str(), r["online"] == true, r["problem"].as_str()) {
             _ if runs.is_empty() => "it runs on none".to_string(),
             (None, ..) => "its device was removed".to_string(),
-            (Some(node), false, _) => format!("{node} is off"),
+            (Some(node), false, _) => crate::cli::off(node, r["seen"].as_u64()),
             (Some(node), true, problem) => format!("on {node}, {}", problem.unwrap_or("it isn't running")),
         };
         Some(format!("{title} needs a device that's on: {why}. Turn it on, or move it with apps_move {app} <node> (apps_devices {app} lists them)."))

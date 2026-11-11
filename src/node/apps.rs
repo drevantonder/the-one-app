@@ -538,7 +538,7 @@ fn built_in_source(app: &str) -> Option<String> {
 }
 
 /// Where `app`'s service runs for the scopes `added` names, and for `user` on their own nodes: `{ scope, node,
-/// name, online, problem }` each, `name` none once that node was removed, `problem` what its node said went wrong.
+/// name, online, seen (ms), problem }` each, `name` none once that node was removed, `problem` what its node said went wrong.
 fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, app: &str, added: &[String], user: &str) -> Result<Vec<Value>> {
     let m = i.r.db();
     let cloudflare = m.cloudflare_node()?;
@@ -562,7 +562,7 @@ fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::
                 _ => None,
             });
             let online = here || Some(*k) == cloudflare || i.online(k);
-            out.push(json!({ "scope": s.scope, "node": hex(k), "name": name, "online": online, "problem": part.and_then(|p| p["problem"].as_str().map(str::to_string)) }));
+            out.push(json!({ "scope": s.scope, "node": hex(k), "name": name, "online": online, "seen": i.seen(k), "problem": part.and_then(|p| p["problem"].as_str().map(str::to_string)) }));
         }
     }
     Ok(out)

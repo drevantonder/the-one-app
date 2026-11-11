@@ -19,12 +19,12 @@ async function act(ctx, fn, input) {
     const n = String(input?.device || "").toLowerCase();
     const own = n && (await ctx.devices()).find((s) => s.name.toLowerCase() === n);
     if (!own) throw err;
-    throw new Error(`${own.name} ${own.online ? "can't be used right now: it's still starting, or Computer Use isn't on there" : "is offline right now"}. Try again once it's back.`);
+    throw new Error(`${own.online ? `${own.name} can't be used right now: it's still starting, or Computer Use isn't on there` : own.seen ? `${own.name} was last seen ${ctx.ago(own.seen)}` : `${own.name} is off`}. Try again once it's back.`);
   }
 }
 
 /// The caller's devices whose computer service serves them, by device name: `{ device, on, title, kind, using,
-/// permissions, missing }`, or `{ device, why }` for one that didn't answer.
+/// permissions, missing }`, or `{ device, why, online, seen }` for one that didn't answer.
 async function devices(ctx) {
   const mine = (s) => {
     const d = (s.installed_services || []).find((d) => d.name === "computer");
@@ -35,7 +35,7 @@ async function devices(ctx) {
     try {
       return { device: s.name, ...(await ctx.services.computer._status({}, { device: s.name })) };
     } catch (err) {
-      return { device: s.name, on: false, why: err.message };
+      return { device: s.name, on: false, why: err.message, online: s.online, seen: s.seen };
     }
   }));
 }
@@ -341,7 +341,7 @@ export default {
         type: "object",
         required: ["devices"],
         properties: {
-          devices: { type: "array", items: { type: "object", required: ["device"], additionalProperties: true }, description: "each { device, on, title, kind, using, permissions, missing }, or { device, on: false, why } for one that didn't answer" },
+          devices: { type: "array", items: { type: "object", required: ["device"], additionalProperties: true }, description: "each { device, on, title, kind, using, permissions, missing }, or { device, on: false, why, online, seen (ms) } for one that didn't answer" },
           mirroring: { type: "boolean", description: "whether the iPhone Mirroring lab is on" },
         },
       },

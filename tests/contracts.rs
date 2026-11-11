@@ -691,6 +691,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
                 now: DeviceNow {
                     here: true,
                     online: true,
+                    seen: Some(1),
                     far: true,
                     build: Some("b".into()),
                     target: Some("t".into()),

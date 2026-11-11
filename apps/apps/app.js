@@ -56,10 +56,10 @@ function namer(ctx) {
 const hasService = (a) => !!a.nodes;
 
 /// Where an app's service runs, and where it may: `runs_on` (each node it runs on for a place where it's added, by
-/// `name`, none once that node was removed, with `scope`, `online` and `problem`); `nodes`, as the catalog gives them;
+/// `name`, none once that node was removed, with `scope`, `online`, `seen` and `problem`); `nodes`, as the catalog gives them;
 /// and `problem`, its one problem box when no node it runs on is on and well, with `move` true when moving it fixes that.
 /// Null for an app with no service.
-function where(a) {
+function where(a, ctx) {
   if (!hasService(a)) return null;
   const nodes = a.nodes;
   const runs_on = a.runs_on || [];
@@ -67,14 +67,14 @@ function where(a) {
   let problem = null;
   if (a.added?.length && !runs_on.some((r) => r.name && r.online && !r.problem)) {
     const r = runs_on[0];
-    const text = !r ? "Choose the device it runs on." : !r.name ? "Its device was removed. Choose another." : !r.online ? `${r.name} is off. Turn it on, or move it.` : r.problem;
+    const text = !r ? "Choose the device it runs on." : !r.name ? "Its device was removed. Choose another." : !r.online ? `${r.seen ? `${r.name} was last seen ${ctx.ago(r.seen)}` : `${r.name} is off`}. Turn it on, or move it.` : r.problem;
     problem = nodes.length || r ? { title: `${title} needs a device that's on`, text, move: nodes.length > 0 } : { title: `${title} can't run on your devices yet`, text: a.needs ? `${a.needs}.` : "It isn’t built for any of them.", move: false };
   }
   return { runs_on, nodes, problem };
 }
 
-function nodeFor(a, node) {
-  const w = where(a);
+function nodeFor(a, node, ctx) {
+  const w = where(a, ctx);
   if (!w) return undefined;
   if (node) {
     if (!w.nodes.some((n) => n.toLowerCase() === String(node).toLowerCase())) throw refusal(`${a.title || a.name} can't run on ${node}: it can run on ${w.nodes.join(", ") || "none of your devices"}`);
@@ -174,7 +174,7 @@ export default {
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       output: { type: "null" },
       async run(ctx, { app, scope }) {
-        const w = where(await find(ctx, app));
+        const w = where(await find(ctx, app), ctx);
         ctx.add(app, placeOf(ctx, scope), true, w?.runs_on.find((r) => r.name)?.name || w?.nodes[0]);
       },
     },
@@ -189,7 +189,7 @@ export default {
         if (!hasService(a)) throw refusal(`${a.title || app} has no service to move`);
         const place = scope ? placeOf(ctx, scope) : a.runs_on?.find((r) => r.scope)?.scope || a.added?.find((s) => places(ctx).some((p) => p.may && p.id === s));
         if (!place) throw refusal(`${a.title || app} isn't added anywhere you may move it: add adds it`);
-        ctx.add(app, place === `user:${ctx.me.user}` ? "user" : place, true, nodeFor(a, node));
+        ctx.add(app, place === `user:${ctx.me.user}` ? "user" : place, true, nodeFor(a, node, ctx));
         return `${a.title || app} runs on ${node}.`;
       },
     },
@@ -320,13 +320,13 @@ export default {
         type: ["object", "null"],
         description: "null for an app with no service",
         properties: {
-          runs_on: { type: "array", items: { type: "object", additionalProperties: true }, description: "each node it runs on, { name, scope, online, problem }" },
+          runs_on: { type: "array", items: { type: "object", additionalProperties: true }, description: "each node it runs on, { name, scope, online, seen (ms, when it was last seen), problem }" },
           nodes: { type: "array", items: { type: "string" }, description: "the nodes it can run on" },
           problem: { type: ["object", "null"], description: "{ title, text, move } when it runs on no node that's on", additionalProperties: true },
         },
       },
       async run(ctx, { app }) {
-        return where(await find(ctx, app));
+        return where(await find(ctx, app), ctx);
       },
     },
     code: {

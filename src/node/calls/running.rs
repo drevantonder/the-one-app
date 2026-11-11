@@ -278,7 +278,7 @@ impl Node {
             // Run priority's order, as the user the call is for: only an admin changes it.
             Ask::Order => {
                 let network = self.state_for(&grant.caller)?.network;
-                let mut order: Vec<Value> = network.iter().flat_map(|n| &n.devices).map(|s| json!({ "name": s.name, "key": s.device.as_ref().unwrap_or(&s.key), "kind": s.kind, "priority": s.priority, "online": s.now.online, "here": s.me })).collect();
+                let mut order: Vec<Value> = network.iter().flat_map(|n| &n.devices).map(|s| json!({ "name": s.name, "key": s.device.as_ref().unwrap_or(&s.key), "kind": s.kind, "priority": s.priority, "online": s.now.online, "seen": s.now.seen, "here": s.me })).collect();
                 if let Some(cloudflare) = network.as_ref().and_then(|n| n.cloudflare_node.as_ref()) {
                     order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "priority": cloudflare.priority, "online": true, "here": false }));
                 }

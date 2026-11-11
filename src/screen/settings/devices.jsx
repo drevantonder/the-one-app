@@ -14,11 +14,13 @@ const api = one.api
 const said = (err) => one.plain(err).title
 const yours = one.config.yours
 const shown = (name) => (String(name || "").endsWith(".local") ? name.slice(0, -6) : String(name || ""))
-// How long ago a device was last on: "5 min ago", "2 h ago", then the day.
+// How long ago, in a row's grey line: "5 min ago", "2 h ago", then the day.
 const ago = (t) => {
   const s = one.ago(t)
   return /^\d/.test(s) ? `${s} ago` : s
 }
+// Whether a device is on: "Online", "Seen 2 minutes ago", or nothing for one never seen.
+const presence = (c) => one.seen({ online: c.online, seen: c.seen })
 const ordinal = (n) => n + (n % 100 > 10 && n % 100 < 14 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th")
 // Run priority: a number from 1, or "last", always after every number.
 const rank = (p) => (p === "last" ? 1000 : Number(p) || 1)
@@ -146,7 +148,8 @@ function model(x, again) {
       const now = [...c.clients].sort((a, b) => b.me - a.me || (seen[b.key] || 0) - (seen[a.key] || 0) || (b.since || 0) - (a.since || 0))
       c.signIn = now[0] || null
       c.old = now.slice(1)
-      c.seen = Math.max(0, ...c.keys.map((k) => seen[k] || 0))
+      // When it was last seen: the relay's record of any of its keys, and what the node answering knows.
+      c.seen = Math.max(0, c.node?.seen || 0, c.runtime?.seen || 0, ...c.keys.map((k) => seen[k] || 0)) || null
       // An outside program that let this device in, as the relay says: only a label, and only ever one of its own devices.
       c.letInBy = c.keys.map((k) => clients.find((p) => p.key === letIn[k] && p.platform === "cloudflare")).find(Boolean)?.name || null
       // What a device is on is its own to say: a device with an app runtime of its own says it, not the runtime.
@@ -191,7 +194,7 @@ function model(x, again) {
     const title = partTitle(p), part = p.part
     const retry = (on, retried) => ({ label: "Try Again", run: again(part, on, retried) })
     if (p.failed) return { title: `Couldn’t turn ${title} ${p.wanted ? "on" : "off"}`, text: p.failed, action: retry(p.wanted) }
-    if (p.late) return { title: `${c.name} hasn’t turned ${title} ${p.on ? "on" : "off"} yet`, text: "It may be offline.", action: retry(p.on) }
+    if (p.late) return { title: `${c.name} hasn’t turned ${title} ${p.on ? "on" : "off"} yet`, text: c.online ? "It’s taking longer than usual." : c.seen ? `${c.name} was last seen ${one.ago(c.seen, { long: true })}.` : `${c.name} is off.`, action: retry(p.on) }
     if (p.on && p.problem) return { title: `${title} isn’t running on ${c.name}`, text: p.problem, action: retry(true, p.problem) }
     if (p.on && p.sandbox) return { title: `${title} runs without its sandbox on ${c.name}`, text: p.sandbox }
     return null
@@ -201,7 +204,7 @@ function model(x, again) {
   /// Every device that runs apps, and Cloudflare, in columns: one per number in use, first first, then Last.
   function board() {
     const entries = drawn.cards.filter((c) => c.runs).map((c) => ({
-      id: c.id, name: c.name, icon: c.icon, whose: c.user === me ? "" : `${userName(c.user)}’s`, p: c.priority,
+      id: c.id, name: c.name, icon: c.icon, whose: c.user === me ? "" : `${userName(c.user)}’s`, presence: presence(c), p: c.priority,
       keys: [deviceKey(c.node)],
     }))
     const s = state.network?.cloudflare_node
@@ -213,7 +216,7 @@ function model(x, again) {
   /// Their own devices that can run something, and Cloudflare, each with what it can run: Cloudflare always runs
   /// apps, and runs the services built for it that an admin switches on, for the apps in the network.
   function gridColumns() {
-    const cols = drawn.cards.filter((c) => c.user === me && c.runs).map((c) => ({ c, name: c.name, icon: c.icon, parts: partsOf(c) }))
+    const cols = drawn.cards.filter((c) => c.user === me && c.runs).map((c) => ({ c, name: c.name, icon: c.icon, presence: presence(c), parts: partsOf(c) }))
     const s = state.network?.cloudflare_node
     if ((cols.length || admin) && s) {
       const parts = (s.parts || [{ name: "apps", on: true, fixed: true }]).filter((p) => p.name === "apps" || appOf(p.name))
@@ -719,7 +722,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
           <List>
             {mine.map((c) => {
               const twin = mine.some((o) => o !== c && o.name === c.name)
-              const sub = c.me ? "This device" : c.seen && Date.now() - c.seen > 3_600_000 ? ago(c.seen) : twin && c.signIn?.since ? `Joined ${ago(c.signIn.since)}` : ""
+              const sub = c.me ? "This device" : [presence(c), twin && c.signIn?.since && `Joined ${ago(c.signIn.since)}`].filter(Boolean).join(" · ")
               const problems = m.problemsOf(c), open = problems.length > 0 && opened[c.id]
               return (
                 <div
@@ -804,7 +807,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
               <List>
                 {passkeys.map((p) => (
                   <div key={p.key} onContextMenu={(e) => (e.preventDefault(), menu(p, true, { x: e.clientX, y: e.clientY }))}>
-                    <DeviceRow icon={glyph("key")} title={p.name} sub={data.seen[p.key] && Date.now() - data.seen[p.key] > 3_600_000 ? ago(data.seen[p.key]) : ""}>
+                    <DeviceRow icon={glyph("key")} title={p.name} sub={one.seen({ seen: data.seen[p.key] })}>
                       <More name={p.name} onClick={(e) => menu(p, true, e.currentTarget)} />
                     </DeviceRow>
                   </div>
@@ -849,7 +852,7 @@ function Priority({ m, move }) {
         <DeviceIcon icon={e.icon} />
         <span className="min-w-0 flex-1 text-left">
           <span className="block truncate font-medium">{e.name}</span>
-          {e.whose && <span className="block truncate text-muted-foreground">{e.whose}</span>}
+          {(e.whose || e.presence) && <span className="block truncate text-muted-foreground">{[e.whose, e.presence].filter(Boolean).join(" · ")}</span>}
         </span>
       </>
     )
@@ -1035,6 +1038,7 @@ function Services({ m, cellOpen, tap }) {
                 <th key={ci} scope="col" className="min-w-24 px-1 pt-3.5 pb-1.5 align-bottom text-[13px] font-medium text-muted-foreground">
                   <DeviceIcon icon={x.icon} className="mx-auto mb-1.5" />
                   <span className="mx-auto block max-w-24 truncate">{x.name}</span>
+                  {x.presence && <span className="mx-auto block max-w-24 truncate text-xs font-normal">{x.presence}</span>}
                 </th>
               ))}
             </tr>
@@ -1312,7 +1316,7 @@ function AppSchedules({ m, asked, open, setOpen, done }) {
   return (
     <ResponsiveDialog open={open} onOpenChange={setOpen} title={app ? `Run ${m.appTitle(app)}’s Schedules On…` : "Run an App’s Schedules"} action={<Cancel setOpen={setOpen} />}>
       {app
-        ? rows(m.runners(scope).map((d) => <ListRow key={d.key} title={shown(d.name)} onClick={() => choose(d)} />), "Choose one that stays on.")
+        ? rows(m.runners(scope).map((d) => <ListRow key={d.key} title={shown(d.name)} sub={one.seen(d)} onClick={() => choose(d)} />), "Choose one that stays on.")
         : rows(m.scheduled(scope).map((a) => <ListRow key={a.name} title={a.title || a.name} onClick={() => setApp(a.name)} />))}
     </ResponsiveDialog>
   )

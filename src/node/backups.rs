@@ -96,7 +96,7 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
                 (Some(crate::bucket::Trouble::Key), _) => "Change its key in the Vault.".to_string(),
                 (Some(crate::bucket::Trouble::Bucket), _) => "Check the bucket's name in the Vault.".to_string(),
                 (Some(crate::bucket::Trouble::Refused), _) => "Give the key permission to write there, or change it in the Vault.".to_string(),
-                (Some(crate::bucket::Trouble::Unreachable), _) => format!("Check {device} is online. It tries again every hour."),
+                (Some(crate::bucket::Trouble::Unreachable), _) => format!("Check {device} is connected to the internet. It tries again every hour."),
                 (Some(crate::bucket::Trouble::Disk), _) => format!("Check the disk on {device} is plugged in and has room."),
                 (None, _) => "It tries again every hour.".to_string(),
             };

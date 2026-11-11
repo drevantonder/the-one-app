@@ -161,7 +161,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
               <ListRow
                 key={r.node + r.scope}
                 title={r.name || "A removed device"}
-                sub={r.name && (!r.online ? "Off" : r.problem)}
+                sub={r.name && (r.online ? r.problem || "Online" : one.seen(r))}
                 trailing={w.nodes.length > 0 && <Button size="sm" variant="outline" onClick={(e) => move(e.currentTarget)}>Move</Button>}
               />
             ))}

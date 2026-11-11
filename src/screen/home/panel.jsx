@@ -7,7 +7,7 @@
 // dist/panel.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Skeleton, WidgetCard, cn } from "@one/ui"
+import { Skeleton, WidgetCard } from "@one/ui"
 import { home } from "./lib/model.js"
 
 /// Each widget on the user's pages once, in their pages' order, at its medium size.
@@ -47,7 +47,7 @@ function devices() {
   // This device: the computer's own node, as the app says (`here`), not whichever node answered.
   const state = home.data.state, me = state?.user?.id, here = one.params?.here
   const mine = (state?.network?.devices || []).filter((d) => !d.user || d.user === me)
-  return mine.map((d) => ({ key: d.key, name: String(d.name || "").replace(/\.local$/, ""), online: d.online === true, here: !!here && (d.key === here || d.device === here) }))
+  return mine.map((d) => ({ key: d.key, name: String(d.name || "").replace(/\.local$/, ""), presence: one.seen(d), here: !!here && (d.key === here || d.device === here) }))
     .sort((a, b) => b.here - a.here || a.name.localeCompare(b.name))
 }
 
@@ -69,9 +69,8 @@ function Panel() {
         <h2 className="text-xs font-medium text-muted-foreground">Your Devices</h2>
         {devices().map((d) => (
           <div key={d.key} className="flex items-center gap-2">
-            <span className={cn("size-[7px] shrink-0 rounded-full", d.online || d.here ? "bg-foreground" : "bg-muted-foreground/40")} />
             <span className="min-w-0 flex-1 truncate">{d.name}</span>
-            {d.here ? <span className="text-muted-foreground">This device</span> : !d.online && <span className="text-muted-foreground/70">Offline</span>}
+            <span className="text-muted-foreground">{d.here ? "This device" : d.presence}</span>
           </div>
         ))}
       </section>

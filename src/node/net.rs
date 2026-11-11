@@ -686,7 +686,7 @@ impl Node {
         // One that hasn't said hello lately is mostly off: it isn't waited for as long, nor tried again for a while.
         let seen = self.with(|i| Ok(i.heard(to))).unwrap_or(true);
         if !seen && self.0.net.down.lock().unwrap().get(to).is_some_and(|at| at.elapsed() < DOWN_FOR) {
-            bail!(NotThere(format!("{} isn't connected", short(to))));
+            bail!(NotThere(self.away(to)));
         }
         let wait = if seen { CONNECT } else { UNSEEN_CONNECT };
         // Off the relay, a device is reached only on a connection it opened: one just started waits to be on it.
@@ -702,11 +702,11 @@ impl Node {
             Ok(Ok(conn)) => conn,
             Ok(Err(err)) => {
                 self.0.net.down.lock().unwrap().insert(*to, Instant::now());
-                bail!(NotThere(format!("{} couldn't be reached: {err:#}", short(to))))
+                bail!(NotThere(format!("{} couldn't be reached: {err:#}", self.name_of(to))))
             }
             Err(_) => {
                 self.0.net.down.lock().unwrap().insert(*to, Instant::now());
-                bail!(NotThere(format!("{} isn't connected", short(to))))
+                bail!(NotThere(self.away(to)))
             }
         };
         self.0.net.down.lock().unwrap().remove(to);
@@ -771,7 +771,7 @@ impl Node {
             match conn.open_bi().await {
                 Ok(stream) => break stream,
                 Err(_) if !fresh => fresh = true,
-                Err(err) => bail!(NotThere(format!("{} couldn't be reached: {err:#}", short(to)))),
+                Err(err) => bail!(NotThere(format!("{} couldn't be reached: {err:#}", self.name_of(to)))),
             }
         };
         send.write_all(msg.as_bytes()).await?;

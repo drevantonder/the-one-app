@@ -12,6 +12,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - The real thing, not counts: a small set is listed ("on You and Work"), never "added to 2 pages". No version numbers or rows of figures added to look like a reference.
 - One way to do each thing. No second version of a screen to save a step; fewer screens, modes and variants beat a shortcut.
 - Screens are for people; the CLI and MCP are for agents.
+- A device says whether it's on in its grey line, never with a dot or the word "Offline": "Online" while its socket is open, else "Seen 2 minutes ago" (screens, long form) or "seen 2 min ago" (CLI and MCP), and nothing for one never seen. This device says "This device" instead. Everywhere a user picks a device (Settings › Devices rows, Run Priority cards, Enabled Services columns, an app's Runs On, where schedules run) each one says it; a call to a device that's off says "mac was last seen 2 min ago", never "offline". Mockups skipped on purpose (Andre, 11-11): this is the best fit for the rules above, so change it freely later.
 - A screen works fully within what MCP Apps allows (no reliance on pushes, a navigation stack, sheets outside its frame or native features), so it's the same in our clients and in someone else's.
 - Motion: the Motion library inside a screen, the browser's View Transitions between screens, and neither when the user asked for reduced motion.
 

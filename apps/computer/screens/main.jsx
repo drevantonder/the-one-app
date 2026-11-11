@@ -28,7 +28,7 @@ function look(d, { asking, note, fix }) {
   const title = d.title || d.device
   const box = note ? { title: note }
     : missing ? { title: `${!d.permissions.accessibility ? "Accessibility" : "Screen Recording"} is off`, text: `Agents can’t use ${title} until it’s on.`, warn: true, fix }
-    : d.why ? { title: "Not answering", text: `Check that ${title} is on and online.`, warn: true }
+    : d.why ? { title: "Not answering", text: d.online ? `Check that ${title} is on.` : `${title} ${d.seen ? `was last seen ${one.ago(d.seen, { long: true })}` : "is off"}. Turn it on and try again.`, warn: true }
     : null
   const line = box ? "" : asking || d.asking ? "Asking on the device…" : !d.on ? d.missing || "" : d.using ? `${d.using.agent} is using it` : ""
   return { title, line, box, off: !!(d.why || d.missing || asking || missing) }

@@ -103,11 +103,11 @@ fn status(node: &Client, state: &State) {
     let title = |app: &str| apps.iter().find(|a| a["name"] == app).and_then(|a| a["title"].as_str()).unwrap_or(app).to_string();
     println!("\nDevices");
     for s in &i.devices {
-        let dot = if s.now.online { "●" } else { "○" };
+        let presence = Some(one::cli::presence(s.now.online, s.now.seen)).filter(|p| !p.is_empty()).map(|p| format!("  {p}")).unwrap_or_default();
         let here = if s.now.here { " (this one)" } else { "" };
         let serves = if s.serves_me { "" } else { ", doesn't run yours" };
         let build = s.now.build.as_ref().map(|b| format!("  {b}")).unwrap_or_default();
-        println!("  {dot} {}{here}  {}'s{serves}{build}", s.name, name(&s.user));
+        println!("  {}{here}  {}'s{serves}{build}{presence}", s.name, name(&s.user));
         if let (Some(runs), Some(latest)) = (&s.now.build, &s.now.latest) && runs.get(..12) != latest.get(..12) {
             println!("      behind: runs {runs}, latest is {latest}{}", s.now.updating.as_ref().map_or(String::new(), |why| format!(" ({why})")));
         } else if let Some(why) = &s.now.updating {
@@ -135,7 +135,7 @@ fn status(node: &Client, state: &State) {
             Priority::Number(n) => n.to_string(),
             Priority::Last => "last".to_string(),
         };
-        println!("  ● {}  the Cloudflare node, run priority {at}", one::rank::CLOUDFLARE);
+        println!("  {}  the Cloudflare node, run priority {at}", one::rank::CLOUDFLARE);
     }
     // A device that's only a client (a phone, a computer, a browser) is listed with them; a passkey isn't one, and a
     // device with an app runtime of its own is listed as that runtime, above.

@@ -420,6 +420,9 @@
     device: () => host({ type: "device" }),
     notify: () => host({ type: "notify" }),
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]),
+    // Whether a device is on, for a row's grey line: "Online" while it's online, "Seen 2 minutes ago" once it isn't,
+    // and "" for one never seen. `d` is a device as the node's state gives it: `{ online, seen }` (ms).
+    seen: (d) => (d.online ? "Online" : d.seen ? `Seen ${one.ago(d.seen, { long: true })}` : ""),
     // How long ago: short ("5 min", "Tue", "3 Oct") for tight rows, or with `{ long: true }` for where there's room
     // ("5 minutes ago", "3 days ago", "2 years ago").
     ago(ms, opts = {}) {

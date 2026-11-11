@@ -84,6 +84,7 @@ impl Node {
                 far: i.far.get(&s.key).is_some_and(|d| *d > FAR),
                 here: s.key == self.0.id,
                 online: s.key == self.0.id || i.online(&s.key),
+                seen: if s.key == self.0.id { Some(now_ms()) } else { i.seen(&s.key).max(m.runtime_for(&s.key)?.and_then(|r| i.seen(&r))) },
                 build: build.as_ref().map(|r| r.commit.clone()),
                 target: build.as_ref().map(|r| r.target.clone()),
                 services: services.iter().map(|d| d.0.clone()).collect(),
@@ -211,6 +212,11 @@ impl Node {
             m.machine_ever(key)
         };
         self.with_or(None, |i| Ok(of(i.r.db())?.map(|m| m.name))).unwrap_or_else(|| short(key))
+    }
+
+    /// Why a device that won't answer is off, in words for its caller: "mac was last seen 2 min ago".
+    pub(super) fn away(&self, key: &Key) -> String {
+        crate::cli::off(&self.name_of(key), self.with_or(None, |i| Ok(i.seen(key))))
     }
 
     /// The network's compute devices' names by key (hex), and the Cloudflare node's (`cloudflare`): what a trace's reader calls the

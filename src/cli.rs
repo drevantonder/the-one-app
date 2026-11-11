@@ -147,14 +147,33 @@ pub fn asked_yes(command: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// How long ago `ms` (since 1970) was, for users: "just now", "5m ago", "3h ago", "2d ago".
+/// How long ago `ms` (since 1970) was, for users: "just now", "5 min ago", "3 h ago", "2 days ago".
 pub fn ago(ms: u64) -> String {
     let s = crate::node::now_ms().saturating_sub(ms) / 1000;
     match s {
         0..60 => "just now".into(),
-        60..3600 => format!("{}m ago", s / 60),
-        3600..86400 => format!("{}h ago", s / 3600),
-        _ => format!("{}d ago", s / 86400),
+        60..3600 => format!("{} min ago", s / 60),
+        3600..86400 => format!("{} h ago", s / 3600),
+        86400..172800 => "1 day ago".into(),
+        _ => format!("{} days ago", s / 86400),
+    }
+}
+
+/// Whether a device is on, for users: "online" while its socket is open at the relay, else when it was last seen
+/// ("seen 5 min ago"), and nothing for one never seen.
+pub fn presence(online: bool, seen: Option<u64>) -> String {
+    match (online, seen) {
+        (true, _) => "online".into(),
+        (false, Some(at)) => format!("seen {}", ago(at)),
+        (false, None) => String::new(),
+    }
+}
+
+/// Why a device that doesn't answer is off, for users: "mac was last seen 5 min ago", "mac is off" for one never seen.
+pub fn off(name: &str, seen: Option<u64>) -> String {
+    match seen {
+        Some(at) => format!("{name} was last seen {}", ago(at)),
+        None => format!("{name} is off"),
     }
 }
 

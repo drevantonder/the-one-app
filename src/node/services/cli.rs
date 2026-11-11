@@ -21,9 +21,9 @@ pub fn commands() -> Command {
                     let Some(network) = g.node.state()?.network else { return Ok(true) };
                     for s in &network.devices {
                         let (installed, off) = (&s.now.installed_services, &s.off_services);
-                        let offline = if s.now.online { "" } else { " (offline)" };
+                        let away = Some(crate::cli::presence(s.now.online, s.now.seen)).filter(|p| !s.now.online && !p.is_empty()).map(|p| format!(" ({p})")).unwrap_or_default();
                         if let Some(parts) = &s.now.parts {
-                            println!("{}{offline}", s.name);
+                            println!("{}{away}", s.name);
                             for p in parts {
                                 let version = installed.iter().find(|d| d.name == p.name).and_then(|d| d.version.as_deref()).map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
                                 let doing = p.doing.as_ref().map(|d| format!(", {}", d.to_lowercase())).unwrap_or_default();
@@ -40,7 +40,7 @@ pub fn commands() -> Command {
                         if installed.is_empty() && off.is_empty() {
                             continue;
                         }
-                        println!("{}{offline}", s.name);
+                        println!("{}{away}", s.name);
                         for d in installed {
                             let by = match (&d.installed_by, d.built_in) {
                                 (_, true) => format!("built into {NAME}"),
