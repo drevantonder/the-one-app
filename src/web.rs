@@ -1,14 +1,14 @@
 //! The web client's files (cloudflare/web, @one/ui and the client's own screens), as this build has them: what the
 //! gateway serves browsers (`cloudflare::Settings::web`, which adds what's the network's own) and what the native app
-//! shows its window from (client/native), so both draw the same window from the same files.
+//! shows its window from (native-apps), so both draw the same window from the same files.
 
 use serde_json::json;
 
 #[cfg(feature = "web-bundle")]
 pub mod bundle;
 
-/// What the shell (client/native) gives the page: its commands (client/native/src/commands.rs) and `window.__oneNative`
-/// (client/native/src/native.js). A web bundle says the shell it needs by this: one more whenever those change, and
+/// What the shell (native-apps) gives the page: its commands (native-apps/src/commands.rs) and `window.__oneNative`
+/// (native-apps/src/native.js). A web bundle says the shell it needs by this: one more whenever those change, and
 /// tests/contracts.rs pins each number to them, so a bundle never reaches a shell that can't run it.
 pub const SHELL: u32 = 4;
 

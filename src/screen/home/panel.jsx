@@ -1,7 +1,7 @@
 // What the native app's menu bar item (its tray item, on other computers) opens, as the Mac app's did: your devices,
 // which are on and which this one is, then the widgets on your pages, each once, as they're arranged there. A tap on a
 // widget follows its link, or opens its app, in the app's window. What's under it (Open, Open at Login, Quit) is the
-// app's own, around this screen. A Mac's menu bar is AppKit's own, not this (client/native/mac).
+// app's own, around this screen. A Mac's menu bar is AppKit's own, not this (native-apps/mac).
 //
 // A client's own screen written in React: @one/ui's build (src/screen/ui, `bun run build`) makes it into
 // dist/panel.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.

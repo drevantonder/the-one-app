@@ -1,4 +1,4 @@
-// The web client in the app's own window (platform.js): on a phone the app itself (client/native/src/native.js) is this
+// The web client in the app's own window (platform.js): on a phone the app itself (native-apps/src/native.js) is this
 // device's client, which holds its key; on a computer the window is a view of the computer's onet, which holds the
 // computer's, and the app asks it. Either signs in through the system's browser. Beyond a page, it asks for its
 // network's address first, joins a computer's onet to one with a pairing code, opens the links the app was opened with,

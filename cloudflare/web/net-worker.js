@@ -1,4 +1,4 @@
-// The browser's one way to its nodes: iroh (client/, as WebAssembly), in one SharedWorker every tab of the web client
+// The browser's one way to its nodes: iroh (onet, as WebAssembly), in one SharedWorker every tab of the web client
 // shares, so a browser keeps one connection however many tabs and screens ask; where there's no SharedWorker, in the
 // one tab that holds the `one.net` lock, for the others (net.js).
 //

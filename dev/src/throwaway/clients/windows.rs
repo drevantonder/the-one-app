@@ -8,8 +8,8 @@ use ::custom_build::config::{CLI, NAME};
 
 use super::super::devices::{approve_code, build, didnt_sign_in, on_device};
 
-/// The Windows app (client/native): cross-built here and packaged with its helper in the device
-/// (client/native/windows/build.sh), installed there, then started by its program's path in the package (so it runs as
+/// The Windows app (native-apps): cross-built here and packaged with its helper in the device
+/// (native-apps/windows/build.sh), installed there, then started by its program's path in the package (so it runs as
 /// the package, as its badge and widgets need), at the throwaway network's address, printing its sign-in rather than
 /// opening a browser, and with a control port, as linux() starts it: its Sign In pressed, the sign-in approved as the
 /// throwaway network's first user or `user`, coming back to it on the device, and its code approved by the
@@ -18,7 +18,7 @@ use super::super::devices::{approve_code, build, didnt_sign_in, on_device};
 /// sets up `one` from the throwaway network's address, which has a program for Windows only once one's published there.
 pub(crate) fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
-    build(dir, checkout, "client/native/windows/build.sh", &[("DEVICE", device), ("PROFILE", "dev"), ("NO_START", "1")])?;
+    build(dir, checkout, "native-apps/windows/build.sh", &[("DEVICE", device), ("PROFILE", "dev"), ("NO_START", "1")])?;
     let file = NAME.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
     let signed_in = dir.join(format!("signed-in-{device}"));
     let first = settings.throwaway_user.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();

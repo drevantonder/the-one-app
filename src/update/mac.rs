@@ -43,7 +43,7 @@ pub fn window(home: &Path, address: &str, thing: &Thing) -> Result<bool> {
     done.map(|()| true)
 }
 
-/// The build a window says it is: `Build` in its Info.plist (client/native/mac/build.sh), what the record names it.
+/// The build a window says it is: `Build` in its Info.plist (native-apps/mac/build.sh), what the record names it.
 fn built(app: &Path) -> Option<String> {
     let out = Command::new("plutil").args(["-extract", "Build", "raw", "-o", "-"]).arg(app.join("Contents/Info.plist")).output().ok().filter(|o| o.status.success())?;
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|b| !b.is_empty())

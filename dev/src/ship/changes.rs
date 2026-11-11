@@ -88,7 +88,7 @@ impl Parts {
                     if !parts.services.contains(&app) {
                         parts.services.push(app);
                     }
-                    // One in Swift or Rust a Mac builds and publishes for Macs (client/native/mac/build.sh): a helper app
+                    // One in Swift or Rust a Mac builds and publishes for Macs (native-apps/mac/build.sh): a helper app
                     // of its own (services/sdk/mac-helpers.sh), or a program.
                     if [".swift", "Info.plist", ".entitlements", ".rs", "Cargo.toml"].iter().any(|end| file.ends_with(end)) {
                         parts.mac = true;
@@ -130,10 +130,10 @@ impl Parts {
                 // The screens' kit and the sign-in pages: nodes hold a copy, but what shows is the web client's (`screens.js`).
                 Some("src") if file.starts_with("src/screen/") => (parts.web, parts.workers) = (true, true),
                 Some("onboarding") if !file.ends_with(".rs") && !file.ends_with("Cargo.toml") => (parts.web, parts.workers) = (true, true),
-                // The native app (client/native) is its own workspace, not in the node: the Mac app, but for Windows' and
-                // Android's own (client/native/windows/, client/native/android/), which no update sends out.
-                Some("client") if file.starts_with("client/native/windows/") || file.starts_with("client/native/android/") => {}
-                Some("client") if file.starts_with("client/native/") => parts.mac = true,
+                // The native app (native-apps) is its own workspace, not in the node: the Mac app, but for Windows' and
+                // Android's own (native-apps/windows/, native-apps/android/), which no update sends out.
+                Some("native-apps") if file.starts_with("native-apps/windows/") || file.starts_with("native-apps/android/") => {}
+                Some("native-apps") if file.starts_with("native-apps/") => parts.mac = true,
                 // onet is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
                 Some("onet") => (parts.node, parts.mac, parts.web, parts.dev) = (true, true, true, true),
                 Some("docs" | "tests" | "tools") => {}
@@ -166,9 +166,9 @@ mod tests {
         assert!(!of(&["apps/whatsapp/service/main.go"]).mac);
         let helpers = of(&["services/sdk/swift/Helper.swift"]);
         assert!(helpers.mac && !helpers.service, "what the Swift services are built on is the Mac app's to build");
-        let native = of(&["client/native/mac/build.sh"]);
+        let native = of(&["native-apps/mac/build.sh"]);
         assert!(!native.node && native.mac);
-        assert_eq!(of(&["client/native/windows/build.sh"]), Parts::default());
+        assert_eq!(of(&["native-apps/windows/build.sh"]), Parts::default());
         assert_eq!(of(&["dev/src/ship.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
         assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
         assert!(of(&["src/node.rs"]).is_built_in() && of(&["onet/src/lib.rs"]).is_built_in());

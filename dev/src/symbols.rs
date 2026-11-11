@@ -1,5 +1,5 @@
 //! `symbols <sample>`: a Mac stall's stacks (`logs/stall.sample`, written by the watchdog) as function names. Release
-//! programs ship stripped, and the Mac's build keeps each one's symbols beside its cache (`client/native/mac/build.sh`),
+//! programs ship stripped, and the Mac's build keeps each one's symbols beside its cache (`native-apps/mac/build.sh`),
 //! found by the program's UUID, so a sample always gets the symbols of the very build it came from.
 
 use std::path::{Path, PathBuf};

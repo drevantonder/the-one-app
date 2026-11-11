@@ -9,7 +9,7 @@ use ::custom_build::config::{CLI, NAME};
 use super::super::devices::{approve_code, didnt_sign_in, shell_quote};
 use super::super::network::spawn;
 
-/// The Mac app (client/native), or with `iphone` the iPhone app on a simulator, as this checkout builds it, on the Mac `MAC` names to ssh (`mac` if none), beside the
+/// The Mac app (native-apps), or with `iphone` the iPhone app on a simulator, as this checkout builds it, on the Mac `MAC` names to ssh (`mac` if none), beside the
 /// user's own app there: a throwaway's build (its own id, folder and Keychain items), in the Mac's logged-in session,
 /// reaching the throwaway network at its address through ports ssh forwards there; the Mac app the window of a computer of
 /// its own there, which sets it up as a real Mac's does, from what this publishes at the throwaway network's address of
@@ -38,7 +38,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     // The copy says which port is its network's: it's in use while that port answers there, through the forward below, and
     // the next throwaway or update on that Mac deletes it once it doesn't.
     let port = |a: &str| a.trim().rsplit_once(':').and_then(|(_, p)| p.trim_end_matches('/').parse::<u16>().ok());
-    ssh(&format!("echo {} > {there}/.throwaway-port && cd {there} && client/native/disk.sh sweep", port(address).unwrap_or_default()))?;
+    ssh(&format!("echo {} > {there}/.throwaway-port && cd {there} && native-apps/disk.sh sweep", port(address).unwrap_or_default()))?;
     // The throwaway network's address and its bucket, at the same ports on the Mac, for as long as it runs.
     let mut forward = vec!["-N".to_string(), "-o".into(), "BatchMode=yes".into(), "-o".into(), "ExitOnForwardFailure=yes".into()];
     for p in [port(address), std::fs::read_to_string(dir.join("bucket-addr")).ok().as_deref().and_then(port)].into_iter().flatten() {
@@ -55,11 +55,11 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     let script = if iphone { "iphone" } else { "mac" };
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{host}\n{script}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
-    eprintln!("Building client/native on {host} (dev profile; the first time takes minutes)…");
+    eprintln!("Building native-apps on {host} (dev profile; the first time takes minutes)…");
     // The Mac's window is a view of a computer of its own there, whose onet answers beside its control port.
     let last = if iphone { simulator_name(dir) } else { format!("127.0.0.1:{}", control + 1) };
     let key = one::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?;
-    let build = format!("cd {there} && CARGO_TERM_COLOR=never PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH RELEASE_KEY={} client/native/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&key), shell_quote(&last));
+    let build = format!("cd {there} && CARGO_TERM_COLOR=never PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH RELEASE_KEY={} native-apps/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&key), shell_quote(&last));
     let said = build_on(&host, &build, &dir.join(format!("{script}-build.log")), started + Duration::from_secs(crate::ship::CALL - 90))?;
     let last: Vec<&str> = said.lines().last().unwrap_or_default().split(' ').collect();
     // The iPhone's says its simulator; the Mac's what to publish, and its window's launch job, started once it is.
@@ -131,7 +131,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     Ok(())
 }
 
-/// Publishes what `client/native/mac/throwaway.sh` built on `host` in `folder` for a Mac at the throwaway network's address,
+/// Publishes what `native-apps/mac/throwaway.sh` built on `host` in `folder` for a Mac at the throwaway network's address,
 /// under its own release key, as a Mac publishes a real build (`one::build::mac_things`): the program, which the window
 /// sets up its computer from, the helper apps its oned runs, and the window, which `update` takes.
 fn publish_mac(dir: &Path, host: &str, folder: &str) -> Result<()> {
@@ -205,7 +205,7 @@ pub(crate) fn stop(dir: &Path, delete: bool) {
         let _ = std::fs::remove_file(dir.join(file));
     };
     // Its window, and its computer's oned, a launch agent named for the computer's home (`platform::set_up`).
-    on("mac", format!("launchctl bootout gui/$(id -u)/app.{CLI}.mac.throwaway; for agent in ~/Library/Caches/{CLI}/throwaway.noindex/client/native/target/throwaway-home/app.{CLI}.{CLI}d.throwaway-*.plist; do [ -e \"$agent\" ] && launchctl bootout gui/$(id -u) \"$agent\"; done; true"));
+    on("mac", format!("launchctl bootout gui/$(id -u)/app.{CLI}.mac.throwaway; for agent in ~/Library/Caches/{CLI}/throwaway.noindex/native-apps/target/throwaway-home/app.{CLI}.{CLI}d.throwaway-*.plist; do [ -e \"$agent\" ] && launchctl bootout gui/$(id -u) \"$agent\"; done; true"));
     // Every simulator of that name (a run that stopped before it said which): by its id, as a name is only what's shown.
     let name = shell_quote(&simulator_name(dir));
     on("iphone", format!("PATH=/opt/homebrew/bin:$PATH; for sim in $(xcrun simctl list devices -j | jq -r --arg n {name} '.devices[][] | select(.name == $n) | .udid'); do xcrun simctl shutdown $sim; xcrun simctl delete $sim; done"));

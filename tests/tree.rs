@@ -31,7 +31,7 @@ fn what_runs_in_wasm_builds() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
-/// The native app (`client/native`, its own workspace that `cargo test` and `cargo build` never build) compiles for this
+/// The native app (`native-apps`, its own workspace that `cargo test` and `cargo build` never build) compiles for this
 /// machine's platform (Linux's Tauri build here), for the Mac's and the iPhone's arm64 and, where the Android NDK is, for
 /// Android's. Only the Rust: the C in their dependencies isn't compiled (a stand-in compiler and an SDK folder that is
 /// only a name), and the Swift (`mac/`, `iphone/`) still needs a Mac, so `mac/build.sh` and `iphone/build.sh` are what
@@ -45,7 +45,7 @@ fn what_runs_in_wasm_builds() {
 /// NDK, a heavy install, only skips Android.
 #[test]
 fn the_native_app_builds() {
-    let native = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../client/native"));
+    let native = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../native-apps"));
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let check = |args: &[&str], envs: &[(String, std::path::PathBuf)]| {
         let out = std::process::Command::new(&cargo).args(["check", "--quiet"]).args(args).envs(envs.iter().map(|(k, v)| (k, v))).current_dir(native).output().expect("cargo check");

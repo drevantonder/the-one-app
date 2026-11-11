@@ -20,11 +20,11 @@ fn abi_here() -> &'static str {
 }
 
 fn apk(dir: &Path, checkout: &Path, abi: &str) -> Result<String> {
-    let said = build(dir, checkout, "client/native/android/build.sh", &[("ABIS", abi)])?;
+    let said = build(dir, checkout, "native-apps/android/build.sh", &[("ABIS", abi)])?;
     Ok(said.lines().last().unwrap_or_default().to_string())
 }
 
-/// The Android app (client/native), as this checkout builds it (client/native/android/build.sh, for the processor the device
+/// The Android app (native-apps), as this checkout builds it (native-apps/android/build.sh, for the processor the device
 /// has), installed over the one there, then started with the throwaway network's address, printing its sign-in rather than
 /// opening a Custom Tab, and with a control port, as linux() starts it (its settings go in as the intent's `env.` extras,
 /// which a debug build reads): its Sign In pressed, the sign-in approved as the throwaway network's first user or `user`,

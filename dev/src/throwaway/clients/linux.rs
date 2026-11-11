@@ -1,4 +1,4 @@
-//! The Linux client: this checkout's client/native, on a display of its own, the window of a computer of its own.
+//! The Linux client: this checkout's native-apps, on a display of its own, the window of a computer of its own.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -10,7 +10,7 @@ use super::super::devices::{approve_code, didnt_sign_in};
 use super::super::network::{shares_native_build, spawn};
 use crate::agent;
 
-/// The native app (client/native) as this checkout builds it, on this machine in a display of its own (Xvfb), the window
+/// The native app (native-apps) as this checkout builds it, on this machine in a display of its own (Xvfb), the window
 /// of a computer of its own (a home, `computer`, and an address its onet answers at), signed in to the throwaway network
 /// as its first user or `user` as a user would: its Sign In pressed, which sets up `one` on that computer the first time,
 /// from this build, published at the throwaway network's address; the sign-in it would open in a browser approved as
@@ -36,10 +36,10 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         eprintln!("Publishing this build at the throwaway network's address, for the app to set up its computer from…");
         crate::throwaway::publish_build(dir, std::fs::read_to_string(dir.join("addr"))?.trim())?;
     }
-    eprintln!("Building client/native (dev profile; the first time takes minutes)…");
+    eprintln!("Building native-apps (dev profile; the first time takes minutes)…");
     let mut cargo = one::build::nice_cargo();
     shares_native_build(dir, &mut cargo);
-    one::build::quietly(cargo.arg("build").current_dir(checkout.join("client/native")))?;
+    one::build::quietly(cargo.arg("build").current_dir(checkout.join("native-apps")))?;
     // Its own display and control port, the same each time for this throwaway network and user.
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(home.to_string_lossy().as_bytes()).into();
     let display = format!(":{}", 200 + u16::from_le_bytes([hash[0], hash[1]]) % 600);
@@ -64,7 +64,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         dir,
         command
             .args(["--", "sh", "-c", "printf throwaway | gnome-keyring-daemon --unlock --components=secrets >/dev/null && exec \"$0\""])
-            .arg(checkout.join("client/native/target/debug/one-native"))
+            .arg(checkout.join("native-apps/target/debug/one-native"))
             .env(env("RELEASE_KEY"), one::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?)
             .env("DISPLAY", &display)
             .env_remove("WAYLAND_DISPLAY")

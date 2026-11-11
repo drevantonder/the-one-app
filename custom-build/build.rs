@@ -55,20 +55,20 @@ fn main() {
     assert!(["", "wnam", "enam", "sam", "weur", "eeur", "apac", "oc", "afr", "me"].contains(&relay_location.as_str()), "relay_location is one of Cloudflare's location hints");
     let out = format!("{out}pub const RELAY_LOCATION: &str = {relay_location:?};\n");
     // The iPhone app's bundle id (its extensions are `<id>.widgets` and `<id>.notifications`, its App Group and Keychain
-    // group `group.<id>`); client/native/apple.sh says the same.
+    // group `group.<id>`); native-apps/apple.sh says the same.
     let iphone = match optional("iphone") {
         id if id.is_empty() => format!("app.{}.phone", get("cli").as_str().unwrap()),
         id => id,
     };
     let out = format!("{out}pub const IPHONE: &str = {iphone:?};\n");
-    // The Android app's package (its applicationId); client/native/android/app/build.gradle.kts says the same.
+    // The Android app's package (its applicationId); native-apps/android/app/build.gradle.kts says the same.
     let android = match optional("android") {
         id if id.is_empty() => format!("app.{}.android", get("cli").as_str().unwrap()),
         id => id,
     };
     let out = format!("{out}pub const ANDROID: &str = {android:?};\n");
     // What a user joins, in their words: "your One App network"; a workplace's (one with a join_domain) is shared, "the PTC App network".
-    // client/native/apple.sh, client/native/android/app/build.gradle.kts and client/native/windows/build.sh say the same.
+    // native-apps/apple.sh, native-apps/android/app/build.gradle.kts and native-apps/windows/build.sh say the same.
     let name = get("name").as_str().unwrap().to_string();
     let yours = if optional("join_domain").is_empty() { format!("your {} network", name.trim_start_matches("The ")) } else { format!("{} network", name.replacen("The ", "the ", 1)) };
     let out = format!("{out}pub const YOURS: &str = {yours:?};\n");

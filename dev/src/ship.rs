@@ -189,10 +189,10 @@ fn github_release(tag: &str) -> Result<()> {
         std::fs::copy(folder.join("one.exe"), dir.join(windows.asset()))?;
         assets.push(windows.asset());
     }
-    // The native app for this platform (client/native, its own workspace), which install.sh puts on a desktop.
+    // The native app for this platform (native-apps, its own workspace), which install.sh puts on a desktop.
     if cfg!(target_os = "linux") {
         println!("Building the Linux app");
-        let native = src.join("client/native");
+        let native = src.join("native-apps");
         match quietly(cargo().current_dir(&native).env("CONFIG", &config).args(["build", "--release"])) {
             Ok(()) => {
                 let name = format!("{CLI}-app-{TARGET}");

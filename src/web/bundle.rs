@@ -1,6 +1,6 @@
 //! The web client as one signed file, which the native apps load from the network in place of the copy built into them.
 //! Whoever carries it (the Workers, the bucket) only carries it: an app takes a bundle only if the release key built
-//! into it signed it, and only if it's newer than what it has. See client/native/src/bundle.rs for what the app does.
+//! into it signed it, and only if it's newer than what it has. See native-apps/src/bundle.rs for what the app does.
 
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::{Deserialize, Serialize};

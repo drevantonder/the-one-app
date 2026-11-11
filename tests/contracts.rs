@@ -608,9 +608,9 @@ fn every_renderer_of_a_widgets_tree_draws_the_same_types_and_tones() {
         text
     };
     let renderers = [
-        ("the iPhone's", read("client/native/iphone/Widget/WidgetTree.swift")),
-        ("Android's", all("client/native/android/app/src/main/kotlin/app/client/widget", "kt")),
-        ("Windows'", read("client/native/windows/WidgetCard.cs")),
+        ("the iPhone's", read("native-apps/iphone/Widget/WidgetTree.swift")),
+        ("Android's", all("native-apps/android/app/src/main/kotlin/app/client/widget", "kt")),
+        ("Windows'", read("native-apps/windows/WidgetCard.cs")),
         ("the screens'", read("src/screen/ui/src/components/widget.tsx")),
     ];
     let mut missing = Vec::new();
@@ -642,7 +642,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
     names("the node's route", &read("widgets/src/says.rs"), &["kind: Option<String>"]);
     names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
     names("the pages", &read("src/screen/home/lib/model.js"), &["w.late", "&kind="]);
-    names("the native widgets", &read("client/native/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
+    names("the native widgets", &read("native-apps/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
     names("a chat's view", &read("src/mcp/view.html"), &["w.late", "widgets_show"]);
     assert!(missing.is_empty(), "{}", missing.join("\n"));
 }
@@ -805,7 +805,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
     }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut files = Vec::new();
-    for dir in ["cloudflare", "auth", "gateway", "url-signer", "insights/worker", "src/screen", "onet/src", "client/native/src", "apps"] {
+    for dir in ["cloudflare", "auth", "gateway", "url-signer", "insights/worker", "src/screen", "onet/src", "native-apps/src", "apps"] {
         let mut stack = vec![root.join(dir)];
         while let Some(dir) = stack.pop() {
             let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
@@ -1004,24 +1004,24 @@ fn the_cloudflare_node_answers_the_asks_it_says_it_does() {
 /// needs them reaches an app that hasn't got them.
 #[test]
 fn what_the_shell_gives_the_page_is_pinned_to_its_number() {
-    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("client/native/src");
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("native-apps/src");
     let mut hash = blake3::Hasher::new();
     for file in ["commands.rs", "native.js"] {
         hash.update(&std::fs::read(root.join(file)).unwrap());
     }
     let hash = hash.finalize().to_hex().to_string();
     const PINNED: &[(u32, &str)] = &[(4, "c373913c50e9158b6ce2056b8ad061f3f5670cff5b9af88a9155f11b89f8d99b"), (3, "7ae08c822ecc7bc95c15dcd268d6bbaaadc6e014d550d40304bb25b7c3db8742"), (2, "2f046373196f89532b94512e4e9c5f197bb76f8c418dffdc717bde2658cb5248"), (1, "44f63548b850ab33724d60f9da788d1885423d02901add2710901371cc37064c")];
-    let raise = format!("what the shell gives the page (client/native/src/commands.rs, native.js) changed: raise one::web::SHELL and pin ({}, \"{hash}\")", one::web::SHELL + 1);
+    let raise = format!("what the shell gives the page (native-apps/src/commands.rs, native.js) changed: raise one::web::SHELL and pin ({}, \"{hash}\")", one::web::SHELL + 1);
     assert!(PINNED.iter().any(|(n, h)| *n == one::web::SHELL && *h == hash), "{raise}");
 }
 
-/// The iPhone's build scripts (`client/native/apple.sh`) make its bundle id as build.rs does (`config::IPHONE`): from the
+/// The iPhone's build scripts (`native-apps/apple.sh`) make its bundle id as build.rs does (`config::IPHONE`): from the
 /// same config.toml, which can name it.
 #[test]
 fn the_iphone_build_scripts_name_the_app_as_the_build_does() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let out = std::process::Command::new("bash")
-        .args(["-c", ". client/native/apple.sh && echo $CONFIG_IPHONE"])
+        .args(["-c", ". native-apps/apple.sh && echo $CONFIG_IPHONE"])
         .current_dir(root)
         .env("CONFIG", root.join(option_env!("CONFIG").unwrap_or("config.toml")))
         .output()

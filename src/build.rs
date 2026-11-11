@@ -422,7 +422,7 @@ pub fn release_key() -> Result<ssh_key::PrivateKey> {
 /// What publishes what a Mac built (dev/skills/keep-mac-current), on a Mac with the release key.
 pub fn commands() -> ::api::cli::Command {
     ::api::cli::Command {
-        help: vec![("publish-mac <folder> [--config <commit>]".into(), "publish what client/native/mac/build.sh made in <folder> (its window, program and services), for every Mac to take with update".into())],
+        help: vec![("publish-mac <folder> [--config <commit>]".into(), "publish what native-apps/mac/build.sh made in <folder> (its window, program and services), for every Mac to take with update".into())],
         run: |g| {
             let words = g.words();
             let ["publish-mac", folder] = words.as_slice() else { return Ok(false) };
@@ -435,7 +435,7 @@ pub fn commands() -> ::api::cli::Command {
     }
 }
 
-/// What a Mac built for the record (client/native/mac/build.sh), as `publish_latest` takes it: in `folder`, its window
+/// What a Mac built for the record (native-apps/mac/build.sh), as `publish_latest` takes it: in `folder`, its window
 /// zipped (`app.zip`), its program (`<cli>`), each service in Rust (`<cli>-<name>`) and each in Swift, an app of its own
 /// zipped (`<cli>-<name>.zip`), all of `version`.
 pub fn mac_things(folder: &Path, version: &Version, config: &str) -> Result<Vec<(String, Option<PathBuf>, Version, String)>> {

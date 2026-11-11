@@ -679,7 +679,7 @@ fn notifications_bindings(settings: &Settings) -> Vec<Binding> {
         plain("RELAY", "service:relay"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", custom_build::config::NAME),
-        // The Apple apps' bundle ids (the iPhone's is config.toml's `iphone`, the Mac's is client/native/mac/build.sh's), which their notifications go to.
+        // The Apple apps' bundle ids (the iPhone's is config.toml's `iphone`, the Mac's is native-apps/mac/build.sh's), which their notifications go to.
         plain("APNS_TOPICS", json!([custom_build::config::IPHONE, format!("app.{cli}.mac")]).to_string()),
     ];
     out.extend(settings.notifications.iter().map(|(name, value)| secret(name, value.clone())));
@@ -850,7 +850,7 @@ fn stand_in(sources: &Files) -> Result<Served> {
     Ok(Served { name: STAND_IN.into(), module: module_from(sources.clone(), "telemetry/stand-in.js")?, modules: vec![], classes: vec!["Store".into()], listen: None, bindings: vec![], assets: None, outbound: None })
 }
 
-/// The Android app's package, as client/native/android/app/build.gradle.kts names it.
+/// The Android app's package, as native-apps/android/app/build.gradle.kts names it.
 pub fn android_package() -> String {
     custom_build::config::ANDROID.to_string()
 }
@@ -879,7 +879,7 @@ impl Settings {
     }
 }
 
-/// The Windows app's package family name, as Windows names the package client/native/windows/build.sh makes: the config's name in
+/// The Windows app's package family name, as Windows names the package native-apps/windows/build.sh makes: the config's name in
 /// letters and digits, then its publisher's (`CN=` and the name in letters, digits and spaces) hash, the first 8 bytes
 /// of the SHA-256 of it in UTF-16LE, in Crockford's base32.
 pub fn windows_package() -> String {

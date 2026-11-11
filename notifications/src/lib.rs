@@ -41,7 +41,7 @@ pub struct Note {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Map<String, Value>>,
     /// Something its device does, checking it first itself: `{ "join": "<code>" }`, a device asking to join, which the
-    /// Apple apps show with Approve and Not Me (`client/native/iphone/Notifications/Notes.swift`).
+    /// Apple apps show with Approve and Not Me (`native-apps/iphone/Notifications/Notes.swift`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<Value>,
 }

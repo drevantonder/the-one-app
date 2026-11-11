@@ -27,6 +27,8 @@ tracing = "0.1"
 
 # Serving and asking a device's API, and the runtime's interface: only a machine's.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+# The runtime's interface names the bucket's place (`runtime::Databases::bucket`).
+bucket = { path = "../bucket", features = ["machine"] }
 axum = "0.8"
 futures-util = { version = "0.3", default-features = false }
 # Times said to users, in their time zone (`feature::say_time`).

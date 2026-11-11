@@ -14,7 +14,7 @@ pub fn sign(key: &PrivateKey, bytes: &[u8]) -> Result<String> {
 }
 
 /// Whether this program runs from inside an app bundle: the copy of it a Mac's window carries only because builds before
-/// it check it's there as they update (`client/native/mac/build.sh`). Nothing runs it, and nothing updates it.
+/// it check it's there as they update (`native-apps/mac/build.sh`). Nothing runs it, and nothing updates it.
 pub fn in_app_bundle() -> bool {
     std::env::current_exe().and_then(|e| e.canonicalize()).is_ok_and(|e| e.to_string_lossy().contains(".app/Contents/"))
 }
