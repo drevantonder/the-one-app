@@ -712,7 +712,7 @@ class Run {
   notOnPages(name, scope = null) {
     const own = `user:${this.who.user}`;
     if ((scope === null || scope === own) && !this.view.runs.includes(own)) {
-      return `${name} isn't on a page this node reads: it reads what's added for everyone and your groups, not what's added for you alone. Run it on one of your devices instead (--device <name>; one status lists them).`;
+      return `${name} isn't on a page Cloudflare reads: it reads what's added for everyone and your groups, not what's added for you alone. Run it on one of your devices instead (--device <name>; one status lists them).`;
     }
     return `${name} isn't on any of your pages${scope ? ` in ${scope === own ? "your own" : scope}` : ""}`;
   }
@@ -980,8 +980,8 @@ class ForCall extends RpcTarget {
         case "devices":
           return Response.json(view.state.network.devices);
       }
-      if (ASKS[name]) return new Response(`a Cloudflare node doesn't do ${name} for apps yet, and ${OFF}`, { status: 501 });
-      refuse(400, `the node has no ask ${name}`);
+      if (ASKS[name]) return new Response(`Cloudflare doesn't do ${name} for apps yet, and ${OFF}`, { status: 501 });
+      refuse(400, `the app runtime has no ask ${name}`);
     } catch (err) {
       if (err.status === 428) this.call.need = err;
       const code = err.said?.code;
@@ -1059,7 +1059,7 @@ async function route(p, request) {
     if (d && plain(d) && p.callScopes(who, run.view, req).every((s) => run.view.runs.includes(s))) return json(await run.call(req));
     const r = named ? null : await p.onMachine(who, run.view, req, 120_000);
     if (r) return json(r, r.ok !== undefined ? 200 : 400);
-    if (!d || !servedHere(d)) refuse(503, named ? `the Cloudflare node can't run ${req.app} for you` : needsDevice(d, req.app));
+    if (!d || !servedHere(d)) refuse(503, named ? `Cloudflare can't run ${req.app} for you` : needsDevice(d, req.app));
     return json(await run.call(req));
   }
   const screenAt = path.match(/^\/api\/screens\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)$/);
@@ -1149,7 +1149,7 @@ function fromOf(remote, headers) {
 }
 
 export default {
-  fetch: () => json({ error: "the Cloudflare node is asked over iroh, as any node is" }, 404),
+  fetch: () => json({ error: "oned on Cloudflare is asked over iroh, as any app runtime is" }, 404),
 };
 
 /// A Durable Object of oned on Cloudflare: a user's (`user:<id>`), where their requests run, or the app runtime's
@@ -1168,7 +1168,7 @@ export class Oned extends DurableObject {
   }
 
   async fetch(request) {
-    if (this.isEndpoint) return json({ error: "the Cloudflare node's endpoint answers only asks over iroh" }, 400);
+    if (this.isEndpoint) return json({ error: "oned on Cloudflare's endpoint answers only asks over iroh" }, 400);
     this.user ||= new User(this);
     try {
       return await route(this.user, request);
@@ -1182,7 +1182,7 @@ export class Oned extends DurableObject {
   }
 
   only() {
-    if (!this.isEndpoint) throw new Error("only the Cloudflare node's endpoint does that");
+    if (!this.isEndpoint) throw new Error("only oned on Cloudflare's endpoint does that");
   }
 
   relay() {

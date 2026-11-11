@@ -106,10 +106,10 @@ export class Notifications extends DurableObject {
     sql.exec("insert into signed (sig, at) values (?, ?)", body.sig, Date.now());
     const allowed = await answer(this.env.RELAY.allowed(by));
     if (!allowed) refuse(403, "That device isn't one of the network's.");
-    const node = rolesOf(allowed.role).includes("compute");
+    const compute = rolesOf(allowed.role).includes("compute");
     if (what === "register") return this.register(by, fields);
     if (what === "unregister") return this.unregister(by);
-    if (what === "devices") return this.devices(node, fields);
+    if (what === "devices") return this.devices(compute, fields);
     return this.send(by, fields.notes);
   }
 
@@ -152,8 +152,8 @@ export class Notifications extends DurableObject {
     return { unregistered: true };
   }
 
-  devices(node, { user, keys = [] }) {
-    if (!node) refuse(403, "Only a node asks which devices registered.");
+  devices(compute, { user, keys = [] }) {
+    if (!compute) refuse(403, "Only an app runtime asks which devices registered.");
     const sql = this.ctx.storage.sql;
     const registered = keys.filter(isKey).flatMap((key) => sql.exec("select key, via, env, at from devices where key = ?", key).toArray());
     return { registered };

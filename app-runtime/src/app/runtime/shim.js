@@ -77,7 +77,7 @@ async function answered(name, r) {
 /// the same on a machine and on oned on Cloudflare.
 const asking = (send, body) => async (name, data) => {
   const ask = ASKS[name];
-  if (!ask) throw new Error(`the node has no ask ${name}`);
+  if (!ask) throw new Error(`the app runtime has no ask ${name}`);
   if (ask.writes && body.read_only) throw new Error(READ_ONLY);
   return answered(name, await send(name, data ?? null));
 };
