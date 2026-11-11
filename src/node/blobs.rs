@@ -260,6 +260,11 @@ impl Node {
     /// another device wrote naming it again is read here. Kept in a file, so a restart loses none; one the bucket didn't
     /// take is tried again next time.
     pub(super) async fn take_forgotten(&self) {
+        // Only an admin's endpoint removes from the bucket (the URL signer): a node of anyone else's leaves it to theirs.
+        let admins = self.with(|i| Ok(i.r.db().machine(&self.0.id)?.is_some_and(|m| i.r.db().may(&m.user, "invite", scopes::NETWORK))));
+        if !admins.unwrap_or(false) {
+            return;
+        }
         let now = now_ms();
         let noted = std::fs::read_to_string(self.network_dir().join("forgotten")).unwrap_or_default();
         let mut done = Vec::new();
