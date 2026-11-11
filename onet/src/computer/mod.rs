@@ -238,12 +238,12 @@ impl Onet {
         if !has_runtime {
             let runtime = api::home::runtime_endpoint(&self.home)?;
             self.tell(device, json!({ "add": key::hex(&runtime.key), "admin": false, "role": "compute" })).await?;
-            keyring.write_to_bucket(device, &self.key, &mine.user, ::scope::content::runtime(&runtime, &mine.user, &mine.name, &me)).await.map_err(|e| anyhow::anyhow!("listing this device's app runtime: {e}"))?;
+            keyring.write_to_bucket(device, &self.key, &mine.user, vec![::scope::content::runtime(&runtime, &mine.user, &mine.name, &me)]).await.map_err(|e| anyhow::anyhow!("listing this device's app runtime: {e}"))?;
             tracing::info!("listed this device's app runtime, {}", key::short(&runtime.key));
         }
         if mine.is(Kind::Compute) {
             let me = key::Endpoint { key: me, seal: mine.seal };
-            keyring.write_to_bucket(device, &self.key, &mine.user, ::scope::content::device(&me, &mine.user, &mine.name, &[Kind::Client], None)).await.map_err(|e| anyhow::anyhow!("leaving this device's things to its app runtime: {e}"))?;
+            keyring.write_to_bucket(device, &self.key, &mine.user, vec![::scope::content::device(&me, &mine.user, &mine.name, &[Kind::Client], None)]).await.map_err(|e| anyhow::anyhow!("leaving this device's things to its app runtime: {e}"))?;
             self.tell(device, json!({ "add": key::hex(&me.key), "admin": admin, "role": "client" })).await?;
             tracing::info!("this device runs nothing itself now: its app runtime does");
         }

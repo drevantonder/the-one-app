@@ -696,15 +696,17 @@ async fn serve() -> Result<()> {
     tracing::info!("{NAME} oned {} keeping onet and its app runtime ({at}) running, from {}", ::custom_build::config::BUILD, dir.display());
     platform::os::notify("READY=1");
     loop {
-        {
+        let waiting = {
             let [onet, runtime] = &mut *kept.lock().unwrap();
             onet.keep();
-            // The runtime asks onet for what the device's key opens as it starts: once onet answers.
+            // The runtime asks onet for what the device's key opens as it starts: once onet answers, which it's looked
+            // for as often as a loopback is asked again (`api::loopback`).
             if runtime.child.is_some() || std::net::TcpStream::connect(::api::local::addr()).is_ok() {
                 runtime.keep();
             }
-        }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+            runtime.child.is_none()
+        };
+        tokio::time::sleep(if waiting { ::api::loopback::EVERY } else { Duration::from_secs(2) }).await;
     }
 }
 

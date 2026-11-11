@@ -287,7 +287,7 @@ async fn write(onet: &Onet, req: Request) -> Result<Value> {
     let device = onet.device().await?;
     let keyring = device.keyring();
     anyhow::ensure!(keyring.user().as_deref() == Some(asked.user.as_str()), "the device writes in global only as its own user");
-    keyring.write_to_bucket(&*device, &*device, &asked.user, asked.content).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    keyring.write_to_bucket(&*device, &*device, &asked.user, asked.contents).await.map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(json!({}))
 }
 

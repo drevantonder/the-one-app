@@ -149,7 +149,7 @@ impl<O: Opens, D: Address + Keep + Signs> ::scope::settings::Me for Mine<'_, O, 
     }
 
     async fn write_as(&self, key: &::key::SigningKey, user: &str, content: Content) -> anyhow::Result<()> {
-        self.keyring.write_to_bucket(self.on, key, user, content).await.map_err(to_one)
+        self.keyring.write_to_bucket(self.on, key, user, vec![content]).await.map_err(to_one)
     }
 }
 
@@ -182,25 +182,33 @@ impl<O: Opens> Keyring<O> {
         Err(unsent("Who's who changed too often to write to: try again."))
     }
 
-    /// Signs a step of `content` with `by` as `user`'s, and writes it to the bucket itself, at the next position: read
-    /// again, and signed again for the one after, while another device's goes first. For the recovery key's steps, which
-    /// no device takes from a device as its user's (`POST /api/steps`), and on a computer, the device's own steps its app
-    /// runtime asks it to write (`app_runtime::Holder`), as the runtime signs nothing as the device.
-    pub(crate) async fn write_to_bucket(&self, on: &(impl Address + Keep + Signs), by: &impl Signs, user: &str, content: Content) -> Result<(), Error> {
+    /// Signs a step of each of `contents`, in order, with `by` as `user`'s, and writes it to the bucket itself, at the
+    /// next position: read again, and signed again for the one after, while another device's goes first. For the
+    /// recovery key's steps, which no device takes from a device as its user's (`POST /api/steps`), and on a computer, the
+    /// device's own steps its app runtime asks it to write (`app_runtime::Holder`), as the runtime signs nothing as the
+    /// device.
+    pub(crate) async fn write_to_bucket(&self, on: &(impl Address + Keep + Signs), by: &impl Signs, user: &str, contents: Vec<Content>) -> Result<(), Error> {
         use ::{scope::steps, database::stored};
-        for _ in 0..50 {
-            self.read(on).await?;
-            let (at, epoch, keys) = self.next_step().ok_or_else(refused)?;
-            let step = steps::sign_by(by, &Scope::Global, at + 1, user, epoch, now(), content.clone()).await.map_err(unsent)?;
-            self.who(|db| steps::apply(db, None, &Scope::Global, &step).map(drop)).ok_or_else(refused)?.map_err(|e| unsent(format!("{e:#}")))?;
-            let name = bucket::names::step_name(&steps::prefix("global"), at + 1);
-            let sealed = steps::seal(&keys, &name, &steps::encode(&step, None)).map_err(unsent)?;
-            if stored::created(on.bucket(), &name, &sealed).await.map_err(|e| unsent(format!("{e:#}")))? {
-                moved(on).await;
-                return self.read(on).await;
+        for content in contents {
+            let mut written = false;
+            for _ in 0..50 {
+                self.read(on).await?;
+                let (at, epoch, keys) = self.next_step().ok_or_else(refused)?;
+                let step = steps::sign_by(by, &Scope::Global, at + 1, user, epoch, now(), content.clone()).await.map_err(unsent)?;
+                self.who(|db| steps::apply(db, None, &Scope::Global, &step).map(drop)).ok_or_else(refused)?.map_err(|e| unsent(format!("{e:#}")))?;
+                let name = bucket::names::step_name(&steps::prefix("global"), at + 1);
+                let sealed = steps::seal(&keys, &name, &steps::encode(&step, None)).map_err(unsent)?;
+                if stored::created(on.bucket(), &name, &sealed).await.map_err(|e| unsent(format!("{e:#}")))? {
+                    written = true;
+                    break;
+                }
+            }
+            if !written {
+                return Err(unsent("Who's who changed too often to write to: try again."));
             }
         }
-        Err(unsent("Who's who changed too often to write to: try again."))
+        moved(on).await;
+        self.read(on).await
     }
 
     /// As each start of a client does (`::scope::settings::settle_own`).

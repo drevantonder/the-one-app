@@ -258,15 +258,21 @@ impl Host {
 
     /// Writes a built-in app's deploy if the network doesn't have it, leaving it to the caller to run it here.
     pub(super) async fn write_built_in(&self, caller: &Caller, app: &str) -> Result<()> {
-        let Some(bundle) = self.0.built_in.get(app) else { return Ok(()) };
+        for content in self.built_in_steps(caller, app)? {
+            self.append_as(&Scope::Global, &caller.user, content).await?;
+        }
+        Ok(())
+    }
+
+    /// The steps that write a built-in app's deploy, if the network doesn't have it: none if it does.
+    pub(super) fn built_in_steps(&self, caller: &Caller, app: &str) -> Result<Vec<Content>> {
+        let Some(bundle) = self.0.built_in.get(app) else { return Ok(Vec::new()) };
         let (present, admin) = self.with(|i| Ok((i.r.db().app(app)?.is_some(), i.r.db().may(&caller.user, "add-apps", scopes::NETWORK))))?;
         if present {
-            return Ok(());
+            return Ok(Vec::new());
         }
         ensure!(admin, "{app} is built in, but {} doesn't have it yet: an admin adds it first", ::custom_build::config::YOURS);
-        self.append_as(&Scope::Global, &caller.user, content::app(app, "admins")).await?;
-        self.append_as(&Scope::Global, &caller.user, content::deploy(app, bundle, [])).await?;
-        Ok(())
+        Ok(vec![content::app(app, "admins"), content::deploy(app, bundle, [])])
     }
 
     /// What an app's latest deploy says it uses: (apps, services). Waits a while for this device to run that deploy.

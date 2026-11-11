@@ -146,15 +146,15 @@ impl Host {
         for scope in [Scope::Global, Scope::User(me.user.clone())] {
             scope::settings::new_vault_key(self, &scope, 1, &[self.0.holds.device()]).await?;
         }
-        // Written first and run together: as each is written, settling would run them all again, holding up the next.
+        // Written first, in one write by whatever holds the device's key, and run together: as each is written, settling
+        // would run them all again, holding up the next.
         let settling = self.0.settling.lock().await;
+        let mut steps = Vec::new();
         for (app, _) in crate::built_in::BUILT_IN {
-            self.write_built_in(&me, app).await?;
+            steps.extend(self.built_in_steps(&me, app)?);
         }
-        for app in apps {
-            self.write_built_in(&me, app).await?;
-            self.append(&Scope::Global, content::added(app, true)).await?;
-        }
+        steps.extend(apps.iter().map(|app| content::added(app, true)));
+        self.write_steps(&me.user, steps).await?;
         drop(settling);
         self.settle().await?;
         self.emit(Event::Network);

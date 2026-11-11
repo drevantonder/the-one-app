@@ -25,12 +25,13 @@ pub struct HeldShare {
     pub share: String,
 }
 
-/// What `/api/holds/write` takes: answered by whatever holds the device's key, its app runtime or its onet.
+/// What `/api/holds/write` takes: answered by whatever holds the device's key, its app runtime or its onet. Its
+/// contents are written as that many steps, in order.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HeldWrite {
     pub user: String,
-    pub content: Content,
+    pub contents: Vec<Content>,
 }
 
 /// What `/api/holds/sign` takes: answered by whatever holds the device's key, its app runtime or its onet.

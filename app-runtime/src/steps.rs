@@ -126,11 +126,11 @@ impl Host {
         }
     }
 
-    /// Writes `content` to `global`'s scope database as a step this device signs as `user`, at the next position: when
-    /// another device wrote there first, it reads that, and signs it again for the one after. Signed by the device's key,
-    /// never this app runtime's own, which may be its app runtime's, whose device's holder writes it (`Holds::write_global`).
-    pub(super) async fn write_step(&self, user: &str, content: Content) -> Result<()> {
-        self.0.holds.write_global(self, user, content).await
+    /// Writes each of `contents` to `global`'s scope database as a step this device signs as `user`, in order, each at the
+    /// next position: when another device wrote there first, it reads that, and signs it again for the one after. Signed
+    /// by the device's key, never this app runtime's own, whose device's holder writes them (`Holds::write_global`).
+    pub(super) async fn write_steps(&self, user: &str, contents: Vec<Content>) -> Result<()> {
+        self.0.holds.write_global(self, user, contents).await
     }
 
     /// `write_step`, signed by `key`: this device's, or the network's recovery key, which only ever signs on the machine
@@ -319,7 +319,7 @@ impl Host {
             self.read_steps().await?;
         }
         match scope {
-            Scope::Global => self.write_step(user, content).await,
+            Scope::Global => self.write_steps(user, vec![content]).await,
             _ => self.write_scope_step(scope, user, content).await.map(drop),
         }
     }

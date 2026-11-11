@@ -68,13 +68,18 @@ impl Holds {
         }
     }
 
-    /// Writes `content` as the device's next step in `global`, as `user`, its user: signed by its key, by `node` or
-    /// by its holder, which writes it there and from which `node` then reads it.
-    pub(super) async fn write_global(&self, host: &Host, user: &str, content: Content) -> Result<()> {
+    /// Writes each of `contents` as the device's next step in `global`, in order, as `user`, its user: signed by its key,
+    /// by `host` or by its holder, which writes them there in one ask and from which `host` then reads them.
+    pub(super) async fn write_global(&self, host: &Host, user: &str, contents: Vec<Content>) -> Result<()> {
         match self {
-            Holds::Key(key) => host.write_step_as(key, user, content).await.map(drop),
+            Holds::Key(key) => {
+                for content in contents {
+                    host.write_step_as(key, user, content).await?;
+                }
+                Ok(())
+            }
             Holds::Asks { holder, .. } => {
-                holder.ask("POST", "/api/holds/write", Some(json!({ "user": user, "content": content }))).await?;
+                holder.ask("POST", "/api/holds/write", Some(json!({ "user": user, "contents": contents }))).await?;
                 host.read_steps_now().await?;
                 host.ping(&Scope::Global, None);
                 Ok(())
@@ -199,7 +204,7 @@ async fn write(State(host): State<Host>, Body(body): Body<HeldWrite>) -> Reply {
     if body.user != host.user()? {
         return Err(anyhow!("the device writes in global only as its own user").into());
     }
-    host.write_step(&body.user, body.content).await?;
+    host.write_steps(&body.user, body.contents).await?;
     Ok(axum::Json(json!({})))
 }
 
