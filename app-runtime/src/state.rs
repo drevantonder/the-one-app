@@ -75,10 +75,11 @@ impl Host {
             {
                 l.containers.clear();
             }
-            // What its services run there, as each says: they're part of it.
+            // What its services run there, as each says: they're part of the device, not of its app runtime listed here.
+            let device = m.device_of(&s.key);
             let mut services: Vec<Service> = Vec::new();
             for (p, d) in &up {
-                if p.device == Some(s.key) && !services.iter().any(|h| h.0 == d.0) {
+                if p.device == Some(device) && !services.iter().any(|h| h.0 == d.0) {
                     services.push(d.clone());
                 }
             }
@@ -234,7 +235,7 @@ fn installed_services(m: &ScopeDb, device: &scopes::Machine, services: &[Service
     let mut out = Vec::new();
     for (name, users, d) in services {
         let built_in = d["built_in"] == true;
-        let installed = m.switch(&device.key, name)?.filter(|i| i.on);
+        let installed = m.switch(&m.device_of(&device.key), name)?.filter(|i| i.on);
         // Registered over the local API, a service counts as installed by the device's local user.
         let by = match &installed {
             Some(i) => name_of(&i.by)?,
