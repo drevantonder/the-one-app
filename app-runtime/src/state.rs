@@ -97,7 +97,7 @@ impl Host {
                 // As its device's onet said them, while it's on.
                 parts: if !m.may(me, "remove", &scopes::device(&s.key)) || !(s.key == self.0.id || i.online(&s.key)) { None } else { i.parts.get(&m.device_of(&s.key)).and_then(|p| serde_json::from_value(p.clone()).ok()) },
                 load,
-                latest: build.as_ref().and_then(|r| latest.to_update_to(&r.target)).map(|t| t.commit.clone()),
+                latest: build.as_ref().and_then(|r| latest.to_update_to(&r.target).filter(|t| ::oned_update::latest::wanted(t, &r.commit, r.committed))).map(|t| t.commit.clone()),
                 updating: if s.key == self.0.id { self.updating() } else { session.and_then(|s| s.updating.clone()) },
             })
         };
