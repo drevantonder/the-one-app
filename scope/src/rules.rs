@@ -870,7 +870,7 @@ mod tests {
     use crate::steps;
 
     /// A step of the core's of any kind, one this release doesn't know too, as an older or newer release may write it.
-    fn node(kind: &str, data: Value) -> Content {
+    fn core_step(kind: &str, data: Value) -> Content {
         Content::new(crate::rules::APP, kind, data)
     }
 
@@ -1372,13 +1372,13 @@ mod tests {
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
         net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
         // Andre's device can't sign as Bob, Bob's can't as Andre, and an app runtime signs no change to who's who.
-        assert!(!net.step(&mac, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
-        assert!(!net.step(&bobs, ANDRE, node("setting", json!({ "name": "a", "value": "1" }))));
-        assert!(!net.step(&linux, ANDRE, node("setting", json!({ "name": "b", "value": "1" }))));
+        assert!(!net.step(&mac, BOB, core_step("rename", json!({ "user": BOB, "name": "Bobby" }))));
+        assert!(!net.step(&bobs, ANDRE, core_step("setting", json!({ "name": "a", "value": "1" }))));
+        assert!(!net.step(&linux, ANDRE, core_step("setting", json!({ "name": "b", "value": "1" }))));
         assert_eq!(net.db.user(BOB)?.unwrap().name, "Bob");
         assert!(net.db.settings()?.is_empty());
         // Bob's own device renames him; it can't list a device for Andre, nor Andre's list a client for Bob.
-        assert!(net.step(&bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
+        assert!(net.step(&bobs, BOB, core_step("rename", json!({ "user": BOB, "name": "Bobby" }))));
         assert!(!net.step(&bobs, BOB, device(&Dev::new(5).endpoint(), ANDRE, "x", &[Kind::Client], None)));
         assert!(!net.step(&mac, ANDRE, device(&Dev::new(6).endpoint(), BOB, "y", &[Kind::Client], None)));
         assert_eq!(net.db.user(BOB)?.unwrap().name, "Bobby");
@@ -1403,14 +1403,14 @@ mod tests {
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
         assert_eq!((net.db.epoch(&Scope::Global)?, net.db.sealed_to(&Scope::Global)?), (1, vec![mac.id()]), "global's first is its first device's");
         let to = json!([hex(&mac.id())]);
-        let epoch = |scope: &str, n: u32, hash: Option<String>| node("epoch", json!({ "scope": scope, "n": n, "to": to, "hash": hash }));
+        let epoch = |scope: &str, n: u32, hash: Option<String>| core_step("epoch", json!({ "scope": scope, "n": n, "to": to, "hash": hash }));
         assert!(!net.step(&bobs, BOB, epoch("global", 2, Some(H.repeat(64)))), "not Bob's to start");
         assert!(!net.step(&bobs, BOB, epoch(&format!("user:{ANDRE}"), 1, Some(H.repeat(64)))));
         assert!(!net.step(&mac, ANDRE, epoch("global", 3, Some(H.repeat(64)))), "epochs go one at a time");
         assert!(!net.step(&mac, ANDRE, epoch("global", 2, None)), "each naming its key");
         assert!(net.step(&mac, ANDRE, epoch("global", 2, Some("f".repeat(64)))));
         let bob = hex(&bobs.id());
-        assert!(net.step(&bobs, BOB, node("epoch", json!({ "scope": format!("user:{BOB}"), "n": 1, "to": [bob], "hash": H.repeat(64) }))), "a user's own scope is theirs");
+        assert!(net.step(&bobs, BOB, core_step("epoch", json!({ "scope": format!("user:{BOB}"), "n": 1, "to": [bob], "hash": H.repeat(64) }))), "a user's own scope is theirs");
         assert_eq!(net.db.epoch_hash(&Scope::Global, 2)?, Some("f".repeat(64)));
         assert_eq!(net.db.epoch_hash(&Scope::Global, 1)?, Some(H.repeat(64)), "each epoch's hash is kept");
         assert_eq!((net.db.epoch(&Scope::User(BOB.into()))?, net.db.epoch(&Scope::User(ANDRE.into()))?), (1, 0));
@@ -1458,7 +1458,7 @@ mod tests {
         assert!(net.step(&mac, ANDRE, remove_user(BOB)));
         // A new epoch of everyone's can't be sealed to Bob's phone, and what his phone writes after doesn't count.
         assert!(!net.step(&mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id, bob_id], &"c".repeat(64))), "an epoch sealed to a removed user's device doesn't count");
-        assert!(!net.step(&bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
+        assert!(!net.step(&bobs, BOB, core_step("rename", json!({ "user": BOB, "name": "Bobby" }))));
         assert!(net.db.client(&bobs.id())?.is_none() && net.db.clients()?.iter().all(|c| c.user != BOB));
         assert_eq!(net.db.user_ever(BOB)?.unwrap().name, "Bob");
         assert!(net.step(&mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id], &"c".repeat(64))), "sealed to those left, it does");
@@ -1494,9 +1494,9 @@ mod tests {
         net.step(&mac, ANDRE, invite("c000000000000003", BOB, Role::Member));
         net.step(&bobs, BOB, accept("c000000000000003"));
         // Apps of the group's, the admins' and Bob's, and oned on Cloudflare, which change nothing owed.
-        net.step(&mac, ANDRE, node("app", json!({ "name": "notes", "owner": "group:c000000000000003" })));
-        net.step(&mac, ANDRE, node("app", json!({ "name": "tally", "owner": "admins" })));
-        net.step(&bobs, BOB, node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
+        net.step(&mac, ANDRE, core_step("app", json!({ "name": "notes", "owner": "group:c000000000000003" })));
+        net.step(&mac, ANDRE, core_step("app", json!({ "name": "tally", "owner": "admins" })));
+        net.step(&bobs, BOB, core_step("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
         net.step(&mac, ANDRE, setting(crate::scopes::CLOUDFLARE_NODE, Some(&hex(&Dev::new(14).id()))));
         let (laptop, tablet) = (Dev::new(5), Dev::new(6));
         net.step(&bobs, BOB, device(&laptop.endpoint(), BOB, "laptop", &[Kind::Client], None));
@@ -1510,7 +1510,7 @@ mod tests {
         let (asked, said) = (Dev::new(12), Dev::new(13));
         net.step(&bobs, BOB, device(&asked.endpoint(), BOB, "app", &[Kind::Client], None));
         net.step(&bobs, BOB, device(&said.endpoint(), BOB, "app", &[Kind::Client], None));
-        let gone = |k: &Dev| node("remove", json!({ "key": hex(&k.id()), "itself": true }));
+        let gone = |k: &Dev| core_step("remove", json!({ "key": hex(&k.id()), "itself": true }));
         assert!(net.step(&bobs, BOB, gone(&asked)));
         assert!(net.owed().is_empty() && net.db.machine(&asked.id())?.is_none(), "its own app runtime signing it out owes nothing");
         assert!(net.step(&mac, ANDRE, gone(&said)));
@@ -1592,11 +1592,11 @@ mod tests {
             (&phone, BOB, epoch(&bob, 1, &[phone.id()], &H.repeat(64))),
             (&mac, ANDRE, epoch(&andre, 1, &[mac.id()], &H.repeat(64))),
             (&phone, BOB, epoch(&g, 1, &[phone.id()], &H.repeat(64))),
-            (&phone, BOB, node("app", json!({ "name": "notes", "owner": format!("user:{BOB}") }))),
-            (&mac, ANDRE, node("app", json!({ "name": "tally", "owner": "admins" }))),
-            (&mac, ANDRE, node("app", json!({ "name": "old", "owner": "admins" }))),
+            (&phone, BOB, core_step("app", json!({ "name": "notes", "owner": format!("user:{BOB}") }))),
+            (&mac, ANDRE, core_step("app", json!({ "name": "tally", "owner": "admins" }))),
+            (&mac, ANDRE, core_step("app", json!({ "name": "old", "owner": "admins" }))),
             (&mac, ANDRE, retire("old", "admins", "deleted").unwrap()),
-            (&phone, BOB, node("app", json!({ "name": "band", "owner": format!("group:{G}") }))),
+            (&phone, BOB, core_step("app", json!({ "name": "band", "owner": format!("group:{G}") }))),
             (&mac, ANDRE, service(&linux.id(), "whatsapp", true, Some(&Scope::Global))),
             (&phone, BOB, service(&box_.id(), "whatsapp", true, Some(&bob))),
         ];
@@ -1621,8 +1621,8 @@ mod tests {
         let (gus, stranger, part) = (Dev::new(30), Dev::new(32), Dev::new(33));
         let k = |d: &Dev| hex(&d.id());
         let bundle = "b".repeat(64);
-        let deploy = |app: &str| Content { blobs: vec![bundle.clone()], ..node("deploy", json!({ "app": app, "bundle": bundle })) };
-        let request = node("vault-request", json!({ "id": "e000000000000008", "app": "notes", "title": "Token", "fields": { "token": { "secret": true } }, "hosts": ["api.example.com"] }));
+        let deploy = |app: &str| Content { blobs: vec![bundle.clone()], ..core_step("deploy", json!({ "app": app, "bundle": bundle })) };
+        let request = core_step("vault-request", json!({ "id": "e000000000000008", "app": "notes", "title": "Token", "fields": { "token": { "secret": true } }, "hosts": ["api.example.com"] }));
         let global = [
             ("someone new, a member", device(&gus.endpoint(), GUS, "gus's phone", &[Kind::Client], Some(("Gus", Role::Member)))),
             ("someone new, an admin", device(&gus.endpoint(), GUS, "gus's phone", &[Kind::Client], Some(("Gus", Role::Admin)))),
@@ -1681,20 +1681,20 @@ mod tests {
             ("andre's handle", handle("user", ANDRE, "andrew")),
             ("g's handle", handle("group", G, "band")),
             ("a setting", setting("name", Some("Ours"))),
-            ("a new recovery key", node("recovery", json!({ "key": k(&stranger) }))),
-            ("an app of bob's", node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") }))),
-            ("an app of andre's", node("app", json!({ "name": "andres", "owner": format!("user:{ANDRE}") }))),
-            ("an app of the admins'", node("app", json!({ "name": "admins", "owner": "admins" }))),
-            ("an app of g's", node("app", json!({ "name": "g", "owner": format!("group:{G}") }))),
+            ("a new recovery key", core_step("recovery", json!({ "key": k(&stranger) }))),
+            ("an app of bob's", core_step("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") }))),
+            ("an app of andre's", core_step("app", json!({ "name": "andres", "owner": format!("user:{ANDRE}") }))),
+            ("an app of the admins'", core_step("app", json!({ "name": "admins", "owner": "admins" }))),
+            ("an app of g's", core_step("app", json!({ "name": "g", "owner": format!("group:{G}") }))),
             ("delete bob's notes", retire("notes", &format!("user:{BOB}"), "deleted").unwrap()),
             ("delete the admins' tally", retire("tally", "admins", "deleted").unwrap()),
             ("delete g's band", retire("band", &format!("group:{G}"), "deleted").unwrap()),
             ("restore the admins' old", retire("old", "admins", "restored").unwrap()),
             ("erase the admins' old", retire("old", "admins", "erased").unwrap()),
             ("erase the admins' tally", retire("tally", "admins", "erased").unwrap()),
-            ("give tally to bob", node("app", json!({ "name": "tally", "owner": format!("user:{BOB}") }))),
-            ("give notes to the admins", node("app", json!({ "name": "notes", "owner": "admins" }))),
-            ("tally's source", node("app", json!({ "name": "tally", "owner": "admins", "source": "https://example.com/tally.git" }))),
+            ("give tally to bob", core_step("app", json!({ "name": "tally", "owner": format!("user:{BOB}") }))),
+            ("give notes to the admins", core_step("app", json!({ "name": "notes", "owner": "admins" }))),
+            ("tally's source", core_step("app", json!({ "name": "tally", "owner": "admins", "source": "https://example.com/tally.git" }))),
             ("deploy notes", deploy("notes")),
             ("deploy tally", deploy("tally")),
             ("deploy band", deploy("band")),
@@ -1708,20 +1708,20 @@ mod tests {
             ("bob's box's notes on, bob's", service(&box_.id(), "notes", true, Some(&bob))),
             ("cloudflare's notes on", service(&cloudflare.id(), "notes", true, Some(&Scope::Global))),
             ("cloudflare's notes off", service(&cloudflare.id(), "notes", false, None)),
-            ("a node release", node("node-release", json!({ "version": "9.9.9" }))),
-            ("an unknown kind", node("frobnicate", json!({}))),
+            ("a node release", core_step("node-release", json!({ "version": "9.9.9" }))),
+            ("an unknown kind", core_step("frobnicate", json!({}))),
             ("an app's own", Content::new("notes", "note", json!({ "text": "hi" }))),
         ];
         let own = |page: &str| {
             [
                 ("add-app notes", added("notes", true)),
                 ("remove-app notes", added("notes", false)),
-                ("schedule", node("schedule", json!({ "app": "notes", "schedule": "daily", "on": true }))),
+                ("schedule", core_step("schedule", json!({ "app": "notes", "schedule": "daily", "on": true }))),
                 ("vault request", request.clone()),
-                ("vault request declined", node("vault-request", json!({ "id": "e000000000000008", "declined": true }))),
-                ("keep", node("keep", json!({}))),
-                ("forget", node("forget", json!({ "blob": "c".repeat(64) }))),
-                ("arrange", node("arrange", json!({ "page": page, "items": [{ "app": "notes" }] }))),
+                ("vault request declined", core_step("vault-request", json!({ "id": "e000000000000008", "declined": true }))),
+                ("keep", core_step("keep", json!({}))),
+                ("forget", core_step("forget", json!({ "blob": "c".repeat(64) }))),
+                ("arrange", core_step("arrange", json!({ "page": page, "items": [{ "app": "notes" }] }))),
                 ("an app's own", Content::new("notes", "note", json!({ "text": "hi" }))),
                 ("a setting", setting("name", Some("Ours"))),
             ]
@@ -1770,15 +1770,15 @@ mod tests {
         // Only a device users use, of someone already in; and nothing else.
         assert!(!net.step(&recovery, BOB, device(&Dev::new(6).endpoint(), BOB, "box", &[Kind::Compute], None)));
         assert!(!net.step(&recovery, "c000000000000003", device(&Dev::new(7).endpoint(), "c000000000000003", "new", &[Kind::Client], Some(("Cy", Role::Admin)))));
-        assert!(!net.step(&recovery, ANDRE, node("setting", json!({ "name": "a", "value": "1" }))));
+        assert!(!net.step(&recovery, ANDRE, core_step("setting", json!({ "name": "a", "value": "1" }))));
         assert!(!net.step(&recovery, ANDRE, role(BOB, Role::Admin)));
         assert!(net.db.user("c000000000000003")?.is_none() && net.db.user(BOB)?.unwrap().role == Role::Member);
         // A key that isn't the network's recovery key lets nobody in.
         let other = Dev::new(8);
         assert!(!net.step(&other, BOB, device(&Dev::new(10).endpoint(), BOB, "x", &[Kind::Client], None)));
         // Only the recovery key hands over to a new one: an admin's device can't, and the old key counts no more.
-        assert!(!net.step(&mac, ANDRE, node("recovery", json!({ "key": hex(&other.id()) }))), "not by an admin's device");
-        assert!(net.step(&recovery, ANDRE, node("recovery", json!({ "key": hex(&other.id()) }))));
+        assert!(!net.step(&mac, ANDRE, core_step("recovery", json!({ "key": hex(&other.id()) }))), "not by an admin's device");
+        assert!(net.step(&recovery, ANDRE, core_step("recovery", json!({ "key": hex(&other.id()) }))));
         assert_eq!((net.db.recovery()?, net.db.recovery_set()?, net.db.recovery_was()?), (Some(other.id()), net.at, vec![recovery.id()]));
         assert!(!net.step(&recovery, BOB, device(&Dev::new(11).endpoint(), BOB, "y", &[Kind::Client], None)), "the old recovery key lets nobody in");
         // Handed over, the new key starts a scope's next keys, for a user with no device left to do it, and nothing else.

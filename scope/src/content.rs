@@ -143,7 +143,7 @@ impl Change {
     }
 }
 
-pub fn node(change: Change, data: Value) -> Content {
+pub fn core_step(change: Change, data: Value) -> Content {
     Content::new(APP, change.name(), data)
 }
 
@@ -161,59 +161,59 @@ pub fn device(endpoint: &::key::Endpoint, user: &str, name: &str, roles: &[Kind]
         data["user_name"] = json!(user_name);
         data["role"] = json!(role);
     }
-    node(Change::Device, data)
+    core_step(Change::Device, data)
 }
 
 
 pub fn role(user: &str, role: Role) -> Content {
-    node(Change::Role, json!({ "user": user, "role": role }))
+    core_step(Change::Role, json!({ "user": user, "role": role }))
 }
 
 pub fn remove_user(user: &str) -> Content {
-    node(Change::Remove, json!({ "user": user }))
+    core_step(Change::Remove, json!({ "user": user }))
 }
 
 pub fn remove_device(key: &Key) -> Content {
-    node(Change::Remove, json!({ "key": hex(key) }))
+    core_step(Change::Remove, json!({ "key": hex(key) }))
 }
 
 /// One of the network's settings; `None` puts back the custom build's default.
 pub fn setting(name: &str, value: Option<&str>) -> Content {
-    node(Change::Setting, json!({ "name": name, "value": value }))
+    core_step(Change::Setting, json!({ "name": name, "value": value }))
 }
 
 /// A new group, its writer its first admin.
 pub fn group(id: &str, name: &str) -> Content {
-    node(Change::Group, json!({ "group": id, "name": name }))
+    core_step(Change::Group, json!({ "group": id, "name": name }))
 }
 
 pub fn invite(group: &str, user: &str, role: Role) -> Content {
-    node(Change::Invite, json!({ "group": group, "user": user, "role": role }))
+    core_step(Change::Invite, json!({ "group": group, "user": user, "role": role }))
 }
 
 /// Says someone new may join as `user` by signing in as `email`, until `until` (ms): an admin's yes, given in advance.
 /// `keys` are the provider's keys now (JWKS keys), which a sign-in any device of the network lets them in by is signed with.
 pub fn invite_email(user: &str, email: &str, name: &str, role: Role, until: u64, keys: &[Value]) -> Content {
-    node(Change::InviteEmail, json!({ "user": user, "email": email, "name": name, "role": role, "until": until, "keys": keys }))
+    core_step(Change::InviteEmail, json!({ "user": user, "email": email, "name": name, "role": role, "until": until, "keys": keys }))
 }
 
 pub fn withdraw_invite(user: &str) -> Content {
-    node(Change::WithdrawInvite, json!({ "user": user }))
+    core_step(Change::WithdrawInvite, json!({ "user": user }))
 }
 
 pub fn accept(group: &str) -> Content {
-    node(Change::Accept, json!({ "group": group }))
+    core_step(Change::Accept, json!({ "group": group }))
 }
 
 /// A group member's role, or `None` to take them out.
 pub fn member(group: &str, user: &str, role: Option<Role>) -> Content {
-    node(Change::Member, json!({ "group": group, "user": user, "role": role }))
+    core_step(Change::Member, json!({ "group": group, "user": user, "role": role }))
 }
 
 /// Turns down a device that asked to join as this user's, before it's listed ("Not Me"): every device of theirs
 /// then refuses it.
 pub fn refuse(endpoint: &::key::Endpoint, name: &str) -> Content {
-    node(Change::Refuse, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "name": name }))
+    core_step(Change::Refuse, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "name": name }))
 }
 
 /// Forgets what one of this user's devices signed in with (`Machine::sign_in`), or with `account`, one it linked.
@@ -222,41 +222,41 @@ pub fn forget_sign_in(key: &Key, account: Option<&Account>) -> Content {
     if let Some(account) = account {
         data["account"] = json!(account);
     }
-    node(Change::ForgetSignIn, data)
+    core_step(Change::ForgetSignIn, data)
 }
 
 /// Records `account` as also signing in as this user, linked from their device `key`, which checked it.
 pub fn link_sign_in(key: &Key, account: &Account) -> Content {
-    node(Change::LinkSignIn, json!({ "key": hex(key), "account": account }))
+    core_step(Change::LinkSignIn, json!({ "key": hex(key), "account": account }))
 }
 
 /// Renames a device (`key`), a user (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
 pub fn rename(what: &str, id: &str, name: &str) -> Content {
     let mut data = json!({ "name": name });
     data[what] = json!(id);
-    node(Change::Rename, data)
+    core_step(Change::Rename, data)
 }
 
 /// Changes a user's (`what` user) or a group's (`group`) handle.
 pub fn handle(what: &str, id: &str, handle: &str) -> Content {
     let mut data = json!({ "handle": handle });
     data[what] = json!(id);
-    node(Change::Rename, data)
+    core_step(Change::Rename, data)
 }
 
 /// A scope's new epoch, sealed to `to`, its key's `keys::epoch_hash` as `hash`.
 pub fn epoch(scope: &Scope, n: u32, to: &[Key], hash: &str) -> Content {
-    node(Change::Epoch, json!({ "scope": scope.to_string(), "n": n, "to": to.iter().map(hex).collect::<Vec<_>>(), "hash": hash }))
+    core_step(Change::Epoch, json!({ "scope": scope.to_string(), "n": n, "to": to.iter().map(hex).collect::<Vec<_>>(), "hash": hash }))
 }
 
 /// The network's next recovery key, `key`, written by the one before it.
 pub fn recovery(key: &Key) -> Content {
-    node(Change::Recovery, json!({ "key": hex(key) }))
+    core_step(Change::Recovery, json!({ "key": hex(key) }))
 }
 
 /// A scope's Vault key `n`, its public half `public`, sealed to the machines `to`.
 pub fn vault(scope: &Scope, n: u32, public: &[u8; 32], to: &[Key]) -> Content {
-    node(Change::Vault, json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))
+    core_step(Change::Vault, json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))
 }
 
 /// A part of a device's oned (a service, or `apps`, the app runtime) switched on or off there; a service, for the app
@@ -266,18 +266,18 @@ pub fn service(device: &Key, name: &str, on: bool, scope: Option<&Scope>) -> Con
     if let Some(scope) = scope {
         data["scope"] = json!(scope.to_string());
     }
-    node(Change::Service, data)
+    core_step(Change::Service, data)
 }
 
 /// Where its writer's own things run besides their own machines: the network's others that run their own scope.
 pub fn runs(on: &[Key]) -> Content {
-    node(Change::Runs, json!({ "on": on.iter().map(hex).collect::<Vec<_>>() }))
+    core_step(Change::Runs, json!({ "on": on.iter().map(hex).collect::<Vec<_>>() }))
 }
 
 /// App schedules: `endpoint` runs `app`'s schedules in `scope` until `until`, or no longer with 0.
 pub fn app_schedules(endpoint: &Key, scope: &Scope, app: &str, until: u64, keys: &BTreeMap<u32, String>) -> Content {
     let keys: serde_json::Map<String, Value> = keys.iter().map(|(n, h)| (n.to_string(), json!(h))).collect();
-    node(Change::AppSchedules, json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until, "keys": keys }))
+    core_step(Change::AppSchedules, json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until, "keys": keys }))
 }
 
 /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), as its owner (`owner`) says.
@@ -289,49 +289,49 @@ pub fn retire(app: &str, owner: &str, how: &str) -> Result<Content> {
         "erased" => data["erased"] = json!(true),
         other => bail!("an app is deleted, restored or erased, not {other}"),
     }
-    Ok(node(Change::App, data))
+    Ok(core_step(Change::App, data))
 }
 
 /// Adds an app to a scope, or removes it.
 pub fn added(app: &str, added: bool) -> Content {
-    node(if added { Change::AddApp } else { Change::RemoveApp }, json!({ "app": app }))
+    core_step(if added { Change::AddApp } else { Change::RemoveApp }, json!({ "app": app }))
 }
 
 /// A new app, or an app given to a new owner (`owner`, as `Principal` writes it).
 pub fn app(name: &str, owner: &str) -> Content {
-    node(Change::App, json!({ "name": name, "owner": owner }))
+    core_step(Change::App, json!({ "name": name, "owner": owner }))
 }
 
 /// A new app `name`, a copy of `from`.
 pub fn fork(name: &str, owner: &str, from: &str) -> Content {
-    node(Change::App, json!({ "name": name, "owner": owner, "from": from }))
+    core_step(Change::App, json!({ "name": name, "owner": owner, "from": from }))
 }
 
 /// Where an app's code is kept (`scopes::source_link`), or nowhere with "".
 pub fn source(name: &str, owner: &str, link: &str) -> Content {
-    node(Change::App, json!({ "name": name, "owner": owner, "source": link }))
+    core_step(Change::App, json!({ "name": name, "owner": owner, "source": link }))
 }
 
 /// A deploy of `app`: the bundle at blob `bundle`, and the builds of its service it names (`bundle::SERVICES`), each a
 /// blob too, so an app runtime that runs it finds it.
 pub fn deploy(app: &str, bundle: &str, builds: impl IntoIterator<Item = String>) -> Content {
     let blobs = std::iter::once(bundle.to_string()).chain(builds).collect();
-    Content { blobs, ..node(Change::Deploy, json!({ "app": app, "bundle": bundle })) }
+    Content { blobs, ..core_step(Change::Deploy, json!({ "app": app, "bundle": bundle })) }
 }
 
 /// Switches a schedule of an app added in the step's scope on or off.
 pub fn schedule(app: &str, schedule: &str, on: bool) -> Content {
-    node(Change::Schedule, json!({ "app": app, "schedule": schedule, "on": on }))
+    core_step(Change::Schedule, json!({ "app": app, "schedule": schedule, "on": on }))
 }
 
 /// The blobs its scope keeps.
 pub fn keep(blobs: Vec<String>) -> Content {
-    Content { blobs, ..node(Change::Keep, json!({})) }
+    Content { blobs, ..core_step(Change::Keep, json!({})) }
 }
 
 /// A blob its scope no longer needs (its hash, hex).
 pub fn forget(blob: &str) -> Content {
-    node(Change::Forget, json!({ "blob": blob.to_lowercase() }))
+    core_step(Change::Forget, json!({ "blob": blob.to_lowercase() }))
 }
 
 /// A page arranged by its user, in their own scope: its items, the apps taken off it, and with their own page
@@ -341,7 +341,7 @@ pub fn arrange(page: &str, items: Value, hidden: Value, pages: Value) -> Content
     if page == "user" && !pages.is_null() {
         data["pages"] = pages;
     }
-    node(Change::Arrange, data)
+    core_step(Change::Arrange, data)
 }
 
 /// What a Vault request asks for: `id`'s item for `app`, its `title`, `fields` (`{ name: { secret } }`) and `hosts`, the
@@ -359,26 +359,26 @@ pub struct Request<'a> {
 
 /// A Vault request made.
 pub fn vault_request(r: Request) -> Content {
-    node(Change::VaultRequest, json!({ "id": r.id, "app": r.app, "title": r.title, "fields": r.fields, "hosts": r.hosts, "need": r.need, "why": r.why, "agent": r.agent }))
+    core_step(Change::VaultRequest, json!({ "id": r.id, "app": r.app, "title": r.title, "fields": r.fields, "hosts": r.hosts, "need": r.need, "why": r.why, "agent": r.agent }))
 }
 
 /// A Vault request answered: declined, or set once its item is in the scope's Vault.
 pub fn vault_answer(id: &str, declined: bool) -> Content {
     let mut data = json!({ "id": id });
     data[if declined { "declined" } else { "set" }] = json!(true);
-    node(Change::VaultRequest, data)
+    core_step(Change::VaultRequest, data)
 }
 
 /// Lists a device's app runtime, by that device: a compute of its own key, naming the device, carrying its rights to
 /// run things (`ScopeDb::device_of`).
 pub fn runtime(endpoint: &::key::Endpoint, user: &str, name: &str, device: &Key) -> Content {
-    node(Change::Device, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Compute], "device": hex(device) }))
+    core_step(Change::Device, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Compute], "device": hex(device) }))
 }
 
 /// Lists a service offering `service` as `user`'s, a part of `device`, by that device: its key and seal key, which
 /// its asks are signed with and sealed to.
 pub fn listed_service(endpoint: &::key::Endpoint, user: &str, name: &str, service: &str, device: &Key) -> Content {
-    node(Change::Device, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service, "device": hex(device) }))
+    core_step(Change::Device, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service, "device": hex(device) }))
 }
 
 #[cfg(test)]

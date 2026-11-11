@@ -1050,7 +1050,7 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     let ran = ::scope::settings::answer(&k, "POST", "/api/devices/run_schedules", json!({ "app": "notes", "device": ::key::hex(&k.id()), "scope": "global" }).to_string().as_bytes()).await.unwrap().unwrap();
     assert!(ran["until"].is_u64(), "{ran}");
     let listing = |key: &[u8; 32], seal: &[u8; 32], name: &str, roles: &[Kind], device: Option<&[u8; 32]>| {
-        content::node(Change::Device, json!({ "key": ::key::hex(key), "seal": ::key::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(::key::hex) }))
+        content::core_step(Change::Device, json!({ "key": ::key::hex(key), "seal": ::key::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(::key::hex) }))
     };
     k.member_content(&me, listing(&r.key, &r.seal, "rt-device's runtime", &[Kind::Compute], Some(&k.id()))).await.unwrap();
     ::scope::settings::tell(&k, &k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
@@ -1116,7 +1116,7 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("key"), ::key::hex(&key.to_bytes())).unwrap();
     let listing = |key: &[u8; 32], seal: &[u8; 32], name: &str, roles: &[Kind], device: Option<&[u8; 32]>| {
-        content::node(Change::Device, json!({ "key": ::key::hex(key), "seal": ::key::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(::key::hex) }))
+        content::core_step(Change::Device, json!({ "key": ::key::hex(key), "seal": ::key::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(::key::hex) }))
     };
     k.member_content(&me, listing(&r.key, &r.seal, "onet-device's runtime", &[Kind::Compute], Some(&k.id()))).await.unwrap();
     ::scope::settings::tell(&k, &k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();

@@ -363,7 +363,7 @@ impl Freeze {
 
     /// As a freeze says it, and as a reader keeps it.
     pub fn content(&self) -> Content {
-        content::node(Change::Freeze, json!({ "hash": self.hash, "logs": self.logs }))
+        content::core_step(Change::Freeze, json!({ "hash": self.hash, "logs": self.logs }))
     }
 
     /// The last step of `global`'s log it holds.
@@ -421,7 +421,7 @@ pub fn start_name(scope: &Scope) -> String {
 pub fn start(key: &SigningKey, scope: &Scope, user: &str, epoch: u32, now: u64, db: &mut ScopeDb) -> Result<Given> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
     let hash = database::stored::state_hash(db.conn())?;
-    let step = sign(key, scope, 0, user, epoch, now, content::node(Change::Start, json!({ "hash": hash })))?;
+    let step = sign(key, scope, 0, user, epoch, now, content::core_step(Change::Start, json!({ "hash": hash })))?;
     Ok(Given { step, copy: Some(db.bytes()?) })
 }
 
@@ -1062,7 +1062,7 @@ pub fn release_defaults() -> Result<Content> {
     db.execute_batch(permissions::DEFAULTS)?;
     let mut data = rules_of(&db)?;
     data["reads"] = json!(READS);
-    Ok(content::node(Change::Defaults, data))
+    Ok(content::core_step(Change::Defaults, data))
 }
 
 /// A database's types, roles and rules, as a `Change::Defaults` step says them.
