@@ -16,7 +16,7 @@ curl -fsSL theoneapp.drevan.me | sh
 > [!WARNING]
 > **Early days.** This changes every day and things break. I wouldn't use it or rely on it yet; wait until it settles.
 
-The vision for this project is simple: make using AI to its full potential easy.
+The vision for this project is simple: make using AI to its full potential easy. [VISION.md](VISION.md) says what that means.
 
 To learn more, point your agent at this repo and ask it to explain.
 
