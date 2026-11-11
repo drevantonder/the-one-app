@@ -47,7 +47,7 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
         ensure!(all.iter().any(|d| d["name"] == n.as_str()), "no device named {n}: {}", all.iter().filter_map(|d| d["name"].as_str()).collect::<Vec<_>>().join(", "));
     }
     let (macs, wanted): (Vec<Value>, Vec<Value>) =
-        all.into_iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).partition(|d| names.is_empty() && one::build::Platform::is_mac(d["target"].as_str().unwrap_or("")));
+        all.into_iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).partition(|d| names.is_empty() && one::latest::is_mac(d["target"].as_str().unwrap_or("")));
     for d in macs {
         println!("  {}: not waited for: a Mac takes a build when its agent builds it; --device {} to wait", d["name"].as_str().unwrap_or(""), d["name"].as_str().unwrap_or(""));
     }
@@ -104,7 +104,7 @@ fn goal(commit: &str, target: &str, record: Option<&Latest>, fetched: &mut std::
         return commit.to_string();
     }
     let parts = Parts::of(String::from_utf8_lossy(&out.stdout).lines());
-    if if one::build::Platform::is_mac(target) { parts.mac } else { parts.node } { commit.to_string() } else { published.commit.clone() }
+    if if one::latest::is_mac(target) { parts.mac } else { parts.node } { commit.to_string() } else { published.commit.clone() }
 }
 
 /// The signed record at the network's address, if it can be read now.

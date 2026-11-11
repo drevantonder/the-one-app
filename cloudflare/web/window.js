@@ -60,10 +60,11 @@ const barBackAt = (r) => (platform.phone() ? !home(r) : !!history.state?.back);
 
 const appBehind = () => {
   if (!platform.behind() && !tooOld.now) return null;
-  const device = (store.state?.network?.clients || []).find((c) => c.key === store.state?.me?.key)?.device;
+  // A computer's window is a view of the computer itself, which `one update` updates, the window with it.
+  const device = platform.view() ? store.state?.me?.key : (store.state?.network?.clients || []).find((c) => c.key === store.state?.me?.key)?.device;
   const storeName = { iPhone: "the App Store", Android: "Google Play" }[platform.label()];
   const action = platform.client() === "web" ? { label: "Update", run: () => location.reload() }
-    : device && !platform.mac() ? { label: "Update", run: () => api("/api/devices/update", { method: "POST", body: { device } }) }
+    : device ? { label: "Update", run: () => api("/api/devices/update", { method: "POST", body: { device } }) }
     : null;
   const text = storeName ? `Update it from ${storeName}.` : action ? "It can’t read what your other devices have moved on to." : "Its next build is on the way.";
   return h(ui.Problem, { quiet: true, title: "This device needs updating", text, action, className: "max-w-none rounded-none border-0 border-b" });

@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 
 use super::Onet;
 use crate::keyring::Address;
-use crate::{Body, Sent};
+use crate::{Body, Device, Sent};
 
 /// The most of a request's body kept in memory: a bigger one (a git push's pack, a file) goes to disk, and streams to
 /// where it's passed on from there.
@@ -71,13 +71,36 @@ fn refused(status: StatusCode, error: String, code: Option<&str>) -> Response {
     (status, axum::Json(out)).into_response()
 }
 
+/// The routes a computer's onet answers itself, which `answer` takes before passing anything on: all but those of the
+/// window's joining and pushes are its app runtime's routes too, for a node that's its own device.
+pub const OWN: &[&str] = &[
+    "/api/join",
+    "/api/join/ask",
+    "/api/join/wait",
+    "/api/push/register",
+    "/api/push/open",
+    "/api/create",
+    "/api/devices/approve-with-recovery",
+    "/api/devices/recovery-key/replace",
+    "/api/devices/recovery-holders/seal",
+    "/api/holds",
+    "/api/holds/shared",
+    "/api/holds/write",
+    "/api/holds/sign",
+];
+
 async fn answer(State((onet, routes)): State<(Arc<Onet>, Arc<Routes>)>, req: Request) -> Response {
     if !one::api::from_this_machine(&onet.token, &req) {
         return refused(StatusCode::FORBIDDEN, one::api::not_this_machine(), Some(code::NOT_THIS_MACHINE));
     }
     let (method, path) = (req.method().to_string(), req.uri().path().to_string());
     let done = match (method.as_str(), path.as_str()) {
+        ("GET", "/api/join") => stands(&onet).await,
         ("POST", "/api/join") => join(&onet, req).await,
+        ("POST", "/api/join/ask") => ask(&onet, req).await,
+        ("POST", "/api/join/wait") => wait(&onet, req).await,
+        ("POST", "/api/push/register") => register_push(&onet, req).await,
+        ("POST", "/api/push/open") => open_note(&onet, req).await,
         ("POST", "/api/create") => create(&onet, req).await,
         ("POST", "/api/devices/approve-with-recovery" | "/api/devices/recovery-key/replace" | "/api/devices/recovery-holders/seal") => recovery(&onet, &path, req).await,
         ("GET", "/api/holds") => Ok(held(&onet)),
@@ -119,6 +142,105 @@ async fn join(onet: &Arc<Onet>, req: Request) -> Result<Value> {
         tracing::info!("joined; {err:#}");
     }
     Ok(json!({}))
+}
+
+/// Where this computer stands with a network, for its desktop window, which is a view of it: in one (`in`, with its
+/// address and this device's user), or not; and the device a sign-in here is for (`join`, its key and seal key) and the
+/// code another of its user's devices lets it in by.
+async fn stands(onet: &Onet) -> Result<Value> {
+    let me = one::keys::Endpoint::of(&onet.key);
+    let mut out = json!({ "in": false, "join": format!("{}{}", one::keys::hex(&me.key), one::keys::hex(&me.seal)), "code": one::keys::spaced_code(&one::keys::join_code(&me)) });
+    if let Some(network) = NetworkFile::read(&onet.home)? {
+        let address = onet.device().await.ok().map(|d| d.address().to_string()).filter(|a| !a.is_empty());
+        out["in"] = json!(true);
+        out["user"] = json!(network.user);
+        out["address"] = json!(address);
+    }
+    Ok(out)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Ask {
+    address: String,
+    /// An access token of the user signed in on this computer, whose sign-in named this device.
+    token: String,
+    /// Someone new's invite secret, its proof.
+    invite: Option<String>,
+}
+
+/// Asks the network at `address` to let this computer in, as the user signed in on it (its desktop window signs them in,
+/// naming this device): → the code another of their devices approves it by, and whether an invite said yes already.
+async fn ask(onet: &Onet, req: Request) -> Result<Value> {
+    let asked: Ask = body(req).await?;
+    anyhow::ensure!(NetworkFile::read(&onet.home)?.is_none(), "this computer is in a network already");
+    let device = Arc::new(Device::new(onet.key.to_bytes(), &asked.address, &onet.home.join("onet").to_string_lossy()));
+    let invited = device.ask(&asked.token, &onet.name, asked.invite.as_deref()).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let code = device.code();
+    *onet.asking.lock().await = Some(device);
+    Ok(json!({ "code": code, "invited": invited }))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Wait {
+    token: String,
+}
+
+/// Whether this computer, having asked (`ask`), has been let in: once it has, its home names the network, its bucket
+/// where who's who says (the `storage` setting, reached through the URL signer), and it starts as a device of it.
+async fn wait(onet: &Arc<Onet>, req: Request) -> Result<Value> {
+    let asked: Wait = body(req).await?;
+    if NetworkFile::read(&onet.home)?.is_some() {
+        return Ok(json!({ "in": true }));
+    }
+    let device = onet.asking.lock().await.clone().context("this computer hasn't asked to be let in: ask first")?;
+    if !device.wait(&asked.token).await.map_err(|e| anyhow::anyhow!("{e}"))? {
+        return Ok(json!({ "in": false }));
+    }
+    let keyring = device.keyring();
+    let user = keyring.user().context("let in, but who's who names no user for this device yet")?;
+    let root = std::fs::read_to_string(onet.home.join("onet").join("root")).context("let in, but the network's root wasn't kept")?;
+    let storage = keyring.who(|db| db.setting(one::node::storage::STORAGE)).and_then(Result::ok).flatten();
+    let bucket = match storage {
+        Some(fields) => {
+            let mut fields: std::collections::BTreeMap<String, String> = serde_json::from_str(&fields).context("the storage setting isn't an S3 address")?;
+            fields.insert("address".into(), device.address().to_string());
+            Some(fields)
+        }
+        None => {
+            tracing::warn!("this device can't reach the network's bucket: it keeps no app's data until the network moves to S3-compatible storage");
+            None
+        }
+    };
+    NetworkFile { root: root.trim().to_string(), user, bucket, folders: Default::default() }.write(&onet.home)?;
+    device.disconnect().await;
+    *onet.asking.lock().await = None;
+    if let Err(err) = onet.start().await {
+        tracing::info!("let in; {err:#}");
+    }
+    Ok(json!({ "in": true }))
+}
+
+/// Registers where a push service reaches this device (`one::push::Address`): Windows' window hands it its channel.
+async fn register_push(onet: &Onet, req: Request) -> Result<Value> {
+    let address: one::push::Address = body(req).await?;
+    onet.device().await?.register_push(&address).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(json!({}))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Pushed {
+    /// The note as its push carried it (base64url).
+    n: String,
+}
+
+/// A note pushed to this device, opened with its key: → the note, and the key of the device that sent it.
+async fn open_note(onet: &Onet, req: Request) -> Result<Value> {
+    let pushed: Pushed = body(req).await?;
+    let (note, from) = crate::open_note(onet.key.to_bytes(), &pushed.n).map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(json!({ "note": note, "from": from }))
 }
 
 /// A new network, made by this device's own app runtime, which deploys its first apps: then this computer is its first

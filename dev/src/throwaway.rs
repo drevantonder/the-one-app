@@ -147,10 +147,19 @@ fn chosen(rest: &[String]) -> Result<(Option<PathBuf>, Option<PathBuf>, &[String
 /// Publishes this checkout's build at the throwaway network's address, under its own release key, for its device to take
 /// with `update`: it must be a different commit from the one the device runs, which `--build` starts it on.
 fn publish(dir: &Path, addr: &str) -> Result<()> {
-    let build = crate::program()?;
-    let version = Version::of(&build).context("ask this checkout's build what it is")?;
+    let version = Version::of(&crate::program()?).context("ask this checkout's build what it is")?;
     let runs = Version::of(&network::program(dir)?).context("ask the throwaway network's program what it is")?;
     anyhow::ensure!(version.commit != runs.commit, "the throwaway network runs this build already ({}), so it would have nothing to take: start it on an older build with {} throwaway --build <program>, or commit and build again", runs.commit, dev());
+    publish_build(dir, addr)?;
+    println!("Published {} under this throwaway network's own release key. {} throwaway update takes it, and Cloudflare's Update in Devices its Workers.", version.commit, dev());
+    Ok(())
+}
+
+/// This checkout's build, published at the throwaway network's address under its own release key: what its devices
+/// update to, and what a computer the desktop app sets up takes.
+pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
+    let build = crate::program()?;
+    let version = Version::of(&build).context("ask this checkout's build what it is")?;
     let (node, key) = (node_at(dir, addr), Throwaway::own_release_key(dir)?);
     one::build::publish(&node, &build, &key, &version, None)?;
     // The Workers and the web client too, which Cloudflare's Update in Devices takes from the record.
@@ -158,9 +167,7 @@ fn publish(dir: &Path, addr: &str) -> Result<()> {
     let (workers, web) = (dir.join("workers.bundle"), dir.join("web.bundle"));
     std::fs::write(&workers, bundle(one::ui_folder::cloudflare()).packed()?)?;
     std::fs::write(&web, one::web::bundle::signed(&key, &bundle(one::web::with_client()).packed()?)?)?;
-    one::build::publish_latest(&node, &key, &[(one::latest::Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()), (one::latest::Thing::WEB.into(), Some(web), version.clone(), "-".into())])?;
-    println!("Published {} under this throwaway network's own release key. {} throwaway update takes it, and Cloudflare's Update in Devices its Workers.", version.commit, dev());
-    Ok(())
+    one::build::publish_latest(&node, &key, &[(one::latest::Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()), (one::latest::Thing::WEB.into(), Some(web), version.clone(), "-".into())])
 }
 
 /// `update`, in the throwaway network: nothing supervises its oned, so what systemd or launchd does for a device's, this does

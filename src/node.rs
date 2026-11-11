@@ -388,22 +388,7 @@ impl Node {
             }
         });
         if dir.join(NETWORK_DIR).join(NETWORK_FILE).exists() {
-            node.open_network().context("open the network")?;
-            if let Err(err) = node.bucket().and_then(|b| b.forget_sent()) {
-                tracing::warn!("forgetting steps other devices sent: {err:#}");
-            }
-            node.with(update_views)?;
-            node.keep_alone_here()?;
-            node.read_own_items();
-            node.follow_net();
-            node.read_all_status(false);
-            let reader = node.clone();
-            tokio::spawn(async move {
-                if let Err(err) = reader.read_scopes(None).await {
-                    tracing::warn!("reading the bucket: {err:#}");
-                }
-                reader.share_blobs().await;
-            });
+            node.take_network()?;
         }
         tokio::spawn(node.clone().pull_loop());
         tokio::spawn(node.clone().invites_loop());
@@ -540,12 +525,40 @@ impl Node {
     }
 
     /// Now and then, reads what other devices wrote and said.
+    /// The network this device's home names, opened and read, as it starts, or as its onet joins one while it runs.
+    fn take_network(&self) -> Result<()> {
+        self.open_network().context("open the network")?;
+        if let Err(err) = self.bucket().and_then(|b| b.forget_sent()) {
+            tracing::warn!("forgetting steps other devices sent: {err:#}");
+        }
+        self.with(update_views)?;
+        self.keep_alone_here()?;
+        self.read_own_items();
+        self.follow_net();
+        self.read_all_status(false);
+        let reader = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = reader.read_scopes(None).await {
+                tracing::warn!("reading the bucket: {err:#}");
+            }
+            reader.share_blobs().await;
+        });
+        Ok(())
+    }
+
     async fn tick_loop(self) {
         let (mut refilled, mut whole): (Option<SystemTime>, Option<SystemTime>) = (None, None);
         // What the relay said of writes at the last refill.
         let mut seen = Value::Null;
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
+            // A network its device's onet joined since it started, which writes it to their home.
+            if !self.has_network() && self.0.dir.join(NETWORK_DIR).join(NETWORK_FILE).exists() {
+                match self.take_network() {
+                    Ok(()) => self.emit(Event::Network),
+                    Err(err) => tracing::warn!("{err:#}"),
+                }
+            }
             let mut read = false;
             if self.has_network() {
                 // The wall clock, which runs on while a machine sleeps, as `Instant` doesn't everywhere.

@@ -129,13 +129,18 @@ impl Latest {
 
     /// What `one update` puts on a device on `target`: a Mac's app as a whole (`app/<target>`), else its node's program.
     pub fn to_update_to(&self, target: &str) -> Option<&Thing> {
-        if crate::build::Platform::is_mac(target) { self.get(&Thing::app_name(target)) } else { self.get(&Thing::node_name(target)) }
+        if is_mac(target) { self.get(&Thing::app_name(target)) } else { self.get(&Thing::node_name(target)) }
     }
 
     /// What a device on `target` should run: for a Mac, what's to be built (`source`), else its node's build.
     pub fn for_target(&self, target: &str) -> Option<&Thing> {
-        if crate::build::Platform::is_mac(target) { self.get("source") } else { self.get(&Thing::node_name(target)) }
+        if is_mac(target) { self.get("source") } else { self.get(&Thing::node_name(target)) }
     }
+}
+
+/// Whether `target` is a Mac's, which takes its whole app.
+pub fn is_mac(target: &str) -> bool {
+    target.ends_with("-apple-darwin")
 }
 
 /// Whether a device running `build`, committed at `committed`, takes `thing`: a different build, and never going

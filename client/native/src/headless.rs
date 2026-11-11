@@ -12,9 +12,10 @@
 //! - `register-push` `{ via, address }`: this device's push address registered with the push Worker → `{ "ok": null }`
 //! - `open` `{ link }`: a link of the app's, opened in its window (a tapped notification's)
 //!
-//! Each fails as `{ "error": "…" }`. While the app runs (in the tray), it answers these itself with its own client,
-//! already connected (`serve`): the command asks it over a loopback port its folder names, with a token only this user
-//! can read there, and starts the client itself only when no app answers.
+//! Each fails as `{ "error": "…" }`. On a computer each is asked of its onet, as the window asks it (`crate::here`). On a
+//! phone, while the app runs, it answers these itself with its own client, already connected (`serve`): the command asks
+//! it over a loopback port its folder names, with a token only this user can read there, and starts the client itself
+//! only when no app answers.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -96,6 +97,7 @@ pub fn serve() {
 }
 
 /// The user signed in here, and this device's key for them: `(address, "<address> <user>", key)`.
+#[cfg(mobile)]
 fn signed_in(data: &std::path::Path) -> Result<(String, String, [u8; 32]), String> {
     let address = crate::address_in(data).ok_or("Sign in first.")?;
     let user = crate::kept_in(data, "user").ok_or("Sign in first.")?;
@@ -105,24 +107,35 @@ fn signed_in(data: &std::path::Path) -> Result<(String, String, [u8; 32]), Strin
 }
 
 /// The running app's device if it's been let in, else one started from what it keeps.
-async fn device(mine: Option<Arc<onet::Device>>) -> Result<Arc<onet::Device>, String> {
+#[cfg(mobile)]
+async fn device(mine: Option<Arc<onet::Device>>) -> Result<crate::Reach, String> {
     if let Some(d) = mine {
-        return Ok(d);
+        return Ok(crate::Reach::Device(d));
     }
     let data = data();
     let (address, id, key) = signed_in(&data)?;
     let device = crate::client(&data, &address, &id, key);
     match device.connect().await {
-        Ok(true) => Ok(Arc::new(device)),
+        Ok(true) => Ok(crate::Reach::Device(Arc::new(device))),
         Ok(false) => Err("This device hasn't been approved yet.".into()),
         Err(e) => Err(e.to_string()),
     }
 }
 
+/// A computer's onet.
+#[cfg(desktop)]
+async fn device(_: Option<Arc<onet::Device>>) -> Result<crate::Reach, String> {
+    Ok(crate::Reach::Onet)
+}
+
 /// One of them, in this process: in the running app with its device if it's been let in yet, or else one started
 /// from what it keeps (an iPhone's widget's button, which may start it in the background).
 pub async fn run_here(kind: &str, input: &Value) -> Value {
-    answered(run(kind, input, crate::APP.get().and_then(|a| a.device().ok())).await)
+    #[cfg(mobile)]
+    let mine = crate::APP.get().and_then(|a| a.device().ok());
+    #[cfg(desktop)]
+    let mine = None;
+    answered(run(kind, input, mine).await)
 }
 
 /// One of them, with `mine`, the running app's device, or else one started here.
@@ -140,12 +153,15 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<onet::Device>>) -> Resu
         }
         "widgets" => {
             let dir = crate::platform::widgets_dir();
-            crate::widgets::refresh(&*device(mine).await?, &dir).await?;
+            crate::widgets::refresh(&device(mine).await?, &dir).await?;
             Ok(json!({ "dir": dir }))
         }
         "open-note" => {
-            let (_, _, key) = signed_in(&data())?;
-            let (note, _) = onet::open_note(key, &text("n")?).map_err(|e| e.to_string())?;
+            #[cfg(mobile)]
+            let (note, _) = onet::open_note(signed_in(&data())?.2, &text("n")?).map_err(|e| e.to_string())?;
+            // Sealed to the computer's key, which its onet opens it with.
+            #[cfg(desktop)]
+            let note: one::push::Note = serde_json::from_value(crate::here::asked("/api/push/open", Some(json!({ "n": text("n")? })), 30).await?["note"].take()).map_err(|e| e.to_string())?;
             let mut out = json!({ "id": note.id, "title": note.title, "body": note.body, "app": note.app, "link": note.link(), "join": note.join() });
             // Absent, not null: Kotlin's optString reads a null as "null".
             out.as_object_mut().unwrap().retain(|_, v| !v.is_null());
@@ -172,7 +188,7 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<onet::Device>>) -> Resu
         }
         "register-push" => {
             let address = one::push::Address { via: text("via")?, address: text("address")?, ..Default::default() };
-            device(mine).await?.register_push(&address).await.map_err(|e| e.to_string())?;
+            device(mine).await?.register_push(&address).await?;
             Ok(json!({ "ok": null }))
         }
         "open" => {

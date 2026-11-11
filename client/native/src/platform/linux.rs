@@ -1,5 +1,5 @@
-//! What's Linux's own: the machine's id, opening at login (an XDG autostart entry), and the app in the desktop's
-//! launcher as what opens `<cli>://` links.
+//! What's Linux's own: opening at login (an XDG autostart entry), the app in the desktop's launcher as what opens
+//! `<cli>://` links, and setting up `<cli>` where it's missing, with oned run by the user's own systemd (`set_up`).
 
 use std::path::PathBuf;
 
@@ -18,8 +18,56 @@ pub const LABEL: &str = "Linux";
 pub const FLYOUT_GAP: f64 = 8.0;
 pub const TRAY_AT_BOTTOM: bool = false;
 
-pub fn this_device() -> Option<String> {
-    this_device_or(["/etc/machine-id", "/var/lib/dbus/machine-id"].iter().find_map(|p| std::fs::read_to_string(p).ok()))
+/// Sets up `<cli>` on this computer, from the network at `address`, with no root: the newest for it where install.sh
+/// puts it (`~/.local/bin`; a throwaway network's in its home, as its programs put theirs), and its oned run by the
+/// user's own systemd, which starts it as they sign in and again whenever it stops, as `<cli> update` has it. A program
+/// already there is only started. One installed for the whole machine (install.sh, by root) is root's to start.
+pub fn set_up(address: &str) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let cli = one::config::CLI;
+    let oned = format!("{cli}d");
+    // A throwaway network's computer is its own, beside the machine's.
+    let throwaway = crate::env("THROWAWAY").is_some();
+    if !throwaway && std::path::Path::new("/etc/systemd/system").join(format!("{oned}.service")).exists() {
+        return Err(format!("This computer's {oned} isn't running: start it with sudo systemctl start {oned}"));
+    }
+    let bin = if throwaway { one::home().join("bin") } else { PathBuf::from(std::env::var_os("HOME").ok_or("This user has no home folder.")?).join(".local/bin") };
+    let program = bin.join(cli);
+    if !program.exists() {
+        let bytes = super::desktop::program(address)?;
+        std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
+        let part = bin.join(format!(".{cli}.part"));
+        std::fs::write(&part, bytes).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+        std::fs::rename(&part, &program).map_err(|e| e.to_string())?;
+        for name in [oned.clone(), format!("git-remote-{cli}")] {
+            let _ = std::fs::remove_file(bin.join(&name));
+            std::os::unix::fs::symlink(cli, bin.join(name)).map_err(|e| e.to_string())?;
+        }
+        one::logs::say(&format!("set up {} from {address}", program.display()));
+    }
+    // A throwaway network's oned is a unit of its own beside the user's real one, named for its home.
+    let unit = match throwaway {
+        true => format!("{oned}-throwaway-{}", &data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(one::home().to_string_lossy().as_bytes()))[..8]),
+        false => oned.clone(),
+    };
+    // What says which network and home it's for: the environment `one-dev throwaway` gives its programs, or a custom
+    // build's home, as the window was started with.
+    let env: String = ["HOME", "ADDR", "THROWAWAY", "RELEASE_KEY"].iter().filter_map(|k| Some(format!("Environment=\"{}={}\"\n", one::config::env(k), crate::env(k)?))).collect();
+    let file = one::home().join(format!("{unit}.service"));
+    std::fs::create_dir_all(one::home()).map_err(|e| e.to_string())?;
+    std::fs::write(
+        &file,
+        format!("[Unit]\nDescription={}, this device\n\n[Service]\nExecStart={}\nRestart=always\nRestartSec=2\n{env}\n[Install]\nWantedBy=default.target\n", one::config::NAME, bin.join(&oned).display()),
+    )
+    .map_err(|e| e.to_string())?;
+    let systemctl = |args: &[&str]| -> Result<(), String> {
+        let done = std::process::Command::new("systemctl").arg("--user").args(args).output().map_err(|_| format!("This computer has no systemd to keep {oned} running: run {} yourself.", bin.join(&oned).display()))?;
+        if done.status.success() { Ok(()) } else { Err(format!("systemctl --user {}: {}", args.join(" "), String::from_utf8_lossy(&done.stderr).trim())) }
+    };
+    systemctl(&["link", &file.to_string_lossy()])?;
+    systemctl(&["daemon-reload"])?;
+    systemctl(&["enable", "--now", &unit])
 }
 
 /// Tauri's app local data folder, found with no window: where XDG_DATA_HOME says.
@@ -89,7 +137,7 @@ pub fn badge(count: u32) {
 }
 
 /// Pushes come only to computers that register a channel (Windows).
-pub fn let_in(_: std::sync::Arc<onet::Device>) {}
+pub fn let_in() {}
 
 /// Links to the network's address open only the browser.
 pub fn claim(_: Option<String>) {}

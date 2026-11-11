@@ -1,6 +1,5 @@
-//! What's the Mac's own, beside the window: opening at login (SMAppService's main app), this Mac's node (oned, the
-//! bundle's launch agent `app.<cli>.mac.oned`, kept running, which joins a network with a pairing code and approves
-//! the window), "Let Agents Use This Mac", which Computer Use's helper reads from this app's defaults (`computerUse`),
+//! What's the Mac's own, beside the window: opening at login (SMAppService's main app), this Mac's oned (the bundle's
+//! launch agent `app.<cli>.mac.oned`, kept running, whose onet the window is a view of), "Let Agents Use This Mac", which Computer Use's helper reads from this app's defaults (`computerUse`),
 //! the app's menus, and the menu bar (`menubar`).
 
 use std::path::PathBuf;
@@ -22,11 +21,6 @@ pub const LABEL: &str = "Mac";
 pub fn name() -> Option<String> {
     let named = std::process::Command::new("/usr/sbin/scutil").args(["--get", "ComputerName"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     named.filter(|n| !n.is_empty()).or_else(super::desktop::name)
-}
-
-/// A Mac is the device its own node is.
-pub fn this_device() -> Option<String> {
-    this_device_or(None)
 }
 
 /// Tauri's app local data folder, found with no window.
@@ -81,17 +75,6 @@ pub fn watch_full_screen(window: &tauri::WebviewWindow) {
 pub fn start_tray(_: &tauri::App) -> tauri::Result<()> {
     menubar::start();
     Ok(())
-}
-
-/// Whether this Mac's own node is in no network yet, so joins one with a pairing code (`pair`), as the Mac app did.
-pub fn unpaired(local: Option<&Value>) -> bool {
-    local.is_some_and(|s| s["network"].is_null())
-}
-
-/// Its own node approves the window by its code, as one of the Mac's own programs, if it's a device of the same user
-/// (as the Mac app's did): else the code waits for another of theirs.
-pub fn approve_here(code: String) {
-    std::thread::spawn(move || crate::local("/api/devices/approve", Some(json!({ "code": crate::device_code(&code), "confirm": true })), 30));
 }
 
 /// This Mac's node kept running; the Mac app's menus, with its keys; the widgets' own items, as last kept, until the
@@ -192,11 +175,22 @@ unsafe extern "C" {
     fn getuid() -> u32;
 }
 
-/// Keeps oned, this Mac as a device, running: the bundle's launch agent, registered (again, if launchd won't run it, as
-/// once the app's been rebuilt since it was registered, which records this build); or, refused, a child of the app's.
-/// Off the main thread: launchctl takes seconds.
+/// oned, which the app carries on a Mac, running: its launch agent (`start_node`). The address is for a computer that
+/// downloads it.
+pub fn set_up(_: &str) -> Result<(), String> {
+    keep_node();
+    Ok(())
+}
+
+/// Keeps oned, this Mac as a device, running, off the main thread: launchctl takes seconds.
 fn start_node() {
-    std::thread::spawn(|| {
+    std::thread::spawn(keep_node);
+}
+
+/// oned running: the bundle's launch agent, registered (again, if launchd won't run it, as once the app's been rebuilt
+/// since it was registered, which records this build); or, refused, a child of the app's.
+fn keep_node() {
+    {
         let agent: Retained<AnyObject> = unsafe { msg_send![class!(SMAppService), agentServiceWithPlistName: &*NSString::from_str(&format!("{}.plist", label()))] };
         if status(&agent) == ENABLED {
             if kickstarted() {
@@ -213,7 +207,7 @@ fn start_node() {
         if node.exists() && !running {
             let _ = std::process::Command::new(node).spawn();
         }
-    });
+    }
 }
 
 /// The app's menus, macOS's own with the Mac app's keys, as items of them so they work wherever the focus is (a key
@@ -258,7 +252,7 @@ pub fn badge(count: u32) {
 }
 
 /// Pushes come only to computers that register a channel (Windows).
-pub fn let_in(_: std::sync::Arc<onet::Device>) {}
+pub fn let_in() {}
 
 /// Links to the network's address open only the browser.
 pub fn claim(_: Option<String>) {}

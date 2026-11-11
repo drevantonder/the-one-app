@@ -67,10 +67,11 @@ pub fn update() {
     static ONE: Mutex<()> = Mutex::new(());
     std::thread::spawn(|| {
         let _one = ONE.lock().unwrap();
+        let stands = crate::here::stands().filter(|s| s["in"] == true);
         let state = json!({
             "name": one::config::NAME,
-            "signedIn": crate::signed_in(),
-            "here": super::this_device(),
+            "signedIn": stands.is_some(),
+            "here": stands.as_ref().and_then(|s| s["join"].as_str()).map(|j| j[..64].to_string()),
             "login": super::login().unwrap_or(false),
             "computerUse": super::computer_use(),
             "items": items(),

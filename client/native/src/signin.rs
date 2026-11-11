@@ -16,7 +16,6 @@ use onet::sign_in::{Auth, Failed, Tokens, signed_out};
 
 use crate::secrets;
 
-pub use onet::sign_in::subject;
 
 pub struct SignIn {
     pub address: String,

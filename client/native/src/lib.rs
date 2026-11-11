@@ -1,14 +1,18 @@
 //! The native app: one window, which is the web client's own page (cloudflare/web/web.js, its files from one::web,
-//! built in), drawn and run as it is in a browser, but on this device's client (onet) rather than a browser's.
+//! built in), drawn and run as it is in a browser, but on this device's onet rather than a browser's: on a phone, built
+//! into the app, with the phone's key in the OS's secret store; on a computer, the computer's own (`here`), of which the
+//! window is only a view, with no key or background program of its own.
 //! The page finds the app as `window.__oneNative` (src/native.js), which only it has: screens run in sandboxed frames
 //! in it with no origin of their own, which reach none of the app's commands, and ask the page, as they do in a
-//! browser. What the app adds is what a page can't do: this device's key in the OS's secret store, signing in through
-//! the system's browser, notifications, the clipboard, files, and links outside.
+//! browser. What the app adds is what a page can't do: signing in through the system's browser, notifications, the
+//! clipboard, files, and links outside.
 
 #[macro_use]
 mod commands;
 mod bundle;
 mod headless;
+#[cfg(desktop)]
+mod here;
 mod platform;
 mod secrets;
 mod signin;
@@ -54,28 +58,82 @@ fn env(name: &str) -> Option<String> {
     std::env::var(format!("{}_{name}", one::config::CLI.to_uppercase())).ok().filter(|v| !v.is_empty())
 }
 
-/// What this computer's own node says of itself, where one runs here.
-fn local_state() -> Option<Value> {
-    local("/api/state", None, 2).ok().filter(|(ok, _)| *ok).map(|(_, out)| out)
+/// What this app asks its user's devices through: a phone's own client, with the phone's key; or the computer's onet,
+/// which the window is a view of.
+#[derive(Clone)]
+enum Reach {
+    #[cfg(mobile)]
+    Device(Arc<onet::Device>),
+    #[cfg(desktop)]
+    Onet,
 }
 
-/// Asks this computer's own node as one of its programs (by its local token): `body` posted, or a GET, waiting at
-/// most `secs` → whether it did, and what it said.
-fn local(path: &str, body: Option<Value>, secs: u64) -> Result<(bool, Value), String> {
-    let token = std::fs::read_to_string(one::home().join("local-token")).map_err(|_| "This computer's node isn't running.".to_string())?;
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(secs))).http_status_as_error(false).build().into();
-    let url = format!("http://127.0.0.1:{}{path}", one::config::PORT);
-    let mut r = match body {
-        Some(body) => agent.post(url).header(one::protocol::header::LOCAL_TOKEN, token.trim()).send_json(body),
-        None => agent.get(url).header(one::protocol::header::LOCAL_TOKEN, token.trim()).call(),
+/// A response's body, as it comes.
+enum Body {
+    #[cfg(mobile)]
+    Device(onet::Body),
+    #[cfg(desktop)]
+    Onet(tokio::sync::mpsc::Receiver<Result<Vec<u8>, String>>),
+}
+
+impl Body {
+    async fn chunk(&mut self) -> Result<Option<Vec<u8>>, String> {
+        match self {
+            #[cfg(mobile)]
+            Body::Device(body) => body.chunk().await.map_err(|e| e.to_string()),
+            #[cfg(desktop)]
+            Body::Onet(parts) => parts.recv().await.transpose(),
+        }
     }
-    .map_err(|e| e.to_string())?;
-    Ok((r.status().is_success(), r.body_mut().read_json().unwrap_or_default()))
+
+    async fn bytes(mut self) -> Result<Vec<u8>, String> {
+        let mut out = Vec::new();
+        while let Some(part) = self.chunk().await? {
+            out.extend_from_slice(&part);
+        }
+        Ok(out)
+    }
+}
+
+/// A response: its status and headers, its body, and for a phone's own client, the trace of how it was reached.
+struct Answer {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Body,
+    trace: Option<Value>,
+}
+
+impl Reach {
+    /// `method` of `path`, with `headers` and `body`; a request a phone's key isn't let in for any more fails as `not_let_in`.
+    async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<Answer, String> {
+        match self {
+            #[cfg(mobile)]
+            Reach::Device(device) => {
+                let r = device.fetch(method, path, headers, body).await.map_err(|e| if e.not_let_in { "not_let_in".to_string() } else { e.to_string() })?;
+                Ok(Answer { status: r.status, headers: r.headers, body: Body::Device(r.body), trace: r.trace })
+            }
+            #[cfg(desktop)]
+            Reach::Onet => {
+                let r = here::fetch(method.to_string(), path.to_string(), headers, body).await?;
+                Ok(Answer { status: r.status, headers: r.headers, body: Body::Onet(r.body), trace: None })
+            }
+        }
+    }
+
+    /// Registers where a push service reaches this device with the network's push Worker.
+    async fn register_push(&self, address: &one::push::Address) -> Result<(), String> {
+        match self {
+            #[cfg(mobile)]
+            Reach::Device(device) => device.register_push(address).await.map_err(|e| e.to_string()),
+            #[cfg(desktop)]
+            Reach::Onet => here::asked("/api/push/register", Some(json!(address)), 30).await.map(drop),
+        }
+    }
 }
 
 /// A response's body the page reads, and what stops a read waiting on it once the page cancels.
 struct Reading {
-    body: tokio::sync::Mutex<onet::Body>,
+    body: tokio::sync::Mutex<Body>,
     stop: tokio::sync::Notify,
 }
 
@@ -84,6 +142,8 @@ struct App {
     /// Where it keeps what isn't secret: the address, who's signed in, and the client's own folder per user.
     data: PathBuf,
     sign_in: Mutex<Option<Arc<signin::SignIn>>>,
+    /// A phone's own client, once it's let in.
+    #[cfg(mobile)]
     device: Mutex<Option<Arc<onet::Device>>>,
     /// Responses whose bodies the page reads as they come, by id.
     bodies: Mutex<HashMap<u64, Arc<Reading>>>,
@@ -150,21 +210,30 @@ impl App {
         Ok(a)
     }
 
+    #[cfg(mobile)]
     fn device(&self) -> Result<Arc<onet::Device>, String> {
         self.device.lock().unwrap().clone().ok_or_else(|| "This device hasn't been approved yet.".into())
+    }
+
+    /// What it asks its user's devices through, once it can.
+    fn reach(&self) -> Result<Reach, String> {
+        #[cfg(mobile)]
+        return self.device().map(Reach::Device);
+        #[cfg(desktop)]
+        Ok(Reach::Onet)
     }
 }
 
 /// What a node answers `method` at `path` (with `body`, as JSON), as JSON: its `error`, or a status that isn't a success,
 /// an Err.
-async fn node(device: &onet::Device, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+async fn node(reach: &Reach, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
     let (headers, body) = match body {
         Some(b) => (vec![("content-type".into(), "application/json".into())], serde_json::to_vec(&b).map_err(|e| e.to_string())?),
         None => (Vec::new(), Vec::new()),
     };
-    let r = device.fetch(method, path, headers, body).await.map_err(|e| e.to_string())?;
+    let r = reach.fetch(method, path, headers, body).await?;
     let status = r.status;
-    let out: Value = serde_json::from_slice(&r.body.bytes().await.map_err(|e| e.to_string())?).unwrap_or_default();
+    let out: Value = serde_json::from_slice(&r.body.bytes().await?).unwrap_or_default();
     match out["error"].as_str() {
         Some(e) => Err(e.to_string()),
         None if !(200..300).contains(&status) => Err("That didn’t work. Try again.".into()),
@@ -173,8 +242,8 @@ async fn node(device: &onet::Device, method: &str, path: &str, body: Option<Valu
 }
 
 /// The widgets kept for the platform's own again, and drawn again where the app runs.
-async fn widgets_changed(device: &onet::Device) {
-    let said = widgets::refresh(device, &platform::widgets_dir()).await;
+async fn widgets_changed(reach: &Reach) {
+    let said = widgets::refresh(reach, &platform::widgets_dir()).await;
     if let Err(e) = &said {
         one::logs::say(&format!("widgets: {e}"));
     }
@@ -203,9 +272,12 @@ fn keep_widgets() {
 /// Let in, now or as it starts: the platform's own widgets kept, and its pushes registered.
 fn let_in() {
     keep_widgets();
+    #[cfg(mobile)]
     if let Ok(device) = app().device() {
         platform::let_in(device);
     }
+    #[cfg(desktop)]
+    platform::let_in();
 }
 
 /// The panel, drawn before this device was in (signed out), drawn again now it is.
@@ -215,11 +287,44 @@ fn redraw_panel() {
     }
 }
 
+/// In its network, as the window first finds it: `let_in`, and on a computer, the key the window had of its own before it
+/// was a view of the computer's onet leaving (`leave_own_key`).
+fn let_in_once() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let_in();
+        #[cfg(desktop)]
+        tauri::async_runtime::spawn(leave_own_key());
+    });
+}
+
+/// The key this window had of its own, before it was a view of the computer's onet, leaves its user's devices
+/// (`Device::sign_out`, by `Keyring::leave`, which makes no epoch) and is forgotten, with its sign-in and what was kept as
+/// it: a computer is one device, with one key. Only once its onet is in, so nothing of theirs is left needing it.
+#[cfg(desktop)]
+async fn leave_own_key() {
+    let a = app();
+    secrets::forget_device(secrets::SIGNING_IN);
+    let (Some(address), Some(user)) = (a.address(), a.kept("user")) else { return };
+    let id = format!("{address} {user}");
+    if let Some(secret) = secrets::device(&id) {
+        let device = client(&a.data, &address, &id, secret);
+        let _ = tokio::time::timeout(Duration::from_secs(30), device.sign_out()).await;
+        secrets::forget_device(&id);
+        one::logs::say("this window's own key left: the computer's is its only one");
+    }
+    if let Ok(signing) = a.sign_in() {
+        let _ = tauri::async_runtime::spawn_blocking(move || signing.sign_out()).await;
+    }
+    a.keep("user", None);
+    let _ = std::fs::remove_dir_all(a.data.join("client"));
+}
+
 /// Something changed on the user's devices (the page's events say): the widgets kept for the platform's own again.
 #[tauri::command]
 fn changed() {
-    let Ok(device) = app().device() else { return };
-    tauri::async_runtime::spawn(async move { widgets_changed(&device).await });
+    let Ok(reach) = app().reach() else { return };
+    tauri::async_runtime::spawn(async move { widgets_changed(&reach).await });
 }
 
 /// What waits for the user (every app's badge on every page, and Settings'), counted on the app's icon; none at 0.
@@ -263,17 +368,21 @@ async fn token() -> Result<String, Failure> {
 
 /// Who an access token is for.
 fn subject(token: &str) -> Result<String, Failure> {
-    signin::subject(token).ok_or_else(|| onet::sign_in::signed_out("Sign in again: that sign-in names no one.").into())
+    onet::sign_in::subject(token).ok_or_else(|| onet::sign_in::signed_out("Sign in again: that sign-in names no one.").into())
 }
 
 // MARK: What the page asks
 
-/// Whether someone's signed in here.
-fn signed_in() -> bool {
+/// Who's signed in here: on a computer in a network, the user its onet is in it as (`stands`, as onet said it); else
+/// who signed in here, to be let in as. None if no one is.
+fn signed_in(stands: Option<&Value>) -> Option<String> {
+    if let Some(user) = stands.filter(|s| s["in"] == true).and_then(|s| s["user"].as_str()) {
+        return Some(user.to_string());
+    }
     let a = app();
     // Only signing out takes the kept user: a device let in by its key stays in whatever became of its refresh token,
     // which only asking to be let in needs.
-    a.address().is_some() && a.kept("user").is_some()
+    a.address().and(a.kept("user"))
 }
 
 /// Who and where this is: the custom build's name and CLI, the address (if one's given), whether someone's signed in
@@ -281,21 +390,31 @@ fn signed_in() -> bool {
 #[tauri::command]
 fn native() -> Value {
     let a = app();
+    #[cfg(desktop)]
+    let stands = here::stands();
+    #[cfg(mobile)]
+    let stands: Option<Value> = None;
+    // A computer in a network has its address, which the window then keeps, and is let in already.
+    if let Some(address) = stands.as_ref().filter(|s| s["in"] == true).and_then(|s| s["address"].as_str()) {
+        a.keep("address", Some(address));
+        let_in_once();
+    }
     let address = a.address();
-    let signed_in = signed_in();
+    let user = signed_in(stands.as_ref());
     a.page.store(true, Ordering::Relaxed);
     bundle::started();
     let opened = a.opened.lock().unwrap().take();
-    let local = local_state();
-    let unpaired = platform::unpaired(local.as_ref());
-    platform::menus(signed_in, unpaired);
+    // A computer whose onet is in no network yet joins one with a pairing code (`pair`).
+    let unpaired = stands.as_ref().is_some_and(|s| s["in"] == false);
+    platform::menus(user.is_some(), unpaired);
     json!({
         "name": one::config::NAME, "yours": one::config::YOURS, "cli": one::config::CLI, "platform": label(), "device": device_name(), "client": platform::CLIENT,
-        "address": address, "signedIn": signed_in, "user": if signed_in { a.kept("user") } else { None },
+        "address": address, "signedIn": user.is_some(), "user": user,
         "opened": opened,
-        // This computer's own node, where one runs here: "This device" in the panel.
-        "node": local.as_ref().and_then(|s| s["device"]["key"].as_str().map(str::to_string)),
-        // A Mac whose own node is in no network yet joins one with a pairing code (`pair`), as the Mac app did.
+        // A computer's window is a view of its onet, with no key of its own: the page asks through the app.
+        "view": cfg!(desktop),
+        // This computer, in a network: "This device" in the panel.
+        "node": stands.as_ref().filter(|s| s["in"] == true).and_then(|s| s["join"].as_str()).map(|j| j[..64].to_string()),
         "unpaired": unpaired,
         // Open at login: whether it's on, where the app switches it (none where it can't).
         "login": platform::login(),
@@ -309,7 +428,7 @@ fn native() -> Value {
         // The newest bundle needs a newer app than this, which stays on what it has.
         "behind": bundle::behind(&a.data),
         // What it's called among its user's devices, and its invite: for its own client, in the page, to ask to be let in.
-        "joinName": join_name(),
+        "joinName": device_name(),
         "joinPlatform": onet::PLATFORM,
         "invite": a.kept("invite"),
     })
@@ -346,17 +465,21 @@ fn address_of(typed: &str) -> Result<String, String> {
 #[tauri::command]
 async fn sign_in() -> Result<(), Failure> {
     let a = app();
-    a.address().ok_or("Enter your address first.")?;
+    let address = a.address().ok_or("Enter your address first.")?;
+    #[cfg(mobile)]
     let join = onet::join_of(secrets::signing_in()?);
+    // A computer's sign-in names the computer's own key, which its onet holds: set up first, if it isn't.
+    #[cfg(desktop)]
+    let join = here::ready(&address).await?["join"].as_str().ok_or("This computer's onet didn't say what it is.")?.to_string();
     let signing = a.sign_in()?;
     let print = env("SIGN_IN_PRINT").is_some();
     tauri::async_runtime::spawn_blocking(move || platform::sign_in(&signing, &join, print)).await.map_err(|e| e.to_string())??;
-    let token = token().await?;
-    let user = subject(&token)?;
+    let user = subject(&token().await?)?;
     a.keep("user", Some(&user));
-    if let Some(address) = a.address() {
-        start_over_if_taken_out(&address, &user).await;
-    }
+    #[cfg(mobile)]
+    start_over_if_taken_out(&address, &user).await;
+    #[cfg(desktop)]
+    drop(address);
     // Back in front of the browser it signed in with.
     platform::show();
     Ok(())
@@ -364,6 +487,7 @@ async fn sign_in() -> Result<(), Failure> {
 
 /// Signed in again with a key the relay let in once and refuses now, which can't be let in again: it goes, with what it
 /// kept as that device, so the next is the new one this sign-in named (`secrets::device_made`).
+#[cfg(mobile)]
 async fn start_over_if_taken_out(address: &str, user: &str) {
     let id = format!("{address} {user}");
     let Some(secret) = secrets::device(&id) else { return };
@@ -390,6 +514,24 @@ fn browser_goes_on(code: Option<&str>) {
     }
 }
 
+/// A computer, in through its onet already, or asking to be let in as the user signed in here, naming the computer's key.
+#[cfg(desktop)]
+async fn join_here() -> Result<Value, Failure> {
+    let a = app();
+    let address = a.address().ok_or("Enter your address first.")?;
+    if here::ready(&address).await?["in"] == true {
+        let_in_once();
+        println!("Let in.");
+        return Ok(json!({ "in": true }));
+    }
+    let asked = json!({ "address": address, "token": token().await?, "invite": a.kept("invite") });
+    let asked = here::asked("/api/join/ask", Some(asked), 60).await?;
+    let code = asked["code"].as_str().unwrap_or_default().to_string();
+    println!("Code: {code}");
+    Ok(json!({ "code": code, "invited": asked["invited"] }))
+}
+
+#[cfg(mobile)]
 async fn join_here() -> Result<Value, Failure> {
     let a = app();
     let address = a.address().ok_or("Enter your address first.")?;
@@ -436,19 +578,16 @@ async fn join_here() -> Result<Value, Failure> {
     }
     let invite = a.kept("invite");
     let token = token().await?;
-    let invited = device.ask(&token, &join_name(), invite.as_deref()).await.map_err(|e| e.to_string())?;
+    let invited = device.ask(&token, &device_name(), invite.as_deref()).await.map_err(|e| e.to_string())?;
     println!("Code: {}", device.code());
-    platform::approve_here(device.code());
     Ok(json!({ "code": device.code(), "invited": invited }))
 }
 
-/// What this device is called among its user's: a computer's "<name> on <computer>", a phone's its own name.
-fn join_name() -> String {
-    if cfg!(desktop) { format!("{} on {}", one::config::NAME, device_name()) } else { device_name() }
-}
-
-/// This device's own id here: `<address> <user>`, signed in.
+/// This device's own id here: `<address> <user>`, signed in. A computer's window has none: the computer's key is its onet's.
 fn id_here() -> Result<String, Failure> {
+    if cfg!(desktop) {
+        return Err("This window has no key: this computer's is its onet's.".into());
+    }
     let a = app();
     Ok(format!("{} {}", a.address().ok_or("Enter your address first.")?, a.kept("user").ok_or("Signed out.")?))
 }
@@ -521,13 +660,11 @@ async fn access_token() -> Result<String, Failure> {
     token().await
 }
 
-/// The code its own client in the page is waiting to be approved by, where this device can approve it itself (a Mac's node).
-/// The browser it signed in with goes on with it.
+/// The code its own client in the page is waiting to be approved by. The browser it signed in with goes on with it.
 #[tauri::command]
 fn waiting(code: String) {
     println!("Code: {code}");
     browser_goes_on(Some(&code));
-    platform::approve_here(code);
 }
 
 /// The page's own client was let in: the app's own (Rust) client starts beside it, for what runs with no window (widgets,
@@ -537,6 +674,7 @@ fn waiting(code: String) {
 fn joined() {
     app().keep("invite", None);
     browser_goes_on(None);
+    #[cfg(mobile)]
     tauri::async_runtime::spawn(async {
         let a = app();
         let (Some(address), Some(user)) = (a.address(), a.kept("user")) else { return };
@@ -573,11 +711,21 @@ fn joined() {
 /// Waits until this device is let in, as auth says it was approved and the relay lets it on.
 #[tauri::command]
 async fn wait() -> Result<(), Failure> {
+    #[cfg(mobile)]
     let device = app().device()?;
     loop {
         let token = token().await?;
-        if device.wait(&token).await.map_err(|e| e.to_string())? {
+        #[cfg(mobile)]
+        let let_in_now = device.wait(&token).await.map_err(|e| e.to_string())?;
+        #[cfg(desktop)]
+        let let_in_now = here::asked("/api/join/wait", Some(json!({ "token": token })), 60).await?["in"] == true;
+        if let_in_now {
             app().keep("invite", None);
+            // A computer's onet is in by its key: the window needs its sign-in no more.
+            #[cfg(desktop)]
+            if let Ok(signing) = app().sign_in() {
+                let _ = tauri::async_runtime::spawn_blocking(move || signing.sign_out()).await;
+            }
             let_in();
             redraw_panel();
             println!("Let in.");
@@ -590,9 +738,8 @@ async fn wait() -> Result<(), Failure> {
 /// A request to the user's nodes → its status and headers, and an id its body is read by (`read`), part by part.
 #[tauri::command]
 async fn fetch(method: String, path: String, headers: Vec<(String, String)>, body: Option<String>) -> Result<Value, String> {
-    let device = app().device()?;
     let body = body.map(String::into_bytes).unwrap_or_default();
-    let r = device.fetch(&method, &path, headers, body).await.map_err(|e| if e.not_let_in { "not_let_in".to_string() } else { e.to_string() })?;
+    let r = app().reach()?.fetch(&method, &path, headers, body).await?;
     let id = app().next.fetch_add(1, Ordering::Relaxed);
     app().bodies.lock().unwrap().insert(id, Arc::new(Reading { body: tokio::sync::Mutex::new(r.body), stop: tokio::sync::Notify::new() }));
     Ok(json!({ "id": id, "status": r.status, "headers": r.headers, "trace": r.trace.map(|t| t.to_string()) }))
@@ -603,7 +750,7 @@ async fn fetch(method: String, path: String, headers: Vec<(String, String)>, bod
 async fn read(id: u64) -> Result<tauri::ipc::Response, String> {
     let reading = app().bodies.lock().unwrap().get(&id).cloned().ok_or("That response is gone.")?;
     let part = tokio::select! {
-        part = async { reading.body.lock().await.chunk().await } => part.map_err(|e| e.to_string())?,
+        part = async { reading.body.lock().await.chunk().await } => part?,
         _ = reading.stop.notified() => None,
     };
     if part.is_none() {
@@ -621,32 +768,48 @@ fn cancel(id: u64) {
 }
 
 /// What `app`'s `tool` answered last for `input` here, if it only reads (`Device::kept`): `{ answer, at }`, or null.
+/// A computer's window keeps none: its onet answers at once, on the computer itself.
 #[tauri::command]
 async fn kept(app: String, tool: String, input: Value) -> Option<Value> {
-    let (answer, at) = self::app().device().ok()?.kept(&app, &tool, input.to_string().as_bytes()).await?;
-    Some(json!({ "answer": serde_json::from_slice::<Value>(&answer).ok()?, "at": at }))
+    #[cfg(mobile)]
+    {
+        let (answer, at) = self::app().device().ok()?.kept(&app, &tool, input.to_string().as_bytes()).await?;
+        Some(json!({ "answer": serde_json::from_slice::<Value>(&answer).ok()?, "at": at }))
+    }
+    #[cfg(desktop)]
+    {
+        let _ = (app, tool, input);
+        None
+    }
 }
 
 /// Renews its user's app schedules of `app`, which they just used (`Device::renew_app_schedules`).
 #[tauri::command]
 async fn renew(app: String) {
+    #[cfg(mobile)]
     if let Ok(device) = self::app().device() {
         device.renew_app_schedules(&app).await;
     }
+    #[cfg(desktop)]
+    let _ = app;
 }
 
-/// Whether this device was taken out of its user's devices, as the relay says.
+/// Whether this device was taken out of its user's devices, as the relay says: a computer's onet says so itself.
 #[tauri::command]
 async fn removed() -> bool {
-    match app().device() {
+    #[cfg(mobile)]
+    return match app().device() {
         Ok(d) => d.removed().await,
         Err(_) => false,
-    }
+    };
+    #[cfg(desktop)]
+    false
 }
 
 /// Signs out: out of its user's devices first, then its key goes (a removed key can't be let in again), and the
 /// sign-in with it. Taken out, as the relay says, only the sign-in goes: the relay's word takes no key, and signing in
 /// again, where it still refuses this one, starts over (`start_over_if_taken_out`).
+#[cfg(mobile)]
 #[tauri::command]
 async fn sign_out() -> Result<(), String> {
     let a = app();
@@ -682,6 +845,21 @@ async fn sign_out() -> Result<(), String> {
     a.keep("user", None);
     widgets::forget(&platform::widgets_dir());
     platform::redraw_widgets();
+    badge(0);
+    Ok(())
+}
+
+/// A computer's window signs out of only its sign-in, which asking to be let in needed: the computer is in its network by
+/// its own key, which only removing it there takes out. What the window drew goes.
+#[cfg(desktop)]
+#[tauri::command]
+async fn sign_out() -> Result<(), String> {
+    let a = app();
+    if let Ok(signing) = a.sign_in() {
+        let _ = tauri::async_runtime::spawn_blocking(move || signing.sign_out()).await;
+    }
+    a.keep("user", None);
+    widgets::forget(&platform::widgets_dir());
     badge(0);
     Ok(())
 }
@@ -771,19 +949,17 @@ fn login(on: bool) -> Option<bool> {
     platform::login()
 }
 
-/// This computer's own node joins a network with a pairing code another of its user's computers made (as `<cli>
-/// join` does) → its address, which the app signs in to next.
+/// This computer's onet joins a network with a pairing code another of its user's computers made (as `<cli> join`
+/// does) → its address, as the window keeps it.
+#[cfg(desktop)]
 #[tauri::command]
 async fn pair(code: String) -> Result<String, String> {
-    if !one::home().join("local-token").exists() {
-        return Err("This Mac's node isn't running.".into());
-    }
     let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
-    let said = tauri::async_runtime::spawn_blocking(move || local("/api/join", Some(json!({ "code": code })), 60)).await.map_err(|e| e.to_string())?;
-    // An answer from the node says why by its code; none came when its own answer didn't (it was too slow: the device that made the code is off).
+    let said = tauri::async_runtime::spawn_blocking(move || here::ask("/api/join", Some(json!({ "code": code })), 60)).await.map_err(|e| e.to_string())?;
+    // An answer from onet says why by its code; none came when its own answer didn't (it was too slow: the device that made the code is off).
     let failed = match said {
-        Ok((true, _)) => None,
-        Ok((false, out)) => Some(out["code"].as_str().unwrap_or_default().to_string()),
+        Ok((200, _)) => None,
+        Ok((_, out)) => Some(out["code"].as_str().unwrap_or_default().to_string()),
         Err(_) => Some(one::protocol::code::UNREACHABLE.to_string()),
     };
     if let Some(why) = failed {
@@ -796,9 +972,21 @@ async fn pair(code: String) -> Result<String, String> {
             _ => "Couldn’t join. Make a new pairing code on your other device and try again.".into(),
         });
     }
-    // Its network's address, which the user signs in to here.
-    let address = local_state().and_then(|s| s["network"]["settings"]["address"].as_str().map(str::to_string)).ok_or("Joined. Now type your network’s address.")?;
-    address_of(&address)
+    // Its network's address, read once its keys are sealed to it, a moment after it's let in.
+    let stands = tauri::async_runtime::spawn_blocking(here::stands).await.map_err(|e| e.to_string())?;
+    if let Some(address) = stands.as_ref().and_then(|s| s["address"].as_str()) {
+        app().keep("address", Some(address));
+    }
+    let_in_once();
+    Ok(app().address().unwrap_or_default())
+}
+
+/// A phone joins with a sign-in: a pairing code is a computer's.
+#[cfg(mobile)]
+#[tauri::command]
+async fn pair(code: String) -> Result<String, String> {
+    let _ = code;
+    Err("A phone joins by signing in.".into())
 }
 
 /// The window's empty top double-clicked (a Mac's): what System Settings says that does.
@@ -937,6 +1125,7 @@ pub fn run() {
                 handle: app.handle().clone(),
                 data,
                 sign_in: Mutex::default(),
+                #[cfg(mobile)]
                 device: Mutex::default(),
                 bodies: Mutex::default(),
                 next: AtomicU64::new(1),

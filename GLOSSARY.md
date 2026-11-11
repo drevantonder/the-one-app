@@ -30,19 +30,20 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 
 ## Machines
 
-- **Device**: where a user's clients and node are, listed as theirs: a machine they own (a phone or a computer), a
-  browser they signed in on, or a remote MCP client's place in the remote MCP server. It has clients, a node, or both:
-  a computer can have both; a phone, a browser and a remote MCP client's device have only a client. A browser's
-  sign-in is its device: nothing ties it to the computer it's on, so it's never part of that computer's. The Cloudflare
-  node is not a device.
+- **Device**: a machine a user owns (a phone or a computer), a browser they signed in on, or a remote MCP client's
+  place in the remote MCP server, listed as theirs, with one key. A computer's key is its onet's, and its clients are
+  views of it; it's a node too, with an app runtime of its own. A phone, a browser and a remote MCP client's device are
+  only a client. A browser's sign-in is its device: nothing ties it to the computer it's on, so it's never part of that
+  computer's. The Cloudflare node is not a device.
 - **Onboarding**: what someone sees on a device before they're in the network, first time or coming back: the first
   screen, proving who they are, waiting for someone to say yes, and starting. Our word for the journey and
   for its folder (`src/onboarding/`); users see Sign In, Join and Waiting for Approval.
 - **Client**: where a user or their agent uses the network, and the only place keys are opened: the native apps (Mac,
   iPhone, Android, Windows), the web client in a browser, the CLI and the local MCP server on a computer, and the remote
-  MCP server. Each has its own key, never shared, but the CLI and the local MCP server, which are their computer's
-  node's own programs and ask it.
-- **onet**: being built (ARCHITECTURE.md, Designed): the entry point into the network, the same on every device. Its library is the `onet` crate (`onet/`) today; on a computer it's `<cli>t` (`onet/src/computer/`), which oned starts, holding the device's key.
+  MCP server. A phone's app, a browser's web client and each remote MCP client hold their device's key; on a computer,
+  the desktop app's window, the CLI and the local MCP server hold none, and ask the computer's onet, which holds the
+  computer's.
+- **onet**: being built (ARCHITECTURE.md, Designed): the entry point into the network, the same on every device. Its library is the `onet` crate (`onet/`) today; on a computer it's `<cli>t` (`onet/src/computer/`), which oned starts, holding the device's key, of which the desktop app's window, the CLI and the local MCP server are views.
 - **oned**: the small program, and the spec it follows, that makes a machine a node: it connects the machine to the
   network (on a computer, by starting its onet), and installs and runs what the node's owner switches on there (the app
   runtime, services), and on a computer takes the device's updates. It holds no key, runs nothing itself, and stays small. It has a version for each platform it runs on: computers (Mac, Windows, Linux) and
@@ -103,7 +104,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 
 - **Bucket**: the network's one store, a folder or S3-compatible storage, holding everything sealed. Only the URL signer
   holds its credentials.
-- **Key**: every client, node and service has its own. Each scope has numbered **epochs** of keys, sealed to the devices
+- **Key**: every device has one (a computer's is its onet's), and every app runtime and service its own. Each scope has numbered **epochs** of keys, sealed to the devices
   that may open it and to the **recovery key**, which an admin keeps offline. Its **holders** are users an admin named,
   who can read everything and restore anyone; it's sealed to their devices that are only clients, never a node or a browser.
 - **Database**: one SQLite database, kept sealed in the bucket as steps at numbered positions, the bucket deciding their

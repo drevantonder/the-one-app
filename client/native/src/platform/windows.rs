@@ -1,10 +1,9 @@
 //! What's Windows' own, beside the window: the taskbar button's count, opening at login (the package's startup task,
-//! Package.appxmanifest's `login`), the links to the network's address, the machine's own id, and the package's helper
-//! (`windows/`, the Windows App SDK's), which registers this device's push channel. All but the id need the package's
-//! identity, which the app has installed (windows/build.sh); run from a folder, they do nothing.
+//! Package.appxmanifest's `login`), the links to the network's address, the package's helper (`windows/`, the Windows
+//! App SDK's), which registers this computer's push channel, and setting up `<cli>` where it's missing (`set_up`). All but
+//! that need the package's identity, which the app has installed (windows/build.sh); run from a folder, they do nothing.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use windows::ApplicationModel::{StartupTask, StartupTaskState};
 use windows::Data::Xml::Dom::XmlDocument;
@@ -23,11 +22,6 @@ pub const LABEL: &str = "Windows";
 /// screen's foot when nothing says.
 pub const FLYOUT_GAP: f64 = 12.0;
 pub const TRAY_AT_BOTTOM: bool = true;
-
-/// Windows' own id for this machine, MachineGuid, which outlives reinstalling Windows' apps (as the Windows app's was).
-pub fn this_device() -> Option<String> {
-    this_device_or(windows_registry::LOCAL_MACHINE.open(r"SOFTWARE\Microsoft\Cryptography").ok().and_then(|k| k.get_string("MachineGuid").ok()))
-}
 
 /// Tauri's app local data folder, found with no window.
 pub fn data_without_window() -> Option<PathBuf> {
@@ -111,16 +105,42 @@ fn helper() -> Option<std::path::PathBuf> {
     helper.exists().then_some(helper)
 }
 
-/// Let in: this device's WNS channel, registered with the push Worker by the helper (`register-push` back to this
-/// program, src/headless.rs), each start, since a channel lasts 30 days; a custom build with no Microsoft Entra app for
-/// WNS has none, and the helper ends.
-pub fn let_in(_: Arc<onet::Device>) {
+/// Let in: this computer's WNS channel, registered with the push Worker by the helper (`register-push` back to this
+/// program, src/headless.rs, which its onet registers), each start, since a channel lasts 30 days; a custom build with no
+/// Microsoft Entra app for WNS has none, and the helper ends.
+pub fn let_in() {
     let Some(helper) = helper() else { return };
     use std::os::windows::process::CommandExt;
     // No console window for it.
     if let Err(e) = std::process::Command::new(helper).arg("--register-push").creation_flags(0x0800_0000).spawn() {
         one::logs::say(&format!("push: {e}"));
     }
+}
+
+/// Sets up `<cli>` on this computer, from the network at `address`, as install.ps1 does by hand and with this very
+/// script: the newest for it, checked, put in place, and its oned a task of the user's, started at sign-in and looked at
+/// every minute, with no administrator. One already there is only started.
+pub fn set_up(address: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    let cli = one::config::CLI;
+    let powershell = |args: &[&str]| -> Result<(), String> {
+        // No console window for it.
+        let done = std::process::Command::new("powershell.exe").args(["-NoProfile", "-ExecutionPolicy", "Bypass"]).args(args).creation_flags(0x0800_0000).output().map_err(|e| e.to_string())?;
+        if done.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&done.stderr).trim().to_string()) }
+    };
+    if one::home().join("bin").join(format!("{cli}.exe")).exists() {
+        return powershell(&["-Command", &format!("Start-ScheduledTask -TaskName {cli}d")]);
+    }
+    let dir = std::env::temp_dir().join(format!("{cli}-set-up-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let (program, script) = (dir.join(format!("{cli}.exe")), dir.join("install.ps1"));
+    let done = (|| {
+        std::fs::write(&program, super::desktop::program(address)?).map_err(|e| e.to_string())?;
+        std::fs::write(&script, include_str!("../../../../install.ps1")).map_err(|e| e.to_string())?;
+        powershell(&["-File", &script.to_string_lossy(), "-Binary", &program.to_string_lossy()])
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    done
 }
 
 fn startup() -> windows::core::Result<StartupTask> {

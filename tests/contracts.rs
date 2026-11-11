@@ -778,7 +778,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
 }
 
 /// Every path of the node's API that the Workers, the screens, the web client and the native apps ask is one of its routes
-/// (`api::routes`) or one a device answers itself (`one::settings::answered`): a path misspelled or dropped from one
+/// (`api::routes`), one a device answers itself (`one::settings::answered`) or one a computer's onet does (`onet::computer::OWN`): a path misspelled or dropped from one
 /// fails as a 404, which no one sees until it's used. Each is in the OpenAPI document too, but a client's keys and signed
 /// steps, which it asks as itself, and what the document lists is what the node serves.
 #[test]
@@ -843,10 +843,10 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
                 let asked: Vec<&str> = literal.trim_start_matches('/').split('/').collect();
                 // A start of a path, which more is added to.
                 let place = format!("{}:{}: {}", path.strip_prefix(root).unwrap().display(), n + 1, &line[at..end]);
-                if !literal.ends_with('/') && !matches(&routes, &asked) && !one::settings::answered(literal) {
+                if !literal.ends_with('/') && !matches(&routes, &asked) && !one::settings::answered(literal) && !onet::computer::OWN.contains(&literal) {
                     unserved.push(place.clone());
                 }
-                if !literal.ends_with('/') && !UNLISTED.contains(&literal) && !matches(&listed, &asked) {
+                if !literal.ends_with('/') && !UNLISTED.contains(&literal) && !onet::computer::OWN.contains(&literal) && !matches(&listed, &asked) {
                     unlisted.push(place);
                 }
             }

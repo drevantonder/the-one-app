@@ -43,12 +43,12 @@ impl Node {
     }
 
     pub(super) fn state_as(&self, viewer: &Caller, client: Option<&str>) -> Result<State> {
-        // The device looking, if it's one.
-        let device = client.is_none().then_some(viewer.key);
         let ready = self.ready();
         let waiting = self.waiting_requests(viewer).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
         let Ok(network) = self.0.network.lock() else { bail!("this device couldn't answer that: a bug in it, which its log shows") };
+        // The device looking, if it's one: for a device's own programs, which its app runtime answers as itself, the device.
+        let device = client.is_none().then(|| network.as_ref().map_or(viewer.key, |i| i.r.db().device_of(&viewer.key)));
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { network.as_ref().map(|i| i.r.db().machine(&viewer.key)).transpose()?.flatten().map(|m| m.name.clone()).unwrap_or_default() };
         let backups = network.as_ref().map(|i| self.backup_problem(i, &viewer.user)).transpose()?.flatten();
         // Which device is looking, to say "This device": a client device of the viewer's names itself.
@@ -101,7 +101,7 @@ impl Node {
         };
         let here = crate::state::Here {
             me: match client {
-                None => Viewer { key: hex(&viewer.key), name: viewer_name.clone(), user: viewer.user.clone() },
+                None => Viewer { key: hex(&device.unwrap_or(viewer.key)), name: viewer_name.clone(), user: viewer.user.clone() },
                 Some(client) => Viewer { key: String::new(), name: client.to_string(), user: viewer.user.clone() },
             },
             client: (client.is_none() && viewer.key != self.0.id).then(|| ClientHere { key: hex(&viewer.key), name: viewer_name }),

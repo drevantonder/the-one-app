@@ -4294,7 +4294,6 @@ dependencies = [
  "url",
  "windows",
  "windows-collections",
- "windows-registry",
 ]
 
 [[package]]

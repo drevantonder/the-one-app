@@ -12,7 +12,7 @@ use super::network::client_session;
 
 mod android;
 pub(super) mod apple;
-mod linux;
+pub(super) mod linux;
 mod web;
 mod windows;
 

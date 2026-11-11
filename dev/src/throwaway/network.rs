@@ -191,7 +191,11 @@ pub(crate) fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, 
     use std::os::unix::process::CommandExt;
     let log_path = dir.join(log);
     let log = std::fs::File::create(&log_path).with_context(|| format!("making {}", log_path.display()))?;
-    let child = command.env(one::config::env("HOME"), dir).stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn().with_context(|| format!("starting {}", command.get_program().to_string_lossy()))?;
+    // In its folder, unless it's a computer of its own with a home of its own (`Throwaway::tell`).
+    if !command.get_envs().any(|(name, _)| name == one::config::env("HOME").as_str()) {
+        command.env(one::config::env("HOME"), dir);
+    }
+    let child = command.stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn().with_context(|| format!("starting {}", command.get_program().to_string_lossy()))?;
     one::mode::record(dir, child.id(), client)?;
     Ok(child.id())
 }
@@ -347,6 +351,7 @@ pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
     let _ = std::fs::remove_file(dir.join("pid"));
     if clients {
         super::clients::apple::stop(dir, delete);
+        super::clients::linux::stop(dir);
     }
     if delete {
         // Its Linux devices, borrowed or spare, are its own containers on the machine's runtime, outside its folder.

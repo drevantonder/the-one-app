@@ -16,7 +16,7 @@ const IMAGE_MOST: usize = 2 << 20;
 ///
 /// One at a time: each writes the same files (through the same `.part` name), and the window's events, the five-minute
 /// timer and the platform's own asking while the app runs all start one.
-pub async fn refresh(device: &onet::Device, dir: &Path) -> Result<(), String> {
+pub async fn refresh(device: &crate::Reach, dir: &Path) -> Result<(), String> {
     static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _one = ONE.lock().await;
     let state: one::state::State = serde_json::from_value(crate::node(device, "GET", "/api/state", None).await?).map_err(|e| e.to_string())?;

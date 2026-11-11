@@ -11,7 +11,8 @@ use super::super::network::spawn;
 
 /// The Mac app (client/native), or with `iphone` the iPhone app on a simulator, as this checkout builds it, on the Mac `MAC` names to ssh (`mac` if none), beside the
 /// user's own app there: a throwaway's build (its own id, folder and Keychain items), in the Mac's logged-in session,
-/// reaching the throwaway network at its address through ports ssh forwards there. Signed in as the throwaway network's
+/// reaching the throwaway network at its address through ports ssh forwards there; the Mac app the window of a computer of
+/// its own there, whose oned this checkout's program is. Signed in as the throwaway network's
 /// first user as linux() is: its Sign In pressed, the sign-in approved as them and opened there, its code approved.
 /// What it keeps stays on the Mac, so a new build is still signed in; it's started again each time.
 pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, iphone: bool, started: Instant) -> Result<()> {
@@ -54,7 +55,10 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{host}\n{script}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
     eprintln!("Building client/native on {host} (dev profile; the first time takes minutes)…");
-    let build = format!("cd {there} && CARGO_TERM_COLOR=never PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH client/native/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&simulator_name(dir)));
+    // The Mac's window is a view of a computer of its own there, whose onet answers beside its control port.
+    let last = if iphone { simulator_name(dir) } else { format!("127.0.0.1:{}", control + 1) };
+    let key = one::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?;
+    let build = format!("cd {there} && CARGO_TERM_COLOR=never PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH RELEASE_KEY={} client/native/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&key), shell_quote(&last));
     let said = build_on(&host, &build, &dir.join(format!("{script}-build.log")), started + Duration::from_secs(crate::ship::CALL - 90))?;
     // The iPhone's says its simulator too.
     let (sim, log) = match said.lines().last().unwrap_or_default().rsplit_once(' ') {

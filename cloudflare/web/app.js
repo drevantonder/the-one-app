@@ -1,8 +1,9 @@
-// The web client in the app's own window (platform.js): the app itself (client/native/src/native.js) is this device's
-// client, which reaches the nodes and holds its keys, and signs in through the system's browser. Beyond a page, it
-// asks for its network's address first, joins a Mac's own node to one with a pairing code, opens the links the app was
-// opened with, takes a phone's hardware Back and text size, and may be the menu bar panel, a small window of its own:
-// this page showing only the client's own `panel` screen, with the app's rows under it.
+// The web client in the app's own window (platform.js): on a phone the app itself (client/native/src/native.js) is this
+// device's client, which holds its key; on a computer the window is a view of the computer's onet, which holds the
+// computer's, and the app asks it. Either signs in through the system's browser. Beyond a page, it asks for its
+// network's address first, joins a computer's onet to one with a pairing code, opens the links the app was opened with,
+// takes a phone's hardware Back and text size, and may be the menu bar panel, a small window of its own: this page
+// showing only the client's own `panel` screen, with the app's rows under it.
 import { demoFile, demoOn, enterDemo, leaveDemo, replaying } from "./demo.js";
 import { codeOf } from "./device.js";
 import { net } from "./net.js";
@@ -71,14 +72,13 @@ export function app(native) {
     return `${about.cli}://settings/${encodeURIComponent(r.name)}`;
   }
 
-  /// A Mac's own node joining a network with a pairing code another of its user's computers shows, then signing in
-  /// to it here; Cancel goes back to `welcome`.
+  /// A computer's onet joining a network with a pairing code another of its user's computers shows; Cancel goes back
+  /// to `welcome`.
   function showPairing(welcome, error) {
     const join = async (code) => {
       try {
         await native.pair(code);
-        about = await native.about();
-        await platform.signIn();
+        location.reload();
       } catch (err) {
         showPairing(welcome, err.message);
       }
@@ -142,6 +142,10 @@ export function app(native) {
     device: () => ({ name: about.device, signOut: true, keys: true, notify }),
   };
 
+  /// A computer's window: a view of the computer's onet, through the app, as the app's own Rust is on a shell with no
+  /// WebAssembly. The computer is the device, in its network by its own key: nothing here signs out.
+  const inView = { ...inShell, device: () => ({ name: about.device, keys: true, notify }) };
+
   /// Try a Demo: nothing to reach or keep, and every request answered from this build's recording (demo.js).
   const inDemo = (calls) => ({
     async join() {
@@ -171,8 +175,7 @@ export function app(native) {
     behind: () => !!about?.behind,
     /// What this device is, as users say it.
     label: () => about?.platform,
-    /// A Mac: its app builds itself, so no `one update` replaces it yet.
-    mac: () => about?.platform === "Mac",
+    view: () => !!about?.view,
     /// The app on a phone: its home is the pages side by side, with no sidebar (`Shell`'s `phone`).
     phone: () => ["iPhone", "Android"].includes(about?.platform),
     address: () => about.address,
@@ -187,7 +190,7 @@ export function app(native) {
       } else {
         leaveDemo();
         hasDemo = !!demo;
-        Object.assign(platform, (await runsClient()) ? inPage : inShell);
+        Object.assign(platform, about.view ? inView : (await runsClient()) ? inPage : inShell);
       }
       // The app draws its next start in it from the first frame.
       native.appearance(window.look);
@@ -198,7 +201,7 @@ export function app(native) {
       oneHost.appBehaviour();
       document.head.append(Object.assign(document.createElement("style"), { textContent: oneHost.APP_RULES }));
       // The app menu's commands (a Mac's), which work wherever the focus is: the sidebar folded or unfolded, as its
-      // own key does here; joining a network with a pairing code, while this Mac's node is in none.
+      // own key does here; joining a network with a pairing code, while this Mac's onet is in none.
       native.onCommand = (name) => {
         if (name === "sidebar") dispatchEvent(new KeyboardEvent("keydown", { key: "\\", metaKey: true }));
         else if (name === "join" && about.unpaired && !about.signedIn) showPairing(() => window.signedOut());
@@ -239,7 +242,7 @@ export function app(native) {
         }
       };
       const field = { label: "Address", placeholder: "one.example.com" };
-      // A Mac whose own node is in no network yet joins one with a pairing code.
+      // A computer whose onet is in no network yet may join one with a pairing code.
       const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing(() => again()) } : undefined;
       return h(ui.Welcome, { ...props, field, action: { label: "Sign In", invite: "Open Invite", run: take }, other });
     },

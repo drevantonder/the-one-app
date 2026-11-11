@@ -17,12 +17,17 @@ pub fn name() -> Option<String> {
     std::env::var("HOSTNAME").ok().or_else(|| std::env::var("COMPUTERNAME").ok()).or_else(|| std::fs::read_to_string("/etc/hostname").ok()).map(|h| h.trim().to_string()).filter(|h| !h.is_empty())
 }
 
-/// The device a computer is, which signing in again replaces its sign-in under: its own node's key, where one runs
-/// here (as the Mac app's was); else the machine's own `id`, hashed.
-pub fn this_device_or(id: Option<String>) -> Option<String> {
-    use sha2::{Digest, Sha256};
-    let node = crate::local_state().and_then(|s| s["device"]["key"].as_str().map(str::to_string));
-    node.or_else(|| Some(data_encoding::HEXLOWER.encode(&Sha256::digest(format!("this device {}", id?.trim()).as_bytes()))))
+/// The newest `<cli>` for this computer, as the network at `address` publishes it (`one::latest`, the signed record a
+/// device updates by), checked against the release key: a throwaway network's own, as it tells its programs.
+pub fn program(address: &str) -> Result<Vec<u8>, String> {
+    let key = if crate::env("THROWAWAY").is_some() { crate::env("RELEASE_KEY").unwrap_or_default() } else { one::config::RELEASE_KEY.to_string() };
+    if key.is_empty() {
+        return Err("This build has no release key, so nothing can be set up from it.".into());
+    }
+    let text = one::latest::fetch(address).map_err(|e| format!("{e:#}"))?.ok_or_else(|| format!("Nothing has been published at {address} yet."))?;
+    let record = one::latest::Latest::read(&key, &text).map_err(|e| format!("The record at {address}: {e:#}"))?;
+    let thing = record.to_update_to(one::config::TARGET).ok_or_else(|| format!("{address} has published nothing for {}.", one::config::TARGET))?;
+    one::latest::download(address, thing).map_err(|e| format!("{e:#}"))
 }
 
 /// Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.
@@ -142,14 +147,7 @@ pub fn show() {
     }
 }
 
-/// Only a Mac's own node joins a network from its window.
-pub fn unpaired(_: Option<&Value>) -> bool {
-    false
-}
-
 pub fn menus(_: bool, _: bool) {}
-
-pub fn approve_here(_: String) {}
 
 /// What's kept of a window between starts. Not whether it was visible: closing only hides it, and the app shows it at each start.
 const PLACE: StateFlags = StateFlags::all().difference(StateFlags::VISIBLE);

@@ -110,10 +110,4 @@ pub fn show() {}
 
 pub fn claim(_: Option<String>) {}
 
-pub fn unpaired(_: Option<&Value>) -> bool {
-    false
-}
-
 pub fn menus(_: bool, _: bool) {}
-
-pub fn approve_here(_: String) {}

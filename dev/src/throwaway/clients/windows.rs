@@ -14,7 +14,8 @@ use super::super::devices::{approve_code, build, didnt_sign_in, on_device};
 /// opening a browser, and with a control port, as linux() starts it: its Sign In pressed, the sign-in approved as the
 /// throwaway network's first user or `user`, coming back to it on the device, and its code approved by the
 /// throwaway network's machine. Once signed in on a device as them (a file in the throwaway network's folder says so), a
-/// new build keeps that sign-in.
+/// new build keeps that sign-in. The window is a view of a computer of its own there, never the copied device's: it
+/// sets up `one` from the throwaway network's address, which has a program for Windows only once one's published there.
 pub(crate) fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
     build(dir, checkout, "client/native/windows/build.sh", &[("DEVICE", device), ("PROFILE", "dev"), ("NO_START", "1")])?;
@@ -45,10 +46,21 @@ New-Item -ItemType Directory -Force $data | Out-Null
 Set-Content "$data\address" '{address}' -NoNewline
 $env:{print_var} = '1'
 $env:{control_var} = '{control}'
+# The window of a computer of its own, the throwaway network's, never the device's own.
+$env:{home_var} = "$data\computer"
+$env:{throwaway_var} = "$data\computer"
+$env:{addr_var} = '127.0.0.1:{onet}'
+$env:{key_var} = '{key}'
 Start-Process -FilePath "$($p.InstallLocation)\{file}.exe" -RedirectStandardOutput "$env:TEMP\one-throwaway-app.log" -RedirectStandardError "$env:TEMP\one-throwaway-app.err""#,
         fresh = if kept { "false" } else { "true" },
         print_var = env("SIGN_IN_PRINT"),
         control_var = env("CONTROL"),
+        home_var = env("HOME"),
+        throwaway_var = env("THROWAWAY"),
+        addr_var = env("ADDR"),
+        key_var = env("RELEASE_KEY"),
+        onet = control + 1,
+        key = one::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?,
     );
     let encoded = data_encoding::BASE64.encode(&script.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>());
     on_device(

@@ -138,7 +138,7 @@ fn delete(name: &str, account: &str) {
 }
 
 /// The key a sign-in here is for, until it knows whose.
-const SIGNING_IN: &str = "signing in";
+pub const SIGNING_IN: &str = "signing in";
 
 /// `id`'s device key (`<address> <sub>`), if it has one.
 pub fn device(id: &str) -> Option<[u8; 32]> {
@@ -158,6 +158,7 @@ pub fn device_made(id: &str) -> Result<[u8; 32], String> {
 }
 
 /// The key the next sign-in is for, made the first time, so whoever answers its request can check that sign-in.
+#[cfg(mobile)]
 pub fn signing_in() -> Result<[u8; 32], String> {
     if let Some(key) = device(SIGNING_IN) {
         return Ok(key);

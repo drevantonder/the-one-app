@@ -102,7 +102,7 @@ pub mod reach;
 pub mod node;
 #[cfg(feature = "node")]
 pub mod release;
-#[cfg(feature = "node")]
+#[cfg(feature = "web-bundle")]
 pub mod latest;
 #[cfg(feature = "node")]
 pub mod update;

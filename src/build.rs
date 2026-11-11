@@ -31,14 +31,10 @@ pub static PLATFORMS: [Platform; 4] = [
 pub const WINDOWS: &str = "x86_64-pc-windows-gnu";
 
 impl Platform {
-    pub fn is_mac(target: &str) -> bool {
-        target.ends_with("-apple-darwin")
-    }
-
     /// What the installers download on it: the program, on a Mac the app, which holds it.
     pub fn asset(&self) -> String {
         match self.target {
-            target if Platform::is_mac(target) => format!("{CLI}-macos.zip"),
+            target if crate::latest::is_mac(target) => format!("{CLI}-macos.zip"),
             WINDOWS => format!("{CLI}-{WINDOWS}.exe"),
             target => format!("{CLI}-{target}"),
         }
@@ -314,7 +310,7 @@ mod tests {
         }
         for p in PLATFORMS.iter().filter(|p| p.target != WINDOWS) {
             let (arch, rest) = p.target.split_once('-').unwrap();
-            let fetched = if Platform::is_mac(p.target) { "$cli-macos.zip".to_string() } else { format!("$cli-$arch-{}", rest) };
+            let fetched = if crate::latest::is_mac(p.target) { "$cli-macos.zip".to_string() } else { format!("$cli-$arch-{}", rest) };
             assert!(installer.contains(&format!("fetch \"{fetched}\"")), "install.sh fetches {fetched} for {}", p.target);
             assert_eq!(p.asset(), fetched.replace("$cli", CLI).replace("$arch", arch));
             assert!(installer.contains(&format!("arch={arch}")), "install.sh knows the processor {arch}");

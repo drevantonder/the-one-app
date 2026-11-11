@@ -22,6 +22,8 @@ use crate::keyring::Address;
 
 mod serve;
 
+pub use serve::OWN;
+
 /// What `<cli>t` is, for `--help` and for an argument it doesn't take.
 fn usage() -> String {
     format!("{CLI}t is {NAME}'s way into the network on this computer: {CLI}t [--listen=<address>] [--runtime=<address of this device's own app runtime>]")
@@ -83,6 +85,8 @@ pub(crate) struct Onet {
     keeping: std::sync::atomic::AtomicBool,
     /// Whether it has told the relay, since it started, that its runtime is the network's and it a client alone.
     told: std::sync::atomic::AtomicBool,
+    /// This device asking to be let in, as a user signed in on this computer (`serve::ask`), until it's in.
+    asking: tokio::sync::Mutex<Option<Arc<Device>>>,
     /// Held while it runs, so no other onet signs as this device at once.
     _lock: std::fs::File,
 }
@@ -128,7 +132,7 @@ impl Onet {
         let (key, name) = one::node::device_key(home)?;
         let token = one::node::load_local_token(home)?;
         let runtime = runtime.map(|at| Runtime { at, folder: one::node::runtime_folder(home) });
-        Ok(Onet { home: home.to_path_buf(), key, name, token, listen, runtime, device: Default::default(), keeping: Default::default(), told: Default::default(), _lock: lock })
+        Ok(Onet { home: home.to_path_buf(), key, name, token, listen, runtime, device: Default::default(), keeping: Default::default(), told: Default::default(), asking: Default::default(), _lock: lock })
     }
 
     /// What it does from its start, and again every so often (`KEEP_EVERY`), if its home says it's in a network: lists
