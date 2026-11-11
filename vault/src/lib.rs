@@ -537,3 +537,9 @@ fn a_key_signs_a_jwt_only_for_its_hosts_and_the_jwt_carries_no_key() {
         assert!(fill(&format!("{{{{rs256 0123456789abcdef:private_key {claims}}}}}"), "evil.example.com", lookup).is_err(), "only to its hosts");
     }
 }
+
+/// What the Vault says needs a user's attention (`state.features.vault`): the requests for an item they may answer, a
+/// badge on Requests.
+pub fn waiting(requests: usize) -> Option<Value> {
+    (requests > 0).then(|| json!({ "badge": "requests", "count": requests }))
+}

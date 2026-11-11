@@ -376,7 +376,7 @@ impl Node {
 
     /// What's wrong with telemetry's own path, once it's more than one check: how it failed and since when. Only an admin's
     /// to see (the network's own program is theirs).
-    pub(super) fn telemetry_problem(&self) -> Option<Value> {
+    pub(crate) fn telemetry_problem(&self) -> Option<Value> {
         let canary = self.0.insights.2.lock().unwrap();
         canary.failing.filter(|_| canary.failed >= CANARY_FAILS).map(|(kind, since)| json!({ "kind": kind, "since": since }))
     }

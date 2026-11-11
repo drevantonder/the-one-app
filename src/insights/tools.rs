@@ -40,6 +40,12 @@ pub fn runs() -> ::api::Runs {
         tools: vec![
             ("insights", node_serves!(serve::insights)),
         ],
+        // Telemetry's own check failing, for an admin: the network's own program is theirs.
+        problem: Some(|rt, me| {
+            use ::api::runtime::ReadExt;
+            let admin = rt.read_or(false, |r| Ok(r.db().may(&me.user, "change-settings", ::scope::scopes::NETWORK)));
+            Ok(crate::node::Node::of(rt).telemetry_problem().filter(|_| admin))
+        }),
         ..::api::Runs::named("insights")
     }
 }

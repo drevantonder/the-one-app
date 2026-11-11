@@ -173,7 +173,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let shown = a.backups().unwrap();
     let moment = &shown["snapshots"][0];
     assert!(moment["scopes"].as_array().unwrap().contains(&json!("Everyone")) && moment["places"] == json!(["T7 Shield"]), "one snapshot of the network: {shown}");
-    assert!(a.state().unwrap().backups.is_none(), "no badge while backups work");
+    assert!(!a.state().unwrap().features.contains_key("backups"), "no badge while backups work");
 
     // A disk that breaks: admins see what's wrong and its fix, on Settings, until a run works again.
     let copy = dir.join(&network).join("bucket");
@@ -183,14 +183,14 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     a.call(notes("post", json!({ "text": "broken" }))).await.unwrap();
     a.back_up_now();
     eventually("a failed run", &a, async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used") || t.contains("won't let"))).await;
-    let problem = a.state().unwrap().backups.unwrap();
+    let problem = a.state().unwrap().features["backups"].clone();
     assert_eq!(problem["fix"], "Check the disk on backup-a is plugged in and has room.", "{problem}");
     assert!(problem["text"].as_str().unwrap().starts_with("T7 Shield "), "{problem}");
     std::fs::remove_file(&copy).unwrap();
     std::fs::rename(dir.join("bucket-aside"), &copy).unwrap();
     a.call(notes("post", json!({ "text": "fixed" }))).await.unwrap();
     a.back_up_now();
-    eventually("the badge to clear", &a, async || a.state().unwrap().backups.is_none()).await;
+    eventually("the badge to clear", &a, async || !a.state().unwrap().features.contains_key("backups")).await;
 
     // A folder named only by a Vault item, which anyone may write, is never written to: a folder is its own device's
     // choice. Nor is an S3 place no admin's setting names.

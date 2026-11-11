@@ -42,7 +42,11 @@ pub(crate) use node_serves;
 pub(super) struct Kept {
     states: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
     wakes: HashMap<&'static str, Arc<tokio::sync::Notify>>,
+    problems: Vec<(&'static str, Problem)>,
 }
+
+/// What a feature says needs a viewer's attention (`Runs.problem`).
+type Problem = fn(&Rt, &Caller) -> Result<Option<Value>>;
 
 /// Each feature's loop: what it is, how often, and what it runs.
 pub(super) type Loop = (&'static str, Duration, fn(Rt) -> Fut<'static, ()>);
@@ -56,6 +60,7 @@ impl Kept {
         let (mut kept, mut starts, mut loops) = (Kept::default(), Vec::new(), Vec::new());
         for r in runs {
             starts.extend(r.start);
+            kept.problems.extend(r.problem.map(|p| (r.feature, p)));
             if !r.state.is::<()>() {
                 kept.states.insert((*r.state).type_id(), r.state);
             }
@@ -96,6 +101,20 @@ impl Node {
                 }
             });
         }
+    }
+
+    /// What each feature says needs `viewer`'s attention (`state.features`).
+    pub(super) fn features_for(&self, viewer: &Caller) -> BTreeMap<String, Value> {
+        let rt = self.rt();
+        let mut out = BTreeMap::new();
+        for (feature, problem) in &self.0.kept.problems {
+            match problem(&rt, viewer) {
+                Ok(Some(said)) => _ = out.insert(feature.to_string(), said),
+                Ok(None) => {}
+                Err(err) => tracing::debug!("{feature}'s problem: {err:#}"),
+            }
+        }
+        out
     }
 
     /// Wakes every feature's loop: what it follows may have changed all at once, as when a network is taken.

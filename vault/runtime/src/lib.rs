@@ -37,6 +37,7 @@ pub fn runs() -> Runs {
         routes: routes::routes(),
         state: Box::new(State::default()),
         every: Some((OWN_EVERY, |rt| Box::pin(items::refresh_own(rt)))),
+        problem: Some(|rt, me| Ok(vault::waiting(requests::waiting(rt, me)?))),
         ..Runs::named("vault")
     }
 }

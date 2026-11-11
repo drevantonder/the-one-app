@@ -666,10 +666,9 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
             looking: None,
             member: false,
             steps: 0,
-            waiting: ::scope::state::waiting(m, me, read(), now),
             arrangements,
-            backups: None,
-            telemetry: false,
+            // Of the features, only the Vault's requests are known from who's who alone.
+            features: vault::waiting(::scope::state::waiting(m, me, read(), now)).map(|v| ("vault".to_string(), v)).into_iter().collect(),
             guide: None,
             // No throwaway network has a Cloudflare node.
             throwaway: false,

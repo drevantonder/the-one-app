@@ -29,12 +29,10 @@ pub struct State {
     pub network: Option<Network>,
     /// The pages this user can read, as every client lists them (see `pages`).
     pub pages: Vec<Page>,
-    /// Requests for an item waiting for this user to answer (see GET /api/vault/requests).
-    pub vault_requests: usize,
     /// How this user arranged each of their pages (see `arrange`).
     pub arrangements: BTreeMap<String, Value>,
-    /// What's wrong with backups, for an admin: a badge on Settings until a run works again.
-    pub backups: Option<Value>,
+    /// What needs this user's attention, by feature, as each says it (`Runs.problem`): a badge on Settings (`Badge`).
+    pub features: BTreeMap<String, Value>,
     /// What Settings shows this user, in order (see `settings_items`).
     pub settings_items: Vec<SettingsItem>,
     /// What to paste into an AI so it connects itself, for Connect Your AI.
@@ -386,14 +384,10 @@ pub struct Here<'a> {
     /// Whether that node is one of the network's devices.
     pub member: bool,
     pub steps: u64,
-    /// Requests for an item waiting for this user to answer.
-    pub waiting: usize,
     /// How this user arranged each of their pages.
     pub arrangements: BTreeMap<String, Value>,
-    /// What's wrong with backups, for an admin.
-    pub backups: Option<Value>,
-    /// Whether telemetry's own check is failing: for an admin, the badge on Insights.
-    pub telemetry: bool,
+    /// What needs this user's attention, by feature.
+    pub features: BTreeMap<String, Value>,
     /// Where an agent reads how to connect itself, when the network has no address.
     pub guide: Option<String>,
     /// Whether this is a throwaway network, whose sign-in lets its user in with no passkey. Every other network's users
@@ -410,7 +404,7 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<State> {
     let address = settings.get("address").filter(|a| !a.is_empty());
     let passkeys = address.filter(|_| !here.throwaway).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
     let store = settings["store"].clone();
-    let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), here.telemetry, &store, passkeys.as_deref())).transpose()?.unwrap_or_default();
+    let settings_items = m.map(|m| settings_items(m, user, &here.features, &store, passkeys.as_deref())).transpose()?.unwrap_or_default();
     let me = m.map(|m| m.user(user)).transpose()?.flatten();
     Ok(State {
         config: Config { name: custom_build::config::NAME.into(), cli: custom_build::config::CLI.into(), store, install: install_line() },
@@ -419,9 +413,8 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<State> {
         user: me.map(|u| User { id: u.id, name: u.name, role: u.role }),
         network,
         pages: m.map(|m| pages(m, user, &here.arrangements)).transpose()?.unwrap_or_default(),
-        vault_requests: here.waiting,
         arrangements: here.arrangements,
-        backups: here.backups,
+        features: here.features,
         settings_items,
         agent_prompt: agent_prompt(address.map(String::as_str), here.guide.as_deref()),
         client: here.client,
@@ -633,15 +626,27 @@ pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
     }
 }
 
-/// What Settings shows `user`, in order, with a badge on Requests for `items_asked` and their other requests, and on
-/// Backups when `backups` are failing, and for an admin on Insights when `telemetry`'s own check is. Passkeys opens
-/// `passkeys` in a browser, where they're kept.
-fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, telemetry: bool, store: &str, passkeys: Option<&str>) -> Result<Vec<SettingsItem>> {
+/// What a feature says needs a user's attention (`state.features`) badges a Settings item: the one named `badge` in it,
+/// else the feature's own, by `count` (1 if it says none).
+#[derive(Debug, Default, Deserialize)]
+pub struct Badge {
+    pub badge: Option<String>,
+    pub count: Option<usize>,
+}
+
+/// What Settings shows `user`, in order, each badged by what `features` say needs their attention, Requests also by the
+/// groups they're invited to. Passkeys opens `passkeys` in a browser, where they're kept.
+fn settings_items(m: &ScopeDb, user: &str, features: &BTreeMap<String, Value>, store: &str, passkeys: Option<&str>) -> Result<Vec<SettingsItem>> {
     let Some(me) = m.user(user)? else { return Ok(Vec::new()) };
-    let item = |name: &str, title: &str, icon: &str, color: &str| SettingsItem { name: name.into(), title: title.into(), icon: icon.into(), color: color.into(), url: None, badge: None, app: None };
+    let mut badges: BTreeMap<String, usize> = BTreeMap::new();
+    for (feature, said) in features {
+        let b: Badge = serde_json::from_value(said.clone()).unwrap_or_default();
+        *badges.entry(b.badge.unwrap_or_else(|| feature.clone())).or_default() += b.count.unwrap_or(1);
+    }
+    let item = |name: &str, title: &str, icon: &str, color: &str| SettingsItem { name: name.into(), title: title.into(), icon: icon.into(), color: color.into(), url: None, badge: badges.get(name).copied().filter(|n| *n > 0), app: None };
     let invites = m.groups()?.iter().filter(|g| g.invited.contains_key(user)).count();
     let mut out: Vec<SettingsItem> = passkeys.map(|url| SettingsItem { url: Some(url.into()), ..item("passkeys", "Passkeys", "key", "#8e8e93") }).into_iter().collect();
-    let requests = invites + items_asked;
+    let requests = invites + badges.get("requests").copied().unwrap_or(0);
     if requests > 0 {
         out.push(SettingsItem { badge: Some(requests), ..item("requests", "Requests", "tray", "#ff2d55") });
     }
@@ -655,11 +660,11 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, te
         item("users", "Users", "user-gear", "#30b0c7"),
         item("groups", "Groups", "users-three", "#34c759"),
         item("devices", "Devices", "devices", "#8e8e93"),
-        SettingsItem { badge: (telemetry && m.may(&me.id, "change-settings", NETWORK)).then_some(1), ..item("insights", "Insights", "chart-line", "#5ac8fa") },
+        item("insights", "Insights", "chart-line", "#5ac8fa"),
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);
     if m.may(&me.id, "change-settings", NETWORK) {
-        out.push(SettingsItem { badge: backups.then_some(1), ..item("backups", "Backups", "hard-drives", "#ff9500") });
+        out.push(item("backups", "Backups", "hard-drives", "#ff9500"));
         out.push(item("labs", "Labs", "flask", "#af52de"));
     }
     Ok(out)

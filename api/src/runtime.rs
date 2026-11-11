@@ -196,12 +196,15 @@ pub struct Runs {
     pub start: Option<fn(&Rt)>,
     /// Its loop: this often, at once as the runtime starts and on `wake`.
     pub every: Option<(Duration, fn(Rt) -> Fut<'static, ()>)>,
+    /// What needs the viewer's attention, if anything: `state.features.<feature>` of `GET /api/state`, which badges a
+    /// Settings item (`scope::state::settings_items`).
+    pub problem: Option<fn(&Rt, &Caller) -> Result<Option<Value>>>,
 }
 
 impl Runs {
     /// One that does nothing yet: `Runs { tools, .., ..Runs::named("vault") }`.
     pub fn named(feature: &'static str) -> Runs {
-        Runs { feature, tools: Vec::new(), routes: Routes::default(), state: Box::new(()), start: None, every: None }
+        Runs { feature, tools: Vec::new(), routes: Routes::default(), state: Box::new(()), start: None, every: None, problem: None }
     }
 }
 

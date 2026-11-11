@@ -48,13 +48,12 @@ impl Node {
         let node = self.clone();
         tokio::spawn(async move { node.know_states(runtimes, false).await });
         let ready = self.ready();
-        let waiting = vault_runtime::waiting(&self.rt(), viewer).unwrap_or(0);
+        let features = self.features_for(viewer);
         let arrangements = self.arrangements(&viewer.user);
         let Ok(network) = self.0.network.lock() else { bail!("this device couldn't answer that: a bug in it, which its log shows") };
         // The device looking, if it's one: for a device's own programs, which its app runtime answers as itself, the device.
         let device = client.is_none().then(|| network.as_ref().map_or(viewer.key, |i| i.r.db().device_of(&viewer.key)));
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { network.as_ref().map(|i| i.r.db().machine(&viewer.key)).transpose()?.flatten().map(|m| m.name.clone()).unwrap_or_default() };
-        let backups = network.as_ref().map(|i| self.backup_problem(i, &viewer.user)).transpose()?.flatten();
         // Which device is looking, to say "This device": a client device of the viewer's names itself.
         let looking = match (device, network.as_ref()) {
             (Some(key), _) => Some(key),
@@ -112,10 +111,8 @@ impl Node {
             member: network.as_ref().map(|i| i.r.db().compute(&self.0.id)).transpose()?.flatten().is_some(),
             // `global`'s steps read.
             steps: network.as_ref().map(|i| i.r.at().unwrap_or(0)).unwrap_or(0),
-            waiting,
             arrangements,
-            backups,
-            telemetry: self.telemetry_problem().is_some(),
+            features,
             guide: self.guide(),
             throwaway: matches!(crate::mode::here(), crate::mode::Mode::Throwaway(_)),
             device_now: &device_now,

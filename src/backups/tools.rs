@@ -97,6 +97,7 @@ pub fn runs() -> ::api::Runs {
             let saved: fn(::api::Rt, ::api::Caller, String) -> ::api::runtime::Fut<'static, ()> = |rt, caller, id| Box::pin(async move { crate::node::Node::of(&rt).saved_place(&caller, &id).await });
             vault_runtime::watch(rt, vault_runtime::Watch { scope: ::scope::scopes::Scope::Global, kind: crate::backups::KIND, saved });
         }),
+        problem: Some(|rt, me| Ok(crate::node::Node::of(rt).backup_problem(&me.user))),
         ..::api::Runs::named("backups")
     }
 }
