@@ -228,9 +228,6 @@ export function server(version, givenHost) {
   let renewal = null;
 
   async function begin(user) {
-    const took = {};
-    let mark = performance.now();
-    const step = (name) => ((took[name] = Math.round(performance.now() - mark)), (mark = performance.now()));
     const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { getAll, put }] = await code();
     const [device, [nodes]] = await Promise.all([host.device(user), getAll([`nodes:${user}`])]);
     if (!device) return null;
@@ -252,7 +249,6 @@ export function server(version, givenHost) {
     const certificate = await certify(device.sign, hex.decode(device.key), endpoint, until);
     const socket = async (certificate) => early(host.address, `${certificate}.${await proveSocket(key, endpoint)}`);
     await socket(certificate);
-    step("key");
     // The relay takes each request once, so one refused as replayed (another process of this device signed in the same
     // millisecond) is signed again.
     const ask = async (certificate) => {
@@ -276,17 +272,14 @@ export function server(version, givenHost) {
     });
     const order = (computes) => [...known.filter((k) => computes.includes(k)), ...computes.filter((k) => !known.includes(k))];
     const first = known.length ? known : (await computes.catch((err) => (opened?.face.close(), Promise.reject(err))))?.all;
-    if (!known.length) step("nodes");
     if (!first) {
       opened?.face.close();
       return null;
     }
     if (!known.length) put(`nodes:${user}`, first).catch(() => {});
     const { Client } = await glue();
-    step("code");
     const [client, keyring] = await Promise.all([Client.start(secret, certificate, host.address, known.length ? first : order(first)), making]);
     keyring.connect(client);
-    step("endpoint");
     computes.then(
       (c) => {
         if (c) {
@@ -306,7 +299,7 @@ export function server(version, givenHost) {
     secret.fill(0);
     clearTimeout(renewal);
     renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
-    made = { client, keyring, endpoint, socket, certificate, took };
+    made = { client, keyring, endpoint, socket, certificate };
     made.still = async () => {
       const asked = await ask(made.certificate);
       const online = asked.ok && (await asked.json().catch(() => null))?.online;
@@ -357,7 +350,7 @@ export function server(version, givenHost) {
         switch (m.op) {
           case "start": {
             const s = await started(m.user, m.again);
-            return post({ id, device: !!s, took: s?.took });
+            return post({ id, device: !!s });
           }
           // Whether the relay still lets this browser in: null, unknown, while it has no session, as it hasn't started
           // one or the last failed, which says nothing about whether it's a device.
@@ -446,7 +439,7 @@ export function server(version, givenHost) {
             const s = await session?.ready;
             if (!s) throw new Error("This browser isn’t one of your devices yet.");
             const body = new Uint8Array(m.body || []);
-            const r = await s.keyring.fetch(m.method, m.path, m.headers, body, m.until, !!m.trace);
+            const r = await s.keyring.fetch(m.method, m.path, m.headers, body, m.until);
             reading.set(id, r);
             post({ id, node: r.node, status: r.status, headers: r.headers, trace: r.trace });
             try {

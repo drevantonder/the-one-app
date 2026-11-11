@@ -107,7 +107,6 @@ export function app(native) {
     },
     reaches: (user) => net.start(user).catch(() => false),
     fetch: (...args) => net.fetch(...args),
-    took: () => net.took(),
     removed: async () => (await net.still().catch(() => null)) === false,
     async leave(api) {
       if (keys) await Promise.race([api("/api/devices/remove", { method: "POST", body: { device: keys.key } }), new Promise((r) => setTimeout(r, 20_000))]).catch((err) => console.warn("leaving your devices:", err));
@@ -133,7 +132,6 @@ export function app(native) {
     },
     reaches: async () => isIn,
     fetch: (...args) => native.fetch(...args),
-    took: async () => undefined,
     removed: () => native.removed().catch(() => false),
     async leave() {},
     nodes() {},
@@ -151,7 +149,6 @@ export function app(native) {
     },
     reaches: async () => true,
     fetch: replaying(calls),
-    took: async () => undefined,
     removed: async () => false,
     async leave() {},
     nodes() {},

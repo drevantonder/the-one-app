@@ -5,9 +5,9 @@
 import { offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { qrSvg } from "./qr.js";
-import { api, developer, fresh, retryWait, sleep, tooOld } from "./request.js";
+import { api, fresh, retryWait, sleep, tooOld } from "./request.js";
 import { back, closeTop, go, home, linked, own, route, setSection, sidebar, whenMoved } from "./routes.js";
-import { detail, devtools, hasScreen, markOpen, openSheet, replacing, screen, setBarStart, tabWaiting, tell, whenTitled } from "./screens.js";
+import { detail, hasScreen, markOpen, openSheet, replacing, screen, setBarStart, tabWaiting, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
 import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, signOut, store, titleOf, whenChanged } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
@@ -87,8 +87,6 @@ function drawWindow() {
     onPress: (to) => linked(to) && screen.ready(detail, linked(to)),
     onSection: (key, open) => (setSection(key, open), drawWindow()),
     onBarStart: setBarStart,
-    developer: developer.on(),
-    onDeveloper: () => devtools.toggle(),
     open: localStorage.getItem(SIDEBAR) !== "closed",
     onOpenChange: (open) => (open ? localStorage.removeItem(SIDEBAR) : localStorage.setItem(SIDEBAR, "closed"), drawWindow()),
     screen: detail,

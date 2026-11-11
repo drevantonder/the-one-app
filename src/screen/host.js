@@ -107,8 +107,7 @@ window.oneHost = (() => {
   /// answers them, the web client's and a chat's alike → what it replies; what it throws, it refuses with. `h` is what
   /// each page does its own way: `frame`, the screen's; `call(tool, input)`, as its app; `open(m)`, `opening(m)` (a press that will `open` has come down, where it can start early), `close(value)` and
   /// `title(text, m)`; `kept(tool, input)`, what that call last answered if this page keeps it (`{ answer, at }`, or null); `vault(need)` → whether it's set; `link(url)`; `icons(names)`; `blob(id)`, a file the node
-  /// keeps; `give`, `copy`, `menu`, `scan` and `haptic`, where the page does those its own way (the native app); `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; `traces()`, in
-  /// developer mode, its latest requests' traces (else null); `thrown(m)`, what threw in the screen (its type, message and where), for a page that reports it; and `own`, what only the client's own screens may do, by
+  /// keeps; `give`, `copy`, `menu`, `scan` and `haptic`, where the page does those its own way (the native app); `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; `thrown(m)`, what threw in the screen (its type, message and where), for a page that reports it; and `own`, what only the client's own screens may do, by
   /// message, on a page that has them.
   async function answer(m, h) {
     switch (m.type) {
@@ -134,9 +133,8 @@ window.oneHost = (() => {
         if (h.scan) return h.scan();
         throw new Error("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
       case "haptic": return h.haptic ? h.haptic(String(m.style || "selection")) : null;
-      case "traces": return h.traces ? h.traces() : null;
       case "thrown": return h.thrown ? h.thrown(m) : null;
-      case "api": case "signOut": case "appearance": case "device": case "notify": case "request": case "cache": case "developer":
+      case "api": case "signOut": case "appearance": case "device": case "notify": case "request": case "cache":
         if (!h.own) throw new Error("Only Settings can do that.");
         return h.own[m.type](m);
       default: throw new Error("Unknown message");

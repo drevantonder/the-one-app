@@ -156,7 +156,6 @@ export function browser() {
     join,
     reaches: (user) => net.start(user).catch(() => false),
     fetch: (...args) => net.fetch(...args),
-    took: () => net.took(),
     /// Whether the relay says this browser isn't one of its user's devices any more: it stops then, and keeps its key
     /// until signing in again (`join`). A client with no session yet (a tab that just took over the others') doesn't know.
     removed: async () => (await net.still().catch(() => null)) === false,

@@ -192,9 +192,9 @@ impl Keyring {
     }
 
     /// A request to its user's nodes (`Keyring::request`), with the keys its kind needed, handed until `until` (ms),
-    /// learning what a node asks for: as `Client::fetch`, its trace each try's, as a JSON list. Before who's who lists
+    /// learning what a node asks for: as `Client::fetch`, with its trace. Before who's who lists
     /// this device, it's read again a few times while the relay lets it in, as its approval may not be there yet.
-    pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>, until: f64, trace: bool) -> Result<Response, Failed> {
+    pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>, until: f64) -> Result<Response, Failed> {
         use crate::keyring::Address;
         let mut behind = 0;
         loop {
@@ -207,19 +207,18 @@ impl Keyring {
             }
         }
         let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
-        let mut fetches = trace.then(Vec::new);
         let client = self.client.borrow().clone().ok_or_else(|| Failed::of(crate::keyring::refused()))?;
         let request = crate::Request { method: method.clone(), path: path.clone(), headers, body: body.clone().into() };
-        let sent = self.keyring.request(&client, &self.on, request, until as u64, fetches.as_mut()).await;
+        let sent = self.keyring.request(&client, &self.on, request, until as u64).await;
         let answers = self.answers.borrow().clone();
         let sent = match (answers, sent) {
             (Some(answers), Ok(response)) => answers.passing(&method, path.split('?').next().unwrap_or(&path), &body, response).await,
             (_, sent) => sent,
         };
-        let traced = fetches.map(|f| serde_json::Value::from(f).to_string()).unwrap_or_default();
-        let response = sent.map_err(|e| Failed { trace: traced.clone(), ..Failed::of(e) })?;
+        let response = sent.map_err(Failed::of)?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
-        Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace: traced, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
+        let trace = traced(response.trace);
+        Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
     }
 
     /// As each start of a client does: its user's own things it settles if they aren't (`Keyring::settle_own`). A
@@ -260,7 +259,7 @@ fn traced(trace: Option<serde_json::Value>) -> String {
     trace.map(|t| t.to_string()).unwrap_or_default()
 }
 
-/// Why a request failed, and the nodes it tried, as JSON (empty if it asked for no trace).
+/// Why a request failed, and the nodes it tried, as JSON.
 #[wasm_bindgen]
 pub struct Failed {
     message: String,
@@ -324,7 +323,7 @@ impl Response {
         self.status
     }
 
-    /// The nodes it tried and what the one that answered did, as JSON: empty if it asked for no trace.
+    /// The nodes it tried and what the one that answered did, as JSON.
     #[wasm_bindgen(getter)]
     pub fn trace(&self) -> String {
         self.trace.clone()

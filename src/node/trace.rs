@@ -1,4 +1,4 @@
-//! What a request did on this device, step by step with how long each took, for a client in developer mode: it asks
+//! What a request did on this device, step by step with how long each took, for a caller that asks for it: it asks
 //! with `x-one-trace` and gets it back in the same header (`api::guard`), and another device asked for a call adds its
 //! own, in its answer (`trace` beside `ok`). Steps hold timings, device, app and tool
 //! names, never data or keys. Every call has one, asked for or not: it's the span insights keeps of a call (`src/insights`)
@@ -188,8 +188,7 @@ pub fn bucket(kind: &str, took: std::time::Duration, found: bool) {
     });
 }
 
-/// A call's trace as a few readable lines, in the Developer panel's words (src/screen/settings/devtools.jsx): what the
-/// device that answered did (`node`, its `x-one-trace`), each wait with its milliseconds, and the total.
+/// A call's trace as a few readable lines: what the device that answered did (`node`, its `x-one-trace`), each wait with its milliseconds, and the total.
 pub fn said(node: &Value) -> Vec<String> {
     let mut out: Vec<String> = node["trace"].as_str().map(|id| format!("trace-id {id}")).into_iter().collect();
     steps(node, node["device"].as_str().unwrap_or("the device that answered"), &mut out);

@@ -20,8 +20,6 @@ pub(crate) use crate::keyring::now;
 use crate::keyring::{Address, HANDED_FOR, Keep, Keyring, error, refused};
 use crate::{Body, Client, Error, Request, Response, Sent, unsent};
 
-const TRACES_KEPT: usize = 100;
-
 /// What a sign-in for the device whose key is `secret` names it by (`join`), before it's made: its key ‖ seal key, hex.
 pub fn join_of(secret: [u8; 32]) -> String {
     let me = Endpoint::of(&SigningKey::from_bytes(&secret));
@@ -75,7 +73,7 @@ pub struct Device {
     key: SigningKey,
     me: Endpoint,
     address: String,
-    /// Where it keeps what outlives it (`Keep`): whether it was let in (`joined`), developer mode, and the keyring's.
+    /// Where it keeps what outlives it (`Keep`): whether it was let in (`joined`), and the keyring's.
     dir: PathBuf,
     bucket: Reached,
     /// Where its own app runtime answers on this machine, and what it's asked with: a computer's (`on_computer`).
@@ -88,7 +86,6 @@ pub struct Device {
     order: Mutex<Vec<[u8; 32]>>,
     /// The device it's on, as its app says (`on`): signing in there again replaces this sign-in.
     on: Mutex<Option<String>>,
-    traces: Mutex<std::collections::VecDeque<Value>>,
     /// The last answer of each call that only reads, for its app's screens (`kept`): a native app's keeps them
     /// (`keeping`), the CLI's doesn't.
     answers: Option<Answers<Files>>,
@@ -158,7 +155,6 @@ impl Device {
             stage: tokio::sync::Mutex::new(Stage::Off { asked: None }),
             order: Mutex::default(),
             on: Mutex::default(),
-            traces: Mutex::default(),
             answers: None,
             logs: None,
         }
@@ -181,37 +177,6 @@ impl Device {
     pub fn keeping(mut self) -> Device {
         self.answers = Some(Answers::new(Files::new(&self.dir, &self.key)));
         self
-    }
-
-    /// Whether this device is in developer mode, which only its own Settings › Developer changes: its requests then
-    /// ask for traces, which its screens show.
-    pub fn developer(&self) -> bool {
-        self.dir.join("developer").exists()
-    }
-
-    /// Turns developer mode on or off, here alone.
-    pub fn set_developer(&self, on: bool) {
-        if on {
-            let _ = std::fs::create_dir_all(&self.dir);
-            let _ = std::fs::write(self.dir.join("developer"), b"");
-        } else {
-            let _ = std::fs::remove_file(self.dir.join("developer"));
-            self.traces.lock().unwrap().clear();
-        }
-    }
-
-    /// Its latest requests' traces, oldest first, as JSON: each what was asked, when, how long it took, the nodes it
-    /// tried and what the one that answered did (Developer's Timing draws them: src/screen/settings/devtools.jsx). None out of developer mode.
-    pub fn traces(&self) -> Option<String> {
-        self.developer().then(|| Value::Array(self.traces.lock().unwrap().iter().cloned().collect()).to_string())
-    }
-
-    fn keep_trace(&self, trace: Value) {
-        let mut traces = self.traces.lock().unwrap();
-        if traces.len() >= TRACES_KEPT {
-            traces.pop_front();
-        }
-        traces.push_back(trace);
     }
 
     pub fn key(&self) -> String {
@@ -468,7 +433,6 @@ impl Device {
     /// is out. `/api/state` is read for the order things run in, and a screen's calls that only read are kept.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: impl Into<Sent>) -> Result<Response, Error> {
         let body = body.into();
-        let traced = self.developer().then(|| (now(), std::time::Instant::now(), what(path, body.bytes())));
         let client = match self.client().await {
             Some(client) => client,
             // Asked before it joined, or after its connections closed: it's in only if the relay lets it, else its own
@@ -476,21 +440,7 @@ impl Device {
             None if self.reach().await? => self.client().await.ok_or_else(refused)?,
             None => return Err(refused()),
         };
-        let network = traced.as_ref().map(|t| t.1.elapsed().as_millis() as u64).filter(|ms| *ms > 0);
-        let mut fetches = Vec::new();
-        let asked = self.request(&client, method, path, headers, body, traced.as_ref().map(|_| &mut fetches));
-        let answered = n0_future::future::or(asked, self.watch()).await;
-        if let Some((at, started, mut what)) = traced {
-            what["at"] = json!(at);
-            what["ms"] = json!(started.elapsed().as_millis() as u64);
-            what["network"] = json!(network);
-            what["fetches"] = json!(fetches);
-            match &answered {
-                Ok(response) => what["status"] = json!(response.status),
-                Err(_) => what["failed"] = json!(true),
-            }
-            self.keep_trace(what);
-        }
+        let answered = n0_future::future::or(self.request(&client, method, path, headers, body), self.watch()).await;
         let err = match answered {
             Ok(response) => return Ok(response),
             Err(err) => err,
@@ -518,9 +468,9 @@ impl Device {
         }
     }
 
-    async fn request(&self, client: &Client, method: &str, path: &str, headers: Vec<(String, String)>, body: Sent, fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
+    async fn request(&self, client: &Client, method: &str, path: &str, headers: Vec<(String, String)>, body: Sent) -> Result<Response, Error> {
         let request = Request { method: method.into(), path: path.into(), headers, body: body.clone() };
-        let response = self.keyring.request(client, self, request, now() + HANDED_FOR, fetches).await?;
+        let response = self.keyring.request(client, self, request, now() + HANDED_FOR).await?;
         if response.status == 200 && path.split('?').next() == Some("/api/state") {
             let bytes = response.body.bytes().await?;
             self.learn_order(&bytes).await;
@@ -616,20 +566,6 @@ impl Address for Device {
             }
             _ => true,
         }
-    }
-}
-
-/// What a request asked, as a trace names it: a call's app and tool, a screen's app and name, else its path. Never
-/// its input or query.
-fn what(path: &str, body: &[u8]) -> Value {
-    let at = path.split('?').next().unwrap_or(path);
-    if at == "/api/call" {
-        let b = serde_json::from_slice::<Value>(body).unwrap_or_default();
-        return json!({ "what": "call", "app": b["app"], "tool": b["tool"] });
-    }
-    match at.strip_prefix("/api/screens/").map(|s| s.split('/')) {
-        Some(mut s) => json!({ "what": "page", "app": s.next(), "screen": s.next() }),
-        None => json!({ "what": "request", "path": at }),
     }
 }
 

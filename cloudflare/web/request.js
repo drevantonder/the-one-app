@@ -1,6 +1,6 @@
 // The request path: a request to the user's nodes, as this device (the platform's `fetch`: in a browser, onet's
 // keyring in the SharedWorker, net.js; in the app, its own client), asked again while no node answers, watched for
-// this device being taken out, and traced in Developer mode.
+// this device being taken out.
 import { CODES, HEADER } from "../shared/protocol.js";
 import { platform } from "./platform.js";
 import { recording } from "./demo.js";
@@ -30,28 +30,23 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /// asks, of their nodes, itself (the keyring says whose it is, `x-one-user`, which a node checks against the device its
 /// connection proves). Asked again for a few seconds while no node answers, as one restarting doesn't; a call carries an
 /// id, so it runs once however often it's sent.
-export async function api(path, { method = "GET", body, query, raw, signal, since } = {}) {
+export async function api(path, { method = "GET", body, query, raw, signal } = {}) {
   const url = new URL(path, location.origin);
   for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
   if (url.pathname === "/api/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
-  const trace = developer.on() ? developer.start(url.pathname, body, since) : null;
   // Its client span (`insights.called`): what the nodes do of it is under it. Sending what's recorded isn't recorded
   // itself, as each would be the next thing sent.
   const call = { traceparent: traceparent(), ...(url.pathname === "/api/call" ? { app: body?.app, tool: body?.tool } : { path: url.pathname }) };
   const began = performance.now();
   const ended = (more) => call.sent && url.pathname !== REPORT && called(sendReport, { ...call, sent: undefined, last: undefined, ms: Math.round(performance.now() - began), ...more });
   try {
-    const out = await sending(url, method, body, raw, signal, trace, call);
-    if (trace) trace.status = raw ? out.status : 200;
+    const out = await sending(url, method, body, raw, signal, call);
     ended({});
     return out;
   } catch (err) {
-    if (trace) (trace.failed = true), (trace.id = err.trace);
     // A node answered what has a status; anything else reached none, and says why as the last try did.
     if (!signal?.aborted && !err.removed) ended(err.status ? { failed: true, code: err.code } : { error: UNREACHED[call.last] || "unreachable", message: err.message });
     throw err;
-  } finally {
-    if (trace) developer.keep(trace);
   }
 }
 
@@ -66,39 +61,25 @@ export const sendReport = (events) => api(REPORT, { method: "POST", body: { plat
 /// Why no node answered, from how the last one tried went (onet's results), as insights names it.
 const UNREACHED = { "no answer": "timeout", lost: "lost" };
 
-/// `api`'s request, each send's trace kept in `trace` if it has one, and in `call` which node answered, or how the last
-/// it tried went. The device sends it again with the keys a node asks for (onet's keyring); a request that doesn't
+/// `api`'s request, and in `call` which node answered, or how the last it tried went. The device sends it again with the keys a node asks for (onet's keyring); a request that doesn't
 /// reach a node is asked again here.
-async function sending(url, method, body, raw, signal, trace, call) {
+async function sending(url, method, body, raw, signal, call) {
   const user = platform.user();
-  const joining = performance.now();
   if (!user || !(await platform.reaches(user))) throw Object.assign(new NodeError("This device hasn’t been approved yet."), { status: 403 });
-  if (trace && performance.now() - joining >= 1) trace.network = Math.round(performance.now() - joining);
-  if (trace && (trace.network || trace.first)) trace.joined = await platform.took();
-  const traced = (json) => {
-    const said = developer.parse(json);
-    for (const f of Array.isArray(said) ? said : [said]) {
-      trace.fetches.push(f);
-      if (f.client) trace.keys++;
-    }
-  };
   const began = performance.now();
   call.sent = true;
   for (let misses = 0; ; ) {
     // The same for each send, so what the nodes do of this one request is one trace.
     const headers = { [HEADER.traceparent]: call.traceparent };
-    if (trace) headers[HEADER.trace] = "1";
     if (body !== undefined) headers["content-type"] = "application/json";
     const sent = body === undefined ? undefined : JSON.stringify(body);
     let r;
     const watch = watching();
     try {
-      const asked = [method, url.pathname + url.search, headers, sent, signal, platform.until(), !!trace];
+      const asked = [method, url.pathname + url.search, headers, sent, signal, platform.until()];
       r = await Promise.race([recording.on() ? recording.fetch(platform.fetch, ...asked) : platform.fetch(...asked), watch.out]);
-      if (trace) traced(r.trace);
       call.node = tried(r.trace).node;
     } catch (err) {
-      if (trace) traced(err.trace);
       call.last = tried(err.trace).last;
       if (err.notLetIn) {
         if (await takenOut()) throw gone();
@@ -121,50 +102,6 @@ async function sending(url, method, body, raw, signal, trace, call) {
     return out;
   }
 }
-
-/// Developer mode, on this device alone (Settings › Developer, for admins): each request asks its nodes for a trace
-/// (`x-one-trace`), kept here, the latest `KEPT`, for screens to show (`traces`, Developer's Timing).
-export const developer = {
-  KEY: "one.developer",
-  KEPT: 100,
-  kept: [],
-  on: () => localStorage.getItem(developer.KEY) === "1",
-  set(on) {
-    if (on) localStorage.setItem(developer.KEY, "1");
-    else (localStorage.removeItem(developer.KEY), (developer.kept = []));
-  },
-  /// What a request asked, as a trace names it: a call's app and tool, a screen's app and name, else its path.
-  /// Never its input or query. `since` (`{ at, perf, first }`) is when what it's for began, if earlier: a screen's
-  /// page waits for this device to be let in, and the screen the window opened on from the page's start.
-  start(path, body, since) {
-    const what = path === "/api/call" ? { what: "call", app: body?.app, tool: body?.tool }
-      : path.startsWith("/api/screens/") ? { what: "page", app: decodeURIComponent(path.split("/")[3] || ""), screen: decodeURIComponent(path.split("/")[4] || "") }
-      : { what: "request", path };
-    const now = performance.now();
-    return { ...what, at: Math.round(since ? since.at : Date.now()), started: since ? since.perf : now, waited: since ? Math.round(now - since.perf) : 0, first: !!since?.first, keys: 0, fetches: [] };
-  },
-  /// When a screen's page was asked for: the one the window opened on, from the page's start; any other (one asked
-  /// after the client's own, like Settings, where Developer mode is turned on) from when it was asked.
-  firstScreen: true,
-  since() {
-    const first = developer.firstScreen;
-    developer.firstScreen = false;
-    return first ? { at: performance.timeOrigin, perf: 0, first } : { at: Date.now(), perf: performance.now() };
-  },
-  parse: (json) => {
-    try {
-      return json ? JSON.parse(json) : {};
-    } catch {
-      return {};
-    }
-  },
-  keep(trace) {
-    if (trace.started !== undefined) trace.ms = Math.round(performance.now() - trace.started);
-    delete trace.started;
-    developer.kept.push(trace);
-    if (developer.kept.length > developer.KEPT) developer.kept.shift();
-  },
-};
 
 const REMOVED = "This device was removed. Sign in again.";
 let removed = false;

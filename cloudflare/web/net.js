@@ -40,8 +40,8 @@ function received(m) {
     const headers = new Headers();
     for (let i = 0; i + 1 < m.headers.length; i += 2) headers.append(m.headers[i], m.headers[i + 1]);
     const empty = m.status === 204 || m.status === 304;
-    // And which node answered, as its connection proved; and in developer mode, each try's nodes and what the one that
-    // answered did (`trace`, JSON).
+    // And which node answered, as its connection proved, and each try's nodes and what the one that answered did
+    // (`trace`, JSON).
     w.resolve(Object.assign(new Response(empty ? null : stream, { status: m.status, headers }), { node: m.node, trace: m.trace }));
   } else if (m.part) {
     w.body?.enqueue(m.part);
@@ -156,23 +156,18 @@ export const net = {
   start(user, again = false) {
     if (!net.has) return Promise.resolve(false);
     if (!starting || starting.user !== user || again) {
-      const asked = ask({ op: "start", user, again });
-      const ready = asked.then((m) => m.device);
-      starting = { user, ready, took: asked.then((m) => m.took || null, () => null) };
+      const ready = ask({ op: "start", user, again }).then((m) => m.device);
+      starting = { user, ready };
       ready.catch(() => starting?.ready === ready && (starting = null));
     }
     return starting.ready;
   },
 
-  took() {
-    return starting?.took || Promise.resolve(null);
-  },
-
   /// A request to the node, as this browser's device: method, path with its query, headers (`{ name: value }`), body
-  /// bytes or none, an AbortSignal, until when the keys it hands may be used (ms), and whether to trace it. → a
+  /// bytes or none, an AbortSignal, and until when the keys it hands may be used (ms). → a
   /// Response, its body streamed as it comes, and `node`, the key of the node that answered. Fails with `notLetIn` while
   /// the network doesn't list this device.
-  fetch(method, path, headers = {}, body, signal, until = Date.now() + 60_000, trace = false) {
+  fetch(method, path, headers = {}, body, signal, until = Date.now() + 60_000) {
     const bytes = body === undefined ? undefined : body instanceof Uint8Array ? body : new TextEncoder().encode(body);
     const buffer = bytes && bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     const id = `${tab}:${++n}`;
@@ -187,7 +182,7 @@ export const net = {
         if (w.body) w.body.error(signal.reason);
         else reject(signal.reason);
       });
-      send({ op: "fetch", id, method, path, headers: Object.entries(headers).flat(), body: buffer, until, trace }, buffer ? [buffer] : []);
+      send({ op: "fetch", id, method, path, headers: Object.entries(headers).flat(), body: buffer, until }, buffer ? [buffer] : []);
     });
   },
 

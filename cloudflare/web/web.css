@@ -1,5 +1,5 @@
 /* The web client's own, around what @one/ui draws (src/screen/ui: its window, sheets, menus and alerts): where screens'
-   frames go, Developer's panel under them. */
+   frames go. */
 html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
 /* Pulling a screen past its top is the screen's, not the browser's reload of the whole window (a phone's Chrome) or its
    bounce; and a second tap is a second press, not a zoom (Safari's), which pinching still does. */
@@ -35,10 +35,6 @@ body[data-dimmed] :is([data-slot=sidebar-container], [data-slot=shell-bar], [dat
 /* A second element of one name makes the browser abort any transition. */
 .window-cover [data-slot=welcome-logo] { view-transition-name: none; }
 .screen-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; }
-.devtools { flex: none; position: relative; height: min(440px, 50%); border-top: 1px solid var(--border); }
-.devtools-edge { position: absolute; z-index: 1; left: 0; right: 0; top: -4px; height: 8px; cursor: ns-resize; }
-body.dragging { cursor: ns-resize; user-select: none; }
-body.dragging iframe { pointer-events: none; }
 
 .screen-status { position: absolute; inset: 0; display: grid; place-items: center; }
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid color-mix(in oklch, var(--muted-foreground) 30%, transparent); border-top-color: var(--muted-foreground); animation: spin 0.8s linear infinite; }

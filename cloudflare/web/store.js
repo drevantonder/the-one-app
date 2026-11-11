@@ -57,7 +57,6 @@ export function titleOf(r) {
     if (r.name === "pages") return params.scope === "settings" ? "Settings" : page(params.scope || "user")?.title || "";
     if (r.name === "accounts") return "Accounts";
     if (r.name === "request") return "Vault";
-    if (r.name === "devtools") return "Developer";
     return settingsItems().find((i) => i.name === r.name)?.title || "Settings";
   }
   const a = app(r.app);

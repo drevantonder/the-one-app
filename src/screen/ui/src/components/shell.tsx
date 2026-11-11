@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowUpRightIcon, CaretLeftIcon, CaretRightIcon, CodeIcon } from "@phosphor-icons/react"
+import { ArrowUpRightIcon, CaretLeftIcon, CaretRightIcon } from "@phosphor-icons/react"
 import { Collapsible } from "radix-ui"
 import { AppIcon, type App } from "@/components/app-icon"
 import { Kept } from "@/components/kept"
@@ -38,7 +38,7 @@ type ShellSection = { key: string; title: string; href: string; selected?: boole
 /// before the title; `onBarStart`, how far along the bar its own buttons reach. A `phone`'s has no sidebar: its home is the
 /// pages side by side (their own titles, no bar), and what's opened from them has a bar with Back, as the native phone apps
 /// had. `banner`, what's wrong with the whole window (being offline), once, at the top of what it shows.
-function Shell({ sections = [], title, back, onBack, onGo, onPress, onSection, onBarStart, developer, onDeveloper, open, onOpenChange, screen, children, className, phone, banner }: {
+function Shell({ sections = [], title, back, onBack, onGo, onPress, onSection, onBarStart, open, onOpenChange, screen, children, className, phone, banner }: {
   sections?: ShellSection[]
   title?: string
   back?: boolean
@@ -47,8 +47,6 @@ function Shell({ sections = [], title, back, onBack, onGo, onPress, onSection, o
   onPress?: (href: string) => void
   onSection?: (key: string, open: boolean) => void
   onBarStart?: (px: number) => void
-  developer?: boolean
-  onDeveloper?: () => void
   open?: boolean
   onOpenChange?: (open: boolean) => void
   screen?: HTMLElement
@@ -95,11 +93,6 @@ function Shell({ sections = [], title, back, onBack, onGo, onPress, onSection, o
       {/* The window’s buttons, where they stay as the sidebar slides under them, clear of a title bar lying over the page (`--titlebar-area-x`). */}
       <div className="pointer-events-none absolute top-0 left-[calc(var(--titlebar-area-x,0px)+0.75rem)] z-20 flex h-(--shell-bar) items-center gap-1">
         <SidebarTrigger className="pointer-events-auto" />
-        {developer && (
-          <Button variant="ghost" size="icon" className="pointer-events-auto size-7" onClick={onDeveloper} aria-label="Developer">
-            <CodeIcon />
-          </Button>
-        )}
       </div>
       <Sidebar>
         <div className="h-(--shell-bar) shrink-0" />
@@ -111,7 +104,7 @@ function Shell({ sections = [], title, back, onBack, onGo, onPress, onSection, o
         </SidebarContent>
       </Sidebar>
       {/* Where the bar starts: past the window’s buttons while the sidebar’s away, as the sidebar goes. */}
-      <SidebarInset data-banner={banner ? "" : undefined} className={cn("min-w-0 overflow-hidden peer-data-[state=expanded]:[--shell-bar-start:0.75rem]", developer ? "[--shell-bar-start:calc(var(--titlebar-area-x,0px)+5.25rem)]" : "[--shell-bar-start:calc(var(--titlebar-area-x,0px)+3.25rem)]")}>
+      <SidebarInset data-banner={banner ? "" : undefined} className="min-w-0 overflow-hidden [--shell-bar-start:calc(var(--titlebar-area-x,0px)+3.25rem)] peer-data-[state=expanded]:[--shell-bar-start:0.75rem]">
         <BarStart back={back} onChange={onBarStart} />
         {/* Over the screen, whose large title lies in this row until it scrolls away and the title here takes over. Above the
             title bar’s drag region only for its buttons: the rest lets the drag through. */}

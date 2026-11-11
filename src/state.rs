@@ -656,7 +656,6 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, te
     if m.may(&me.id, "change-settings", NETWORK) {
         out.push(SettingsItem { badge: backups.then_some(1), ..item("backups", "Backups", "hard-drives", "#ff9500") });
         out.push(item("labs", "Labs", "flask", "#af52de"));
-        out.push(item("developer", "Developer", "code", "#8e8e93"));
     }
     Ok(out)
 }

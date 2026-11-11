@@ -139,7 +139,7 @@ pub async fn device_fetch(me: String, method: String, path: String, headers: Vec
     }
     let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
     let request = onet::Request { method, path, headers, body: body.into() };
-    let response = keyring.request(&client, &on, request, until as u64, None).await.map_err(|e| failed(&e))?;
+    let response = keyring.request(&client, &on, request, until as u64).await.map_err(|e| failed(&e))?;
     let body = response.body.bytes_within(ANSWER_MOST).await.map_err(|e| failed(&e))?;
     Ok(answered(response.node, response.status, response.headers, &body))
 }
@@ -178,7 +178,7 @@ async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8
         headers: vec![("content-type".into(), "application/json".into())],
         body: asks.body.to_string().into_bytes().into(),
     };
-    let response = match keyring.request(client, on, request, until, None).await {
+    let response = match keyring.request(client, on, request, until).await {
         Ok(r) => r,
         Err(err) => return Some(Err(err)),
     };

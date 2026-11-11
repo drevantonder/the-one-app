@@ -34,7 +34,7 @@ pub fn guarded(routes: Routes, node: Node) -> Router {
 }
 
 /// Every request is a trace, which a failure names to its caller. One that names the trace it's part of (W3C's
-/// `traceparent`) continues it. One that asks for a trace (`x-one-trace`, a client in developer mode) gets what it did
+/// `traceparent`) continues it. One that asks for a trace (`x-one-trace`, as `--trace` does) gets what it did
 /// here in the same header of its answer, as base64 of its JSON (`node::trace`).
 async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     use crate::node::trace;

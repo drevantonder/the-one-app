@@ -3,7 +3,7 @@
 // who can do what), the look, and what they keep. screens.js answers their
 // bridges with these, and with what opens over the window.
 import { platform } from "./platform.js";
-import { api, developer, shared } from "./request.js";
+import { api, shared } from "./request.js";
 import { keeping, leave, refreshState, screensKey, withWaiting } from "./store.js";
 
 /// `one.api` for a client's own screen: the node's /api at this origin, as this user; nothing else here. What
@@ -46,7 +46,6 @@ export function setAppearance(value) {
 
 /// What the client's own screens' bridges may ask beyond an app's, but for what opens over the window (screens.js).
 export const ownAnswers = {
-  developer: (m) => ("on" in m && developer.set(!!m.on), developer.on()),
   api: clientApi,
   signOut: () => (leave(), null),
   // A Mac's widgets' own menu bar items: shown again, or hidden, from its panel.

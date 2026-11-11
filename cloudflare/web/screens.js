@@ -5,9 +5,9 @@ import { move, settle } from "./moves.js";
 import { late, offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { CODES } from "../shared/protocol.js";
-import { UNANSWERED, api, call, developer, sendReport } from "./request.js";
+import { UNANSWERED, api, call, sendReport } from "./request.js";
 import { report } from "./insights.js";
-import { back, go, hold, home, listed, own, route } from "./routes.js";
+import { back, go, hold, home, listed, own } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
 import { KEPT_SCREENS, app, config, here, joined, keeping, reads, refreshState, settingAt, settingsItems, tabTitle, titleOf } from "./store.js";
 import { $, h, reveal, ui } from "./view.js";
@@ -16,8 +16,7 @@ let frames = [];
 /// How long a screen has to draw before it counts as never having drawn.
 const NEVER_DREW = 5000;
 
-/// What's beside the sidebar, which this page keeps (the screen's frame, and Developer's panel under it) while the
-/// window draws around it.
+/// What's beside the sidebar, which this page keeps (the screen's frame) while the window draws around it.
 export const detail = Object.assign(document.createElement("div"), { className: "detail" });
 
 /// What the screen beside the sidebar says it's called, to the window's bar (`whenTitled`).
@@ -89,11 +88,9 @@ function screenPage(r) {
     asked = null;
     return page;
   }
-  // Asked now, whether or not Developer mode is on yet: only the screen the window opened on counts from its start.
-  const since = developer.since();
   if (r.kind === "own") return ownPage(r);
   const path = `/api/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
-  return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope, linked: true }, raw: true, since: developer.on() ? since : undefined }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
+  return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope, linked: true }, raw: true }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
 }
 
 /// One of the client's own screens' pages, which act as the user, so never a node's: the address's
@@ -238,9 +235,7 @@ function frameFor(r, into, { sheet, kitted } = {}) {
   };
   const fresh = screenPage(r);
   // The client's own aren't kept: one kept before they came from its files came from a node.
-  const looking = developer.on() && r.kind !== "own" && { what: "page", app: r.app, screen: r.screen, source: "kept", at: Date.now(), started: performance.now() };
   const tried = Promise.all([r.kind === "own" ? null : kept.get("page", f.key), sheet ? null : kept.get("still", f.key, into.clientWidth)]).then(([page, still]) => {
-    if (looking && page) developer.keep(looking);
     if (f.page) return;
     if (still) showStill(f, still);
     if (page) draw(page);
@@ -278,7 +273,7 @@ let barStart = 0;
 export function setBarStart(px) {
   if (px === barStart) return;
   barStart = px;
-  frames.filter((f) => !f.sheet && !f.dock).forEach((f) => f.frame.contentWindow?.postMessage({ oneBar: px }, "*"));
+  frames.filter((f) => !f.sheet).forEach((f) => f.frame.contentWindow?.postMessage({ oneBar: px }, "*"));
 }
 
 /// A screen's still, in a frame of its own as sandboxed as the screen's, answering nothing but its frame's ask for it.
@@ -425,8 +420,6 @@ export const screen = {
     if (coming?.key === key) return;
     if (!coming && showing?.key === key && showing.into.isConnected) return (showing.leaving = false), void announced(showing, begin);
     tabTitled(titleOf(r));
-    devtools.since = Date.now();
-    devtools.draw();
     settle();
     if (coming) (drop(coming.into), (coming = null));
     const early = readied?.key === key ? readied : null;
@@ -481,67 +474,6 @@ export const screen = {
         if (goes.shrink) announced(f, begin);
       });
     });
-  },
-};
-
-/// Developer, in Developer mode: the bar's </> opens its panel (src/screen/settings/devtools.jsx) for the screen in front,
-/// docked under it, where it stays open from screen to screen until closed. It's told the screen's app and title, and
-/// for the client's own, since when it showed.
-export const devtools = {
-  KEY: "one.devtools",
-  HEIGHT: "one.devtools.height",
-  since: Date.now(),
-  open: () => localStorage.getItem(devtools.KEY) === "1",
-  route() {
-    const r = route();
-    return own("devtools", r.kind === "screen" ? { app: r.app, screen: r.screen, title: titleOf(r) } : { title: titleOf(r), since: devtools.since });
-  },
-  toggle() {
-    if (devtools.open()) localStorage.removeItem(devtools.KEY);
-    else localStorage.setItem(devtools.KEY, "1");
-    devtools.draw();
-  },
-  /// Its top edge drags it taller or shorter, kept for next time. The screens' frames would take the pointer as it
-  /// moves over them, so they let it pass while it's dragged.
-  resizable(dock) {
-    const edge = Object.assign(document.createElement("div"), { className: "devtools-edge" });
-    edge.setAttribute("role", "separator");
-    edge.setAttribute("aria-orientation", "horizontal");
-    dock.append(edge);
-    edge.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      edge.setPointerCapture(e.pointerId);
-      const start = e.clientY, from = dock.offsetHeight, most = dock.parentElement.offsetHeight - 120;
-      document.body.classList.add("dragging");
-      const move = (m) => (dock.style.height = `${Math.round(Math.min(most, Math.max(120, from + start - m.clientY)))}px`);
-      const up = () => {
-        edge.removeEventListener("pointermove", move);
-        document.body.classList.remove("dragging");
-        localStorage.setItem(devtools.HEIGHT, String(dock.offsetHeight));
-      };
-      edge.addEventListener("pointermove", move);
-      edge.addEventListener("pointerup", up, { once: true });
-      edge.addEventListener("pointercancel", up, { once: true });
-    });
-  },
-  draw() {
-    let dock = $(".devtools", detail);
-    if (!developer.on() || !devtools.open()) {
-      if (dock) (frames = frames.filter((f) => f !== dock.f)), dock.remove();
-      return;
-    }
-    const r = devtools.route(), key = JSON.stringify(r);
-    if (dock?.key === key) return;
-    if (!dock) {
-      detail.append((dock = Object.assign(document.createElement("div"), { className: "devtools" })));
-      const height = Number(localStorage.getItem(devtools.HEIGHT));
-      if (height) dock.style.height = `${height}px`;
-    }
-    frames = frames.filter((f) => f !== dock.f);
-    dock.key = key;
-    dock.f = frameFor(r, dock);
-    dock.f.dock = true;
-    devtools.resizable(dock);
   },
 };
 
@@ -668,7 +600,6 @@ addEventListener("message", async (e) => {
         return null;
       },
       close: (value) => {
-        if (f.dock) return (localStorage.removeItem(devtools.KEY), devtools.draw(), null);
         if (f.sheet) f.sheet.close(value);
         else back();
         return null;
@@ -677,8 +608,7 @@ addEventListener("message", async (e) => {
         // Empty while the screen shows its own large title; the tab is named by what the screen says it's called.
         // A sheet too says nothing while the screen's large title shows (`one.largeTitle`, which names it).
         if (f.sheet) f.sheet.title(title || (m.name ? "" : titleOf(r)));
-        // Developer's panel has the bar of the screen it's under.
-        else if (!f.dock && f.into.isConnected && !f.leaving) {
+        else if (f.into.isConnected && !f.leaving) {
           f.said = title;
           f.name = m.name;
           // A large title lies in the bar's row.
@@ -706,7 +636,6 @@ addEventListener("message", async (e) => {
       icons: iconPaths,
       blob: async (id) => (await api(`/api/blobs/${encodeURIComponent(id)}`, { raw: true })).blob(),
       ...platform.bridge(f.frame),
-      traces: () => (developer.on() ? developer.kept : null),
       thrown: (m) => report(sendReport, mine ? { name: "page.exception", exception: m.exception } : { name: "screen.exception", app: r.app, screen: r.screen, exception: m.exception }),
       own: mine && {
         ...ownAnswers,

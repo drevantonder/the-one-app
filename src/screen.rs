@@ -114,7 +114,7 @@ pub fn tag(page: &str) -> String {
 }
 
 /// The clients' own screens, by name, the same on every client: the user's pages, a page's Accounts, a request for a
-/// Vault item, Settings' (`settings/`), and Developer's panel (`devtools`). They act through the bridge's `one.api` as the user looking, which a
+/// Vault item, and Settings' (`settings/`). They act through the bridge's `one.api` as the user looking, which a
 /// client answers only for these.
 const CLIENT_SCREENS: &[(&str, &str, &str)] = &[
     // Written in React (home/<name>.jsx), built by @one/ui's build into home/dist/.
@@ -133,8 +133,6 @@ const CLIENT_SCREENS: &[(&str, &str, &str)] = &[
     ("labs", "src/screen/settings/dist/labs.html", include_str!("screen/settings/dist/labs.html")),
     ("devices", "src/screen/settings/dist/devices.html", include_str!("screen/settings/dist/devices.html")),
     ("connect-ai", "src/screen/settings/dist/connect-ai.html", include_str!("screen/settings/dist/connect-ai.html")),
-    ("developer", "src/screen/settings/dist/developer.html", include_str!("screen/settings/dist/developer.html")),
-    ("devtools", "src/screen/settings/dist/devtools.html", include_str!("screen/settings/dist/devtools.html")),
 ];
 
 /// Each of the client's own screens' source maps: what a frame thrown in one of them came from (`insights::source_map`).
@@ -153,8 +151,6 @@ const CLIENT_MAPS: &[(&str, &str)] = &[
     ("labs", include_str!("screen/settings/dist/labs.html.map")),
     ("devices", include_str!("screen/settings/dist/devices.html.map")),
     ("connect-ai", include_str!("screen/settings/dist/connect-ai.html.map")),
-    ("developer", include_str!("screen/settings/dist/developer.html.map")),
-    ("devtools", include_str!("screen/settings/dist/devtools.html.map")),
 ];
 
 /// The source map of a client's own screen.
