@@ -1180,6 +1180,9 @@ async fn own_runtime(k: &Host) -> OwnRuntime {
     let mut program = std::process::Command::new(env!("CARGO_BIN_EXE_one-apps"));
     program.env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), &holder_at).stdout(out.try_clone().unwrap()).stderr(out);
     let process = Runtime(platform::os::spawn_listening(&mut program, &listener).unwrap());
+    // oned keeps the socket to start the next runtime on; nothing here does, so a runtime that ended refuses what's
+    // asked of it rather than leaving it waiting.
+    drop(listener);
     let started = async || std::fs::exists(folder.join(api::local::LOCAL_TOKEN)).unwrap() && ask_runtime(&at, "", json!({})).await.0 == 403;
     polled("the runtime to start", &log, started).await;
     let token = std::fs::read_to_string(folder.join(api::local::LOCAL_TOKEN)).unwrap();
