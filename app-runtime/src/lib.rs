@@ -273,11 +273,11 @@ impl std::fmt::Debug for Host {
 /// What an app runtime stopping waits at most for its last insights to be written: they may be lost, and stopping may not wait.
 const LAST_SAY: Duration = Duration::from_secs(3);
 
-/// `<cli>-apps --listen=<address>`: this device's app runtime, an endpoint of its own key (`Host::runtime`), answering on
-/// `address` only its device's own programs, with the token in its folder, and asking its device's key, held by the
+/// `<cli>-apps --listen-socket=<socket>`: this device's app runtime, an endpoint of its own key (`Host::runtime`), answering on
+/// `listener`, which oned keeps, only its device's own programs, with the token in its folder, and asking its device's key, held by the
 /// computer's onet at the API's address, for what that opens and signs. It runs its own watchdog.
 #[tokio::main]
-pub async fn serve(listen: &str) -> Result<()> {
+pub async fn serve(listener: std::net::TcpListener) -> Result<()> {
     ::device_logs::keep(::device_logs::NODE);
     tracing_subscriber::fmt()
         .with_writer(::device_logs::Tee)
@@ -310,8 +310,8 @@ pub async fn serve(listen: &str) -> Result<()> {
     if last == ::insights::Ended::Update {
         insights_runtime::device_signal(&host.rt(), "update.running", ::insights::Attrs::default().part(&::oned_update::latest::Thing::program_name(custom_build::config::TARGET)), ::insights::Status::Unset);
     }
-    let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
-    tracing::info!("{} app runtime {} answering {listen} from {}", ::custom_build::config::NAME, ::key::short(&host.id()), dir.display());
+    let listener = tokio::net::TcpListener::from_std(listener)?;
+    tracing::info!("{} app runtime {} answering {} from {}", ::custom_build::config::NAME, ::key::short(&host.id()), listener.local_addr()?, dir.display());
     tokio::spawn(crate::api::serve_guide(host.clone()));
     crate::watchdog::watch();
     let served = ::api::serve(listener, crate::api::guarded(crate::api::routes(), host)).await;

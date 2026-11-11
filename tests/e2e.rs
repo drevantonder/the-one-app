@@ -1165,13 +1165,13 @@ async fn own_runtime(k: &Host) -> OwnRuntime {
     ::scope::settings::tell(k, k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
     k.member_content(&me, listing(&k.id(), &::scope::settings::Me::seal(k), &name, &[Kind::Client], None)).await.unwrap();
 
-    let at = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let at = listener.local_addr().unwrap().to_string();
     let log = home.join("runtime.log");
     let out = std::fs::File::create(&log).unwrap();
     let mut program = std::process::Command::new(env!("CARGO_BIN_EXE_one-apps"));
-    program.arg(format!("--listen={at}"));
     program.env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), &holder_at).stdout(out.try_clone().unwrap()).stderr(out);
-    let process = Runtime(program.spawn().unwrap());
+    let process = Runtime(platform::os::spawn_listening(&mut program, &listener).unwrap());
     let started = async || std::fs::exists(folder.join(api::local::LOCAL_TOKEN)).unwrap() && ask_runtime(&at, "", json!({})).await.0 == 403;
     polled("the runtime to start", &log, started).await;
     let token = std::fs::read_to_string(folder.join(api::local::LOCAL_TOKEN)).unwrap();
@@ -1303,21 +1303,25 @@ impl Computer {
         ::scope::settings::tell(k, k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
         k.member_content(&me, listing(&k.id(), &::scope::settings::Me::seal(k), name, &[Kind::Client], None)).await.unwrap();
 
-        let free = || format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
-        let (onet_at, runtime_at) = (free(), free());
-        let started = |mut program: std::process::Command, args: Vec<String>, addr: &str, log: &str| {
+        let onet_at = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
+        let runtime_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let runtime_at = runtime_listener.local_addr().unwrap().to_string();
+        let started = |mut program: std::process::Command, args: Vec<String>, addr: &str, log: &str, listening: Option<&std::net::TcpListener>| {
             let log = std::fs::File::create(home.join(log)).unwrap();
             program.args(args).env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), addr).stdout(log.try_clone().unwrap()).stderr(log);
-            Runtime(program.spawn().unwrap())
+            Runtime(match listening {
+                Some(listener) => platform::os::spawn_listening(&mut program, listener).unwrap(),
+                None => program.spawn().unwrap(),
+            })
         };
         let mut onet = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
         std::os::unix::process::CommandExt::arg0(&mut onet, onet::computer::name());
-        let onet = started(onet, vec![format!("--listen={onet_at}"), format!("--runtime={runtime_at}")], &onet_at, "onet.log");
+        let onet = started(onet, vec![format!("--listen={onet_at}"), format!("--runtime={runtime_at}")], &onet_at, "onet.log", None);
         let token = std::fs::read_to_string(home.join(api::local::LOCAL_TOKEN)).unwrap();
         let held = async || ask(&onet_at, "GET", "/api/holds", &token, None).await;
         polled("onet to answer", &home.join("onet.log"), async || held().await.0 == 200).await;
         assert_eq!(held().await.1["key"], ::key::hex(&k.id()), "it holds the device's key");
-        let runtime = started(std::process::Command::new(env!("CARGO_BIN_EXE_one-apps")), vec![format!("--listen={runtime_at}")], &onet_at, "runtime.log");
+        let runtime = started(std::process::Command::new(env!("CARGO_BIN_EXE_one-apps")), Vec::new(), &onet_at, "runtime.log", Some(&runtime_listener));
         polled("the runtime to start", &home.join("runtime.log"), async || ask(&runtime_at, "GET", "/api/state", "", None).await.0 == 403).await;
         let runtime_token = std::fs::read_to_string(folder.join(api::local::LOCAL_TOKEN)).unwrap();
         let runtime = OwnRuntime { process: runtime, at: runtime_at, token: runtime_token, log: home.join("runtime.log"), key: r };

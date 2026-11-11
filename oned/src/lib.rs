@@ -1,7 +1,7 @@
 //! oned (`<cli>d`): a computer's always-on program, this program run by that name; the `<cli>` command line runs, answers
 //! and exits. It holds no key, and is a user of its onet like any other program. It keeps two programs of its own
 //! running, starting each again when it stops: the computer's onet (`<cli>t`), which holds the device's key and answers
-//! its programs, and its app runtime (`<cli>-apps --listen=`, app-runtime/), an endpoint of its own key that onet asks on
+//! its programs, and its app runtime (`<cli>-apps --listen-socket=`, app-runtime/), an endpoint of its own key that onet asks on
 //! a loopback address oned gives both. It never takes a build by itself: `one update`, which Update asks of the device,
 //! replaces its program and has it exit, for its supervisor to start it again on the new one.
 //!
@@ -600,13 +600,15 @@ struct Kept {
     /// What starts it, given its arguments.
     program: fn() -> Result<std::process::Command>,
     args: Vec<String>,
+    /// The socket it serves, which oned keeps and hands it each time (`os::spawn_listening`), so its address stays its own.
+    listening: Option<std::net::TcpListener>,
     child: Option<std::process::Child>,
     stops: Vec<Instant>,
 }
 
 impl Kept {
-    fn new(what: &'static str, log: &'static str, program: fn() -> Result<std::process::Command>, args: Vec<String>) -> Kept {
-        Kept { what, log, program, args, child: None, stops: Vec::new() }
+    fn new(what: &'static str, log: &'static str, program: fn() -> Result<std::process::Command>, args: Vec<String>, listening: Option<std::net::TcpListener>) -> Kept {
+        Kept { what, log, program, args, listening, child: None, stops: Vec::new() }
     }
 
     /// Started if it isn't running; one that stopped is said in oned's log, and once it keeps stopping, said so.
@@ -625,7 +627,11 @@ impl Kept {
         if self.child.is_none() {
             // On Windows, closing its stdin is how it's asked to stop (`os::ask_to_stop`).
             let stdin = if cfg!(windows) { std::process::Stdio::piped() } else { std::process::Stdio::null() };
-            match (self.program)().and_then(|mut c| Ok(c.args(&self.args).stdin(stdin).spawn()?)) {
+            let spawn = |c: &mut std::process::Command| match &self.listening {
+                Some(listener) => platform::os::spawn_listening(c, listener),
+                None => c.spawn(),
+            };
+            match (self.program)().and_then(|mut c| Ok(spawn(c.args(&self.args).stdin(stdin))?)) {
                 Ok(child) => {
                     tracing::info!("oned started {}", self.what);
                     self.child = Some(child);
@@ -667,7 +673,7 @@ fn runtime() -> Result<std::process::Command> {
 }
 
 /// oned on a computer: keeps the computer's onet running, which holds its key and answers its programs, and its app
-/// runtime, which onet asks on a loopback address chosen here.
+/// runtime, which onet asks on a loopback socket oned keeps for as long as it runs.
 #[tokio::main(flavor = "current_thread")]
 async fn serve() -> Result<()> {
     #[cfg(windows)]
@@ -685,10 +691,11 @@ async fn serve() -> Result<()> {
     std::fs::write(dir.join(::oned_update::update::PID), std::process::id().to_string())?;
     ::oned_update::update::note_running(&dir)?;
     with_bucket_address(&dir)?;
-    let at = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let at = listener.local_addr()?.to_string();
     let kept = std::sync::Arc::new(std::sync::Mutex::new([
-        Kept::new("onet", " --service onet", || Ok(platform::os::named(&::custom_build::programs::onet())?), vec![format!("--listen={}", ::api::local::addr()), format!("--runtime={at}")]),
-        Kept::new("the app runtime", "", runtime, vec![format!("--listen={at}")]),
+        Kept::new("onet", " --service onet", || Ok(platform::os::named(&::custom_build::programs::onet())?), vec![format!("--listen={}", ::api::local::addr()), format!("--runtime={at}")], None),
+        Kept::new("the app runtime", "", runtime, Vec::new(), Some(listener)),
     ]));
     keep_parts(kept.clone(), at.clone());
     let stop = platform::os::stop_asked()?;

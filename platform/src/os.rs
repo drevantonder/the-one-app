@@ -266,6 +266,52 @@ pub fn child(command: &mut std::process::Command, listening: &[(&str, &std::net:
     }
 }
 
+/// Starts `command` serving `listener`, a socket already listening, given it as `--listen-socket=<it>`: no other program
+/// can take its port first, and what reaches it waits for the child, while it starts again too, rather than being
+/// refused. Only that child keeps it, not whatever else this process starts meanwhile, which could answer in its place.
+pub fn spawn_listening(command: &mut Command, listener: &std::net::TcpListener) -> std::io::Result<Child> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        let fd = listener.as_raw_fd();
+        command.arg(format!("--listen-socket={fd}"));
+        // SAFETY: only an async-signal-safe call, between fork and exec.
+        unsafe {
+            command.pre_exec(move || if libc::fcntl(fd, libc::F_SETFD, 0) == -1 { Err(std::io::Error::last_os_error()) } else { Ok(()) });
+        }
+        command.spawn()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawSocket;
+        use windows_sys::Win32::Foundation::{HANDLE, HANDLE_FLAG_INHERIT, SetHandleInformation};
+        let socket = listener.as_raw_socket();
+        command.arg(format!("--listen-socket={socket}"));
+        // Windows hands a child every inheritable handle: the socket is one only while this child is started.
+        let inherit = |on: bool| {
+            // SAFETY: a socket this process holds open, which is a handle.
+            if unsafe { SetHandleInformation(socket as HANDLE, HANDLE_FLAG_INHERIT, if on { HANDLE_FLAG_INHERIT } else { 0 }) } == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+        };
+        inherit(true)?;
+        let spawned = command.spawn();
+        inherit(false)?;
+        spawned
+    }
+}
+
+/// The socket this program's parent handed it (`spawn_listening`), given what followed `--listen-socket=`.
+pub fn handed_listener(socket: &str) -> anyhow::Result<std::net::TcpListener> {
+    let socket = socket.parse().map_err(|_| anyhow::anyhow!("--listen-socket={socket} isn't a socket's number: only the program that starts this one gives it"))?;
+    // SAFETY: the parent handed it open and listening, for this program alone.
+    #[cfg(unix)]
+    let listener = unsafe { <std::net::TcpListener as std::os::fd::FromRawFd>::from_raw_fd(socket) };
+    #[cfg(windows)]
+    let listener = unsafe { <std::net::TcpListener as std::os::windows::io::FromRawSocket>::from_raw_socket(socket) };
+    listener.set_nonblocking(true)?;
+    Ok(listener)
+}
+
 /// Tells systemd `state`, when it runs oned as its service.
 pub fn notify(#[cfg_attr(not(target_os = "linux"), allow(unused_variables))] state: &str) {
     #[cfg(target_os = "linux")]
