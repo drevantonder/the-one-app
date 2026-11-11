@@ -39,7 +39,6 @@ pub mod built_in {
 pub mod api;
 pub mod app;
 pub mod apps;
-pub mod blobs;
 pub mod copied;
 mod calls;
 mod databases;
@@ -226,7 +225,6 @@ pub struct Inner {
     /// The port apps' requests go out through.
     outbound: u16,
     calls: calls::State,
-    blobs: blobs::State,
     databases: databases::State,
     /// Steps other devices sent, waiting for the bucket to confirm them, while one ask of it is under way: none then.
     sent: Mutex<Option<Vec<sync::Sent>>>,
@@ -376,7 +374,6 @@ impl Host {
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             calls: Default::default(),
-            blobs: Default::default(),
             databases: Default::default(),
             sent: Mutex::new(None),
             moving: Mutex::new(false),
@@ -554,7 +551,7 @@ impl Host {
             if let Err(err) = reader.read_scopes(None).await {
                 tracing::warn!("reading the bucket: {err:#}");
             }
-            reader.share_blobs().await;
+            database_runtime::share_all(&reader.rt()).await;
         });
         Ok(())
     }
@@ -612,10 +609,7 @@ impl Host {
                 self.forget_sessions();
             }
             if tick % 6 == 0 && self.has_network() {
-                self.share_unshared().await;
-                self.take_forgotten().await;
                 self.tidy_databases().await;
-                self.sweep_remote_puts();
             }
         }
     }

@@ -18,6 +18,7 @@ pub fn features() -> Vec<Runs> {
         app_schedules_runtime::runs(),
         groups_runtime::runs(),
         devices_runtime::runs(),
+        database_runtime::runs(),
         onboarding_runtime::runs(),
         services_runtime::runs(),
         widgets_runtime::runs(),
@@ -248,16 +249,8 @@ impl Databases for Host {
         Box::pin(async move { Ok(::bucket::Bucket::get(&self.bucket()?, name).await?.map(|o| o.bytes)) })
     }
 
-    fn blob<'a>(&'a self, hash: &'a str) -> Fut<'a, Vec<u8>> {
-        Box::pin(Host::blob(self, hash))
-    }
-
-    fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String> {
-        Host::put_blob_for(self, caller, bytes)
-    }
-
-    fn may_read_blob(&self, caller: &Caller, hash: &str) -> Result<bool> {
-        Ok(self.this_machine(caller) || Host::may_read_blob(self, &caller.user, hash)?)
+    fn removes_from_bucket(&self) -> bool {
+        Host::removes_from_bucket(self)
     }
 }
 
@@ -280,6 +273,10 @@ impl Holds for Host {
 
     fn app_schedules_keys<'a>(&'a self, scope: &'a Scope, app: &'a str) -> Fut<'a, u64> {
         Box::pin(Host::app_schedules_keys(self, scope, app))
+    }
+
+    fn database_keys<'a>(&'a self, scope: &'a Scope, app: &'a str, database: &'a str) -> Fut<'a, database::stored::Keys> {
+        Box::pin(Host::database_keys(self, scope, app, database, false))
     }
 
     fn tell_relay(&self, fields: Value, by_device: bool) -> Fut<'_, ()> {
@@ -327,6 +324,10 @@ impl Apps for Host {
 
     fn built_in(&self, app: &str) -> Option<String> {
         self.0.built_in.get(app).cloned()
+    }
+
+    fn carries(&self, hash: &str) -> bool {
+        self.0.built_in.values().any(|b| b == hash)
     }
 
     fn bring_in<'a>(&'a self, caller: &'a Caller, app: &'a str) -> Fut<'a, ()> {

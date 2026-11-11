@@ -101,7 +101,7 @@ impl Host {
         let mut builds: BTreeMap<String, Build> = self.service_releases().into_iter().map(|(n, r)| (n, Build::Released(r))).collect();
         let bundles = self.with_or(Default::default(), |i| Ok(i.r.db().apps()?.into_iter().filter(|a| a.deleted.is_none()).filter_map(|a| Some((a.name, a.bundle?))).collect::<Vec<_>>()));
         for (app, bundle) in bundles {
-            match self.blob(&bundle).await {
+            match database_runtime::blob(&self.rt(), &bundle).await {
                 Ok(bytes) => match ::deploy::bundle::services(&bytes).remove(custom_build::config::TARGET) {
                     Some(build) => drop(builds.insert(app, Build::Deployed(build))),
                     // A deploy naming builds for other platforms only runs on none here, release or not.
@@ -116,7 +116,7 @@ impl Host {
 
     /// A build of a service its deploy names, fetched if it isn't here, once it's the one by that hash.
     pub async fn service_build(&self, hash: &str) -> Result<Vec<u8>> {
-        let bytes = self.blob(hash).await?;
+        let bytes = database_runtime::blob(&self.rt(), hash).await?;
         ensure!(blake3::hash(&bytes).to_hex().as_str() == hash, "it isn't the build its deploy names");
         Ok(bytes)
     }

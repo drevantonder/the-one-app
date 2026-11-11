@@ -191,7 +191,7 @@ pub async fn fork(rt: &Rt, caller: &Caller, app: &str, name: &str, owner: Option
         m.app(app)?.with_context(|| format!("no app named {app}"))?.bundle.with_context(|| format!("{app} has no deploy to fork"))
     })?;
     let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
-    let builds = deploy::bundle::services(&rt.blob(&bundle).await?).into_values();
+    let builds = deploy::bundle::services(&database_runtime::blob(&rt, &bundle).await?).into_values();
     rt.as_member(caller, content::fork(name, &owner, app)).await?;
     rt.as_member(caller, content::deploy(name, &bundle, builds)).await
 }
@@ -212,12 +212,12 @@ pub async fn deploy(rt: &Rt, caller: &Caller, app: &str, bundle: &str, wait: boo
     })?;
     // From elsewhere, only a bundle they may read: their own, or one an entry names for them; so too its service's
     // builds, which the deploy names among its blobs.
-    ensure!(rt.may_read_blob(caller, &bundle)?, "{app} has no deploy {bundle}: its versions are in apps_list's history");
-    let bytes = rt.blob(&bundle).await?;
+    ensure!(database_runtime::may_read(&rt, caller, &bundle)?, "{app} has no deploy {bundle}: its versions are in apps_list's history");
+    let bytes = database_runtime::blob(&rt, &bundle).await?;
     deploy::bundle::module(&bytes)?;
     let builds: Vec<String> = deploy::bundle::services(&bytes).into_values().collect();
     for build in &builds {
-        ensure!(rt.may_read_blob(caller, build)?, "{app}'s bundle names a build of its service, {build}, that isn't here: put it first");
+        ensure!(database_runtime::may_read(&rt, caller, build)?, "{app}'s bundle names a build of its service, {build}, that isn't here: put it first");
     }
     rt.as_member(caller, content::deploy(app, &bundle, builds)).await?;
     Ok(wait && rt.runs_latest(app, Duration::from_secs(10)).await?)
@@ -268,7 +268,7 @@ pub async fn source(rt: &Rt, app: &str, bundle: Option<&str>, path: Option<&str>
         Some(b) => history.iter().find(|(h, ..)| h.starts_with(b)).with_context(|| format!("{app} has no deploy {b}"))?.0.clone(),
         None => history.last().map(|h| h.0.clone()).or(built_in).with_context(|| format!("{app} has no deploy yet"))?,
     };
-    let mut out = deploy::build::show(&rt.blob(&bundle).await?, path)?;
+    let mut out = deploy::build::show(&database_runtime::blob(&rt, &bundle).await?, path)?;
     out["app"] = json!(app);
     out["bundle"] = json!(bundle);
     Ok(out)

@@ -153,7 +153,7 @@ impl Host {
         let at = u64::from(step.seq());
         ensure!(self.with(|i| Ok(i.r.at()))? == Some(at - 1), "step {at} isn't the next here");
         for blob in &step.content.blobs {
-            self.share_blob(&Scope::Global, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
+            database_runtime::share(&self.rt(), &Scope::Global, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
         }
         let keys = self.step_keys(&Scope::Global).await?;
         let name = bucket::names::step_name(&steps::prefix("global"), at);
@@ -251,7 +251,7 @@ impl Host {
             self.happened(Happened::Steps { scope: scope.clone() });
         }
         if !forgotten.is_empty() {
-            self.delete_forgotten(forgotten);
+            database_runtime::delete_forgotten(&self.rt(), forgotten);
         }
         // A newer release's step: this device reads no further until it's updated.
         took?;
@@ -288,7 +288,7 @@ impl Host {
                 Ok((step, r.at + 1))
             })?;
             for blob in &step.content.blobs {
-                self.share_blob(scope, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
+                database_runtime::share(&self.rt(), scope, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
             }
             let keys = self.step_keys(scope).await?;
             let name = bucket::names::step_name(&steps::prefix(&scope.to_string()), at);
@@ -391,7 +391,7 @@ impl Host {
         let forgotten: Vec<(String, String)> = forgotten_now.into_iter().filter(|b| !forgotten_before.contains(b)).map(|b| ("global".to_string(), b)).collect();
         self.emit(Event::Changed { apps: Vec::new() });
         if !forgotten.is_empty() {
-            self.delete_forgotten(forgotten);
+            database_runtime::delete_forgotten(&self.rt(), forgotten);
         }
         Ok(())
     }
@@ -421,12 +421,12 @@ impl Host {
         let broken = self.0.broken.lock().unwrap().clone();
         let ran = self.0.bundles.lock().unwrap().clone();
         for (app, bundle) in wanted.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
-            let mut fetched = self.blob(bundle).await.and_then(|b| ::deploy::bundle::module(&b)).map(|m| (m, bundle));
+            let mut fetched = database_runtime::blob(&self.rt(), bundle).await.and_then(|b| ::deploy::bundle::module(&b)).map(|m| (m, bundle));
             if let Err(err) = &fetched {
                 tracing::warn!("{app}'s deploy: {err:#}: tried again soon");
                 unfetched = true;
                 if let Some(old) = ran.get(app).filter(|old| *old != bundle)
-                    && let Ok(module) = self.blob(old).await.and_then(|b| ::deploy::bundle::module(&b))
+                    && let Ok(module) = database_runtime::blob(&self.rt(), old).await.and_then(|b| ::deploy::bundle::module(&b))
                 {
                     fetched = Ok((module, old));
                 }
@@ -439,7 +439,7 @@ impl Host {
         // The built-in apps no one has added run no calls: they're there to be described, for the App Store to list.
         let mut waiting = Vec::new();
         for (app, bundle) in unadded.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
-            if let Ok(module) = self.blob(bundle).await.and_then(|b| ::deploy::bundle::module(&b)) {
+            if let Ok(module) = database_runtime::blob(&self.rt(), bundle).await.and_then(|b| ::deploy::bundle::module(&b)) {
                 waiting.push((app.clone(), module));
             }
         }

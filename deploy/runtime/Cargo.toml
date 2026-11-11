@@ -13,6 +13,8 @@ doctest = false
 [dependencies]
 deploy = { path = ".." }
 api = { path = "../../api" }
+# Blobs, read and put as the app runtime keeps them.
+database-runtime = { path = "../../database/runtime" }
 scope = { path = "../../scope" }
 database = { path = "../../database" }
 key = { path = "../../key" }

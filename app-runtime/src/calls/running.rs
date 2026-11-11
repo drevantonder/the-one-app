@@ -222,12 +222,12 @@ impl Host {
                 ok(json!({ "id": id }))
             }
             Ask::BlobPut => {
-                let hash = self.put_blob(&body)?;
+                let hash = database_runtime::put(&self.rt(), &body)?;
                 if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
                     g.puts.push(hash.clone());
                     // Someone not of this machine's own programs reads back what their call put, as what they put.
                     if g.caller.credential != Credential::Own {
-                        self.0.blobs.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(g.caller.user.clone());
+                        database_runtime::put_by(&self.rt(), &hash, &g.caller.user);
                     }
                 }
                 ok(json!({ "blob": hash }))
@@ -239,8 +239,8 @@ impl Host {
                 // A call this machine's own programs asked may read what its local API would give them: a file put there to
                 // attach. A sign-in's asks here too, but reads only what its user may.
                 let local = self.this_machine(&grant.caller) && ::database::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
-                ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || self.may_read_blob(&grant.caller.user, hash)?, "no such blob for you");
-                self.blob(hash).await?.into_response()
+                ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || database_runtime::may_read(&self.rt(), &grant.caller, hash)?, "no such blob for you");
+                database_runtime::blob(&self.rt(), hash).await?.into_response()
             }
             Ask::Appends => {
                 ensure!(self.0.calls.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");

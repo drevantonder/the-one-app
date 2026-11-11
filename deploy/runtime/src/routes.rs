@@ -31,7 +31,7 @@ async fn deploy(State(rt): State<Rt>, me: Me, Body(body): Body<Deploy>) -> Reply
                 return Err(anyhow::anyhow!("{screen} is a React screen, built on the machine that deploys it with Bun or Node: deploy it from there, with {cli} deploy <folder> or {cli} mcp's deploy tool", cli = custom_build::config::CLI).into());
             }
             let built = tokio::task::spawn_blocking(move || deploy::build::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>()));
-            rt.put_blob_for(&me.caller, &built.await.map_err(anyhow::Error::from)??)?
+            database_runtime::put_for(&rt, &me.caller, &built.await.map_err(anyhow::Error::from)??)?
         }
         None => given(body.bundle.as_deref().unwrap_or_default(), "bundle")?.to_string(),
     };

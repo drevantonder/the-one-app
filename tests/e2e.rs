@@ -77,7 +77,7 @@ fn notes(tool: &str, input: Value) -> CallRequest {
 /// would add an app, and waits for this device to run it.
 async fn add_notes(a: &Host) {
     let me = api::Caller::own(a.id(), a.user().unwrap());
-    let bundle = a.put_blob(&deploy::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
+    let bundle = database_runtime::put(&a.rt(), &deploy::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
     deploy_runtime::deploy_making(&a.rt(), &me, "notes", &bundle, Some("admins"), true).await.unwrap();
     deploy_runtime::add(&a.rt(), &me, "notes", &::scope::scopes::Scope::Global, true, None).await.unwrap();
 }
@@ -653,14 +653,14 @@ async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     create(&a, "Home", "Andre").await;
     let caller = |user: &str| api::Caller { key: a.id(), user: user.into(), agent: None, credential: api::Credential::Client([user.len() as u8; 32]) };
     let (sam, andre) = (caller("sam"), caller(&a.user().unwrap()));
-    let (hash, size) = a.put_blob_from(&sam, axum::body::Body::from("Sam's file")).await.unwrap();
+    let (hash, size) = database_runtime::put_from(&a.rt(), &sam, axum::body::Body::from("Sam's file")).await.unwrap();
     assert_eq!(size, 10);
-    assert_eq!(a.blob_for(&sam, &hash).await.unwrap(), b"Sam's file", "Sam reads back what Sam put");
-    assert!(a.blob_for(&andre, &hash).await.is_err(), "and Andre doesn't, by its hash");
-    let theirs = a.put_blob(b"an attachment of someone else's").unwrap();
-    assert!(a.blob_for(&sam, &theirs).await.is_err(), "nor Sam one nobody gave him");
-    a.drop_put(&hash);
-    assert!(a.blob_for(&sam, &hash).await.is_err(), "a request's file goes once it's answered");
+    assert_eq!(database_runtime::blob_for(&a.rt(), &sam, &hash).await.unwrap(), b"Sam's file", "Sam reads back what Sam put");
+    assert!(database_runtime::blob_for(&a.rt(), &andre, &hash).await.is_err(), "and Andre doesn't, by its hash");
+    let theirs = database_runtime::put(&a.rt(), b"an attachment of someone else's").unwrap();
+    assert!(database_runtime::blob_for(&a.rt(), &sam, &theirs).await.is_err(), "nor Sam one nobody gave him");
+    database_runtime::drop_put(&a.rt(), &hash);
+    assert!(database_runtime::blob_for(&a.rt(), &sam, &hash).await.is_err(), "a request's file goes once it's answered");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -747,10 +747,10 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     let a = Host::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
-    let build = a.put_blob(b"a program").unwrap();
+    let build = database_runtime::put(&a.rt(), b"a program").unwrap();
     let bundle = |services: Value| {
         let files = vec![("app.js".to_string(), b"export default { tools: {} }".to_vec()), (deploy::bundle::SERVICES.to_string(), services.to_string().into_bytes())];
-        a.put_blob(&deploy::bundle::pack(&files).unwrap()).unwrap()
+        database_runtime::put(&a.rt(), &deploy::bundle::pack(&files).unwrap()).unwrap()
     };
     let named = bundle(json!({ custom_build::config::TARGET: build }));
     deploy_runtime::deploy_making(&a.rt(), &me, "tiny", &named, None, false).await.unwrap();
@@ -771,8 +771,8 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     assert!(deploy_runtime::deploy(&a.rt(), &sam, "tiny", &named, false).await.is_err());
     // Nor does Andre, from elsewhere, name a build he can't read: one Sam put, by its hash.
     let away = api::Caller { key: [7; 32], credential: api::Credential::Client([7; 32]), ..me.clone() };
-    let (sams, _) = a.put_blob_from(&sam, axum::body::Body::from("Sam's program")).await.unwrap();
-    let (his, _) = a.put_blob_from(&away, axum::body::Body::from(deploy::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (deploy::bundle::SERVICES.to_string(), json!({ custom_build::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
+    let (sams, _) = database_runtime::put_from(&a.rt(), &sam, axum::body::Body::from("Sam's program")).await.unwrap();
+    let (his, _) = database_runtime::put_from(&a.rt(), &away, axum::body::Body::from(deploy::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (deploy::bundle::SERVICES.to_string(), json!({ custom_build::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
     let refused = deploy_runtime::deploy(&a.rt(), &away, "tiny", &his, false).await.unwrap_err();
     assert!(format!("{refused:#}").contains("put it first"), "{refused:#}");
 }
@@ -910,7 +910,7 @@ async fn a_tool_answers_what_its_output_says() {
     let a = start("answers").await;
     create(&a, "Home", "Andre").await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
-    let bundle = a.put_blob(&deploy::bundle::pack(&[("app.js".to_string(), include_bytes!("answers/app.js").to_vec())]).unwrap()).unwrap();
+    let bundle = database_runtime::put(&a.rt(), &deploy::bundle::pack(&[("app.js".to_string(), include_bytes!("answers/app.js").to_vec())]).unwrap()).unwrap();
     let deployed = deploy_runtime::deploy_making(&a.rt(), &me, "answers", &bundle, Some("admins"), true).await.unwrap();
     assert_eq!(deployed["lacking"], json!(["unsaid"]), "the deploy names the tool that says nothing of its answer: {deployed}");
     let schema = &onet::document(&[], true)["paths"]["/api/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];

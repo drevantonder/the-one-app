@@ -81,20 +81,20 @@ async fn app_http(State(host): State<Host>, me: Me, Path((app, path)): Path<(Str
     let empty = matches!(method.as_str(), "GET" | "HEAD") || req.headers().get(axum::http::header::CONTENT_LENGTH).is_some_and(|l| l == "0");
     let body = match empty {
         true => None,
-        false => Some(host.put_blob_from(&me.caller, req.into_body()).await?),
+        false => Some(database_runtime::put_from(&host.rt(), &me.caller, req.into_body()).await?),
     };
     let body = body.and_then(|(hash, size)| (size > 0).then_some(hash));
     let input = json!({ "method": method, "path": path, "query": query, "body": body });
     let call = CallRequest { app, tool: "_http".into(), input, puts: body.iter().cloned().collect(), ..Default::default() };
     let out = host.call_as(call, me.caller.clone()).await;
     if let Some(hash) = &body {
-        host.drop_put(hash);
+        database_runtime::drop_put(&host.rt(), hash);
     }
     let out = out?;
     let status = StatusCode::from_u16(out["status"].as_u64().unwrap_or(200) as u16)?;
     let kind = out["type"].as_str().unwrap_or("text/plain").to_string();
     let bytes = match out["blob"].as_str() {
-        Some(hash) => host.blob_for(&me.caller, hash).await?,
+        Some(hash) => database_runtime::blob_for(&host.rt(), &me.caller, hash).await?,
         None => out["text"].as_str().unwrap_or("").as_bytes().to_vec(),
     };
     let mut reply = (status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response();

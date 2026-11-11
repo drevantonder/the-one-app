@@ -16,7 +16,7 @@ impl Host {
                 };
                 let reply = self.run(&req, &me).await;
                 for hash in &req.puts {
-                    self.drop_put(hash);
+                    database_runtime::drop_put(&self.rt(), hash);
                 }
                 reply
             }

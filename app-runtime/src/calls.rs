@@ -786,8 +786,8 @@ impl Host {
         let mut puts = Vec::new();
         for (hash, data) in blobs {
             let bytes = data_encoding::BASE64.decode(data.as_str().context("a file a call came with is base64")?.as_bytes())?;
-            ensure!(self.put_blob(&bytes)? == *hash, "a file a call came with isn't the one it names");
-            self.0.blobs.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(me.user.clone());
+            ensure!(database_runtime::put(&self.rt(), &bytes)? == *hash, "a file a call came with isn't the one it names");
+            database_runtime::put_by(&self.rt(), hash, &me.user);
             puts.push(hash.clone());
         }
         Ok(puts)

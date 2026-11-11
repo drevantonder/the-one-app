@@ -112,18 +112,13 @@ pub trait Databases: Send + Sync {
     fn needs<'a>(&'a self, caller: &'a Caller, wants: &'a [(Scope, &'a str, &'a str)]) -> Fut<'a, ()>;
     /// An object of the network's bucket, by its name (`database::keys` names them): none if it has none.
     fn object<'a>(&'a self, name: &'a str) -> Fut<'a, Option<Vec<u8>>>;
-    /// A blob, by its hash: from this device, else from the bucket, in a scope whose database names it.
-    fn blob<'a>(&'a self, hash: &'a str) -> Fut<'a, Vec<u8>>;
     /// The network's bucket, as a place: where everything is kept, which a feature that copies it reads.
     fn bucket(&self) -> Result<bucket::Place>;
     /// Where the network's bucket is, as this device keeps it (`api::home::NetworkFile`'s `bucket`): what a device it
     /// admits starts from. None for a folder of its own.
     fn bucket_fields(&self) -> Option<BTreeMap<String, String>>;
-    /// Keeps `bytes` as a blob `caller` put, which they may then read back: → its hash.
-    fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String>;
-    /// Whether `caller` may read the blob `hash`: this machine's own programs, whoever put it, or someone a scope they
-    /// may use names it for.
-    fn may_read_blob(&self, caller: &Caller, hash: &str) -> Result<bool>;
+    /// Whether this runtime is an admin's, whose endpoint alone the URL signer lets remove from the bucket.
+    fn removes_from_bucket(&self) -> bool;
 }
 
 /// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
@@ -178,6 +173,8 @@ pub trait Holds: Send + Sync {
     /// The app schedules in force for this device to run `app`'s schedules in `scope`, their keys opened: → until when
     /// they last. Fails when this device doesn't run them.
     fn app_schedules_keys<'a>(&'a self, scope: &'a Scope, app: &'a str) -> Fut<'a, u64>;
+    /// The keys of `app`'s `database` in `scope`, as its device opens them.
+    fn database_keys<'a>(&'a self, scope: &'a Scope, app: &'a str, database: &'a str) -> Fut<'a, database::stored::Keys>;
     /// Tells the relay something (`scope::settings::tell`), signed by its device, or by this runtime's own key.
     fn tell_relay(&self, fields: Value, by_device: bool) -> Fut<'_, ()>;
     /// Asks the network's auth something as its device (`scope::settings::ask_auth`).
@@ -201,6 +198,8 @@ pub trait Apps: Send + Sync {
     fn title<'a>(&'a self, app: &'a str) -> Fut<'a, String>;
     /// The bundle this release has of the built-in app `app`, if it's one.
     fn built_in(&self, app: &str) -> Option<String>;
+    /// Whether this release carries the blob `hash` as a built-in app's bundle.
+    fn carries(&self, hash: &str) -> bool;
     /// Adds the built-in app `app` if the network doesn't have it yet, as this release has it, and runs it here.
     /// Admins only.
     fn bring_in<'a>(&'a self, caller: &'a Caller, app: &'a str) -> Fut<'a, ()>;

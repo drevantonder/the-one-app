@@ -86,6 +86,8 @@ deploy-runtime = { path = "../deploy/runtime" }
 insights-runtime = { path = "../insights/runtime" }
 # A pairing code a test device makes, which another joins with (tests/e2e.rs).
 onboarding-runtime = { path = "../onboarding/runtime" }
+# Blobs as the tests' devices keep them (tests/e2e.rs).
+database-runtime = { path = "../database/runtime" }
 # What a browser's push service does with a push (RFC 8291's decryption, tests/contracts.rs): the app runtime's own crypto.
 aes-gcm = "0.10"
 hkdf = "0.13"

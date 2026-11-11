@@ -57,7 +57,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
         got["branches"].as_array().unwrap().iter().map(|b| (b["branch"].as_str().unwrap().to_string(), b["head"].as_str().unwrap().to_string())).collect::<Vec<_>>()
     };
 
-    let body = a.put_blob(&push(&[(&zero, &head, "refs/heads/main")], &pack)).unwrap();
+    let body = database_runtime::put(&a.rt(), &push(&[(&zero, &head, "refs/heads/main")], &pack)).unwrap();
     let told = a.call(http("andre/home", Some(body))).await.unwrap();
     assert!(told["text"].as_str().unwrap().contains("ok refs/heads/main"), "{told}");
     assert_eq!(branches("andre/home").await, [("main".to_string(), head.clone())]);
@@ -87,7 +87,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
         a.hand(&sam.credential, &sam.user, &::api::handed::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
         let call = |req: CallRequest| a.call_as(req, sam.clone());
 
-        let (body, _) = a.put_blob_from(&sam, axum::body::Body::from(push(&[(&head, &zero, "refs/heads/main"), (&zero, &head, "refs/heads/sams")], &[]))).await.unwrap();
+        let (body, _) = database_runtime::put_from(&a.rt(), &sam, axum::body::Body::from(push(&[(&head, &zero, "refs/heads/main"), (&zero, &head, "refs/heads/sams")], &[]))).await.unwrap();
         let told = call(http("andre/home", Some(body))).await.unwrap();
         let text = told["text"].as_str().unwrap();
         assert!(text.contains("ng refs/heads/main ") && text.contains("ng refs/heads/sams ") && !text.contains("ok refs/"), "{told}");
@@ -124,7 +124,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let sams_push = async |sam: &Caller, repo: &str, branch: &str, deleting: bool| {
         let r = format!("refs/heads/{branch}");
         let line = if deleting { (head.as_str(), zero.as_str(), r.as_str()) } else { (zero.as_str(), head.as_str(), r.as_str()) };
-        let (body, _) = a.put_blob_from(sam, axum::body::Body::from(push(&[line], if deleting { &[] } else { &pack }))).await.unwrap();
+        let (body, _) = database_runtime::put_from(&a.rt(), sam, axum::body::Body::from(push(&[line], if deleting { &[] } else { &pack }))).await.unwrap();
         // A call reaches the groups he's in too, whose keys his device would hand; this one hands global's alone.
         let told = call(CallRequest { scopes: (!repo.starts_with("andre/")).then(|| vec!["global".into()]), ..http(repo, Some(body)) }, sam).await.unwrap();
         told["text"].as_str().unwrap().contains(&format!("ok {r}"))
@@ -217,7 +217,7 @@ async fn a_repos_merged_packs_hold_every_object_pushed() {
         let line = format!("{old} {head} refs/heads/main\0report-status\n");
         let mut body = format!("{:04x}{line}0000", line.len() + 4).into_bytes();
         body.extend(pack);
-        let body = a.put_blob(&body).unwrap();
+        let body = database_runtime::put(&a.rt(), &body).unwrap();
         let told = a.call(repos("_http", json!({ "method": "POST", "path": "andre/home.git/git-receive-pack", "query": "", "body": body }))).await.unwrap();
         assert!(told["text"].as_str().unwrap().contains("ok refs/heads/main"), "{told}");
         heads.push(head.clone());
@@ -231,7 +231,7 @@ async fn a_repos_merged_packs_hold_every_object_pushed() {
     git(&bare, &["init", "-q", "--bare"], b"");
     for (i, hash) in packs.iter().enumerate() {
         let path = bare.join(format!("objects/pack/kept-{i}.pack"));
-        std::fs::write(&path, a.blob(hash.as_str().unwrap()).await.unwrap()).unwrap();
+        std::fs::write(&path, database_runtime::blob(&a.rt(), hash.as_str().unwrap()).await.unwrap()).unwrap();
         git(&bare, &["index-pack", path.to_str().unwrap()], b"");
     }
     for head in &heads {

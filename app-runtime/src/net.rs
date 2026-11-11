@@ -387,7 +387,7 @@ impl Host {
                     Ok((key, until)) => {
                         req.extensions_mut().insert(crate::api::FromClient(key, until));
                         // What it sends is read in a while and up to a size, but a file's and an app's own requests',
-                        // which stream to disk within their user's room (`Host::put_blob_from`).
+                        // which stream to disk within their user's room (`database_runtime::put_from`).
                         let path = req.uri().path();
                         if !(path == "/api/blobs" || path.starts_with("/api/blobs/") || crate::api::app_route(path)) {
                             let (parts, body) = req.into_parts();

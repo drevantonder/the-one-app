@@ -43,7 +43,7 @@ impl Host {
         kept.extend(writes.iter().flat_map(|(s, c)| c.blobs.iter().map(|b| (s.clone(), b.clone()))));
         let mut put = Vec::new();
         for (scope, blob) in kept {
-            self.share_blob(&scope, &blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
+            database_runtime::share(&self.rt(), &scope, &blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
             put.push(format!("{scope} {blob}"));
         }
         Ok(Prepared { statements, writes, items, adds, put })
@@ -54,7 +54,7 @@ impl Host {
     pub(in crate) async fn write_prepared(&self, app: &str, prepared: Prepared, scopes: &[Scope], me: &Caller) -> Result<()> {
         let Prepared { statements, mut writes, items, adds, put } = prepared;
         // The blobs it put in the bucket aren't put again by the steps that keep them.
-        self.0.blobs.put_first.lock().unwrap().extend(put.iter().cloned());
+        database_runtime::put_first(&self.rt(), &put);
         let wrote = async {
             let wrote = !statements.is_empty();
             for (scope, list, kept) in statements {
@@ -90,10 +90,7 @@ impl Host {
             Ok(())
         }
         .await;
-        let mut first = self.0.blobs.put_first.lock().unwrap();
-        for p in &put {
-            first.remove(p);
-        }
+        database_runtime::written(&self.rt(), &put);
         wrote
     }
 

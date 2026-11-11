@@ -279,7 +279,7 @@ async fn back_up_scope(rt: &Rt, place: &Place, place_id: &str, network: &str, d:
         }
         let job = b::Job { place: &place, network: &network, scope: &scope_name, key, epochs, sealed, device, now, previous: previous.clone(), blobs, bucket: bucket.as_ref() };
         // A blob this device doesn't keep is read from the bucket, where the device that wrote it put it.
-        let written = b::back_up(job, |hash| runtime.block_on(blob_rt.blob(hash)).inspect_err(|err| tracing::debug!("backing up blob {hash}: {err:#}")).ok())?;
+        let written = b::back_up(job, |hash| runtime.block_on(database_runtime::blob(&blob_rt, hash)).inspect_err(|err| tracing::debug!("backing up blob {hash}: {err:#}")).ok())?;
         Ok((written.clone(), written.or(previous)))
     })
     .await??;
