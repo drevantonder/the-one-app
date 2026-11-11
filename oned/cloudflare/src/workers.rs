@@ -48,20 +48,21 @@ pub struct Was {
     pub classes: &'static [(&'static str, &'static str)],
 }
 
-/// The network's Workers, in the order they're deployed.
+/// The network's Workers, in the order they're deployed: each, where it can be, after those it binds, so none goes up
+/// without a binding it has and a Worker renamed is up, its objects taken, before any binds it by its new name.
 ///
 /// Auth's Durable Object `Auth` holds every user's passkeys and accounts. The paths under `/api/auth` name the
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer, so they never change.
 pub const WORKERS: &[Worker] = &[
-    Worker { name: "auth", entry: "auth/worker.js", classes: &["Auth"], place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, oned_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings, cron: None, was: None },
-    Worker { name: "relay", entry: "relay/worker.js", classes: &["Relay", "List"], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings, cron: None, was: None },
     Worker { name: "url-signer", entry: "url-signer/worker.js", classes: &[], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: true, bindings: url_signer_bindings, cron: None, was: Some(Was { name: "signer", classes: &[] }) },
     // Its `Client` objects hold each outside program's sealed secret.
     Worker { name: "onet", entry: "onet/worker.js", classes: &["Client"], place: None, own_address: false, oned_build: true, serves_web: false, reads_bucket: true, bindings: onet_bindings, cron: None, was: Some(Was { name: "mcp", classes: &[("Client", "Client")] }) },
-    Worker { name: "telemetry", entry: "telemetry/worker.js", classes: &[], place: None, own_address: true, oned_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *"), was: None },
-    Worker { name: "gateway", entry: "gateway/worker.js", classes: &[], place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, oned_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None, was: None },
     // Its `Notifications` object holds every device's registered address.
     Worker { name: "notifications", entry: "notifications/worker.js", classes: &["Notifications"], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: false, bindings: notifications_bindings, cron: None, was: Some(Was { name: "push", classes: &[("Push", "Notifications")] }) },
+    Worker { name: "auth", entry: "auth/worker.js", classes: &["Auth"], place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, oned_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings, cron: None, was: None },
+    Worker { name: "relay", entry: "relay/worker.js", classes: &["Relay", "List"], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings, cron: None, was: None },
+    Worker { name: "telemetry", entry: "telemetry/worker.js", classes: &[], place: None, own_address: true, oned_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *"), was: None },
+    Worker { name: "gateway", entry: "gateway/worker.js", classes: &[], place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, oned_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None, was: None },
 ];
 
 /// oned on Cloudflare's Worker (`oned/cloudflare/worker/`), `<cli>-oned`, oned on Cloudflare: no address, and an iroh
@@ -1606,16 +1607,19 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
 /// the web client's files (`web`) as its static assets, which it serves itself. A service whose binding names one not
 /// deployed yet goes up without it, and again once that one is.
 pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &[(String, Vec<u8>)]) -> Result<()> {
-    deploy_some(cf, settings, sources, web, &WORKERS.iter().collect::<Vec<_>>())?;
-    remove_renamed(cf, WORKERS.iter())
+    deploy_some(cf, settings, sources, web, &WORKERS.iter().collect::<Vec<_>>())
 }
 
-/// Removes the Workers `workers` were deployed as before their names changed, once all of them are deployed by their new
-/// names and their objects taken (`Was`): nothing binds the old ones by then.
-pub fn remove_renamed<'a>(cf: &Cloudflare, workers: impl Iterator<Item = &'a Worker>) -> Result<()> {
+/// Removes each Worker deployed by an old name whose Worker by its new name is there, its objects taken (`Was`): once
+/// the network's Workers and oned on Cloudflare are all deployed, so nothing binds the old ones. An old Worker binds
+/// only those deployed before it, so the last deployed goes first: Cloudflare refuses to remove a Worker another binds.
+pub fn remove_renamed(cf: &Cloudflare) -> Result<()> {
     let scripts = cf.scripts()?;
-    for was in workers.filter_map(|w| w.was).filter(|was| scripts.contains_key(&worker_name(was.name))) {
-        cf.delete(&format!("/accounts/{}/workers/scripts/{}", cf.account, worker_name(was.name))).with_context(|| format!("remove the Worker {}, renamed", worker_name(was.name)))?;
+    for worker in WORKERS.iter().chain([&ONED]).rev() {
+        let Some(was) = worker.was else { continue };
+        if scripts.contains_key(&worker.worker_name()) && scripts.contains_key(&worker_name(was.name)) {
+            cf.delete(&format!("/accounts/{}/workers/scripts/{}", cf.account, worker_name(was.name))).with_context(|| format!("remove the Worker {}, renamed", worker_name(was.name)))?;
+        }
     }
     Ok(())
 }
@@ -1636,7 +1640,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &
             let url = worker.place(settings).map(|(url, _)| url);
             let Some(wasm) = worker.modules(sources, crate::worker::modules().ok().as_ref()) else { bail!("this build has no oned for Cloudflare, which the {} Worker runs: {}-dev update program builds one", worker.name, custom_build::config::CLI) };
             let module = module_from(sources.clone(), worker.entry)?;
-            let mut what = vec![meta.to_string().into_bytes(), module.clone(), url.unwrap_or("").as_bytes().to_vec()];
+            let mut what = vec![versioned(&meta), module.clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));
             if worker.serves_web {
                 what.extend(web.iter().flat_map(|(path, bytes)| [path.as_bytes().to_vec(), bytes.clone()]));
@@ -1682,6 +1686,13 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &
 pub struct Script {
     /// The Durable Object migration it has had.
     pub migration: Option<String>,
+}
+
+/// What of a Worker's metadata its version is named by: all but its migration, which it carries only until it has had it.
+pub(crate) fn versioned(meta: &Value) -> Vec<u8> {
+    let mut meta = meta.clone();
+    meta.as_object_mut().map(|m| m.remove("migrations"));
+    meta.to_string().into_bytes()
 }
 
 /// What names everything a Worker would be sent (the secrets in its bindings too), which its version keeps on

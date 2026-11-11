@@ -57,6 +57,7 @@ fn put_up(cf: &crate::Cloudflare, settings: &mut crate::Settings, newest: crate:
     if settings.cloudflare_node {
         crate::worker::deploy(cf, settings, &newest.workers)?;
     }
+    crate::remove_renamed(cf)?;
     // A Durable Object class deployed for the first time just now has made its namespace.
     if let Some(before) = settings.usage.clone() {
         usage(settings);

@@ -59,7 +59,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<(
     let name = ONED.worker_name();
     let scripts = cf.scripts()?;
     let (meta, _) = crate::metadata(settings, &ONED, scripts.get(&name).and_then(|s| s.migration.as_deref()), |other| scripts.contains_key(other));
-    let mut what = vec![meta.to_string().into_bytes()];
+    let mut what = vec![crate::versioned(&meta)];
     what.extend(modules.iter().flat_map(|(n, k, b)| [n.as_bytes().to_vec(), k.as_bytes().to_vec(), b.clone()]));
     let what = upload_hash(&what);
     if !(scripts.contains_key(&name) && cf.runs(&name, &what)?) {
@@ -68,6 +68,5 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<(
     }
     // Its address may have been turned on by hand.
     cf.hide(&name)?;
-    crate::deploy_some(cf, settings, sources, &[], &[Worker::named("relay")])?;
-    crate::remove_renamed(cf, std::iter::once(&ONED))
+    crate::deploy_some(cf, settings, sources, &[], &[Worker::named("relay")])
 }
