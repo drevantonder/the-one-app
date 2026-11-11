@@ -479,6 +479,12 @@ async fn read_steps(id: &(String, String), scope: &Scope, bucket: &Js, keys: &::
             })
         };
         let (waits, frozen) = add(&sealed)?.unwrap_or((None, true));
+        let passed = held(id, keys, |h, _| Ok(match &mut h.steps {
+            Steps::Global(r) => r.passed(),
+            Steps::Scope(_) => Vec::new(),
+        }))?;
+        // Copies only save the next object that starts here its reading: one the bucket refuses fails nothing.
+        let _ = steps::leave(bucket, keys, &Scope::Global, passed.unwrap_or_default()).await;
         match frozen || waits.is_some() || sealed.welcome.is_none() {
             true => waits,
             false => add(&steps::fetch(bucket, at, None).await?)?.and_then(|(waits, _)| waits),

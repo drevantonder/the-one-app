@@ -546,10 +546,21 @@ pub async fn written(bucket: &impl ::bucket::Bucket, keys: &database::stored::Ke
     let prefix = prefix(&scope.to_string());
     let epoch = *keys.keys().next_back().context("no key")?;
     if at % database::stored::COPY_EVERY == 0 {
+        leave(bucket, keys, scope, vec![(at, bytes)]).await?;
+    }
+    database::stored::hint(bucket, &prefix, at, at - at % database::stored::COPY_EVERY, epoch).await
+}
+
+/// Copies of a scope's database, each its position and bytes, sealed as its steps are, where the bucket has none yet:
+/// what a writer leaves (`written`), and a reader that passed a position whose copy its writer didn't leave
+/// (`Reader::passed`), so the next to start there doesn't read every step from the freeze again.
+pub async fn leave(bucket: &impl ::bucket::Bucket, keys: &database::stored::Keys, scope: &Scope, copies: Vec<(u64, Vec<u8>)>) -> Result<()> {
+    let prefix = prefix(&scope.to_string());
+    for (at, bytes) in copies {
         let name = ::bucket::names::copy_name(&prefix, at);
         bucket.create(&name, &seal(keys, &name, &bytes)?).await?;
     }
-    database::stored::hint(bucket, &prefix, at, at - at % database::stored::COPY_EVERY, epoch).await
+    Ok(())
 }
 
 /// Where the device that let a new one in had read `global`'s scope database to (its Welcome): its freeze's position,
@@ -598,8 +609,8 @@ impl Truth {
     /// `Welcome::copies` (its position and bytes, opened), or none to start from the freeze's own, then `after`, the
     /// steps after that one up to the Welcome's, each taken as any reader takes it. Fails unless it comes to the
     /// Welcome's hash, in this release's form: a freeze, copy or step an app runtime or another device swapped is never
-    /// used.
-    pub fn welcomed(welcome: &Welcome, freeze: &Given, start: Option<(u64, &[u8])>, after: &[Option<Given>], now: u64) -> Result<Truth> {
+    /// used. → it, and the database at each of `Welcome::copies` after `start`, which the bucket didn't have.
+    pub fn welcomed(welcome: &Welcome, freeze: &Given, start: Option<(u64, &[u8])>, after: &[Option<Given>], now: u64) -> Result<(Truth, Vec<(u64, Vec<u8>)>)> {
         ensure!(u64::from(freeze.step.seq()) == welcome.freeze, "that isn't the freeze it was welcomed with");
         let anchored = Truth::of_freeze(freeze, welcome.freeze, now).context("the step it was welcomed with isn't a freeze")?;
         let (at, db) = match start {
@@ -611,11 +622,15 @@ impl Truth {
         };
         ensure!(after.len() as u64 == welcome.at - at, "not every step up to where it was welcomed is here");
         let mut t = Truth { freeze: anchored.freeze, at, db, whole: true };
+        let mut passed = Vec::new();
         for given in after {
             t.take(t.at + 1, given.as_ref().map(|g| &g.step), now)?;
+            if t.at % database::stored::COPY_EVERY == 0 {
+                passed.push((t.at, t.db.bytes()?));
+            }
         }
         ensure!(database::stored::state_hash(t.db.conn())? == welcome.hash, "who's who from that copy isn't what the device that let this one in said");
-        Ok(t)
+        Ok((t, passed))
     }
 }
 
@@ -705,16 +720,22 @@ pub struct Reader {
     root: Option<Hash>,
     truth: Option<Truth>,
     looked: u64,
+    passed: Vec<(u64, Vec<u8>)>,
 }
 
 impl Reader {
     /// For the network whose root is `root`, or for none, the first freeze there is.
     pub fn new(root: Option<Hash>) -> Reader {
-        Reader { root, truth: None, looked: 0 }
+        Reader { root, truth: None, looked: 0, passed: Vec::new() }
     }
 
     pub fn root(&self) -> Option<Hash> {
         self.root
+    }
+
+    /// The copies it passed starting from a Welcome that the bucket didn't have (`Truth::welcomed`), for it to `leave`.
+    pub fn passed(&mut self) -> Vec<(u64, Vec<u8>)> {
+        std::mem::take(&mut self.passed)
     }
 
     /// Who's who, once it's read the freeze.
@@ -811,7 +832,10 @@ impl Reader {
             && let Some(w) = &sealed.welcome
         {
             match self.welcomed(w, sealed, keys, epochs, now) {
-                Ok(t) => self.resume(t)?,
+                Ok((t, passed)) => {
+                    self.resume(t)?;
+                    self.passed = passed;
+                }
                 Err(err) => tracing::info!("where this device was welcomed to ({w}): {err:#}: it reads from the freeze"),
             }
         }
@@ -845,7 +869,7 @@ impl Reader {
     /// after it up to the Welcome's, or, if that copy isn't there or doesn't come to its hash, every step after the
     /// freeze's up to there (`Truth::welcomed`), each opened with `keys`, unchecked, so each of `epochs` who's who there
     /// made must be the one it made.
-    fn welcomed(&self, welcome: &Welcome, sealed: &Sealed, keys: &database::stored::Keys, epochs: Option<&BTreeMap<u32, [u8; 32]>>, now: u64) -> Result<Truth> {
+    fn welcomed(&self, welcome: &Welcome, sealed: &Sealed, keys: &database::stored::Keys, epochs: Option<&BTreeMap<u32, [u8; 32]>>, now: u64) -> Result<(Truth, Vec<(u64, Vec<u8>)>)> {
         let made = keys.keys().next_back().copied().unwrap_or(0);
         let opened = |at: u64, bytes: &[u8]| match open(keys, made, &Scope::Global, at, bytes) {
             Opened::Step(g) => Ok(Some(g)),
@@ -869,7 +893,7 @@ impl Reader {
             }
         };
         for (e, epoch) in epochs.into_iter().flatten() {
-            ensure!(truth.db.epoch_hash(&Scope::Global, *e)?.is_none_or(|h| h == ::key::epoch_hash(epoch)), "a key for this didn't check out, so it wasn't used");
+            ensure!(truth.0.db.epoch_hash(&Scope::Global, *e)?.is_none_or(|h| h == ::key::epoch_hash(epoch)), "a key for this didn't check out, so it wasn't used");
         }
         Ok(truth)
     }
@@ -937,6 +961,9 @@ pub async fn read_sealed_to(bucket: &impl ::bucket::Bucket, reader: &mut Reader,
         epochs.clear();
     }
     keys.retain(|n, _| epochs.contains_key(n));
+    if let Err(err) = leave(bucket, &keys, &Scope::Global, reader.passed()).await {
+        tracing::debug!("global's copies it passed: {err:#}");
+    }
     Ok((epochs, keys))
 }
 
@@ -1278,7 +1305,7 @@ pub mod tests {
         assert!(t.take(2, Some(&step), 0).unwrap().is_some());
         let w = t.welcome().unwrap();
         let after = [Some(Given { step, copy: None })];
-        assert_eq!(database::stored::state_hash(Truth::welcomed(&w, &theirs, None, &after, 0).unwrap().db.conn()).unwrap(), w.hash);
+        assert_eq!(database::stored::state_hash(Truth::welcomed(&w, &theirs, None, &after, 0).unwrap().0.db.conn()).unwrap(), w.hash);
         assert!(Truth::welcomed(&Welcome { hash: "0".repeat(64), ..w.clone() }, &theirs, None, &after, 0).is_err(), "nor another hash");
         assert!(Truth::welcomed(&w, &theirs, None, &[None], 0).is_err(), "nor a step held back");
         Ok(())
