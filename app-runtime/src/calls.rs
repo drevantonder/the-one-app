@@ -597,8 +597,10 @@ impl Host {
                     return Ok(vec![found]);
                 }
             }
-            // A client's log is read through an app runtime it's connected to, which only that app runtime knows: each is tried.
-            if req.app == key::APP && self.with(|i| Ok(i.r.db().find_machine(device).and_then(|k| Ok(i.r.db().client(&k)?.is_some())).unwrap_or(false)))? {
+            // The log of a client with no app runtime of its own (a phone, a browser) is read through an app runtime it's
+            // connected to, which only that app runtime knows: each is tried. A computer's is read by its own runtime.
+            let client_only = |m: &ScopeDb, k: Key| -> Result<bool> { Ok(m.client(&k)?.is_some() && m.runtime_for(&k)?.is_none()) };
+            if req.app == key::APP && self.with(|i| Ok(i.r.db().find_machine(device).and_then(|k| client_only(i.r.db(), k)).unwrap_or(false)))? {
                 let mut nodes = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|m| m.key).filter(|k| *k == self.0.id || i.reachable(k)).collect::<Vec<_>>()))?;
                 nodes.sort_by_key(|k| *k != self.0.id);
                 return Ok(nodes);
