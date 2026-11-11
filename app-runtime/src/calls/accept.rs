@@ -60,7 +60,10 @@ impl Host {
             me.credential = self.take_passed(&remote, &me.user, request, keys, true)?;
         }
         let mut req = call_in(request)?;
-        let (own, serves) = self.with(|i| Ok((!passed && i.r.db().client(&remote)?.is_some_and(|c| c.user == me.user), i.r.db().serves(&remote, &me.user)?)))?;
+        let (own, serves) = self.with(|i| {
+            let m = i.r.db();
+            Ok((!passed && m.client(&m.device_of(&remote))?.is_some_and(|c| c.user == me.user), m.serves(&remote, &me.user)?))
+        })?;
         // Only an app runtime that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
         if !serves {
             (req.from, req.depth) = (None, 0);
