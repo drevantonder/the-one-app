@@ -280,8 +280,8 @@ impl Node {
     /// Counts what the URL signer failed at since the last send, the requests to Cloudflare that passed their limit, and
     /// what this device read of the bucket.
     fn say_requests(&self) {
-        for (kind, found, n) in crate::bucket::take_reads() {
-            self.device_metric(insights::BUCKET_READS, Attrs::default().reached(kind).outcome(if found { "found" } else { "missing" }), n);
+        for (kind, found, n) in crate::bucket::READS.take() {
+            self.device_metric(insights::BUCKET_READS, Attrs::default().reached(kind).outcome(if found { "found" } else { "missing" }).client("node"), n);
         }
         let failures = crate::bucket::signed::take_failures();
         if failures > 0 {

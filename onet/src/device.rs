@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use crate::answers::{Answers, Files};
 use crate::join;
-use crate::bucket::{Reached, Signed};
+use crate::bucket::Reached;
 pub(crate) use crate::keyring::now;
 use crate::keyring::{Address, HANDED_FOR, Keep, Keyring, error, refused};
 use crate::{Body, Client, Error, Request, Response, Sent, unsent};
@@ -96,15 +96,15 @@ pub struct Device {
 impl Device {
     pub fn new(secret: [u8; 32], address: &str, dir: &str) -> Device {
         let address = address.trim_end_matches('/').to_string();
-        Device::with(secret, address.clone(), dir, Reached::Signed(Signed::new(address, secret)))
+        Device::with(secret, address.clone(), dir, Reached::signed(address, secret))
     }
 
     /// A computer's device, its onet's (`crate::computer`): its bucket the place its home's network file names, from
     /// which it reads who's who to find the network's address, if it has one yet (`address` is empty till then); and
     /// its own app runtime at `runtime` (where it answers, and its token), which it asks before any other node.
     #[cfg(feature = "computer")]
-    pub async fn on_computer(secret: [u8; 32], dir: &str, place: one::bucket::Place, runtime: Option<crate::computer::Runtime>) -> Result<Device, Error> {
-        let mut device = Device::with(secret, String::new(), dir, Reached::Place(place));
+    pub async fn on_computer(secret: [u8; 32], dir: &str, place: one::bucket::Place, address: Option<String>, runtime: Option<crate::computer::Runtime>) -> Result<Device, Error> {
+        let mut device = Device::with(secret, String::new(), dir, Reached::place(place, secret, address));
         device.runtime = runtime;
         device.keyring.read(&device).await?;
         let address = device.keyring.who(|db| db.setting("address")).and_then(Result::ok).flatten();

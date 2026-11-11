@@ -56,6 +56,16 @@ pub fn signed(seed: &str, domain: &str, fields: &str, at: f64) -> Result<String,
     Ok(one::keys::signed_request(&signing_key(seed).map_err(thrown)?, domain, serde_json::from_str(fields)?, at as u64).to_string())
 }
 
+static READS: one::bucket::Reads = one::bucket::Reads::new();
+
+/// A read of the bucket this node made, `name` and whether it was there, counted: → what it read, as the rows the
+/// telemetry Worker takes, once it's been a minute since it last said. `instance` is this node's key.
+#[wasm_bindgen]
+pub fn bucket_read(name: &str, found: bool, instance: &str, now: f64) -> Option<String> {
+    READS.count(name, found);
+    READS.due(now as u64, instance, "cloudflare-node").map(|rows| rows.to_string())
+}
+
 /// A call this node ran, as the rows the telemetry Worker takes: one server span, by the same rules as any node's. `code` is
 /// what it failed with, and `said` what it said; a refusal keeps none of that.
 #[wasm_bindgen]

@@ -116,6 +116,65 @@ pub fn scope_of(folder: &str) -> String {
     folder.replacen('-', ":", 1)
 }
 
+/// What a program read of the bucket, by kind of object and whether it was there, since it last said (the metric
+/// `bucket.reads`): a node's in its insights, a client's written by itself, once a minute, as it reads.
+#[derive(Default)]
+pub struct Reads(std::sync::Mutex<(std::collections::BTreeMap<(&'static str, bool), u64>, u64)>);
+
+impl Reads {
+    pub const fn new() -> Reads {
+        Reads(std::sync::Mutex::new((std::collections::BTreeMap::new(), 0)))
+    }
+
+    pub fn count(&self, name: &str, found: bool) {
+        *self.0.lock().unwrap().0.entry((kind_of(name), found)).or_default() += 1;
+    }
+
+    /// What it read since this last took them: (kind, found, how many).
+    pub fn take(&self) -> Vec<(&'static str, bool, u64)> {
+        std::mem::take(&mut self.0.lock().unwrap().0).into_iter().map(|((kind, found), n)| (kind, found, n)).collect()
+    }
+
+    /// What `client` read, the device `instance`'s (its key, hex), as the telemetry Worker writes it (`/telemetry/write`'s
+    /// fields), once it's been a minute since it last said.
+    pub fn due(&self, now: u64, instance: &str, client: &str) -> Option<serde_json::Value> {
+        {
+            let mut kept = self.0.lock().unwrap();
+            if now < kept.1 + 60_000 {
+                return None;
+            }
+            kept.1 = now;
+        }
+        let mut batch = crate::insights::Batch::default();
+        for (kind, found, n) in self.take() {
+            let attrs = crate::insights::Attrs::default().reached(kind).outcome(if found { "found" } else { "missing" }).client(client).scope("everyone").build(crate::config::BUILD);
+            batch.metric(now, crate::insights::BUCKET_READS, crate::insights::own(), instance, &attrs, n);
+        }
+        (!batch.is_empty()).then(|| batch.rows())
+    }
+}
+
+/// What kind of object a name is, out of a closed set, so what a device reads can be told apart without its names.
+fn kind_of(name: &str) -> &'static str {
+    let has = |part: &str| name.split('/').any(|s| s == part);
+    let last = name.rsplit('/').next().unwrap_or("");
+    match () {
+        _ if has("_epochs") => "epoch",
+        _ if has("_key") => "app-key",
+        _ if has("_vault") => "vault-key",
+        _ if has("_app_schedules") || has("_grants") => "app-schedules-key",
+        _ if has(crate::protocol::COPY) => "copy",
+        _ if last == crate::protocol::NEWEST => "newest",
+        _ if last == crate::protocol::TIDIED => "tidied",
+        _ if last.ends_with(".sig") => "sig",
+        _ => match crate::database::stored::position(name) {
+            Some((prefix, _)) if crate::database::stored::keeps_every_step(prefix) => "scope-step",
+            Some(_) => "step",
+            None => "other",
+        },
+    }
+}
+
 #[cfg(feature = "node")]
 mod copied;
 #[cfg(feature = "node")]
@@ -123,7 +182,7 @@ mod place;
 #[cfg(not(target_family = "wasm"))]
 pub mod signed;
 #[cfg(feature = "node")]
-pub use copied::{Copied, take_reads};
+pub use copied::{Copied, READS};
 #[cfg(not(target_family = "wasm"))]
 pub use signed::{Address, Ask, Signer, signer_requests};
 #[cfg(feature = "node")]

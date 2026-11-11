@@ -26,7 +26,7 @@
 // takes are onet's keyring (onet/src/keyring.rs, through cloudflare/node/src/clients.rs), which keeps what each
 // tool needed in this object's storage, so a call hands only its own.
 //
-// Bindings: AUTH (auth), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), CLIENT
+// Bindings: AUTH (auth), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), TELEMETRY, CLIENT
 // (this Worker's `Client`), ADDRESS (the network's), NAME (its name), LOCATION (where objects are made), IDLE (ms,
 // optional).
 
@@ -461,13 +461,14 @@ export class Client extends DurableObject {
   on(me) {
     const { storage } = this.ctx;
     const env = this.env;
-    const to = { "/urls": env.SIGNER, [`${IROH_PATHS.relay}/tell`]: env.RELAY };
+    const to = { "/urls": env.SIGNER, [`${IROH_PATHS.relay}/tell`]: env.RELAY, "/telemetry/write": env.TELEMETRY };
     return {
       address: origin(env),
+      client: "remote-mcp",
       async ask(method, url, name, value, body) {
         const path = new URL(url).pathname;
         const binding = path.startsWith("/api/auth/") ? env.AUTH : to[path];
-        if (!binding) throw new Error("the remote MCP server's devices ask only the URL signer and auth, and tell only the relay");
+        if (!binding) throw new Error("the remote MCP server's devices ask only the URL signer and auth, and tell only the relay and telemetry");
         const headers = { "content-type": "application/json", ...(name ? { [name]: value } : {}) };
         const r = await binding.fetch(url, { method, headers, body });
         return { status: r.status, body: await r.text() };

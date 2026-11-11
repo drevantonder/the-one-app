@@ -12,6 +12,7 @@ use crate::keyring::{Address, Keep};
 /// The bucket as JavaScript reaches it: an object whose `get(name)`, `create(name, bytes)`, `replace(name, bytes,
 /// tag)`, `objects(folder)` and `wait(ms)` give promises, of `{ bytes, tag }` or null, of whether it was written, and of
 /// `[name, written]` for each object in the folder. One that throws with `unanswered` set wasn't reached.
+#[derive(Clone)]
 pub struct Js(pub JsValue);
 
 impl Js {
@@ -64,7 +65,7 @@ pub fn said(err: JsValue) -> anyhow::Error {
     anyhow!("{}", err.as_string().or_else(|| Reflect::get(&err, &"message".into()).ok().and_then(|m| m.as_string())).unwrap_or_else(|| format!("{err:?}")))
 }
 
-/// What a device's object hands its keyring: `{ address, get(name), put(name, bytes), delete(name), letIn(), ask(method,
+/// What a device's object hands its keyring: `{ address, client?, get(name), put(name, bytes), delete(name), letIn(), ask(method,
 /// url, header, value, body), sign(bytes) }`: the network's address; what it keeps, by name; whether the relay still lets
 /// it in; a JSON request to the address (→ `{ status, body }`, its JSON, or null); and its key's signature of `bytes`.
 /// Each method a promise. The bucket it reads through the URL signer, as itself (`Urls`).
@@ -76,12 +77,14 @@ pub struct On {
 impl On {
     /// `key`: the device's own, which `sign` signs with.
     pub fn of(on: JsValue, key: [u8; 32]) -> On {
-        let address = Reflect::get(&on, &"address".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
-        On { bucket: Urls { me: Me { js: Js(on.clone()), key, address }, ahead: Default::default() }, js: Js(on) }
+        let said = |name: &str| Reflect::get(&on, &name.into()).ok().and_then(|a| a.as_string());
+        let (address, client) = (said("address").unwrap_or_default(), said("client").unwrap_or_else(|| "browser".into()));
+        On { bucket: Urls { me: Me { js: Js(on.clone()), key, address }, ahead: Default::default(), reads: Default::default(), client }, js: Js(on) }
     }
 }
 
 /// The device as JavaScript signs and asks for it.
+#[derive(Clone)]
 struct Me {
     js: Js,
     key: [u8; 32],
@@ -111,10 +114,27 @@ impl one::keys::Signs for On {
 
 /// The bucket as a device reads it where it runs as WebAssembly: each object's bytes from the URL signer (`get`), for a
 /// request it signs (`one/urls`), as it can't reach the bucket itself. Reading a step also reads the ones after it, in
-/// the same request, as they're read next: those are answered from here.
+/// the same request, as they're read next: those are answered from here. What the URL signer read for it it counts, and
+/// says itself as `bucket.reads` once a minute, as the `client` its object names (`browser` if none).
 pub struct Urls {
     me: Me,
     ahead: std::cell::RefCell<std::collections::HashMap<String, Option<Object>>>,
+    reads: one::bucket::Reads,
+    client: String,
+}
+
+impl Urls {
+    /// What it read, if it's been a minute, to the telemetry Worker, which nothing waits for.
+    fn say(&self) {
+        let now = crate::keyring::now();
+        let Some(rows) = self.reads.due(now, &one::keys::hex(&self.me.key), &self.client) else { return };
+        let me = self.me.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let Ok(signed) = one::keys::signed_request_by(&me, one::protocol::TELEMETRY, rows, one::keys::next_at(now)).await else { return };
+            let args = ["POST".into(), format!("{}/telemetry/write", me.address).into(), JsValue::NULL, JsValue::NULL, signed.to_string().into()];
+            let _ = me.js.ask("ask", &args).await;
+        });
+    }
 }
 
 impl Bucket for Urls {
@@ -136,6 +156,12 @@ impl Bucket for Urls {
             return Err(if status >= 500 || status == 0 { Failed(Trouble::Unreachable, said).into() } else { anyhow!(said) });
         }
         let object = |n: &str| out["get"][n].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.trim_end_matches('=').as_bytes()).ok()).map(|bytes| Object { bytes, tag: String::new() });
+        // The signer reads the rest only once the first is there.
+        let first = object(name).is_some();
+        for n in names.iter().take(if first { names.len() } else { 1 }) {
+            self.reads.count(n, out["get"][n].is_string());
+        }
+        self.say();
         let mut ahead = self.ahead.borrow_mut();
         for n in &names[1..] {
             if let Some(o) = object(n) {

@@ -80,6 +80,7 @@ function early(address, token) {
 function browserHost(keptJs) {
   return {
     address: location.origin,
+    client: "browser",
     device: async (user) => (await keptJs).get(`device:${user}`),
     keep: (user) => ({
       get: async (name) => (await keptJs).get(`${name}:${user}`),
@@ -129,6 +130,7 @@ export function server(version, givenHost) {
       delete: (name) => kept.del(name),
       letIn: () => still(),
       address: host.address,
+      client: host.client,
       async ask(method, url, name, value, body) {
         const headers = { ...(name ? { [name]: value } : {}), ...(body != null ? { "content-type": "application/json" } : {}) };
         const r = await fetch(url, { method, headers, body: body ?? undefined });

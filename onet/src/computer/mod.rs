@@ -201,10 +201,11 @@ impl Onet {
         // S3 is reached through the URL signer at the network's address, which a computer keeps beside its fields.
         let joined = fields.get("address").cloned();
         anyhow::ensure!(joined.is_some() || !fields.contains_key("endpoint"), "this computer's network file doesn't say where {}'s bucket is asked for: its oned writes it there as it starts", one::config::YOURS);
+        let at = joined.clone().map(|a| a.trim_end_matches('/').to_string());
         let address: one::bucket::Address = Arc::new(move || joined.clone().context("a folder is reached without the network's address"));
         let place = one::bucket::Place::network(&fields, address, self.key.clone())?;
         let runtime = self.runtime.as_ref().map(|r| Runtime { at: r.at.clone(), folder: r.folder.clone() });
-        Device::on_computer(self.key.to_bytes(), &kept.to_string_lossy(), place, runtime).await.map_err(|e| anyhow::anyhow!("{e}"))
+        Device::on_computer(self.key.to_bytes(), &kept.to_string_lossy(), place, at, runtime).await.map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     /// Lists this device's app runtime, an endpoint of its own key in its folder, as a compute naming this device, which

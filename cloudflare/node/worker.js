@@ -30,7 +30,7 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, call_span, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
+import { initSync, bucket_read, call_span, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
@@ -206,11 +206,21 @@ class Bucket {
     const kept = Sealed.keeps(name) && this.sealed.get(name);
     if (kept) return kept;
     const r = await fetch(await this.readUrl(name));
+    if (r.ok || r.status === 404) this.counted(name, r.ok);
     if (r.status === 404) return null;
     if (!r.ok) throw new Error(`the bucket said ${r.status} to reading ${name}`);
     const got = { bytes: new Uint8Array(await r.arrayBuffer()), tag: r.headers.get("etag") };
     this.sealed.put(name, got.bytes, got.tag);
     return got;
+  }
+
+  /// A read counted, and what it read said as `bucket.reads` once a minute, as a node says it: telemetry may be lost, so
+  /// nothing waits for it.
+  counted(name, found) {
+    const rows = bucket_read(name, found, JSON.parse(endpoint_of(this.env.NODE_KEY)).key, Date.now());
+    if (!rows) return;
+    const body = signed(this.env.NODE_KEY, TELEMETRY, rows, Date.now());
+    this.env.TELEMETRY.fetch("https://telemetry/telemetry/write", { method: "POST", body }).then((r) => r.body?.cancel()).catch((e) => console.log(`telemetry: ${e}`));
   }
 
   prefetch(names) {

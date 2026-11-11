@@ -705,6 +705,7 @@ fn mcp_bindings(settings: &Settings) -> Vec<Binding> {
         plain("AUTH", "service:auth"),
         plain("RELAY", "service:relay:McpDevices"),
         plain("SIGNER", "service:signer"),
+        plain("TELEMETRY", "service:telemetry"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", crate::config::NAME),
         plain("YOURS", crate::config::YOURS),
