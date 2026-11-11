@@ -38,6 +38,7 @@ pub fn javascript() -> String {
          export const VAULT = {vault};\n\
          export const LOG = {log};\n\
          export const BLOBS = {blobs};\n\
+         export const AI_GATEWAY = {ai_gateway};\n\
          export const NOTE_FALLBACK = {fallback};\n\
          export const WIDGET_LIMIT_MS = {widget_limit};\n\
          export const LATE_WIDGET = {late_widget};\n\
@@ -86,6 +87,7 @@ pub fn javascript() -> String {
         vault = json!(key::CoreDb::Vault.name()),
         log = json!(key::CoreDb::Log.name()),
         blobs = json!(key::CoreDb::Blobs.name()),
+        ai_gateway = json!(key::CoreDb::AiGateway.name()),
         fallback = json!(NOTE_FALLBACK),
         widget_limit = WIDGET_LIMIT_MS,
         late_widget = json!(LATE_WIDGET),

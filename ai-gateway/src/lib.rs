@@ -13,7 +13,7 @@ pub use route::{Company, Route};
 
 pub const NAME: &str = "ai-gateway";
 pub const TITLE: &str = "AI Gateway";
-pub const DESCRIPTION: &str = "How your apps use AI models: hosted ones with keys in the Vault, and Workers AI";
+pub const DESCRIPTION: &str = "How your apps use AI models: hosted ones with keys in the Vault, Workers AI, and models on your devices";
 /// A key's Vault kind starts with this, then the company's id: `AI key: google`.
 pub const KEY_KIND: &str = "AI key: ";
 /// The most a request may hold: Gemini's inline limit, the smallest of the hosted ones.
@@ -83,6 +83,8 @@ pub enum Failed {
     RetryChanged,
     /// A `retryKey` whose first call was sent and never answered: it may have run.
     Uncertain,
+    /// A model on the network's devices that none of those on has: which have it, and that they're off.
+    Unavailable(String),
     /// The company failed, or refused its key.
     Broke(String),
 }
@@ -96,6 +98,7 @@ impl Failed {
             Failed::Limit { .. } => Some("limit"),
             Failed::RetryChanged => Some("retry_changed"),
             Failed::Uncertain => Some("uncertain"),
+            Failed::Unavailable(_) => Some("unavailable"),
             Failed::Broke(_) => None,
         }
     }
@@ -104,7 +107,7 @@ impl Failed {
 impl std::fmt::Display for Failed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Failed::Refused(said) | Failed::NoKey(said) | Failed::Broke(said) => f.write_str(said),
+            Failed::Refused(said) | Failed::NoKey(said) | Failed::Unavailable(said) | Failed::Broke(said) => f.write_str(said),
             Failed::Limit { said, retry_after: Some(s) } => write!(f, "{said}: try again in {s}s"),
             Failed::Limit { said, retry_after: None } => f.write_str(said),
             Failed::RetryChanged => f.write_str("That retryKey was used for another input: give a new one"),
@@ -161,7 +164,7 @@ pub fn ask(input: Value, defaults: &Defaults) -> Result<Asked, Failed> {
         None => defaults.model(Kind::Chat),
     };
     let route = Route::parse(&model)?;
-    let kind = route.kind();
+    let kind = route.kind().unwrap_or(if input.contains_key("questions") { Kind::Decide } else { Kind::Chat });
     for key in input.keys() {
         let not_yet = match key.as_str() {
             "stream" => Some("streaming"),
@@ -193,9 +196,17 @@ impl Asked {
         json!({ "model": self.route.id(), "input": self.input }).to_string()
     }
 
+    /// What a device's model is asked (a service's `chat` or `decide`): the input as given, with the model's own name.
+    pub fn on_device(&self) -> Value {
+        let mut input = self.input.clone();
+        input.insert("model".into(), json!(self.route.model));
+        Value::Object(input)
+    }
+
     /// The request to send, paid with the Vault item `key`.
     pub fn request(&self, key: &str) -> Result<Outgoing, Failed> {
         let body = match self.route.company {
+            Company::Local => return Err(Failed::Refused(format!("{} runs on a device, which no key pays for", self.route.id()))),
             Company::Google => google::request(&self.input)?,
             Company::Anthropic => anthropic::request(&self.route.model, &self.input)?,
             Company::WorkersAi if self.kind == Kind::Decide => Value::Object(self.input.clone()),
@@ -205,7 +216,7 @@ impl Asked {
                 Value::Object(body)
             }
         };
-        Ok(self.route.request(key, body))
+        Ok(self.route.request(key, self.kind, body))
     }
 
     /// Its answer, in the kind's own shape, from what the company said: its status, `retry-after` and body.
@@ -226,12 +237,17 @@ impl Asked {
             (Company::WorkersAi, Kind::Decide) => got.get("result").cloned().unwrap_or(got),
             _ => got,
         };
+        self.fits(answer)
+    }
+
+    /// `answer`, if it's in its kind's shape.
+    pub fn fits(&self, answer: Value) -> Result<Value, Failed> {
         let fits = match self.kind {
             Kind::Chat => answer["choices"].is_array(),
             Kind::Decide => answer["answers"].is_object(),
         };
         if !fits {
-            return Err(Failed::Broke(format!("{title} answered in a shape that isn't a {} answer", self.kind.as_str())));
+            return Err(Failed::Broke(format!("{} answered in a shape that isn't a {} answer", self.route.company.title(), self.kind.as_str())));
         }
         Ok(answer)
     }
@@ -260,6 +276,17 @@ pub fn usage(kind: Kind, answer: &Value) -> Usage {
         },
         Kind::Decide => Usage { input: n(&u["input_tokens"]), output: n(&u["output_tokens"]), ..Usage::default() },
     }
+}
+
+/// A finished call, for Insights: the span's name, its attributes (only `SPAN_ATTRS`), how long it took, how it failed
+/// (its code, or none when it broke, with the message), if it did, and what it used.
+#[derive(Clone, Debug)]
+pub struct Span {
+    pub name: String,
+    pub attrs: Vec<(&'static str, Value)>,
+    pub ms: u64,
+    pub failed: Option<(Option<&'static str>, String)>,
+    pub used: Option<Usage>,
 }
 
 /// The attributes a call's GenAI span may have, and only these: OTEL's `gen_ai.*` and ours. Never a prompt or an answer.
@@ -291,8 +318,10 @@ pub fn span_attrs(asked: &Asked, paid: Option<Paid>, used: Option<&Usage>, repla
         ("gen_ai.operation.name", json!(asked.kind.as_str())),
         ("gen_ai.provider.name", json!(asked.route.company.otel())),
         ("gen_ai.request.model", json!(asked.route.id())),
-        ("server.address", json!(asked.route.company.host())),
     ];
+    if asked.route.company != Company::Local {
+        out.push(("server.address", json!(asked.route.company.host())));
+    }
     if let Some(paid) = paid {
         out.push(("one.paid", json!(paid.as_str())));
     }
@@ -388,4 +417,4 @@ pub fn tools() -> Vec<Value> {
 }
 
 /// What `ctx.ai.run`'s caller is told, as the guide every client lists with its tools.
-pub const GUIDE: &str = "Apps call models with ctx.ai.run({ model, ...input }, { retryKey }): chat models take OpenAI's chat completions input and answer its ChatCompletion; decide models (Clef) take state and questions. Keys stay in the Vault, as items of kind \"AI key: <company>\" (one field, api_key; Workers AI's has account_id too), and the most specific pays: one switched on for the app (vault_request with app and need AI key: <company>), else the caller's own, else Everyone's. Errors carry code: refused, no_key, limit, retry_changed, uncertain.";
+pub const GUIDE: &str = "Apps call models with ctx.ai.run({ model, ...input }, { retryKey }): chat models take OpenAI's chat completions input and answer its ChatCompletion; decide models (Clef) take state and questions. Keys stay in the Vault, as items of kind \"AI key: <company>\" (one field, api_key; Workers AI's has account_id too), and the most specific pays: one switched on for the app (vault_request with app and need AI key: <company>), else the caller's own, else Everyone's. Models on your own devices are local/<model> (local/gemma4:12b), answered by whichever of the user's devices has it, at no cost. Errors carry code: refused, no_key, limit, retry_changed, uncertain, unavailable.";

@@ -3107,6 +3107,8 @@ dependencies = [
 name = "one-cloudflare-node"
 version = "0.1.0"
 dependencies = [
+ "ai-gateway",
+ "ai-gateway-runtime",
  "anyhow",
  "api",
  "blake3",

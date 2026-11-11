@@ -743,7 +743,7 @@ fn node_bindings(settings: &Settings) -> Vec<Binding> {
         plain("SIGNER", "service:signer"),
         plain("TELEMETRY", "service:telemetry"),
         plain("LOADER", "loader:"),
-        // Workers AI, for the services built for Cloudflare that use it.
+        // Workers AI, for AI Gateway's calls of the apps it runs, paid by the account (cloudflare/node: `ai_run`).
         plain("AI", "ai:"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", custom_build::config::NAME),

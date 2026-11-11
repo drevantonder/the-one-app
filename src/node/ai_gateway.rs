@@ -95,8 +95,44 @@ impl Host for Gateway<'_> {
         })
     }
 
+    fn device<'a>(&'a self, kind: ::ai_gateway::Kind, input: Value) -> Fut<'a, Value> {
+        Box::pin(async move {
+            let model = input["model"].as_str().unwrap_or_default().to_string();
+            let services = self.node.ai_services().await;
+            if services.is_empty() {
+                bail!(::ai_gateway::Failed::Unavailable(format!("local/{model} is a model on your devices, and none runs a service for them: switch Models on for one in Settings › Devices")));
+            }
+            let mut why = Vec::new();
+            for service in &services {
+                let call = self.node.resolve(CallRequest { app: service.clone(), service: Some(service.clone()), function: kind.as_str().into(), input: input.clone(), depth: 1, client: Some("app".into()), ..Default::default() });
+                match self.node.route(call, self.caller.clone()).await {
+                    Ok(answer) => return Ok(answer),
+                    // No device that's on has it: the next service might.
+                    Err(err) if err.is::<super::calls::NoneCould>() => why.push(format!("{err:#}")),
+                    Err(err) => return Err(err),
+                }
+            }
+            bail!(::ai_gateway::Failed::Unavailable(format!("none of your devices that are on has local/{model}: {}", why.join("; "))))
+        })
+    }
+
+    fn here(&self) -> Fut<'_, Value> {
+        Box::pin(async move {
+            let mut out = Map::new();
+            for service in self.node.ai_services().await {
+                let call = self.node.resolve(CallRequest { app: service.clone(), service: Some(service.clone()), function: "here".into(), device: Some("all".into()), depth: 1, client: Some("app".into()), ..Default::default() });
+                out.insert(service.clone(), self.node.route(call, self.caller.clone()).await.unwrap_or_else(|err| json!({ "error": format!("{err:#}") })));
+            }
+            Ok(Value::Object(out))
+        })
+    }
+
     fn record(&self, span: Span) {
         self.node.record_gen_ai(self.trace, self.service(), &self.caller.user, span);
+    }
+
+    fn now(&self) -> u64 {
+        now_ms()
     }
 }
 
@@ -132,6 +168,19 @@ fn coded(err: anyhow::Error) -> anyhow::Error {
 }
 
 impl Node {
+    /// The apps whose service declares `ai` (`service: { ai: true }`): each answers `here`, `chat` and `decide` with the
+    /// models on its devices, in AI Gateway's shapes.
+    async fn ai_services(&self) -> Vec<String> {
+        let apps: Vec<String> = self.with_or(Vec::new(), |i| Ok(i.r.db().apps()?.into_iter().filter(|a| a.deleted.is_none() && !a.erased).map(|a| a.name).collect()));
+        let mut out = Vec::new();
+        for app in apps {
+            if self.described(&app).await.is_ok_and(|d| d["service"]["ai"] == true) {
+                out.push(app);
+            }
+        }
+        out
+    }
+
     /// `ctx.ai.run(input, { retryKey })` for a call of `app`'s.
     pub(super) async fn ai_run(&self, caller: &Caller, app: &str, scopes: &[Scope], trace: Option<&trace::Trace>, input: Value, retry_key: Option<&str>) -> Result<Value> {
         let gateway = Gateway::new(self, caller, Some(app), scopes.to_vec(), trace);

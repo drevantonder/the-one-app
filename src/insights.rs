@@ -676,6 +676,37 @@ pub struct Batch {
 }
 
 impl Batch {
+    /// An AI Gateway call ended at `now`: one GenAI client span, a child of `parent` in `trace` (a trace of its own if
+    /// none), always kept, and what it used and took as OTEL's two GenAI metrics. `service` is the app that asked, or the
+    /// network's own; `user` who asked.
+    pub fn gen_ai(&mut self, now: u64, trace: Option<(String, Option<String>)>, service: &str, instance: &str, user: &str, call: ai_gateway::Span) {
+        let failure = call.failed.as_ref().map(|(code, _)| Failure::of(*code, None, stage::RUN));
+        let mut attrs = Attrs::default().gen_ai(&call.attrs);
+        let mut message = None;
+        if let (Some(failure), Some((_, said))) = (&failure, &call.failed) {
+            attrs = attrs.failed(failure);
+            if matches!(failure, Failure::Broke(_)) {
+                message = Some(message::cleaned(said));
+            }
+        }
+        let time = now.saturating_sub(call.ms);
+        let (trace, parent) = trace.unwrap_or_else(|| (new_trace(), None));
+        let status = failure.as_ref().map_or(Status::Unset, Failure::status);
+        let span = Span { time, trace, span: new_span(), parent, name: call.name, service: service.to_string(), version: None, instance: instance.to_string(), kind: SpanKind::Client, status, duration: call.ms, message, attrs };
+        // The metrics' attributes: what they're read by (operation, company, model, payer, tier), never more.
+        let by: Vec<(&'static str, Value)> = call.attrs.iter().filter(|(k, _)| matches!(*k, "gen_ai.operation.name" | "gen_ai.provider.name" | "gen_ai.request.model" | "one.paid" | "one.tier")).cloned().collect();
+        let about = Attrs::default().gen_ai(&by).user(user);
+        self.span(span, true, &[]);
+        self.metric(time, GEN_AI_DURATION, service, instance, &about, call.ms);
+        if let Some(used) = &call.used {
+            for (kind, n) in [("input", used.input), ("output", used.output)] {
+                let mut typed = by.clone();
+                typed.push(("gen_ai.token.type", json!(kind)));
+                self.metric(time, GEN_AI_TOKENS, service, instance, &Attrs::default().gen_ai(&typed).user(user), n);
+            }
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.spans.is_empty() && self.logs.is_empty() && self.metrics.is_empty() && self.programs.is_empty()
     }

@@ -51,8 +51,9 @@ function describe() {
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
     uses: { apps: app.uses?.apps || [], services: app.uses?.services || [] },
     // Its service's wrapper: the hosts it may reach ("*" for any) and whether it runs as the node's user; and the
-    // platforms it's built for, the nodes the App Store offers to run it.
-    ...(app.service ? { service: { network: [].concat(app.service.network || []).map(String), user: app.service.user === true, ...(app.service.platforms ? { platforms: [].concat(app.service.platforms).map(String) } : {}) } } : {}),
+    // platforms it's built for, the nodes the App Store offers to run it; and `ai`, that it answers AI Gateway's
+    // `local/<model>` calls (`here`, `chat`, `decide`).
+    ...(app.service ? { service: { network: [].concat(app.service.network || []).map(String), user: app.service.user === true, ...(app.service.ai === true ? { ai: true } : {}), ...(app.service.platforms ? { platforms: [].concat(app.service.platforms).map(String) } : {}) } } : {}),
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
     // Each kind of scope's schema (user, group, global), as the changes that make it, oldest first.
     schema: Object.fromEntries(Object.entries(app.schema || {}).map(([kind, sql]) => [kind, [].concat(sql)])),
@@ -272,7 +273,7 @@ function context(ask, body, appends, later, spans) {
     /// sees. Chat models take OpenAI's chat completions input and answer its ChatCompletion; decide models (Clef) take
     /// `state` and `questions` and answer `{ answers }`; every answer has `one: { model, ran, paid, replayed }`. The same
     /// retryKey with the same input replays the first answer for a day, unpaid. Thrown errors carry `code`: refused,
-    /// no_key, limit, retry_changed, uncertain.
+    /// no_key, limit, retry_changed, uncertain, unavailable. `local/<model>` is a model on one of the user's devices.
     ai: {
       run: async (input, { retryKey } = {}) => (await post("ai.run", { input, retry_key: retryKey ?? null })).ok,
     },

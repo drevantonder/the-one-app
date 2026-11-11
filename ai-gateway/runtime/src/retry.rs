@@ -14,14 +14,10 @@ pub const SCHEMA: &[&str] = &["
     create table defaults (kind text primary key, model text not null);
 "];
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
-}
-
 /// The answer kept for this key and input, if there is one; refused if the key was used for other input, or its call
 /// was sent and never answered.
-pub async fn kept(host: &dyn Host, app: &str, key: &str, hash: &str) -> Result<Option<Value>> {
-    let rows = host.query(Whose::Own, "select input, state, answer from retries where app = ? and key = ? and until > ?", vec![json!(app), json!(key), json!(now_ms())]).await?;
+pub async fn kept(host: &dyn Host, app: &str, key: &str, hash: &str, now: u64) -> Result<Option<Value>> {
+    let rows = host.query(Whose::Own, "select input, state, answer from retries where app = ? and key = ? and until > ?", vec![json!(app), json!(key), json!(now)]).await?;
     let Some(row) = rows.first() else { return Ok(None) };
     if row["input"] != hash {
         return Err(Failed::RetryChanged.into());
@@ -34,11 +30,10 @@ pub async fn kept(host: &dyn Host, app: &str, key: &str, hash: &str) -> Result<O
 
 /// Holds the key as sent, unless another call took it first; and lets go of those past their day.
 pub async fn sending(host: &dyn Host, app: &str, key: &str, hash: &str) -> Result<()> {
-    let (app, key, hash) = (app.to_string(), key.to_string(), hash.to_string());
+    let (app, key, hash, now) = (app.to_string(), key.to_string(), hash.to_string(), host.now());
     host.write(
         Whose::Own,
         Box::new(move |c| {
-            let now = now_ms();
             c.execute("delete from retries where until <= ?1", [now as i64])?;
             let taken: bool = c.query_row("select exists(select 1 from retries where app = ?1 and key = ?2)", [&app, &key], |r| r.get(0))?;
             if taken {

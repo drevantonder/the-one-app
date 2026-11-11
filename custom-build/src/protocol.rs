@@ -187,6 +187,8 @@ pub mod code {
         RETRY_CHANGED = "retry_changed",
         /// An AI call's retryKey whose first call was sent and never answered: it may have run.
         UNCERTAIN = "uncertain",
+        /// An AI model on the network's devices that none of those on has.
+        UNAVAILABLE = "unavailable",
     }
 
     /// `not_let_in` as `notLetIn`, as `shared/protocol.js` names it.

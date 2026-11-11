@@ -30,12 +30,12 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, bucket_read, call_span, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
+import { initSync, bucket_read, call_span, openapi, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, ai_gateway_schema, ai_run, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
 import { Refused, answer, json, near, refuse, textOf } from "./http.js";
-import { ASKS, BLOBS, CODES, HEADER, LATE_WIDGET, LOG, MOST_URLS, NODE_APP, READS, TELEMETRY, URLS, VAULT, WIDGET_LIMIT_MS } from "./protocol.js";
+import { AI_GATEWAY, ASKS, BLOBS, CODES, HEADER, LATE_WIDGET, LOG, MOST_URLS, NODE_APP, READS, TELEMETRY, URLS, VAULT, WIDGET_LIMIT_MS } from "./protocol.js";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -644,6 +644,20 @@ class Call {
     return this.items.then((opened) => JSON.stringify(opened));
   }
 
+  /// AI Gateway's rows (the node's `ai-gateway`) of the caller's own scope and Everyone's, opened with the keys handed
+  /// for them, for this call alone: `[own, everyone]`, handles; those it lacks are said with 428, all at once.
+  aiGateway() {
+    const p = this.user;
+    this.ai ||= (async () => {
+      const scopes = [`user:${this.who.user}`, "global"];
+      const lacks = scopes.filter((scope) => !p.keysOf(this.who, scope, NODE_APP, AI_GATEWAY));
+      if (lacks.length) await p.needs(lacks.map((scope) => ({ scope, app: NODE_APP, database: AI_GATEWAY, have: [] })), this.who);
+      const current = (scope) => this.view.epochs[scope] ?? p.epochs([scope])[scope];
+      return Promise.all(scopes.map((scope) => p.withKeys(this.who, scope, NODE_APP, AI_GATEWAY, (keys) => open(p.owner, p.bucket, prefix(scope, NODE_APP, AI_GATEWAY), keys, current(scope), ai_gateway_schema(), p.env.NODE_KEY))));
+    })();
+    return this.ai;
+  }
+
   query(scope, sql, params) {
     return this.on(scope, (handle) => JSON.parse(query(handle, sql, JSON.stringify(params))));
   }
@@ -675,6 +689,7 @@ class Call {
         if (db.own) serially(db, () => close(db.handle));
       }, () => {});
     this.items?.then((opened) => opened.forEach(([, handle]) => close(handle)), () => {});
+    this.ai?.then((handles) => handles.forEach((handle) => close(handle)), () => {});
   }
 }
 
@@ -746,6 +761,8 @@ class Run {
 
   async call(req, from = null, depth = 0) {
     const app = deployed(this.view, req.app) || refuse(404, `no app named ${req.app}`);
+    // What the calls it makes record beside it (an AI call's span) is part of its trace.
+    this.traceparent ??= req.traceparent;
     const scopes = this.scopes(app, req.scopes);
     // The keys of every database it may open, asked for at once, before it runs, unless each has its scope's current.
     await this.askKeys([{ app, scopes }]);
@@ -932,6 +949,29 @@ class ForCall extends RpcTarget {
     return { status: r.status, headers: Object.fromEntries(r.headers), body64 };
   }
 
+  /// `ctx.ai.run` (src/lib.rs: `ai_run`), with the caller's and Everyone's `node/ai-gateway` and the call's Vault: Workers
+  /// AI through the account's binding, a hosted model with a key the Vault fills, a device's model through a machine.
+  /// What it recorded goes to telemetry, and the scopes it wrote to the relay, as a call's writes do. → `{ ok }`.
+  async aiRun(q) {
+    const { who, user, env } = this.run;
+    const [own, everyone] = await this.call.aiGateway();
+    const out = {
+      workersAi: async (model, input) => JSON.stringify(await env.AI.run(model, JSON.parse(input))),
+      fetch: async (url, headers, body) => {
+        const r = await fetch(url, { method: "POST", headers: JSON.parse(headers), body, redirect: "manual" });
+        return JSON.stringify({ status: r.status, retryAfter: Number(r.headers.get("retry-after")) || null, body: await r.text() });
+      },
+      device: async (fn, input) => JSON.stringify(await aiDevice(this.run, fn, JSON.parse(input))),
+    };
+    const said = JSON.parse(await ai_run(user.bucket, own, everyone, await this.call.vault(), this.app.name, who.user, JSON.stringify(q), out, JSON.parse(endpoint_of(env.NODE_KEY)).key, this.run.traceparent ?? null));
+    const body = signed(env.NODE_KEY, TELEMETRY, JSON.stringify(said.telemetry), Date.now());
+    this.run.ctx.waitUntil(env.TELEMETRY.fetch("https://telemetry/telemetry/write", { method: "POST", body }).then((r) => r.body?.cancel()).catch((e) => console.log(`telemetry: ${e}`)));
+    const wrote = said.wrote.map((w) => (w === "user" ? `user:${who.user}` : w));
+    if (wrote.length) this.run.ctx.waitUntil(Promise.resolve(env.RELAY.moved(wrote)).catch(() => {}));
+    if (said.error !== undefined) throw Object.assign(new Error(said.error), { said: { code: said.code ?? undefined } });
+    return { ok: said.ok };
+  }
+
   /// One of an app's asks (api/src/call.rs: `Ask`), as a machine's node answers it: a Response, an error's code in its header.
   async ask(name, body) {
     try {
@@ -965,6 +1005,8 @@ class ForCall extends RpcTarget {
           return new Response(vault_items(await this.call.vault(), this.app.name, who.user), { headers: { "content-type": "application/json" } });
         case "fetch":
           return Response.json(await this.fetch(q));
+        case "ai.run":
+          return Response.json(await this.aiRun(q));
         case "catalog":
           return Response.json(await this.run.apps());
         case "devices":
@@ -978,6 +1020,33 @@ class ForCall extends RpcTarget {
       return new Response(err.message, { status: err.status === 503 ? 503 : 400, headers: code ? { [HEADER.code]: code } : {} });
     }
   }
+}
+
+/// A model on the user's devices, for AI Gateway (src/lib.rs: `ai_run`): `fn` (`chat`, `decide`) of the first service
+/// that declares `ai` whose devices have it, as any call of a service goes from here; `here`, every device's of each.
+/// → `{ ok }`, `{ unavailable }` (no device that's on has it) or `{ error }`.
+async function aiDevice(run, fn, input) {
+  const found = [];
+  for (const app of run.view.apps.filter((a) => a.bundle && !a.deleted)) {
+    const d = await run.user.describe(run.who, app).catch(keysFirst);
+    if (d?.service?.ai === true) found.push({ app, d });
+  }
+  if (!found.length) return { unavailable: "Models on your devices need one running a service for them: switch Models on for one in Settings › Devices" };
+  if (fn === "here") {
+    const ok = {};
+    for (const { app, d } of found) ok[app.name] = await machineCall(run, { app: app.name, service: true, function: "here", input: {}, device: "all" }, d).then((r) => r.ok, (err) => ({ error: err.message }));
+    return { ok };
+  }
+  const why = [];
+  for (const { app, d } of found) {
+    try {
+      return await machineCall(run, { app: app.name, service: true, function: fn, input }, d);
+    } catch (err) {
+      if (err.status !== 503) return { error: err.message };
+      why.push(err.message);
+    }
+  }
+  return { unavailable: why.join("; ") };
 }
 
 /// An app's call that needs a node on a machine (a service's, or one of an app that uses one), as this user.

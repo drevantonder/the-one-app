@@ -140,39 +140,10 @@ impl Node {
         }
     }
 
-    /// An AI Gateway call (ai-gateway/runtime): one GenAI client span, a child of the call that asked, always kept, and
-    /// what it used and took as OTEL's two GenAI metrics. `service` is the app that asked, or the network's own.
-    pub(super) fn record_gen_ai(&self, trace: Option<&trace::Trace>, service: &str, user: &str, call: ai_gateway_runtime::Span) {
-        let failure = call.failed.as_ref().map(|(code, _)| Failure::of(*code, None, stage::RUN));
-        let mut attrs = Attrs::default().gen_ai(&call.attrs);
-        let mut message = None;
-        if let (Some(failure), Some((_, said))) = (&failure, &call.failed) {
-            attrs = attrs.failed(failure);
-            if matches!(failure, Failure::Broke(_)) {
-                message = Some(insights::message::cleaned(said));
-            }
-        }
-        let time = now_ms().saturating_sub(call.ms);
-        let instance = hex(&self.0.id);
-        let (trace_id, parent) = match trace {
-            Some(t) => (t.trace_id(), t.span()),
-            None => (insights::new_trace(), None),
-        };
-        let status = failure.as_ref().map_or(Status::Unset, Failure::status);
-        let span = Span { time, trace: trace_id, span: insights::new_span(), parent, name: call.name, service: service.to_string(), version: None, instance: instance.clone(), kind: SpanKind::Client, status, duration: call.ms, message, attrs };
-        // The metrics' attributes: what they're read by (operation, company, model, payer, tier), never more.
-        let by: Vec<(&'static str, Value)> = call.attrs.iter().filter(|(k, _)| matches!(*k, "gen_ai.operation.name" | "gen_ai.provider.name" | "gen_ai.request.model" | "one.paid" | "one.tier")).cloned().collect();
-        let about = Attrs::default().gen_ai(&by).user(user);
-        let mut batch = self.0.insights.0.lock().unwrap();
-        batch.span(span, true, &[]);
-        batch.metric(time, insights::GEN_AI_DURATION, service, &instance, &about, call.ms);
-        if let Some(used) = &call.used {
-            for (kind, n) in [("input", used.input), ("output", used.output)] {
-                let mut typed = by.clone();
-                typed.push(("gen_ai.token.type", json!(kind)));
-                batch.metric(time, insights::GEN_AI_TOKENS, service, &instance, &Attrs::default().gen_ai(&typed).user(user), n);
-            }
-        }
+    /// An AI Gateway call (ai-gateway/runtime), a child of the call that asked (`Batch::gen_ai`).
+    pub(super) fn record_gen_ai(&self, trace: Option<&trace::Trace>, service: &str, user: &str, call: ::ai_gateway::Span) {
+        let trace = trace.map(|t| (t.trace_id(), t.span()));
+        self.0.insights.0.lock().unwrap().gen_ai(now_ms(), trace, service, &hex(&self.0.id), user, call);
     }
 
     /// A request to one of the API's routes that failed with no call to say so, so its trace has a span to find: named by

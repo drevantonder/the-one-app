@@ -1,4 +1,6 @@
-//! Models' service: the local models its device serves with Ollama, for apps and agents on any of its user's devices.
+//! Models' service: the models its device serves with Ollama, for AI Gateway (`ctx.ai.run` with `local/<model>`), which
+//! asks it in its own shapes: `chat` takes OpenAI's chat completions input and answers its ChatCompletion (Ollama's
+//! OpenAI-compatible endpoint), `decide` takes Cloudflare Clef's and answers `{ answers, usage }`.
 
 use std::time::Duration;
 
@@ -18,42 +20,32 @@ fn call(_: &Host, call: &Call) -> Result<Answer> {
         "here" => {
             let tags: Value = get("/api/tags")?;
             let loaded: Vec<Value> = get("/api/ps").map(|ps| ps["models"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
-            Ok(json!(tags["models"].as_array().into_iter().flatten().map(|m| json!({
-                "name": m["name"], "size": m["size"], "family": m["details"]["family"], "parameters": m["details"]["parameter_size"],
-                "loaded": loaded.iter().any(|l| l["name"] == m["name"]),
-            })).collect::<Vec<_>>()))
+            Ok(json!(tags["models"].as_array().into_iter().flatten().map(|m| {
+                // A decision model says so in its capabilities; every other answers chat.
+                let shown = post("/api/show", &json!({ "model": m["name"] })).unwrap_or_default();
+                let decides = shown["capabilities"].as_array().is_some_and(|c| c.iter().any(|c| c == "decision"));
+                json!({
+                    "name": m["name"], "kind": if decides { "decide" } else { "chat" }, "size": m["size"], "family": m["details"]["family"],
+                    "parameters": m["details"]["parameter_size"], "loaded": loaded.iter().any(|l| l["name"] == m["name"]),
+                })
+            }).collect::<Vec<_>>()))
         }
         "chat" => {
-            let model = input["model"].as_str().context("give a model; models_here lists them")?;
+            let model = input["model"].as_str().context("give a model")?;
             here(model)?;
-            let mut messages: Vec<Value> = input["messages"].as_array().cloned().unwrap_or_default();
-            if let Some(p) = input["prompt"].as_str() {
-                let mut m = json!({ "role": "user", "content": p });
-                if let Some(images) = input["images"].as_array() {
-                    m["images"] = json!(images);
-                }
-                messages.push(m);
+            if !input["messages"].is_array() {
+                one_service::refuse!("give messages");
             }
-            if messages.is_empty() {
-                one_service::refuse!("give a prompt or messages");
-            }
-            if let Some(s) = input["system"].as_str() {
-                messages.insert(0, json!({ "role": "system", "content": s }));
-            }
-            let mut body = json!({ "model": model, "messages": messages, "stream": false });
-            for key in ["format", "think", "options"] {
-                if !input[key].is_null() {
-                    body[key] = input[key].clone();
-                }
-            }
-            let reply = post("/api/chat", &body)?;
+            let mut body = input.clone();
+            body["stream"] = json!(false);
+            let reply = post("/v1/chat/completions", &body)?;
             if let Some(err) = reply.get("error") {
-                bail!("{}", err.as_str().unwrap_or("the model failed"));
+                bail!("{}", err["message"].as_str().or(err.as_str()).unwrap_or("the model failed"));
             }
-            Ok(reply["message"]["content"].clone())
+            Ok(reply)
         }
         "decide" => {
-            let model = input["model"].as_str().context("give a decision model, like clef-flash")?;
+            let model = input["model"].as_str().context("give a decision model")?;
             here(model)?;
             if !input["questions"].is_object() {
                 one_service::refuse!("give questions");

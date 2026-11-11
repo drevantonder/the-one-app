@@ -70,7 +70,7 @@ const ASKS: [(Ask, &str, bool, bool); 18] = [
     (Ask::Order, "order", false, false),
     (Ask::Priority, "priority", true, false),
     (Ask::Fetch, "fetch", false, true),
-    (Ask::AiRun, "ai.run", false, false),
+    (Ask::AiRun, "ai.run", false, true),
 ];
 
 /// What a call that only reads is told when it writes, asks something that does, pushes or calls another app.

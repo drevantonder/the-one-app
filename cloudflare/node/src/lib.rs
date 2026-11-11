@@ -717,3 +717,158 @@ pub async fn bundle(bucket: JsValue, keys: String, hash: String) -> Result<Strin
     }
     one::app::bundle::module(&bytes).map_err(failed)
 }
+
+/// `node/ai-gateway`'s migrations (JSON), AI Gateway's rows in a scope.
+#[wasm_bindgen]
+pub fn ai_gateway_schema() -> String {
+    json!(ai_gateway_runtime::SCHEMA).to_string()
+}
+
+/// AI Gateway for a call this node runs: as a machine's node does (src/node/ai_gateway.rs), but Workers AI through the
+/// account's binding, which no key pays for but the network's account, and a device's model through a machine, as any
+/// call of a service goes from here. What it needs of `worker.js` is `out`: `{ workersAi(model, input), fetch(url,
+/// headers, body) → { status, retryAfter, body }, device(function, input) → { ok } | { unavailable } | { error } }`,
+/// each JSON and a promise.
+struct Gateway {
+    bucket: Js,
+    own: u32,
+    everyone: u32,
+    items: Vec<(Scope, one::vault::Items)>,
+    app: Option<String>,
+    user: String,
+    out: Js,
+    spans: RefCell<Vec<ai_gateway::Span>>,
+    wrote: RefCell<Vec<ai_gateway_runtime::Whose>>,
+}
+
+/// Workers AI's binding answers older text models as `{ response, usage }`: as a chat completion's.
+fn as_chat(model: &str, got: Value) -> Value {
+    if got["choices"].is_array() {
+        return got;
+    }
+    let content = match &got["response"] {
+        Value::String(s) => json!(s),
+        other => json!(other.to_string()),
+    };
+    json!({ "model": model, "choices": [{ "index": 0, "message": { "role": "assistant", "content": content }, "finish_reason": "stop" }], "usage": got["usage"] })
+}
+
+impl ai_gateway_runtime::Host for Gateway {
+    fn key(&self, company: ai_gateway::Company) -> ai_gateway_runtime::Fut<'_, Option<ai_gateway_runtime::Key>> {
+        Box::pin(async move {
+            if company == ai_gateway::Company::WorkersAi {
+                return Ok(Some(ai_gateway_runtime::Key { item: String::new(), paid: ai_gateway::Paid::Network }));
+            }
+            Ok(one::ai_gateway::pays(&self.items, self.app.as_deref(), &self.user, company).map(|(item, paid)| ai_gateway_runtime::Key { item, paid }))
+        })
+    }
+
+    fn send<'a>(&'a self, key: &'a ai_gateway_runtime::Key, out: ai_gateway::Outgoing) -> ai_gateway_runtime::Fut<'a, ai_gateway_runtime::Sent> {
+        Box::pin(async move {
+            let body: Value = serde_json::from_slice(&out.body)?;
+            if key.item.is_empty() {
+                let model = out.url.rsplit_once("/run/").map(|(_, m)| m.to_string()).or_else(|| body["model"].as_str().map(str::to_string)).unwrap_or_default();
+                let mut input = body.clone();
+                input.as_object_mut().map(|o| o.remove("model"));
+                let got: Value = serde_json::from_str(&self.out.ask("workersAi", &[model.clone().into(), input.to_string().into()]).await?.as_string().unwrap_or_default())?;
+                let answer = if out.url.contains("/run/") { json!({ "result": got }) } else { as_chat(&model, got) };
+                return Ok(ai_gateway_runtime::Sent { status: 200, retry_after: None, body: answer.to_string().into_bytes() });
+            }
+            let item = self.items.iter().find_map(|(_, items)| items.get(&key.item)).context("that AI key left the Vault as the call began: ask again")?;
+            anyhow::ensure!(item.opened, "the {} that pays is opened only by the machines its Vault's admins grant, and the Cloudflare node holds no Vault key: run this app on one of your machines, or pay with Workers AI", item.kind);
+            let host = out.url.split("://").nth(1).and_then(|r| r.split(['/', ':']).next()).unwrap_or_default().to_string();
+            let fill = |text: &str| one::vault::fill(text, &host, |name| name.strip_prefix(&format!("{}:", key.item)).and_then(|field| one::vault::filled(item, field)));
+            let url = fill(&out.url)?;
+            let headers: serde_json::Map<String, Value> = out.headers.iter().map(|(n, v)| Ok((n.clone(), json!(fill(v)?)))).collect::<Result<_>>()?;
+            let got = self.out.ask("fetch", &[url.into(), Value::Object(headers).to_string().into(), String::from_utf8(out.body)?.into()]).await?;
+            let got: Value = serde_json::from_str(&got.as_string().unwrap_or_default())?;
+            Ok(ai_gateway_runtime::Sent { status: got["status"].as_u64().unwrap_or(0) as u16, retry_after: got["retryAfter"].as_u64(), body: got["body"].as_str().unwrap_or("").as_bytes().to_vec() })
+        })
+    }
+
+    fn query<'a>(&'a self, whose: ai_gateway_runtime::Whose, sql: &'a str, params: Vec<Value>) -> ai_gateway_runtime::Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            let handle = self.handle(whose);
+            OPEN.with(|o| {
+                let o = o.borrow();
+                let (_, db) = o.1.get(&handle).context("that database isn't open")?;
+                Ok(db.query(sql, &params)?.into_iter().map(Value::Object).collect())
+            })
+        })
+    }
+
+    fn write<'a>(&'a self, whose: ai_gateway_runtime::Whose, mut change: Box<dyn FnMut(&ai_gateway_runtime::Connection) -> Result<Value> + Send + 'a>) -> ai_gateway_runtime::Fut<'a, Value> {
+        Box::pin(async move {
+            let handle = self.handle(whose);
+            let (owner, mut db) = take(handle)?;
+            let wrote = db.write(&self.bucket, |c| change(c)).await;
+            put(handle, (owner, db));
+            self.wrote.borrow_mut().push(whose);
+            wrote
+        })
+    }
+
+    fn device<'a>(&'a self, kind: ai_gateway::Kind, input: Value) -> ai_gateway_runtime::Fut<'a, Value> {
+        Box::pin(async move {
+            let got = self.out.ask("device", &[kind.as_str().into(), input.to_string().into()]).await?;
+            let got: Value = serde_json::from_str(&got.as_string().unwrap_or_default())?;
+            match (got.get("ok"), got["unavailable"].as_str(), got["error"].as_str()) {
+                (Some(ok), ..) => Ok(ok.clone()),
+                (None, Some(why), _) => Err(ai_gateway::Failed::Unavailable(why.to_string()).into()),
+                (None, None, why) => Err(anyhow!("{}", why.unwrap_or("the device's model failed"))),
+            }
+        })
+    }
+
+    fn here(&self) -> ai_gateway_runtime::Fut<'_, Value> {
+        Box::pin(async move {
+            let got = self.out.ask("device", &["here".into(), "{}".into()]).await?;
+            let got: Value = serde_json::from_str(&got.as_string().unwrap_or_default())?;
+            Ok(got["ok"].clone())
+        })
+    }
+
+    fn record(&self, span: ai_gateway::Span) {
+        self.spans.borrow_mut().push(span);
+    }
+
+    fn now(&self) -> u64 {
+        js_sys::Date::now() as u64
+    }
+}
+
+impl Gateway {
+    fn handle(&self, whose: ai_gateway_runtime::Whose) -> u32 {
+        match whose {
+            ai_gateway_runtime::Whose::Own => self.own,
+            ai_gateway_runtime::Whose::Everyone => self.everyone,
+        }
+    }
+}
+
+/// `ctx.ai.run` for `app`'s call by `user` (their id): `own` and `everyone` are the handles of the user's and Everyone's
+/// `node/ai-gateway` (`open` with `ai_gateway_schema`), `vault` the call's Vault (`[[scope, handle]]`, as
+/// `vault_items`), `request` the shim's `{ input, retry_key }` and `out` what `worker.js` does for it (`Gateway`). →
+/// `{ ok }` or `{ error, code }`, with `telemetry` (the call's GenAI span, as the rows the telemetry Worker takes, a
+/// child of `traceparent`) and `wrote` (which of `own` and `everyone` it wrote: `user`, `global`).
+#[wasm_bindgen]
+pub async fn ai_run(bucket: JsValue, own: u32, everyone: u32, vault: String, app: String, user: String, request: String, out: JsValue, instance: String, traceparent: Option<String>) -> Result<String, JsError> {
+    let items = lookup(&vault, &app, &user)?.scopes;
+    let gateway = Gateway { bucket: Js(bucket), own, everyone, items, app: Some(app.clone()), user: user.clone(), out: Js(out), spans: RefCell::default(), wrote: RefCell::default() };
+    let request: Value = serde_json::from_str(&request)?;
+    let ran = ai_gateway_runtime::run(&gateway, &app, request["input"].clone(), request["retry_key"].as_str()).await;
+    let mut said = match ran {
+        Ok(answer) => json!({ "ok": answer }),
+        Err(err) => json!({ "error": format!("{err:#}"), "code": err.downcast_ref::<ai_gateway::Failed>().and_then(ai_gateway::Failed::code) }),
+    };
+    let mut batch = one::insights::Batch::default();
+    let parent = traceparent.as_deref().and_then(one::insights::parent_of).map(|(t, s)| (t, Some(s)));
+    let service = if one::insights::token(&app) { app.as_str() } else { one::insights::own() };
+    for span in gateway.spans.take() {
+        batch.gen_ai(js_sys::Date::now() as u64, parent.clone(), service, &instance, &user, span);
+    }
+    said["telemetry"] = batch.rows();
+    let wrote: Vec<&str> = gateway.wrote.take().into_iter().map(|w| if w == ai_gateway_runtime::Whose::Own { "user" } else { "global" }).collect();
+    said["wrote"] = json!(wrote);
+    Ok(said.to_string())
+}

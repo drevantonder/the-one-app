@@ -1,4 +1,5 @@
-//! Which model id runs where: `<company>/<model>`, the first part naming where it's sent and whose key kind pays.
+//! Which model id runs where: `<company>/<model>`, the first part naming where it's sent and whose key kind pays; or
+//! `local/<model>`, a model on one of the network's devices, which no key pays for.
 
 use serde_json::Value;
 
@@ -12,8 +13,11 @@ pub enum Company {
     Anthropic,
     OpenRouter,
     WorkersAi,
+    /// The network's own devices: a service that declares `ai` answers with a model it has (`here`, `chat`, `decide`).
+    Local,
 }
 
+/// The companies whose models run hosted, each paid for with a key.
 pub const ALL: [Company; 5] = [Company::WorkersAi, Company::Google, Company::Anthropic, Company::OpenAi, Company::OpenRouter];
 
 impl Company {
@@ -25,6 +29,7 @@ impl Company {
             Company::Anthropic => "anthropic",
             Company::OpenRouter => "openrouter",
             Company::WorkersAi => "workers-ai",
+            Company::Local => "local",
         }
     }
 
@@ -35,6 +40,7 @@ impl Company {
             Company::Anthropic => "Anthropic",
             Company::OpenRouter => "OpenRouter",
             Company::WorkersAi => "Workers AI",
+            Company::Local => "your devices",
         }
     }
 
@@ -46,10 +52,11 @@ impl Company {
             Company::Anthropic => "anthropic",
             Company::OpenRouter => "openrouter",
             Company::WorkersAi => "workers-ai",
+            Company::Local => "local",
         }
     }
 
-    /// The one host its key may be sent to.
+    /// The one host its key may be sent to: none for the network's devices.
     pub fn host(self) -> &'static str {
         match self {
             Company::OpenAi => "api.openai.com",
@@ -57,6 +64,7 @@ impl Company {
             Company::Anthropic => "api.anthropic.com",
             Company::OpenRouter => "openrouter.ai",
             Company::WorkersAi => "api.cloudflare.com",
+            Company::Local => "",
         }
     }
 
@@ -82,8 +90,8 @@ impl Route {
     pub fn parse(id: &str) -> Result<Route, Failed> {
         let refused = || Failed::Refused(format!("{id} isn't a model id: they're <company>/<model>, as ai-gateway_models lists them ({})", ALL.map(|c| c.id()).join(", ")));
         let (first, model) = id.split_once('/').ok_or_else(refused)?;
-        if first == "local" {
-            return Err(Failed::Refused(format!("{id} is a model on a device, which AI Gateway doesn't run yet: use a hosted or Workers AI model")));
+        if first == "local" && !model.is_empty() {
+            return Ok(Route { company: Company::Local, model: model.to_string() });
         }
         let company = ALL.into_iter().find(|c| c.id() == first).ok_or_else(refused)?;
         if model.is_empty() || (company == Company::WorkersAi && !model.starts_with("@cf/")) {
@@ -96,26 +104,29 @@ impl Route {
         format!("{}/{}", self.company.id(), self.model)
     }
 
-    /// What it answers. Cloudflare's Clef models decide; every other is chat.
-    pub fn kind(&self) -> Kind {
-        match self.company == Company::WorkersAi && self.model.starts_with("@cf/cloudflare/clef") {
-            true => Kind::Decide,
-            false => Kind::Chat,
+    /// What it answers. Cloudflare's Clef models decide; every other hosted one is chat; a device's is whichever its
+    /// input asks (its device knows, and refuses what the model doesn't do).
+    pub fn kind(&self) -> Option<Kind> {
+        match self.company {
+            Company::Local => None,
+            Company::WorkersAi if self.model.starts_with("@cf/cloudflare/clef") => Some(Kind::Decide),
+            _ => Some(Kind::Chat),
         }
     }
 
     /// The request for `body` (the company's own shape, built already), with `key` the Vault item that pays: its fields
     /// are placeholders the Vault fills (`{{<id>:api_key}}`), never the key itself.
-    pub fn request(&self, key: &str, body: Value) -> crate::Outgoing {
+    pub fn request(&self, key: &str, kind: Kind, body: Value) -> crate::Outgoing {
         let bearer = vec![("authorization".to_string(), format!("Bearer {{{{{key}:api_key}}}}"))];
         let (url, headers) = match self.company {
             Company::OpenAi => ("https://api.openai.com/v1/chat/completions".to_string(), bearer),
             Company::OpenRouter => ("https://openrouter.ai/api/v1/chat/completions".to_string(), bearer),
             Company::Google => (format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent", self.model), vec![("x-goog-api-key".to_string(), format!("{{{{{key}:api_key}}}}"))]),
+            Company::Local => (String::new(), Vec::new()),
             Company::Anthropic => ("https://api.anthropic.com/v1/messages".to_string(), vec![("x-api-key".to_string(), format!("{{{{{key}:api_key}}}}")), ("anthropic-version".to_string(), "2023-06-01".to_string())]),
             Company::WorkersAi => {
                 let account = format!("https://api.cloudflare.com/client/v4/accounts/{{{{{key}:account_id}}}}/ai");
-                match self.kind() {
+                match kind {
                     Kind::Chat => (format!("{account}/v1/chat/completions"), bearer),
                     Kind::Decide => (format!("{account}/run/{}", self.model), bearer),
                 }
