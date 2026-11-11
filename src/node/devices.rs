@@ -296,7 +296,7 @@ impl Node {
             Ok(())
         })?;
         tracing::warn!("asked to erase what {name} keeps: its oned does, then stops");
-        self.0.parts.erase();
+        self.0.erasing.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(json!({ "erasing": name }))
     }
 

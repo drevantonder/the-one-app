@@ -195,7 +195,7 @@ impl Node {
         }
     }
 
-    /// Tells every other device how loaded it is and what its parts are doing, now and then.
+    /// Tells every other device how loaded it is, now and then.
     pub(super) async fn presence_loop(self) {
         let mut paths_said = Instant::now();
         loop {
@@ -210,21 +210,19 @@ impl Node {
                 self.node_says();
                 self.renew_app_schedules("");
                 self.start_owed_keys();
+                self.name_services_scopes(&crate::oned::carried_helpers()).await;
             }
             tokio::time::sleep(PRESENCE_EVERY).await;
         }
     }
 
-    /// Says hello to every other device: as now and then, and when this device's parts change. How far each is, is
-    /// the round trip iroh measures to it.
+    /// Says hello to every other device, now and then: how loaded this one is. How far each is, is the round trip iroh
+    /// measures to it.
     pub(super) fn say_hello(&self) {
-        let Ok((devices, parts)) = self.with(|i| {
-            let devices: Vec<Key> = i.r.db().computes()?.into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-            Ok((devices, self.parts_here(i)?))
-        }) else {
+        let Ok(devices) = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect::<Vec<Key>>())) else {
             return;
         };
-        let hello = json!({ "load": crate::load::current(), "parts": parts, "updating": self.updating() });
+        let hello = json!({ "load": crate::load::current(), "updating": self.updating() });
         for device in devices {
             let (node, hello) = (self.clone(), hello.clone());
             tokio::spawn(async move {
@@ -240,16 +238,17 @@ impl Node {
 
     pub(super) fn hello_from(&self, from: &Key, hello: &Value) -> Result<()> {
         let load = serde_json::from_value(hello["load"].clone()).ok();
-        let parts = hello["parts"].as_array().map(|_| hello["parts"].clone());
-        let new = self.with(|i| {
-            let changed = i.peers.get(from).is_none_or(|p| p.parts != parts);
-            i.peers.insert(*from, Peer { services: Vec::new(), load, parts, updating: hello["updating"].as_str().map(str::to_string), seen: Instant::now() });
-            Ok(changed)
-        })?;
-        if new {
+        self.with(|i| Ok(i.peers.insert(*from, Peer { services: Vec::new(), load, updating: hello["updating"].as_str().map(str::to_string), seen: Instant::now() })))?;
+        Ok(())
+    }
+
+    /// What `device`'s oned runs as processes of its own, and each one's state, as its onet said (`oned::keep_parts`):
+    /// shown with its app runtime in Settings › Devices.
+    pub(super) fn parts_from(&self, device: &Key, parts: Value) {
+        let changed = self.with_or(false, |i| Ok(i.parts.insert(*device, parts.clone()) != Some(parts)));
+        if changed {
             self.emit(Event::Devices);
         }
-        Ok(())
     }
 
     /// Says hello to each service endpoint of the network, which says what it offers and whom it serves: it's listed
@@ -300,7 +299,7 @@ impl Node {
             if let Some(far) = far {
                 i.far.insert(key, far);
             }
-            let before = i.peers.insert(key, Peer { services: services.clone(), load: None, parts: None, updating: None, seen: Instant::now() });
+            let before = i.peers.insert(key, Peer { services: services.clone(), load: None, updating: None, seen: Instant::now() });
             Ok(before.is_none_or(|p| p.services != services || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
         });
         self.0.heard.notify_waiters();

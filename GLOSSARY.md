@@ -54,8 +54,9 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Platform**: what a client or oned is built for: Mac, Windows, Linux, iPhone, Android, a browser, Cloudflare.
 - **Endpoint**: an iroh identity, of its own key. Each client, node and service is one; the relay lets in only the
   network's.
-- **Network message**: what one node tells another directly over iroh: `hello` (what it runs and its load, every so
-  often) and `changed` (that something changed). A nudge, never trusted for what's true, which the bucket says.
+- **Network message**: what one node tells another directly over iroh: `hello` (its load, every so often; from a
+  computer's onet, what its services are doing) and `changed` (that something changed). A nudge, never trusted for
+  what's true, which the bucket says.
 - **Agent device**: a machine agents use (Linux with a browser, Windows, Android, an iPhone), which the Agent Devices
   service runs on a user's node. It is not in the network: it has no key there, and is reached only through that
   service.

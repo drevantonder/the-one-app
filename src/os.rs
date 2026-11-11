@@ -212,3 +212,23 @@ pub fn disk_space(path: &Path) -> Option<(u64, u64)> {
     let ok = unsafe { windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(wide.as_ptr(), &mut avail, &mut total, &mut free) };
     (ok != 0).then(|| (total.saturating_sub(free), avail))
 }
+
+/// When this program is asked to stop: Ctrl-C, or SIGTERM from its supervisor or an update, each listened for from when
+/// it's called.
+pub fn stop_asked() -> anyhow::Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let (mut term, mut interrupt) = (signal(SignalKind::terminate())?, signal(SignalKind::interrupt())?);
+        Ok(Box::pin(async move {
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = interrupt.recv() => {}
+            }
+        }))
+    }
+    #[cfg(not(unix))]
+    Ok(Box::pin(async {
+        let _ = tokio::signal::ctrl_c().await;
+    }))
+}

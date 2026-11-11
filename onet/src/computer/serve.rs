@@ -84,6 +84,7 @@ async fn answer(State((onet, routes)): State<(Arc<Onet>, Arc<Routes>)>, req: Req
         ("POST", "/api/holds/shared") => shared(&onet, req).await,
         ("POST", "/api/holds/write") => write(&onet, req).await,
         ("POST", "/api/holds/sign") => sign(&onet, req).await,
+        ("POST", "/api/services") => services(&onet, req).await,
         _ => return pass_on(&onet, &routes, req).await,
     };
     match done {
@@ -105,6 +106,14 @@ async fn join(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     anyhow::ensure!(NetworkFile::read(&onet.home)?.is_none(), "this computer is in a network already");
     let joined = one::node::join_with(&onet.key, &onet.name, &asked.code).await?;
     joined.network.write(&onet.home)?;
+    // Its app runtime, started before there was a network, opens it now; one started later opens it as it starts.
+    if let Some(runtime) = &onet.runtime {
+        match runtime.ask("POST".into(), "/api/joined".into(), Vec::new(), Vec::new()).await {
+            Ok((200, ..)) => {}
+            Ok((_, _, said)) => tracing::warn!("joined; this computer's own app runtime didn't open the network: {}", String::from_utf8_lossy(&said)),
+            Err(err) => tracing::info!("joined; this computer's own app runtime opens the network as it starts: {err:#}"),
+        }
+    }
     // Its keys are sealed to it by the device that let it in, in a moment: it reaches the network once they are.
     if let Err(err) = onet.start().await {
         tracing::info!("joined; {err:#}");
@@ -123,6 +132,36 @@ async fn create(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     anyhow::ensure!(status == 200, "{}", made["error"].as_str().unwrap_or("this computer's own app runtime didn't make the network"));
     onet.start().await?;
     Ok(made)
+}
+
+/// What this device's oned says its services are doing (`one::oned::keep_parts`): said in a hello to every other app
+/// runtime of the network, over what devices speak to each other, which the relay carries sealed, so it never reads the
+/// services' names or what went wrong; and given to its own runtime by its loopback.
+async fn services(onet: &Arc<Onet>, req: Request) -> Result<Value> {
+    let said = axum::body::to_bytes(req.into_body(), 1 << 20).await?.to_vec();
+    let body: Value = serde_json::from_slice(&said)?;
+    if let Ok(device) = onet.device().await
+        && !device.address().is_empty()
+    {
+        tokio::spawn(async move {
+            let Ok((keyring, client)) = device.reached().await else { return };
+            let own = keyring.own_runtime();
+            let runtimes = keyring.who(|who| who.computes().map(|c| c.into_iter().map(|c| c.key).collect::<Vec<_>>())).and_then(Result::ok).unwrap_or_default();
+            for node in runtimes.into_iter().filter(|k| Some(*k) != own) {
+                let (client, body) = (client.clone(), body.clone());
+                tokio::spawn(async move {
+                    if let Err(err) = client.hello(node, body).await {
+                        tracing::debug!("telling {} what this device's services are doing: {err}", one::keys::short(&node));
+                    }
+                });
+            }
+        });
+    }
+    let runtime = onet.runtime.as_ref().context("this computer's own app runtime isn't running here")?;
+    let (status, _, answer) = runtime.ask("POST".into(), "/api/services".into(), vec![("content-type".into(), "application/json".into())], said).await?;
+    let answer: Value = serde_json::from_slice(&answer).unwrap_or_default();
+    anyhow::ensure!(status == 200, "{}", answer["error"].as_str().unwrap_or("this computer's own app runtime didn't take that"));
+    Ok(json!({}))
 }
 
 /// What this device's own app runtime, an endpoint of its own key, asks of the device's key (`one::node::Holder`): the

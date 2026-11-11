@@ -111,7 +111,14 @@ impl Node {
         let secret: [u8; 16] = rand::random();
         let by = (asker.key != self.0.id).then(|| hex(&asker.key));
         self.add_pairing(secret, Pairing { user: asker.user.clone(), by, admits: user, until: now_ms() + PAIRING_LIFE, tried: None })?;
-        self.tell_relay(json!({ "pairing": { "hash": net::ticket_hash(&net::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE } }));
+        // Told with the key the code names, which answers the computer joining with it: the relay lets that computer
+        // reach only the key that told it of the code.
+        let (node, fields) = (self.clone(), json!({ "pairing": { "hash": net::ticket_hash(&net::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE } }));
+        tokio::spawn(async move {
+            if let Err(err) = crate::settings::tell(&node, &node.0.key, fields).await {
+                tracing::warn!("telling {YOURS}'s relay of a pairing code: {err:#}");
+            }
+        });
         let code = PairingCode { address, from: self.0.id, secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&code, &mut bytes)?;
@@ -146,6 +153,16 @@ impl Node {
         self.ensure_no_network()?;
         let joined = join_with(&self.0.key, &self.device_name(), code).await?;
         self.save_network(&joined.network)?;
+        self.joined()?;
+        Ok(joined.address)
+    }
+
+    /// Opens the network its home names now that it's joined it: by itself (`join`), or on a computer, where its onet
+    /// joins as the device, as the app runtime asked by it (`/api/joined`). Open already, it's nothing.
+    pub fn joined(&self) -> Result<()> {
+        if self.has_network() {
+            return Ok(());
+        }
         self.open_network()?;
         let node = self.clone();
         tokio::spawn(async move {
@@ -154,7 +171,7 @@ impl Node {
             }
         });
         self.emit(Event::Network);
-        Ok(joined.address)
+        Ok(())
     }
 
     /// Joins a machine with a pairing code: used up once it's in, and kept for that machine alone when its join didn't

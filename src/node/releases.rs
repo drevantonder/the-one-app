@@ -107,15 +107,10 @@ impl Node {
         Ok(replaced)
     }
 
-    /// The file a service's or the node's build is, fetched from the network's address, once it's the one the record names.
-    pub async fn thing_bytes(&self, thing: &crate::latest::Thing) -> Result<Vec<u8>> {
-        let (address, thing) = (self.address()?, thing.clone());
-        tokio::task::spawn_blocking(move || crate::latest::download(&address, &thing)).await?
-    }
-
     /// The build of each service a device on this platform runs: the one its app's latest deploy names
     /// (`bundle::SERVICES`), else its newest release signed with the release key, as built-in apps' services come.
-    pub async fn service_builds(&self) -> BTreeMap<String, Build> {
+    pub async fn service_builds(&self) -> BTreeMap<String, crate::oned::Build> {
+        use crate::oned::Build;
         let mut builds: BTreeMap<String, Build> = self.service_releases().into_iter().map(|(n, r)| (n, Build::Released(r))).collect();
         let bundles = self.with_or(Default::default(), |i| Ok(i.r.db().apps()?.into_iter().filter(|a| a.deleted.is_none()).filter_map(|a| Some((a.name, a.bundle?))).collect::<Vec<_>>()));
         for (app, bundle) in bundles {
@@ -178,17 +173,6 @@ async fn tidy(bucket: &impl crate::bucket::Bucket, key: &str, text: &str) -> Res
         bucket.delete(name).await?;
     }
     Ok(gone.len())
-}
-
-/// What a device runs of a service on its platform.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Build {
-    /// The newest build of its program, as the record at the network's address names it.
-    Released(crate::latest::Thing),
-    /// The build, by its hash, its app's latest deploy names.
-    Deployed(String),
-    /// Nothing: its app's latest deploy names builds, none for this platform.
-    None,
 }
 
 #[cfg(test)]

@@ -20,6 +20,7 @@ pub(super) fn routes() -> Routes {
         .route("/api/keys", Clients, get(keys_get).post(keys_post))
         .route("/api/create", ThisMachine, post(create))
         .route("/api/join", ThisMachine, post(join))
+        .route("/api/joined", ThisMachine, post(joined))
         .route("/api/steps", Clients, post(steps))
         .route("/api/steps/global", Clients, get(global_steps))
 }
@@ -60,6 +61,11 @@ async fn state(State(node): State<Node>, client: Option<axum::Extension<Me>>) ->
 async fn create(State(node): State<Node>, Body(body): Body<Create>) -> Reply {
     let recovery = node.create_with(given(&body.name, "name")?, given(&body.user_name, "user_name")?, body.user.as_deref(), crate::config::STARTERS).await?;
     Ok(Json(json!({ "recovery": recovery })))
+}
+
+async fn joined(State(node): State<Node>) -> Reply {
+    node.joined()?;
+    done()
 }
 
 async fn join(State(node): State<Node>, Body(body): Body<Join>) -> Reply {

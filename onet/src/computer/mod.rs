@@ -5,8 +5,8 @@
 //! request goes, as this device, to the best machine for it: its own app runtime by its loopback, which it asks as this
 //! computer's own program, or another over iroh, with the keys it opens. Until its network has an address, all of that
 //! is its own app runtime's to answer. It holds the device's key for that runtime (`/api/holds`), lists it as the
-//! device's the first time it runs (`list_runtime`), tells the relay what the device is on, and hears an ask to update
-//! it. The computer's oned starts it: `--listen=<addr>` where it answers (the API's own address, `one::api::addr`),
+//! device's the first time it runs (`list_runtime`), tells the relay what the device is on, hears an ask to update
+//! it, and says to every app runtime what the computer's oned says its services are doing (`/api/services`). The computer's oned starts it: `--listen=<addr>` where it answers (the API's own address, `one::api::addr`),
 //! `--runtime=<addr>` where this device's own app runtime does.
 
 use std::path::{Path, PathBuf};

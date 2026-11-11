@@ -27,6 +27,8 @@ const CHANGED_WAIT: Duration = Duration::from_millis(500);
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// The most a computer that isn't the network's yet may send: one ask to join.
 const JOIN_LIMIT: usize = 4 << 10;
+/// The most a device's onet may say in a hello: its parts.
+const ONET_LIMIT: usize = 64 << 10;
 /// How many streams another device may have open on a connection at once.
 const STREAMS: u32 = 32;
 /// How many computers that aren't the network's yet may be connected at once, each asking to join.
@@ -255,6 +257,9 @@ impl Node {
         if !self.is_device(&remote) && self.is_service(&remote) {
             return self.take_service(conn).await;
         }
+        if !self.is_device(&remote) && self.has_runtime(&remote) {
+            return self.take_onet(remote, conn).await;
+        }
         if !self.is_device(&remote) {
             return self.take_joining(conn).await;
         }
@@ -304,6 +309,30 @@ impl Node {
                     tracing::debug!("answering {}: {err:#}", short(&remote));
                 }
             });
+        }
+    }
+
+    /// A computer's onet, the device an app runtime names, which only says hello: what its oned runs as processes of
+    /// its own, and each one's state (`oned::keep_parts`).
+    async fn take_onet(&self, remote: Key, conn: Connection) {
+        while let Ok((mut send, mut recv)) = conn.accept_bi().await {
+            if !self.has_runtime(&remote) {
+                return conn.close(1u32.into(), b"not a device with an app runtime of this network");
+            }
+            let msg: Value = match recv.read_to_end(ONET_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
+                Ok(msg) => msg,
+                Err(err) => return tracing::debug!("what {} sent: {err:#}", short(&remote)),
+            };
+            let answer = match msg["kind"].as_str() {
+                Some(M::HELLO) => {
+                    self.parts_from(&remote, msg["body"]["parts"].clone());
+                    Value::Null
+                }
+                _ => json!({ "error": "a device's onet only says hello" }),
+            };
+            if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
+                tracing::debug!("answering {}: {err:#}", short(&remote));
+            }
         }
     }
 
@@ -572,6 +601,11 @@ impl Node {
 
     fn is_device(&self, key: &Key) -> bool {
         self.with_or(false, |i| Ok(i.r.db().compute(key)?.is_some()))
+    }
+
+    /// Whether `key` is a device that an app runtime of the network names as its own.
+    fn has_runtime(&self, key: &Key) -> bool {
+        self.with_or(false, |i| Ok(i.r.db().has_runtime(key)?))
     }
 
     pub(super) fn is_service(&self, key: &Key) -> bool {

@@ -126,13 +126,12 @@ impl Node {
             let m = i.r.db();
             let apps = m.apps()?;
             let switches = m.switches()?;
-            let parts_here = self.parts_here(i)?;
             apps.iter()
                 .filter(|a| !a.erased)
                 .map(|a| -> Result<_> {
                     let states = i.views.iter().filter_map(|(scope, st)| Some((Scope::parse(scope).ok()?, st))).collect::<Vec<_>>();
                     let added = crate::state::added(m, &a.name, &viewer.user, states.iter().map(|(s, st)| (s, *st)));
-                    let runs_on = runs_on(self, i, &switches, &parts_here, &a.name, &added, &viewer.user)?;
+                    let runs_on = runs_on(self, i, &switches, &a.name, &added, &viewer.user)?;
                     let mut info = crate::state::app_info(m, a, &apps, &viewer.user, added)?;
                     info["runs_on"] = json!(runs_on);
                     if let Some(bundle) = self.built_in(a) {
@@ -544,7 +543,7 @@ fn built_in_source(app: &str) -> Option<String> {
 
 /// Where `app`'s service runs for the scopes `added` names, and for `user` on their own nodes: `{ scope, node,
 /// name, online, problem }` each, `name` none once that node was removed, `problem` what its node said went wrong.
-fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, parts_here: &[crate::state::Part], app: &str, added: &[String], user: &str) -> Result<Vec<Value>> {
+fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, app: &str, added: &[String], user: &str) -> Result<Vec<Value>> {
     let m = i.r.db();
     let cloudflare = m.cloudflare_node()?;
     let mut out = Vec::new();
@@ -556,11 +555,11 @@ fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::
                 None => m.machine(k)?.is_some_and(|d| d.user == user),
             };
         if on {
-            // A device's switch is run by its app runtime, where it has one of its own.
+            // What it's doing is its device's, as its onet said; it's run by its app runtime, where it has one of its own.
+            let parts = i.parts.get(k).cloned();
             let k = &m.computes()?.into_iter().find(|c| c.runtime_of() == Some(*k)).map_or(*k, |c| c.key);
             let here = *k == node.0.id;
             let name = if Some(*k) == cloudflare { Some(crate::rank::CLOUDFLARE.to_string()) } else { m.machine(k)?.filter(|d| !d.removed).map(|d| d.name) };
-            let parts = if here { Some(json!(parts_here)) } else { i.peers.get(k).and_then(|p| p.parts.clone()) };
             let part = parts.and_then(|p| match p {
                 Value::Array(list) => list.into_iter().find(|v| v["name"] == app),
                 Value::Object(map) => map.get(app).cloned(),

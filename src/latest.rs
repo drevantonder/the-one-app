@@ -43,7 +43,7 @@ const FETCH: Duration = Duration::from_secs(30);
 const DOWNLOAD: Duration = Duration::from_secs(30 * 60);
 
 /// One thing the record names.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Thing {
     pub name: String,
     pub commit: String,

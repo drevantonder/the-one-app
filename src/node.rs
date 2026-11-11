@@ -57,7 +57,6 @@ use calls::{Granted, Reply};
 use apps::built_in_bundle;
 use scheduled::switch_entry;
 use services::added_scope;
-pub use releases::Build;
 pub use crate::keys::Needs;
 pub mod services;
 mod app_schedules;
@@ -104,7 +103,7 @@ const WHOLE_REFILL: Duration = Duration::from_secs(1800);
 const MOVED_FRESH: Duration = Duration::from_secs(60);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
-/// How often a device says hello to the others: how loaded it is, and what its parts are doing.
+/// How often a device says hello to the others: how loaded it is.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
 const REFETCH_AFTER: Duration = Duration::from_secs(30);
 
@@ -119,8 +118,6 @@ pub type Service = (String, Vec<String>, Value);
 struct Peer {
     services: Vec<Service>,
     load: Option<crate::load::Load>,
-    /// What it can run, and each part's state (`Node::parts_here`), if it says.
-    parts: Option<Value>,
     /// Why it hasn't taken the latest update, if it says.
     updating: Option<String>,
     seen: Instant,
@@ -132,6 +129,8 @@ struct Network {
     /// The network's bucket, and its fields, which a device joining is given.
     bucket: Option<(Place, BTreeMap<String, String>)>,
     peers: HashMap<Key, Peer>,
+    /// What each computer runs as processes of its oned, and each one's state, as its onet last said (`oned::keep_parts`).
+    parts: HashMap<Key, Value>,
     /// The devices connected to the relay, as it last said: `Network::online`.
     connected: std::collections::HashSet<Key>,
     /// What each device told the relay it's on, as it last said: its key → `protocol::version`.
@@ -252,8 +251,8 @@ pub struct Inner {
     unfetched: std::sync::atomic::AtomicBool,
     /// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, while this node serves it there (`api::serve_guide`).
     guide: Mutex<Option<String>>,
-    /// What oned's thread for its parts tells it about them.
-    parts: crate::oned::Parts,
+    /// Whether it was asked to erase what this device keeps, which its oned does (`oned::keep_parts`).
+    erasing: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]
@@ -263,6 +262,48 @@ impl std::fmt::Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Node({})", short(&self.0.id))
     }
+}
+
+
+/// What a node stopping waits at most for its last insights to be written: they may be lost, and stopping may not wait.
+const LAST_SAY: Duration = Duration::from_secs(3);
+
+/// `oned apps --listen=<address>`: this device's app runtime, an endpoint of its own key (`Node::runtime`), answering on
+/// `address` only its device's own programs, with the token in its folder, and asking its device's key, held by the
+/// computer's onet at the API's address, for what that opens and signs. It runs its own watchdog.
+#[tokio::main]
+pub async fn serve(listen: &str) -> Result<()> {
+    crate::logs::keep(crate::logs::NODE);
+    tracing_subscriber::fmt()
+        .with_writer(crate::logs::Tee)
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
+        .init();
+    crate::watchdog::started();
+    // Asked to stop, even while it starts: its workerd first, then at once, rather than once every blocking task
+    // ends, which a stuck request would hold up.
+    let stop = crate::os::stop_asked()?;
+    let (ready_node, node_ready) = tokio::sync::oneshot::channel::<Node>();
+    tokio::spawn(async move {
+        stop.await;
+        crate::insights::Ended::Signal.write(&crate::home());
+        if let Ok(Ok(node)) = tokio::time::timeout(LAST_SAY, node_ready).await {
+            let _ = tokio::time::timeout(LAST_SAY, node.flush_insights()).await;
+        }
+        crate::app::runtime::stop_all();
+        std::process::exit(0)
+    });
+    let dir = crate::home();
+    let token = crate::api::local_token(&dir).with_context(|| format!("{} has no token for this device's own programs: its onet makes it as it starts", dir.display()))?;
+    let node = Node::runtime(&dir, Holder { at: crate::api::addr(), token }).await?;
+    let _ = ready_node.send(node.clone());
+    node.node_started(crate::insights::Ended::read(&dir));
+    let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
+    tracing::info!("{} app runtime {} answering {listen} from {}", crate::config::NAME, crate::keys::short(&node.id()), dir.display());
+    tokio::spawn(crate::api::serve_guide(node.clone()));
+    crate::watchdog::watch();
+    let served = crate::api::serve(listener, crate::api::guarded(crate::api::routes(), node)).await;
+    crate::app::runtime::stop_all();
+    Ok(served?)
 }
 
 impl Node {
@@ -338,7 +379,7 @@ impl Node {
             unfetched: Default::default(),
             erased: Default::default(),
             guide: Default::default(),
-            parts: Default::default(),
+            erasing: Default::default(),
         }));
         let outbound_router = crate::app::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -398,10 +439,6 @@ impl Node {
 
     pub fn dir(&self) -> &Path {
         &self.0.dir
-    }
-
-    pub fn parts(&self) -> &crate::oned::Parts {
-        &self.0.parts
     }
 
     /// The guide's address on the tailnet, if this node serves it there.

@@ -51,7 +51,6 @@ impl Node {
         let Ok(network) = self.0.network.lock() else { bail!("this device couldn't answer that: a bug in it, which its log shows") };
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { network.as_ref().map(|i| i.r.db().machine(&viewer.key)).transpose()?.flatten().map(|m| m.name.clone()).unwrap_or_default() };
         let backups = network.as_ref().map(|i| self.backup_problem(i, &viewer.user)).transpose()?.flatten();
-        let here_parts = network.as_ref().map(|i| self.parts_here(i)).transpose()?;
         // Which device is looking, to say "This device": a client device of the viewer's names itself.
         let looking = match (device, network.as_ref()) {
             (Some(key), _) => Some(key),
@@ -93,7 +92,8 @@ impl Node {
                 services: services.iter().map(|d| d.0.clone()).collect(),
                 installed_services: installed_services(m, s, &services, build.map(|r| r.commit.as_str()))?,
                 // What it can run, its user's and the admins' to see.
-                parts: if !m.may(me, "remove", &scopes::device(&s.key)) { None } else if s.key == self.0.id { here_parts.clone() } else { session.and_then(|s| s.parts.clone()).and_then(|p| serde_json::from_value(p).ok()) },
+                // As its device's onet said them, while it's on.
+                parts: if !m.may(me, "remove", &scopes::device(&s.key)) || !(s.key == self.0.id || i.online(&s.key)) { None } else { i.parts.get(&m.device_of(&s.key)).and_then(|p| serde_json::from_value(p.clone()).ok()) },
                 load,
                 latest: build.and_then(|r| latest.for_target(&r.target)).map(|t| t.commit.clone()),
                 updating: if s.key == self.0.id { self.updating() } else { session.and_then(|s| s.updating.clone()) },
