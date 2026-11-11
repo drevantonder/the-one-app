@@ -38,7 +38,7 @@ pub async fn join_with(key: &SigningKey, name: &str, code: &str) -> Result<Joine
     if bucket.is_none() {
         tracing::warn!("this device can't reach the network's bucket: it keeps no app's data until the network moves to S3-compatible storage");
     }
-    Ok(Joined { address: code.address, network: NetworkFile { root: reply.root, user: reply.user, bucket, folders: BTreeMap::new() } })
+    Ok(Joined { address: code.address, network: NetworkFile { root: reply.root, user: reply.user, bucket } })
 }
 
 /// Whether `who` may list a device of `user`'s that does `kinds`, as `rules` counts a `device` step: only of someone in

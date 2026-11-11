@@ -1,0 +1,45 @@
+# What the app runtime does for Backups: backing each scope up to each place, the weekly restore checks, telling admins
+# what's wrong, and their rows, through `api::AppRuntime`; the backup format; and the command that opens a backup on a
+# disk with the recovery key alone, which the CLI runs with no network.
+[package]
+name = "backups-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+backups = { path = ".." }
+api = { path = "../../api" }
+scope = { path = "../../scope" }
+database = { path = "../../database" }
+bucket = { path = "../../bucket", features = ["machine"] }
+key = { path = "../../key" }
+custom-build = { path = "../../custom-build" }
+platform = { path = "../../platform", features = ["machine"] }
+vault = { path = "../../vault" }
+vault-runtime = { path = "../../vault/runtime" }
+notifications = { path = "../../notifications" }
+notifications-runtime = { path = "../../notifications/runtime" }
+anyhow = "1"
+axum = "0.8"
+# Backups encrypt what leaves for a place with AES-256-GCM (engine.rs).
+aes-gcm = "0.10"
+blake3 = "1"
+data-encoding = "2"
+# What a snapshot kept daily or monthly is, by the calendar (engine::kept).
+jiff = "0.2"
+rand = "0.8"
+rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tokio = { version = "1", features = ["rt", "sync"] }
+tracing = "0.1"
+
+[dev-dependencies]
+ed25519-dalek = "3"
+tokio = { version = "1", features = ["macros", "rt"] }

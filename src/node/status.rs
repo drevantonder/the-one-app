@@ -1,5 +1,7 @@
-//! How things went, as devices say it: schedules' runs; backups' runs. Rows each scope's node database changes in place, not steps of their own: written often, and
-//! needed only as they are now. Each device reads them back into `Status`, which the rest of the node looks at.
+//! How things went, as devices say it: schedules' runs. Rows each scope's node database changes in place, not steps of
+//! their own: written often, and needed only as they are now. Backups' rows were here too, before they had a database
+//! of their own: their tables stay in its schema, read only
+//! to copy them there once. Each device reads them back into `Status`, which the rest of the node looks at.
 
 use super::*;
 
@@ -84,9 +86,6 @@ drop table builds;
 "];
 
 pub const RUNS_KEPT: usize = 20;
-/// How many backup runs to each place `global` keeps, besides each scope's last that backed it up.
-pub const BACKUP_RUNS_KEPT: usize = 100;
-pub const CHECKS_KEPT: usize = 20;
 
 /// A scope's rows, as this device last read them.
 #[derive(Clone, Debug, Default)]
@@ -95,14 +94,6 @@ pub struct Status {
     pub runs: BTreeMap<(String, String), Vec<Run>>,
     /// When a schedule's runs first followed a different definition, by (app, schedule): (was, is, when).
     pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
-    /// In `global`: the latest backup runs, oldest first.
-    pub backups: Vec<BackupRun>,
-    /// In `global`: by (place, scope), the newest step's time a snapshot there holds, and when it was written.
-    pub covered: BTreeMap<(String, String), (u64, u64)>,
-    /// In `global`: when admins were last told of a place's trouble, by place.
-    pub alerted: BTreeMap<String, u64>,
-    /// In `global`: the latest restore checks, oldest first.
-    pub checks: Vec<CheckRun>,
 }
 
 /// One run of a schedule: the slot it ran for, when, on which device, as whom, how it went, and the definition it
@@ -119,49 +110,13 @@ pub struct Run {
     pub spec: Value,
 }
 
-/// One device's backup run to one place: the snapshots it wrote, or what went wrong.
-#[derive(Clone, Debug)]
-pub struct BackupRun {
-    /// The place's Vault item.
-    pub place: String,
-    pub device: Key,
-    pub time: u64,
-    pub error: Option<String>,
-    /// What kind of trouble the error is, for its fix: `bucket::Trouble`'s name.
-    pub trouble: Option<String>,
-    pub snapshots: Vec<BackedUp>,
-}
-
-/// A scope's snapshot in a run: when it holds the scope as of, and what it added.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct BackedUp {
-    pub scope: String,
-    pub upto: u64,
-    pub blobs: u64,
-    pub bytes: u64,
-}
-
-/// One device's restore check of one place: what came back (`backups::check`'s report, in short), or what's wrong.
-#[derive(Clone, Debug)]
-pub struct CheckRun {
-    pub place: String,
-    pub device: Key,
-    pub time: u64,
-    pub error: Option<String>,
-    pub report: Value,
-}
-
 pub enum Said {
     Ran { app: String, schedule: String, run: Run },
-    BackedUp(BackupRun),
-    Alerted { place: String },
-    Checked(CheckRun),
 }
 
 impl Node {
     /// Changes a scope's rows, then reads them back.
     pub(super) async fn say(&self, scope: &Scope, said: Said) -> Result<()> {
-        let now = now_ms();
         let db = self.node_database(scope).await?;
         let mut db = db.lock().await;
         let before = db.at();
@@ -178,24 +133,6 @@ impl Node {
                         "delete from runs where app = ? and schedule = ? and slot not in (select slot from runs where app = ? and schedule = ? order by slot desc limit ?)",
                         &[json!(app), json!(schedule), json!(app), json!(schedule), json!(RUNS_KEPT)],
                     )
-                }
-                Said::BackedUp(r) => {
-                    ex(
-                        "insert or replace into backups values (?, ?, ?, ?, ?, ?)",
-                        &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.trouble), json!(serde_json::to_string(&r.snapshots)?)],
-                    )?;
-                    // Beyond the newest, each scope's last run that backed it up stays, as what's covered is read from
-                    // them: a scope that hasn't changed would otherwise look a day late once busier ones fill these.
-                    ex(
-                        "delete from backups where place = ? and time not in (select time from backups where place = ? order by time desc limit ?) \
-                         and time not in (select max(b.time) from backups b, json_each(b.snapshots) j where b.place = ? and b.error is null group by json_extract(j.value, '$.scope'))",
-                        &[json!(r.place), json!(r.place), json!(BACKUP_RUNS_KEPT), json!(r.place)],
-                    )
-                }
-                Said::Alerted { place } => ex("insert or replace into alerts values (?, ?)", &[json!(place), json!(now)]),
-                Said::Checked(r) => {
-                    ex("insert or replace into checks values (?, ?, ?, ?, ?)", &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.report.to_string())])?;
-                    ex("delete from checks where place = ? and time not in (select time from checks where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(CHECKS_KEPT)])
                 }
             }
         })
@@ -244,36 +181,6 @@ impl Node {
                 s.changed.insert(key, (last.spec.clone(), run.spec.clone(), run.time));
             }
             runs.push(run);
-        }
-        for r in rows("select * from backups order by time")? {
-            let snapshots: Vec<BackedUp> = stored(&r["snapshots"], "[]")?;
-            let run = BackupRun {
-                place: text(&r["place"]),
-                device: device(&r["device"])?,
-                time: n(&r["time"]),
-                error: r["error"].as_str().map(str::to_string),
-                trouble: r["trouble"].as_str().map(str::to_string),
-                snapshots,
-            };
-            if run.error.is_none() {
-                for b in &run.snapshots {
-                    let covered = s.covered.entry((run.place.clone(), b.scope.clone())).or_default();
-                    *covered = (covered.0.max(b.upto), covered.1.max(run.time));
-                }
-            }
-            s.backups.push(run);
-        }
-        for r in rows("select * from alerts")? {
-            s.alerted.insert(text(&r["place"]), n(&r["time"]));
-        }
-        for r in rows("select * from checks order by time")? {
-            s.checks.push(CheckRun {
-                place: text(&r["place"]),
-                device: device(&r["device"])?,
-                time: n(&r["time"]),
-                error: r["error"].as_str().map(str::to_string),
-                report: stored(&r["report"], "null")?,
-            });
         }
         // While it holds the database, so a read that started earlier can't land after this one.
         self.with(|i| {

@@ -215,7 +215,7 @@ async fn wait(onet: &Arc<Onet>, req: Request) -> Result<Value> {
             None
         }
     };
-    NetworkFile { root: root.trim().to_string(), user, bucket, folders: Default::default() }.write(&onet.home)?;
+    NetworkFile { root: root.trim().to_string(), user, bucket }.write(&onet.home)?;
     device.disconnect().await;
     *onet.asking.lock().await = None;
     if let Err(err) = onet.start().await {

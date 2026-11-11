@@ -34,7 +34,6 @@ use ::scope::replica::{Handled, Replica};
 
 mod ai_gateway;
 pub mod apps;
-pub mod backups;
 pub mod blobs;
 pub mod copied;
 mod calls;
@@ -151,10 +150,6 @@ struct Network {
     status: HashMap<String, status::Status>,
     /// Each scope's own state, as its database says it.
     views: HashMap<String, ScopeState>,
-    /// When this device first and last saw each scope's database change since it started (ms): what backups wait on.
-    changed: HashMap<Scope, (u64, u64)>,
-    /// The folders on this device it backs up to, by their place's id (`NetworkFile::folders`).
-    folders: BTreeMap<String, String>,
     /// How long each device took to answer a call lately.
     nearest: HashMap<Key, Duration>,
     /// How far each device is: the round trip iroh measured on the connection of its last answer here.
@@ -243,7 +238,6 @@ pub struct Inner {
     /// The port apps' requests go out through.
     outbound: u16,
     calls: calls::State,
-    backups: backups::State,
     blobs: blobs::State,
     databases: databases::State,
     /// Steps other devices sent, waiting for the bucket to confirm them, while one ask of it is under way: none then.
@@ -396,7 +390,6 @@ impl Node {
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             calls: Default::default(),
-            backups: Default::default(),
             blobs: Default::default(),
             databases: Default::default(),
             sent: Mutex::new(None),
@@ -431,7 +424,6 @@ impl Node {
         tokio::spawn(node.clone().pull_loop());
         tokio::spawn(node.clone().invites_loop());
         tokio::spawn(node.clone().tick_loop());
-        tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
         node.start_features(starts);
         let worker = node.clone();
@@ -663,10 +655,6 @@ fn update_views(i: &mut Network) -> Result<()> {
     Ok(())
 }
 
-fn note_change(i: &mut Network, scope: &Scope) {
-    let now = now_ms();
-    i.changed.entry(scope.clone()).and_modify(|c| c.1 = now).or_insert((now, now));
-}
 
 /// The scopes a call of `app` as `user` reaches (`state::reachable`), as this device can tell: of each scope it holds,
 /// by what it read.

@@ -10,7 +10,6 @@ pub mod carried {
 // What the Cloudflare node (cloudflare/node/) and the native apps' onet (onet/) share with nodes on machines; the rest
 // is only theirs (the `node` feature).
 pub mod ai_gateway;
-pub mod backups;
 #[cfg(feature = "node")]
 pub mod skills;
 #[cfg(feature = "node")]

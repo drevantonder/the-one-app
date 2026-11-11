@@ -1,5 +1,5 @@
-//! This device's network as its home keeps it: whose it is, its bucket (found by the object at its root), and the
-//! folders it backs up to; and making a network.
+//! This device's network as its home keeps it: whose it is and its bucket (found by the object at its root); and making
+//! a network.
 
 use super::*;
 
@@ -31,9 +31,6 @@ pub struct NetworkFile {
     /// The network's bucket, as a place's fields: a folder's `path`, or S3's. None if this device can't reach it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bucket: Option<BTreeMap<String, String>>,
-    /// The folders on this device it backs up to, by their place's id: a folder is only ever this device's own choice.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub folders: BTreeMap<String, String>,
 }
 
 impl NetworkFile {
@@ -64,7 +61,7 @@ impl Node {
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), Some(Hash::from_bytes(root)), now_ms());
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.network_place(&f)?, f))).transpose()?;
-        let network = Network { r, user: file.user, bucket, folders: file.folders, said: HashMap::new(), exchanged: HashMap::new(), described: HashMap::new(), stated: HashMap::new(), parts: HashMap::new(), last_seen: HashMap::new(), versions: serde_json::Value::Null, workers: serde_json::Value::Null, moved: None, connected: Default::default(), scope_dbs: HashMap::new(), status: HashMap::new(), views: HashMap::new(), changed: HashMap::new(), nearest: HashMap::new(), far: HashMap::new(), read: false };
+        let network = Network { r, user: file.user, bucket, said: HashMap::new(), exchanged: HashMap::new(), described: HashMap::new(), stated: HashMap::new(), parts: HashMap::new(), last_seen: HashMap::new(), versions: serde_json::Value::Null, workers: serde_json::Value::Null, moved: None, connected: Default::default(), scope_dbs: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.network.lock()? = Some(network);
         self.start_kept();
         Ok(())
@@ -85,19 +82,6 @@ impl Node {
         self.save_network(&file)?;
         self.with(|i| {
             i.bucket = Some((place, fields));
-            Ok(())
-        })
-    }
-
-    pub(super) fn keep_folder(&self, id: &str, path: Option<&std::path::Path>) -> Result<()> {
-        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(self.network_dir().join(NETWORK_FILE))?)?;
-        match path {
-            Some(path) => drop(file.folders.insert(id.to_string(), path.display().to_string())),
-            None => drop(file.folders.remove(id)),
-        }
-        self.save_network(&file)?;
-        self.with(|i| {
-            i.folders = file.folders;
             Ok(())
         })
     }
@@ -126,7 +110,7 @@ impl Node {
         // Until it's moved to S3-compatible storage, the network's bucket is a folder here.
         let bucket: BTreeMap<String, String> = [("path".to_string(), self.network_dir().join("bucket").display().to_string())].into();
         Place::from_fields(&bucket)?.create(NETWORK_OBJECT, root.to_hex().as_bytes())?;
-        self.save_network(&NetworkFile { root: root.to_hex(), user: user.clone(), bucket: Some(bucket), folders: BTreeMap::new() })?;
+        self.save_network(&NetworkFile { root: root.to_hex(), user: user.clone(), bucket: Some(bucket) })?;
         self.open_network()?;
         let bucket = self.bucket()?;
         let recovery_seal = key::twin_public(recovery.verifying_key().as_bytes())?;

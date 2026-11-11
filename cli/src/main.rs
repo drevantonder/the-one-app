@@ -22,7 +22,7 @@ fn commands() -> Vec<Command> {
         one::update::cli::commands(),
         network::commands(),
         groups::cli::commands(),
-        one::backups::cli::commands(),
+        backups_runtime::commands(),
         devices::cli::commands(),
         apps::cli::commands(),
         vault::cli::commands(),

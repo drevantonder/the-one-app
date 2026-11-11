@@ -242,9 +242,6 @@ impl Node {
             // The blobs its steps said its apps no longer need, as `forget` entries did.
             let forgotten: Vec<(String, String)> = state.forgotten.iter().filter(|b| !was.contains(*b)).map(|b| (scope.to_string(), b.clone())).collect();
             i.views.insert(scope.to_string(), state);
-            if !read.steps.is_empty() {
-                note_change(i, scope);
-            }
             let kept = reader.keep()?;
             i.scope_dbs.insert(scope.clone(), reader);
             Ok((kept, took, forgotten))
@@ -358,9 +355,6 @@ impl Node {
             }
             for log in &handled.dropped {
                 i.views.remove(log);
-            }
-            if handled.members {
-                note_change(i, &Scope::Global);
             }
             update_views(i)?;
             Ok(i.views.get("global").map(|s| s.forgotten.clone()).unwrap_or_default())

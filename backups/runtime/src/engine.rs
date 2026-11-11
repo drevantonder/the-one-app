@@ -26,9 +26,6 @@ use ::bucket::{Place, folder, scope_of};
 use ::scope::scopes::ScopeDb;
 use ::key::{Key, hex};
 
-/// The Vault item kind a place is: an item in Everyone, with a folder's `device` and `path`, or S3's `endpoint`,
-/// `bucket`, `region`, `key_id` and `secret`.
-pub const KIND: &str = "Backup place";
 /// A snapshot every hour, if anything changed.
 pub const EVERY: u64 = 3_600_000;
 /// How long a scope's changes may wait for the devices before this one in line, each, before it backs them up itself.

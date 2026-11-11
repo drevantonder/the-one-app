@@ -119,31 +119,31 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
     vault_runtime::set_item(&a.rt(), &me, &::scope::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
-    let bad = a.add_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" })).await.unwrap();
+    let bad = backups_runtime::add_place(&a.rt(), &me, &json!({ "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" })).await.unwrap();
     assert!(bad["id"].is_null() && bad["tried"][0]["error"].is_string(), "{bad}");
-    assert!(a.backups().unwrap()["places"].as_array().unwrap().is_empty());
+    assert!(backups_runtime::status(&a.rt()).await.unwrap()["places"].as_array().unwrap().is_empty());
 
     let dir = temp("backup-disk").join("One Backups");
-    let added = a.add_place(&me, &json!({ "path": dir, "title": "T7 Shield" })).await.unwrap();
+    let added = backups_runtime::add_place(&a.rt(), &me, &json!({ "path": dir, "title": "T7 Shield" })).await.unwrap();
     assert!(added["id"].is_string() && added["tried"].as_array().unwrap().iter().all(|s| s["error"].is_null()), "{added}");
-    eventually("the first backup", &a, async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
-    let shown = a.backups().unwrap();
+    eventually("the first backup", &a, async || !backups_runtime::status(&a.rt()).await.unwrap()["places"][0]["last"].is_null()).await;
+    let shown = backups_runtime::status(&a.rt()).await.unwrap();
     assert_eq!(shown["places"][0]["title"], "T7 Shield");
     assert_eq!(shown["places"][0]["last"]["device"], "backup-a", "the folder's own device backs it up: {shown}");
     let first = shown["places"][0]["last"]["time"].clone();
-    eventually("b to see it", &b, async || !b.backups().unwrap()["places"][0]["last"].is_null()).await;
+    eventually("b to see it", &b, async || !backups_runtime::status(&b.rt()).await.unwrap()["places"][0]["last"].is_null()).await;
 
     // The folder's device restores it into a throwaway copy, against what it holds: who's who, databases and blobs.
-    let report = a.check_backups().await.unwrap();
+    let report = backups_runtime::check_backups(&a.rt()).await.unwrap();
     assert!(report[0]["error"].is_null() && !report[0]["scopes"].as_array().unwrap().is_empty(), "{report}");
-    assert!(a.backups().unwrap()["places"][0]["checked"]["error"].is_null(), "and says it passed");
+    assert!(backups_runtime::status(&a.rt()).await.unwrap()["places"][0]["checked"]["error"].is_null(), "and says it passed");
 
     // From nothing but the disk and the recovery key.
     let place = bucket::Place::Folder(dir.clone());
-    let network = one::backups::networks(&place).unwrap().remove(0);
-    let keys = one::backups::open_keys(&place, &network, &::key::unhex(&recovery).unwrap()).unwrap();
+    let network = backups_runtime::engine::networks(&place).unwrap().remove(0);
+    let keys = backups_runtime::engine::open_keys(&place, &network, &::key::unhex(&recovery).unwrap()).unwrap();
     assert!(keys.contains_key("global") && keys.contains_key(&format!("user:{}", me.user)), "{:?}", keys.keys());
-    let checked = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None }).unwrap().0;
+    let checked = backups_runtime::engine::check(&backups_runtime::engine::Check { place: &place, network: &network, keys: &keys, root: None }).unwrap().0;
     assert_eq!(checked["problems"], json!([]), "{checked}");
     assert_eq!(checked["network"], "Home");
     assert_eq!(checked["users"], json!(["Andre"]));
@@ -152,7 +152,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let items = backed_up(&dir, &network, &::key::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
     assert!(items.iter().any(|i| i.contains("\"Example key\"")), "the Vault's item came back: {items:?}");
     the_command_checks_it_with_no_node(&dir, &recovery);
-    let restored = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
+    let restored = backups_runtime::engine::restore(&place, &network, "global", &keys["global"]).unwrap();
     assert_eq!(backed_up_posts(&dir, &network, &::key::unhex(&recovery).unwrap()).await, ["before the backup"]);
     let steps_then = restored.snapshot.databases["notes/main"].0;
     let files: Vec<Vec<u8>> = walk(&dir).iter().map(|f| std::fs::read(f).unwrap()).collect();
@@ -160,17 +160,17 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
 
     // A change is backed up on the next run; only what's new is sent.
     a.call(notes("post", json!({ "text": "after the backup" }))).await.unwrap();
-    a.back_up_now();
+    backups_runtime::back_up_now(&a.rt());
     // A run is done once it says when it last backed up, not once its copy of the bucket has the post: it copies the
     // bucket before writing the snapshot that names the copy, and backs up every scope.
-    eventually("the second backup", &a, async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
-    let again = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
+    eventually("the second backup", &a, async || backups_runtime::status(&a.rt()).await.unwrap()["places"][0]["last"]["time"] != first).await;
+    let again = backups_runtime::engine::restore(&place, &network, "global", &keys["global"]).unwrap();
     assert!(again.snapshot.databases["notes/main"].0 > steps_then);
     assert_eq!(backed_up_posts(&dir, &network, &::key::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
-    let checked = a.check_backups().await.unwrap();
+    let checked = backups_runtime::check_backups(&a.rt()).await.unwrap();
     assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
     assert!(checked[0]["error"].is_null(), "{checked}");
-    let shown = a.backups().unwrap();
+    let shown = backups_runtime::status(&a.rt()).await.unwrap();
     let moment = &shown["snapshots"][0];
     assert!(moment["scopes"].as_array().unwrap().contains(&json!("Everyone")) && moment["places"] == json!(["T7 Shield"]), "one snapshot of the network: {shown}");
     assert!(!a.state().unwrap().features.contains_key("backups"), "no badge while backups work");
@@ -181,15 +181,15 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     std::fs::write(&copy, b"not a folder").unwrap();
     // Its failure shows once it's done: nothing writes to the disk until the next run.
     a.call(notes("post", json!({ "text": "broken" }))).await.unwrap();
-    a.back_up_now();
-    eventually("a failed run", &a, async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used") || t.contains("won't let"))).await;
+    backups_runtime::back_up_now(&a.rt());
+    eventually("a failed run", &a, async || backups_runtime::status(&a.rt()).await.unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used") || t.contains("won't let"))).await;
     let problem = a.state().unwrap().features["backups"].clone();
     assert_eq!(problem["fix"], "Check the disk on backup-a is plugged in and has room.", "{problem}");
     assert!(problem["text"].as_str().unwrap().starts_with("T7 Shield "), "{problem}");
     std::fs::remove_file(&copy).unwrap();
     std::fs::rename(dir.join("bucket-aside"), &copy).unwrap();
     a.call(notes("post", json!({ "text": "fixed" }))).await.unwrap();
-    a.back_up_now();
+    backups_runtime::back_up_now(&a.rt());
     eventually("the badge to clear", &a, async || !a.state().unwrap().features.contains_key("backups")).await;
 
     // A folder named only by a Vault item, which anyone may write, is never written to: a folder is its own device's
@@ -197,20 +197,20 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let global = ::scope::scopes::Scope::Global;
     let planted = temp("backup-planted").join("home");
     let fields = json!({ "path": { "value": planted }, "device": { "value": ::key::hex(&a.id()) } });
-    vault_runtime::set_item(&a.rt(), &me, &global, json!({ "title": "Planted", "type": one::backups::KIND, "fields": fields, "apps": ["node"] })).await.unwrap();
+    vault_runtime::set_item(&a.rt(), &me, &global, json!({ "title": "Planted", "type": backups::KIND, "fields": fields, "apps": ["node"] })).await.unwrap();
     let s3 = json!({ "endpoint": { "value": "http://127.0.0.1:9" }, "bucket": { "value": "b" }, "key_id": { "value": "k" }, "secret": { "value": "s", "secret": true } });
-    vault_runtime::set_item(&a.rt(), &me, &global, json!({ "title": "Unnamed bucket", "type": one::backups::KIND, "fields": s3, "hosts": ["127.0.0.1"], "apps": ["node"] })).await.unwrap();
-    a.back_up_now();
-    let place = |title: &str| a.backups().unwrap()["places"].as_array().unwrap().iter().find(|p| p["title"] == title).cloned();
-    eventually("the planted folder's run to fail", &a, async || place("Planted").is_some_and(|p| !p["problem"].is_null())).await;
+    vault_runtime::set_item(&a.rt(), &me, &global, json!({ "title": "Unnamed bucket", "type": backups::KIND, "fields": s3, "hosts": ["127.0.0.1"], "apps": ["node"] })).await.unwrap();
+    backups_runtime::back_up_now(&a.rt());
+    let place = async |title: &str| backups_runtime::status(&a.rt()).await.unwrap()["places"].as_array().unwrap().iter().find(|p| p["title"] == title).cloned();
+    eventually("the planted folder's run to fail", &a, async || place("Planted").await.is_some_and(|p| !p["problem"].is_null())).await;
     assert!(!planted.exists(), "nothing was written there");
-    assert!(place("Unnamed bucket").is_none(), "{}", a.backups().unwrap());
+    assert!(place("Unnamed bucket").await.is_none(), "{}", backups_runtime::status(&a.rt()).await.unwrap());
 
     // A place typed into the sheet on the user's device is a place too.
-    let asked = a.request_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "title": "Sheet bucket" })).await.unwrap();
+    let asked = backups_runtime::request_place(&a.rt(), &me, &json!({ "endpoint": "http://127.0.0.1:9", "title": "Sheet bucket" })).await.unwrap();
     let answer = json!({ "fields": { "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" } });
     vault_runtime::answer_request(&a.rt(), &me, &global, asked["id"].as_str().unwrap(), &answer).await.unwrap();
-    assert!(place("Sheet bucket").is_some_and(|p| p["kind"] == "s3"), "{}", a.backups().unwrap());
+    assert!(place("Sheet bucket").await.is_some_and(|p| p["kind"] == "s3"), "{}", backups_runtime::status(&a.rt()).await.unwrap());
 }
 
 /// The notes' lines in `global` as a place's copy of the network's bucket holds them, opened with the recovery key
@@ -236,7 +236,7 @@ fn backed_up_keys(dir: &std::path::Path, install: &str, recovery: &[u8; 32], sco
     let folder = bucket::folder(scope);
     let mut keys = ::database::stored::Keys::new();
     for n in copy.list(&format!("{folder}/_epochs")).unwrap().iter().filter_map(|n| n.parse::<u32>().ok()) {
-        let epoch = one::backups::unseal(recovery, &copy.get(&::database::keys::epoch_name(scope, n, "recovery")).unwrap().unwrap()).unwrap();
+        let epoch = backups_runtime::engine::unseal(recovery, &copy.get(&::database::keys::epoch_name(scope, n, "recovery")).unwrap().unwrap()).unwrap();
         let Ok(Some(sealed)) = copy.get(&::database::keys::app_key_name(scope, app, n)) else { continue };
         keys.insert(n, ::key::open_database_key(&epoch, app, database, &sealed).unwrap());
     }
@@ -552,10 +552,10 @@ async fn a_backup_keeps_a_holders_copy_of_the_recovery_key() {
     ::scope::settings::recovery::seal(&a, &to, &B64U.encode(&::key::held_copy(&recovery, &to, &sealed))).await.unwrap();
 
     let dir = temp("holder-backup-disk").join("One Backups");
-    a.add_place(&me, &json!({ "path": dir, "title": "Disk" })).await.unwrap();
-    eventually("the first backup", &a, async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
+    backups_runtime::add_place(&a.rt(), &me, &json!({ "path": dir, "title": "Disk" })).await.unwrap();
+    eventually("the first backup", &a, async || !backups_runtime::status(&a.rt()).await.unwrap()["places"][0]["last"].is_null()).await;
     let place = bucket::Place::Folder(dir.clone());
-    let network = one::backups::networks(&place).unwrap().remove(0);
+    let network = backups_runtime::engine::networks(&place).unwrap().remove(0);
     let copied = place.get(&format!("{network}/bucket/{}", ::database::keys::recovery_held_name(&hex(&recovery.verifying_key().to_bytes()), &to))).unwrap().expect("the backup keeps it");
     let opened = ::key::held_sealed(&recovery.verifying_key().to_bytes(), &to, &copied).expect("still signed");
     assert_eq!(open_sealed(&seal_secret(&phone), opened).unwrap(), secret, "and it opens with the holder's device alone");

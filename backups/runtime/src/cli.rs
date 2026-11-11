@@ -4,7 +4,7 @@
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 
-use ::api::cli::{Command, Given};
+use api::cli::{Command, Given};
 
 pub fn commands() -> Command {
     Command {
@@ -17,7 +17,7 @@ fn run(g: &Given) -> Result<bool> {
     let (["backups", "check"], Some(folder)) = (g.words().as_slice(), g.flag("folder")) else { return Ok(false) };
     let key = key::recovery_key_in(g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?)?;
     let report = check_folder(folder, &key)?;
-    println!("{}", if g.json { report.to_string() } else { ::api::tools::said(&report) });
+    println!("{}", if g.json { report.to_string() } else { api::tools::said(&report) });
     Ok(true)
 }
 
@@ -26,9 +26,9 @@ fn check_folder(folder: &str, recovery_key: &str) -> Result<Value> {
     let secret = key::unhex(recovery_key).context("a recovery key is 64 hex characters")?;
     let place = bucket::Place::Folder(folder.into());
     let mut out = Vec::new();
-    for network in crate::backups::networks(&place)? {
-        let keys = crate::backups::open_keys(&place, &network, &secret)?;
-        let mut r = crate::backups::check(&crate::backups::Check { place: &place, network: &network, keys: &keys, root: None })?.0;
+    for network in crate::engine::networks(&place)? {
+        let keys = crate::engine::open_keys(&place, &network, &secret)?;
+        let mut r = crate::engine::check(&crate::engine::Check { place: &place, network: &network, keys: &keys, root: None })?.0;
         r["place"] = json!(folder);
         out.push(r);
     }

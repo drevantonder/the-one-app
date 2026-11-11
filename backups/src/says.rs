@@ -1,4 +1,4 @@
-//! What the route Settings' Backups screen adds a place with says of itself (src/says.rs).
+//! What the route Settings' Backups screen adds a place with says of itself.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;

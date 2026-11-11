@@ -274,6 +274,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "backups"
+version = "0.1.0"
+dependencies = [
+ "api",
+ "custom-build",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "backups-runtime"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "api",
+ "axum",
+ "backups",
+ "blake3",
+ "bucket",
+ "custom-build",
+ "data-encoding",
+ "database",
+ "ed25519-dalek 3.0.0",
+ "jiff",
+ "key",
+ "notifications",
+ "notifications-runtime",
+ "platform",
+ "rand 0.8.8",
+ "rusqlite",
+ "scope",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tokio",
+ "tracing",
+ "vault",
+ "vault-runtime",
+]
+
+[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3178,16 +3221,16 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 name = "one"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
  "ai-gateway",
  "ai-gateway-runtime",
  "anyhow",
  "api",
  "axum",
+ "backups",
+ "backups-runtime",
  "blake3",
  "bucket",
  "ciborium",
- "curve25519-dalek 4.1.3",
  "custom-build",
  "data-encoding",
  "database",
@@ -3312,6 +3355,8 @@ dependencies = [
  "anyhow",
  "api",
  "axum",
+ "backups",
+ "backups-runtime",
  "blake3",
  "bucket",
  "ciborium",

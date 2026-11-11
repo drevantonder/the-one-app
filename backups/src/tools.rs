@@ -1,6 +1,6 @@
-//! Backups' tools, each its own route (`api::Runs`): how they're going, backing up now, and the places
-//! they go. Settings' Backups screen asks the same routes, and `/api/backups/place` besides, which takes the key of a
-//! place its user types and so is not a tool.
+//! Backups' tools, each its own route: how they're going, backing up now, and the places they go. Settings' Backups
+//! screen asks the same routes, and `/api/backups/place` besides, which takes the key of a place its user types and so is
+//! not a tool. What serves them is the runtime's (backups/runtime/src/tools.rs).
 
 use serde_json::json;
 
@@ -79,80 +79,4 @@ pub fn tried_said(r: &serde_json::Value) -> String {
         }
     }
     out
-}
-
-/// What serves each tool, in this runtime.
-#[cfg(feature = "node")]
-pub fn runs() -> ::api::Runs {
-    use crate::node::runtime::node_serves;
-    ::api::Runs {
-        tools: vec![
-            ("status", node_serves!(serve::status)),
-            ("now", node_serves!(serve::now)),
-            ("add_place", node_serves!(serve::add_place)),
-            ("remove_place", node_serves!(serve::remove_place)),
-            ("check", node_serves!(serve::check)),
-        ],
-        start: Some(|rt| {
-            let saved: fn(::api::Rt, ::api::Caller, String) -> ::api::runtime::Fut<'static, ()> = |rt, caller, id| Box::pin(async move { crate::node::Node::of(&rt).saved_place(&caller, &id).await });
-            vault_runtime::watch(rt, vault_runtime::Watch { scope: ::scope::scopes::Scope::Global, kind: crate::backups::KIND, saved });
-        }),
-        problem: Some(|rt, me| Ok(crate::node::Node::of(rt).backup_problem(&me.user))),
-        ..::api::Runs::named("backups")
-    }
-}
-
-#[cfg(feature = "node")]
-mod serve {
-    use anyhow::{Context, Result, bail, ensure};
-    use serde_json::{Map, Value, json};
-
-    use ::api::feature::text;
-    use crate::node::Node;
-    use ::api::Caller;
-
-    pub async fn status(node: Node, me: Caller, _: Map<String, Value>) -> Result<Value> {
-        node.only_admins_back_up(&me)?;
-        node.backups()
-    }
-
-    pub async fn now(node: Node, me: Caller, _: Map<String, Value>) -> Result<Value> {
-        node.only_admins_back_up(&me)?;
-        node.back_up_now();
-        Ok(json!({ "said": "Backing up now; backups_status says how it went." }))
-    }
-
-    /// A folder on this device, or S3-compatible storage, whose key the user types on their own device.
-    pub async fn add_place(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {
-        node.only_admins_back_up(&me)?;
-        let given = |k: &str| input.get(k).and_then(Value::as_str);
-        let title = input.get("title").cloned().unwrap_or(Value::Null);
-        match (given("folder"), given("endpoint")) {
-            (Some(folder), None) => {
-                ensure!(std::path::Path::new(folder).is_absolute(), "give folder as an absolute path, like /mnt/usb/backups: {folder} isn't one");
-                let tried = node.add_place(&me, &json!({ "path": folder, "title": title })).await?;
-                let kept = if tried["id"].is_string() { "Added: the first backup starts now, then every hour that something changes." } else { "Not added." };
-                Ok(json!({ "said": format!("{}{kept}", super::tried_said(&tried)) }))
-            }
-            (None, Some(endpoint)) => {
-                let asked = node.request_place(&me, &json!({ "endpoint": endpoint, "title": title })).await?;
-                Ok(json!({ "said": format!("Asked. Give the user this link: {}\nThey type the bucket and its key into a sheet on their own device, and you never see it. Once they have, backups_status shows its first backup.", asked["link"].as_str().unwrap_or("")) }))
-            }
-            _ => bail!("give endpoint, for S3-compatible storage, or folder, a folder on this device"),
-        }
-    }
-
-    pub async fn remove_place(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {
-        node.only_admins_back_up(&me)?;
-        let place = text(&input, "place")?;
-        let places = node.backups()?["places"].as_array().cloned().unwrap_or_default();
-        let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}; backups_status lists them"))?;
-        node.remove_place(&me, p["id"].as_str().unwrap_or(place)).await?;
-        Ok(json!({ "said": format!("No longer backing up to {}. What's there stays.", p["title"].as_str().unwrap_or(place)) }))
-    }
-
-    pub async fn check(node: Node, me: Caller, _: Map<String, Value>) -> Result<Value> {
-        node.only_admins_back_up(&me)?;
-        node.check_backups().await
-    }
 }
