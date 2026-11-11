@@ -453,7 +453,9 @@ fn held<R>(id: &(String, String), keys: &::database::stored::Keys, f: impl FnOnc
 }
 
 /// A scope's database's steps after those read, with `keys`: another scope's once `global`'s log is frozen, from its
-/// start the first time. One under an epoch made whose key it wasn't handed is asked for (428, `Missing`).
+/// start the first time. One under an epoch made whose key it wasn't handed is asked for (428, `Missing`); and before
+/// `global`'s freeze is read, which says what epochs were made, one under any epoch it wasn't handed, never passed over
+/// as junk: it may be the freeze, or list the device asking.
 async fn read_steps(id: &(String, String), scope: &Scope, bucket: &Js, keys: &::database::stored::Keys) -> Result<()> {
     use ::scope::steps::{self, ScopeReader};
     let waits = if *scope == Scope::Global {
@@ -464,7 +466,11 @@ async fn read_steps(id: &(String, String), scope: &Scope, bucket: &Js, keys: &::
         let Some(at) = at else { return Ok(()) };
         let sealed = steps::fetch(bucket, at, None).await?;
         held(id, keys, |h, _| match &mut h.steps {
-            Steps::Global(r) => r.add(&sealed, keys, None, now(), |_, _, _| Ok(())),
+            Steps::Global(r) => {
+                let waits = r.add(&sealed, keys, None, now(), |_, _, _| Ok(()))?;
+                let unhanded = || sealed.steps.values().filter_map(|b| ::key::epoch_of(b).ok()).filter(|e| !keys.contains_key(e)).min();
+                Ok(waits.or_else(|| r.truth().is_none().then(unhanded).flatten()))
+            }
             Steps::Scope(_) => Ok(None),
         })?
         .flatten()
