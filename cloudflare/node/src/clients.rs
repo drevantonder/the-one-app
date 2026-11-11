@@ -155,7 +155,7 @@ fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8])
 }
 
 /// The answer to an MCP client's call of a core tool that's one request the device answers itself (`one::core_tools`,
-/// `one::settings::answered`): one that changes who can do what, which it signs as its user's, as any device does.
+/// `scope::settings::answered`): one that changes who can do what, which it signs as its user's, as any device does.
 /// None for any other MCP message, which goes to a node, as its user.
 async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, onet::Error>> {
     use one::core_tools::Reader;
@@ -168,7 +168,7 @@ async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8
     let mut input = msg["params"]["arguments"].as_object().cloned().unwrap_or_default();
     let confirmed = input.remove("confirm") == Some(json!(true));
     // Any other a node runs.
-    let asks = Some(feature.request(at, &input, confirmed)).filter(|r| one::settings::answered(&r.path))?;
+    let asks = Some(feature.request(at, &input, confirmed)).filter(|r| scope::settings::answered(&r.path))?;
     if feature.tools[at].spec["confirm"] == true && !confirmed {
         return Some(Ok(result(&msg, Err(Reader::Mcp.unconfirmed(name)))));
     }
@@ -227,6 +227,6 @@ pub async fn device_view(me: String, seal: Vec<u8>, on: JsValue) -> Result<Strin
     let seal: Key = seal.try_into().map_err(|_| JsValue::from(thrown("a seal key's secret is 32 bytes")))?;
     let keyring = KEYRINGS.with(|k| k.borrow_mut().entry(me).or_insert_with(|| Rc::new(Keyring::new(me, seal))).clone());
     keyring.read(&On::of(on, me)).await.map_err(|e| failed(&e))?;
-    let nodes: Vec<_> = keyring.nodes().iter().map(|(key, seal)| json!({ "key": one::keys::hex(key), "seal": one::keys::hex(seal) })).collect();
+    let nodes: Vec<_> = keyring.nodes().iter().map(|(key, seal)| json!({ "key": key::hex(key), "seal": key::hex(seal) })).collect();
     Ok(json!({ "user": keyring.user(), "nodes": nodes }).to_string())
 }

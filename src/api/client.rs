@@ -26,7 +26,7 @@ pub trait Via: Send + Sync {
 
     /// The home it reads the token it shows the node from, for the refusal that says it was the wrong one.
     fn home(&self) -> std::path::PathBuf {
-        crate::home()
+        platform::home()
     }
 }
 
@@ -79,7 +79,7 @@ impl Client {
     pub fn sets(&self) -> Result<Vec<Value>> {
         let mut kept = self.sets.lock().unwrap();
         if kept.is_none() {
-            *kept = Some(crate::openapi::sets(&self.get(crate::protocol::path::OPENAPI)?));
+            *kept = Some(crate::openapi::sets(&self.get(::api::path::OPENAPI)?));
         }
         Ok(kept.clone().unwrap_or_default())
     }
@@ -93,7 +93,7 @@ impl Client {
     }
 
     /// The network as this node says it (`GET /api/state`).
-    pub fn state(&self) -> Result<crate::state::State> {
+    pub fn state(&self) -> Result<scope::state::State> {
         serde_json::from_value(self.get("/api/state")?).context("the node's answer isn't a state: it may be a different build than this one")
     }
 
@@ -105,7 +105,7 @@ impl Client {
     pub fn post_for(&self, agent: Option<&str>, path: &str, body: Value) -> Result<Value> {
         let named = agent.map(|a| data_encoding::BASE64URL_NOPAD.encode(a.as_bytes()));
         let mut headers = vec![("content-type", "application/json")];
-        headers.extend(named.as_deref().map(|n| (crate::protocol::header::AGENT, n)));
+        headers.extend(named.as_deref().map(|n| (custom_build::protocol::header::AGENT, n)));
         self.answered(self.send("POST", path, &headers, Some(serde_json::to_vec(&body)?), None, None)?)
     }
 
@@ -125,7 +125,7 @@ impl Client {
     pub fn route(&self, agent: Option<&str>, path: &str, body: &Value, trace: bool) -> Called {
         let named = agent.map(|a| data_encoding::BASE64URL_NOPAD.encode(a.as_bytes()));
         let mut headers = vec![("content-type", "application/json")];
-        headers.extend(named.as_deref().map(|n| (crate::protocol::header::AGENT, n)));
+        headers.extend(named.as_deref().map(|n| (custom_build::protocol::header::AGENT, n)));
         self.traced(path, headers, body, trace, None, |r| r)
     }
 
@@ -136,7 +136,7 @@ impl Client {
 
     fn traced(&self, path: &str, mut headers: Vec<(&str, &str)>, body: &Value, trace: bool, what: Option<Value>, answered: impl FnOnce(Value) -> Value) -> Called {
         if trace {
-            headers.push((crate::protocol::header::TRACE, "1"));
+            headers.push((custom_build::protocol::header::TRACE, "1"));
         }
         let (ok, node) = match self.send("POST", path, &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None, what) {
             Ok((mut answer, asked)) => {
@@ -161,7 +161,7 @@ impl Client {
         call["traceparent"] = json!(traceparent);
         let asked = Asked { call, began: std::time::Instant::now() };
         let mut headers = headers.to_vec();
-        headers.push((crate::protocol::header::TRACEPARENT, &traceparent));
+        headers.push((custom_build::protocol::header::TRACEPARENT, &traceparent));
         match self.via.send(method, path, &headers, body, wait) {
             Ok(answer) => Ok((answer, asked)),
             Err(err) => {
@@ -188,8 +188,8 @@ impl Client {
         let ms = began.elapsed().as_millis() as u64;
         call.as_object_mut().unwrap().extend(how.as_object().cloned().unwrap_or_default().into_iter().filter(|(_, v)| !v.is_null()));
         (call["name"], call["time"], call["ms"]) = (json!("client.call"), json!(now_ms().saturating_sub(ms)), json!(ms));
-        let kept = call["failed"] == true || call["error"].is_string() || ms >= crate::insights::SLOW_MS || call["traceparent"].as_str().and_then(crate::insights::parent_of).is_some_and(|(trace, _)| crate::insights::sampled(&trace));
-        let unsent = crate::cache().join(format!("unsent-{}.json", self.client));
+        let kept = call["failed"] == true || call["error"].is_string() || ms >= custom_build::protocol::SLOW_MS || call["traceparent"].as_str().and_then(crate::insights::parent_of).is_some_and(|(trace, _)| crate::insights::sampled(&trace));
+        let unsent = platform::cache().join(format!("unsent-{}.json", self.client));
         let mut events: Vec<Value> = std::fs::read(&unsent).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         if kept {
             events.push(call);
@@ -205,7 +205,7 @@ impl Client {
             let _ = std::fs::remove_file(&unsent);
         } else {
             let keep = &events[events.len().saturating_sub(MOST_UNSENT)..];
-            let _ = std::fs::create_dir_all(crate::cache()).and_then(|_| std::fs::write(&unsent, serde_json::to_vec(keep).unwrap_or_default()));
+            let _ = std::fs::create_dir_all(platform::cache()).and_then(|_| std::fs::write(&unsent, serde_json::to_vec(keep).unwrap_or_default()));
         }
     }
 
@@ -243,7 +243,7 @@ fn unreached(err: &anyhow::Error) -> &'static str {
 /// The code of what a node answered failed, as `answered` read it: a refusal's is `refused`.
 fn code_of(err: &anyhow::Error) -> Option<String> {
     let refused = matches!(err.downcast_ref::<crate::cli::Failed>(), Some(crate::cli::Failed::Refused(_)));
-    crate::protocol::Coded::of(err).or_else(|| refused.then(|| crate::protocol::code::REFUSED.to_string()))
+    custom_build::protocol::Coded::of(err).or_else(|| refused.then(|| custom_build::protocol::code::REFUSED.to_string()))
 }
 
 /// What the node answered, or what it says failed: refused (401, 403 or `code::REFUSED`) as `cli::Failed::Refused`, the
@@ -252,17 +252,17 @@ pub fn answered(status: u16, body: Value, home: &std::path::Path) -> Result<Valu
     let Some(err) = body.get("error") else { return Ok(body) };
     let code = body.get("code").and_then(Value::as_str).map(str::to_string);
     let err = match code.as_deref() {
-        Some(crate::protocol::code::NOT_THIS_MACHINE) => super::token_refused(home),
-        Some(crate::protocol::code::UPDATE) => format!("{} Run {} update.", err.as_str().unwrap_or("failed"), crate::config::CLI),
+        Some(custom_build::protocol::code::NOT_THIS_MACHINE) => super::token_refused(home),
+        Some(custom_build::protocol::code::UPDATE) => format!("{} Run {} update.", err.as_str().unwrap_or("failed"), custom_build::config::CLI),
         _ => err.as_str().unwrap_or("failed").to_string(),
     };
     let err = match body["trace"].as_str() {
         Some(trace) => format!("{err} (trace-id {trace})"),
         None => err,
     };
-    Err(match matches!(status, 401 | 403) || code.as_deref() == Some(crate::protocol::code::REFUSED) {
+    Err(match matches!(status, 401 | 403) || code.as_deref() == Some(custom_build::protocol::code::REFUSED) {
         true => crate::cli::Failed::Refused(err).into(),
-        false => crate::protocol::Coded::or_plain(code, err),
+        false => custom_build::protocol::Coded::or_plain(code, err),
     })
 }
 
@@ -280,7 +280,7 @@ pub struct InProcess {
 impl InProcess {
     /// As a request that came with `client` (over iroh), from `peer` (over TCP), and `headers`. Called in the runtime.
     pub fn new(node: Node, client: Option<super::FromClient>, peer: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>, headers: &axum::http::HeaderMap) -> InProcess {
-        let proof = [axum::http::header::AUTHORIZATION.as_str(), crate::protocol::header::LOCAL_TOKEN, crate::protocol::header::READS];
+        let proof = [axum::http::header::AUTHORIZATION.as_str(), custom_build::protocol::header::LOCAL_TOKEN, custom_build::protocol::header::READS];
         let headers = headers.iter().filter(|(n, _)| proof.contains(&n.as_str())).map(|(n, v)| (n.clone(), v.clone())).collect();
         InProcess { router: super::guarded(super::routes(), node), client, peer, headers, runtime: tokio::runtime::Handle::current() }
     }
@@ -313,7 +313,7 @@ impl Via for InProcess {
                 }
             }
         });
-        let trace = parts.headers.get(crate::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
+        let trace = parts.headers.get(custom_build::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
         Ok(Answer { status: parts.status.as_u16(), trace, body: Box::new(Streamed { chunks, part: Default::default() }) })
     }
 }

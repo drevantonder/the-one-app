@@ -127,11 +127,11 @@ pub mod ids {
 }
 
 /// A scope as a trace names it: its kind alone, never whose.
-pub fn kind(scope: &crate::database::scopes::Scope) -> &'static str {
+pub fn kind(scope: &scope::scopes::Scope) -> &'static str {
     match scope {
-        crate::database::scopes::Scope::Global => "everyone",
-        crate::database::scopes::Scope::Group(_) => "group",
-        crate::database::scopes::Scope::User(_) => "user",
+        scope::scopes::Scope::Global => "everyone",
+        scope::scopes::Scope::Group(_) => "group",
+        scope::scopes::Scope::User(_) => "user",
     }
 }
 

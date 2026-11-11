@@ -6,10 +6,11 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use one::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, REPO, TARGET};
+use ::custom_build::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, REPO, TARGET};
 use one::latest::{Latest, Thing};
 use one::release::Version;
-use one::{cache, release};
+use ::platform::cache;
+use one::release;
 use serde_json::{Value, json};
 
 use one::build::{self, release_key, PLATFORMS, cargo, git, quietly, show, succeeds};
@@ -156,7 +157,7 @@ fn changes(commit: Option<&str>) -> Result<()> {
 /// Publishes a build on GitHub, for the installer.
 fn github_release(tag: &str) -> Result<()> {
     ensure!(version_tag(tag), "a release is named like v1.2.3");
-    ensure!(one::state::installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub");
+    ensure!(scope::state::installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub");
     ensure!(succeeds(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     let key = release_key()?;
     let _turn = turn()?;
@@ -311,7 +312,7 @@ fn publish_source(at: &At, release: bool) -> Result<()> {
 
 /// A clean clone of the repo, kept in the cache, at `commit` or the tip of the repo's main. Build output stays, so builds are quick.
 fn checkout(commit: Option<&str>) -> Result<PathBuf> {
-    ensure!(cache().is_absolute(), "give {} as a full path", one::config::env("HOME"));
+    ensure!(cache().is_absolute(), "give {} as a full path", ::custom_build::config::env("HOME"));
     std::fs::create_dir_all(cache())?;
     let dir = cache().join("src");
     if !dir.join(".git").exists() {
@@ -344,9 +345,9 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
 
 /// This build's web client written to `dir` as `<commit>.bundle`, not yet signed: gzip, for `publish web` to sign and publish.
 fn web_bundle(dir: &Path) -> Result<PathBuf> {
-    let bundle = one::web::bundle::Bundle::of_this_build(one::config::BUILD, one::config::COMMITTED);
+    let bundle = one::web::bundle::Bundle::of_this_build(::custom_build::config::BUILD, ::custom_build::config::COMMITTED);
     std::fs::create_dir_all(dir)?;
-    let path = dir.join(format!("{}.bundle", one::config::BUILD));
+    let path = dir.join(format!("{}.bundle", ::custom_build::config::BUILD));
     std::fs::write(&path, bundle.packed()?)?;
     Ok(path)
 }

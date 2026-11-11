@@ -7,26 +7,11 @@
 //! reaches; if it doesn't, it answers 421 with the nodes that do, and the client asks one itself, with keys for it,
 //! rather than the node passing it on. A node asked by what doesn't pick its node (this machine's own programs, a
 //! auth, the Cloudflare node's relay) passes a call on to the devices that run it. Calls go to the devices in run
-//! priority's order (`src/rank.rs`).
+//! priority's order (`scope/src/rank.rs`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
-
-impl CallRequest {
-    /// What it runs: its service's function, or its app's tool.
-    pub fn runs(&self) -> &str {
-        if self.service.is_some() { &self.function } else { &self.tool }
-    }
-
-    /// `fields` of the call with its app and what it runs, under the name its kind has: how a call goes between devices
-    /// and into the trace.
-    pub(super) fn named(&self, mut fields: Value) -> Value {
-        fields["app"] = json!(self.app);
-        fields[if self.service.is_some() { "function" } else { "tool" }] = json!(self.runs());
-        fields
-    }
-}
 
 pub(super) enum Reply {
     Ok(Value),
@@ -45,7 +30,7 @@ impl Reply {
     }
 
     pub(super) fn failed(err: &anyhow::Error) -> Reply {
-        Reply::Error(format!("{err:#}"), crate::protocol::Coded::of(err))
+        Reply::Error(format!("{err:#}"), custom_build::protocol::Coded::of(err))
     }
 
     pub(super) fn json(self) -> Value {
@@ -131,7 +116,7 @@ fn runs_on_online(app: &Value) -> impl Iterator<Item = &Value> {
 }
 
 /// Whether a device has no room for more: its memory, or its CPU of late, over 90% used.
-fn full(load: &crate::load::Load) -> bool {
+fn full(load: &scope::state::Load) -> bool {
     let busy = load.cpu.iter().rev().take(3).map(|c| *c as u32).sum::<u32>() / 3;
     load.memory.is_some_and(|m| m.total > 0 && m.used * 10 > m.total * 9) || busy > 90
 }
@@ -214,7 +199,7 @@ impl std::error::Error for Elsewhere {}
 
 /// How a device asked for a call didn't answer: it lacked keys its caller hands (this device), or never answered.
 enum Asked {
-    Needs(crate::keys::Needs),
+    Needs(::api::handed::Needs),
     Failed(anyhow::Error),
 }
 
@@ -288,7 +273,7 @@ impl Node {
             }
             Ok(Reply::Error(e, code)) => {
                 tried("failed", None);
-                return Err(crate::protocol::Coded::or_plain(code, e))
+                return Err(custom_build::protocol::Coded::or_plain(code, e))
             }
             Ok(Reply::Elsewhere(why)) if !others.is_empty() => {
                 tried("elsewhere", Some(&why));
@@ -396,7 +381,7 @@ impl Node {
                 stops.push(stop);
                 started.push(Instant::now());
                 answered.push(here);
-                hedge_at = (races && !here && next < candidates.len()).then(|| tokio::time::Instant::now() + crate::hedge::limit(&device_limit(&device)));
+                hedge_at = (races && !here && next < candidates.len()).then(|| tokio::time::Instant::now() + platform::hedge::limit(&device_limit(&device)));
                 continue;
             }
             if asked.is_empty() {
@@ -413,7 +398,7 @@ impl Node {
                     let device = candidates[i];
                     answered[i] = true;
                     if device != self.0.id {
-                        crate::hedge::learn(&device_limit(&device), started[i].elapsed());
+                        platform::hedge::learn(&device_limit(&device), started[i].elapsed());
                         self.set_down(device, false);
                     }
                     if took && winner.is_none() {
@@ -458,12 +443,12 @@ impl Node {
                     return Ok(v);
                 }
                 // Another device asked took its lease first: that one's answer is the call's.
-                Ok((Reply::Error(e, Some(code)), theirs)) if code == crate::protocol::code::ALREADY && !asked.is_empty() => {
+                Ok((Reply::Error(e, Some(code)), theirs)) if code == custom_build::protocol::code::ALREADY && !asked.is_empty() => {
                     tried("elsewhere", json!({ "here": here, "why": e, "trace": theirs }));
                 }
                 Ok((Reply::Error(e, code), theirs)) => {
                     tried("failed", json!({ "here": here, "trace": theirs }));
-                    return Err(crate::protocol::Coded::or_plain(code, e));
+                    return Err(custom_build::protocol::Coded::or_plain(code, e));
                 }
                 Ok((Reply::Elsewhere(w), theirs)) => {
                     tried("elsewhere", json!({ "here": here, "why": w, "trace": theirs }));
@@ -549,17 +534,17 @@ impl Node {
 
     /// No device of `me`'s runs `app`, in words: it's on one that's starting (`restarting`), or on none yet, with what it
     /// needs and how to add it.
-    async fn no_device(&self, app: &str, me: &Caller) -> crate::protocol::Coded {
+    async fn no_device(&self, app: &str, me: &Caller) -> custom_build::protocol::Coded {
         let title = self.title(app).await;
         let info = self.about(app, me).await;
         if info.as_ref().is_some_and(|a| runs_on_online(a).next().is_some()) {
-            return crate::protocol::Coded::new(crate::protocol::code::RESTARTING, format!("{title} is starting: try again in a moment."));
+            return custom_build::protocol::Coded::new(custom_build::protocol::code::RESTARTING, format!("{title} is starting: try again in a moment."));
         }
         let text = match &info {
             Some(a) => format!("{title} isn't on any of your devices yet.{} add {app} adds it, on a node you choose (apps_devices {app} lists them).", a["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()),
             None => format!("{title} isn't on any of your devices yet."),
         };
-        crate::protocol::Coded::new(crate::protocol::code::NOT_ADDED, text)
+        custom_build::protocol::Coded::new(custom_build::protocol::code::NOT_ADDED, text)
     }
 
     /// Why `app`'s service runs nowhere for `me` though it was put on a node, as its problem box in the App Store says
@@ -622,7 +607,7 @@ impl Node {
     }
 
     fn cloudflare_is_asked_directly(&self) -> String {
-        format!("{} is asked by a device of yours itself, not through {}, which runs a node: from the web app, a phone, or the command line of a computer that runs no node of its own (one <command> --device {}). From this one, leave --device off and the nearest device that can runs it", crate::rank::CLOUDFLARE, self.device_name(), crate::rank::CLOUDFLARE)
+        format!("{} is asked by a device of yours itself, not through {}, which runs a node: from the web app, a phone, or the command line of a computer that runs no node of its own (one <command> --device {}). From this one, leave --device off and the nearest device that can runs it", scope::rank::CLOUDFLARE, self.device_name(), scope::rank::CLOUDFLARE)
     }
 
     /// The devices that might run a call, in the order it tries them (`rank::order`). A service about its own machine
@@ -641,7 +626,7 @@ impl Node {
                 }
             }
             // A client's log is read through a node it's connected to, which only that node knows: each is tried.
-            if req.app == scopes::APP && self.with(|i| Ok(i.r.db().find_machine(device).and_then(|k| Ok(i.r.db().client(&k)?.is_some())).unwrap_or(false)))? {
+            if req.app == key::APP && self.with(|i| Ok(i.r.db().find_machine(device).and_then(|k| Ok(i.r.db().client(&k)?.is_some())).unwrap_or(false)))? {
                 let mut nodes = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|m| m.key).filter(|k| *k == self.0.id || i.reachable(k)).collect::<Vec<_>>()))?;
                 nodes.sort_by_key(|k| *k != self.0.id);
                 return Ok(nodes);
@@ -730,7 +715,7 @@ impl Node {
     pub(super) fn resolve(&self, mut req: CallRequest) -> CallRequest {
         if let Some(service) = &req.service {
             req.app = service.clone();
-        } else if req.app != scopes::APP && (!self.deployed(&req.app) || req.device.as_deref() == Some("all")) {
+        } else if req.app != key::APP && (!self.deployed(&req.app) || req.device.as_deref() == Some("all")) {
             req.service = Some(req.app.clone());
         }
         if req.service.is_some() && req.function.is_empty() {
@@ -769,7 +754,7 @@ impl Node {
             let (keys, until) = self.passing_on(&me.credential, &runs, &resolved.app);
             let seal = self.with(|i| Ok(i.r.db().seal_key(&device)?))?.context("that device has no key to seal to")?;
             let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
-            request = crate::keys::forwarded(&request, &me.user, req.client.as_deref().unwrap_or(""), &self.0.id, &seal, until, keys, &named)?["body"]["call"].take();
+            request = ::api::handed::forwarded(&request, &me.user, req.client.as_deref().unwrap_or(""), &self.0.id, &seal, until, keys, &named)?["body"]["call"].take();
             request["me"]["key"] = json!(hex(&self.0.id));
             request["me"]["agent"] = json!(me.agent);
         }
@@ -843,7 +828,7 @@ impl Node {
 
     /// `run`, but a call that lacks keys its caller can hand fails with what it needs. A call is stopped at its limit
     /// only before it writes: one that's writing is waited for, and answers as it went.
-    pub(super) async fn run_or_need(&self, req: &CallRequest, me: &Caller) -> Result<Reply, crate::keys::Needs> {
+    pub(super) async fn run_or_need(&self, req: &CallRequest, me: &Caller) -> Result<Reply, ::api::handed::Needs> {
         let req = &self.resolve(req.clone());
         let limit = self.limit(req).await;
         let writing = AtomicBool::new(false);
@@ -851,7 +836,7 @@ impl Node {
         let result = trace::within(Some(call.trace.clone()), unless_writing(tokio::time::Instant::now() + limit, &writing, Box::pin(self.run_here(req, me, limit, &writing)))).await;
         let reply = match result {
             Some(Ok(reply)) => reply,
-            Some(Err(err)) if !err.is::<Stopped>() => match err.downcast::<crate::keys::Needs>() {
+            Some(Err(err)) if !err.is::<Stopped>() => match err.downcast::<::api::handed::Needs>() {
                 Ok(need) => {
                     call.leave();
                     return Err(need);
@@ -893,7 +878,7 @@ impl Node {
         if reading.elapsed() >= Duration::from_millis(1) {
             trace::note(json!({ "step": "logs" }), reading.elapsed());
         }
-        if req.app == scopes::APP {
+        if req.app == key::APP {
             return self.read_logs(req, &input, me).await;
         }
         if req.service.is_some() {
@@ -919,7 +904,7 @@ impl Node {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest version yet", req.app)));
         }
         if self.deleted(&req.app) {
-            return Ok(Reply::Error(format!("{title} was deleted: its owners can restore it from Recently Deleted in the App Store"), Some(crate::protocol::code::APP_DELETED.into())));
+            return Ok(Reply::Error(format!("{title} was deleted: its owners can restore it from Recently Deleted in the App Store"), Some(custom_build::protocol::code::APP_DELETED.into())));
         }
         if let Some(why) = self.stopped(&req.app) {
             trace::stage(crate::insights::stage::GUARD);
@@ -931,13 +916,13 @@ impl Node {
             && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings()?, &crate::labs::app_key(&req.app, lab))))?
         {
             let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
-            return Ok(Reply::Error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs."), Some(crate::protocol::code::REFUSED.into())));
+            return Ok(Reply::Error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs."), Some(custom_build::protocol::code::REFUSED.into())));
         }
         // A call that lacks a key of a scope it names fails here, before it runs or writes anything: its
         // app's database's, and the Vault's there too if it says it uses items.
-        let mut want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), scopes::APP_DATABASE)).collect();
+        let mut want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), key::APP_DATABASE)).collect();
         if self.0.apps.describe(&req.app).await?["vault"].is_object() {
-            want.extend(scopes.iter().map(|s| (s.clone(), scopes::APP, scopes::CoreDb::Vault.name())));
+            want.extend(scopes.iter().map(|s| (s.clone(), key::APP, key::CoreDb::Vault.name())));
         }
         let checking = Instant::now();
         trace::stage(crate::insights::stage::KEYS);
@@ -947,13 +932,13 @@ impl Node {
         let mut lease = None;
         if let (Some(id), Some(scope), false) = (&req.id, scopes.first(), req.unleased) {
             if !self.reads(req).await {
-                let base = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
+                let base = format!("{}/{}/calls/{id}", bucket::folder(&scope.to_string()), req.app);
                 let leasing = Instant::now();
                 trace::stage(crate::insights::stage::LEASE);
                 let taken = self.take_lease(&base).await?;
                 trace::note(json!({ "step": "lease" }), leasing.elapsed());
                 let Some(taken) = taken else {
-                    return Ok(Reply::Error("This may already be done: it ran on another device, whose answer was lost. Check before trying again.".into(), Some(crate::protocol::code::ALREADY.into())));
+                    return Ok(Reply::Error("This may already be done: it ran on another device, whose answer was lost. Check before trying again.".into(), Some(custom_build::protocol::code::ALREADY.into())));
                 };
                 lease = Some(taken);
             }
@@ -993,7 +978,7 @@ impl Node {
                 // The app answered and the call wrote nothing (a call's writes are one transaction): its next try may
                 // run. Not when the app was stopped, as it may still be running, nor when it failed writing.
                 if let Some(lease) = lease.filter(|_| answered.load(Ordering::Relaxed) && !writing.load(Ordering::Relaxed))
-                    && let Err(err) = crate::bucket::Bucket::create(&self.bucket()?, &format!("{lease}.failed"), b"").await
+                    && let Err(err) = bucket::Bucket::create(&self.bucket()?, &format!("{lease}.failed"), b"").await
                 {
                     tracing::warn!("saying a call failed, so it may run again: {err:#}");
                 }
@@ -1017,10 +1002,10 @@ impl Node {
         let bucket = self.bucket()?;
         for n in 1..=LEASE_TRIES {
             let lease = if n == 1 { base.to_string() } else { format!("{base}.{n}") };
-            if crate::bucket::Bucket::create(&bucket, &lease, hex(&self.0.id).as_bytes()).await? {
+            if bucket::Bucket::create(&bucket, &lease, hex(&self.0.id).as_bytes()).await? {
                 return Ok(Some(lease));
             }
-            if crate::bucket::Bucket::get(&bucket, &format!("{lease}.failed")).await?.is_none() {
+            if bucket::Bucket::get(&bucket, &format!("{lease}.failed")).await?.is_none() {
                 return Ok(None);
             }
         }
@@ -1063,14 +1048,14 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
             let mut out = Vec::new();
             for s in named {
                 let s = Scope::parse_for(s, &me.user)?;
-                crate::protocol::allowed!(reach.contains(&s), "{title} can't reach {} for you", scope_name(i, &s.to_string())?);
+                custom_build::allowed!(reach.contains(&s), "{title} can't reach {} for you", scope_name(i, &s.to_string())?);
                 out.push(s);
             }
             out
         }
     };
     if reach.is_empty() {
-        bail!(crate::protocol::Coded::new(crate::protocol::code::NOT_ADDED, format!("{title} isn't on your pages: add it first")));
+        bail!(custom_build::protocol::Coded::new(custom_build::protocol::code::NOT_ADDED, format!("{title} isn't on your pages: add it first")));
     }
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string())?)));

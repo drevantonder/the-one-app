@@ -4,8 +4,8 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::cli::{Command, Given};
-use crate::config::{CLI, NAME, YOURS};
-use crate::database::scopes::Role;
+use ::custom_build::config::{CLI, NAME, YOURS};
+use ::scope::scopes::Role;
 use crate::api::Client;
 
 /// `settings` with the network's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
@@ -173,7 +173,7 @@ pub fn commands() -> Command {
                             settings.save()?;
                             println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave a 1Password reference (op://…) in its place.\n", crate::cloudflare::Settings::path().with_file_name(".env.local").display());
                             // A network with a domain needs a provider's client, which is put beside the secrets first.
-                            if crate::config::JOIN_DOMAIN.is_empty() { settings } else { crate::cloudflare::Settings::load()? }
+                            if ::custom_build::config::JOIN_DOMAIN.is_empty() { settings } else { crate::cloudflare::Settings::load()? }
                         }
                     };
                     let settings = devices_here(g.node, settings, !g.has("new"))?;
@@ -186,11 +186,11 @@ pub fn commands() -> Command {
                     // The clients its users sign in with, signed by this admin's device: a new device's sign-in counts
                     // only for one of them (`sign_in_proof::CLIENTS`), whatever auth says.
                     if let Some(clients) = settings.sign_in_clients() {
-                        let had = node.state().ok().and_then(|s| s.network?.settings.get(crate::onboarding::sign_in_proof::CLIENTS).cloned());
+                        let had = node.state().ok().and_then(|s| s.network?.settings.get(::scope::sign_in_proof::CLIENTS).cloned());
                         if had.as_deref() != Some(clients.as_str())
-                            && let Err(err) = node.post("/api/settings", json!({ "name": crate::onboarding::sign_in_proof::CLIENTS, "value": clients }))
+                            && let Err(err) = node.post("/api/settings", json!({ "name": ::scope::sign_in_proof::CLIENTS, "value": clients }))
                         {
-                            eprintln!("A new device's sign-in can't be checked until an admin's device runs {CLI} settings {} {clients}: {err:#}", crate::onboarding::sign_in_proof::CLIENTS);
+                            eprintln!("A new device's sign-in can't be checked until an admin's device runs {CLI} settings {} {clients}: {err:#}", ::scope::sign_in_proof::CLIENTS);
                         }
                     }
                     print!("Deployed.\n{}", cloudflare_said(&settings));
@@ -216,7 +216,7 @@ pub fn commands() -> Command {
                     }
                     // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
                     // things run in.
-                    node.post("/api/settings", json!({ "name": crate::database::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
+                    node.post("/api/settings", json!({ "name": ::scope::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
                     println!("The Cloudflare node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
                 }
                 ["cloudflare", "set", name, value] => {

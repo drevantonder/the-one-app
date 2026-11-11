@@ -14,7 +14,7 @@ use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::keys::{Endpoint, FRESH, Key, hex};
+use ::key::{Endpoint, FRESH, Key, hex};
 
 /// What an ask to a service is signed for.
 pub const ASK: &str = "one/service-ask";
@@ -40,15 +40,15 @@ pub type Parts = super::Hub<Carried>;
 /// `body` asked of the service `to` by `from`: signed, then sealed to the service. → the bytes, and the `at` it was
 /// signed with, which its answer names.
 pub fn ask(from: &SigningKey, to: &Endpoint, body: Value) -> Result<(Vec<u8>, u64)> {
-    let at = crate::keys::next_at(now_ms());
-    let signed = crate::keys::signed_request(from, ASK, json!({ "to": hex(&to.key), "body": body }), at);
-    Ok((crate::keys::seal_to(&to.seal, &serde_json::to_vec(&signed)?)?, at))
+    let at = ::key::next_at(now_ms());
+    let signed = ::key::signed_request(from, ASK, json!({ "to": hex(&to.key), "body": body }), at);
+    Ok((::key::seal_to(&to.seal, &serde_json::to_vec(&signed)?)?, at))
 }
 
 /// An ask the service `me` was handed, opened and checked: signed for it, fresh, and never taken before. → who
 /// signed it, what it asks, and its `at`.
 pub fn open_ask(me: &SigningKey, sealed: &[u8], once: &Once) -> Result<(Key, Value, u64)> {
-    let opened = crate::keys::open_sealed(&crate::keys::seal_secret(me), sealed).context("it isn't sealed to this service")?;
+    let opened = ::key::open_sealed(&::key::seal_secret(me), sealed).context("it isn't sealed to this service")?;
     let signed: Value = serde_json::from_slice(&opened)?;
     signed_by(&signed, &me.verifying_key().to_bytes(), once)
 }
@@ -56,7 +56,7 @@ pub fn open_ask(me: &SigningKey, sealed: &[u8], once: &Once) -> Result<(Key, Val
 /// A request signed for `to` (a service, or a service's device as it asks its runtime), checked: fresh, and taken
 /// once. → who signed it, its body, and its `at`.
 pub fn signed_by(signed: &Value, to: &Key, once: &Once) -> Result<(Key, Value, u64)> {
-    let (by, fields) = crate::keys::check_request(ASK, signed, now_ms())?;
+    let (by, fields) = ::key::check_request(ASK, signed, now_ms())?;
     ensure!(fields["to"] == hex(to), "it was asked of someone else");
     let at = fields["at"].as_u64().unwrap_or(0);
     once.take(&by, at)?;
@@ -65,20 +65,20 @@ pub fn signed_by(signed: &Value, to: &Key, once: &Once) -> Result<(Key, Value, u
 
 /// A service's own ask of its runtime, signed: not sealed, as the runtime runs it. `device` is the service's device.
 pub fn own_ask(me: &SigningKey, device: &Key, body: Value) -> Value {
-    crate::keys::signed_request(me, ASK, json!({ "to": hex(device), "body": body }), crate::keys::next_at(now_ms()))
+    ::key::signed_request(me, ASK, json!({ "to": hex(device), "body": body }), ::key::next_at(now_ms()))
 }
 
 /// The service `me`'s answer to an ask signed at `at` by `to`: signed, then sealed to the asker.
 pub fn answer(me: &SigningKey, to: &Endpoint, at: u64, answer: Value) -> Result<Vec<u8>> {
-    let signed = crate::keys::signed_request(me, ANSWER, json!({ "to": hex(&to.key), "ask": at, "answer": answer }), crate::keys::next_at(now_ms()));
-    crate::keys::seal_to(&to.seal, &serde_json::to_vec(&signed)?)
+    let signed = ::key::signed_request(me, ANSWER, json!({ "to": hex(&to.key), "ask": at, "answer": answer }), ::key::next_at(now_ms()));
+    ::key::seal_to(&to.seal, &serde_json::to_vec(&signed)?)
 }
 
 /// The answer to the ask `me` signed at `at` of the service `service`, opened and checked.
 pub fn open_answer(me: &SigningKey, service: &Key, at: u64, sealed: &[u8]) -> Result<Value> {
-    let opened = crate::keys::open_sealed(&crate::keys::seal_secret(me), sealed).context("the answer isn't sealed to this device")?;
+    let opened = ::key::open_sealed(&::key::seal_secret(me), sealed).context("the answer isn't sealed to this device")?;
     let signed: Value = serde_json::from_slice(&opened)?;
-    let (by, fields) = crate::keys::check_request(ANSWER, &signed, now_ms())?;
+    let (by, fields) = ::key::check_request(ANSWER, &signed, now_ms())?;
     ensure!(by == *service && fields["to"] == hex(&me.verifying_key().to_bytes()) && fields["ask"] == at, "that answer isn't the service's to this ask");
     Ok(fields["answer"].clone())
 }

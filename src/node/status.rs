@@ -3,7 +3,7 @@
 
 use super::*;
 
-const NODE_DATABASE: (&str, &str) = (scopes::APP, scopes::APP_DATABASE);
+const NODE_DATABASE: (&str, &str) = (key::APP, key::APP_DATABASE);
 
 /// Its schema, as its changes, oldest first.
 const SCHEMA: &[&str] = &["
@@ -127,7 +127,7 @@ pub struct BackupRun {
     pub device: Key,
     pub time: u64,
     pub error: Option<String>,
-    /// What kind of trouble the error is, for its fix: `crate::bucket::Trouble`'s name.
+    /// What kind of trouble the error is, for its fix: `bucket::Trouble`'s name.
     pub trouble: Option<String>,
     pub snapshots: Vec<BackedUp>,
 }
@@ -167,7 +167,7 @@ impl Node {
         let before = db.at();
         // As every write is, so a step that says the log may be frozen is answered, not the end of every row here.
         self.write_in(scope, &mut db, &self.bucket()?, |c| {
-            let ex = |sql: &str, params: &[Value]| crate::database::stored::execute(c, sql, params).map(|_| ());
+            let ex = |sql: &str, params: &[Value]| database::stored::execute(c, sql, params).map(|_| ());
             match &said {
                 Said::Ran { app, schedule, run } => {
                     ex(

@@ -9,9 +9,9 @@ use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use one::api::Who;
-use one::config::{CLI, YOURS};
+use ::custom_build::config::{CLI, YOURS};
 use one::node::NetworkFile;
-use one::protocol::{Coded, code};
+use ::custom_build::protocol::{Coded, code};
 use serde_json::{Value, json};
 
 use super::Onet;
@@ -23,7 +23,7 @@ use crate::{Body, Device, Sent};
 const IN_MEMORY: usize = 4 << 20;
 
 /// The headers a request is passed on without: how it was framed and who it's from are said again where it goes.
-const OWN_HEADERS: &[&str] = &["host", "content-length", "transfer-encoding", "connection", one::protocol::header::LOCAL_TOKEN, "authorization"];
+const OWN_HEADERS: &[&str] = &["host", "content-length", "transfer-encoding", "connection", ::custom_build::protocol::header::LOCAL_TOKEN, "authorization"];
 
 /// Each route of the API with who may ask it, to tell what only this computer's own runtime answers.
 struct Routes(Vec<(Vec<String>, Who)>);
@@ -150,8 +150,8 @@ async fn join(onet: &Arc<Onet>, req: Request) -> Result<Value> {
 /// address and this device's user), or not; and the device a sign-in here is for (`join`, its key and seal key) and the
 /// code another of its user's devices lets it in by.
 async fn stands(onet: &Onet) -> Result<Value> {
-    let me = one::keys::Endpoint::of(&onet.key);
-    let mut out = json!({ "in": false, "join": format!("{}{}", one::keys::hex(&me.key), one::keys::hex(&me.seal)), "code": one::keys::spaced_code(&one::keys::join_code(&me)) });
+    let me = key::Endpoint::of(&onet.key);
+    let mut out = json!({ "in": false, "join": format!("{}{}", key::hex(&me.key), key::hex(&me.seal)), "code": key::spaced_code(&key::join_code(&me)) });
     if let Some(network) = NetworkFile::read(&onet.home)? {
         let address = onet.device().await.ok().map(|d| d.address().to_string()).filter(|a| !a.is_empty());
         out["in"] = json!(true);
@@ -292,8 +292,8 @@ async fn services(onet: &Arc<Onet>, req: Request) -> Result<Value> {
 /// What this device's own app runtime, an endpoint of its own key, asks of the device's key (`one::node::Holder`): the
 /// device's key and seal key.
 fn held(onet: &Onet) -> Value {
-    let seal = one::keys::public_of(&one::keys::seal_secret(&onet.key));
-    json!({ "key": one::keys::hex(&onet.key.verifying_key().to_bytes()), "seal": one::keys::hex(&seal) })
+    let seal = key::public_of(&key::seal_secret(&onet.key));
+    json!({ "key": key::hex(&onet.key.verifying_key().to_bytes()), "seal": key::hex(&seal) })
 }
 
 /// The secret the device's seal key shares with the key given: what opens something sealed to the device.
@@ -301,7 +301,7 @@ async fn shared(onet: &Onet, req: Request) -> Result<Value> {
     use data_encoding::BASE64URL_NOPAD as B64U;
     let asked: one::node::HeldShare = body(req).await?;
     let share = <[u8; 32]>::try_from(B64U.decode(asked.share.as_bytes())?).map_err(|_| anyhow::anyhow!("a share is 32 bytes"))?;
-    Ok(json!({ "shared": B64U.encode(&one::keys::agree(&one::keys::seal_secret(&onet.key), &share)) }))
+    Ok(json!({ "shared": B64U.encode(&key::agree(&key::seal_secret(&onet.key), &share)) }))
 }
 
 /// A step of `global` written as the device, for its user alone, to the bucket itself.
@@ -322,10 +322,10 @@ async fn sign(onet: &Onet, req: Request) -> Result<Value> {
     Ok(json!({ "signature": B64U.encode(&signature) }))
 }
 
-/// What the network's recovery key does on this computer, signed here as this device (`one::settings::recovery`).
+/// What the network's recovery key does on this computer, signed here as this device (`::scope::settings::recovery`).
 async fn recovery(onet: &Onet, path: &str, req: Request) -> Result<Value> {
     use one::says::devices::{ApproveWithRecovery, ReplaceRecovery, SealRecovery, recovery_key};
-    use one::settings::recovery;
+    use ::scope::settings::recovery;
     let device = onet.device().await?;
     let (keyring, client) = device.reached().await.map_err(|e| anyhow::anyhow!("{e}"))?;
     let me = keyring.mine(&client, &*device);
@@ -364,12 +364,12 @@ async fn pass_on(onet: &Arc<Onet>, routes: &Routes, req: Request) -> Response {
     };
     let path = req.uri().path().to_string();
     // What its own app runtime serves itself for this computer's programs, as a node that's its own device did: a
-    // route a client answers alone, a node answers with more than that (`one::settings::on_a_node`).
+    // route a client answers alone, a node answers with more than that (`::scope::settings::on_a_node`).
     let method = req.method().to_string();
     if let Some(runtime) = &onet.runtime
         && device.local().is_some()
-        && one::settings::answered(&path)
-        && !one::settings::on_a_node().any(|(m, p)| m == method && p == path)
+        && ::scope::settings::answered(&path)
+        && !::scope::settings::on_a_node().any(|(m, p)| m == method && p == path)
     {
         return to_runtime(runtime, req).await;
     }
@@ -383,7 +383,7 @@ async fn pass_on(onet: &Arc<Onet>, routes: &Routes, req: Request) -> Response {
         Err(err) => return said(StatusCode::BAD_REQUEST, &err.into()),
     };
     let called = match &spooled {
-        Spooled::Bytes(sent) if path == one::protocol::path::CALL => serde_json::from_slice::<Value>(sent).ok().and_then(|c| c["app"].as_str().map(str::to_string)),
+        Spooled::Bytes(sent) if path == api::path::CALL => serde_json::from_slice::<Value>(sent).ok().and_then(|c| c["app"].as_str().map(str::to_string)),
         _ => None,
     };
     let fetched = device.fetch(&method, &asked, headers, spooled.sent()).await;
@@ -460,7 +460,7 @@ impl Spooled {
                 Some((f, _)) => f.write_all(&part).await?,
                 None if sent.len() + part.len() <= IN_MEMORY => sent.extend_from_slice(&part),
                 None => {
-                    let path = std::env::temp_dir().join(format!("{CLI}-sending-{}", one::keys::hex(&rand::random::<[u8; 32]>())));
+                    let path = std::env::temp_dir().join(format!("{CLI}-sending-{}", key::hex(&rand::random::<[u8; 32]>())));
                     let mut options = tokio::fs::OpenOptions::new();
                     options.write(true).create_new(true);
                     #[cfg(unix)]

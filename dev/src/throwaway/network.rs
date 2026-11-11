@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use one::api::client::{Answer, Client, Via};
-use one::config::CLI;
+use ::custom_build::config::CLI;
 use one::cloudflare::Settings;
 use one::mode::{Throwaway, programs};
 use serde_json::json;
@@ -151,7 +151,7 @@ pub(crate) fn start_new(dir: &Path) -> Result<String> {
 fn create(dir: &Path) -> Result<String> {
     // Called what the user is called in their own network, if this machine is in one.
     let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
-    let mine = quick.get(format!("http://{}/api/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<one::state::State>().ok());
+    let mine = quick.get(format!("http://{}/api/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<scope::state::State>().ok());
     let me = mine.map(|s| s.looking().to_string());
     let me = me.or_else(|| std::env::var("USER").ok()).unwrap_or_else(|| "You".into());
     std::fs::create_dir_all(dir)?;
@@ -173,7 +173,7 @@ fn create(dir: &Path) -> Result<String> {
     node.post("/api/settings", json!({ "name": "address", "value": &settings.address }))?;
     // Its sign-in signs its own ID tokens, as a provider would, for this client: the one its users sign in with.
     let clients = format!("{}/api/auth one-throwaway", settings.address);
-    node.post("/api/settings", json!({ "name": one::onboarding::sign_in_proof::CLIENTS, "value": clients }))?;
+    node.post("/api/settings", json!({ "name": scope::sign_in_proof::CLIENTS, "value": clients }))?;
     // Its data moves to the throwaway bucket, which its node reaches only through its URL signer from then on.
     let moved = node.post("/api/storage", json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" }))?;
     anyhow::ensure!(moved["kept"] == true, "the throwaway network's node couldn't reach its bucket through the URL signer: {moved}");
@@ -192,8 +192,8 @@ pub(crate) fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, 
     let log_path = dir.join(log);
     let log = std::fs::File::create(&log_path).with_context(|| format!("making {}", log_path.display()))?;
     // In its folder, unless it's a computer of its own with a home of its own (`Throwaway::tell`).
-    if !command.get_envs().any(|(name, _)| name == one::config::env("HOME").as_str()) {
-        command.env(one::config::env("HOME"), dir);
+    if !command.get_envs().any(|(name, _)| name == ::custom_build::config::env("HOME").as_str()) {
+        command.env(::custom_build::config::env("HOME"), dir);
     }
     let child = command.stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn().with_context(|| format!("starting {}", command.get_program().to_string_lossy()))?;
     one::mode::record(dir, child.id(), client)?;
@@ -214,7 +214,7 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
         None => std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string(),
     };
     let mut command = std::process::Command::new(program(dir)?);
-    std::os::unix::process::CommandExt::arg0(&mut command, one::oned::name());
+    std::os::unix::process::CommandExt::arg0(&mut command, ::custom_build::programs::oned());
     Throwaway::tell(&mut command, dir, &addr);
     let node_program = spawn(dir, &mut command, "node.log", false)?;
     for (name, text) in [("pid", node_program.to_string()), ("addr", addr.clone())] {
@@ -262,11 +262,11 @@ impl Via for Direct {
             req = req.header(*name, *value);
         }
         if let Some(token) = one::api::local_token(&self.dir) {
-            req = req.header(one::protocol::header::LOCAL_TOKEN, token);
+            req = req.header(::custom_build::protocol::header::LOCAL_TOKEN, token);
         }
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         let resp = agent.run(agent.configure_request(req.body(body.unwrap_or_default())?).timeout_global(wait).build())?;
-        let trace = resp.headers().get(one::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
+        let trace = resp.headers().get(::custom_build::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
         Ok(Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
     }
 }

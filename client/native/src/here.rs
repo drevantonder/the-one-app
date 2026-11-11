@@ -11,16 +11,16 @@ use serde_json::Value;
 
 /// Where this computer's onet answers: `ADDR` (a throwaway's), or the API's own port.
 fn addr() -> String {
-    crate::env("ADDR").unwrap_or_else(|| format!("127.0.0.1:{}", one::config::PORT))
+    crate::env("ADDR").unwrap_or_else(|| format!("127.0.0.1:{}", custom_build::config::PORT))
 }
 
 fn token() -> Result<String, String> {
-    std::fs::read_to_string(one::home().join("local-token")).map(|t| t.trim().to_string()).map_err(|_| format!("This computer's {} isn't running.", onet()))
+    std::fs::read_to_string(platform::home().join("local-token")).map(|t| t.trim().to_string()).map_err(|_| format!("This computer's {} isn't running.", onet()))
 }
 
 /// onet's name here (`<cli>t`).
 fn onet() -> String {
-    format!("{}t", one::config::CLI)
+    format!("{}t", custom_build::config::CLI)
 }
 
 fn agent(secs: u64) -> ureq::Agent {
@@ -33,8 +33,8 @@ pub fn ask(path: &str, body: Option<Value>, secs: u64) -> Result<(u16, Value), S
     let url = format!("http://{}{path}", addr());
     let agent = agent(secs);
     let mut r = one::loopback::while_refused(|| match &body {
-        Some(body) => agent.post(&url).header(one::protocol::header::LOCAL_TOKEN, &token).send_json(body),
-        None => agent.get(&url).header(one::protocol::header::LOCAL_TOKEN, &token).call(),
+        Some(body) => agent.post(&url).header(custom_build::protocol::header::LOCAL_TOKEN, &token).send_json(body),
+        None => agent.get(&url).header(custom_build::protocol::header::LOCAL_TOKEN, &token).call(),
     })
     .map_err(|_| format!("This computer's {} isn't answering.", onet()))?;
     Ok((r.status().as_u16(), r.body_mut().read_json().unwrap_or_default()))
@@ -71,7 +71,7 @@ pub async fn ready(address: &str) -> Result<Value, String> {
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    Err(format!("This computer's {} didn't start. Its log says why: {} logs this device --service onet", onet(), one::config::CLI))
+    Err(format!("This computer's {} didn't start. Its log says why: {} logs this device --service onet", onet(), custom_build::config::CLI))
 }
 
 /// A response of onet's, its body coming as it sends it.
@@ -91,14 +91,14 @@ pub async fn fetch(method: String, path: String, headers: Vec<(String, String)>,
             Err(e) => return drop(answered.send(Err(e))),
         };
         let send = || {
-            let mut request = ureq::http::Request::builder().method(method.as_str()).uri(format!("http://{}{path}", addr())).header(one::protocol::header::LOCAL_TOKEN, &token);
+            let mut request = ureq::http::Request::builder().method(method.as_str()).uri(format!("http://{}{path}", addr())).header(custom_build::protocol::header::LOCAL_TOKEN, &token);
             for (name, value) in &headers {
                 request = request.header(name, value);
             }
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
             agent.run(request.body(body.clone())?)
         };
-        let apps = || ask(one::protocol::path::APPS, None, 30).ok().map(|(_, apps)| apps);
+        let apps = || ask(api::path::APPS, None, 30).ok().map(|(_, apps)| apps);
         let sent = match one::loopback::while_refused(&send) {
             Err(err) if one::loopback::lost(&err) && one::loopback::reads(&method, &path, &body, apps) => one::loopback::while_refused(&send),
             Err(err) if one::loopback::lost(&err) => return drop(answered.send(Ok(failed(one::loopback::lost_write())))),

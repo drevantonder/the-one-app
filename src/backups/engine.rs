@@ -22,9 +22,9 @@ use anyhow::{Context, Result, anyhow, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::bucket::{Place, folder, scope_of};
-use crate::database::scopes::ScopeDb;
-use crate::keys::{Key, hex};
+use ::bucket::{Place, folder, scope_of};
+use ::scope::scopes::ScopeDb;
+use ::key::{Key, hex};
 
 /// The Vault item kind a place is: an item in Everyone, with a folder's `device` and `path`, or S3's `endpoint`,
 /// `bucket`, `region`, `key_id` and `secret`.
@@ -43,7 +43,7 @@ const KEY_ID: &str = "the one app 2026-11-01 backups: a key's id";
 
 /// Opens an epoch's key sealed to the recovery key, with the recovery key's secret (its Ed25519 seed).
 pub fn unseal(recovery_secret: &[u8; 32], sealed: &[u8]) -> Result<[u8; 32]> {
-    let key = crate::keys::open_sealed(&crate::keys::twin(recovery_secret).0, sealed).map_err(|_| anyhow!("that recovery key doesn't open this backup"))?;
+    let key = ::key::open_sealed(&::key::twin(recovery_secret).0, sealed).map_err(|_| anyhow!("that recovery key doesn't open this backup"))?;
     key.try_into().map_err(|_| anyhow!("not a sealed key"))
 }
 
@@ -68,12 +68,12 @@ fn name_of(key: &[u8; 32], bytes: &[u8]) -> String {
 
 /// Encrypts an object under a key derived from its name: each key encrypts one content, so a fixed nonce is safe.
 fn lock_object(key: &[u8; 32], name: &str, bytes: &[u8]) -> Vec<u8> {
-    [crate::keys::NUMBERED, &cipher(&blake3::derive_key(OBJECT_NUMBERED, &[&key[..], name.as_bytes()].concat())).encrypt(&zero(), bytes).expect("encrypting in memory")].concat()
+    [::key::NUMBERED, &cipher(&blake3::derive_key(OBJECT_NUMBERED, &[&key[..], name.as_bytes()].concat())).encrypt(&zero(), bytes).expect("encrypting in memory")].concat()
 }
 
 fn open_object(key: &[u8; 32], name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
     let under = |context: &str, body: &[u8]| cipher(&blake3::derive_key(context, &[&key[..], name.as_bytes()].concat())).decrypt(&zero(), body).ok();
-    let numbered = bytes.strip_prefix(crate::keys::NUMBERED).and_then(|body| under(OBJECT_NUMBERED, body));
+    let numbered = bytes.strip_prefix(::key::NUMBERED).and_then(|body| under(OBJECT_NUMBERED, body));
     let plain = numbered.or_else(|| under(OBJECT, bytes)).ok_or_else(|| anyhow!("object {} didn't decrypt", &name[..12]))?;
     ensure!(name_of(key, &plain) == name, "object {} isn't what its name says", &name[..12]);
     Ok(plain)
@@ -98,17 +98,17 @@ pub struct Snapshot {
 /// A snapshot as a place keeps it: `keys::FORMAT`, its key's id, a random nonce, and the snapshot, encrypted.
 fn lock_snapshot(key: &[u8; 32], s: &Snapshot) -> Vec<u8> {
     let nonce: [u8; 12] = rand::random();
-    let mut out = crate::keys::NUMBERED.to_vec();
+    let mut out = ::key::NUMBERED.to_vec();
     out.extend(key_id(key).into_bytes());
     out.extend(nonce);
-    out.extend(cipher(&blake3::derive_key(SNAPSHOT, key)).encrypt(&nonce.into(), Payload { msg: &serde_json::to_vec(s).expect("json"), aad: crate::keys::NUMBERED }).expect("encrypting in memory"));
+    out.extend(cipher(&blake3::derive_key(SNAPSHOT, key)).encrypt(&nonce.into(), Payload { msg: &serde_json::to_vec(s).expect("json"), aad: ::key::NUMBERED }).expect("encrypting in memory"));
     out
 }
 
 /// Opens a snapshot with whichever of `keys` it was written with; None if none of them.
 fn open_snapshot(keys: &[[u8; 32]], bytes: &[u8]) -> Result<Option<(Snapshot, [u8; 32])>> {
     // A key's id is hex, so one written before formats were numbered never starts with the version.
-    let (aad, body) = crate::keys::forms(bytes).next().expect("always at least the form with no version");
+    let (aad, body) = ::key::forms(bytes).next().expect("always at least the form with no version");
     ensure!(body.len() > 16 + 12, "not a snapshot");
     let Some(key) = keys.iter().find(|k| key_id(k).as_bytes() == &body[..16]) else { return Ok(None) };
     let plain = cipher(&blake3::derive_key(SNAPSHOT, key)).decrypt(body[16..28].into(), Payload { msg: &body[28..], aad }).map_err(|_| anyhow!("a snapshot didn't decrypt"))?;
@@ -124,7 +124,7 @@ pub struct Job<'a> {
     /// The key of the scope's newest epoch, and that key sealed to the recovery key, as the bucket keeps it.
     pub key: [u8; 32],
     /// Every epoch's key the device holds of the scope, which open its databases' copies to choose one that holds.
-    pub epochs: crate::database::stored::Keys,
+    pub epochs: database::stored::Keys,
     pub sealed: Vec<u8>,
     pub device: Key,
     pub now: u64,
@@ -178,7 +178,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
 /// as the bucket is: each epoch's key and Vault key sealed to the recovery key, each app's key in each epoch (sealed under it), and
 /// each database's new steps, the signatures beside them (and those of the last few steps it copied before, which may
 /// have come just after their steps), and newest copy that holds (sealed as they are), past what `snap` says it has.
-fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs: &crate::database::stored::Keys, snap: &mut Snapshot) -> Result<()> {
+fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs: &database::stored::Keys, snap: &mut Snapshot) -> Result<()> {
     /// How many of the last steps a run copied the next looks for signatures of again.
     const SIGNED_LATE: u64 = 4;
     let folder = folder(scope);
@@ -191,66 +191,66 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
         snap.bytes += bytes.len() as u64;
         Ok(true)
     };
-    for n in bucket.list(&crate::keys::epochs_folder(scope))?.iter().filter_map(|n| n.parse().ok()) {
-        copy(&crate::keys::epoch_name(scope, n, "recovery"), true)?;
-        for to in bucket.list(&format!("{}/{n}", crate::keys::epochs_folder(scope)))?.into_iter().filter(|t| t.starts_with("recovery.")) {
-            copy(&crate::keys::epoch_name(scope, n, &to), true)?;
+    for n in bucket.list(&database::keys::epochs_folder(scope))?.iter().filter_map(|n| n.parse().ok()) {
+        copy(&database::keys::epoch_name(scope, n, "recovery"), true)?;
+        for to in bucket.list(&format!("{}/{n}", database::keys::epochs_folder(scope)))?.into_iter().filter(|t| t.starts_with("recovery.")) {
+            copy(&database::keys::epoch_name(scope, n, &to), true)?;
         }
     }
     // And each of its Vault's keys, sealed to the recovery key, so what's sealed in its items comes back with it.
-    for n in bucket.list(&crate::keys::vault_keys_folder(scope))?.iter().filter_map(|n| n.parse().ok()) {
-        copy(&crate::keys::vault_key_name(scope, n, "recovery"), true)?;
-        for to in bucket.list(&format!("{}/{n}", crate::keys::vault_keys_folder(scope)))?.into_iter().filter(|t| t.starts_with("recovery.")) {
-            copy(&crate::keys::vault_key_name(scope, n, &to), true)?;
+    for n in bucket.list(&database::keys::vault_keys_folder(scope))?.iter().filter_map(|n| n.parse().ok()) {
+        copy(&database::keys::vault_key_name(scope, n, "recovery"), true)?;
+        for to in bucket.list(&format!("{}/{n}", database::keys::vault_keys_folder(scope)))?.into_iter().filter(|t| t.starts_with("recovery.")) {
+            copy(&database::keys::vault_key_name(scope, n, &to), true)?;
         }
     }
     // The recovery key's copies, sealed to its holders' devices: asked for again each run, as a bad one can be replaced.
     if scope == "global" {
-        for recovery in bucket.list(&crate::keys::recovery_held_folder())? {
-            for to in bucket.list(&format!("{}/{recovery}", crate::keys::recovery_held_folder()))? {
-                copy(&crate::keys::recovery_held_name(&recovery, &to), false)?;
+        for recovery in bucket.list(&database::keys::recovery_held_folder())? {
+            for to in bucket.list(&format!("{}/{recovery}", database::keys::recovery_held_folder()))? {
+                copy(&database::keys::recovery_held_name(&recovery, &to), false)?;
             }
         }
     }
-    for app in bucket.list(&folder)?.into_iter().filter(|a| crate::database::scopes::valid_app_name(a) || a == crate::database::scopes::APP) {
-        for n in bucket.list(&crate::keys::app_keys_folder(scope, &app))?.iter().filter_map(|n| n.parse().ok()) {
-            copy(&crate::keys::app_key_name(scope, &app, n), true)?;
+    for app in bucket.list(&folder)?.into_iter().filter(|a| ::scope::scopes::valid_app_name(a) || a == ::key::APP) {
+        for n in bucket.list(&database::keys::app_keys_folder(scope, &app))?.iter().filter_map(|n| n.parse().ok()) {
+            copy(&database::keys::app_key_name(scope, &app, n), true)?;
         }
         for database in bucket.list(&format!("{folder}/{app}"))?.into_iter().filter(|d| !d.starts_with('_')) {
-            let prefix = crate::bucket::database_prefix(scope, &app, &database);
-            let Some(hint) = bucket.get(&crate::database::stored::newest_name(&prefix))? else { continue };
-            let (_, hinted, epoch) = crate::database::stored::newest(&hint);
+            let prefix = ::bucket::names::database_prefix(scope, &app, &database);
+            let Some(hint) = bucket.get(&::bucket::names::newest_name(&prefix))? else { continue };
+            let (_, hinted, epoch) = database::stored::newest(&hint);
             let (mut at, mut copied) = snap.databases.get(&format!("{app}/{database}")).copied().unwrap_or((0, 0));
             let newest_copy = newest_holding(bucket, scope, &prefix, &app, &database, epochs, hinted, copied)?;
-            if newest_copy > copied && copy(&crate::database::stored::copy_name(&prefix, newest_copy), false)? {
+            if newest_copy > copied && copy(&::bucket::names::copy_name(&prefix, newest_copy), false)? {
                 copied = newest_copy;
                 at = at.max(newest_copy);
             }
             // The steps before the copy aren't kept here, so a reader of a restored bucket goes on from it.
-            let tidied = crate::database::stored::tidied_name(&prefix);
+            let tidied = ::bucket::names::tidied_name(&prefix);
             if copied > 0 && !copy(&tidied, true)? {
                 place.put(&format!("{network}/bucket/{tidied}"), b"{}")?;
             }
-            let signed = crate::database::stored::signed_beside(&prefix);
+            let signed = ::bucket::names::signed_beside(&prefix);
             // And the step at the copy's position, without which a reader doesn't start from it (`stored::start`), with the
             // signature beside it, which says what the copy comes to.
             if copied > 0 {
-                copy(&crate::database::stored::step_name(&prefix, copied), true)?;
+                copy(&::bucket::names::step_name(&prefix, copied), true)?;
                 if signed {
-                    copy(&crate::database::stored::sig_name(&prefix, copied), true)?;
+                    copy(&::bucket::names::sig_name(&prefix, copied), true)?;
                 }
             }
             // A signature is written just after its step, so the last steps a run copied may have come without theirs.
             for n in (copied.max(at.saturating_sub(SIGNED_LATE)) + 1..=at).filter(|_| signed) {
-                copy(&crate::database::stored::sig_name(&prefix, n), true)?;
+                copy(&::bucket::names::sig_name(&prefix, n), true)?;
             }
-            while copy(&crate::database::stored::step_name(&prefix, at + 1), false)? {
+            while copy(&::bucket::names::step_name(&prefix, at + 1), false)? {
                 if signed {
-                    copy(&crate::database::stored::sig_name(&prefix, at + 1), false)?;
+                    copy(&::bucket::names::sig_name(&prefix, at + 1), false)?;
                 }
                 at += 1;
             }
-            place.put(&format!("{network}/bucket/{}", crate::database::stored::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == hinted { epoch } else { 0 } }))?)?;
+            place.put(&format!("{network}/bucket/{}", ::bucket::names::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == hinted { epoch } else { 0 } }))?)?;
             snap.databases.insert(format!("{app}/{database}"), (at, copied));
         }
     }
@@ -261,24 +261,24 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
 /// hint's, `hinted`, first, then the others, newest first; `above` if none does. A scope's frozen log, whose copies are
 /// its entries, not a database, takes the hint's.
 #[allow(clippy::too_many_arguments)]
-fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &crate::database::stored::Keys, hinted: u64, above: u64) -> Result<u64> {
-    if crate::database::scopes::CoreDb::of(app, database) == Some(crate::database::scopes::CoreDb::Log) {
+fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &database::stored::Keys, hinted: u64, above: u64) -> Result<u64> {
+    if ::key::CoreDb::of(app, database) == Some(::key::CoreDb::Log) {
         return Ok(hinted.max(above));
     }
-    let mut keys = crate::database::stored::Keys::new();
+    let mut keys = database::stored::Keys::new();
     for (n, epoch) in epochs {
-        let Some(sealed) = bucket.get(&crate::keys::app_key_name(scope, app, *n))? else { continue };
-        if let Ok(key) = crate::keys::open_database_key(epoch, app, database, &sealed) {
+        let Some(sealed) = bucket.get(&database::keys::app_key_name(scope, app, *n))? else { continue };
+        if let Ok(key) = ::key::open_database_key(epoch, app, database, &sealed) {
             keys.insert(*n, key);
         }
     }
     let mut copies: Vec<u64> = bucket.list(&format!("{prefix}/copy"))?.iter().filter_map(|n| n.parse().ok()).filter(|n| *n != hinted).collect();
     copies.sort_unstable_by(|a, b| b.cmp(a));
     for at in std::iter::once(hinted).chain(copies).filter(|c| *c > above) {
-        let Some(copy) = bucket.get(&crate::database::stored::copy_name(prefix, at))? else { continue };
-        let step = bucket.get(&crate::database::stored::step_name(prefix, at))?;
-        let beside = if crate::database::stored::signed_beside(prefix) { bucket.get(&crate::database::stored::sig_name(prefix, at))? } else { None };
-        if crate::database::stored::sealed_copy_holds(prefix, &keys, at, &copy, step.as_deref(), beside.as_deref()) {
+        let Some(copy) = bucket.get(&::bucket::names::copy_name(prefix, at))? else { continue };
+        let step = bucket.get(&::bucket::names::step_name(prefix, at))?;
+        let beside = if ::bucket::names::signed_beside(prefix) { bucket.get(&::bucket::names::sig_name(prefix, at))? } else { None };
+        if database::stored::sealed_copy_holds(prefix, &keys, at, &copy, step.as_deref(), beside.as_deref()) {
             return Ok(at);
         }
     }
@@ -293,7 +293,7 @@ pub fn takes_over(at: usize, waiting: Option<u64>, added: u64, now: u64) -> bool
 
 /// A snapshot's file name: its time, so names sort by it, and its device.
 fn snapshot_name(time: u64, device: &Key) -> String {
-    format!("{time:013}-{}", crate::keys::short(device))
+    format!("{time:013}-{}", ::key::short(device))
 }
 
 /// The newest snapshot of a scope in a place that one of `keys` opens, with its key.
@@ -502,7 +502,7 @@ pub struct Check<'a> {
     pub network: &'a str,
     /// The keys that may open each scope's snapshots: its epochs' keys.
     pub keys: &'a BTreeMap<String, Vec<[u8; 32]>>,
-    pub root: Option<crate::keys::Hash>,
+    pub root: Option<::key::Hash>,
 }
 
 /// Restores each scope's newest snapshot from a place, checking every blob, and who's who from `global`'s steps the
@@ -539,7 +539,7 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
         Ok(m) => m,
         Err(err) => {
             problems.push(format!("global: {err:#}"));
-            ScopeDb::empty(&crate::database::scopes::Scope::Global, crate::node::now_ms())?
+            ScopeDb::empty(&::scope::scopes::Scope::Global, custom_build::now_ms())?
         }
     };
     let bytes: u64 = place.objects(&format!("{network}/objects"))?.iter().map(|o| o.2).sum();
@@ -557,15 +557,15 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
 
 /// Who's who as `global`'s scope database's steps the place's copy of the bucket holds say it (`steps::Reader`), from
 /// its first freeze, of the network `root` (or for none, the one there), opened with `keys`, its epochs' keys.
-fn who(place: &Place, network: &str, root: Option<crate::keys::Hash>, keys: &[[u8; 32]]) -> Result<ScopeDb> {
-    use crate::database::steps;
+fn who(place: &Place, network: &str, root: Option<::key::Hash>, keys: &[[u8; 32]]) -> Result<ScopeDb> {
+    use ::scope::steps;
     let bucket = |name: &str| place.get(&format!("{network}/bucket/{name}"));
     // The steps' key in each epoch the place holds: the node's app key there, opened with whichever of the epochs' keys does.
     let mut step_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
-    for name in place.list(&format!("{network}/bucket/{}", crate::keys::app_keys_folder("global", crate::database::scopes::APP)))? {
+    for name in place.list(&format!("{network}/bucket/{}", database::keys::app_keys_folder("global", ::key::APP)))? {
         let Ok(n) = name.parse::<u32>() else { continue };
-        let Some(sealed) = bucket(&crate::keys::app_key_name("global", crate::database::scopes::APP, n))? else { continue };
-        if let Some(key) = keys.iter().find_map(|k| crate::keys::open_database_key(k, crate::database::scopes::APP, crate::database::scopes::CoreDb::Scope.name(), &sealed).ok()) {
+        let Some(sealed) = bucket(&database::keys::app_key_name("global", ::key::APP, n))? else { continue };
+        if let Some(key) = keys.iter().find_map(|k| ::key::open_database_key(k, ::key::APP, ::key::CoreDb::Scope.name(), &sealed).ok()) {
             step_keys.insert(n, key);
         }
     }
@@ -573,8 +573,8 @@ fn who(place: &Place, network: &str, root: Option<crate::keys::Hash>, keys: &[[u
     let prefix = steps::prefix("global");
     let mut sealed = steps::Sealed::default();
     for at in 1.. {
-        let Some(step) = bucket(&crate::database::stored::step_name(&prefix, at))? else {
-            if let Some(after) = bucket(&crate::database::stored::step_name(&prefix, at + 1))? {
+        let Some(step) = bucket(&::bucket::names::step_name(&prefix, at))? else {
+            if let Some(after) = bucket(&::bucket::names::step_name(&prefix, at + 1))? {
                 sealed.steps.insert(at + 1, after);
             }
             break;
@@ -582,7 +582,7 @@ fn who(place: &Place, network: &str, root: Option<crate::keys::Hash>, keys: &[[u
         sealed.steps.insert(at, step);
     }
     let mut reader = steps::Reader::new(root);
-    reader.add(&sealed, &step_keys, None, crate::node::now_ms(), |_, _, _| Ok(()))?;
+    reader.add(&sealed, &step_keys, None, custom_build::now_ms(), |_, _, _| Ok(()))?;
     Ok(reader.into_truth().context("its who's who has no freeze")?.db)
 }
 
@@ -593,9 +593,9 @@ struct Copy<'a> {
     root: String,
 }
 
-impl crate::bucket::Bucket for Copy<'_> {
-    async fn get(&self, name: &str) -> Result<Option<crate::bucket::Object>> {
-        crate::bucket::Bucket::get(self.place, &format!("{}{name}", self.root)).await
+impl ::bucket::Bucket for Copy<'_> {
+    async fn get(&self, name: &str) -> Result<Option<::bucket::Object>> {
+        ::bucket::Bucket::get(self.place, &format!("{}{name}", self.root)).await
     }
     async fn create(&self, _: &str, _: &[u8]) -> Result<bool> {
         anyhow::bail!("a backup is only read")
@@ -604,7 +604,7 @@ impl crate::bucket::Bucket for Copy<'_> {
         anyhow::bail!("a backup is only read")
     }
     async fn wait(&self, ms: u64) {
-        crate::bucket::Bucket::wait(self.place, ms).await
+        ::bucket::Bucket::wait(self.place, ms).await
     }
 }
 
@@ -612,31 +612,31 @@ impl crate::bucket::Bucket for Copy<'_> {
 /// to the snapshot's last, are in the place, and are the same bytes as the network's bucket has (`live`), or without
 /// it, open with their epoch's key; then it restores from them into a throwaway database, which must reach that step.
 /// `epochs` are the scope's epoch keys. → what's wrong, one line each; nothing when all is well.
-pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, epochs: &crate::database::stored::Keys, live: Option<&impl crate::bucket::Bucket>) -> Vec<String> {
-    use crate::bucket::Bucket;
+pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, epochs: &database::stored::Keys, live: Option<&impl ::bucket::Bucket>) -> Vec<String> {
+    use ::bucket::Bucket;
     let scope = &snapshot.scope;
     let copy = Copy { place, root: format!("{network}/bucket/") };
     let mut out = Vec::new();
     for (database, (at, copied)) in &snapshot.databases {
         let Some((app, db)) = database.split_once('/') else { continue };
-        let prefix = crate::bucket::database_prefix(scope, app, db);
+        let prefix = ::bucket::names::database_prefix(scope, app, db);
         // What a user calls it: the app, or of the node's own, its Vault, its history (entries) or its status rows.
-        let said = match (crate::database::scopes::CoreDb::of(app, db), app, db) {
+        let said = match (::key::CoreDb::of(app, db), app, db) {
             (Some(core), ..) => core.said().to_string(),
-            (None, crate::database::scopes::APP, db) => db.to_string(),
-            (None, app, crate::database::scopes::APP_DATABASE) => app.to_string(),
+            (None, ::key::APP, db) => db.to_string(),
+            (None, app, ::key::APP_DATABASE) => app.to_string(),
             (None, app, db) => format!("{app} {db}"),
         };
-        let mut keys = crate::database::stored::Keys::new();
+        let mut keys = database::stored::Keys::new();
         for (n, epoch) in epochs {
-            let Ok(Some(sealed)) = copy.get(&crate::keys::app_key_name(scope, app, *n)).await else { continue };
-            match crate::keys::open_database_key(epoch, app, db, &sealed.bytes) {
+            let Ok(Some(sealed)) = copy.get(&database::keys::app_key_name(scope, app, *n)).await else { continue };
+            match ::key::open_database_key(epoch, app, db, &sealed.bytes) {
                 Ok(key) => drop(keys.insert(*n, key)),
                 Err(err) => out.push(format!("{scope} {said}: its key in epoch {n}: {err:#}")),
             }
         }
-        let copy_of = (*copied > 0).then(|| (format!("its copy at step {copied}"), crate::database::stored::copy_name(&prefix, *copied)));
-        let names = copy_of.into_iter().chain((((*copied).max(1))..=*at).map(|n| (format!("step {n}"), crate::database::stored::step_name(&prefix, n))));
+        let copy_of = (*copied > 0).then(|| (format!("its copy at step {copied}"), ::bucket::names::copy_name(&prefix, *copied)));
+        let names = copy_of.into_iter().chain((((*copied).max(1))..=*at).map(|n| (format!("step {n}"), ::bucket::names::step_name(&prefix, n))));
         let mut wrong = None;
         for (said_as, name) in names {
             let problem = match copy.get(&name).await {
@@ -663,10 +663,10 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
         }
         // The node's log of a scope is entries, which `check` restored, and its scope database's steps who's who, which
         // it checked too (`steps_of`); the rest are SQLite.
-        if matches!(crate::database::scopes::CoreDb::of(app, db), Some(crate::database::scopes::CoreDb::Log | crate::database::scopes::CoreDb::Scope)) || keys.is_empty() {
+        if matches!(::key::CoreDb::of(app, db), Some(::key::CoreDb::Log | ::key::CoreDb::Scope)) || keys.is_empty() {
             continue;
         }
-        match crate::database::stored::Db::open(&copy, &prefix, keys).await {
+        match database::stored::Db::open(&copy, &prefix, keys).await {
             Ok(restored) if restored.at() >= *at => {}
             Ok(restored) => out.push(format!("{scope} {said}: it restores only to step {} of {at}", restored.at())),
             Err(err) => out.push(format!("{scope} {said}: it doesn't restore: {err:#}")),
@@ -677,13 +677,13 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
 
 /// What's wrong with a sealed step or copy, if it doesn't open with its epoch's key: nothing, too, when that key isn't
 /// one of `keys`.
-fn opens(keys: &crate::database::stored::Keys, name: &str, sealed: &[u8]) -> Option<String> {
-    let epoch = match crate::keys::epoch_of(sealed) {
+fn opens(keys: &database::stored::Keys, name: &str, sealed: &[u8]) -> Option<String> {
+    let epoch = match ::key::epoch_of(sealed) {
         Ok(e) => e,
         Err(err) => return Some(format!("{err:#}")),
     };
     let key = keys.get(&epoch)?;
-    crate::keys::open(key, name, sealed).err().map(|_| "doesn't open".to_string())
+    ::key::open(key, name, sealed).err().map(|_| "doesn't open".to_string())
 }
 
 #[cfg(test)]
@@ -699,7 +699,7 @@ mod tests {
         let plain = b"a deploy's bundle".to_vec();
         let name = name_of(&key, &plain);
         let derive = |context: &str| blake3::derive_key(context, &[&key[..], name.as_bytes()].concat());
-        let numbered = [crate::keys::NUMBERED, &cipher(&derive(OBJECT_NUMBERED)).encrypt(&zero(), plain.as_slice()).unwrap()].concat();
+        let numbered = [::key::NUMBERED, &cipher(&derive(OBJECT_NUMBERED)).encrypt(&zero(), plain.as_slice()).unwrap()].concat();
         assert_eq!(open_object(&key, &name, &numbered).unwrap(), plain);
         assert!(open_object(&key, &name, &numbered[1..]).is_err(), "not with its version taken off");
         assert_eq!(open_object(&key, &name, &lock_object(&key, &name, &plain)).unwrap(), plain, "as it's written now");
@@ -710,7 +710,7 @@ mod tests {
             let plain = n.to_be_bytes().to_vec();
             let name = name_of(&key, &plain);
             let sealed = before(&name, &plain);
-            (sealed[0] == crate::keys::FORMAT).then_some((name, sealed, plain))
+            (sealed[0] == ::key::FORMAT).then_some((name, sealed, plain))
         });
         let (name, sealed, plain) = unlucky.unwrap();
         assert_eq!(open_object(&key, &name, &sealed).unwrap(), plain);
@@ -718,8 +718,8 @@ mod tests {
         let snapshot = Snapshot { scope: "global".into(), time: 5, ..Default::default() };
         let nonce: [u8; 12] = rand::random();
         let json = serde_json::to_vec(&snapshot).unwrap();
-        let sealed = cipher(&blake3::derive_key(SNAPSHOT, &key)).encrypt(&nonce.into(), Payload { msg: &json, aad: crate::keys::NUMBERED }).unwrap();
-        let numbered = [crate::keys::NUMBERED, key_id(&key).as_bytes(), &nonce, &sealed].concat();
+        let sealed = cipher(&blake3::derive_key(SNAPSHOT, &key)).encrypt(&nonce.into(), Payload { msg: &json, aad: ::key::NUMBERED }).unwrap();
+        let numbered = [::key::NUMBERED, key_id(&key).as_bytes(), &nonce, &sealed].concat();
         assert_eq!(open_snapshot(&[key], &numbered).unwrap().unwrap().0, snapshot);
         assert!(open_snapshot(&[key], &numbered[1..]).is_err(), "not with its version taken off");
         assert_eq!(open_snapshot(&[key], &lock_snapshot(&key, &snapshot)).unwrap().unwrap().0, snapshot, "as it's written now");
@@ -739,43 +739,43 @@ mod tests {
 
         // Who's who: the freeze its recovery key signed.
         const ANDRE: &str = "0123456789abcdef";
-        let node = crate::keys::app_key(&bucket, &epoch, "global", crate::database::scopes::APP, 1, true).await.unwrap().unwrap();
-        let step_keys = crate::database::stored::Keys::from([(1, crate::keys::database_key(&node, crate::database::scopes::APP, crate::database::scopes::CoreDb::Scope.name()))]);
-        let start = crate::database::content::first("Home", ANDRE, "Andre", &crate::keys::Endpoint::of(&device), "mac", &[crate::database::scopes::Kind::Client], recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&epoch));
-        let root = crate::keys::Hash::from_bytes(rand::random());
-        let first = crate::database::steps::first_freeze(&recovery, root, &start, ANDRE, 0).unwrap();
-        let steps = crate::database::steps::prefix("global");
-        let name = crate::database::stored::step_name(&steps, 1);
-        bucket.put(&name, &crate::database::steps::seal(&step_keys, &name, &crate::database::steps::encode(&first.step, first.copy.as_deref())).unwrap()).unwrap();
-        crate::database::stored::hint(&bucket, &steps, 1, 0, 1).await.unwrap();
+        let node = database::keys::app_key(&bucket, &epoch, "global", ::key::APP, 1, true).await.unwrap().unwrap();
+        let step_keys = database::stored::Keys::from([(1, ::key::database_key(&node, ::key::APP, ::key::CoreDb::Scope.name()))]);
+        let start = ::scope::content::first("Home", ANDRE, "Andre", &::key::Endpoint::of(&device), "mac", &[::scope::scopes::Kind::Client], recovery.verifying_key().as_bytes(), &::key::epoch_hash(&epoch));
+        let root = ::key::Hash::from_bytes(rand::random());
+        let first = ::scope::steps::first_freeze(&recovery, root, &start, ANDRE, 0).unwrap();
+        let steps = ::scope::steps::prefix("global");
+        let name = ::bucket::names::step_name(&steps, 1);
+        bucket.put(&name, &::scope::steps::seal(&step_keys, &name, &::scope::steps::encode(&first.step, first.copy.as_deref())).unwrap()).unwrap();
+        database::stored::hint(&bucket, &steps, 1, 0, 1).await.unwrap();
 
         // A database with more steps than one copy holds, so a reader starts from its copy.
         let prefix = "global/tally/main";
-        let app = crate::keys::app_key(&bucket, &epoch, "global", "tally", 1, true).await.unwrap().unwrap();
-        let keys = crate::database::stored::Keys::from([(1, crate::keys::database_key(&app, "tally", "main"))]);
-        let mut db = crate::database::stored::Db::open(&bucket, prefix, keys).await.unwrap();
+        let app = database::keys::app_key(&bucket, &epoch, "global", "tally", 1, true).await.unwrap().unwrap();
+        let keys = database::stored::Keys::from([(1, ::key::database_key(&app, "tally", "main"))]);
+        let mut db = database::stored::Db::open(&bucket, prefix, keys).await.unwrap();
         db.sign_as(device.clone());
         db.migrate(&bucket, &["create table posts (text text)".to_string()]).await.unwrap();
-        for n in 0..crate::database::stored::COPY_EVERY + 5 {
+        for n in 0..database::stored::COPY_EVERY + 5 {
             db.write(&bucket, |c| Ok(c.execute("insert into posts values (?)", [format!("post {n}")])?)).await.unwrap();
         }
         let at = db.at();
-        let (_, copy, _) = crate::database::stored::newest(&crate::bucket::Bucket::get(&bucket, &crate::database::stored::newest_name(prefix)).await.unwrap().unwrap().bytes);
+        let (_, copy, _) = database::stored::newest(&::bucket::Bucket::get(&bucket, &::bucket::names::newest_name(prefix)).await.unwrap().unwrap().bytes);
         assert!(copy > 0 && copy < at, "it has a copy, and steps after it");
 
         // Junk at a copy's position, and the newest hint naming it, from a device without the key: the backup copies
         // the copy that holds.
-        let junk = crate::database::stored::copy_name(prefix, 10 * crate::database::stored::COPY_EVERY);
-        bucket.put(&junk, &crate::keys::seal(1, &rand::random(), &junk, b"junk")).unwrap();
-        bucket.put(&crate::database::stored::newest_name(prefix), &serde_json::to_vec(&json!({ "at": at, "copy": 10 * crate::database::stored::COPY_EVERY })).unwrap()).unwrap();
+        let junk = ::bucket::names::copy_name(prefix, 10 * database::stored::COPY_EVERY);
+        bucket.put(&junk, &::key::seal(1, &rand::random(), &junk, b"junk")).unwrap();
+        bucket.put(&::bucket::names::newest_name(prefix), &serde_json::to_vec(&json!({ "at": at, "copy": 10 * database::stored::COPY_EVERY })).unwrap()).unwrap();
 
         let job = |previous: Option<Snapshot>, now: u64| Job {
             place: &place,
             network,
             scope: "global",
             key: epoch,
-            epochs: crate::database::stored::Keys::from([(1, epoch)]),
-            sealed: crate::keys::seal_to(&crate::keys::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
+            epochs: database::stored::Keys::from([(1, epoch)]),
+            sealed: ::key::seal_to(&::key::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
             device: *device.verifying_key().as_bytes(),
             now,
             previous,
@@ -786,7 +786,7 @@ mod tests {
         assert_eq!(back_up(job(Some(first), 1_500_000), |h| (h == hash).then(|| blob.clone())).unwrap(), None, "nothing new for a snapshot");
 
         let keys: BTreeMap<String, Vec<[u8; 32]>> = [("global".to_string(), vec![epoch])].into();
-        let epochs = crate::database::stored::Keys::from([(1, epoch)]);
+        let epochs = database::stored::Keys::from([(1, epoch)]);
         let checked = || {
             let (report, restored) = check(&Check { place: &place, network, keys: &keys, root: Some(root) }).unwrap();
             (report["problems"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect::<Vec<_>>(), restored, report)
@@ -800,7 +800,7 @@ mod tests {
         assert_eq!(check_databases(&place, network, &snapshot, &epochs, None::<&Place>).await, Vec::<String>::new(), "and opens without the network's bucket");
 
         // A step that's changed in the backup, then one that's gone: the one its copy starts beside.
-        let name = |n: u64| format!("{network}/bucket/{}", crate::database::stored::step_name(prefix, n));
+        let name = |n: u64| format!("{network}/bucket/{}", ::bucket::names::step_name(prefix, n));
         let good = place.get(&name(at)).unwrap().unwrap();
         let mut bad = good.clone();
         *bad.last_mut().unwrap() ^= 1;

@@ -7,7 +7,7 @@
 // steps in the bucket and asks of the scope database it builds from them (src/lib.rs, the machine node's own Rust), and
 // each app's latest deploy from the bucket too, through the URL signer's URLs, keeping what it read sealed in its
 // Durable Object's storage, so a wake fetches only what's newer; it runs an app in an isolate of its own (Worker Loader, src/app/runtime/shim.js as its `ctx`) and writes
-// what a call wrote as one step (src/database/stored.rs). An app's requests go out from here, filled in with the Vault's items it's
+// what a call wrote as one step (database/src/stored.rs). An app's requests go out from here, filled in with the Vault's items it's
 // switched on for, read as any node reads them: each scope's `vault` database, opened with the keys handed for it.
 //
 // It answers what it can itself (the network's state, apps, widgets, badges, screens, and the calls of apps that keep
@@ -153,7 +153,7 @@ class Sealed {
   }
 }
 
-/// The bucket as src/database/stored.rs reads and writes it (src/lib.rs: `Js`). A database's steps are read one after another, so
+/// The bucket as database/src/stored.rs reads and writes it (src/lib.rs: `Js`). A database's steps are read one after another, so
 /// asking for one fetches the next few at once; each fetched object is used once, so a read after a lost race is fresh.
 /// What's read or written is kept sealed (`Sealed`), and only what isn't there is fetched, its URLs signed in one
 /// request to the URL signer for everything asked for in the same turn, and kept while they last.
@@ -243,7 +243,7 @@ class Bucket {
   }
 
   /// The objects directly in `folder`, as `[name, when the bucket wrote it (ms)]`, a page at a time from URLs the URL
-  /// signer gives: a database's copies, for a reader whose steps were deleted (src/database/stored.rs `gap`).
+  /// signer gives: a database's copies, for a reader whose steps were deleted (database/src/stored.rs `gap`).
   async objects(folder) {
     const unanswered = (message) => Object.assign(new Error(message), { unanswered: true });
     const unescape = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
@@ -870,7 +870,7 @@ const keysFirst = (err) => {
 /// Whether an app keeps to its own data: it uses no other app or Vault item, and its service, if it has one, runs here.
 const plain = (d, view) => !d.uses?.apps?.length && servedHere(view, d) && !d.vault;
 
-/// Whether the service `name`, built for Cloudflare, runs here: an admin switched it on (src/state.rs:
+/// Whether the service `name`, built for Cloudflare, runs here: an admin switched it on (scope/src/state.rs:
 /// `cloudflare_node.parts`), and this node carries its build.
 const onHere = (view, name) => Object.hasOwn(services, name) && (view.state.network.cloudflare_node?.parts || []).some((p) => p.name === name && p.on);
 
@@ -932,7 +932,7 @@ class ForCall extends RpcTarget {
     return { status: r.status, headers: Object.fromEntries(r.headers), body64 };
   }
 
-  /// One of an app's asks (src/call.rs: `Ask`), as a machine's node answers it: a Response, an error's code in its header.
+  /// One of an app's asks (api/src/call.rs: `Ask`), as a machine's node answers it: a Response, an error's code in its header.
   async ask(name, body) {
     try {
       const { who, view, user } = this.run;

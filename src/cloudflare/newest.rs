@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 
-use crate::config::COMMITTED;
+use ::custom_build::config::COMMITTED;
 use crate::latest::{Latest, Thing};
 use crate::web::bundle::{Bundle, open};
 
@@ -23,8 +23,8 @@ pub struct Newest {
 impl Newest {
     /// As this program was built with them.
     pub fn built() -> Newest {
-        let of = |name: &str| format!("{} {} {name}", crate::config::BUILD, COMMITTED);
-        Newest { workers: crate::ui_folder::cloudflare(), web: crate::web::with_client(), said: format!("Workers and web client from this build, {}", crate::config::BUILD), workers_version: of(Thing::WORKERS), web_version: of(Thing::WEB) }
+        let of = |name: &str| format!("{} {} {name}", ::custom_build::config::BUILD, COMMITTED);
+        Newest { workers: crate::ui_folder::cloudflare(), web: crate::web::with_client(), said: format!("Workers and web client from this build, {}", ::custom_build::config::BUILD), workers_version: of(Thing::WORKERS), web_version: of(Thing::WEB) }
     }
 
     /// What the relay says of the Workers (`DEPLOYED`, `workers` in its answer to `POST /relay/computes`): the device they
@@ -35,7 +35,7 @@ impl Newest {
             "from": crate::node::device_here(&settings.dir).ok().map(|(key, _)| key),
             "workers": self.workers_version,
             "web": self.web_version,
-            "node": settings.cloudflare_node.then(crate::protocol::version),
+            "node": settings.cloudflare_node.then(::custom_build::protocol::version),
         })
         .to_string()
     }

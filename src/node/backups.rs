@@ -9,7 +9,7 @@ use super::status::{BackedUp, BackupRun, CheckRun, Said};
 use std::collections::BTreeSet;
 
 use crate::backups::{self as b, Snapshot};
-use crate::bucket::Place;
+use ::bucket::Place;
 
 #[derive(Default)]
 pub(super) struct State {
@@ -77,27 +77,27 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
         let failing: Vec<&&BackupRun> = runs.iter().rev().take_while(|r| r.error.is_some()).collect();
         if let Some(last) = failing.first() {
             let error = last.error.clone().unwrap_or_default();
-            let trouble = last.trouble.as_deref().and_then(crate::bucket::Trouble::parse);
+            let trouble = last.trouble.as_deref().and_then(::bucket::Trouble::parse);
             let text = match trouble {
                 Some(_) => format!("{} {error}.", p.title),
                 None => format!("Couldn't back up to {} ({error}).", p.title),
             };
             let status = match trouble {
-                Some(crate::bucket::Trouble::Key) => "Key not accepted",
-                Some(crate::bucket::Trouble::Bucket) => "No such bucket",
-                Some(crate::bucket::Trouble::Refused) => "Not allowed to write",
-                Some(crate::bucket::Trouble::Unreachable) => "Not reachable",
-                Some(crate::bucket::Trouble::Disk) => "Couldn't be used",
+                Some(::bucket::Trouble::Key) => "Key not accepted",
+                Some(::bucket::Trouble::Bucket) => "No such bucket",
+                Some(::bucket::Trouble::Refused) => "Not allowed to write",
+                Some(::bucket::Trouble::Unreachable) => "Not reachable",
+                Some(::bucket::Trouble::Disk) => "Couldn't be used",
                 None => "Couldn't back up",
             };
             let device = name(&last.device)?;
             let fix = match (trouble, &p.place) {
                 (_, Err(_)) if p.device.is_none() => "Fix it in the Vault.".to_string(),
-                (Some(crate::bucket::Trouble::Key), _) => "Change its key in the Vault.".to_string(),
-                (Some(crate::bucket::Trouble::Bucket), _) => "Check the bucket's name in the Vault.".to_string(),
-                (Some(crate::bucket::Trouble::Refused), _) => "Give the key permission to write there, or change it in the Vault.".to_string(),
-                (Some(crate::bucket::Trouble::Unreachable), _) => format!("Check {device} is connected to the internet. It tries again every hour."),
-                (Some(crate::bucket::Trouble::Disk), _) => format!("Check the disk on {device} is plugged in and has room."),
+                (Some(::bucket::Trouble::Key), _) => "Change its key in the Vault.".to_string(),
+                (Some(::bucket::Trouble::Bucket), _) => "Check the bucket's name in the Vault.".to_string(),
+                (Some(::bucket::Trouble::Refused), _) => "Give the key permission to write there, or change it in the Vault.".to_string(),
+                (Some(::bucket::Trouble::Unreachable), _) => format!("Check {device} is connected to the internet. It tries again every hour."),
+                (Some(::bucket::Trouble::Disk), _) => format!("Check the disk on {device} is plugged in and has room."),
                 (None, _) => "It tries again every hour.".to_string(),
             };
             let since = failing.last().map_or(last.time, |r| r.time);
@@ -140,7 +140,7 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
     // A place an admin named whose details changed since, by someone who isn't one: nothing goes there until an admin
     // saves them, which names them again (`repin_place`), so a member can't send backups somewhere else.
     let pinned = pinned(m)?;
-    for (id, it) in i.vault.iter().filter(|(id, it)| it.apps.contains(scopes::APP) && it.kind == b::KIND && !it.fields.contains_key("device") && pinned.get(*id).is_some_and(|h| *h != item_hash(it))) {
+    for (id, it) in i.vault.iter().filter(|(id, it)| it.apps.contains(key::APP) && it.kind == b::KIND && !it.fields.contains_key("device") && pinned.get(*id).is_some_and(|h| *h != item_hash(it))) {
         out.push(Problem {
             place: id.clone(),
             title: format!("Not backing up to {}", it.title),
@@ -199,7 +199,7 @@ fn places(i: &Network) -> Result<Vec<PlaceItem>> {
     let pinned = pinned(i.r.db())?;
     Ok(i.vault
         .iter()
-        .filter(|(_, it)| it.apps.contains(scopes::APP) && it.kind == b::KIND)
+        .filter(|(_, it)| it.apps.contains(key::APP) && it.kind == b::KIND)
         .filter(|(id, it)| it.fields.contains_key("device") || pinned.get(*id).is_some_and(|h| *h == item_hash(it)))
         .map(|(id, it)| {
             let mut fields: BTreeMap<String, String> = it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect();
@@ -456,7 +456,7 @@ impl Node {
     }
 
     /// Every epoch's key of each scope this device holds, by its name, of those it opens.
-    async fn held_epochs(&self) -> BTreeMap<String, crate::database::stored::Keys> {
+    async fn held_epochs(&self) -> BTreeMap<String, database::stored::Keys> {
         let scopes = self.with_or(Default::default(), |i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>()));
         let mut out = BTreeMap::new();
         for scope in scopes {
@@ -475,8 +475,8 @@ impl Node {
         let epochs = self.epoch_keys(&scope, false).await?;
         let (n, key) = epochs.last_key_value().map(|(n, k)| (*n, *k)).context("no epoch")?;
         ensure!(d.key.is_none_or(|k| k == key), "{scope}'s newest epoch changed: it's backed up on the next run");
-        let name = crate::keys::epoch_name(&d.scope, n, "recovery");
-        let sealed = crate::bucket::Bucket::get(&self.bucket()?, &name).await?.with_context(|| format!("{name} is missing"))?.bytes;
+        let name = database::keys::epoch_name(&d.scope, n, "recovery");
+        let sealed = ::bucket::Bucket::get(&self.bucket()?, &name).await?.with_context(|| format!("{name} is missing"))?.bytes;
         let cached = self.0.backups.backed.lock().unwrap().get(&(place_id.to_string(), d.scope.clone())).filter(|s| s.1 == b::key_id(&key)).map(|s| s.0.clone());
         let blobs = self.with(|i| {
             // What its database names, of the releases only the newest of each.
@@ -525,7 +525,7 @@ impl Node {
     /// Says how a run to a place went, in `global`.
     async fn backed_up(&self, place: &str, now: u64, error: Option<anyhow::Error>, snapshots: Vec<Snapshot>) -> Result<()> {
         let snapshots = snapshots.iter().map(|s| BackedUp { scope: s.scope.clone(), upto: s.upto, blobs: s.blobs.len() as u64, bytes: s.bytes }).collect();
-        let trouble = error.as_ref().and_then(crate::bucket::Trouble::of).map(|t| t.name().to_string());
+        let trouble = error.as_ref().and_then(::bucket::Trouble::of).map(|t| t.name().to_string());
         let error = error.map(|e| format!("{e:#}").chars().take(500).collect::<String>());
         self.say_to_watchers(Said::BackedUp(BackupRun { place: place.into(), device: self.0.id, time: now, error, trouble, snapshots })).await
     }
@@ -627,7 +627,7 @@ impl Node {
             }
             Place::S3(s3) => {
                 let host = s3.endpoint.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or("").to_string();
-                let crate::bucket::Auth::Keys { key_id, secret } = &s3.auth else { bail!("a place is added with its keys") };
+                let ::bucket::Auth::Keys { key_id, secret } = &s3.auth else { bail!("a place is added with its keys") };
                 let title = text("title").unwrap_or_else(|| format!("{} on {host}", s3.bucket));
                 let fields = json!({
                     "endpoint": { "value": s3.endpoint }, "bucket": { "value": s3.bucket }, "region": { "value": s3.region },
@@ -636,7 +636,7 @@ impl Node {
                 (title, fields, json!([host]))
             }
         };
-        let data = json!({ "title": title, "type": b::KIND, "fields": item_fields, "hosts": hosts, "apps": [scopes::APP] });
+        let data = json!({ "title": title, "type": b::KIND, "fields": item_fields, "hosts": hosts, "apps": [key::APP] });
         let id = self.set_item(caller, &Scope::Global, data).await?;
         match &place {
             Place::Folder(path) => self.keep_folder(&id, Some(path))?,
@@ -656,7 +656,7 @@ impl Node {
         let fields = json!({ "endpoint": { "secret": false }, "bucket": { "secret": false }, "key_id": { "secret": false }, "secret": { "secret": true } });
         let ask = json!({ "title": body["title"].as_str().unwrap_or("Backups"), "fields": fields, "hosts": [host] });
         let why = format!("Backups go to {endpoint}, encrypted: its bucket, access key ID and secret key.");
-        self.request_item(caller, &Scope::Global, scopes::APP, Some(b::KIND), &ask, &why).await
+        self.request_item(caller, &Scope::Global, key::APP, Some(b::KIND), &ask, &why).await
     }
 
     /// Stops backing up to a place: deletes its item. What's in the place stays there.
@@ -807,7 +807,7 @@ impl Node {
     pub fn only_admins_back_up(&self, me: &Caller) -> Result<()> {
         self.with(|i| {
             if !i.r.db().may(&me.user, "change-settings", scopes::NETWORK) {
-                return Err(crate::protocol::Coded::refused("Only admins use Backups.").into());
+                return Err(custom_build::protocol::Coded::refused("Only admins use Backups.").into());
             }
             Ok(())
         })
@@ -850,14 +850,14 @@ fn disks() -> Vec<Value> {
                 continue;
             }
             let Some(free) = free_space(&path) else { continue };
-            out.push(json!({ "name": e.file_name().to_string_lossy(), "path": path.join(format!("{} Backups", crate::config::NAME)).display().to_string(), "free": free }));
+            out.push(json!({ "name": e.file_name().to_string_lossy(), "path": path.join(format!("{} Backups", custom_build::config::NAME)).display().to_string(), "free": free }));
         }
     }
     out
 }
 
 fn free_space(path: &Path) -> Option<u64> {
-    crate::os::disk_space(path).map(|(_, free)| free)
+    platform::os::disk_space(path).map(|(_, free)| free)
 }
 
 /// When a scope's database first changed after `after` (ms), as this device read it since it started: none if it hasn't,

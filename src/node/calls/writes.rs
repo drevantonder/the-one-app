@@ -1,7 +1,7 @@
 //! What a call wrote: its appends checked into steps, the blobs they keep put in the bucket first, and its work kept
 //! running after it returns (`ctx.waitUntil`).
 
-use crate::protocol::allowed;
+use ::custom_build::allowed;
 use super::*;
 
 impl Node {
@@ -58,12 +58,12 @@ impl Node {
         let wrote = async {
             let wrote = !statements.is_empty();
             for (scope, list, kept) in statements {
-                let (db, bucket) = self.call_database(me, &scope, app, scopes::APP_DATABASE, None).await?;
+                let (db, bucket) = self.call_database(me, &scope, app, key::APP_DATABASE, None).await?;
                 let mut db = db.lock().await;
                 let at = db.at();
-                self.write_in(&scope, &mut db, &bucket, |c| crate::database::stored::statements(c, &list)).await?;
+                self.write_in(&scope, &mut db, &bucket, |c| database::stored::statements(c, &list)).await?;
                 if db.at() > at {
-                    self.ping(&scope, Some((app, scopes::APP_DATABASE, db.at())));
+                    self.ping(&scope, Some((app, key::APP_DATABASE, db.at())));
                 }
                 drop(db);
                 if !kept.is_empty() {
@@ -139,7 +139,7 @@ pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope
             ensure!(blob.len() == 64 && blob.bytes().all(|b| b.is_ascii_hexdigit()), "a blob is named by its hash");
             (scope, content::forget(&blob))
         }
-        Append::Retire { app, how } => (Scope::Global, crate::settings::retire(i.r.db(), &me.user, &app, &how, title)?),
+        Append::Retire { app, how } => (Scope::Global, scope::settings::retire(i.r.db(), &me.user, &app, &how, title)?),
         Append::Source { app: name, link } => {
             let db = i.r.db();
             let a = db.app(&name)?.filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
@@ -153,7 +153,7 @@ pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope
                 None if on => added_scope(i, &me.user, &name)?,
                 None => None,
             };
-            (Scope::Global, crate::settings::service(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)
+            (Scope::Global, scope::settings::service(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)
         }
         Append::Add { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("apps added, statements and items are written on their own"),
     })

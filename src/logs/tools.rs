@@ -35,9 +35,8 @@ mod serve {
     use serde_json::{Map, Value, json};
 
     use crate::core_tools::{say_time, text};
-    use crate::database::scopes;
     use crate::node::{Caller, Node};
-    use crate::protocol::CallRequest;
+    use ::api::call::CallRequest;
 
     /// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the
     /// node there says no unless the caller may remove that device (src/node/calls/running.rs).
@@ -45,7 +44,7 @@ mod serve {
         let device = text(&input, "device")?.to_string();
         input.remove("device");
         crate::logs::Ask::from_json(&Value::Object(input.clone()))?;
-        let read = CallRequest { app: scopes::APP.into(), tool: "logs".into(), device: Some(device.clone()), scopes: Some(Vec::new()), input: Value::Object(input), agent: me.agent.clone(), ..Default::default() };
+        let read = CallRequest { app: key::APP.into(), tool: "logs".into(), device: Some(device.clone()), scopes: Some(Vec::new()), input: Value::Object(input), agent: me.agent.clone(), ..Default::default() };
         let r = node.call_as(read, me).await?;
         let (shown, matched) = (r["shown"].as_u64().unwrap_or(0), r["matched"].as_u64().unwrap_or(0));
         let note = if shown == 0 {

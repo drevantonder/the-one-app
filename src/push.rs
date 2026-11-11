@@ -18,10 +18,6 @@ use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-/// What a device signs its requests to the push Worker for.
-pub const DOMAIN: &str = "one/push";
-/// What a device signs a note for.
-pub const SIGNED_NOTE: &str = "one/note";
 /// The most a sealed note may be: it fits in a push, 4 KB at Apple and in Web Push, with room to spare.
 pub const NOTE_BYTES: usize = 2_600;
 
@@ -57,8 +53,8 @@ impl Note {
     /// Settings' own screens (`app` "settings"), the client's, not an app's; else the app screen it names, `main` if
     /// none. None opens only the app.
     pub fn link(&self) -> Option<String> {
-        let cli = crate::config::CLI;
-        let enc = crate::url_encode;
+        let cli = custom_build::config::CLI;
+        let enc = custom_build::url_encode;
         if self.join().is_some() {
             return Some(format!("{cli}://settings/devices"));
         }
@@ -79,8 +75,8 @@ impl Note {
 pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result<Vec<u8>> {
     let mut note = note.clone();
     loop {
-        let signed = crate::keys::signed_request(by, SIGNED_NOTE, serde_json::to_value(&note)?, at);
-        let sealed = crate::keys::seal_unnumbered_to(to, &serde_json::to_vec(&signed)?)?;
+        let signed = key::signed_request(by, custom_build::protocol::SIGNED_NOTE, serde_json::to_value(&note)?, at);
+        let sealed = key::seal_unnumbered_to(to, &serde_json::to_vec(&signed)?)?;
         if sealed.len() <= NOTE_BYTES {
             return Ok(sealed);
         }
@@ -97,12 +93,12 @@ pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result
 /// Opens a note sealed to the device whose seal secret is `secret`: → the note, and the key that signed it (hex), or
 /// none for a note from the network's Workers. A signature that's wrong is refused.
 pub fn open_note(secret: &[u8; 32], sealed: &[u8]) -> Result<(Note, Option<String>)> {
-    let plain = crate::keys::open_sealed(secret, sealed)?;
+    let plain = key::open_sealed(secret, sealed)?;
     let mut v: Value = serde_json::from_slice(&plain).map_err(|_| anyhow!("not a note"))?;
     let by = match v.as_object_mut().and_then(|o| o.remove("sig")) {
         Some(sig) => {
             let by: [u8; 32] = HEXLOWER.decode(v["by"].as_str().unwrap_or("").as_bytes())?.try_into().map_err(|_| anyhow!("not a key"))?;
-            crate::keys::verify(&by, SIGNED_NOTE, &v, &B64U.decode(sig.as_str().unwrap_or("").as_bytes())?)?;
+            key::verify(&by, custom_build::protocol::SIGNED_NOTE, &v, &B64U.decode(sig.as_str().unwrap_or("").as_bytes())?)?;
             Some(HEXLOWER.encode(&by))
         }
         None => None,
@@ -133,7 +129,7 @@ pub struct Address {
 /// naming its seal key `seal`, which only the network's own Workers seal to, and its user `user`, as its own entries
 /// list it, whom sign-in pushes about their devices joining.
 pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, user: Option<&str>, at: u64) -> Result<Value> {
-    Ok(crate::keys::signed_request(key, DOMAIN, register_fields(seal, address, user)?, at))
+    Ok(key::signed_request(key, custom_build::protocol::PUSH, register_fields(seal, address, user)?, at))
 }
 
 /// What `register_request` signs.
@@ -149,7 +145,7 @@ pub fn register_fields(seal: &[u8; 32], address: &Address, user: Option<&str>) -
 
 /// What a device sends the push Worker to stop getting pushes (`POST <address>/push/unregister`).
 pub fn unregister_request(key: &SigningKey, at: u64) -> Value {
-    crate::keys::signed_request(key, DOMAIN, json!({ "route": "POST /push/unregister" }), at)
+    key::signed_request(key, custom_build::protocol::PUSH, json!({ "route": "POST /push/unregister" }), at)
 }
 
 #[cfg(feature = "node")]
@@ -185,12 +181,12 @@ mod tests {
     #[test]
     fn a_note_opens_only_where_it_was_sealed() {
         let by = SigningKey::from_bytes(&rand::random());
-        let (secret, public) = crate::keys::twin(&rand::random());
+        let (secret, public) = key::twin(&rand::random());
         let note = Note { id: "0123456789abcdef".into(), title: "Hi".into(), body: "there".into(), app: "tally".into(), screen: "main".into(), ..Default::default() };
         let sealed = seal_note(&by, &public, &note, 1).unwrap();
         let (opened, from) = open_note(&secret, &sealed).unwrap();
         assert_eq!((opened, from), (note.clone(), Some(HEXLOWER.encode(by.verifying_key().as_bytes()))));
-        assert!(open_note(&crate::keys::twin(&rand::random()).0, &sealed).is_err(), "another device's key opens nothing");
+        assert!(open_note(&key::twin(&rand::random()).0, &sealed).is_err(), "another device's key opens nothing");
 
         let long = Note { body: "é".repeat(5000), ..note };
         let sealed = seal_note(&by, &public, &long, 1).unwrap();
@@ -201,7 +197,7 @@ mod tests {
 
     #[test]
     fn a_tapped_note_opens_the_same_link_on_every_platform() {
-        let cli = crate::config::CLI;
+        let cli = custom_build::config::CLI;
         let note = |app: &str, screen: &str, params: Option<Value>, action: Option<Value>| Note { app: app.into(), screen: screen.into(), params: params.and_then(|p| p.as_object().cloned()), action, ..Default::default() };
         assert_eq!(note("tally", "", None, None).link(), Some(format!("{cli}://open?app=tally&screen=main")));
         assert_eq!(note("tally", "day", Some(json!({ "d": "a b" })), None).link(), Some(format!("{cli}://open?app=tally&screen=day&params=%7B%22d%22%3A%22a%20b%22%7D")));

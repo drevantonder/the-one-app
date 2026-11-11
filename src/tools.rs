@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 
 use crate::api::Client;
 use crate::cli::{Failed, asked_yes};
-use crate::config::CLI;
+use ::custom_build::config::CLI;
 use crate::core_tools::Reader;
 
 use files::show;
@@ -66,8 +66,8 @@ pub fn exit_code(err: &anyhow::Error) -> i32 {
     match err.downcast_ref::<Failed>() {
         Some(Failed::Typed(_)) => 2,
         Some(Failed::Refused(_)) => crate::cli::exit::REFUSED,
-        None => match crate::protocol::Coded::of(err).as_deref() {
-            Some(crate::protocol::code::REFUSED | crate::protocol::code::NOT_SIGNED_IN) => crate::cli::exit::REFUSED,
+        None => match ::custom_build::protocol::Coded::of(err).as_deref() {
+            Some(::custom_build::protocol::code::REFUSED | ::custom_build::protocol::code::NOT_SIGNED_IN) => crate::cli::exit::REFUSED,
             _ => 1,
         },
     }
@@ -152,7 +152,7 @@ pub fn in_cli_error(node: &Client, e: anyhow::Error) -> anyhow::Error {
     match e.downcast::<Failed>() {
         Ok(Failed::Refused(_)) => Failed::Refused(said).into(),
         Ok(Failed::Typed(_)) => Failed::Typed(said).into(),
-        Err(e) => crate::protocol::Coded::or_plain(crate::protocol::Coded::of(&e), said),
+        Err(e) => ::custom_build::protocol::Coded::or_plain(::custom_build::protocol::Coded::of(&e), said),
     }
 }
 

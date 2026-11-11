@@ -11,7 +11,7 @@
 //
 // Sealed under a secret (a refresh token, an access token), bytes are
 // 1 ‖ nonce ‖ AES-256-GCM(key, nonce, plain, authenticating that 1), with key and the copy's id both derived from the
-// secret. What was sealed before that format has no version and opens forever (tests/sealed/, src/keys.rs's FORMAT).
+// secret. What was sealed before that format has no version and opens forever (tests/sealed/, key/src/lib.rs's FORMAT).
 
 import { CODES, ENDPOINT, FRESH, READS, SESSION, SIGNED_NOTE, SOCKET } from "./protocol.js";
 
@@ -63,7 +63,7 @@ const ZERO = new Uint8Array(12);
 const NUMBERED = new Uint8Array([1]);
 
 /// Sealed with no version: what the push Worker sends, for a phone's shell, which changes only with a new build from the
-/// App Store or TestFlight (`seal_unnumbered_to` in src/keys.rs).
+/// App Store or TestFlight (`seal_unnumbered_to` in key/src/lib.rs).
 export async function sealTo(to, plain) {
   to = bytes(to);
   const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
@@ -115,7 +115,7 @@ export async function sealUnder(secret, plain) {
   return concat(NUMBERED, nonce, new Uint8Array(sealed));
 }
 
-/// What's sealed in src/keys.rs's FORMAT starts with it. Something sealed before can start with that byte by chance, so
+/// What's sealed in key/src/lib.rs's FORMAT starts with it. Something sealed before can start with that byte by chance, so
 /// it's tried as both: AES-GCM says which it was.
 export async function openUnder(secret, sealed) {
   sealed = bytes(sealed);
@@ -133,7 +133,7 @@ export async function sha256(v) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes(v)));
 }
 
-// Keys as devices hold them (src/keys.rs): endpoints' keys, epochs and signed requests.
+// Keys as devices hold them (key/src/lib.rs): endpoints' keys, epochs and signed requests.
 
 const hex = {
   encode: (bytes) => Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join(""),

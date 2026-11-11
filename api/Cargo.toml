@@ -1,0 +1,23 @@
+# The API: what every client asks a device through, at /api/*.
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+ai-gateway = { path = "../ai-gateway" }
+scope = { path = "../scope" }
+database = { path = "../database" }
+bucket = { path = "../bucket" }
+key = { path = "../key" }
+custom-build = { path = "../custom-build" }
+anyhow = "1"
+data-encoding = "2"
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

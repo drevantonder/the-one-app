@@ -17,12 +17,12 @@
 // `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
 // `&root=`, the network's root as the approving device holds it: the only network the new device then takes, so no
 // node it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
-// where the approving device read them to, which the new device starts from (src/database/steps.rs `Welcome`). Set
+// where the approving device read them to, which the new device starts from (scope/src/steps.rs `Welcome`). Set
 // once, with the approval. A service asks nothing here:
 // its device's oned lists it.
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
-// hex), so whoever answers its request can check it themselves (src/onboarding/sign_in_proof.rs): with a provider, auth asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
+// hex), so whoever answers its request can check it themselves (scope/src/sign_in_proof.rs): with a provider, auth asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
 // and keeps the token it gave; with a passkey, the prompt's challenge names it, the network and when
 // (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
 // request to join (`sign_in`), never checked here, and only to who may answer it: an admin's device, one of that
@@ -700,7 +700,7 @@ export class Auth extends DurableObject {
   }
 
   /// Whether a device of the network that's online lets this request in by itself, an invite having said yes
-  /// (src/settings.rs's `Joining::New`): an invited email's first device, once it has signed in on itself.
+  /// (scope/src/settings.rs's `Joining::New`): an invited email's first device, once it has signed in on itself.
   anInviteLetsIn(user, key) {
     const sql = this.ctx.storage.sql;
     return sql.exec("select 1 from invites where user = ? and email is not null and used is not null", user).toArray().length > 0 && !sql.exec("select 1 from devices where user = ? and key != ?", user, key).toArray().length;

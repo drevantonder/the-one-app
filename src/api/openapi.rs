@@ -4,7 +4,7 @@ use axum::extract::State;
 use axum::response::Response;
 use axum::routing::get;
 use crate::node::Node;
-use crate::protocol::path;
+use ::api::path;
 
 use super::reply::{Error, tagged};
 use super::{Me, Routes, Who};
@@ -131,7 +131,7 @@ mod tests {
         for feature in crate::core_tools::all() {
             for tool in &feature.tools {
                 let at = feature.path(&tool.spec);
-                let Some((.., body)) = crate::settings::answered_routes().find(|(_, path, ..)| *path == at) else { continue };
+                let Some((.., body)) = scope::settings::answered_routes().find(|(_, path, ..)| *path == at) else { continue };
                 let names = |schema: &Value| schema["properties"].as_object().map(|p| p.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
                 assert_eq!(names(&tool.spec["input"]), names(&body), "{at}'s tool and what its client reads");
             }

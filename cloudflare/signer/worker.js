@@ -1,6 +1,6 @@
 // The URL signer: the only holder of the network's bucket's credentials (`BUCKET`, `{ endpoint, bucket, region,
 // key_id, secret }`). It gives presigned URLs to endpoints of the network, which the relay keeps the list of (`RELAY`,
-// asked `allowed(key)`), for a request each signs with its own key (src/keys.rs `signed_request`, domain `one/urls`):
+// asked `allowed(key)`), for a request each signs with its own key (key/src/lib.rs `signed_request`, domain `one/urls`):
 //
 //   POST /urls { read, head, create: [item], replace: [{ name, etag }], remove: [name],
 //                list: [{ prefix, delimiter?, token? }], confirm: [{ name, etag }], newest: [prefix], get: [item],
@@ -13,7 +13,7 @@
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
 // admin's endpoint removes. A step at position n of a database (`<prefix>/<n>`, n > 1) is created only once the
 // one before it is there, or the copy of the steps up to it (`<prefix>/copy/<n-1>`), or the database's older steps
-// were deleted (`<prefix>/tidied`, src/database/stored.rs), past which its readers look for a copy that holds; and a
+// were deleted (`<prefix>/tidied`, database/src/stored.rs), past which its readers look for a copy that holds; and a
 // copy only once its step is: so no endpoint without the keys leaves a gap in the steps its readers take for the end,
 // nor plants one past it. Others asked for in the same trip are left out, and asked for again when they're next.
 // `confirm` says whether each object is there with that ETag, `newest` what each database's newest hint says
@@ -36,7 +36,7 @@ const ALLOWED_FOR = 5_000;
 
 const isName = (name) => typeof name === "string" && name.length <= 1024 && name.split("/").every((p) => p && p !== "." && p !== "..");
 
-// stepName is src/database/stored.rs's `step_name`.
+// stepName is database/src/stored.rs's `step_name`.
 function names(item) {
   if (typeof item === "string") return isName(item) ? [item] : refuse(400, `${item} isn't a name in the bucket`);
   const { steps, from, to } = item || {};

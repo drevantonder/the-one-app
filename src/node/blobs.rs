@@ -37,15 +37,15 @@ impl Node {
         if let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) {
             return Ok(bytes);
         }
-        use crate::bucket::Bucket;
+        use ::bucket::Bucket;
         let bucket = self.bucket()?;
         for scope in self.scopes_naming(hash)? {
-            let name = crate::bucket::blob_name(&scope.to_string(), hash);
+            let name = ::bucket::names::blob_name(&scope.to_string(), hash);
             let Some(sealed) = Bucket::get(&bucket.place, &name).await? else { continue };
-            let keys = self.database_keys(&scope, scopes::APP, scopes::CoreDb::Blobs.name(), false).await?;
-            let epoch = crate::keys::epoch_of(&sealed.bytes)?;
+            let keys = self.database_keys(&scope, key::APP, key::CoreDb::Blobs.name(), false).await?;
+            let epoch = key::epoch_of(&sealed.bytes)?;
             let key = keys.get(&epoch).with_context(|| format!("{} wasn't given {scope}'s epoch {epoch}", self.device_name()))?;
-            let bytes = crate::keys::open(key, &name, &sealed.bytes)?;
+            let bytes = key::open(key, &name, &sealed.bytes)?;
             ensure!(blake3::hash(&bytes).to_hex().as_str() == hash, "the blob kept as {hash} isn't it");
             release::put_blob(&self.0.dir, &bytes)?;
             return Ok(bytes);
@@ -57,15 +57,15 @@ impl Node {
     /// step, always, since another device may have taken it out after a scope forgot it, unless a call just put it
     /// there before writing (`Node::prepare_appends`); else (`noted`) unless this device notes it put it there.
     pub(super) async fn share_blob(&self, scope: &Scope, hash: &str, noted: bool) -> Result<()> {
-        use crate::bucket::Bucket;
+        use ::bucket::Bucket;
         let marker = format!("{scope} {hash}");
         if (noted && self.0.blobs.shared.lock().unwrap().contains(&marker)) || self.0.blobs.put_first.lock().unwrap().contains(&marker) {
             return Ok(());
         }
         let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) else { return Ok(()) };
-        let keys = self.database_keys(scope, scopes::APP, scopes::CoreDb::Blobs.name(), false).await?;
-        let name = crate::bucket::blob_name(&scope.to_string(), hash);
-        Bucket::create(&self.bucket()?.place, &name, &crate::database::steps::seal(&keys, &name, &bytes)?).await?;
+        let keys = self.database_keys(scope, key::APP, key::CoreDb::Blobs.name(), false).await?;
+        let name = ::bucket::names::blob_name(&scope.to_string(), hash);
+        Bucket::create(&self.bucket()?.place, &name, &scope::steps::seal(&keys, &name, &bytes)?).await?;
         self.0.blobs.shared.lock().unwrap().insert(marker.clone());
         self.note_shared(&marker)
     }
@@ -287,7 +287,7 @@ impl Node {
                 }
             }
             let Ok(bucket) = self.bucket() else { continue };
-            let name = crate::bucket::blob_name(log, blob);
+            let name = ::bucket::names::blob_name(log, blob);
             if let Err(err) = tokio::task::spawn_blocking(move || bucket.place.delete(&name)).await.map_err(anyhow::Error::from).and_then(|r| r) {
                 tracing::warn!("taking a forgotten blob from the bucket: {err:#}");
                 continue;

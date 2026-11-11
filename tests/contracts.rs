@@ -2,7 +2,6 @@
 //! and checks they do, so neither can drift from the other. Each agreement is a test of its own.
 
 use data_encoding::BASE64URL_NOPAD as B64U;
-use one::keys;
 use serde_json::{Value, json};
 
 /// A workerd running `cloudflare/test/formats.js`, which does with the Workers' JavaScript what a test asks, for the test
@@ -54,15 +53,15 @@ fn the_workers_and_nodes_seal_keys_for_each_other() {
 
     // Sealed to a key pair (the recovery key's twin): Rust opens what JavaScript sealed to it (push's notes).
     let scope: [u8; 32] = rand::random();
-    let (secret, public) = keys::twin(&rand::random());
+    let (secret, public) = ::key::twin(&rand::random());
     let sealed = js(json!({ "op": "sealTo", "to": B64U.encode(&public), "plain": B64U.encode(&scope) }));
-    assert_eq!(keys::open_sealed(&secret, &b(&sealed["sealed"])).unwrap(), scope, "Rust opens what JavaScript sealed to it");
+    assert_eq!(::key::open_sealed(&secret, &b(&sealed["sealed"])).unwrap(), scope, "Rust opens what JavaScript sealed to it");
 
     // Sealed under a secret, with the id it's kept by.
     let under = js(json!({ "op": "sealUnder", "secret": "a refresh token, as text", "plain": B64U.encode(&scope) }));
-    assert_eq!(under["id"], keys::id_of(b"a refresh token, as text"), "a copy's id");
-    assert_eq!(keys::open_under(b"a refresh token, as text", &b(&under["sealed"])).unwrap(), scope, "Rust opens a copy JavaScript sealed");
-    let sealed = keys::seal_under(b"a code from the recovery key", &scope);
+    assert_eq!(under["id"], ::key::id_of(b"a refresh token, as text"), "a copy's id");
+    assert_eq!(::key::open_under(b"a refresh token, as text", &b(&under["sealed"])).unwrap(), scope, "Rust opens a copy JavaScript sealed");
+    let sealed = ::key::seal_under(b"a code from the recovery key", &scope);
     let opened = js(json!({ "op": "openUnder", "secret": "a code from the recovery key", "sealed": B64U.encode(&sealed) }));
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
 }
@@ -83,7 +82,7 @@ fn the_workers_open_what_an_earlier_build_sealed() {
     }
 }
 
-/// Devices' keys (`src/keys.rs`): canonical JSON, signed requests both ways, join codes,
+/// Devices' keys (`key/src/lib.rs`): canonical JSON, signed requests both ways, join codes,
 /// and a session endpoint's certificate.
 #[test]
 fn a_device_signs_and_proves_as_the_nodes_read_it() {
@@ -93,49 +92,49 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     let seed: [u8; 32] = rand::random();
     let signer = ed25519_dalek::SigningKey::from_bytes(&seed);
     let fields = json!({ "read": ["user-0123456789abcdef/notes/main/1"], "n": 3, "z": { "b": "é\n\"", "a": [] } });
-    let request = keys::signed_request(&signer, "one/urls", fields.clone(), 1_000_000);
+    let request = ::key::signed_request(&signer, "one/urls", fields.clone(), 1_000_000);
     let node = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let to = keys::Endpoint::of(&node).seal;
+    let to = ::key::Endpoint::of(&node).seal;
     let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
     let device_seal: [u8; 32] = rand::random();
     let out = js(json!({
         "op": "keys", "seed": B64U.encode(&seed), "domain": "one/urls", "fields": fields, "at": 1_000_000,
-        "request": request, "now": 1_000_000 + keys::FRESH,
+        "request": request, "now": 1_000_000 + ::key::FRESH,
         "pair": { "key": data_encoding::HEXLOWER.encode(&device), "seal": data_encoding::HEXLOWER.encode(&device_seal) },
     }));
-    assert_eq!(out["canonical"].as_str().unwrap().as_bytes(), keys::canonical(&fields), "canonical JSON");
+    assert_eq!(out["canonical"].as_str().unwrap().as_bytes(), ::key::canonical(&fields), "canonical JSON");
     assert_eq!(out["signed"], request, "the same request signed the same, Ed25519 being deterministic");
     assert_eq!(out["checked"], json!(data_encoding::HEXLOWER.encode(signer.verifying_key().as_bytes())), "JavaScript checks a request Rust signed");
-    assert!(keys::check_request("one/urls", &out["signed"], 1_000_000).is_ok(), "Rust checks one JavaScript signed");
-    assert_eq!(out["joinCode"], keys::join_code(&keys::Endpoint { key: device, seal: device_seal }));
-    let asking = keys::Endpoint { key: device, seal: device_seal };
-    assert_eq!(out["nonce"], one::onboarding::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
-    assert_eq!(b(&out["challenge"]), one::onboarding::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
-    assert_eq!(to, keys::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
+    assert!(::key::check_request("one/urls", &out["signed"], 1_000_000).is_ok(), "Rust checks one JavaScript signed");
+    assert_eq!(out["joinCode"], ::key::join_code(&::key::Endpoint { key: device, seal: device_seal }));
+    let asking = ::key::Endpoint { key: device, seal: device_seal };
+    assert_eq!(out["nonce"], ::scope::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
+    assert_eq!(b(&out["challenge"]), ::scope::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
+    assert_eq!(to, ::key::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
 
     // A session endpoint's certificate: made the same, and each takes and refuses the same ones.
     let endpoint: [u8; 32] = rand::random();
     let at = 1_700_000_000_000u64;
-    let made = keys::certify(&signer, &endpoint, at + keys::SESSION, at);
-    let other = keys::signed_request(&signer, "one/relay", json!({ "endpoint": data_encoding::HEXLOWER.encode(&endpoint), "until": at + 1 }), at);
+    let made = ::key::certify(&signer, &endpoint, at + ::key::SESSION, at);
+    let other = ::key::signed_request(&signer, "one/relay", json!({ "endpoint": data_encoding::HEXLOWER.encode(&endpoint), "until": at + 1 }), at);
     let mut tampered: Value = serde_json::from_slice(&B64U.decode(made.as_bytes()).unwrap()).unwrap();
     tampered["until"] = json!(at + 2);
     let check = [
         made.clone(),
-        keys::certify(&signer, &endpoint, at + keys::SESSION + 1, at),
-        keys::certify(&signer, &endpoint, at + 10, at),
-        keys::certify(&signer, &endpoint, at + keys::SESSION, at + keys::FRESH + 200),
+        ::key::certify(&signer, &endpoint, at + ::key::SESSION + 1, at),
+        ::key::certify(&signer, &endpoint, at + 10, at),
+        ::key::certify(&signer, &endpoint, at + ::key::SESSION, at + ::key::FRESH + 200),
         // Signed by a clock a second fast, for a day from then: longer than a day from now.
-        keys::certify(&signer, &endpoint, at + 1_000 + keys::SESSION, at + 1_000),
-        B64U.encode(&keys::canonical(&other)),
-        B64U.encode(&keys::canonical(&tampered)),
+        ::key::certify(&signer, &endpoint, at + 1_000 + ::key::SESSION, at + 1_000),
+        B64U.encode(&::key::canonical(&other)),
+        B64U.encode(&::key::canonical(&tampered)),
         "not base64url!".into(),
     ];
     let now = at + 100;
-    let out = js(json!({ "op": "certificates", "seed": B64U.encode(&seed), "endpoint": data_encoding::HEXLOWER.encode(&endpoint), "until": at + keys::SESSION, "at": at, "check": check, "now": now }));
+    let out = js(json!({ "op": "certificates", "seed": B64U.encode(&seed), "endpoint": data_encoding::HEXLOWER.encode(&endpoint), "until": at + ::key::SESSION, "at": at, "check": check, "now": now }));
     assert_eq!(out["made"], json!(made), "the same certificate made the same");
     for (cert, js) in check.iter().zip(out["checked"].as_array().unwrap()) {
-        let rust = keys::check_certificate(cert, now);
+        let rust = ::key::check_certificate(cert, now);
         assert_eq!(js.get("error").is_none(), rust.is_ok(), "{cert}: Rust {rust:?}, JavaScript {js}");
         if let Ok(s) = rust {
             assert_eq!(js, &json!({ "by": data_encoding::HEXLOWER.encode(&s.by), "endpoint": data_encoding::HEXLOWER.encode(&s.endpoint), "until": s.until }));
@@ -144,7 +143,7 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     assert!(out["checked"].as_array().unwrap().iter().skip(1).all(|c| c.get("error").is_some()), "only the first is good");
 }
 
-/// Who's who as steps (`src/database/steps.rs`), as a browser reads it: the node's key sealed under an epoch, the
+/// Who's who as steps (`scope/src/steps.rs`), as a browser reads it: the node's key sealed under an epoch, the
 /// freeze the recovery key signed and a step a browser signed, sealed as a node
 /// puts them in the bucket and read from it as the URL signer's `get` gives them (`cloudflare/web/net-worker.js`),
 /// opened and applied by the client's keyring; and from a Welcome, sign-in's word passed on as JavaScript reads it.
@@ -154,31 +153,31 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     let js = |body: Value| formats.js(body);
 
     use ed25519_dalek::SigningKey;
-    use one::database::steps;
-    use one::database::steps::Step;
-    use one::database::scopes::{Kind, Scope};
-    use one::database::{content, scopes};
-    use one::keys::{Endpoint, Hash};
-    use one::database::steps::Reader;
+    use ::scope::steps;
+    use ::scope::steps::Step;
+    use ::scope::scopes::{Kind, Scope};
+    use ::scope::content;
+    use ::key::{Endpoint, Hash};
+    use ::scope::steps::Reader;
     const ANDRE: &str = "a000000000000001";
     let (mac, browser, recovery) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&rand::random()));
     let (epoch, app): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
     let root = Hash::from_bytes(rand::random());
-    let start = content::first("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch));
+    let start = content::first("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &::key::epoch_hash(&epoch));
     let first = steps::first_freeze(&recovery, root, &start, ANDRE, 0).unwrap();
     let listed = steps::sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, content::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None)).unwrap();
     let signed = steps::sign(&browser, &Scope::Global, 3, ANDRE, 1, 5, content::setting("greeting", Some("hi"))).unwrap();
-    let sealed_app = one::keys::seal_app_key(&epoch, scopes::APP, &app);
-    let keys: one::database::stored::Keys = [(1, one::keys::database_key(&app, one::database::scopes::APP, one::database::scopes::CoreDb::Scope.name()))].into();
+    let sealed_app = ::key::seal_app_key(&epoch, ::key::APP, &app);
+    let keys: database::stored::Keys = [(1, ::key::database_key(&app, ::key::APP, ::key::CoreDb::Scope.name()))].into();
     let prefix = steps::prefix("global");
     let sealed = |at: u64, step: &Step, copy: Option<&[u8]>| {
-        let name = one::database::stored::step_name(&prefix, at);
-        json!({ "at": at, "sealed": B64U.encode(&one::database::steps::seal(&keys, &name, &steps::encode(step, copy)).unwrap()) })
+        let name = ::bucket::names::step_name(&prefix, at);
+        json!({ "at": at, "sealed": B64U.encode(&::scope::steps::seal(&keys, &name, &steps::encode(step, copy)).unwrap()) })
     };
     let (s1, s2, s3) = (sealed(1, &first.step, first.copy.as_deref()), sealed(2, &listed, None), sealed(3, &signed, None));
-    let junk = json!({ "at": 4, "sealed": B64U.encode(&one::database::steps::seal(&[(1, rand::random())].into(), &one::database::stored::step_name(&prefix, 4), b"not a step").unwrap()) });
+    let junk = json!({ "at": 4, "sealed": B64U.encode(&::scope::steps::seal(&[(1, rand::random())].into(), &::bucket::names::step_name(&prefix, 4), b"not a step").unwrap()) });
     let epochs = std::collections::BTreeMap::from([(1, epoch)]);
-    let step_keys: one::database::stored::Keys = [(1, one::keys::open_database_key(&epoch, scopes::APP, scopes::CoreDb::Scope.name(), &sealed_app)?)].into();
+    let step_keys: database::stored::Keys = [(1, ::key::open_database_key(&epoch, ::key::APP, ::key::CoreDb::Scope.name(), &sealed_app)?)].into();
     let add = |r: &mut Reader, given: &serde_json::Value| r.add(&steps::Sealed::from_json(given), &step_keys, Some(&epochs), 0, |_, _, _| Ok(()));
     let frozen = |r: &Reader| r.truth().is_some();
     // A freeze an admin's device signed is nothing.
@@ -197,20 +196,20 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     add(&mut elsewhere, &read).unwrap();
     assert!(!frozen(&elsewhere), "a freeze that isn't the network it joined");
     // Welcomed: from the freeze and the steps up to the Welcome's, as a node passes them on with `?welcome=`.
-    let welcome = steps::Welcome { freeze: 1, at: 3, hash: one::database::stored::state_hash(who.conn()).unwrap() };
-    let keys::Waited::Approved { welcome: Some(said), .. } = keys::waited(200, &json!({ "approved": true, "root": root.to_hex(), "welcome": welcome.to_string() })) else { panic!("an approval's welcome is taken") };
+    let welcome = steps::Welcome { freeze: 1, at: 3, hash: database::stored::state_hash(who.conn()).unwrap() };
+    let ::api::handed::Waited::Approved { welcome: Some(said), .. } = ::api::handed::waited(200, &json!({ "approved": true, "root": root.to_hex(), "welcome": welcome.to_string() })) else { panic!("an approval's welcome is taken") };
     let given = json!({ "welcome": said, "freeze": s1, "at": 3, "steps": [s2, s3] });
     let mut new = Reader::new(Some(root));
     add(&mut new, &given).unwrap();
     assert!(frozen(&new) && new.at() == 3, "a new device starts where it was welcomed");
-    assert_eq!(one::database::stored::state_hash(new.truth().unwrap().db.conn()).unwrap(), welcome.hash);
+    assert_eq!(database::stored::state_hash(new.truth().unwrap().db.conn()).unwrap(), welcome.hash);
     let mut other = given.clone();
     other["welcome"] = json!(steps::Welcome { hash: "0".repeat(64), ..welcome.clone() }.to_string());
     let mut new = Reader::new(Some(root));
     assert!(add(&mut new, &other).is_err() && !frozen(&new), "nor from a Welcome its steps don't come to: it reads from the freeze, which it wasn't given");
     // Junk at the first position, under an epoch no one made, and anything after it: passed over, not waited for.
-    let name = one::database::stored::step_name(&prefix, 1);
-    let junk = json!({ "at": 1, "sealed": B64U.encode(&one::keys::seal(0xFFFF_FFFF, &rand::random(), &name, b"junk")) });
+    let name = ::bucket::names::step_name(&prefix, 1);
+    let junk = json!({ "at": 1, "sealed": B64U.encode(&::key::seal(0xFFFF_FFFF, &rand::random(), &name, b"junk")) });
     let mut fresh = Reader::new(Some(root));
     add(&mut fresh, &json!({ "steps": [junk, sealed(2, &first.step, first.copy.as_deref())] })).unwrap();
     assert_eq!(fresh.at(), 2, "a browser reads past junk");
@@ -221,7 +220,7 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
 /// (onet/src/join.rs): an approval names only a network and a welcome that are one.
 #[test]
 fn a_client_takes_only_a_network_and_a_welcome_that_are_one() {
-    use one::keys::{Waited, waited};
+    use ::api::handed::{Waited, waited};
     let root = "e".repeat(64);
     let said: Vec<(u16, Value)> = vec![
         (401, json!({})),
@@ -250,7 +249,7 @@ fn a_client_takes_only_a_network_and_a_welcome_that_are_one() {
     ];
     assert_eq!(waited(200, &said[2].1), Waited::Approved { root: Some(root.clone()), welcome: None }, "an approval names the network it's in");
     let welcomed = waited(200, &said[6].1);
-    assert!(matches!(&welcomed, Waited::Approved { welcome: Some(w), .. } if one::database::steps::Welcome::parse(w).is_some_and(|w| (w.freeze, w.at, w.copy()) == (3, 250, Some(200)))), "and where who's who was read to: {welcomed:?}");
+    assert!(matches!(&welcomed, Waited::Approved { welcome: Some(w), .. } if ::scope::steps::Welcome::parse(w).is_some_and(|w| (w.freeze, w.at, w.copy()) == (3, 250, Some(200)))), "and where who's who was read to: {welcomed:?}");
     assert_eq!(said.iter().filter(|(s, b)| matches!(waited(*s, b), Waited::Approved { welcome: Some(_), .. })).count(), 3, "only a welcome that's one is taken");
 }
 
@@ -258,7 +257,7 @@ fn a_client_takes_only_a_network_and_a_welcome_that_are_one() {
 /// and the codes answers carry.
 #[test]
 fn auth_and_devices_find_a_providers_keys_at_the_same_place() {
-    use one::onboarding::sign_in_proof::{Network, discovery};
+    use ::scope::sign_in_proof::{Network, discovery};
     let formats = Formats::start();
     for issuer in ["https://login.example", "https://login.example/", "https://login.example/tenant/v2.0"] {
         let network = Network::new("https://one.example", [1; 32], Some(&format!("{issuer} ours")));
@@ -271,14 +270,14 @@ fn the_workers_name_the_buckets_objects_as_nodes_do() {
     let formats = Formats::start();
     let js = |body: Value| formats.js(body);
 
-    use one::database::stored::{copy_name, newest_name, step_name, tidied_name};
-    let prefix = one::database::steps::prefix("user:abc");
+    use ::bucket::names::{copy_name, newest_name, step_name, tidied_name};
+    let prefix = ::scope::steps::prefix("user:abc");
     let out = js(json!({ "op": "names", "names": [[prefix, 1], [prefix, 4_000_000_000_000u64]], "prefixes": [["user:abc", "tally", "main"], ["global", "node", "scope"]], "yours": "your One App network" }));
     let rust = |p: &str, n: u64| json!([step_name(p, n), copy_name(p, n), tidied_name(p), newest_name(p)]);
     assert_eq!(out["names"], json!([rust(&prefix, 1), rust(&prefix, 4_000_000_000_000)]), "the names of a database's objects in the bucket");
     assert_eq!(out["prefixes"], json!(["user-abc/tally/main", "global/node/scope"]), "where an app's database of a scope is");
-    assert_eq!(out["refusal"], json!(one::protocol::update_refusal("your One App network")), "what a device that reads less is told");
-    use one::protocol::code;
+    assert_eq!(out["refusal"], json!(::custom_build::protocol::update_refusal("your One App network")), "what a device that reads less is told");
+    use ::custom_build::protocol::code;
     assert_eq!(out["codes"], json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notThisMachine": code::NOT_THIS_MACHINE, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "stopped": code::STOPPED, "notAdded": code::NOT_ADDED, "appDeleted": code::APP_DELETED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED, "pairingUsed": code::PAIRING_USED, "badPairingCode": code::BAD_PAIRING_CODE, "alreadyInNetwork": code::ALREADY_IN_NETWORK, "unreachable": code::UNREACHABLE }), "the codes answers carry");
 }
 
@@ -287,7 +286,7 @@ fn the_workers_name_the_buckets_objects_as_nodes_do() {
 #[test]
 fn the_screens_name_agents_as_the_vault_does() {
     let formats = Formats::start();
-    assert_eq!(formats.js(json!({ "op": "agents" }))["name"], json!(one::database::scopes::AGENTS));
+    assert_eq!(formats.js(json!({ "op": "agents" }))["name"], json!(::scope::scopes::AGENTS));
 }
 
 /// Push (src/push.rs, cloudflare/push/): a device registers its address with the push Worker as Rust signs it, a node's
@@ -310,7 +309,7 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let subscription = crate::cloudflare::Subscription::new();
     let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
     let address = subscription.address(endpoint);
-    let phone_seal = one::keys::Endpoint::of(&phone).seal;
+    let phone_seal = ::key::Endpoint::of(&phone).seal;
     let register = push::register_request(&phone, &phone_seal, &address, None, now()).unwrap();
     assert_eq!(post("/push/register", register.clone()), (200, json!({ "registered": true })), "the network's device registers");
     assert_eq!(post("/push/register", register).0, 403, "a request is taken once");
@@ -323,7 +322,7 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let unregistered = HEXLOWER.encode(node.verifying_key().as_bytes());
     let to = HEXLOWER.encode(phone.verifying_key().as_bytes());
     let fields = json!({ "route": "POST /push/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }, { "to": unregistered, "note": B64U.encode(&sealed) }] });
-    let (status, said) = post("/push/send", one::keys::signed_request(&node, push::DOMAIN, fields, now()));
+    let (status, said) = post("/push/send", ::key::signed_request(&node, ::custom_build::protocol::PUSH, fields, now()));
     assert_eq!((status, &said["to"][&to], &said["to"][&unregistered]), (200, &json!({ "sent": true }), &json!({ "none": true })), "it went to the device that registered: {said}");
 
     // What the browser's push service got: VAPID with the network's key, and the note, encrypted to the subscription.
@@ -337,14 +336,14 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let plain = subscription.open(&BASE64.decode(got["body"].as_str().unwrap().as_bytes()).unwrap());
     let plain = B64U.decode(&plain).expect("Web Push carries the note as base64url text");
     assert_eq!(plain, sealed, "the Worker carried the sealed note as it was");
-    let (opened, by) = push::open_note(&one::keys::seal_secret(&phone), &plain).unwrap();
+    let (opened, by) = push::open_note(&::key::seal_secret(&phone), &plain).unwrap();
     assert_eq!((opened, by), (note, Some(HEXLOWER.encode(node.verifying_key().as_bytes()))), "the phone opens the note, from the node");
-    assert!(push::open_note(&one::keys::seal_secret(&node), &plain).is_err(), "no other device opens it");
+    assert!(push::open_note(&::key::seal_secret(&node), &plain).is_err(), "no other device opens it");
 
     // A device that stops registering gets nothing more.
     assert_eq!(post("/push/unregister", push::unregister_request(&phone, now())).0, 200);
     let fields = json!({ "route": "POST /push/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }] });
-    assert_eq!(post("/push/send", one::keys::signed_request(&node, push::DOMAIN, fields, now())).1["to"][&to], json!({ "none": true }));
+    assert_eq!(post("/push/send", ::key::signed_request(&node, ::custom_build::protocol::PUSH, fields, now())).1["to"][&to], json!({ "none": true }));
 }
 
 /// The browser's service worker opens a note as `push::open_note` does (`openNote` in `cloudflare/shared/crypto.js`): one a
@@ -359,10 +358,10 @@ fn the_service_worker_opens_notes_as_rust_does() {
     let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
     let formats = Formats::start();
     let open = |secret: &[u8; 32], public: &[u8; 32], plain: &[u8]| {
-        let sealed = keys::seal_to(public, plain).unwrap();
+        let sealed = ::key::seal_to(public, plain).unwrap();
         formats.js(json!({ "op": "openNote", "secret": B64U.encode(secret), "public": B64U.encode(public), "sealed": B64U.encode(&sealed) }))["note"].clone()
     };
-    let (secret, public) = keys::twin(&rand::random());
+    let (secret, public) = ::key::twin(&rand::random());
     let node = SigningKey::from_bytes(&rand::random());
     let by = HEXLOWER.encode(node.verifying_key().as_bytes());
     let note = Note { id: "0123456789abcdef".into(), title: "Café \"Ü\"".into(), body: "é…".into(), app: "tally".into(), screen: "main".into(), params: Some(serde_json::from_value(json!({ "b": 1, "a": ["x"] })).unwrap()), ..Default::default() };
@@ -373,7 +372,7 @@ fn the_service_worker_opens_notes_as_rust_does() {
     assert_eq!((got["title"].as_str(), got["by"].as_str()), (Some(opened.title.as_str()), from.as_deref()), "a note a device signed: {got}");
     assert_eq!(got["by"], json!(by));
 
-    let signed = keys::signed_request(&node, push::SIGNED_NOTE, serde_json::to_value(&note).unwrap(), now());
+    let signed = ::key::signed_request(&node, ::custom_build::protocol::SIGNED_NOTE, serde_json::to_value(&note).unwrap(), now());
     let unsigned = open(&secret, &public, &serde_json::to_vec(&note).unwrap());
     assert_eq!(unsigned["title"], json!(note.title), "a note from the network's Workers is unsigned: {unsigned}");
     let mut forged = signed.clone();
@@ -382,7 +381,7 @@ fn the_service_worker_opens_notes_as_rust_does() {
     let mut other = signed;
     other["by"] = json!(HEXLOWER.encode(SigningKey::from_bytes(&rand::random()).verifying_key().as_bytes()));
     assert!(open(&secret, &public, &serde_json::to_vec(&other).unwrap())["error"].is_string(), "a note signed by another than it says");
-    assert!(push::open_note(&secret, &keys::seal_to(&public, &serde_json::to_vec(&forged).unwrap()).unwrap()).is_err(), "Rust refuses the same");
+    assert!(push::open_note(&secret, &::key::seal_to(&public, &serde_json::to_vec(&forged).unwrap()).unwrap()).is_err(), "Rust refuses the same");
 }
 
 /// Auth's pages drawn by hand (`src/onboarding/render.js`) call the network what this build does (`config::YOURS`, from
@@ -398,7 +397,7 @@ fn auth_pages_drawn_by_hand_name_the_network_as_the_build_does() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(std::fs::read_to_string(dir.join("invite.html")).unwrap().contains(&format!("Join {}", one::config::NAME)));
+    assert!(std::fs::read_to_string(dir.join("invite.html")).unwrap().contains(&format!("Join {}", ::custom_build::config::NAME)));
 }
 
 /// A row the telemetry Worker lets through has exactly the columns Basin's stream was made with: one that doesn't is taken
@@ -441,7 +440,7 @@ mod service_protocol {
     use std::time::Duration;
 
     use one::services::{Call, Elsewhere, Registry};
-    use one::state::Me;
+    use ::scope::state::Me;
     use serde_json::{Value, json};
 
     const TOKEN: &str = "a token in the service's home";
@@ -497,7 +496,7 @@ mod service_protocol {
     fn rust_and_go() -> Vec<Case> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         // Go builds the way a release does; with none installed, the build says how to get it.
-        let platforms = one::build::PLATFORMS.iter().filter(|p| p.target == one::config::TARGET);
+        let platforms = one::build::PLATFORMS.iter().filter(|p| p.target == ::custom_build::config::TARGET);
         let out = crate::temp("go-service");
         let built = one::build::build_service(&root.join("apps/whatsapp"), "contract-test", platforms, &out).unwrap_or_else(|err| panic!("WhatsApp's service is in Go, which these tests hold to the protocol: {err:#}")).unwrap();
         let go = Command::new(one::build::go()).args(["test", "./..."]).current_dir(root.join("apps/whatsapp/service")).output().unwrap_or_else(|err| panic!("Go isn't installed ({err}): see go.dev/doc/install, or `mise use -g go`"));
@@ -572,7 +571,7 @@ mod service_protocol {
             for ((function, input, why), code) in [(case.error.clone(), None), (case.refused.clone(), Some("refused"))] {
                 let err = ask(&registry, name, function, input).await.unwrap_err();
                 assert!(err.downcast_ref::<Elsewhere>().is_none() && format!("{err:#}").contains(why), "{name} answers {function} with why: {err:#}");
-                assert_eq!(one::protocol::Coded::of(&err).as_deref(), code, "{name} says what kind of error it is, as wire.json's replies do");
+                assert_eq!(::custom_build::protocol::Coded::of(&err).as_deref(), code, "{name} says what kind of error it is, as wire.json's replies do");
             }
             if let Some((function, input)) = case.elsewhere.clone() {
                 let err = ask(&registry, name, function, input).await.unwrap_err();
@@ -639,7 +638,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
     };
     names("the node's widgets", &read("src/node/screens.rs"), &["[\"late\"] = json!(true)"]);
     names("the node's route", &read("src/node/widgets/says.rs"), &["kind: Option<String>"]);
-    names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", one::protocol::path::OPENAPI]);
+    names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
     names("the pages", &read("src/screen/home/lib/model.js"), &["w.late", "&kind="]);
     names("the native widgets", &read("client/native/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
     names("a chat's view", &read("src/mcp/view.html"), &["w.late", "widgets_show"]);
@@ -647,12 +646,12 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
 }
 
 /// Every `state.<field>` the screens, the web client and the Workers read of `GET /api/state` is a field the node says
-/// (`one::state::State`): a field renamed or dropped there shows as a screen that reads nothing, which no one sees fail.
+/// (`::scope::state::State`): a field renamed or dropped there shows as a screen that reads nothing, which no one sees fail.
 /// The sample has a value in every field, so a field added to the Rust is added here (it won't compile otherwise).
 #[test]
 fn what_the_screens_read_of_the_state_is_what_the_node_says() {
-    use one::database::scopes::{Kind, Role};
-    use one::state::*;
+    use ::scope::scopes::{Kind, Role};
+    use ::scope::state::*;
     let part = || Part { name: "apps".into(), on: true, title: Some("Apps".into()), fixed: true, doing: Some("Starting".into()), problem: Some("It stopped".into()), sandbox: Some("why".into()), user: true };
     let sample = State {
         config: Config { name: "The One App".into(), cli: "one".into(), store: "apps".into(), install: Some("curl".into()) },
@@ -682,7 +681,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
                 since: 1,
                 device: Some("d".into()),
                 kind: "laptop".into(),
-                priority: one::rank::Priority::Last,
+                priority: ::scope::rank::Priority::Last,
                 order: 0,
                 serves_me: true,
                 runs_for: vec![],
@@ -705,11 +704,11 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
                 },
             }],
             devices_at: 1,
-            clients: vec![Client { key: "k".into(), seal: "s".into(), name: "n".into(), user: "u".into(), roles: [Kind::Client].into(), platform: None, passkey: Some("p".into()), device: Some("d".into()), since: 1, place: Some("p".into()), me: true, sign_in: Some(one::onboarding::sign_in_proof::Account::Passkey { credential: "c".into(), public_key: "k".into() }), linked: Vec::new() }],
+            clients: vec![Client { key: "k".into(), seal: "s".into(), name: "n".into(), user: "u".into(), roles: [Kind::Client].into(), platform: None, passkey: Some("p".into()), device: Some("d".into()), since: 1, place: Some("p".into()), me: true, sign_in: Some(::scope::sign_in_proof::Account::Passkey { credential: "c".into(), public_key: "k".into() }), linked: Vec::new() }],
             app_schedules: vec![AppSchedule { endpoint: "e".into(), scope: "s".into(), app: "a".into(), until: 1, by: "u".into(), keys: Default::default() }],
             steps: 1,
             settings: [("address".to_string(), "a".to_string())].into(),
-            cloudflare_node: Some(CloudflareNode { priority: one::rank::Priority::Last, key: "k".into(), runs_for: vec![], parts: vec![part()] }),
+            cloudflare_node: Some(CloudflareNode { priority: ::scope::rank::Priority::Last, key: "k".into(), runs_for: vec![], parts: vec![part()] }),
         }),
         pages: vec![Page { scope: "user".into(), title: "You".into(), subtitle: "".into(), hidden: false }],
         vault_requests: 1,
@@ -775,11 +774,11 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
             }
         }
     }
-    assert!(unknown.is_empty(), "these read what the node's state doesn't say (src/state.rs):\n{}", unknown.join("\n"));
+    assert!(unknown.is_empty(), "these read what the node's state doesn't say (scope/src/state.rs):\n{}", unknown.join("\n"));
 }
 
 /// Every path of the node's API that the Workers, the screens, the web client and the native apps ask is one of its routes
-/// (`api::routes`), one a device answers itself (`one::settings::answered`) or one a computer's onet does (`onet::computer::OWN`): a path misspelled or dropped from one
+/// (`api::routes`), one a device answers itself (`::scope::settings::answered`) or one a computer's onet does (`onet::computer::OWN`): a path misspelled or dropped from one
 /// fails as a 404, which no one sees until it's used. Each is in the OpenAPI document too, but a client's keys and signed
 /// steps, which it asks as itself, and what the document lists is what the node serves.
 #[test]
@@ -801,7 +800,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
     let listed: Vec<Vec<String>> = document["paths"].as_object().unwrap().keys().map(|path| path.trim_start_matches('/').split('/').map(str::to_string).collect()).collect();
     for path in document["paths"].as_object().unwrap().keys() {
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-        assert!(matches(&routes, &segments) || one::settings::answered(path), "the OpenAPI document lists {path}, which the node doesn't serve");
+        assert!(matches(&routes, &segments) || ::scope::settings::answered(path), "the OpenAPI document lists {path}, which the node doesn't serve");
     }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut files = Vec::new();
@@ -844,7 +843,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
                 let asked: Vec<&str> = literal.trim_start_matches('/').split('/').collect();
                 // A start of a path, which more is added to.
                 let place = format!("{}:{}: {}", path.strip_prefix(root).unwrap().display(), n + 1, &line[at..end]);
-                if !literal.ends_with('/') && !matches(&routes, &asked) && !one::settings::answered(literal) && !onet::computer::OWN.contains(&literal) {
+                if !literal.ends_with('/') && !matches(&routes, &asked) && !::scope::settings::answered(literal) && !onet::computer::OWN.contains(&literal) {
                     unserved.push(place.clone());
                 }
                 if !literal.ends_with('/') && !UNLISTED.contains(&literal) && !onet::computer::OWN.contains(&literal) && !matches(&listed, &asked) {
@@ -864,7 +863,7 @@ fn the_apis_paths_are_never_taken_for_an_apps() {
     for (path, _) in one::api::routes().who() {
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
         if segments.len() > 1 && !segments[0].starts_with('{') {
-            assert!(one::protocol::path::ROOTS.contains(&segments[0]), "{path} would be an app's: add {} to protocol::path::ROOTS", segments[0]);
+            assert!(::api::path::ROOTS.contains(&segments[0]), "{path} would be an app's: add {} to protocol::path::ROOTS", segments[0]);
             assert!(segments[..2] != ["api", "auth"], "{path}: /api/auth/ is auth's at the gateway, so no node would ever be asked it");
         }
     }
@@ -942,9 +941,9 @@ fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
           }},
         }};
         "#,
-        shim = json!(one::call::shim()),
+        shim = json!(::api::call::shim()),
         app = json!(APP),
-        code = json!(one::protocol::header::CODE),
+        code = json!(::custom_build::protocol::header::CODE),
         date = json!(one::app::runtime::COMPATIBILITY_DATE),
     );
     let at = format!("127.0.0.1:{}", crate::cloudflare::port());
@@ -977,26 +976,26 @@ fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
     }
     let both = ask("writes");
     assert_eq!(both["machine"], both["cloudflare"], "the same writes on both");
-    let appends = one::call::appends(&both["machine"]["appends"]).unwrap_or_else(|err| panic!("the node reads what the shim hands it: {err:#}\n{}", both["machine"]["appends"]));
+    let appends = ::api::call::appends(&both["machine"]["appends"]).unwrap_or_else(|err| panic!("the node reads what the shim hands it: {err:#}\n{}", both["machine"]["appends"]));
     assert_eq!(appends.len(), 11, "every write the app made: {appends:?}");
 }
 
-/// What the shim asks the node is what `one::call::Ask` names, and the Cloudflare node answers exactly those it says it
+/// What the shim asks the node is what `::api::call::Ask` names, and the Cloudflare node answers exactly those it says it
 /// does (a machine's node answers each, which the compiler holds it to).
 #[test]
 fn the_cloudflare_node_answers_the_asks_it_says_it_does() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let names: std::collections::BTreeMap<&str, bool> = one::call::Ask::names().collect();
+    let names: std::collections::BTreeMap<&str, bool> = ::api::call::Ask::names().collect();
     let quoted = |text: &str, before: &str| -> std::collections::BTreeSet<String> { text.split(before).skip(1).filter_map(|rest| Some(rest.split_once('"')?.0.to_string())).collect() };
     let shim = std::fs::read_to_string(root.join("src/app/runtime/shim.js")).unwrap();
     let asked: std::collections::BTreeSet<String> = quoted(&shim, "ask(\"").union(&quoted(&shim, "post(\"")).cloned().collect();
     let unknown: Vec<&String> = asked.iter().filter(|a| !names.contains_key(a.as_str())).collect();
-    assert!(unknown.is_empty(), "the shim asks what src/call.rs doesn't name: {unknown:?}");
+    assert!(unknown.is_empty(), "the shim asks what api/src/call.rs doesn't name: {unknown:?}");
     let worker = std::fs::read_to_string(root.join("cloudflare/node/worker.js")).unwrap();
     let ask = worker.split("  async ask(name, body) {").nth(1).expect("the Cloudflare node's ForCall.ask").split("\n  }\n").next().unwrap();
     let answered = quoted(ask, "case \"");
     let said: std::collections::BTreeSet<String> = names.iter().filter(|(_, on)| **on).map(|(n, _)| n.to_string()).collect();
-    assert_eq!(answered, said, "the asks the Cloudflare node answers, and those src/call.rs says it does");
+    assert_eq!(answered, said, "the asks the Cloudflare node answers, and those api/src/call.rs says it does");
 }
 
 /// A web bundle says the shell it needs by a number (`one::web::SHELL`): what the shell gives the page, its commands and
@@ -1027,7 +1026,7 @@ fn the_iphone_build_scripts_name_the_app_as_the_build_does() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), one::config::IPHONE);
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), ::custom_build::config::IPHONE);
 }
 
 /// What a screen's bridge reports of what threw is its type, where, and what it said: a frame stays only a location, however
@@ -1206,46 +1205,46 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
     let (admin, device) = (SecretKey::generate(), SecretKey::generate());
     let k = crate::cloudflare::Workers::for_devices(vec![hex(&admin)]);
     let address = k.address.replace("localhost", "127.0.0.1");
-    let clock = std::sync::atomic::AtomicU64::new(one::node::now_ms());
+    let clock = std::sync::atomic::AtomicU64::new(::custom_build::now_ms());
     let at = || clock.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let tell = |by: &SecretKey, fields: Value| crate::cloudflare::post(&format!("{address}/relay/tell"), &[], keys::signed_request(&signer(by), "one/relay", fields, at()));
-    let computes = |by: &SecretKey, fields: Value| crate::cloudflare::post(&format!("{address}/relay/computes"), &[], keys::signed_request(&signer(by), "one/relay", fields, at()));
+    let tell = |by: &SecretKey, fields: Value| crate::cloudflare::post(&format!("{address}/relay/tell"), &[], ::key::signed_request(&signer(by), "one/relay", fields, at()));
+    let computes = |by: &SecretKey, fields: Value| crate::cloudflare::post(&format!("{address}/relay/computes"), &[], ::key::signed_request(&signer(by), "one/relay", fields, at()));
     let hex_device = hex(&device);
 
     assert_eq!(tell(&admin, json!({ "add": hex_device, "role": "client" })).0, 204);
     let version = "abcdef123456 1700000000 x86_64-unknown-linux-gnu";
-    let (status, said) = computes(&device, json!({ "computes": true, "reads": one::database::READS, "version": version }));
+    let (status, said) = computes(&device, json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": version }));
     assert_eq!((status, said.as_object().unwrap().keys().cloned().collect::<Vec<_>>()), (200, ["computes", "moved", "online", "seen", "versions", "workers"].map(String::from).to_vec()));
     assert_eq!(said["versions"][&hex_device], version);
     // What a deploy says of the Workers: the device they were last deployed from, and each part's version in a version's words.
     assert_eq!(said["workers"], json!({ "from": hex(&admin), "workers": crate::cloudflare::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null }));
 
     // The ask is left whole, signed by the asker, and heard once, even by a device too old to be told anything else.
-    let ask = keys::signed_request(&signer(&admin), "one/relay", json!({ "update": hex_device }), at());
+    let ask = ::key::signed_request(&signer(&admin), "one/relay", json!({ "update": hex_device }), at());
     assert_eq!(crate::cloudflare::post(&format!("{address}/relay/tell"), &[], ask.clone()).0, 204);
     let older = "000000000000 1600000000 x86_64-unknown-linux-gnu";
     let (status, said) = computes(&device, json!({ "computes": true, "reads": 0, "version": older }));
     assert_eq!(status, 426, "{said}");
     assert_eq!(said["code"], "update", "{said}");
     assert_eq!(said["asked"], ask, "the ask as it was signed");
-    let (by, fields) = keys::check_request("one/relay", &said["asked"], at()).unwrap();
+    let (by, fields) = ::key::check_request("one/relay", &said["asked"], at()).unwrap();
     assert_eq!((data_encoding::HEXLOWER.encode(&by), fields["update"].clone()), (hex(&admin), json!(hex_device)));
 
     // Its version was noted before it was told it's too old, and the ask is gone.
-    let (status, said) = computes(&admin, json!({ "computes": true, "reads": one::database::READS }));
+    let (status, said) = computes(&admin, json!({ "computes": true, "reads": ::custom_build::protocol::READS }));
     assert_eq!(status, 200, "{said}");
     assert_eq!(said["versions"][&hex_device], older, "kept before the reads check");
     assert!(said.get("asked").is_none());
-    assert!(computes(&device, json!({ "computes": true, "reads": one::database::READS, "version": version })).1.get("asked").is_none(), "heard once");
+    assert!(computes(&device, json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": version })).1.get("asked").is_none(), "heard once");
     assert_eq!(tell(&device, json!({ "update": data_encoding::HEXLOWER.encode(&[9u8; 32]) })).0, 403, "an ask for no one on the list");
 
     // An ask to deploy the Workers again is left for the device they were last deployed from, whoever leaves it, and heard once, whole.
-    let deploy = keys::signed_request(&signer(&device), "one/relay", json!({ "cloudflare": true }), at());
+    let deploy = ::key::signed_request(&signer(&device), "one/relay", json!({ "cloudflare": true }), at());
     assert_eq!(crate::cloudflare::post(&format!("{address}/relay/tell"), &[], deploy.clone()).0, 204);
-    let from = json!({ "computes": true, "reads": one::database::READS, "version": version });
+    let from = json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": version });
     let (status, said) = computes(&admin, from.clone());
     assert_eq!((status, &said["asked"]), (200, &deploy), "{said}");
-    let (by, fields) = keys::check_request("one/relay", &said["asked"], at()).unwrap();
+    let (by, fields) = ::key::check_request("one/relay", &said["asked"], at()).unwrap();
     assert_eq!((data_encoding::HEXLOWER.encode(&by), fields["cloudflare"].clone()), (hex_device.clone(), json!(true)));
     assert!(computes(&admin, from).1.get("asked").is_none(), "heard once");
 }
@@ -1255,15 +1254,15 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
 #[test]
 fn the_relay_counts_writes_to_scopes_by_their_names() {
     use iroh::SecretKey;
-    use one::database::scopes::Scope;
+    use ::scope::scopes::Scope;
     let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
     let hex = |k: &SecretKey| data_encoding::HEXLOWER.encode(k.public().as_bytes());
     let (admin, other) = (SecretKey::generate(), SecretKey::generate());
     let k = crate::cloudflare::Workers::for_devices(vec![hex(&admin)]);
     let address = k.address.replace("localhost", "127.0.0.1");
-    let clock = std::sync::atomic::AtomicU64::new(one::node::now_ms());
+    let clock = std::sync::atomic::AtomicU64::new(::custom_build::now_ms());
     let at = || clock.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let post = |path: &str, by: &SecretKey, fields: Value| crate::cloudflare::post(&format!("{address}/relay/{path}"), &[], keys::signed_request(&signer(by), "one/relay", fields, at()));
+    let post = |path: &str, by: &SecretKey, fields: Value| crate::cloudflare::post(&format!("{address}/relay/{path}"), &[], ::key::signed_request(&signer(by), "one/relay", fields, at()));
     let (user, group) = (Scope::User("976091fe8c23a057".into()).to_string(), Scope::Group("0a1b2c3d4e5f6071".into()).to_string());
     assert_eq!(post("tell", &admin, json!({ "add": hex(&other), "role": "compute" })).0, 204);
     assert_eq!(post("tell", &admin, json!({ "moved": [Scope::Global.to_string(), user] })).0, 204);
@@ -1271,7 +1270,7 @@ fn the_relay_counts_writes_to_scopes_by_their_names() {
     assert_eq!(post("tell", &other, json!({ "moved": ["../global"] })).0, 403, "only scopes' names");
     let stranger = SecretKey::generate();
     assert_eq!(post("tell", &stranger, json!({ "moved": ["global"] })).0, 403, "only the network's devices");
-    let (status, said) = post("computes", &other, json!({ "computes": true, "reads": one::database::READS }));
+    let (status, said) = post("computes", &other, json!({ "computes": true, "reads": ::custom_build::protocol::READS }));
     assert_eq!((status, &said["moved"]), (200, &json!({ "global": 1, user: 2, group: 1 })), "{said}");
 }
 

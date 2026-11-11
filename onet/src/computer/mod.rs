@@ -1,7 +1,7 @@
 //! onet on a computer, `<cli>t`: the computer's way into its network, holding its device's key (`<home>/device.json`),
 //! and answering this computer's own programs (the CLI, the local MCP server, the desktop app, harnesses) on its
 //! loopback, with the token in its home (`one::api::LOCAL_TOKEN`). What a client answers itself it answers
-//! (`one::settings::answered`); joining with a pairing code, and what the recovery key does here, it does; every other
+//! (`::scope::settings::answered`); joining with a pairing code, and what the recovery key does here, it does; every other
 //! request goes, as this device, to the best machine for it: its own app runtime by its loopback, which it asks as this
 //! computer's own program, or another over iroh, with the keys it opens. Until its network has an address, all of that
 //! is its own app runtime's to answer. It holds the device's key for that runtime (`/api/holds`), lists it as the
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-use one::config::{CLI, NAME};
+use ::custom_build::config::{CLI, NAME};
 use one::node::NetworkFile;
 
 use crate::Device;
@@ -31,11 +31,11 @@ fn usage() -> String {
 
 /// The name it runs by.
 pub fn name() -> String {
-    one::oned::onet()
+    ::custom_build::programs::onet()
 }
 
 pub fn invoked() -> bool {
-    one::os::invoked_as().is_some_and(|me| me == name())
+    platform::os::invoked_as().is_some_and(|me| me == name())
 }
 
 /// Where this device's own app runtime answers on this computer, and its folder, with the token it's asked with
@@ -60,7 +60,7 @@ impl Runtime {
         tokio::task::spawn_blocking(move || {
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
             let mut answer = one::loopback::while_refused(|| {
-                let mut request = ureq::http::Request::builder().method(method.as_str()).uri(&url).header(one::protocol::header::LOCAL_TOKEN, &token);
+                let mut request = ureq::http::Request::builder().method(method.as_str()).uri(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, &token);
                 for (name, value) in &headers {
                     request = request.header(name, value);
                 }
@@ -76,7 +76,7 @@ impl Runtime {
 /// This computer's onet: its home, its key, what its own programs show it, and once it's in a network, its device.
 pub(crate) struct Onet {
     home: PathBuf,
-    key: one::keys::SigningKey,
+    key: key::SigningKey,
     name: String,
     token: String,
     /// Where it answers.
@@ -105,7 +105,7 @@ pub fn run(args: &[String]) -> Result<()> {
     tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(async {
         one::logs::keep(LOG);
         tracing_subscriber::fmt().with_writer(one::logs::Tee).with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "onet=info,one=info,warn".into())).init();
-        let onet = Arc::new(Onet::open(&one::home(), flag("--listen=").unwrap_or_else(one::api::addr), flag("--runtime="))?);
+        let onet = Arc::new(Onet::open(&platform::home(), flag("--listen=").unwrap_or_else(one::api::addr), flag("--runtime="))?);
         let keeping = onet.clone();
         tokio::spawn(async move {
             loop {
@@ -164,14 +164,14 @@ impl Onet {
                 let onet = asked.clone();
                 async move {
                     let device = onet.device.read().await.clone()?;
-                    let response = device.fetch("GET", one::protocol::path::APPS, Vec::new(), Vec::new()).await.ok().filter(|r| r.status == 200)?;
+                    let response = device.fetch("GET", api::path::APPS, Vec::new(), Vec::new()).await.ok().filter(|r| r.status == 200)?;
                     serde_json::from_slice(&response.body.bytes().await.ok()?).ok()
                 }
             };
             tokio::spawn(one::harnesses::keep(apps, self.home.clone(), self.listen.clone()));
         }
-        device.connect().await.map_err(|err| anyhow::anyhow!("reaching {}'s devices: {err}", one::config::YOURS))?;
-        let asked = device.told().await.map_err(|err| anyhow::anyhow!("telling {}'s relay what this device is on: {err}", one::config::YOURS))?;
+        device.connect().await.map_err(|err| anyhow::anyhow!("reaching {}'s devices: {err}", ::custom_build::config::YOURS))?;
+        let asked = device.told().await.map_err(|err| anyhow::anyhow!("telling {}'s relay what this device is on: {err}", ::custom_build::config::YOURS))?;
         if !asked.is_null() {
             device.keyring().who(|who| one::node::heard(who, &self.key.verifying_key().to_bytes(), &asked));
         }
@@ -184,7 +184,7 @@ impl Onet {
         if let Some(device) = self.device.read().await.clone() {
             return Ok(device);
         }
-        let network = NetworkFile::read(&self.home)?.with_context(|| format!("this computer isn't in a network yet: {} join <code> joins one", one::config::CLI))?;
+        let network = NetworkFile::read(&self.home)?.with_context(|| format!("this computer isn't in a network yet: {} join <code> joins one", ::custom_build::config::CLI))?;
         let mut held = self.device.write().await;
         if let Some(device) = held.clone() {
             return Ok(device);
@@ -204,13 +204,13 @@ impl Onet {
         if !kept.join("root").exists() {
             std::fs::write(kept.join("root"), &network.root)?;
         }
-        let fields = network.bucket.clone().with_context(|| format!("this computer can't reach {}'s bucket", one::config::YOURS))?;
+        let fields = network.bucket.clone().with_context(|| format!("this computer can't reach {}'s bucket", ::custom_build::config::YOURS))?;
         // S3 is reached through the URL signer at the network's address, which a computer keeps beside its fields.
         let joined = fields.get("address").cloned();
-        anyhow::ensure!(joined.is_some() || !fields.contains_key("endpoint"), "this computer's network file doesn't say where {}'s bucket is asked for: its oned writes it there as it starts", one::config::YOURS);
+        anyhow::ensure!(joined.is_some() || !fields.contains_key("endpoint"), "this computer's network file doesn't say where {}'s bucket is asked for: its oned writes it there as it starts", ::custom_build::config::YOURS);
         let at = joined.clone().map(|a| a.trim_end_matches('/').to_string());
-        let address: one::bucket::Address = Arc::new(move || joined.clone().context("a folder is reached without the network's address"));
-        let place = one::bucket::Place::network(&fields, address, self.key.clone())?;
+        let address: bucket::Address = Arc::new(move || joined.clone().context("a folder is reached without the network's address"));
+        let place = bucket::Place::network(&fields, address, self.key.clone())?;
         let runtime = self.runtime.as_ref().map(|r| Runtime { at: r.at.clone(), folder: r.folder.clone() });
         Device::on_computer(self.key.to_bytes(), &kept.to_string_lossy(), place, at, runtime).await.map_err(|e| anyhow::anyhow!("{e}"))
     }
@@ -220,12 +220,12 @@ impl Onet {
     /// new one as it joins or makes a network. The relay is told first, where the network has one, so it's never listed
     /// unreachable. Nothing else changes: the device keeps its key, and what's sealed to it stays as it is.
     async fn list_runtime(&self, device: &Device) -> Result<()> {
-        use one::database::scopes::Kind;
+        use ::scope::scopes::Kind;
         let me = self.key.verifying_key().to_bytes();
         let keyring = device.keyring();
         let Some(listed) = keyring.who(|who| -> Result<_> {
             let Some(mine) = who.machine(&me)?.filter(|m| !m.removed) else { return Ok(None) };
-            Ok(Some((who.has_runtime(&me)?, who.may(&mine.user, "invite", one::database::scopes::NETWORK), mine)))
+            Ok(Some((who.has_runtime(&me)?, who.may(&mine.user, "invite", ::scope::scopes::NETWORK), mine)))
         }) else {
             return Ok(());
         };
@@ -235,14 +235,14 @@ impl Onet {
         }
         if !has_runtime {
             let runtime = one::node::runtime_endpoint(&self.home)?;
-            self.tell(device, json!({ "add": one::keys::hex(&runtime.key), "admin": false, "role": "compute" })).await?;
-            keyring.write_to_bucket(device, &self.key, &mine.user, one::database::content::runtime(&runtime, &mine.user, &mine.name, &me)).await.map_err(|e| anyhow::anyhow!("listing this device's app runtime: {e}"))?;
-            tracing::info!("listed this device's app runtime, {}", one::keys::short(&runtime.key));
+            self.tell(device, json!({ "add": key::hex(&runtime.key), "admin": false, "role": "compute" })).await?;
+            keyring.write_to_bucket(device, &self.key, &mine.user, ::scope::content::runtime(&runtime, &mine.user, &mine.name, &me)).await.map_err(|e| anyhow::anyhow!("listing this device's app runtime: {e}"))?;
+            tracing::info!("listed this device's app runtime, {}", key::short(&runtime.key));
         }
         if mine.is(Kind::Compute) {
-            let me = one::keys::Endpoint { key: me, seal: mine.seal };
-            keyring.write_to_bucket(device, &self.key, &mine.user, one::database::content::device(&me, &mine.user, &mine.name, &[Kind::Client], None)).await.map_err(|e| anyhow::anyhow!("leaving this device's things to its app runtime: {e}"))?;
-            self.tell(device, json!({ "add": one::keys::hex(&me.key), "admin": admin, "role": "client" })).await?;
+            let me = key::Endpoint { key: me, seal: mine.seal };
+            keyring.write_to_bucket(device, &self.key, &mine.user, ::scope::content::device(&me, &mine.user, &mine.name, &[Kind::Client], None)).await.map_err(|e| anyhow::anyhow!("leaving this device's things to its app runtime: {e}"))?;
+            self.tell(device, json!({ "add": key::hex(&me.key), "admin": admin, "role": "client" })).await?;
             tracing::info!("this device runs nothing itself now: its app runtime does");
         }
         device.refresh().await.map_err(|e| anyhow::anyhow!("{e}"))
@@ -252,18 +252,18 @@ impl Onet {
     /// its endpoints, an admin's if its user is one, and this device a client. A network made on this computer had no
     /// relay when they were listed, and the relay changes nothing it already has.
     async fn tell_relay_of(&self, device: &Device) -> Result<()> {
-        use one::database::scopes::Kind;
+        use ::scope::scopes::Kind;
         let me = self.key.verifying_key().to_bytes();
         let Some(said) = device.keyring().who(|who| -> Result<_> {
             let Some(mine) = who.machine(&me)?.filter(|m| !m.removed) else { return Ok(None) };
             let runtime = who.computes()?.into_iter().find(|c| c.runtime_of() == Some(me)).map(|c| c.key);
-            Ok(Some((runtime, who.may(&mine.user, "invite", one::database::scopes::NETWORK), mine.is(Kind::Compute))))
+            Ok(Some((runtime, who.may(&mine.user, "invite", ::scope::scopes::NETWORK), mine.is(Kind::Compute))))
         }) else {
             return Ok(());
         };
         let Some((Some(runtime), admin, false)) = said? else { return Ok(()) };
-        self.tell(device, json!({ "add": one::keys::hex(&runtime), "admin": admin, "role": "compute" })).await?;
-        self.tell(device, json!({ "add": one::keys::hex(&me), "admin": admin, "role": "client" })).await
+        self.tell(device, json!({ "add": key::hex(&runtime), "admin": admin, "role": "compute" })).await?;
+        self.tell(device, json!({ "add": key::hex(&me), "admin": admin, "role": "client" })).await
     }
 
     /// Tells the network's relay something, signed by this device, where the network has one yet: one it took already is
@@ -272,9 +272,9 @@ impl Onet {
         if device.address().is_empty() {
             return Ok(());
         }
-        let signed = one::keys::signed_request(&self.key, one::protocol::RELAY, fields, one::keys::next_at(crate::keyring::now()));
+        let signed = key::signed_request(&self.key, ::custom_build::protocol::RELAY, fields, key::next_at(crate::keyring::now()));
         let (status, out) = Address::ask(device, "POST", &format!("{}/relay/tell", device.address()), None, Some(signed)).await.map_err(|e| anyhow::anyhow!("{e}"))?;
-        anyhow::ensure!((200..300).contains(&status) || out["code"] == one::protocol::code::ALREADY, "{}'s relay didn't take that: {}", one::config::YOURS, out["error"].as_str().unwrap_or("it didn't say why"));
+        anyhow::ensure!((200..300).contains(&status) || out["code"] == ::custom_build::protocol::code::ALREADY, "{}'s relay didn't take that: {}", ::custom_build::config::YOURS, out["error"].as_str().unwrap_or("it didn't say why"));
         Ok(())
     }
 }

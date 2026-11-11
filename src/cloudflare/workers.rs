@@ -334,9 +334,9 @@ const VARLOCK_DOWNLOADS: &[(&str, &str, &str)] = &[
 fn varlock() -> Result<PathBuf> {
     let (_, file, sha256) = VARLOCK_DOWNLOADS
         .iter()
-        .find(|(target, _, _)| *target == crate::config::TARGET)
-        .ok_or_else(|| anyhow!("this machine can't run the Workers: Varlock has no build for {}", crate::config::TARGET))?;
-    let dir = crate::cache().join(format!("varlock-{VARLOCK}"));
+        .find(|(target, _, _)| *target == custom_build::config::TARGET)
+        .ok_or_else(|| anyhow!("this machine can't run the Workers: Varlock has no build for {}", custom_build::config::TARGET))?;
+    let dir = platform::cache().join(format!("varlock-{VARLOCK}"));
     let path = dir.join("varlock");
     if path.exists() {
         return Ok(path);
@@ -393,7 +393,7 @@ fn vault_of(text: &str) -> Option<&str> {
 
 /// The 1Password item a network's Workers' settings are kept in, beside their secrets, for any admin's device to deploy from.
 fn item_title() -> String {
-    format!("{} Cloudflare settings", crate::config::NAME)
+    format!("{} Cloudflare settings", custom_build::config::NAME)
 }
 
 /// `op` with `args`, and `input` on its standard input.
@@ -429,7 +429,7 @@ fn references_only(text: &str) -> String {
 
 impl Settings {
     pub fn path() -> PathBuf {
-        Settings::path_in(&crate::home())
+        Settings::path_in(&platform::home())
     }
 
     fn path_in(home: &Path) -> PathBuf {
@@ -437,14 +437,14 @@ impl Settings {
     }
 
     pub fn load() -> Result<Settings> {
-        Settings::load_in(&crate::home())
+        Settings::load_in(&platform::home())
     }
 
     /// The settings kept in `home`'s folder: a throwaway network's, read from `one-dev throwaway` with its own home passed
     /// rather than this process told it's there.
     pub fn load_in(home: &Path) -> Result<Settings> {
         let path = Settings::path_in(home);
-        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine has no Cloudflare settings yet: {} cloudflare deploy takes a real network's from 1Password, and {} cloudflare serve --address <url> runs Workers here", crate::config::CLI, crate::config::CLI))?;
+        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine has no Cloudflare settings yet: {} cloudflare deploy takes a real network's from 1Password, and {} cloudflare serve --address <url> runs Workers here", custom_build::config::CLI, custom_build::config::CLI))?;
         let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't the Workers' settings", path.display()))?;
         settings.dir = home.to_path_buf();
         let dir = path.parent().unwrap();
@@ -472,7 +472,7 @@ impl Settings {
                 provider.client = get(&provider.secret("CLIENT_ID")).zip(get(&provider.secret("CLIENT_SECRET")));
             }
             // A network with a domain has no other way in for its users, so it's never deployed without one.
-            ensure!(crate::config::JOIN_DOMAIN.is_empty() || settings.providers.iter().any(|p| p.client.is_some()), "this network's users sign in with a provider's account, and no provider has its client here: set {} (its redirect URI is {}/api/auth/callback/{})", settings.providers.first().map_or(String::new(), |p| format!("{} and {}", p.secret("CLIENT_ID"), p.secret("CLIENT_SECRET"))), settings.address, settings.providers.first().map_or("", |p| &p.id));
+            ensure!(custom_build::config::JOIN_DOMAIN.is_empty() || settings.providers.iter().any(|p| p.client.is_some()), "this network's users sign in with a provider's account, and no provider has its client here: set {} (its redirect URI is {}/api/auth/callback/{})", settings.providers.first().map_or(String::new(), |p| format!("{} and {}", p.secret("CLIENT_ID"), p.secret("CLIENT_SECRET"))), settings.address, settings.providers.first().map_or("", |p| &p.id));
         }
         Ok(settings)
     }
@@ -503,7 +503,7 @@ impl Settings {
     /// `new` ones are to be made. A failure says why, and leaves the files here as they were.
     pub fn from_1password(new: bool) -> Result<()> {
         let path = Settings::path();
-        let env = std::fs::read_to_string(local(&crate::home())).unwrap_or_default();
+        let env = std::fs::read_to_string(local(&platform::home())).unwrap_or_default();
         if new || path.exists() && vault_of(&env).is_none() {
             return Ok(());
         }
@@ -517,7 +517,7 @@ impl Settings {
         let item: Value = serde_json::from_slice(&out.stdout).context("op said something other than the item")?;
         let (settings, env) = files_of(&item).with_context(|| format!("{title} in 1Password isn't the Workers' settings: it needs its fields settings and env, as a deploy keeps them"))?;
         write_private(&path, &settings)?;
-        write_private(&local(&crate::home()), &env)
+        write_private(&local(&platform::home()), &env)
     }
 
     /// Keeps `settings.json` and `.env.local`'s references in their 1Password item, in the vault the references are in,
@@ -558,7 +558,7 @@ impl Settings {
 
     /// New settings, with new secrets.
     pub fn new(address: &str) -> Settings {
-        let port = crate::config::PORT;
+        let port = custom_build::config::PORT;
         let ports = [port + 10, port + 13];
         let secret = || B64U.encode(&rand::random::<[u8; 32]>());
         Settings {
@@ -585,7 +585,7 @@ impl Settings {
             analytics_token: None,
             usage: None,
             deployed: None,
-            dir: crate::home(),
+            dir: platform::home(),
         }
     }
 
@@ -637,7 +637,7 @@ impl Settings {
             ensure!(!line.contains("op("), "{name} is kept in 1Password: change it there ({})", line.trim_start_matches(&format!("{name}=")));
         }
         let kept = match vault_of(&text) {
-            Some(vault) => format!("op(op://{vault}/{}/password)", in_1password(vault, &format!("{} Cloudflare {name}", crate::config::NAME), value)?),
+            Some(vault) => format!("op(op://{vault}/{}/password)", in_1password(vault, &format!("{} Cloudflare {name}", custom_build::config::NAME), value)?),
             None => quoted(value),
         };
         lines.push(format!("{name}={kept}"));
@@ -654,7 +654,7 @@ impl Settings {
 
 /// The location Workers' objects are made in, where the config sets one.
 fn location() -> Option<Binding> {
-    (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false))
+    (!custom_build::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), custom_build::config::RELAY_LOCATION.into(), false))
 }
 
 fn plain(name: &str, value: impl Into<String>) -> Binding {
@@ -667,20 +667,20 @@ fn secret(name: &str, value: impl Into<String>) -> Binding {
 
 /// The gateway holds no secrets.
 fn gateway_bindings(_: &Settings) -> Vec<Binding> {
-    let named = [("NAME", crate::config::NAME), ("YOURS", crate::config::YOURS), ("CLI", crate::config::CLI)].map(|(n, v)| plain(n, v));
+    let named = [("NAME", custom_build::config::NAME), ("YOURS", custom_build::config::YOURS), ("CLI", custom_build::config::CLI)].map(|(n, v)| plain(n, v));
     let bound = [("AUTH", "auth"), ("IROH", "relay"), ("SIGNER", "signer"), ("MCP", "mcp"), ("PUSH", "push"), ("TELEMETRY", "telemetry")].map(|(n, s)| plain(n, format!("service:{s}")));
     bound.into_iter().chain(named).collect()
 }
 
 /// The push Worker: the network's push credentials, and the relay, which says which devices are the network's.
 fn push_bindings(settings: &Settings) -> Vec<Binding> {
-    let cli = crate::config::CLI;
+    let cli = custom_build::config::CLI;
     let mut out = vec![
         plain("RELAY", "service:relay"),
         plain("ADDRESS", settings.address.clone()),
-        plain("NAME", crate::config::NAME),
+        plain("NAME", custom_build::config::NAME),
         // The Apple apps' bundle ids (the iPhone's is config.toml's `iphone`, the Mac's is client/native/mac/build.sh's), which their pushes go to.
-        plain("APNS_TOPICS", json!([crate::config::IPHONE, format!("app.{cli}.mac")]).to_string()),
+        plain("APNS_TOPICS", json!([custom_build::config::IPHONE, format!("app.{cli}.mac")]).to_string()),
     ];
     out.extend(settings.push.iter().map(|(name, value)| secret(name, value.clone())));
     out
@@ -695,7 +695,7 @@ fn relay_bindings(settings: &Settings) -> Vec<Binding> {
     let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("NODE", format!("object:{}:{}", NODE.name, NODE.classes[0]))]);
     let mcp = plain("MCP", format!("object:mcp:{}", Worker::named("mcp").classes[0]));
     let deployed = settings.deployed.clone().map(|d| plain("DEPLOYED", d));
-    devices.into_iter().chain(node.into_iter().flatten()).chain([mcp, plain("YOURS", crate::config::YOURS)]).chain(deployed).chain(location()).collect()
+    devices.into_iter().chain(node.into_iter().flatten()).chain([mcp, plain("YOURS", custom_build::config::YOURS)]).chain(deployed).chain(location()).collect()
 }
 
 /// The remote MCP server: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches the
@@ -707,8 +707,8 @@ fn mcp_bindings(settings: &Settings) -> Vec<Binding> {
         plain("SIGNER", "service:signer"),
         plain("TELEMETRY", "service:telemetry"),
         plain("ADDRESS", settings.address.clone()),
-        plain("NAME", crate::config::NAME),
-        plain("YOURS", crate::config::YOURS),
+        plain("NAME", custom_build::config::NAME),
+        plain("YOURS", custom_build::config::YOURS),
     ];
     out.extend(location());
     out
@@ -730,7 +730,7 @@ fn telemetry_bindings(settings: &Settings) -> Vec<Binding> {
         }
         None => vec![plain("SPANS", format!("service:{STAND_IN}:Spans")), plain("LOGS", format!("service:{STAND_IN}:Logs")), plain("METRICS", format!("service:{STAND_IN}:Metrics")), plain("SQL", format!("http://{STAND_IN}/")), plain("SQL_TOKEN", "stand-in")],
     };
-    let mut out = vec![plain("RELAY", "service:relay"), plain("YOURS", crate::config::YOURS), plain("CLI", crate::config::CLI)];
+    let mut out = vec![plain("RELAY", "service:relay"), plain("YOURS", custom_build::config::YOURS), plain("CLI", custom_build::config::CLI)];
     out.extend(store);
     out.extend(settings.otlp_token.clone().map(|token| secret("OTLP_TOKEN", token)));
     out
@@ -746,7 +746,7 @@ fn node_bindings(settings: &Settings) -> Vec<Binding> {
         // Workers AI, for the services built for Cloudflare that use it.
         plain("AI", "ai:"),
         plain("ADDRESS", settings.address.clone()),
-        plain("NAME", crate::config::NAME),
+        plain("NAME", custom_build::config::NAME),
         secret("NODE_KEY", settings.cloudflare_node_key.clone()),
         plain("RELAY", "service:relay:CloudflareNode"),
     ];
@@ -758,7 +758,7 @@ fn node_bindings(settings: &Settings) -> Vec<Binding> {
 
 /// The URL signer holds only the bucket's credentials, and asks the relay who's allowed.
 fn signer_bindings(settings: &Settings) -> Vec<Binding> {
-    let mut out = vec![plain("RELAY", "service:relay"), plain("YOURS", crate::config::YOURS)];
+    let mut out = vec![plain("RELAY", "service:relay"), plain("YOURS", custom_build::config::YOURS)];
     if let Some(bucket) = &settings.bucket {
         out.push(secret("BUCKET", bucket.to_string()));
         let endpoint = bucket["endpoint"].as_str().unwrap_or("");
@@ -776,16 +776,16 @@ fn auth_bindings(settings: &Settings) -> Vec<Binding> {
         // Pushes to a user's devices, by the push Worker's entrypoint for the network's own Workers.
         plain("PUSH", "service:push:Sender"),
         plain("ADDRESS", settings.address.clone()),
-        plain("NAME", crate::config::NAME),
-        plain("YOURS", crate::config::YOURS),
+        plain("NAME", custom_build::config::NAME),
+        plain("YOURS", custom_build::config::YOURS),
         // Its own apps' sign-ins come back to `<cli>://signed-in/`.
-        plain("CLI", crate::config::CLI),
+        plain("CLI", custom_build::config::CLI),
     ];
     if let Some((id, name)) = &settings.throwaway_user {
         out.extend([plain("SIGN_IN", "throwaway"), plain("THROWAWAY_USER", id.clone()), plain("THROWAWAY_NAME", name.clone())]);
     } else {
-        if !crate::config::JOIN_DOMAIN.is_empty() {
-            out.push(plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN));
+        if !custom_build::config::JOIN_DOMAIN.is_empty() {
+            out.push(plain("JOIN_DOMAIN", custom_build::config::JOIN_DOMAIN));
         }
         let registered: Vec<Value> = settings.providers.iter().filter_map(Provider::binding).collect();
         if !registered.is_empty() {
@@ -852,7 +852,7 @@ fn stand_in(sources: &Files) -> Result<Served> {
 
 /// The Android app's package, as client/native/android/app/build.gradle.kts names it.
 pub fn android_package() -> String {
-    crate::config::ANDROID.to_string()
+    custom_build::config::ANDROID.to_string()
 }
 
 impl Settings {
@@ -883,7 +883,7 @@ impl Settings {
 /// letters and digits, then its publisher's (`CN=` and the name in letters, digits and spaces) hash, the first 8 bytes
 /// of the SHA-256 of it in UTF-16LE, in Crockford's base32.
 pub fn windows_package() -> String {
-    let name = crate::config::NAME;
+    let name = custom_build::config::NAME;
     let publisher = format!("CN={}", name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ').collect::<String>());
     let hash = sha2::Sha256::digest(publisher.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>());
     let bits = u128::from(u64::from_be_bytes(hash[..8].try_into().unwrap())) << 1;
@@ -1050,11 +1050,11 @@ pub fn precompressed(web: &[(String, Vec<u8>)]) -> Result<Vec<(String, Vec<u8>)>
         .iter()
         .filter(|(path, bytes)| bytes.len() >= 1024 && path != "index.html" && ["js", "css", "json", "html", "wasm", "svg"].contains(&path.rsplit('.').next().unwrap_or("")))
         .collect();
-    let kept = crate::cache().join("brotli");
+    let kept = platform::cache().join("brotli");
     let names: Vec<PathBuf> = wanted.iter().map(|(_, bytes)| kept.join(data_encoding::HEXLOWER.encode(&Sha256::digest(bytes)))).collect();
     let missing: Vec<usize> = (0..wanted.len()).filter(|&i| !names[i].is_file()).collect();
     if !missing.is_empty() {
-        let dir = std::env::temp_dir().join(format!("{}-brotli-{}", crate::config::CLI, rand::random::<u64>()));
+        let dir = std::env::temp_dir().join(format!("{}-brotli-{}", custom_build::config::CLI, rand::random::<u64>()));
         let made = (|| {
             std::fs::create_dir_all(&kept)?;
             std::fs::create_dir_all(dir.join("in"))?;
@@ -1104,7 +1104,7 @@ pub fn parses(web: &[(String, Vec<u8>)]) -> Result<()> {
     if scripts.is_empty() {
         return Ok(());
     }
-    let dir = std::env::temp_dir().join(format!("{}-scripts-{}", crate::config::CLI, rand::random::<u64>()));
+    let dir = std::env::temp_dir().join(format!("{}-scripts-{}", custom_build::config::CLI, rand::random::<u64>()));
     let checked = (|| {
         for (path, text) in &scripts {
             let file = dir.join(path);
@@ -1137,18 +1137,18 @@ pub const PROTOCOL: &str = "shared/protocol.js";
 pub fn module_from(mut files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec<u8>> {
     // What they say that Rust says too, as this build says it (`protocol`): never a file of the repo.
     files.retain(|(path, _)| path != PROTOCOL);
-    files.push((PROTOCOL.into(), crate::protocol::javascript().into_bytes()));
+    files.push((PROTOCOL.into(), ::api::protocol_js::javascript().into_bytes()));
     let mut hash = Sha256::new();
     for (path, bytes) in &files {
         hash.update(format!("{path}\0{}\0", bytes.len()));
         hash.update(bytes);
     }
     let hash = data_encoding::HEXLOWER.encode(&hash.finalize());
-    let kept = crate::cache().join("cloudflare").join(format!("{}-{}.js", &hash[..32], entry.replace('/', "-")));
+    let kept = platform::cache().join("cloudflare").join(format!("{}-{}.js", &hash[..32], entry.replace('/', "-")));
     if let Ok(module) = std::fs::read(&kept) {
         return Ok(module);
     }
-    let dir = std::env::temp_dir().join(format!("{}-cloudflare-{}", crate::config::CLI, rand::random::<u64>()));
+    let dir = std::env::temp_dir().join(format!("{}-cloudflare-{}", custom_build::config::CLI, rand::random::<u64>()));
     let built = (|| {
         for (path, bytes) in &files {
             let path = dir.join(path);
@@ -1329,7 +1329,7 @@ impl Cloudflare {
     /// What's at `path`, or none if nothing is.
     pub(crate) fn found(&self, path: &str) -> Result<Option<Value>> {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(60))).build().into();
-        let mut resp = agent.get(format!("{}{path}", self.api)).header("authorization", format!("Bearer {}", self.token)).header("user-agent", crate::config::CLI).call()?;
+        let mut resp = agent.get(format!("{}{path}", self.api)).header("authorization", format!("Bearer {}", self.token)).header("user-agent", custom_build::config::CLI).call()?;
         if resp.status() == 404 {
             return Ok(None);
         }
@@ -1514,7 +1514,7 @@ fn mime(path: &str) -> &'static str {
 
 /// A Worker's name on Cloudflare: `<cli>-<name>`, so custom builds sharing an account don't clash.
 pub fn worker_name(name: &str) -> String {
-    format!("{}-{name}", crate::config::CLI)
+    format!("{}-{name}", custom_build::config::CLI)
 }
 
 /// What a Worker's upload says besides its module: its bindings (another service's by its Worker's name), its Durable
@@ -1601,7 +1601,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &
             let migration = scripts.get(&name).and_then(|s| s.migration.clone());
             let (mut meta, complete) = metadata(settings, worker, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
             let url = worker.place(settings).map(|(url, _)| url);
-            let Some(wasm) = worker.modules(sources, crate::cloudflare::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {} Worker runs: {}-dev update node builds one", worker.name, crate::config::CLI) };
+            let Some(wasm) = worker.modules(sources, crate::cloudflare::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {} Worker runs: {}-dev update node builds one", worker.name, custom_build::config::CLI) };
             let module = module_from(sources.clone(), worker.entry)?;
             let mut what = vec![meta.to_string().into_bytes(), module.clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));

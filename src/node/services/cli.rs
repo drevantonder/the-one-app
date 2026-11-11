@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use crate::api::Client;
 use crate::cli::{Command, Failed, ago};
-use crate::config::{CLI, NAME};
+use ::custom_build::config::{CLI, NAME};
 
 pub fn commands() -> Command {
     Command {
@@ -72,8 +72,8 @@ pub fn commands() -> Command {
                     let device = g.flag("device");
                     g.node.post("/api/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
                     let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
-                    match (*how, *name == crate::database::scopes::APPS_PART) {
-                        _ if device.is_some_and(|d| d.eq_ignore_ascii_case(crate::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),
+                    match (*how, *name == scope::scopes::APPS_PART) {
+                        _ if device.is_some_and(|d| d.eq_ignore_ascii_case(scope::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),
                         ("off", true) => println!("Apps' calls no longer run {there}."),
                         (_, true) => println!("Apps' calls run {there} again."),
                         ("off", _) => println!("{name} is switched off {there}."),
@@ -91,7 +91,7 @@ pub fn commands() -> Command {
 /// to put it on), and the parts devices list, with the Cloudflare node's.
 fn known(node: &Client) -> Result<BTreeSet<String>> {
     let mut names: BTreeSet<String> = node.apps()?.iter().flat_map(|a| a["uses"]["services"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect::<Vec<_>>()).collect();
-    names.insert(crate::database::scopes::APPS_PART.into());
+    names.insert(scope::scopes::APPS_PART.into());
     if let Some(network) = node.state()?.network {
         for s in &network.devices {
             names.extend(s.now.parts.iter().flatten().map(|p| p.name.clone()));

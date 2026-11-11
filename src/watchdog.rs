@@ -83,7 +83,7 @@ fn stuck_on(runtime: &tokio::runtime::Handle, now: u64) -> String {
     let metrics = runtime.metrics();
     let mut said = format!("Who's who was held by {held}; {} tasks alive on {} workers, {} queued", metrics.num_alive_tasks(), metrics.num_workers(), metrics.global_queue_depth());
     if cfg!(target_os = "macos") {
-        let file = crate::home().join("logs").join("stall.sample");
+        let file = platform::home().join("logs").join("stall.sample");
         if std::process::Command::new("sample").arg(std::process::id().to_string()).args(["2", "-file"]).arg(&file).output().is_ok_and(|o| o.status.success()) {
             said.push_str(&format!("; every thread's stack is in {}", file.display()));
         }
@@ -118,7 +118,7 @@ pub fn watch() {
             }
         }
     });
-    let restarted = crate::home().join(RESTARTS);
+    let restarted = platform::home().join(RESTARTS);
     let mut in_a_row: u32 = std::fs::read_to_string(&restarted).ok().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
     std::thread::spawn(move || {
         let mut counting_from = 0;
@@ -140,7 +140,7 @@ pub fn watch() {
             let silent = up().saturating_sub(beat.load(std::sync::atomic::Ordering::SeqCst).max(counting_from));
             if silent >= (STUCK_FOR << in_a_row.min(3)).min(MOST_STUCK_FOR) {
                 tracing::error!("this node's runtime has done nothing for {silent} seconds: exiting, to be started again. {}", stuck_on(&runtime, up()));
-                crate::insights::Ended::Watchdog.write(&crate::home());
+                crate::insights::Ended::Watchdog.write(&platform::home());
                 let _ = std::fs::write(&restarted, (in_a_row + 1).to_string());
                 std::process::exit(1);
             }

@@ -5,12 +5,12 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use one::config::NAME;
+use ::custom_build::config::NAME;
 use serde_json::{Value, json};
 
 /// The devices borrowed for the throwaway network, by kind: `{ "android": "<name>" }`.
 pub(crate) fn devices(dir: &Path) -> serde_json::Map<String, Value> {
-    one::files::read_json(&dir.join("devices.json"))
+    platform::files::read_json(&dir.join("devices.json"))
 }
 
 /// One of this machine's network's Agent Devices tools (not the throwaway network's, which has none). When the node
@@ -21,7 +21,7 @@ pub(crate) fn agent_devices(tool: &str, input: Value) -> Result<Value> {
 
 /// What this machine's node says as it restarts: that it is, or, if it's gone before it can, nothing at all.
 fn restarting(err: &anyhow::Error) -> bool {
-    one::protocol::Coded::is(err, one::protocol::code::RESTARTING) || err.chain().any(|e| e.downcast_ref::<ureq::Error>().is_some_and(|e| matches!(e, ureq::Error::Io(_) | ureq::Error::ConnectionFailed)))
+    ::custom_build::protocol::Coded::is(err, ::custom_build::protocol::code::RESTARTING) || err.chain().any(|e| e.downcast_ref::<ureq::Error>().is_some_and(|e| matches!(e, ureq::Error::Io(_) | ureq::Error::ConnectionFailed)))
 }
 
 /// What `ask` gives, asking again for up to 3 minutes while this machine's node or a service of its restarts.

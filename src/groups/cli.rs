@@ -19,7 +19,7 @@ pub fn commands() -> Command {
 }
 
 fn cli(g: &Given) -> Result<bool> {
-    use crate::config::CLI;
+    use ::custom_build::config::CLI;
     match g.words().as_slice() {
         ["group", "create", name @ ..] if !name.is_empty() => {
             let r = g.node.post("/api/group", json!({ "name": name.join(" ") }))?;

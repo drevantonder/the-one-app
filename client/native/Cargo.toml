@@ -32,6 +32,11 @@ ico = "0.6"
 tauri-utils = { version = "2", features = ["build"] }
 
 [dependencies]
+custom-build = { path = "../../custom-build" }
+platform = { path = "../../platform" }
+key = { path = "../../key" }
+scope = { path = "../../scope" }
+api = { path = "../../api" }
 # The app: the system's web view (WebKitGTK, WKWebView, WebView2, Android's) in a window, the same on every platform,
 # with a tray or menu bar item on computers. Its plugins: opening links and files outside, and notifications (below).
 # `custom-protocol`: the window's files are the app's own, built in, as the Tauri CLI's builds have them; without it,

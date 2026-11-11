@@ -12,17 +12,16 @@ use anyhow::{Context, Result, bail};
 use axum::body::{Body, Bytes};
 use axum::http::{Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use one::config::{CLI, NAME, YOURS};
-use one::git_wire::helper;
+use ::custom_build::config::{CLI, NAME, YOURS};
 
 /// Run as git's remote helper, `git-remote-<CLI> <remote> <url>`: → the exit code of git's HTTP transport.
 pub fn run(args: &[String]) -> Result<i32> {
-    let [remote, url] = args else { bail!("{} is git's, for {CLI}:: addresses: git clone <your repo's address>", helper()) };
+    let [remote, url] = args else { bail!("{} is git's, for {CLI}:: addresses: git clone <your repo's address>", ::custom_build::programs::git_helper()) };
     // Before any thread starts. A home the user gave rules; else the node's, as it told git.
-    if std::env::var_os(one::config::env("HOME")).is_none()
+    if std::env::var_os(::custom_build::config::env("HOME")).is_none()
         && let Some(home) = one::git_wire::node_home()
     {
-        unsafe { std::env::set_var(one::config::env("HOME"), home) };
+        unsafe { std::env::set_var(::custom_build::config::env("HOME"), home) };
     }
     let bad = || format!("{url} isn't an address in {NAME}: <address>/<app>/…");
     let (scheme, rest) = url.split_once("://").with_context(bad)?;
@@ -35,7 +34,7 @@ pub fn run(args: &[String]) -> Result<i32> {
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
-    let secret = one::keys::hex(&rand::random::<[u8; 32]>());
+    let secret = key::hex(&rand::random::<[u8; 32]>());
     let auth = format!("Basic {}", data_encoding::BASE64.encode(format!("git:{secret}").as_bytes()));
     std::thread::spawn(move || proxy(listener, auth));
     // Git's proxy for this one address alone, in its environment (no other user reads it), not its command line.
@@ -134,7 +133,7 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
         if status >= 400 && kind.starts_with("application/json") {
             let said: serde_json::Value = resp.body_mut().read_json().unwrap_or_default();
             let error = match said["code"].as_str() {
-                Some(one::protocol::code::NOT_THIS_MACHINE) => one::api::token_refused(&one::home()),
+                Some(::custom_build::protocol::code::NOT_THIS_MACHINE) => one::api::token_refused(&platform::home()),
                 _ => said["error"].as_str().unwrap_or("that didn't work").to_string(),
             };
             return drop(head.send((status, "text/plain".into(), Some(one::tools::in_cli_words(&crate::node(one::core_tools::Reader::Cli.client()), &error)))));

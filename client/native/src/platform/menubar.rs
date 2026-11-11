@@ -69,7 +69,7 @@ pub fn update() {
         let _one = ONE.lock().unwrap();
         let stands = crate::here::stands().filter(|s| s["in"] == true);
         let state = json!({
-            "name": one::config::NAME,
+            "name": custom_build::config::NAME,
             "signedIn": stands.is_some(),
             "here": stands.as_ref().and_then(|s| s["join"].as_str()).map(|j| j[..64].to_string()),
             "login": super::login().unwrap_or(false),
@@ -96,7 +96,7 @@ pub unsafe extern "C" fn one_menu_chose(json: *const c_char) {
             Some(link) if link.starts_with("http") => drop(crate::open(link.to_string())),
             link => crate::main(link.map(str::to_string)),
         },
-        "devices" => crate::main(Some(format!("{}://settings/devices", one::config::CLI))),
+        "devices" => crate::main(Some(format!("{}://settings/devices", custom_build::config::CLI))),
         "login" => {
             super::set_login(!super::login().unwrap_or(false));
             update();

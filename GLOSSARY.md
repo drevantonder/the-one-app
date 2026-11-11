@@ -43,6 +43,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   MCP server. A phone's app, a browser's web client and each remote MCP client hold their device's key; on a computer,
   the desktop app's window, the CLI and the local MCP server hold none, and ask the computer's onet, which holds the
   computer's.
+- **API**: what every client asks a device through, at `/api/*`: the CLI, MCP, the screens, the native apps and outside
+  programs. Each route says who may call it, and MCP's tools and the CLI's commands are made from what they say.
 - **onet**: being built (ARCHITECTURE.md, Designed): the entry point into the network, the same on every device. Its library is the `onet` crate (`onet/`) today; on a computer it's `<cli>t` (`onet/src/computer/`), which oned starts, holding the device's key, of which the desktop app's window, the CLI and the local MCP server are views.
 - **oned**: the small program, and the spec it follows, that makes a machine a node: it connects the machine to the
   network (on a computer, by starting its onet), and installs and runs what the node's owner switches on there (the app

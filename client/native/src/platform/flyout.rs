@@ -112,7 +112,7 @@ pub fn fit(window: &tauri::WebviewWindow, height: f64) {
 /// focus.
 fn popup(handle: &AppHandle, label: &str, page: &str) -> tauri::Result<tauri::WebviewWindow> {
     let window = WebviewWindowBuilder::new(handle, label, WebviewUrl::App(page.into()))
-        .title(one::config::NAME)
+        .title(custom_build::config::NAME)
         .initialization_script(include_str!("../native.js"))
         .use_https_scheme(true)
         .inner_size(PANEL.0, PANEL.1)
@@ -140,7 +140,7 @@ fn popup(handle: &AppHandle, label: &str, page: &str) -> tauri::Result<tauri::We
 /// and Quit. The panel is this page in panel mode, hidden until the item's clicked, gone when it loses focus.
 pub fn start_tray(app: &tauri::App) -> tauri::Result<()> {
     let tray = tauri::tray::TrayIconBuilder::with_id("main")
-        .tooltip(one::config::NAME)
+        .tooltip(custom_build::config::NAME)
         .show_menu_on_left_click(cfg!(target_os = "linux"))
         .on_tray_icon_event(|_, e| {
             if let tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, button_state: tauri::tray::MouseButtonState::Up, rect, .. } = e {
@@ -174,7 +174,7 @@ fn tray_menu(app: &AppHandle) {
         Menu::with_items(
             app,
             &[
-                &MenuItem::with_id(app, "open", format!("Open {}", one::config::NAME), true, None::<&str>)?,
+                &MenuItem::with_id(app, "open", format!("Open {}", custom_build::config::NAME), true, None::<&str>)?,
                 &CheckMenuItem::with_id(app, "login", "Open at Login", true, super::login().unwrap_or(false), None::<&str>)?,
                 &PredefinedMenuItem::separator(app)?,
                 &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,

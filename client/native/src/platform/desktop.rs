@@ -20,13 +20,13 @@ pub fn name() -> Option<String> {
 /// The newest `<cli>` for this computer, as the network at `address` publishes it (`one::latest`, the signed record a
 /// device updates by), checked against the release key: a throwaway network's own, as it tells its programs.
 pub fn program(address: &str) -> Result<Vec<u8>, String> {
-    let key = if crate::env("THROWAWAY").is_some() { crate::env("RELEASE_KEY").unwrap_or_default() } else { one::config::RELEASE_KEY.to_string() };
+    let key = if crate::env("THROWAWAY").is_some() { crate::env("RELEASE_KEY").unwrap_or_default() } else { custom_build::config::RELEASE_KEY.to_string() };
     if key.is_empty() {
         return Err("This build has no release key, so nothing can be set up from it.".into());
     }
     let text = one::latest::fetch(address).map_err(|e| format!("{e:#}"))?.ok_or_else(|| format!("Nothing has been published at {address} yet."))?;
     let record = one::latest::Latest::read(&key, &text).map_err(|e| format!("The record at {address}: {e:#}"))?;
-    let thing = record.to_update_to(one::config::TARGET).ok_or_else(|| format!("{address} has published nothing for {}.", one::config::TARGET))?;
+    let thing = record.to_update_to(custom_build::config::TARGET).ok_or_else(|| format!("{address} has published nothing for {}.", custom_build::config::TARGET))?;
     one::latest::download(address, thing).map_err(|e| format!("{e:#}"))
 }
 
@@ -118,7 +118,7 @@ pub fn open(url: String) -> Result<(), String> {
 /// A file a screen gives: saved where the user chooses, or with `preview`, opened in the app for it.
 pub async fn save(name: String, data: Vec<u8>, preview: bool) -> Result<(), String> {
     if preview {
-        let dir = std::env::temp_dir().join(format!("{}-{}", one::config::CLI, app().next.fetch_add(1, Ordering::Relaxed)));
+        let dir = std::env::temp_dir().join(format!("{}-{}", custom_build::config::CLI, app().next.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let path = dir.join(&name);
         std::fs::write(&path, data).map_err(|e| e.to_string())?;

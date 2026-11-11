@@ -7,9 +7,9 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::keys::{self, Route};
+use ::api::handed::Route;
 use crate::says::{Op, Who};
-use crate::settings;
+use ::scope::settings;
 
 const ABOUT: &str = "Your network's API, as you can use it now: your apps, the core's tools and routes. Its extensions: `x-one-who`, who may ask (clients, this-machine); `x-one-runs: client`, the caller's client answers it itself, with its own keys, and no node runs it; `x-one-keys`, which keys a client may hand a node with it; `x-one-call`, an app's tool, with no route of its own yet: a client asks POST /api/call with `{ app, tool, input }`, answered `{ ok: <this operation's answer> }`; `x-one-device`, the call can name the device it runs on; `x-one-confirm`, it sends or can't be undone: ask your user first, as nothing enforces it; `x-one-reads`, it only reads; `x-one-accounts`, it lists the accounts signed in to the app; `x-one-words`, the inputs a command line takes as bare words; an input's `x-one-file`, the file it takes, which it's sent as; a tag's `x-one-guide`, how to use it, and `x-one-app`, what a client needs to say of the app: how it runs (`runs`), the services it needs (`uses`) and what setting those up takes (`needs`), `tagline`, and for one with no operations here, `deleted` or `not_added`.";
 
@@ -30,7 +30,7 @@ pub fn document(apps: &[Value], this_machine: bool) -> Value {
             let method = op.method;
             let mut op = operation(at, op);
             (op["x-one-who"], op["x-one-keys"]) = (who(by), hands(at));
-            if at == crate::protocol::path::CALL {
+            if at == ::api::path::CALL {
                 keys_and_routing(&mut op);
             }
             add(at, method, op);
@@ -77,19 +77,19 @@ fn tools(apps: &[Value]) -> Value {
         for tool in tools {
             let tool_name = tool["name"].as_str().unwrap_or_default();
             let mut op = tool_op(format!("{name}_{tool_name}"), name, tool);
-            op["x-one-keys"] = json!(keys::hands(&Route::Call(name.to_string())));
+            op["x-one-keys"] = json!(::api::handed::hands(&Route::Call(name.to_string())));
             op["x-one-call"] = json!({ "app": name, "tool": tool_name, "added": app["added"] });
             if runs_on_devices(app) && !own_device(tool) {
                 op["x-one-device"] = json!(true);
             }
             keys_and_routing(&mut op);
-            add(&format!("{}/{name}/{tool_name}", crate::protocol::path::CALL), "post", op);
+            add(&format!("{}/{name}/{tool_name}", ::api::path::CALL), "post", op);
         }
     }
 
     json!({
         "openapi": "3.2.0",
-        "info": { "title": crate::config::NAME, "version": crate::config::BUILD, "description": ABOUT },
+        "info": { "title": custom_build::config::NAME, "version": custom_build::config::BUILD, "description": ABOUT },
         "tags": tags,
         "paths": paths,
         "components": { "responses": error_responses() },
@@ -162,7 +162,7 @@ fn tool_of(path: &str, op: &Value) -> Value {
 }
 
 pub(crate) fn hands(at: &str) -> Value {
-    json!(keys::hands(&Route::of(at, || "{app}".to_string())))
+    json!(::api::handed::hands(&Route::of(at, || "{app}".to_string())))
 }
 
 /// What an operation that runs a call also answers.
@@ -218,7 +218,7 @@ fn file_input(given: &Value) -> Value {
 /// call's client does something about.
 fn error_responses() -> Value {
     let error = json!({ "type": "string", "description": "why, for whoever reads it" });
-    let mut needs = crate::protocol::schema_of::<keys::Needs>();
+    let mut needs = custom_build::protocol::schema_of::<::api::handed::Needs>();
     needs["properties"]["error"] = error.clone();
     needs["required"].as_array_mut().expect("Needs has fields").push(json!("error"));
     let answer = |description: &str, schema: Value| json!({ "description": description, "content": { "application/json": { "schema": schema } } });

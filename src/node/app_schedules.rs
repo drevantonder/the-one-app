@@ -24,9 +24,9 @@ pub(super) struct State {
 #[derive(Clone, Default)]
 struct Held {
     /// The app's key, sealed to the device.
-    app: crate::database::stored::Keys,
+    app: database::stored::Keys,
     /// The Vault's database's key, kept under the app's.
-    vault: crate::database::stored::Keys,
+    vault: database::stored::Keys,
     /// The epochs the bucket had no Vault key under the app's for, as of the app schedules lasting `until`: one is
     /// written as they're set or renewed, which moves that on.
     no_vault: std::collections::BTreeSet<u32>,
@@ -48,7 +48,7 @@ impl Node {
         let (node, app) = (self.clone(), app.to_string());
         tokio::spawn(async move {
             let Ok(_renewing) = node.0.app_schedules.renewing.try_lock() else { return };
-            crate::settings::renew_app_schedules(&node, &app).await;
+            scope::settings::renew_app_schedules(&node, &app).await;
         });
     }
 
@@ -63,7 +63,7 @@ impl Node {
         let mut held = Held { until, ..Held::default() };
         let mut missing = BTreeMap::new();
         for (n, hash) in hashes {
-            match had.app.get(&n).filter(|k| crate::keys::epoch_hash(k) == hash) {
+            match had.app.get(&n).filter(|k| key::epoch_hash(k) == hash) {
                 Some(key) => drop(held.app.insert(n, *key)),
                 None if had.until == until && had.no_app.contains(&n) => drop(held.no_app.insert(n)),
                 None => drop(missing.insert(n, hash)),
@@ -81,12 +81,12 @@ impl Node {
                 held.no_vault.insert(*n);
                 continue;
             }
-            let name = crate::keys::app_schedules_vault_name(&scope.to_string(), app, *n);
-            let Some(o) = crate::bucket::Bucket::get(&bucket, &name).await? else {
+            let name = database::keys::app_schedules_vault_name(&scope.to_string(), app, *n);
+            let Some(o) = bucket::Bucket::get(&bucket, &name).await? else {
                 held.no_vault.insert(*n);
                 continue;
             };
-            match crate::keys::open(key, &name, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
+            match key::open(key, &name, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
                 Some(vault) => drop(held.vault.insert(*n, vault)),
                 None => tracing::warn!("{name} doesn't open with {app}'s key: passed over"),
             }
@@ -103,7 +103,7 @@ impl Node {
         let req = CallRequest { app: app.to_string(), tool: tool.to_string(), input, scopes: Some(vec![scope.to_string()]), client: Some(client.into()), id: Some(new_id()), ..Default::default() };
         match self.run_or_need(&req, &me).await {
             Ok(Reply::Ok(v)) => Ok(v),
-            Ok(Reply::Error(e, code)) => Err(crate::protocol::Coded::or_plain(code, e)),
+            Ok(Reply::Error(e, code)) => Err(custom_build::protocol::Coded::or_plain(code, e)),
             Ok(Reply::Elsewhere(e)) => Err(anyhow!(e)),
             Ok(Reply::Needs(need)) | Err(need) => Err(need.into()),
         }
@@ -111,15 +111,15 @@ impl Node {
 
     /// The keys app schedules of `theirs` in `in_` open of a database: their app's and the Vault's, only in their
     /// scope, while they're in force.
-    pub(super) fn app_schedules_handed(&self, in_: &Scope, theirs: &str, scope: &Scope, app: &str, database: &str) -> crate::database::stored::Keys {
+    pub(super) fn app_schedules_handed(&self, in_: &Scope, theirs: &str, scope: &Scope, app: &str, database: &str) -> database::stored::Keys {
         if in_ != scope || self.app_schedules_until(scope, theirs) <= now_ms() {
             return Default::default();
         }
         let kept = self.0.app_schedules.keys.lock().unwrap();
         let Some(held) = kept.get(&(scope.clone(), theirs.to_string())) else { return Default::default() };
-        match crate::database::scopes::CoreDb::of(app, database) {
-            Some(crate::database::scopes::CoreDb::Vault) => held.vault.clone(),
-            _ if app == theirs => held.app.iter().map(|(n, k)| (*n, crate::keys::database_key(k, app, database))).collect(),
+        match key::CoreDb::of(app, database) {
+            Some(key::CoreDb::Vault) => held.vault.clone(),
+            _ if app == theirs => held.app.iter().map(|(n, k)| (*n, key::database_key(k, app, database))).collect(),
             _ => Default::default(),
         }
     }

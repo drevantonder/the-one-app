@@ -27,7 +27,7 @@ pub fn cleaned(text: &str) -> String {
 
 /// A short hash of what `cleaned` left, to tell one message from another where it can't be kept.
 pub fn id(cleaned: &str) -> String {
-    crate::keys::hex(&crate::keys::sha256(cleaned.as_bytes()))[..8].to_string()
+    key::hex(&key::sha256(cleaned.as_bytes()))[..8].to_string()
 }
 
 fn cut(text: &str, most: usize) -> &str {

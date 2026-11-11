@@ -27,7 +27,7 @@ pub(super) fn routes() -> Routes {
 
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
 async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
-    let scope = crate::database::scopes::Scope::parse(q.get("scope").map(String::as_str).unwrap_or(""))?;
+    let scope = scope::scopes::Scope::parse(q.get("scope").map(String::as_str).unwrap_or(""))?;
     Ok(Json(node.sealed_keys(&me.caller, &scope, q.get("to").map(String::as_str), q.get("app").map(String::as_str)).await?))
 }
 
@@ -47,7 +47,7 @@ struct SealedKey {
 }
 
 async fn keys_post(State(node): State<Node>, me: Me, Body(body): Body<SealedKey>) -> Reply {
-    let scope = crate::database::scopes::Scope::parse(given(&body.scope, "scope")?)?;
+    let scope = scope::scopes::Scope::parse(given(&body.scope, "scope")?)?;
     Ok(Json(node.seal_key(&me.caller, &scope, body.n, body.to.as_deref(), body.app.as_deref(), body.vault, given(&body.sealed, "sealed")?).await?))
 }
 
@@ -59,7 +59,7 @@ async fn state(State(node): State<Node>, client: Option<axum::Extension<Me>>) ->
 }
 
 async fn create(State(node): State<Node>, Body(body): Body<Create>) -> Reply {
-    let recovery = node.create_with(given(&body.name, "name")?, given(&body.user_name, "user_name")?, body.user.as_deref(), crate::config::STARTERS).await?;
+    let recovery = node.create_with(given(&body.name, "name")?, given(&body.user_name, "user_name")?, body.user.as_deref(), crate::carried::STARTERS).await?;
     Ok(Json(json!({ "recovery": recovery })))
 }
 
@@ -86,7 +86,7 @@ struct SignedStep {
 /// checks count and writes (`database::steps`).
 async fn steps(State(node): State<Node>, me: Me, Body(list): Body<Vec<SignedStep>>) -> Reply {
     let b = |v: &str, k: &str| data_encoding::BASE64URL_NOPAD.decode(v.as_bytes()).map_err(|_| anyhow::anyhow!("{k} isn't base64url"));
-    let list = list.iter().map(|s| crate::database::steps::Step::decode(&b(&s.header, "header")?, &b(&s.signature, "signature")?, &b(&s.body, "body")?)).collect::<anyhow::Result<Vec<_>>>()?;
+    let list = list.iter().map(|s| scope::steps::Step::decode(&b(&s.header, "header")?, &b(&s.signature, "signature")?, &b(&s.body, "body")?)).collect::<anyhow::Result<Vec<_>>>()?;
     node.put_signed_steps(&me.caller, list).await?;
     done()
 }
@@ -94,6 +94,6 @@ async fn steps(State(node): State<Node>, me: Me, Body(list): Body<Vec<SignedStep
 /// `?from=<n>`: `global`'s scope database's steps after position n (`Node::global_steps`).
 async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Reply {
     let from = q.get("from").map(|f| f.parse()).transpose()?.unwrap_or(0);
-    let welcome = q.get("welcome").and_then(|w| crate::database::steps::Welcome::parse(w));
+    let welcome = q.get("welcome").and_then(|w| scope::steps::Welcome::parse(w));
     Ok(Json(node.global_steps(&me.caller, from, welcome).await?))
 }

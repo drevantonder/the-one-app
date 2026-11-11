@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 
-use crate::config::{BUILD, CLI, COMMITTED, TARGET};
+use ::custom_build::config::{BUILD, CLI, COMMITTED, TARGET};
 use crate::latest::{self, Latest, Thing};
 use crate::release;
 
@@ -69,7 +69,7 @@ pub fn address(home: &Path) -> Option<String> {
 /// so it comes back on it; on a Mac, takes the window it names too. Anything wrong (a bad signature, an older build, the
 /// wrong target, a failed download) leaves what it's about as it was, and is kept for `why`. → what happened, to say.
 pub fn run() -> Result<String> {
-    let home = crate::home();
+    let home = platform::home();
     let done = take(&home);
     if let Err(err) = say_why(&home, done.as_ref().err().map(|e| format!("{e:#}")).as_deref()) {
         eprintln!("{CLI}: couldn't note why this device didn't update: {err}");
@@ -111,9 +111,9 @@ fn take(home: &Path) -> Result<String> {
 fn restart_oned(home: &Path) -> bool {
     let Some(pid) = std::fs::read_to_string(home.join(PID)).ok().and_then(|p| p.trim().parse::<u32>().ok()) else { return false };
     // Only a process of this program's: a pid left from a stopped one may be anyone's by now.
-    if !crate::os::is_program(pid, CLI) && !crate::os::is_program(pid, &crate::oned::name()) {
+    if !platform::os::is_program(pid, CLI) && !platform::os::is_program(pid, &::custom_build::programs::oned()) {
         return false;
     }
-    crate::os::ask_pid_to_stop(pid as i32);
+    platform::os::ask_pid_to_stop(pid as i32);
     true
 }

@@ -8,7 +8,7 @@ use axum::routing::{get, post};
 use serde_json::json;
 
 use crate::api::{Body, Error, Me, Reply, Routes, Who};
-use crate::database::scopes::Scope;
+use ::scope::scopes::Scope;
 use crate::node::{Caller, Node};
 use crate::says::vault::{Answer, Asked, Change, Items};
 

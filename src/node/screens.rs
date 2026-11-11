@@ -42,7 +42,7 @@ impl Node {
         // The keys of every app's database here that the caller didn't hand, asked for at once (428), as the Vault
         // does: an app's render reaches its data in its own process, which can't say what it lacked as a need, so a
         // widget would only say it stopped working until something else had them.
-        let want: Vec<(Scope, &str, &str)> = contexts.iter().flat_map(|(app, ctx, _)| ctx.scopes.iter().filter_map(|s| Some((Scope::parse(&s.id).ok()?, app.as_str(), scopes::APP_DATABASE)))).collect();
+        let want: Vec<(Scope, &str, &str)> = contexts.iter().flat_map(|(app, ctx, _)| ctx.scopes.iter().filter_map(|s| Some((Scope::parse(&s.id).ok()?, app.as_str(), key::APP_DATABASE)))).collect();
         self.needs(&viewer, &want).await?;
         let placed = &placed;
         let apps = futures_util::future::try_join_all(contexts.iter().map(|(app, ctx, _granted)| async move {
@@ -62,13 +62,13 @@ impl Node {
             return drawing.await;
         }
         let late = || {
-            tracing::info!("{app} {} took longer than {} ms; it comes alone", w["name"], crate::protocol::WIDGET_LIMIT_MS);
+            tracing::info!("{app} {} took longer than {} ms; it comes alone", w["name"], custom_build::protocol::WIDGET_LIMIT_MS);
             let mut one = said.clone();
             one["late"] = json!(true);
-            one["root"] = json!({ "t": "text", "text": crate::protocol::LATE_WIDGET, "tone": "muted" });
+            one["root"] = json!({ "t": "text", "text": custom_build::protocol::LATE_WIDGET, "tone": "muted" });
             one
         };
-        tokio::time::timeout(Duration::from_millis(crate::protocol::WIDGET_LIMIT_MS), drawing).await.unwrap_or_else(|_| late())
+        tokio::time::timeout(Duration::from_millis(custom_build::protocol::WIDGET_LIMIT_MS), drawing).await.unwrap_or_else(|_| late())
     }
 
     /// A widget at every size it draws, with its options and the viewer's placed copies, added to `said`.
@@ -169,7 +169,7 @@ impl Node {
     pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>, linked: bool) -> Result<String> {
         let row = self.with(|i| i.r.db().app(app))?;
         if row.as_ref().is_some_and(|a| a.deleted.is_some() && !a.erased) {
-            bail!(crate::protocol::Coded::new(crate::protocol::code::APP_DELETED, format!("{app} was deleted: its owners can restore it from Recently Deleted in the App Store")));
+            bail!(custom_build::protocol::Coded::new(custom_build::protocol::code::APP_DELETED, format!("{app} was deleted: its owners can restore it from Recently Deleted in the App Store")));
         }
         let deployed = row.is_some_and(|a| a.bundle.is_some() && !a.erased);
         // A screen the app doesn't have (an old or mistyped link), or an app not deployed here, is a page that says so.
@@ -182,7 +182,7 @@ impl Node {
     pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str, linked: bool) -> Result<String> {
         context["me"] = json!(self.me_for(viewer)?);
         let api = format!("http://localhost:{}", crate::api::port());
-        context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": crate::config::MADE_HERE });
+        context["config"] = json!({ "name": custom_build::config::NAME, "cli": custom_build::config::CLI, "api": api, "made_here": custom_build::config::MADE_HERE });
         Ok(crate::screen::page(&context, body, linked))
     }
 

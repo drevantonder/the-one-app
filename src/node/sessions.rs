@@ -5,8 +5,8 @@
 
 use std::collections::HashSet;
 
-use crate::database::stored::Keys;
-use crate::keys::{Need, Needs};
+use ::database::stored::Keys;
+use ::api::handed::{Need, Needs};
 
 use super::*;
 
@@ -44,29 +44,6 @@ pub(super) struct Opened {
     pub db: Arc<tokio::sync::Mutex<Db>>,
 }
 
-impl std::fmt::Display for Needs {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let list: Vec<String> = self.need.iter().map(|n| format!("{}'s {}/{} in epoch {}", n.scope, n.app, n.database, n.epoch)).collect();
-        write!(f, "it needs keys it wasn't handed: {}", list.join(", "))
-    }
-}
-
-impl std::error::Error for Needs {}
-
-impl Needs {
-    /// As the API says it: `{ error, need, to, seal }`.
-    pub fn json(&self) -> Value {
-        json!({ "error": self.to_string(), "need": self.need, "to": self.to, "seal": self.seal })
-    }
-
-    /// What `json` says, if it says keys are needed.
-    pub fn from_json(v: &Value) -> Option<Needs> {
-        let need: Vec<Need> = serde_json::from_value(v["need"].clone()).ok().filter(|n: &Vec<Need>| !n.is_empty())?;
-        let said = |k: &str| v[k].as_str().unwrap_or("").to_string();
-        Some(Needs { need, to: said("to"), seal: said("seal") })
-    }
-}
-
 impl Session {
     fn live(&self, now: u64) -> bool {
         self.until > now
@@ -102,7 +79,7 @@ impl Credential {
 }
 
 fn hint_name(scope: &Scope, app: &str, database: &str) -> String {
-    crate::database::stored::newest_name(&crate::bucket::database_prefix(&scope.to_string(), app, database))
+    ::bucket::names::newest_name(&::bucket::names::database_prefix(&scope.to_string(), app, database))
 }
 
 /// How many hints of a request's databases are read from the bucket at once.
@@ -156,7 +133,7 @@ impl Node {
         // Keys this device can't open (sealed to another: the node a client asked before, say) are left, never refused:
         // the call goes on without them and asks for what it needs (428), sealed to this device, which the client
         // checks against its own entries before handing anything. Leaving them gives nothing away.
-        let handoff = match crate::keys::open_handoff(&self.seal_secret(), sealed) {
+        let handoff = match ::api::handed::open_handoff(&self.seal_secret(), sealed) {
             Ok(handoff) => handoff,
             Err(err) => {
                 tracing::debug!("keys handed for {user} that this device can't open, left: {err:#}");
@@ -188,7 +165,7 @@ impl Node {
             }
             Ok(newest)
         })?;
-        let keys: Vec<crate::keys::Handed> = handoff.keys.into_iter().filter(|k| newest.get(&k.scope).is_some_and(|n| k.epoch >= 1 && k.epoch <= *n)).collect();
+        let keys: Vec<::api::handed::Handed> = handoff.keys.into_iter().filter(|k| newest.get(&k.scope).is_some_and(|n| k.epoch >= 1 && k.epoch <= *n)).collect();
         let mut kept = self.0.sessions.kept.lock().unwrap();
         kept.retain(|_, s| s.live(now));
         let session = kept.entry(held).or_default();
@@ -204,7 +181,7 @@ impl Node {
     /// `from`'s key, and only of `scopes`, those the call names; a service's call (`service`) only with some, since
     /// a node's word alone runs no service. → the call's credential.
     pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope], service: bool) -> Result<Credential> {
-        let handoff = crate::keys::open_handoff(&self.seal_secret(), sealed)?;
+        let handoff = ::api::handed::open_handoff(&self.seal_secret(), sealed)?;
         ensure!(handoff.for_ == hex(from), "the keys handed are for another node");
         ensure!(!service || !handoff.keys.is_empty(), "a service's call passed on comes with the keys its user handed");
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
@@ -216,19 +193,19 @@ impl Node {
 
     /// The keys a call of `app` was handed here, of `scopes` alone, for passing it on, until when they're kept: what a
     /// client would hand a node for that call (`keys::may_hand`), never another app's.
-    pub(super) fn passing_on(&self, credential: &Credential, scopes: &[Scope], app: &str) -> (Vec<crate::keys::Handed>, u64) {
+    pub(super) fn passing_on(&self, credential: &Credential, scopes: &[Scope], app: &str) -> (Vec<::api::handed::Handed>, u64) {
         let Some(held) = credential.held() else { return (Vec::new(), 0) };
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
-        let route = crate::keys::Route::Call(app.to_string());
+        let route = ::api::handed::Route::Call(app.to_string());
         let kept = self.0.sessions.kept.lock().unwrap();
         let Some(session) = kept.get(&held).filter(|s| s.live(now_ms())) else { return (Vec::new(), 0) };
         let keys = session
             .keys
             .iter()
             .filter(|((scope, ..), _)| named.contains(scope))
-            .flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| (crate::keys::Need { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone() }, *key)))
-            .filter(|(need, _)| crate::keys::may_hand(&route, need))
-            .map(|(n, key)| crate::keys::Handed { scope: n.scope, epoch: n.epoch, app: n.app, database: n.database, key })
+            .flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| (::api::handed::Need { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone() }, *key)))
+            .filter(|(need, _)| ::api::handed::may_hand(&route, need))
+            .map(|(n, key)| ::api::handed::Handed { scope: n.scope, epoch: n.epoch, app: n.app, database: n.database, key })
             .collect();
         (keys, session.until)
     }
@@ -249,7 +226,7 @@ impl Node {
     /// nobody's key has this device pass over the real steps or write any it can't be read by (`opens_steps`).
     pub(super) async fn handed_step_keys(&self, scope: &Scope) -> Result<Keys> {
         let (now, newest) = (now_ms(), self.with(|i| Ok(i.r.db().epoch(scope)?))?);
-        let id = (scope.to_string(), scopes::APP.to_string(), scopes::CoreDb::Log.name().to_string());
+        let id = (scope.to_string(), key::APP.to_string(), key::CoreDb::Log.name().to_string());
         let handed: Vec<(String, Keys)> = self.0.sessions.kept.lock().unwrap().values().filter(|s| s.live(now)).filter_map(|s| s.keys.get(&id).map(|k| (s.user.clone(), k.clone()))).collect();
         let mut offered: BTreeMap<u32, Vec<[u8; 32]>> = BTreeMap::new();
         self.with(|i| {
@@ -269,7 +246,7 @@ impl Node {
                 keys.insert(n, key);
             }
         }
-        crate::database::stored::handed(keys, newest).map_err(|_| NotGiven(scope.clone(), self.device_name()).into())
+        ::database::stored::handed(keys, newest).map_err(|_| NotGiven(scope.clone(), self.device_name()).into())
     }
 
     /// Which of the keys `offered` for epoch `n` of a scope's database's steps opens what the bucket holds under that
@@ -277,7 +254,7 @@ impl Node {
     /// everyone offered the same; else none. An epoch before the newest (`old`) has nothing more written under it, so
     /// what it came to holds.
     async fn opens_steps(&self, scope: &Scope, n: u32, old: bool, offered: &[[u8; 32]]) -> Result<Option<[u8; 32]>> {
-        use crate::bucket::Bucket;
+        use ::bucket::Bucket;
         let checked = |k: &[u8; 32]| -> [u8; 32] {
             use sha2::Digest;
             sha2::Sha256::new().chain_update(scope.to_string()).chain_update(n.to_be_bytes()).chain_update(k).finalize().into()
@@ -286,17 +263,17 @@ impl Node {
             return Ok(Some(*k));
         }
         let bucket = self.bucket()?;
-        let prefix = crate::database::steps::prefix(&scope.to_string());
-        let (at, copy, epoch) = Bucket::get(&bucket, &crate::database::stored::newest_name(&prefix)).await?.map_or((0, 0, 0), |o| crate::database::stored::newest(&o.bytes));
+        let prefix = scope::steps::prefix(&scope.to_string());
+        let (at, copy, epoch) = Bucket::get(&bucket, &::bucket::names::newest_name(&prefix)).await?.map_or((0, 0, 0), |o| ::database::stored::newest(&o.bytes));
         let mut sealed = None;
         if copy > 0 && epoch == n {
-            sealed = Bucket::get(&bucket, &crate::database::stored::copy_name(&prefix, copy)).await?.map(|o| (crate::database::stored::copy_name(&prefix, copy), o.bytes));
+            sealed = Bucket::get(&bucket, &::bucket::names::copy_name(&prefix, copy)).await?.map(|o| (::bucket::names::copy_name(&prefix, copy), o.bytes));
         }
         // From the last step anyone said is there, or this device read, on to the last there is.
         let read = self.with(|i| Ok(i.scope_dbs.get(scope).map_or(0, |r| r.at)))?;
         let mut top = at.max(read);
         for _ in 0..STEPS_CHECKED {
-            match Bucket::get(&bucket, &crate::database::stored::step_name(&prefix, top + 1)).await? {
+            match Bucket::get(&bucket, &::bucket::names::step_name(&prefix, top + 1)).await? {
                 Some(_) => top += 1,
                 None => break,
             }
@@ -305,9 +282,9 @@ impl Node {
             if sealed.is_some() {
                 break;
             }
-            let name = crate::database::stored::step_name(&prefix, step);
+            let name = ::bucket::names::step_name(&prefix, step);
             let Some(o) = Bucket::get(&bucket, &name).await? else { continue };
-            match crate::keys::epoch_of(&o.bytes) {
+            match key::epoch_of(&o.bytes) {
                 Ok(e) if e == n => sealed = Some((name, o.bytes)),
                 Ok(e) if e < n => break,
                 _ => {}
@@ -320,7 +297,7 @@ impl Node {
             }
             return Ok(Some(*one));
         };
-        let opens = offered.iter().find(|k| crate::keys::open(k, &name, &sealed).is_ok()).copied();
+        let opens = offered.iter().find(|k| key::open(k, &name, &sealed).is_ok()).copied();
         match opens {
             Some(k) => drop(self.0.sessions.opened_steps.lock().unwrap().insert(checked(&k))),
             None => tracing::warn!("{scope}'s steps: no key handed for epoch {n} opens {name}: left"),
@@ -340,7 +317,7 @@ impl Node {
             let mut want = Vec::new();
             for s in m.scopes()? {
                 if s != Scope::Global && i.r.holds(&s) && m.may(&me.user, "use", &scopes::object(&s)) && m.epoch(&s)? > 0 && !self.opens(m, &s)? {
-                    want.push((s, scopes::APP, scopes::CoreDb::Log.name()));
+                    want.push((s, key::APP, key::CoreDb::Log.name()));
                 }
             }
             Ok(want)
@@ -399,13 +376,13 @@ impl Node {
         let bucket = self.bucket()?;
         // Each database's newest hint, a few at once as a page asks for dozens. R2 now and then holds a read of one for half a minute
         // and resets it: a hint only says how old a key it needs, so without one it asks for the newest, and the page goes on.
-        let hints: Vec<Option<Option<crate::bucket::Object>>> = {
+        let hints: Vec<Option<Option<::bucket::Object>>> = {
             use futures_util::StreamExt;
             let bucket = &bucket;
             let names: Vec<String> = want.iter().map(|(scope, app, database)| hint_name(scope, app, database)).collect();
             futures_util::stream::iter(names)
                 .map(|name| async move {
-                    match tokio::time::timeout(HINT_WITHIN, crate::bucket::Bucket::get(bucket, &name)).await {
+                    match tokio::time::timeout(HINT_WITHIN, ::bucket::Bucket::get(bucket, &name)).await {
                         Ok(Ok(hint)) => Some(hint),
                         Ok(Err(err)) => {
                             tracing::warn!("{name}: {err:#}");
@@ -423,7 +400,7 @@ impl Node {
         };
         for ((scope, app, database), hint) in want.iter().zip(hints) {
             let newest = self.newest_epoch(scope).await?.max(1);
-            let oldest = crate::keys::oldest_needed(database, hint.as_ref().and_then(|h| h.as_ref()).map(|o| &o.bytes[..]), newest);
+            let oldest = ::api::handed::oldest_needed(database, hint.as_ref().and_then(|h| h.as_ref()).map(|o| &o.bytes[..]), newest);
             // Only what the bucket said, never a read that failed.
             if hint.is_some() {
                 self.0.sessions.oldest.lock().unwrap().insert(hint_name(scope, app, database), oldest);
@@ -437,7 +414,7 @@ impl Node {
     /// Forgets what a database's newest hint said, once it's written here or another device says it wrote it: a
     /// caller's next request reads it again.
     pub(super) fn hint_changed(&self, prefix: &str) {
-        self.0.sessions.oldest.lock().unwrap().remove(&crate::database::stored::newest_name(prefix));
+        self.0.sessions.oldest.lock().unwrap().remove(&::bucket::names::newest_name(prefix));
     }
 
     pub(super) fn need(&self, need: Vec<Need>) -> Needs {
@@ -461,7 +438,7 @@ impl Node {
         let keys = self.handed(me, scope, app, database);
         let db = match self.database(scope, app, database, schema, Some(super::databases::Given { keys, bucket: &bucket, until, app_schedules })).await {
             Err(err) => {
-                let epoch = err.downcast_ref::<crate::database::stored::Missing>().map(|m| m.epoch).or(err.downcast_ref::<crate::database::stored::Ahead>().map(|a| a.epoch));
+                let epoch = err.downcast_ref::<::database::stored::Missing>().map(|m| m.epoch).or(err.downcast_ref::<::database::stored::Ahead>().map(|a| a.epoch));
                 // What its hint said when last read here no longer holds: it's read again next time.
                 self.0.sessions.oldest.lock().unwrap().remove(&hint_name(scope, app, database));
                 return match epoch {

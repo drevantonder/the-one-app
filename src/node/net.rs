@@ -4,8 +4,8 @@
 //! both ends' keys, so what devices say needs no sealing of its own: an ask is one stream, its answer the same stream
 //! back. Devices are found by the network's list of them, never n0's discovery.
 
-use crate::config::YOURS;
-use crate::protocol::message as M;
+use ::custom_build::config::YOURS;
+use ::custom_build::protocol::message as M;
 use iroh::endpoint::{Connection, QuicTransportConfig, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey};
 
@@ -112,12 +112,12 @@ impl std::error::Error for NotThere {}
 
 /// What devices of this custom build speak: another's never meet them.
 pub fn alpn() -> Vec<u8> {
-    format!("{}/1", crate::config::CLI).into_bytes()
+    format!("{}/1", ::custom_build::config::CLI).into_bytes()
 }
 
 /// What client devices of this custom build speak to a node: HTTP/1.1, one request on each stream, to its local API.
 fn http_alpn() -> Vec<u8> {
-    format!("{}/http/1", crate::config::CLI).into_bytes()
+    format!("{}/http/1", ::custom_build::config::CLI).into_bytes()
 }
 
 
@@ -387,7 +387,7 @@ impl Node {
         }
         let _held = Held(self.clone(), remote, conn.clone());
         // The certificate checked last, and the session it vouched for: one check a connection, unless it's renewed.
-        let vouched: Arc<Mutex<Option<(String, crate::keys::Session)>>> = Arc::default();
+        let vouched: Arc<Mutex<Option<(String, key::Session)>>> = Arc::default();
         if !listed {
             let (node, waiting, shown, found) = (self.clone(), conn.clone(), vouched.clone(), found.clone());
             tokio::spawn(async move {
@@ -403,10 +403,10 @@ impl Node {
             let (node, closing, vouched, found) = (node.clone(), closing.clone(), vouched.clone(), found.clone());
             async move {
                 // Who asks is the key the connection proved, or the device that vouched for it, and nothing it says of itself.
-                for header in [axum::http::header::AUTHORIZATION.as_str(), crate::protocol::header::LOCAL_TOKEN] {
+                for header in [axum::http::header::AUTHORIZATION.as_str(), ::custom_build::protocol::header::LOCAL_TOKEN] {
                     req.headers_mut().remove(header);
                 }
-                let certificate = req.headers_mut().remove(crate::protocol::header::ENDPOINT);
+                let certificate = req.headers_mut().remove(::custom_build::protocol::header::ENDPOINT);
                 let who = if listed || found.load(std::sync::atomic::Ordering::SeqCst) {
                     Ok((remote, u64::MAX))
                 } else if certificate.is_none() && node.client_now(&remote).await.is_some() {
@@ -483,14 +483,14 @@ impl Node {
     /// The device a session's endpoint `remote` asks as: the one its certificate names, if it's for `remote`, unexpired,
     /// and by a client device the network still lists, with its `until`. `kept` is the last checked, so a connection
     /// checks one signature.
-    fn vouched(&self, remote: &Key, certificate: Option<&str>, kept: &Mutex<Option<(String, crate::keys::Session)>>) -> Result<(Key, u64)> {
+    fn vouched(&self, remote: &Key, certificate: Option<&str>, kept: &Mutex<Option<(String, key::Session)>>) -> Result<(Key, u64)> {
         let certificate = certificate.with_context(|| format!("that key isn't one of {YOURS}'s devices, and no device vouched for it"))?;
         let now = now_ms();
         let mut kept = kept.lock().unwrap();
         let session = match kept.as_ref().filter(|(c, _)| c == certificate) {
             Some((_, session)) => *session,
             None => {
-                let session = crate::keys::check_certificate(certificate, now)?;
+                let session = key::check_certificate(certificate, now)?;
                 ensure!(session.endpoint == *remote, "that certificate is for another endpoint");
                 *kept = Some((certificate.to_string(), session));
                 session
@@ -540,7 +540,7 @@ impl Node {
             Ok(request) => self.admit(remote, request).await.and_then(|r| Ok(serde_json::to_value(r)?)),
             Err(err) => Err(err.into()),
         };
-        joined.unwrap_or_else(|err| json!({ "error": format!("{err:#}"), "code": crate::protocol::Coded::of(&err) }))
+        joined.unwrap_or_else(|err| json!({ "error": format!("{err:#}"), "code": ::custom_build::protocol::Coded::of(&err) }))
     }
 
     /// Another device's `changed`, that something changed: `{ scope, app?, database?, at?, step?, sig? }`, `step` the sealed step written
@@ -565,7 +565,7 @@ impl Node {
 
     /// Whether `key` is the network's Cloudflare node's endpoint, as `cloudflare node deploy` set it.
     pub(super) fn is_cloudflare_node(&self, key: &Key) -> bool {
-        self.with_or(false, |i| Ok(i.r.db().setting(crate::database::scopes::CLOUDFLARE_NODE)?.is_some_and(|k| k == hex(key))))
+        self.with_or(false, |i| Ok(i.r.db().setting(scope::scopes::CLOUDFLARE_NODE)?.is_some_and(|k| k == hex(key))))
     }
 
     /// Closes the connections of devices the network no longer lists: client devices' to the local API, and those
@@ -584,7 +584,7 @@ impl Node {
                 }
                 let mut gone_held = Vec::new();
                 for k in held {
-                    if m.compute(&k)?.is_none() && m.setting(crate::database::scopes::CLOUDFLARE_NODE)?.is_none_or(|s| s != hex(&k)) {
+                    if m.compute(&k)?.is_none() && m.setting(scope::scopes::CLOUDFLARE_NODE)?.is_none_or(|s| s != hex(&k)) {
                         gone_held.push(k);
                     }
                 }
@@ -884,12 +884,12 @@ impl Node {
         let url = format!("{}/relay/computes", address.trim_end_matches('/'));
         let node = self.clone();
         // What a device is on is its device's to say: an app runtime of its own key is on its device's build.
-        let mut asked = json!({ "computes": true, "reads": crate::database::READS });
+        let mut asked = json!({ "computes": true, "reads": ::custom_build::protocol::READS });
         if matches!(self.0.holds, holds::Holds::Key(_)) {
-            asked["version"] = json!(crate::protocol::version());
+            asked["version"] = json!(::custom_build::protocol::version());
         }
         tokio::spawn(async move {
-            let body = crate::keys::signed_request(&key, crate::protocol::RELAY, asked, crate::keys::next_at(now_ms()));
+            let body = key::signed_request(&key, ::custom_build::protocol::RELAY, asked, key::next_at(now_ms()));
             let said = match post_relay(url, body).await {
                 Ok((200, said)) => said,
                 // Too old to be told anything else, it can still be asked to update.
@@ -904,8 +904,8 @@ impl Node {
                 i.moved = said["moved"].is_object().then(|| (Instant::now(), said["moved"].clone()));
                 Ok(())
             });
-            let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| crate::keys::unhex(k.as_str()?).ok()).collect();
-            let seen: HashMap<Key, u64> = said["seen"].as_object().into_iter().flatten().filter_map(|(k, at)| Some((crate::keys::unhex(k).ok()?, at.as_u64()?))).collect();
+            let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| key::unhex(k.as_str()?).ok()).collect();
+            let seen: HashMap<Key, u64> = said["seen"].as_object().into_iter().flatten().filter_map(|(k, at)| Some((key::unhex(k).ok()?, at.as_u64()?))).collect();
             let was = node.with_or(None, |i| {
                 i.last_seen = seen;
                 let was = std::mem::replace(&mut i.connected, connected.clone());
@@ -932,16 +932,16 @@ impl Node {
         tokio::spawn(async move {
             let mut wait = Duration::from_secs(1);
             for _ in 0..5 {
-                let at = crate::keys::next_at(now_ms());
-                let body = match crate::keys::signed_request_by(&node.0.holds, crate::protocol::RELAY, fields.clone(), at).await {
+                let at = key::next_at(now_ms());
+                let body = match key::signed_request_by(&node.0.holds, ::custom_build::protocol::RELAY, fields.clone(), at).await {
                     Ok(body) => body,
                     Err(err) => return tracing::debug!("telling the relay: {err:#}"),
                 };
                 match post_relay(url.clone(), body).await {
                     Ok((code, _)) if code < 300 => return,
                     // Another process of this device signed in the same millisecond: again at once, with a new `at`.
-                    Ok((_, said)) if said["code"] == crate::protocol::code::REPLAYED => {
-                        tokio::time::sleep(crate::keys::again_in(at)).await;
+                    Ok((_, said)) if said["code"] == ::custom_build::protocol::code::REPLAYED => {
+                        tokio::time::sleep(key::again_in(at)).await;
                         continue;
                     }
                     Ok((code, _)) if code < 500 => return tracing::debug!("the relay refused what this device told it ({code})"),
@@ -1040,7 +1040,7 @@ async fn post_relay(url: String, body: Value) -> Result<(u16, Value)> {
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(RELAY_WAIT)).build().into();
     tokio::task::spawn_blocking(move || {
         let request = ureq::http::Request::post(&url).header("content-type", "application/json").body(serde_json::to_vec(&body)?)?;
-        let (mut resp, _) = crate::hedge::run(&agent, "relay", request, crate::hedge::Twice::Never)?;
+        let (mut resp, _) = platform::hedge::run(&agent, "relay", request, platform::hedge::Twice::Never)?;
         let said: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         anyhow::Ok((resp.status().as_u16(), said))
     })

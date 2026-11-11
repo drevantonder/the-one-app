@@ -37,12 +37,12 @@ const ASKS: usize = 16;
 const INBOX_MOST: usize = 4096;
 
 fn alpn() -> Vec<u8> {
-    format!("{}/1", one::config::CLI).into_bytes()
+    format!("{}/1", custom_build::config::CLI).into_bytes()
 }
 
 /// What client devices speak to nodes.
 fn http_alpn() -> Vec<u8> {
-    format!("{}/http/1", one::config::CLI).into_bytes()
+    format!("{}/http/1", custom_build::config::CLI).into_bytes()
 }
 
 fn through_relay(key: &[u8]) -> CustomAddr {

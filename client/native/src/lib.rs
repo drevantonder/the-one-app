@@ -55,7 +55,7 @@ fn label() -> &'static str {
 /// `SIGN_IN_PRINT`, sign in by printing the link rather than opening a browser (`one-dev throwaway client linux` signs in
 /// there); `CONTROL`, in a debug build, a loopback port an agent drives the window by.
 fn env(name: &str) -> Option<String> {
-    std::env::var(format!("{}_{name}", one::config::CLI.to_uppercase())).ok().filter(|v| !v.is_empty())
+    std::env::var(format!("{}_{name}", ::custom_build::config::CLI.to_uppercase())).ok().filter(|v| !v.is_empty())
 }
 
 /// What this app asks its user's devices through: a phone's own client, with the phone's key; or the computer's onet,
@@ -166,7 +166,7 @@ fn kept_in(data: &std::path::Path, name: &str) -> Option<String> {
 
 /// The network's address: `ADDRESS` for a test, the custom build's if it has one, else as the user gave it.
 fn address_in(data: &std::path::Path) -> Option<String> {
-    env("ADDRESS").or_else(|| Some(one::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| kept_in(data, "address")).map(|a| a.trim_end_matches('/').to_string())
+    env("ADDRESS").or_else(|| Some(::custom_build::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| kept_in(data, "address")).map(|a| a.trim_end_matches('/').to_string())
 }
 
 /// This device's client for `id` (`<address> <user>`), its folder in `data` named by it.
@@ -205,7 +205,7 @@ impl App {
         if let Some(a) = kept.as_ref().filter(|a| a.address == address) {
             return Ok(a.clone());
         }
-        let a = Arc::new(signin::SignIn::new(&address, &format!("{} on {}", one::config::NAME, device_name()), self.data.clone()));
+        let a = Arc::new(signin::SignIn::new(&address, &format!("{} on {}", ::custom_build::config::NAME, device_name()), self.data.clone()));
         *kept = Some(a.clone());
         Ok(a)
     }
@@ -408,7 +408,7 @@ fn native() -> Value {
     let unpaired = stands.as_ref().is_some_and(|s| s["in"] == false);
     platform::menus(user.is_some(), unpaired);
     json!({
-        "name": one::config::NAME, "yours": one::config::YOURS, "cli": one::config::CLI, "platform": label(), "device": device_name(), "client": platform::CLIENT,
+        "name": ::custom_build::config::NAME, "yours": ::custom_build::config::YOURS, "cli": ::custom_build::config::CLI, "platform": label(), "device": device_name(), "client": platform::CLIENT,
         "address": address, "signedIn": user.is_some(), "user": user,
         "opened": opened,
         // A computer's window is a view of its onet, with no key of its own: the page asks through the app.
@@ -611,14 +611,14 @@ fn device_keys() -> Result<Value, Failure> {
 /// This device's signature of `bytes` (base64), for its own client in the page, which never sees the key.
 #[tauri::command]
 fn device_sign(bytes: String) -> Result<String, Failure> {
-    Ok(data_encoding::BASE64.encode(&one::keys::sign_with(&secret_here()?, &unbase64(&bytes)?)))
+    Ok(data_encoding::BASE64.encode(&key::sign_with(&secret_here()?, &unbase64(&bytes)?)))
 }
 
 /// What this device's seal key agrees with `share` (base64) on, for its own client in the page, which never sees the key.
 #[tauri::command]
 fn device_shared(share: String) -> Result<String, Failure> {
     let share: [u8; 32] = unbase64(&share)?.try_into().map_err(|_| "not a key")?;
-    Ok(data_encoding::BASE64.encode(&one::keys::agree_as(&secret_here()?, &share)))
+    Ok(data_encoding::BASE64.encode(&key::agree_as(&secret_here()?, &share)))
 }
 
 /// The folder this device keeps what its keyring keeps (the same one its own client in Rust reads, so a sign-in carries over).
@@ -958,13 +958,13 @@ async fn pair(code: String) -> Result<String, String> {
     let failed = match said {
         Ok((200, _)) => None,
         Ok((_, out)) => Some(out["code"].as_str().unwrap_or_default().to_string()),
-        Err(_) => Some(one::protocol::code::UNREACHABLE.to_string()),
+        Err(_) => Some(::custom_build::protocol::code::UNREACHABLE.to_string()),
     };
     if let Some(why) = failed {
-        use one::protocol::code;
+        use ::custom_build::protocol::code;
         return Err(match why.as_str() {
             code::PAIRING_USED => "That pairing code was used or has expired. Make a new one on your other device.".into(),
-            code::ALREADY_IN_NETWORK => format!("This device is already in another {}. Remove it there first.", one::config::NAME.trim_start_matches("The ")),
+            code::ALREADY_IN_NETWORK => format!("This device is already in another {}. Remove it there first.", ::custom_build::config::NAME.trim_start_matches("The ")),
             code::BAD_PAIRING_CODE => "That isn’t a whole pairing code. Copy it again, all of it.".into(),
             code::UNREACHABLE => "Couldn’t reach the device that made the code. Check both are online, then try again.".into(),
             _ => "Couldn’t join. Make a new pairing code on your other device and try again.".into(),
@@ -1028,7 +1028,7 @@ fn open_at_login_once(app: &tauri::App) -> tauri::Result<()> {
 /// which goes there, or kept for it until it asks.
 fn opened(url: &str) {
     let a = app();
-    let own = url.starts_with(&format!("{}://", one::config::CLI))
+    let own = url.starts_with(&format!("{}://", ::custom_build::config::CLI))
         || a.address().is_some_and(|address| url::Url::parse(url).is_ok_and(|u| u.origin().ascii_serialization() == address));
     if !own {
         return;
@@ -1114,7 +1114,7 @@ pub fn run() {
                 one::logs::say(&format!("panic: {info}"));
                 earlier(info)
             }));
-            one::logs::say(&format!("{} {} started on {}", one::config::NAME, env!("CARGO_PKG_VERSION"), device_name()));
+            one::logs::say(&format!("{} {} started on {}", ::custom_build::config::NAME, env!("CARGO_PKG_VERSION"), device_name()));
             #[cfg(debug_assertions)]
             if let Some(port) = env("CONTROL").and_then(|p| p.parse().ok()) {
                 control(port);
@@ -1175,7 +1175,7 @@ pub fn run() {
                     own
                 });
             #[cfg(desktop)]
-            let window = window.title(one::config::NAME).inner_size(1000.0, 700.0).min_inner_size(360.0, 480.0).visible(false);
+            let window = window.title(::custom_build::config::NAME).inner_size(1000.0, 700.0).min_inner_size(360.0, 480.0).visible(false);
             // The page runs up to the window's top, under its buttons, as the Mac's own apps do.
             #[cfg(target_os = "macos")]
             let window = window

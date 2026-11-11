@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::state::Me;
+use ::scope::state::Me;
 
 /// What a service's call gives back: its answer, and blobs the caller's scope keeps.
 #[derive(Debug, Default)]
@@ -53,7 +53,7 @@ pub const STARTS_WITHIN: Duration = Duration::from_secs(30);
 
 /// That `app`'s program isn't running here: it didn't come back from a restart in time, so its call has failed, unrun.
 fn not_running(app: &str) -> anyhow::Error {
-    crate::protocol::Coded::error(crate::protocol::code::RESTARTING, format!("{app} isn't running on this device"))
+    ::custom_build::protocol::Coded::error(::custom_build::protocol::code::RESTARTING, format!("{app} isn't running on this device"))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -207,7 +207,7 @@ impl<J: Job> Hub<J> {
             Err(_) if p.take_back(id) => return Err(not_running(app)),
             Err(_) => tokio::time::timeout_at(answers_by, rx).await.map_err(|_| anyhow!("{app} didn't answer"))?,
         };
-        answer.map_err(|_| crate::protocol::Coded::error(crate::protocol::code::STOPPED, format!("{app} stopped before it answered, and may have done some of it: look at what it did before asking again")))
+        answer.map_err(|_| ::custom_build::protocol::Coded::error(::custom_build::protocol::code::STOPPED, format!("{app} stopped before it answered, and may have done some of it: look at what it did before asking again")))
     }
 
     /// The next job for `app`, waiting up to 25 seconds; None if there was none.
@@ -238,7 +238,7 @@ impl Services {
             return Err(Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());
         }
         if let Some(err) = reply.get("error") {
-            return Err(crate::protocol::Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("failed")));
+            return Err(::custom_build::protocol::Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("failed")));
         }
         let blobs = reply["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
         Ok(Answer { ok: reply["ok"].clone(), blobs })
@@ -267,8 +267,8 @@ pub fn program_env(name: &str, at: std::net::SocketAddr, home: &std::path::Path,
         // Where its program may send standard OTLP/JSON: the loopback that also takes `ONE_ADDR`'s requests.
         ("OTEL_EXPORTER_OTLP_ENDPOINT".into(), format!("http://{at}").into()),
         ("OTEL_EXPORTER_OTLP_PROTOCOL".into(), "http/json".into()),
-        ("OTEL_EXPORTER_OTLP_HEADERS".into(), format!("{}={token}", crate::protocol::header::LOCAL_TOKEN).into()),
-        ("ONE_CLI".into(), crate::config::CLI.into()),
+        ("OTEL_EXPORTER_OTLP_HEADERS".into(), format!("{}={token}", ::custom_build::protocol::header::LOCAL_TOKEN).into()),
+        ("ONE_CLI".into(), ::custom_build::config::CLI.into()),
         (format!("{}_DATA", name.to_uppercase().replace('-', "_")), data.into()),
     ]
 }
@@ -296,8 +296,8 @@ impl Registry {
 
     /// Whether a request is the program's on this machine: it sends the token in the service's folder.
     pub fn ours(&self, headers: &axum::http::HeaderMap) -> std::result::Result<(), axum::response::Response> {
-        match headers.get(crate::protocol::header::LOCAL_TOKEN).and_then(|v| v.to_str().ok()) {
-            Some(t) if crate::keys::same_secret(t.as_bytes(), self.token.as_bytes()) => Ok(()),
+        match headers.get(::custom_build::protocol::header::LOCAL_TOKEN).and_then(|v| v.to_str().ok()) {
+            Some(t) if key::same_secret(t.as_bytes(), self.token.as_bytes()) => Ok(()),
             _ => Err(refused(axum::http::StatusCode::UNAUTHORIZED, "send the local token in the service's folder")),
         }
     }
@@ -362,7 +362,7 @@ pub(crate) fn refused(code: axum::http::StatusCode, why: impl std::fmt::Display)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{Coded, code};
+    use ::custom_build::protocol::{Coded, code};
 
     fn me() -> Me {
         serde_json::from_value(json!({ "key": "k1", "user": "u1", "name": "mac", "role": null, "user_name": "Ann", "handle": "ann", "agent": null })).unwrap()

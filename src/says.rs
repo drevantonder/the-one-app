@@ -6,7 +6,7 @@
 use schemars::JsonSchema;
 use serde_json::{Value, json};
 
-use crate::protocol::schema_of;
+use ::custom_build::protocol::schema_of;
 
 #[path = "api/says.rs"]
 pub mod api;

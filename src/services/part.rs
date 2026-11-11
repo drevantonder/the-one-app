@@ -10,8 +10,8 @@
 //! reaching out only through this part's proxy. A service writes nothing itself: what it asks for is a call, which its
 //! runtime runs (`/api/call` on the loopback).
 
-use crate::protocol::allowed;
-use crate::config::YOURS;
+use ::custom_build::allowed;
+use ::custom_build::config::YOURS;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::{Arc, Mutex};
@@ -28,9 +28,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 
-use crate::keys::{Hash, Key, hex, short, unhex};
-use crate::database::scopes::{self, ScopeDb};
-use crate::database::steps::{Reader, Truth};
+use ::key::{Hash, Key, hex, short, unhex};
+use ::scope::scopes::{self, ScopeDb};
+use ::scope::steps::{Reader, Truth};
 use crate::services::carried;
 use crate::services::{Registry, Services, refused};
 
@@ -100,13 +100,13 @@ const RUNTIME_WAIT: Duration = Duration::from_secs(30);
 
 /// Where a service keeps its key, its network and what it knows of it.
 pub fn folder(name: &str) -> PathBuf {
-    crate::home().join("services").join(name)
+    platform::home().join("services").join(name)
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, bytes)?;
-    crate::os::set_mode(&tmp, 0o600)?;
+    platform::os::set_mode(&tmp, 0o600)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
 }
@@ -117,7 +117,7 @@ impl Service {
     pub fn open(dir: &Path, name: &str, runtime: &str) -> Result<Service> {
         ensure!(scopes::valid_app_name(name), "a service's name is lowercase words joined by -");
         std::fs::create_dir_all(dir)?;
-        crate::os::set_mode(dir, 0o700)?;
+        platform::os::set_mode(dir, 0o700)?;
         let key_file = dir.join("key");
         let key = match std::fs::read_to_string(&key_file) {
             Ok(secret) => SigningKey::from_bytes(&unhex(secret.trim()).context("its key file isn't a key")?),
@@ -157,8 +157,8 @@ impl Service {
         *self.0.key.verifying_key().as_bytes()
     }
 
-    pub fn endpoint(&self) -> crate::keys::Endpoint {
-        crate::keys::Endpoint::of(&self.0.key)
+    pub fn endpoint(&self) -> ::key::Endpoint {
+        ::key::Endpoint::of(&self.0.key)
     }
 
     /// Where the program offering it registers.
@@ -242,12 +242,12 @@ impl Service {
     async fn runtime(&self, method: &'static str, path: &str, body: Option<Value>, wait: Duration) -> Result<(u16, Value)> {
         let url = format!("http://{}{path}", self.0.runtime);
         tokio::task::spawn_blocking(move || {
-            let token = crate::api::local_token(&crate::node::runtime_folder(&crate::home())).context("its device's app runtime has no token yet")?;
+            let token = crate::api::local_token(&crate::node::runtime_folder(&platform::home())).context("its device's app runtime has no token yet")?;
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(wait)).build().into();
             let mut resp = match body {
-                Some(body) => agent.post(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).send_json(body)?,
-                None if method == "GET" => agent.get(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).call()?,
-                None => agent.post(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).send_empty()?,
+                Some(body) => agent.post(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, token.trim()).send_json(body)?,
+                None if method == "GET" => agent.get(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, token.trim()).call()?,
+                None => agent.post(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, token.trim()).send_empty()?,
             };
             let status = resp.status().as_u16();
             let said: Value = resp.body_mut().with_config().limit(64 << 20).read_json().unwrap_or(Value::Null);
@@ -274,7 +274,7 @@ impl Service {
             let at = s["at"].as_u64().unwrap_or(0);
             if at == reader.at() + 1 {
                 let bytes = s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
-                reader.take(crate::database::steps::given(&scopes::Scope::Global, at, bytes.as_deref()).as_ref(), now)?;
+                reader.take(::scope::steps::given(&scopes::Scope::Global, at, bytes.as_deref()).as_ref(), now)?;
             }
         }
         if reader.at() == before {
@@ -347,7 +347,7 @@ impl Service {
                 self.read_whos_who().await?;
             }
             let answer = self.run(signer, &body["call"], body["traceparent"].as_str()).await.unwrap_or_else(|err| json!({ "error": format!("{err:#}") }));
-            let to = self.0.known.lock().unwrap().machine(&signer)?.map(|m| crate::keys::Endpoint { key: m.key, seal: m.seal }).context("who asked isn't one of the network's devices")?;
+            let to = self.0.known.lock().unwrap().machine(&signer)?.map(|m| ::key::Endpoint { key: m.key, seal: m.seal }).context("who asked isn't one of the network's devices")?;
             anyhow::Ok(json!({ "answer": carried::b64(&carried::answer(&self.0.key, &to, at, answer)?) }))
         }
         .await
@@ -415,7 +415,7 @@ impl Service {
                 return Ok(json!({ "error": format!("{err:#}") }));
             }
             let member = m.user(&user)?;
-            crate::state::Me {
+            ::scope::state::Me {
                 key: hex(&key),
                 user: user.clone(),
                 name: m.machine(&key)?.map(|d| d.name).unwrap_or_default(),
@@ -430,7 +430,7 @@ impl Service {
         Ok(match self.services().call(&self.0.name, call["function"].as_str().unwrap_or(""), input, caller, from, traceparent.map(str::to_string)).await {
             Ok(answer) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
             Err(err) if err.is::<crate::services::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
-            Err(err) => match crate::protocol::Coded::of(&err) {
+            Err(err) => match ::custom_build::protocol::Coded::of(&err) {
                 Some(code) => json!({ "error": format!("{err:#}"), "code": code }),
                 None => json!({ "error": format!("{err:#}") }),
             },
@@ -533,7 +533,7 @@ impl Service {
             "device": { "key": device.map(|d| hex(&d)).unwrap_or_default(), "name": name, "runs_for": runs_for },
             "me": { "key": hex(&self.key()), "name": name },
             "user": self.owner_in(m)?.map(|u| m.user(&u).map(|p| json!({ "id": u, "name": p.map(|p| p.name) }))).transpose()?,
-            "network": { "name": m.name()?, "root": self.0.network.root, "devices": devices, "settings": crate::state::settings(&m.settings()?) },
+            "network": { "name": m.name()?, "root": self.0.network.root, "devices": devices, "settings": ::scope::state::settings(&m.settings()?) },
         }))
     }
 }
@@ -658,11 +658,11 @@ async fn blobs(s: &Service, headers: &HeaderMap, method: &'static str, path: &st
     }
     let url = format!("http://{}{path}", crate::api::addr());
     let asked = tokio::task::spawn_blocking(move || -> Result<(u16, Vec<u8>)> {
-        let token = std::fs::read_to_string(crate::home().join(crate::api::LOCAL_TOKEN)).context("its device's oned has no local token")?;
+        let token = std::fs::read_to_string(platform::home().join(crate::api::LOCAL_TOKEN)).context("its device's oned has no local token")?;
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         let resp = match body {
-            Some(body) => agent.post(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).header("content-type", "application/octet-stream").send(&body[..])?,
-            None => agent.get(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).call()?,
+            Some(body) => agent.post(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, token.trim()).header("content-type", "application/octet-stream").send(&body[..])?,
+            None => agent.get(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, token.trim()).call()?,
         };
         let status = resp.status().as_u16();
         Ok((status, resp.into_body().with_config().limit(u64::MAX).read_to_vec()?))
@@ -691,8 +691,8 @@ fn stop_check() -> Result<impl Fn() -> bool> {
         unsafe { libc::signal(libc::SIGTERM, asked as *const () as libc::sighandler_t) };
     }
     let exe = std::env::current_exe()?.canonicalize()?;
-    let id = crate::os::file_id(&std::fs::metadata(&exe)?);
-    Ok(move || ASKED.load(SeqCst) || std::fs::metadata(&exe).map(|m| crate::os::file_id(&m)).ok() != Some(id))
+    let id = platform::os::file_id(&std::fs::metadata(&exe)?);
+    Ok(move || ASKED.load(SeqCst) || std::fs::metadata(&exe).map(|m| platform::os::file_id(&m)).ok() != Some(id))
 }
 
 static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -761,7 +761,7 @@ pub fn run(name: &str, runtime: &str) -> Result<()> {
     let tokio = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let service = Service::open(&dir, name, runtime)?;
     let at = tokio.block_on(service.start())?;
-    let data = crate::home().join(name);
+    let data = platform::home().join(name);
     std::fs::create_dir_all(&data)?;
     host(name, &program, &data, at, &service, &stop, tokio.handle())?;
     eprintln!("{name}: stopping, for oned to start it again");
@@ -879,7 +879,7 @@ fn disclaimed(command: &std::process::Command) -> Result<libc::pid_t> {
 fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service) -> Result<Running> {
     use crate::services::sandbox::{How, Launch};
     let declared = service.0.declared.clone().unwrap_or_default();
-    let launcher = crate::this_program()?;
+    let launcher = platform::this_program()?;
     let mut command = match crate::services::sandbox::how(service.0.declared.as_ref(), "") {
         How::Unit => {
             let launch = Launch { name: name.into(), own_network: !declared.any_host(), ports: declared.local_ports(), data: None };
@@ -954,12 +954,12 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
 /// Runs a service's program in another language, started again whenever it stops, until `stop`. One that can't start
 /// in its sandbox says why (`PROBLEM`), and is tried again a minute on.
 fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service, stop: &impl Fn() -> bool, runtime: &tokio::runtime::Handle) -> Result<()> {
-    let built = || std::fs::metadata(program).ok().and_then(|m| Some((crate::os::file_id(&m), m.modified().ok()?)));
+    let built = || std::fs::metadata(program).ok().and_then(|m| Some((platform::os::file_id(&m), m.modified().ok()?)));
     let problem = service.0.dir.join(PROBLEM);
     let before = crate::services::sandbox::dir(name).join(crate::services::sandbox::BEFORE);
     while !stop() {
         let started = built();
-        let build = std::fs::read(program).map(|bytes| crate::keys::hex(&crate::keys::sha256(&bytes))).unwrap_or_default();
+        let build = std::fs::read(program).map(|bytes| ::key::hex(&::key::sha256(&bytes))).unwrap_or_default();
         let told = |event: Value| service.tell_node(event, runtime);
         let mut running = match begin(name, program, data, at, service) {
             Ok(r) => {
@@ -1023,7 +1023,7 @@ fn exit_reason(status: &str) -> String {
 
 /// Stops a program: asked, then made to, if it hasn't in ten seconds, so it closes what it keeps (WhatsApp's link).
 fn end(child: &mut std::process::Child) {
-    crate::os::ask_to_stop(child);
+    platform::os::ask_to_stop(child);
     for _ in 0..100 {
         if !matches!(child.try_wait(), Ok(None)) {
             return;

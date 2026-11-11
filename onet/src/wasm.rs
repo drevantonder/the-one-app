@@ -69,7 +69,7 @@ impl Client {
             async move {
                 let Some(asked) = keys.and_then(|k| k.call1(&JsValue::NULL, &JsValue::from_str(&node)).ok()) else { return Vec::new() };
                 match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&asked)).await.ok().and_then(|v| v.as_string()) {
-                    Some(k) if !k.is_empty() => vec![(one::protocol::header::KEYS.to_string(), k)],
+                    Some(k) if !k.is_empty() => vec![(custom_build::protocol::header::KEYS.to_string(), k)],
                     _ => Vec::new(),
                 }
             }
@@ -96,7 +96,7 @@ impl Client {
 #[wasm_bindgen]
 pub struct Keyring {
     keyring: crate::keyring::Keyring<crate::js::Seal>,
-    me: one::keys::Endpoint,
+    me: key::Endpoint,
     on: crate::js::On,
     client: std::cell::RefCell<Option<std::rc::Rc<crate::Client>>>,
     answers: std::cell::RefCell<Option<std::rc::Rc<crate::answers::Answers<crate::js::Shelf>>>>,
@@ -133,7 +133,7 @@ impl Keyring {
     #[wasm_bindgen(constructor)]
     pub fn new(key: String, seal: String, on: JsValue) -> Result<Keyring, JsError> {
         let opens = crate::js::Seal { public: self::key(&seal)?, js: crate::js::Js(on.clone()) };
-        let me = one::keys::Endpoint { key: self::key(&key)?, seal: self::key(&seal)? };
+        let me = key::Endpoint { key: self::key(&key)?, seal: self::key(&seal)? };
         Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), me, on: crate::js::On::of(on, self::key(&key)?), client: Default::default(), answers: Default::default() })
     }
 
@@ -145,7 +145,7 @@ impl Keyring {
 
     /// What auth says of its request now, acted on (`join::waited`): "signedOut", "approved", "gone" or "waiting".
     pub async fn waited(&self, token: String) -> Result<String, Failed> {
-        use one::keys::Waited;
+        use ::api::handed::Waited;
         let said = match crate::join::waited(&self.on, &token, &self.me.key).await.map_err(Failed::of)? {
             Waited::SignedOut => "signedOut",
             Waited::Approved { .. } => "approved",
@@ -199,8 +199,8 @@ impl Keyring {
         let mut behind = 0;
         loop {
             match self.keyring.load(&self.on).await {
-                Err(e) if e.not_let_in && behind < one::keys::BEHIND.len() && self.on.let_in().await => {
-                    n0_future::time::sleep(std::time::Duration::from_millis(one::keys::BEHIND[behind])).await;
+                Err(e) if e.not_let_in && behind < ::api::handed::BEHIND.len() && self.on.let_in().await => {
+                    n0_future::time::sleep(std::time::Duration::from_millis(::api::handed::BEHIND[behind])).await;
                     behind += 1;
                 }
                 loaded => break loaded.map_err(Failed::of)?,
@@ -424,5 +424,5 @@ impl SignIn {
 /// What's read next after `name` (`stored::following`), as JSON.
 #[wasm_bindgen]
 pub fn following(name: &str, n: u32) -> String {
-    serde_json::Value::from(one::database::stored::following(name, n)).to_string()
+    serde_json::Value::from(bucket::names::following(name, n)).to_string()
 }

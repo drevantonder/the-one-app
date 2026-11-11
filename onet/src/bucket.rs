@@ -7,18 +7,18 @@
 //! their downloads side by side), and the next reads are answered from those. Past the end, where a device asks most
 //! often, only the step asked for is read.
 
-use one::config::YOURS;
+use ::custom_build::config::YOURS;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use anyhow::{Context, Result, bail};
-use one::bucket::{Bucket, Object, Signer, signer_requests};
+use ::bucket::{Bucket, Object, Signer, signer_requests};
 
 /// One agent for everything this device asks over HTTP, so connections are kept for the next request.
 pub(crate) static AGENT: LazyLock<ureq::Agent> = LazyLock::new(signer_requests);
 
 /// What a native app downloaded of the bucket, counted as it was.
-static READS: one::bucket::Reads = one::bucket::Reads::new();
+static READS: ::bucket::Reads = ::bucket::Reads::new();
 
 pub struct Signed {
     signer: Arc<Signer>,
@@ -34,7 +34,7 @@ impl Signed {
 
 fn download(url: &str) -> Result<Option<Object>> {
     let request = ureq::http::Request::get(url).body(Vec::new())?;
-    let (mut r, _) = one::hedge::run(&AGENT, "bucket", request, one::hedge::Twice::Safe).with_context(|| format!("Couldn't reach {YOURS}'s storage"))?;
+    let (mut r, _) = platform::hedge::run(&AGENT, "bucket", request, platform::hedge::Twice::Safe).with_context(|| format!("Couldn't reach {YOURS}'s storage"))?;
     match r.status().as_u16() {
         404 => Ok(None),
         200 => {
@@ -100,12 +100,12 @@ impl Bucket for Signed {
 }
 
 /// The network's bucket as a device reaches it: through the URL signer, only reading, as a phone or a native app does;
-/// or on a computer, the place its home's network file names (`one::bucket::Place`), a folder here or S3 through the URL
+/// or on a computer, the place its home's network file names (`::bucket::Place`), a folder here or S3 through the URL
 /// signer, which it may write in too, as anyone in the network may create there what isn't yet. What it reads it counts,
 /// and says itself as `bucket.reads` once a minute, to the telemetry Worker at the network's address, if it has one.
 pub struct Reached {
     at: Reach,
-    reads: &'static one::bucket::Reads,
+    reads: &'static ::bucket::Reads,
     key: ed25519_dalek::SigningKey,
     address: Option<String>,
     client: &'static str,
@@ -114,7 +114,7 @@ pub struct Reached {
 enum Reach {
     Signed(Signed),
     #[cfg(feature = "computer")]
-    Place(one::bucket::Place),
+    Place(::bucket::Place),
 }
 
 impl Reached {
@@ -125,19 +125,19 @@ impl Reached {
 
     /// A computer's onet's: `place`, of the network at `address` if it has one yet.
     #[cfg(feature = "computer")]
-    pub fn place(place: one::bucket::Place, secret: [u8; 32], address: Option<String>) -> Reached {
-        Reached { at: Reach::Place(place), reads: &one::bucket::READS, key: ed25519_dalek::SigningKey::from_bytes(&secret), address, client: "onet" }
+    pub fn place(place: ::bucket::Place, secret: [u8; 32], address: Option<String>) -> Reached {
+        Reached { at: Reach::Place(place), reads: &::bucket::READS, key: ed25519_dalek::SigningKey::from_bytes(&secret), address, client: "onet" }
     }
 
     /// What it read, if it's been a minute: sent on a thread of its own, as telemetry may be lost and nothing waits for it.
     fn say(&self) {
         let Some(address) = self.address.clone() else { return };
-        let Some(rows) = self.reads.due(crate::keyring::now(), &one::keys::hex(&self.key.verifying_key().to_bytes()), self.client) else { return };
-        let body = one::keys::signed_request(&self.key, one::protocol::TELEMETRY, rows, one::keys::next_at(crate::keyring::now()));
+        let Some(rows) = one::insights::bucket_reads(&self.reads, crate::keyring::now(), &key::hex(&self.key.verifying_key().to_bytes()), self.client) else { return };
+        let body = key::signed_request(&self.key, ::custom_build::protocol::TELEMETRY, rows, key::next_at(crate::keyring::now()));
         std::thread::spawn(move || {
             let sent = ureq::http::Request::post(format!("{address}/telemetry/write")).header("content-type", "application/json").body(serde_json::to_vec(&body).unwrap_or_default());
             if let Ok(request) = sent {
-                let _ = one::hedge::run(&AGENT, "telemetry", request, one::hedge::Twice::Never);
+                let _ = platform::hedge::run(&AGENT, "telemetry", request, platform::hedge::Twice::Never);
             }
         });
     }

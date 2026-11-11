@@ -17,13 +17,13 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
     let mut files: Vec<(String, Vec<u8>)> =
         crate::ui_folder::cloudflare().into_iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes))).collect();
     // What the client says that Rust says too, imported by the formats it holds keys in (`protocol`).
-    files.push(("shared/protocol.js".into(), crate::protocol::javascript().into_bytes()));
+    files.push(("shared/protocol.js".into(), ::api::protocol_js::javascript().into_bytes()));
     // The page says whose it is before anyone signs in: the custom build's name.
     let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
     files.push(("icons.json".into(), crate::screen::ICONS.to_vec()));
     // Installed from Chrome or Edge, it's an app of its own: the desktop's, where there's no native one.
     let manifest = json!({
-        "name": crate::config::NAME, "short_name": crate::config::NAME, "id": "/", "start_url": "/", "scope": "/", "display": "standalone",
+        "name": custom_build::config::NAME, "short_name": custom_build::config::NAME, "id": "/", "start_url": "/", "scope": "/", "display": "standalone",
         "background_color": "#ffffff", "theme_color": "#ffffff",
         "icons": [
             { "src": "/icon.png", "sizes": "192x192 512x512 1024x1024", "type": "image/png", "purpose": "any" },
@@ -34,7 +34,7 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
     // The service worker shows a note it can't open with the custom build's name.
     if let Some((_, sw)) = files.iter_mut().find(|(path, _)| path == "sw.js") {
         *sw = String::from_utf8_lossy(sw)
-            .replacen("const NAME = \"\";", &format!("const NAME = {};", json!(crate::config::NAME)), 1)
+            .replacen("const NAME = \"\";", &format!("const NAME = {};", json!(custom_build::config::NAME)), 1)
             .into_bytes();
     }
     // The client's own screens, which it shows from here and never from a node (`screen::client_template`).
@@ -70,9 +70,9 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
         let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json", "net-worker.js", "screen/ui/importmap.json"].contains(&path.as_str()) || path.starts_with("screens/")).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
         let label = format!(
             "<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"one-cli\" content=\"{}\">\n<meta name=\"one-files\" content=\"{asked}\">",
-            attr(crate::config::NAME),
-            attr(crate::config::NAME),
-            attr(crate::config::CLI)
+            attr(custom_build::config::NAME),
+            attr(custom_build::config::NAME),
+            attr(custom_build::config::CLI)
         );
         text = text.replacen("<title></title>", &label, 1);
         // start.js runs inline, as the page arrives, before its styles and scripts are in: its hash is in the
@@ -94,7 +94,7 @@ pub fn onet_version() -> Option<String> {
 }
 
 fn onet() -> Vec<(String, Vec<u8>)> {
-    crate::ui_folder::wasm(crate::config::ONET_FILES, crate::config::ONET)
+    crate::ui_folder::wasm(crate::carried::ONET_FILES, crate::carried::ONET)
 }
 
 fn version_of(onet: &[(String, Vec<u8>)]) -> Option<String> {

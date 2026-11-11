@@ -37,7 +37,7 @@ impl Node {
     async fn pull_once(&self) -> Result<()> {
         let Ok(address) = self.address() else { return Ok(()) };
         if let Err(err) = crate::update::keep_address(&self.0.dir, &address) {
-            tracing::warn!("couldn't note the network's address for {} update: {err}", crate::config::CLI);
+            tracing::warn!("couldn't note the network's address for {} update: {err}", custom_build::config::CLI);
         }
         let fetched = {
             let address = address.clone();
@@ -62,7 +62,7 @@ impl Node {
 
     /// Keeps the file `one-dev update` publishes: unsealed in the bucket's `updates/`, by its hash. → the hash.
     pub async fn publish_file(&self, path: &Path) -> Result<(String, u64)> {
-        use crate::bucket::Bucket;
+        use ::bucket::Bucket;
         let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
         let sha256 = crate::latest::sha256(&bytes);
         let bucket = self.bucket()?;
@@ -72,14 +72,14 @@ impl Node {
 
     /// The record as it is in the bucket, with its tag, to replace.
     pub async fn latest_record(&self) -> Result<Option<(String, String)>> {
-        use crate::bucket::Bucket;
+        use ::bucket::Bucket;
         let bucket = self.bucket()?;
         Ok(Bucket::get(&bucket.place, &crate::latest::newest_name()).await?.map(|o| (String::from_utf8_lossy(&o.bytes).into_owned(), o.tag)))
     }
 
     /// Replaces the record, if it's still the one `tag` names (none: if there's none). → whether it did.
     pub async fn replace_latest(&self, text: &str, tag: Option<&str>) -> Result<bool> {
-        use crate::bucket::Bucket;
+        use ::bucket::Bucket;
         let bucket = self.bucket()?;
         let was = self.latest();
         let replaced = Bucket::replace(&bucket.place, &crate::latest::newest_name(), text.as_bytes(), tag).await?;
@@ -102,7 +102,7 @@ impl Node {
         let bundles = self.with_or(Default::default(), |i| Ok(i.r.db().apps()?.into_iter().filter(|a| a.deleted.is_none()).filter_map(|a| Some((a.name, a.bundle?))).collect::<Vec<_>>()));
         for (app, bundle) in bundles {
             match self.blob(&bundle).await {
-                Ok(bytes) => match crate::app::bundle::services(&bytes).remove(crate::config::TARGET) {
+                Ok(bytes) => match crate::app::bundle::services(&bytes).remove(custom_build::config::TARGET) {
                     Some(build) => drop(builds.insert(app, Build::Deployed(build))),
                     // A deploy naming builds for other platforms only runs on none here, release or not.
                     None if !crate::app::bundle::services(&bytes).is_empty() => drop(builds.insert(app, Build::None)),
@@ -123,7 +123,7 @@ impl Node {
 
     /// The newest build of each service's program for this device's platform, as the record names it.
     pub fn service_releases(&self) -> BTreeMap<String, crate::latest::Thing> {
-        let (prefix, suffix) = ("service/", format!("/{}", crate::config::TARGET));
+        let (prefix, suffix) = ("service/", format!("/{}", custom_build::config::TARGET));
         self.latest().things.into_iter().filter_map(|t| Some((t.name.strip_prefix(prefix)?.strip_suffix(&suffix)?.to_string(), t.clone()))).filter(|(n, _)| !n.contains('/')).collect()
     }
 }
@@ -131,7 +131,7 @@ impl Node {
 /// Once `text` is the record, keeps it as its publish's latest record, and removes from `updates/` each file that
 /// neither the newest record nor the latest record of each of the `KEPT_PUBLISHES` publishes before it name, unless it
 /// was written in the last `UPLOADING`. → how many objects went.
-async fn tidy(bucket: &impl crate::bucket::Bucket, key: &str, text: &str) -> Result<usize> {
+async fn tidy(bucket: &impl ::bucket::Bucket, key: &str, text: &str) -> Result<usize> {
     use crate::latest::{FOLDER, Latest};
     let read = |text: &[u8]| Latest::read(key, &String::from_utf8_lossy(text));
     let record = read(text.as_bytes()).context("the record published doesn't verify")?;
@@ -165,7 +165,7 @@ async fn tidy(bucket: &impl crate::bucket::Bucket, key: &str, text: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bucket::Place;
+    use ::bucket::Place;
     use crate::latest::{Latest, Thing};
     use ssh_key::private::{Ed25519Keypair, PrivateKey};
 

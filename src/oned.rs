@@ -29,19 +29,15 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
-use crate::config::{CLI, NAME};
+use ::custom_build::config::{CLI, NAME};
 use crate::api;
 
-pub fn name() -> String {
-    format!("{CLI}d")
-}
-
 pub fn invoked() -> bool {
-    crate::os::invoked_as().is_some_and(|me| me == name())
+    platform::os::invoked_as().is_some_and(|me| me == ::custom_build::programs::oned())
 }
 
 pub fn command(args: &[&str]) -> std::io::Result<std::process::Command> {
-    let mut command = crate::os::named(&name())?;
+    let mut command = platform::os::named(&::custom_build::programs::oned())?;
     command.args(args);
     Ok(command)
 }
@@ -76,7 +72,7 @@ pub fn helper(name: &str) -> Option<PathBuf> {
 
 /// The folder a Mac's helper apps are unpacked in.
 fn helper_apps() -> PathBuf {
-    crate::home().join("helpers")
+    platform::home().join("helpers")
 }
 
 /// The programs of the helper apps here.
@@ -94,7 +90,7 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     let prefix = format!("{CLI}-");
     let files = dirs.iter().flat_map(std::fs::read_dir).flatten().flatten().map(|e| e.file_name().to_string_lossy().to_string());
     for file in files.chain(helpers().iter().filter_map(|p| Some(p.file_name()?.to_string_lossy().to_string()))) {
-        let Some(name) = file.strip_suffix(std::env::consts::EXE_SUFFIX).and_then(|f| f.strip_prefix(&prefix)).filter(|n| crate::database::scopes::valid_app_name(n)) else { continue };
+        let Some(name) = file.strip_suffix(std::env::consts::EXE_SUFFIX).and_then(|f| f.strip_prefix(&prefix)).filter(|n| ::scope::scopes::valid_app_name(n)) else { continue };
         if on.contains_key(name) || crate::services::part::folder(name).is_dir() {
             names.insert(name.to_string());
         }
@@ -167,9 +163,9 @@ impl Said {
 
     /// Each part, as Settings › Devices shows it: `apps`, the app runtime, and each service this device could run as
     /// a process, with whether it's switched on, what it's doing and how it runs.
-    fn parts(&self, wanted: &Wanted) -> Vec<crate::state::Part> {
-        use crate::database::scopes::APPS_PART;
-        use crate::state::Part;
+    fn parts(&self, wanted: &Wanted) -> Vec<::scope::state::Part> {
+        use ::scope::scopes::APPS_PART;
+        use ::scope::state::Part;
         let mut out = BTreeMap::new();
         out.insert(APPS_PART.to_string(), Part { on: !wanted.off.contains(APPS_PART), ..Part::off(APPS_PART) });
         for name in &self.offered {
@@ -198,7 +194,7 @@ impl Onet {
     /// `method` of `path`, with a JSON body: → what it answered, once that's a 200.
     fn ask(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Vec<u8>> {
         let token = api::local_token(&self.home).context("onet hasn't started yet")?;
-        let mut request = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", api::addr())).header(crate::protocol::header::LOCAL_TOKEN, token);
+        let mut request = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", api::addr())).header(::custom_build::protocol::header::LOCAL_TOKEN, token);
         if body.is_some() {
             request = request.header("content-type", "application/json");
         }
@@ -207,7 +203,7 @@ impl Onet {
         let bytes = answer.body_mut().with_config().limit(2 << 30).read_to_vec()?;
         if status != 200 {
             let said: Value = serde_json::from_slice(&bytes).unwrap_or_default();
-            bail!("{}", said["error"].as_str().map_or_else(|| format!("{} answered {status}", onet()), str::to_string));
+            bail!("{}", said["error"].as_str().map_or_else(|| format!("{} answered {status}", ::custom_build::programs::onet()), str::to_string));
         }
         Ok(bytes)
     }
@@ -241,7 +237,7 @@ fn put(onet: &Onet, address: &str, name: &str, build: &Build) -> anyhow::Result<
         std::fs::create_dir_all(path.parent().unwrap_or(&path))?;
         let new = path.with_extension("new");
         std::fs::write(&new, bytes)?;
-        crate::os::set_mode(&new, 0o755)?;
+        platform::os::set_mode(&new, 0o755)?;
         std::fs::rename(&new, &path)?;
     }
     let folder = crate::services::part::folder(name);
@@ -288,7 +284,7 @@ const TELL_EVERY: Duration = Duration::from_secs(30);
 /// is oned's child, whatever onet and the runtime do.
 fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String) {
     std::thread::spawn(move || {
-        let home = crate::home();
+        let home = platform::home();
         let onet = std::sync::Arc::new(Onet::new(home.clone()));
         let began = Instant::now();
         let said = std::sync::Arc::new(std::sync::Mutex::new(Said::default()));
@@ -423,7 +419,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                     }
                     // Unknown, it waits a while for its app to run here; a build its deploy names never runs without one.
                     let deployed = matches!(released.get(name), Some(Build::Deployed(_)));
-                    let patient = began.elapsed() < Duration::from_secs(120) && !wanted.off.contains(crate::database::scopes::APPS_PART);
+                    let patient = began.elapsed() < Duration::from_secs(120) && !wanted.off.contains(::scope::scopes::APPS_PART);
                     let declaring = declares.is_none() && (deployed || patient);
                     if on && declares.is_none() && deployed {
                         say(name, Now { doing: None, problem: Some(UNDECLARED.into()) });
@@ -535,7 +531,7 @@ fn start(network: &crate::services::part::Network, name: &str, declared: Option<
 
 /// Stops a part: asked, then made to, if it hasn't in ten seconds.
 fn stop(name: &str, mut child: std::process::Child) {
-    crate::os::ask_to_stop(&mut child);
+    platform::os::ask_to_stop(&mut child);
     for _ in 0..100 {
         if !matches!(child.try_wait(), Ok(None)) {
             tracing::info!("oned stopped {name}");
@@ -577,12 +573,7 @@ fn usual_path() {
 
 /// What oned says it is, for `--help` and for an argument it doesn't take.
 fn usage() -> String {
-    format!("{} runs this device, or with a service's name, that service, as its oned starts it; --version says which build", name())
-}
-
-/// The name onet runs by on a computer (`<cli>t`), which oned starts it as.
-pub fn onet() -> String {
-    format!("{CLI}t")
+    format!("{} runs this device, or with a service's name, that service, as its oned starts it; --version says which build", ::custom_build::programs::oned())
 }
 
 /// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`, or `apps
@@ -604,7 +595,7 @@ pub fn run(args: &[String]) -> Result<()> {
             usual_path();
             return serve();
         }
-        ([crate::database::scopes::APPS_PART], [_]) if let Some(listen) = flag("--listen=") => return crate::node::serve(listen),
+        ([::scope::scopes::APPS_PART], [_]) if let Some(listen) = flag("--listen=") => return crate::node::serve(listen),
         ([name], [_]) if let Some(runtime) = flag("--runtime=") => return crate::services::part::run(name, runtime),
         _ => bail!("{}", usage()),
     }
@@ -645,7 +636,7 @@ impl Kept {
         if self.child.is_none() {
             // On Windows, closing its stdin is how it's asked to stop (`os::ask_to_stop`).
             let stdin = if cfg!(windows) { std::process::Stdio::piped() } else { std::process::Stdio::null() };
-            match crate::os::named(&self.name).and_then(|mut c| c.args(&self.args).stdin(stdin).spawn()) {
+            match platform::os::named(&self.name).and_then(|mut c| c.args(&self.args).stdin(stdin).spawn()) {
                 Ok(child) => {
                     tracing::info!("oned started {}", self.what);
                     self.child = Some(child);
@@ -657,7 +648,7 @@ impl Kept {
 
     /// How its log is read: onet's is its own, and the app runtime's the node's (`logs::NODE`).
     fn log(&self) -> &str {
-        if self.name == onet() { " --service onet" } else { "" }
+        if self.name == ::custom_build::programs::onet() { " --service onet" } else { "" }
     }
 
     fn stop(&mut self) {
@@ -673,26 +664,26 @@ impl Kept {
 async fn serve() -> Result<()> {
     #[cfg(windows)]
     {
-        crate::os::children_end_with_me()?;
-        crate::os::remove_replaced(&crate::this_program()?);
+        platform::os::children_end_with_me()?;
+        platform::os::remove_replaced(&platform::this_program()?);
     }
     crate::logs::keep("oned");
     tracing_subscriber::fmt()
         .with_writer(crate::logs::Tee)
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
-    let dir = crate::home();
+    let dir = platform::home();
     std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
     std::fs::write(dir.join(crate::update::PID), std::process::id().to_string())?;
     crate::update::note_running(&dir)?;
     with_bucket_address(&dir)?;
     let at = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
     let kept = std::sync::Arc::new(std::sync::Mutex::new([
-        Kept::new(onet(), "onet", vec![format!("--listen={}", api::addr()), format!("--runtime={at}")]),
-        Kept::new(name(), "the app runtime", vec![crate::database::scopes::APPS_PART.into(), format!("--listen={at}")]),
+        Kept::new(::custom_build::programs::onet(), "onet", vec![format!("--listen={}", api::addr()), format!("--runtime={at}")]),
+        Kept::new(::custom_build::programs::oned(), "the app runtime", vec![::scope::scopes::APPS_PART.into(), format!("--listen={at}")]),
     ]));
     keep_parts(kept.clone(), at.clone());
-    let stop = crate::os::stop_asked()?;
+    let stop = platform::os::stop_asked()?;
     tokio::spawn({
         let kept = kept.clone();
         async move {
@@ -701,7 +692,7 @@ async fn serve() -> Result<()> {
             std::process::exit(0)
         }
     });
-    tracing::info!("{NAME} oned {} keeping onet and its app runtime ({at}) running, from {}", crate::config::BUILD, dir.display());
+    tracing::info!("{NAME} oned {} keeping onet and its app runtime ({at}) running, from {}", ::custom_build::config::BUILD, dir.display());
     crate::watchdog::notify("READY=1");
     loop {
         {

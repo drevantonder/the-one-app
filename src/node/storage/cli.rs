@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 
 use crate::cli::{Command, Given};
-use crate::config::CLI;
+use ::custom_build::config::CLI;
 use crate::backups::tools::tried_said;
 
 pub fn commands() -> Command {

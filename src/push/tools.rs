@@ -3,7 +3,7 @@
 
 use serde_json::json;
 
-use crate::config::YOURS;
+use ::custom_build::config::YOURS;
 use crate::core_tools::{Feature, Tool, serves};
 
 pub fn feature() -> Feature {

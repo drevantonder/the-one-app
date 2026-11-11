@@ -31,7 +31,7 @@ impl Node {
             let m = i.r.db();
             let s = m.service(&service)?.with_context(|| format!("{} isn't a service of {YOURS}", short(&service)))?;
             let device = s.device.with_context(|| format!("{} isn't a part of a device", short(&service)))?;
-            Ok((s.service.unwrap_or_default(), device, crate::keys::Endpoint { key: s.key, seal: s.seal }, m.runtime_for(&device)?))
+            Ok((s.service.unwrap_or_default(), device, key::Endpoint { key: s.key, seal: s.seal }, m.runtime_for(&device)?))
         })?;
         let (sealed, at) = carried::ask(&self.0.key, &endpoint, json!({ "call": call, "traceparent": trace::traceparent() }))?;
         let ask = carried::b64(&sealed);
@@ -39,10 +39,10 @@ impl Node {
             tokio::time::timeout(limit, self.0.sockets.hand(&name, |id| Carried { id, ask })).await.context("timed out")?
         } else {
             let runtime = runtime.with_context(|| format!("{}'s device has no app runtime to reach it through", short(&service)))?;
-            self.send(&runtime, crate::protocol::message::SERVICE, &json!({ "service": hex(&service), "ask": ask }), true, limit).await
+            self.send(&runtime, custom_build::protocol::message::SERVICE, &json!({ "service": hex(&service), "ask": ask }), true, limit).await
         }?;
         if let Some(err) = carried["error"].as_str() {
-            bail!(crate::protocol::Coded::or_plain(carried["code"].as_str().map(str::to_string), err));
+            bail!(custom_build::protocol::Coded::or_plain(carried["code"].as_str().map(str::to_string), err));
         }
         carried::open_answer(&self.0.key, &service, at, &carried::unb64(carried["answer"].as_str().context("its runtime carried back no answer")?)?)
     }
@@ -51,7 +51,7 @@ impl Node {
     /// `{ answer }`, or `{ error }` if it couldn't be handed.
     pub(in crate::node) async fn carry(&self, body: &Value) -> Value {
         let handed = async {
-            let service = crate::keys::unhex(body["service"].as_str().unwrap_or(""))?;
+            let service = key::unhex(body["service"].as_str().unwrap_or(""))?;
             let name = self.with(|i| {
                 let s = i.r.db().service(&service)?.with_context(|| format!("{} isn't a service of {YOURS}", short(&service)))?;
                 ensure!(s.device == Some(self.0.holds.device()), "{} isn't a part of {}", s.service.as_deref().unwrap_or("that service"), self.device_name());
@@ -61,7 +61,7 @@ impl Node {
             self.0.sockets.hand(&name, |id| Carried { id, ask }).await
         }
         .await;
-        handed.unwrap_or_else(|err| json!({ "error": format!("{err:#}"), "code": crate::protocol::Coded::of(&err) }))
+        handed.unwrap_or_else(|err| json!({ "error": format!("{err:#}"), "code": custom_build::protocol::Coded::of(&err) }))
     }
 
     /// A part of this device asking, signed by its key (`carried::own_ask`): `{ call }`, run as its user (a service
@@ -89,8 +89,8 @@ impl Node {
         }
         let (bucket, keys) = (self.bucket()?, self.step_keys(&Scope::Global).await?);
         let made = self.with(|i| Ok(i.r.db().epoch(&Scope::Global)?))?;
-        let steps = crate::database::steps::read(&bucket, &keys, &Scope::Global, from, made).await?.steps;
-        let list: Vec<Value> = steps.iter().enumerate().map(|(n, s)| json!({ "at": from + n as u64 + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
+        let steps = scope::steps::read(&bucket, &keys, &Scope::Global, from, made).await?.steps;
+        let list: Vec<Value> = steps.iter().enumerate().map(|(n, s)| json!({ "at": from + n as u64 + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&scope::steps::encoded(s))) })).collect();
         Ok(json!({ "steps": list }))
     }
 }

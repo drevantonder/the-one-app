@@ -8,7 +8,7 @@ use axum::routing::{any, post};
 use serde_json::{Value, json};
 
 use crate::node::{Caller, Node};
-use crate::protocol::CallRequest;
+use ::api::call::CallRequest;
 
 use super::{Routes, Who};
 use super::guard::Me;
@@ -22,7 +22,7 @@ pub(super) const APP_ROUTE: &str = "/{app}/{*path}";
 
 /// Whether `path` is one of an app's own requests (`APP_ROUTE`), not the API's.
 pub fn app_route(path: &str) -> bool {
-    crate::protocol::path::app_request(path).is_some()
+    ::api::path::app_request(path).is_some()
 }
 
 pub(super) fn routes() -> Routes {
@@ -33,7 +33,7 @@ pub(super) fn routes() -> Routes {
 }
 
 async fn call(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Body(req): Body<CallRequest>) -> Reply {
-    Ok(Json(call_for(&node, me, req, headers.contains_key(crate::protocol::header::ELSEWHERE)).await?))
+    Ok(Json(call_for(&node, me, req, headers.contains_key(custom_build::protocol::header::ELSEWHERE)).await?))
 }
 
 /// A call as `/api/call` takes it, for `me`: → `{ ok }`. A client that `picks` its node has it run here, or told where.
@@ -51,7 +51,7 @@ async fn call_for(node: &Node, me: Me, mut req: CallRequest, picks: bool) -> any
 /// Cloudflare node's key, `Credential::Passed`) for the scopes the call names alone, and never this device's own: no
 /// access token comes with it, so none of theirs reaches a node on a machine, whose owner could use it as them.
 /// → `{ ok }`, or what failed as the API says it.
-pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::Key, mut call: Value) -> Value {
+pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: key::Key, mut call: Value) -> Value {
     let (me, keys) = match call.as_object_mut() {
         Some(c) => (c.remove("me").unwrap_or_default(), c.remove("keys")),
         None => (Value::Null, None),

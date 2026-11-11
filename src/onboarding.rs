@@ -3,4 +3,3 @@
 //! drawn to HTML when @one/ui is built and served by `pages.js`, `render.js` drawing them all to look at; `sign_in_proof`,
 //! which a user's devices check a sign-in with), waiting to be let in, and starting (`pairing.rs`, a pairing code and admitting the machine that joins with it, part of the node).
 
-pub mod sign_in_proof;

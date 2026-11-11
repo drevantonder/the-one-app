@@ -1,9 +1,9 @@
 [workspace]
-members = [".", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
-default-members = [".", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 
 [package]
 name = "one"
@@ -23,11 +23,18 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["dep:ai-gateway-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
+node = ["bucket/machine", "platform/machine", "dep:ai-gateway-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
 # `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
 web-bundle = ["dep:ssh-key", "dep:flate2"]
 
 [dependencies]
+custom-build = { path = "custom-build" }
+platform = { path = "platform" }
+key = { path = "key" }
+bucket = { path = "bucket" }
+database = { path = "database" }
+scope = { path = "scope" }
+api = { path = "api" }
 anyhow = "1"
 # AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes and tools' specs, every build; what a node does for it, only a node's.
 ai-gateway = { path = "ai-gateway" }
@@ -51,15 +58,15 @@ ed25519-dalek = "3"
 hkdf = "0.13"
 rand = "0.8"
 blake3 = "1"
-# A scope database's steps are kept in CBOR in the bucket (src/database/steps.rs); the Cloudflare node reads them too.
+# A scope database's steps are kept in CBOR in the bucket (scope/src/steps.rs); the Cloudflare node reads them too.
 ciborium = "0.2"
-# `serialize` makes and reads an app database's copy in memory (src/database/stored.rs).
+# `serialize` makes and reads an app database's copy in memory (database/src/stored.rs).
 rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 serde_json = "1"
 # The push Worker's VAPID key is made with ring (src/cloudflare/workers.rs), and devices check a provider's RS256 ID tokens and
-# a passkey's ES256 or RS256 assertion with it (src/onboarding/sign_in_proof.rs): rustls and iroh build it already, browsers' client too.
+# a passkey's ES256 or RS256 assertion with it (scope/src/sign_in_proof.rs): rustls and iroh build it already, browsers' client too.
 ring = "0.17"
 tracing = "0.1"
 
@@ -67,7 +74,7 @@ tracing = "0.1"
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
-# Windows has none of what `libc` gives a node on Unix (src/os.rs): a job for its children, and a disk's free space.
+# Windows has none of what `libc` gives a node on Unix (platform/src/os.rs): a job for its children, and a disk's free space.
 # The version Cargo already builds for tokio and iroh there.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
@@ -89,7 +96,7 @@ iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "
 # Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
 jiff = { version = "0.2", optional = true }
 # A device applies a database step another device sent only once the bucket confirms it holds those bytes, by their
-# ETag, which for R2's single PUT is their MD5 (src/bucket/place.rs); nothing already built gives MD5.
+# ETag, which for R2's single PUT is their MD5 (bucket/src/place.rs); nothing already built gives MD5.
 md-5 = { version = "0.11", optional = true }
 # So workerd dies with its node on Linux (prctl PR_SET_PDEATHSIG).
 libc = { version = "0.2", optional = true }

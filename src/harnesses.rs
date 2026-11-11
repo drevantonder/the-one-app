@@ -14,11 +14,11 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use serde_json::Value;
 
-use crate::protocol::path::HOOKS_PROMPT;
+use ::api::path::HOOKS_PROMPT;
 
 /// Marks a skill folder as this custom build's to replace, so the nodes of two custom builds on one machine leave each other's alone.
 fn marker() -> String {
-    format!(".synced-{}", crate::config::CLI)
+    format!(".synced-{}", custom_build::config::CLI)
 }
 
 fn built_in(name: &str) -> bool {
@@ -142,13 +142,13 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
     let pi = dir("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     // Asked as one of this machine's own programs: with the token only its user can read.
     let token = node_home.join(crate::api::LOCAL_TOKEN);
-    let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{} || true", crate::protocol::header::LOCAL_TOKEN, token.display(), crate::protocol::path::HOOKS_PROMPT);
+    let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{} || true", custom_build::protocol::header::LOCAL_TOKEN, token.display(), ::api::path::HOOKS_PROMPT);
     // Another custom build's node on this machine has a hook of its own, on its own port; an older hook of its own is replaced.
     let port = format!(":{}{}", crate::api::port_of(addr), &HOOKS_PROMPT[..=HOOKS_PROMPT.rfind('/').unwrap_or_default()]);
     let server = crate::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
-    let installed = home.join(".local/bin").join(crate::config::CLI);
+    let installed = home.join(".local/bin").join(custom_build::config::CLI);
     let exe = std::env::current_exe().and_then(|e| e.canonicalize()).ok();
     let cli = match exe {
         Some(exe) if installed.canonicalize().ok() != Some(exe.clone()) => exe.to_string_lossy().to_string(),
@@ -156,8 +156,8 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
     };
     let token = serde_json::to_string(&token.to_string_lossy()).unwrap_or_default();
     let plugin = |text: &str| {
-        let text = text.replace("{{name}}", crate::config::NAME).replace("{{cli}}", crate::config::CLI).replace("{{addr}}", addr).replace("{{hook}}", HOOKS_PROMPT);
-        text.replace("{{header}}", crate::protocol::header::LOCAL_TOKEN).replace("{{token}}", &token)
+        let text = text.replace("{{name}}", custom_build::config::NAME).replace("{{cli}}", custom_build::config::CLI).replace("{{addr}}", addr).replace("{{hook}}", HOOKS_PROMPT);
+        text.replace("{{header}}", custom_build::protocol::header::LOCAL_TOKEN).replace("{{token}}", &token)
     };
     let s = |v: &str| CstInputValue::String(v.to_string());
     let args = |harness: &str| mcp_args(harness).iter().map(|a| s(a)).collect::<Vec<_>>();
@@ -174,7 +174,7 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
     }
     let opencode = config.join("opencode");
     if opencode.is_dir() {
-        written.write(&opencode.join("plugins").join(format!("{}-hooks", crate::config::CLI)).join("index.ts"), &plugin(OPENCODE_PLUGIN));
+        written.write(&opencode.join("plugins").join(format!("{}-hooks", custom_build::config::CLI)).join("index.ts"), &plugin(OPENCODE_PLUGIN));
         let entry = CstInputValue::Object(vec![("type".into(), s("local")), ("command".into(), CstInputValue::Array([vec![s(&cli)], args("opencode")].concat())), ("enabled".into(), true.into())]);
         edit(&json_or_jsonc(&opencode, "opencode"), true, |t| with_mcp(t, "mcp", &server, entry));
     }
@@ -184,7 +184,7 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
         edit(&json_or_jsonc(&amp, "settings"), true, |t| with_mcp(t, "amp.mcpServers", &server, entry));
     }
     if pi.is_dir() {
-        written.write(&pi.join("extensions").join(format!("{}-hooks.ts", crate::config::CLI)), &plugin(PI_EXTENSION));
+        written.write(&pi.join("extensions").join(format!("{}-hooks.ts", custom_build::config::CLI)), &plugin(PI_EXTENSION));
     }
     git(node_home, addr);
 }
@@ -196,11 +196,11 @@ fn git(node_home: &Path, addr: &str) {
     let Some(token) = crate::api::local_token(node_home) else { return };
     let port = crate::api::port_of(addr);
     let file = node_home.join("git-config");
-    let hosts: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", crate::protocol::header::LOCAL_TOKEN)).collect();
+    let hosts: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", custom_build::protocol::header::LOCAL_TOKEN)).collect();
     let text = format!("{hosts}{}", crate::git_wire::home_config(node_home));
     if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
         use std::io::Write;
-        let wrote = crate::os::private_file().truncate(true).open(&file).and_then(|mut f| f.write_all(text.as_bytes()));
+        let wrote = platform::os::private_file().truncate(true).open(&file).and_then(|mut f| f.write_all(text.as_bytes()));
         if let Err(err) = wrote {
             once(format!("couldn't write {}: {err}", file.display()));
             return;
@@ -253,7 +253,7 @@ fn once(said: String) {
 /// Writes `text` over `file` all at once, so a harness reading it never sees half, keeping its permissions.
 fn replace(file: &Path, text: &str) -> Result<()> {
     let name = file.file_name().context("no file name")?.to_string_lossy();
-    let tmp = file.with_file_name(format!(".{name}.{}-tmp", crate::config::CLI));
+    let tmp = file.with_file_name(format!(".{name}.{}-tmp", custom_build::config::CLI));
     std::fs::write(&tmp, text)?;
     if let Ok(meta) = std::fs::metadata(file) {
         std::fs::set_permissions(&tmp, meta.permissions())?;
@@ -379,7 +379,7 @@ struct Written {
 impl Written {
     fn load(node_home: &Path) -> Self {
         let path = node_home.join("agents-written.json");
-        let hashes = crate::files::read_json(&path);
+        let hashes = platform::files::read_json(&path);
         Written { path, hashes }
     }
 
@@ -409,6 +409,6 @@ impl Written {
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        crate::files::write_json(&self.path, &self.hashes);
+        platform::files::write_json(&self.path, &self.hashes);
     }
 }

@@ -3,12 +3,7 @@
 
 use anyhow::{Context, Result, bail};
 
-use crate::config::CLI;
-
-/// The name git runs this program by for `<CLI>::` addresses.
-pub fn helper() -> String {
-    format!("git-remote-{CLI}")
-}
+use ::custom_build::config::CLI;
 
 /// What tells git `address`'s apps are reached as `<CLI>::…`: a config key and its value.
 pub fn instead_of(address: &str) -> (String, String) {
@@ -32,9 +27,9 @@ pub fn node_home() -> Option<std::path::PathBuf> {
 
 pub fn link_in(dir: &std::path::Path) -> Result<()> {
     let me = std::env::current_exe()?.canonicalize()?;
-    let link = dir.join(format!("{}{}", helper(), std::env::consts::EXE_SUFFIX));
+    let link = dir.join(format!("{}{}", ::custom_build::programs::git_helper(), std::env::consts::EXE_SUFFIX));
     let _ = std::fs::remove_file(&link);
-    crate::os::link_program(&me, &link).with_context(|| format!("git reaches your repos through {}, which couldn't be made: ln -s {} {}", link.display(), me.display(), link.display()))
+    platform::os::link_program(&me, &link).with_context(|| format!("git reaches your repos through {}, which couldn't be made: ln -s {} {}", link.display(), me.display(), link.display()))
 }
 
 /// `wire`, in the background, for a device that's this computer's own: a throwaway network leaves its git as it is.
@@ -57,7 +52,7 @@ pub fn wire(address: &str) -> Result<()> {
     if !tools || !git(&["--version"]) {
         return Ok(());
     }
-    if !on_path(&helper()) {
+    if !on_path(&::custom_build::programs::git_helper()) {
         // Beside the `<CLI>` users run (a link to it, on a Mac), else beside this program.
         let dir = std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).find(|d| d.join(format!("{CLI}{}", std::env::consts::EXE_SUFFIX)).is_file()).unwrap_or_default())

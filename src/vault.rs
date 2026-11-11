@@ -16,7 +16,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::database::scopes::{Scope, is_id};
+use ::scope::scopes::{Scope, is_id};
 
 /// Its schema: each item as one row, its fields' values with it.
 pub const SCHEMA: &str = "create table items (id text primary key, item text not null)";
@@ -114,12 +114,12 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
         item.kind = kind.trim().to_string();
     }
     if !data["domain"].is_null() {
-        item.domain = data["domain"].as_str().filter(|d| crate::database::scopes::valid_host(d)).map(str::to_string);
+        item.domain = data["domain"].as_str().filter(|d| ::scope::scopes::valid_host(d)).map(str::to_string);
     }
     if let Some(fields) = data["fields"].as_object() {
         let before = item.fields.clone();
         for (name, field) in fields {
-            ensure!(crate::database::scopes::valid_secret_name(name), "a field's name is letters, digits, _, - and .");
+            ensure!(::scope::scopes::valid_secret_name(name), "a field's name is letters, digits, _, - and .");
             if field.is_null() {
                 item.fields.remove(name);
                 continue;
@@ -135,7 +135,7 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
     }
     if let Some(hosts) = data["hosts"].as_array() {
         item.hosts = hosts.iter().filter_map(|h| h.as_str().map(str::to_string)).collect();
-        ensure!(item.hosts.iter().all(|h| crate::database::scopes::valid_host(h)), "a host is a host name, like api.example.com");
+        ensure!(item.hosts.iter().all(|h| ::scope::scopes::valid_host(h)), "a host is a host name, like api.example.com");
     }
     ensure!(!item.hosts.is_empty() || !item.fields.values().any(|f| f.secret), "an item with a secret field is sent to one host or more");
     if let Some(apps) = data["apps"].as_array() {
@@ -149,11 +149,11 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
 
 pub fn load(conn: &Connection) -> Result<Items> {
     let mut out = Items::new();
-    for row in crate::database::stored::query(conn, "select id, item from items", &[])? {
+    for row in database::stored::query(conn, "select id, item from items", &[])? {
         let (Some(id), Some(item)) = (row["id"].as_str(), row["item"].as_str()) else { continue };
         let mut item: Item = serde_json::from_str(item).context("an item that isn't one")?;
         item.opened = !item.fields.values().any(|f| f.secret);
-        crate::database::migrate::vault_apps(&mut item.apps, item.apps_before.take());
+        ::scope::migrate::vault_apps(&mut item.apps, item.apps_before.take());
         out.insert(id.to_string(), item);
     }
     Ok(out)
@@ -165,7 +165,7 @@ pub fn open_all(items: &mut Items, keys: &BTreeMap<u32, [u8; 32]>) {
     for (id, item) in items.iter_mut() {
         let Some(sealed) = &item.sealed else { continue };
         let Some(key) = keys.get(&sealed.n) else { continue };
-        let opened = data_encoding::BASE64URL_NOPAD.decode(sealed.sealed.as_bytes()).ok().and_then(|b| crate::keys::open_sealed(key, &b).ok()).and_then(|b| serde_json::from_slice::<Secrets>(&b).ok());
+        let opened = data_encoding::BASE64URL_NOPAD.decode(sealed.sealed.as_bytes()).ok().and_then(|b| key::open_sealed(key, &b).ok()).and_then(|b| serde_json::from_slice::<Secrets>(&b).ok());
         let Some(s) = opened.filter(|s| s.id == *id) else {
             tracing::warn!("{:?}'s secrets didn't open with {}'s Vault key {}", item.title, id, sealed.n);
             continue;
@@ -174,14 +174,14 @@ pub fn open_all(items: &mut Items, keys: &BTreeMap<u32, [u8; 32]>) {
             f.value = s.values.get(name).cloned().unwrap_or_default();
         }
         (item.hosts, item.apps, item.opened) = (s.hosts, s.apps, true);
-        crate::database::migrate::vault_apps(&mut item.apps, s.apps_before);
+        ::scope::migrate::vault_apps(&mut item.apps, s.apps_before);
     }
 }
 
 fn seal_item(id: &str, item: &mut Item, n: u32, public: &[u8; 32]) -> Result<()> {
     let values = item.fields.iter().filter(|(_, f)| f.secret).map(|(n, f)| (n.clone(), f.value.clone())).collect();
     let s = Secrets { id: id.to_string(), values, hosts: item.hosts.clone(), apps: item.apps.clone(), apps_before: None };
-    item.sealed = Some(Sealed { n, sealed: data_encoding::BASE64URL_NOPAD.encode(&crate::keys::seal_to(public, &serde_json::to_vec(&s)?)?) });
+    item.sealed = Some(Sealed { n, sealed: data_encoding::BASE64URL_NOPAD.encode(&key::seal_to(public, &serde_json::to_vec(&s)?)?) });
     Ok(())
 }
 
@@ -232,12 +232,12 @@ pub fn change(conn: &Connection, data: &Value, user: &str, time: u64, known: imp
     if let (Some(_), Some((n, public))) = (sealing.keys, sealing.public) {
         for (other, item) in items.iter_mut().filter(|(i, it)| **i != id && it.opened && it.sealed.as_ref().is_some_and(|s| s.n < n)) {
             seal_item(other, item, n, &public)?;
-            crate::database::stored::execute(conn, "insert or replace into items values (?, ?)", &[json!(other), json!(row(item)?)])?;
+            database::stored::execute(conn, "insert or replace into items values (?, ?)", &[json!(other), json!(row(item)?)])?;
         }
     }
     match items.get(&id) {
-        Some(item) => crate::database::stored::execute(conn, "insert or replace into items values (?, ?)", &[json!(id), json!(row(item)?)])?,
-        None => crate::database::stored::execute(conn, "delete from items where id = ?", &[json!(id)])?,
+        Some(item) => database::stored::execute(conn, "insert or replace into items values (?, ?)", &[json!(id), json!(row(item)?)])?,
+        None => database::stored::execute(conn, "delete from items where id = ?", &[json!(id)])?,
     };
     Ok(id)
 }
@@ -447,7 +447,7 @@ fn placeholder(name: &str) -> bool {
         (None, None) => name,
         _ => return false,
     };
-    crate::database::scopes::valid_secret_name(field)
+    ::scope::scopes::valid_secret_name(field)
 }
 
 #[test]
@@ -456,14 +456,14 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     conn.execute(SCHEMA, []).unwrap();
     let secret: [u8; 32] = rand::random();
     let keys = BTreeMap::from([(1, secret)]);
-    let public = Some((1, crate::keys::public_of(&secret)));
+    let public = Some((1, key::public_of(&secret)));
     let member = Sealing { keys: None, public, scope: "Everyone's", machines: "linux" };
     let granted = Sealing { keys: Some(&keys), public, scope: "Everyone's", machines: "linux" };
     let id = "0123456789abcdef";
     // A member adds an item: sealed to the Vault key, so the row they can read has no secret.
     let made = json!({ "id": id, "title": "Key", "fields": { "user": { "value": "andre" }, "token": { "value": "s3cret", "secret": true } }, "hosts": ["api.example.com"], "apps": ["two"] });
     change(&conn, &made, "bob", 1, |_| true, &member).unwrap();
-    let rows = crate::database::stored::query(&conn, "select item from items", &[]).unwrap();
+    let rows = database::stored::query(&conn, "select item from items", &[]).unwrap();
     assert!(!rows[0]["item"].as_str().unwrap().contains("s3cret"), "the row has it only sealed");
     let shut = load(&conn).unwrap();
     let lookup = Lookup { app: "two".into(), user: "bob".into(), scopes: vec![(Scope::Global, shut.clone())] };
@@ -474,9 +474,9 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     assert!(change(&conn, &json!({ "id": id, "apps": ["evil"] }), "bob", 2, |_| true, &member).is_err());
     change(&conn, &json!({ "id": id, "title": "Key, renamed" }), "bob", 2, |_| true, &member).unwrap();
     // Nor by rewriting its row: what's sealed counts.
-    let mut row: Value = serde_json::from_str(crate::database::stored::query(&conn, "select item from items", &[]).unwrap()[0]["item"].as_str().unwrap()).unwrap();
+    let mut row: Value = serde_json::from_str(database::stored::query(&conn, "select item from items", &[]).unwrap()[0]["item"].as_str().unwrap()).unwrap();
     (row["hosts"], row["apps"]) = (json!(["evil.example.com"]), json!(["evil"]));
-    crate::database::stored::execute(&conn, "update items set item = ?", &[json!(row.to_string())]).unwrap();
+    database::stored::execute(&conn, "update items set item = ?", &[json!(row.to_string())]).unwrap();
     let mut opened = load(&conn).unwrap();
     open_all(&mut opened, &keys);
     let it = &opened[id];
@@ -503,14 +503,14 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     let items = load(&conn).unwrap();
     assert!(items[plain].apps.iter().eq(["agents"]));
     // A row and a box from before, when agents were `agents` in an item's `apps`, read as agents'.
-    let mut row: Value = serde_json::from_str(&crate::database::stored::query(&conn, "select item from items where id = ?", &[json!(plain)]).unwrap()[0]["item"].as_str().unwrap()).unwrap();
+    let mut row: Value = serde_json::from_str(&database::stored::query(&conn, "select item from items where id = ?", &[json!(plain)]).unwrap()[0]["item"].as_str().unwrap()).unwrap();
     row["apps"] = row.as_object_mut().unwrap().remove("used_by").unwrap();
-    crate::database::stored::execute(&conn, "update items set item = ? where id = ?", &[json!(row.to_string()), json!(plain)]).unwrap();
+    database::stored::execute(&conn, "update items set item = ? where id = ?", &[json!(row.to_string()), json!(plain)]).unwrap();
     let secrets = serde_json::to_vec(&json!({ "id": id, "values": { "token": "s3cret" }, "hosts": ["api2.example.com"], "apps": ["agents"] })).unwrap();
     let mut items = load(&conn).unwrap();
-    items.get_mut(id).unwrap().sealed = Some(Sealed { n: 1, sealed: data_encoding::BASE64URL_NOPAD.encode(&crate::keys::seal_to(&crate::keys::public_of(&secret), &secrets).unwrap()) });
+    items.get_mut(id).unwrap().sealed = Some(Sealed { n: 1, sealed: data_encoding::BASE64URL_NOPAD.encode(&key::seal_to(&key::public_of(&secret), &secrets).unwrap()) });
     open_all(&mut items, &keys);
-    assert!([id, plain].iter().all(|i| items[*i].apps.iter().eq([crate::database::scopes::AGENTS])));
+    assert!([id, plain].iter().all(|i| items[*i].apps.iter().eq([::scope::scopes::AGENTS])));
 }
 
 #[cfg(feature = "node")]

@@ -134,8 +134,8 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<At> {
     let _turn = turn()?;
     let at = to_send()?;
     rebuild_if_stale(&at)?;
-    if !one::config::CHECK.is_empty() {
-        timed("checked the build", || run_check(one::config::CHECK, &at.src, &at.config_file, &cache().join("checked").join(at.build_name())))?;
+    if !custom_build::config::CHECK.is_empty() {
+        timed("checked the build", || run_check(custom_build::config::CHECK, &at.src, &at.config_file, &cache().join("checked").join(at.build_name())))?;
     }
     let started = Instant::now();
     println!("Sending out {}.", at.build_name());
@@ -290,7 +290,7 @@ fn front(at: &At, workers: bool, web: bool) -> Result<()> {
 
 /// What this program was built from (build.rs): its code's commit, and its config's if it's a custom build's.
 fn built_from() -> (&'static str, Option<&'static str>) {
-    let build = one::config::BUILD.split('+').next().unwrap_or("");
+    let build = custom_build::config::BUILD.split('+').next().unwrap_or("");
     build.split_once('-').map_or((build, None), |(code, config)| (code, Some(config)))
 }
 
@@ -308,12 +308,12 @@ fn changed_since_built(at: &At) -> Result<Parts> {
 /// What's compiled into this program (what the Workers and the web client are put together with: their generated files,
 /// the client's WebAssembly, its logo and name) is what `at` says, so nothing it adds to them is out of date.
 fn same_rust(at: &At) -> Result<()> {
-    let stale = || format!("{CLI}-dev is from {}, and what's built into it has changed since: {CLI}-dev update dev", one::config::BUILD);
+    let stale = || format!("{CLI}-dev is from {}, and what's built into it has changed since: {CLI}-dev update dev", custom_build::config::BUILD);
     // What is built in is also what `update dev` sends: so whatever makes this program stale, it has something to send. A
     // change to dev/ alone doesn't, or any push to it would hold back the Workers and the web client until `update dev`.
     ensure!(!changed_since_built(at).with_context(stale)?.is_built_in(), "{}", stale());
     // A program `rebuild_if_stale` made has neither: a plain cargo build, which doesn't make them. `update dev` sends one that does.
-    ensure!(!one::config::ONET.is_empty() && !one::config::CLOUDFLARE_NODE.is_empty(), "{CLI}-dev was built without the web client's WebAssembly and the Cloudflare node, which the Workers and the web client are put together with: {CLI}-dev update dev");
+    ensure!(!one::carried::ONET.is_empty() && !one::carried::CLOUDFLARE_NODE.is_empty(), "{CLI}-dev was built without the web client's WebAssembly and the Cloudflare node, which the Workers and the web client are put together with: {CLI}-dev update dev");
     Ok(())
 }
 
@@ -325,15 +325,15 @@ pub(super) fn rebuild_if_stale(at: &At) -> Result<()> {
     if !changed_since_built(at).map_or(true, |parts| parts.dev) {
         return Ok(());
     }
-    let (dev, rebuilt) = (format!("{CLI}-dev"), one::config::env("DEV_REBUILT"));
+    let (dev, rebuilt) = (format!("{CLI}-dev"), custom_build::config::env("DEV_REBUILT"));
     ensure!(
         std::env::var_os(&rebuilt).is_none(),
         "{dev} built itself from {} and is still from {}, so it can't tell it's current: build it by hand ({})",
         at.build_name(),
-        one::config::BUILD,
+        custom_build::config::BUILD,
         by_hand(at)
     );
-    println!("{dev} is from {}, older than {}: building {dev} from the checkout first, then running this again with it.", one::config::BUILD, at.build_name());
+    println!("{dev} is from {}, older than {}: building {dev} from the checkout first, then running this again with it.", custom_build::config::BUILD, at.build_name());
     let made = at.src.join("target/release/one-dev");
     timed("built it", || {
         let mut command = cargo();
@@ -350,12 +350,12 @@ pub(super) fn rebuild_if_stale(at: &At) -> Result<()> {
 
 /// How to do `rebuild_if_stale` by hand.
 fn by_hand(at: &At) -> String {
-    format!("cd {} && CONFIG={} cargo build --release -p one-dev, then copy target/release/one-dev over {}", at.src.display(), at.config_file.display(), one::this_program().map_or("this program".into(), |me| me.display().to_string()))
+    format!("cd {} && CONFIG={} cargo build --release -p one-dev, then copy target/release/one-dev over {}", at.src.display(), at.config_file.display(), platform::this_program().map_or("this program".into(), |me| me.display().to_string()))
 }
 
 /// `built` put in place of this program, beside it and moved into place, so the one running isn't written over: → where.
 fn install(built: &Path) -> Result<PathBuf> {
-    let me = one::this_program()?;
+    let me = platform::this_program()?;
     let next = me.with_extension("new");
     std::fs::copy(built, &next)?;
     std::fs::rename(&next, &me).with_context(|| format!("install it at {}", me.display()))?;

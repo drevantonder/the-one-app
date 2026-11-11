@@ -24,14 +24,14 @@ pub const TRAY_AT_BOTTOM: bool = false;
 /// already there is only started. One installed for the whole machine (install.sh, by root) is root's to start.
 pub fn set_up(address: &str) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let cli = one::config::CLI;
+    let cli = custom_build::config::CLI;
     let oned = format!("{cli}d");
     // A throwaway network's computer is its own, beside the machine's.
     let throwaway = crate::env("THROWAWAY").is_some();
     if !throwaway && std::path::Path::new("/etc/systemd/system").join(format!("{oned}.service")).exists() {
         return Err(format!("This computer's {oned} isn't running: start it with sudo systemctl start {oned}"));
     }
-    let bin = if throwaway { one::home().join("bin") } else { PathBuf::from(std::env::var_os("HOME").ok_or("This user has no home folder.")?).join(".local/bin") };
+    let bin = if throwaway { platform::home().join("bin") } else { PathBuf::from(std::env::var_os("HOME").ok_or("This user has no home folder.")?).join(".local/bin") };
     let program = bin.join(cli);
     if !program.exists() {
         let bytes = super::desktop::program(address)?;
@@ -48,17 +48,17 @@ pub fn set_up(address: &str) -> Result<(), String> {
     }
     // A throwaway network's oned is a unit of its own beside the user's real one, named for its home.
     let unit = match throwaway {
-        true => format!("{oned}-throwaway-{}", &data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(one::home().to_string_lossy().as_bytes()))[..8]),
+        true => format!("{oned}-throwaway-{}", &data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(platform::home().to_string_lossy().as_bytes()))[..8]),
         false => oned.clone(),
     };
     // What says which network and home it's for: the environment `one-dev throwaway` gives its programs, or a custom
     // build's home, as the window was started with.
-    let env: String = ["HOME", "ADDR", "THROWAWAY", "RELEASE_KEY"].iter().filter_map(|k| Some(format!("Environment=\"{}={}\"\n", one::config::env(k), crate::env(k)?))).collect();
-    let file = one::home().join(format!("{unit}.service"));
-    std::fs::create_dir_all(one::home()).map_err(|e| e.to_string())?;
+    let env: String = ["HOME", "ADDR", "THROWAWAY", "RELEASE_KEY"].iter().filter_map(|k| Some(format!("Environment=\"{}={}\"\n", custom_build::config::env(k), crate::env(k)?))).collect();
+    let file = platform::home().join(format!("{unit}.service"));
+    std::fs::create_dir_all(platform::home()).map_err(|e| e.to_string())?;
     std::fs::write(
         &file,
-        format!("[Unit]\nDescription={}, this device\n\n[Service]\nExecStart={}\nRestart=always\nRestartSec=2\n{env}\n[Install]\nWantedBy=default.target\n", one::config::NAME, bin.join(&oned).display()),
+        format!("[Unit]\nDescription={}, this device\n\n[Service]\nExecStart={}\nRestart=always\nRestartSec=2\n{env}\n[Install]\nWantedBy=default.target\n", custom_build::config::NAME, bin.join(&oned).display()),
     )
     .map_err(|e| e.to_string())?;
     let systemctl = |args: &[&str]| -> Result<(), String> {
@@ -93,7 +93,7 @@ pub fn set_login(on: bool) {
         return;
     }
     let _ = std::fs::create_dir_all(entry.parent().unwrap());
-    let _ = std::fs::write(entry, format!("[Desktop Entry]\nType=Application\nName={}\nExec=\"{}\"\nTerminal=false\n", one::config::NAME, exe.display()));
+    let _ = std::fs::write(entry, format!("[Desktop Entry]\nType=Application\nName={}\nExec=\"{}\"\nTerminal=false\n", custom_build::config::NAME, exe.display()));
 }
 
 pub fn start(app: &tauri::App) {
@@ -116,15 +116,15 @@ fn launcher(app: &tauri::App) -> Result<(), String> {
     }
     let entry = format!(
         "[Desktop Entry]\nType=Application\nName={name}\nExec=\"{exe}\" %u\nIcon={id}\nTerminal=false\nCategories=Office;Network;\nMimeType=x-scheme-handler/{cli};\nStartupWMClass={cli}\n",
-        name = one::config::NAME,
+        name = custom_build::config::NAME,
         exe = exe.display(),
-        cli = one::config::CLI,
+        cli = custom_build::config::CLI,
     );
     let apps = data.join("applications");
     std::fs::create_dir_all(&apps).map_err(|e| e.to_string())?;
     std::fs::write(apps.join(format!("{id}.desktop")), entry).map_err(|e| e.to_string())?;
     // And it's what opens `<cli>://`, in mimeapps.list where XDG_CONFIG_HOME says.
-    let _ = std::process::Command::new("xdg-mime").args(["default", &format!("{id}.desktop"), &format!("x-scheme-handler/{}", one::config::CLI)]).status();
+    let _ = std::process::Command::new("xdg-mime").args(["default", &format!("{id}.desktop"), &format!("x-scheme-handler/{}", custom_build::config::CLI)]).status();
     Ok(())
 }
 

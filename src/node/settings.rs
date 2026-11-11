@@ -1,10 +1,10 @@
-//! A machine with a node as its user's own device (`crate::settings::Me`), as it's listed (`MACHINE`): what its CLI,
+//! A machine with a node as its user's own device (`::scope::settings::Me`), as it's listed (`MACHINE`): what its CLI,
 //! MCP and Mac app change of who can do what is signed by it, with the one copy every client runs; and on an admin's,
 //! it lets in those an invite already said yes to, as Settings does while it lists requests.
 
 use super::*;
-use crate::bucket::Bucket;
-use crate::settings::Me;
+use ::bucket::Bucket;
+use ::scope::settings::Me;
 
 /// How often a client looks for someone an invite lets in.
 const INVITES_EVERY: Duration = Duration::from_secs(4);
@@ -15,9 +15,9 @@ const ISSUER_KEYS_FOR: Duration = Duration::from_secs(3600);
 /// Each issuer's keys, by where they're published, and when they were fetched.
 pub(super) type IssuerKeys = HashMap<String, (Value, Instant)>;
 
-impl crate::keys::Signs for Node {
+impl key::Signs for Node {
     fn public(&self) -> [u8; 32] {
-        crate::keys::Signs::public(&self.0.holds)
+        key::Signs::public(&self.0.holds)
     }
 
     async fn sign_bytes(&self, bytes: &[u8]) -> Result<[u8; 64]> {
@@ -35,10 +35,10 @@ impl Me for Node {
     }
 
     fn seal(&self) -> [u8; 32] {
-        crate::keys::Opens::public(&self.0.holds)
+        key::Opens::public(&self.0.holds)
     }
 
-    fn welcome(&self) -> Option<crate::database::steps::Welcome> {
+    fn welcome(&self) -> Option<::scope::steps::Welcome> {
         self.with(|i| i.r.welcome()).ok().flatten()
     }
 
@@ -65,7 +65,7 @@ impl Me for Node {
         let epochs = self.epoch_keys(scope, true).await?;
         let epoch = epochs.get(&n).with_context(|| format!("{} doesn't hold {scope}'s epoch {n}", self.device_name()))?;
         // An app added after an epoch ended has no key in it until this asks, as a browser's own keyring makes one.
-        crate::keys::app_key(&self.bucket()?, epoch, &scope.to_string(), app, n, true).await?.with_context(|| format!("{app} has no key in {scope}'s epoch {n}"))
+        database::keys::app_key(&self.bucket()?, epoch, &scope.to_string(), app, n, true).await?.with_context(|| format!("{app} has no key in {scope}'s epoch {n}"))
     }
 
     fn made_epoch(&self, scope: &Scope, _: u32, _: [u8; 32]) {
@@ -85,11 +85,11 @@ impl Me for Node {
                 request = request.header(name, value);
             }
             let request = match body {
-                Some(body) => request.header("content-type", "application/json").body(crate::keys::canonical(&body))?,
+                Some(body) => request.header("content-type", "application/json").body(key::canonical(&body))?,
                 None => request.body(Vec::new())?,
             };
-            let twice = if method == "GET" { crate::hedge::Twice::Safe } else { crate::hedge::Twice::Never };
-            let (mut response, _) = crate::hedge::run(&agent, "address", request, twice)?;
+            let twice = if method == "GET" { platform::hedge::Twice::Safe } else { platform::hedge::Twice::Never };
+            let (mut response, _) = platform::hedge::run(&agent, "address", request, twice)?;
             let status = response.status().as_u16();
             Ok((status, response.body_mut().read_json().unwrap_or(Value::Null)))
         })
@@ -133,26 +133,26 @@ impl Me for Node {
     }
 
     async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
-        crate::database::stored::created(&self.bucket()?, name, bytes).await
+        database::stored::created(&self.bucket()?, name, bytes).await
     }
 
     async fn delete(&self, name: &str) -> Result<()> {
         Bucket::delete(&self.bucket()?, name).await
     }
 
-    async fn write_as(&self, key: &crate::keys::SigningKey, user: &str, content: Content) -> Result<()> {
+    async fn write_as(&self, key: &key::SigningKey, user: &str, content: Content) -> Result<()> {
         self.write_step_as(key, user, content).await.map(drop)
     }
 
     async fn open(&self, sealed: &[u8]) -> Result<Vec<u8>> {
-        crate::keys::open_sealed_by(&self.0.holds, sealed).await
+        key::open_sealed_by(&self.0.holds, sealed).await
     }
 }
 
 /// The routes a machine with a node answers as its own device (`settings::on_a_node`), for its own programs.
 pub(crate) fn routes() -> crate::api::Routes {
     let mut routes = crate::api::Routes::default();
-    for (method, path) in crate::settings::on_a_node() {
+    for (method, path) in ::scope::settings::on_a_node() {
         let filter = axum::routing::MethodFilter::try_from(axum::http::Method::from_bytes(method.as_bytes()).expect("a method")).expect("a method");
         let answer = move |axum::extract::State(node): axum::extract::State<Node>, body: axum::body::Bytes| async move { node.answer_as_mine(method, path, &body).await };
         routes = routes.route(path, crate::api::Who::ThisMachine, axum::routing::on(filter, answer));
@@ -163,7 +163,7 @@ pub(crate) fn routes() -> crate::api::Routes {
 impl Node {
     /// What this machine's own programs ask of who can do what, answered as its own device (`settings::answer`).
     pub(crate) async fn answer_as_mine(&self, method: &str, path: &str, body: &[u8]) -> crate::api::Reply {
-        let answered = crate::settings::answer(self, method, path, body).await.with_context(|| format!("{path} isn't one this device answers"))?;
+        let answered = ::scope::settings::answer(self, method, path, body).await.with_context(|| format!("{path} isn't one this device answers"))?;
         Ok(axum::Json(answered?))
     }
 
@@ -179,7 +179,7 @@ impl Node {
                 if node.with(|i| i.r.db().epoch(&own))? == 0 {
                     node.epoch_keys(&own, true).await?;
                 }
-                crate::settings::settle_own(&node, None, None).await
+                ::scope::settings::settle_own(&node, None, None).await
             };
             if let Err(err) = settled.await {
                 tracing::warn!("settling this user's own things: {err:#}");
@@ -193,10 +193,10 @@ impl Node {
         loop {
             tokio::time::sleep(INVITES_EVERY).await;
             let client = self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.is_some_and(|c| c.user == i.user)));
-            if !client.unwrap_or(false) || Node::address(&self).is_err() || !crate::settings::invite_open(&self).await {
+            if !client.unwrap_or(false) || Node::address(&self).is_err() || !::scope::settings::invite_open(&self).await {
                 continue;
             }
-            if let Err(err) = crate::settings::requests(&self).await {
+            if let Err(err) = ::scope::settings::requests(&self).await {
                 tracing::debug!("looking for someone an invite lets in: {err:#}");
             }
         }

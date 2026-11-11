@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use one::config::CLI;
+use ::custom_build::config::CLI;
 use one::mode::Throwaway;
 use one::release::Version;
 
@@ -42,12 +42,12 @@ fn built_in() -> Option<PathBuf> {
 /// and the checkout. So a checkout's own build finds its throwaway network from any folder, as an MCP client starts it, and
 /// from a folder in no checkout there is none: nothing starts a network for a folder that isn't one.
 fn folder() -> Option<(PathBuf, PathBuf)> {
-    let base = PathBuf::from(format!("{}-throwaway", one::home().display()));
+    let base = PathBuf::from(format!("{}-throwaway", platform::home().display()));
     let built = built_in();
     let top = || std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success()).map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim())).filter(|top| is_checkout(top));
     let checkout = built.or_else(top)?;
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(checkout.to_string_lossy().as_bytes()).into();
-    let hash = one::keys::hex(&hash);
+    let hash = key::hex(&hash);
     let name = checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     Some((base.join(format!("{name}-{}", &hash[..6])), checkout))
 }
@@ -218,9 +218,9 @@ fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
     let address = node_at(dir, addr).state()?.address().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
-    let helper = bin.join(one::git_wire::helper());
+    let helper = bin.join(::custom_build::programs::git_helper());
     // Replaced in one step: another `git` here at once has this one on its PATH while it's linked.
-    let linking = bin.join(format!("{}.{}", one::git_wire::helper(), std::process::id()));
+    let linking = bin.join(format!("{}.{}", ::custom_build::programs::git_helper(), std::process::id()));
     std::os::unix::fs::symlink(network::program(dir)?, &linking)?;
     std::fs::rename(&linking, &helper)?;
     let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())))?;
@@ -254,7 +254,7 @@ fn cloudflare_node(dir: &Path) -> Result<()> {
     }
     let addr = running(dir).context("the throwaway network didn't start again")?;
     let key = settings.cloudflare_node_endpoint().context("the throwaway network's Workers have no Cloudflare node key")?;
-    node_at(dir, &addr).post("/api/settings", json!({ "name": one::database::scopes::CLOUDFLARE_NODE, "value": key }))?;
+    node_at(dir, &addr).post("/api/settings", json!({ "name": scope::scopes::CLOUDFLARE_NODE, "value": key }))?;
     println!("The throwaway network's Cloudflare node runs beside its Workers, its endpoint {}.", &key[..8]);
     Ok(())
 }

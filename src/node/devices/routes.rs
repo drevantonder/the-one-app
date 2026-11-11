@@ -47,11 +47,11 @@ async fn erase(State(node): State<Node>, me: Me, Body(body): Body<Device>) -> Re
 
 async fn approve_with_recovery(State(node): State<Node>, Body(body): Body<ApproveWithRecovery>) -> Reply {
     let key = recovery_key(&body.recovery, "a recovery key")?;
-    Ok(Json(crate::settings::recovery::approve(&node, given(&body.code, "code")?, &key, body.confirm).await?))
+    Ok(Json(scope::settings::recovery::approve(&node, given(&body.code, "code")?, &key, body.confirm).await?))
 }
 
 async fn replace_recovery(State(node): State<Node>, Body(body): Body<ReplaceRecovery>) -> Reply {
-    Ok(Json(crate::settings::recovery::replace(&node, &recovery_key(&body.recovery, "a recovery key")?, &recovery_key(&body.next, "the next recovery key")?, body.confirm).await?))
+    Ok(Json(scope::settings::recovery::replace(&node, &recovery_key(&body.recovery, "a recovery key")?, &recovery_key(&body.next, "the next recovery key")?, body.confirm).await?))
 }
 
 async fn recovery_holders(State(node): State<Node>, me: Me) -> Reply {
@@ -59,6 +59,6 @@ async fn recovery_holders(State(node): State<Node>, me: Me) -> Reply {
 }
 
 async fn seal_recovery(State(node): State<Node>, Body(body): Body<SealRecovery>) -> Reply {
-    crate::settings::recovery::seal(&node, given(&body.to, "to")?, given(&body.copy, "copy")?).await?;
+    scope::settings::recovery::seal(&node, given(&body.to, "to")?, given(&body.copy, "copy")?).await?;
     done()
 }

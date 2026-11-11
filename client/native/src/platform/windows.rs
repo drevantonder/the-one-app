@@ -122,13 +122,13 @@ pub fn let_in() {
 /// every minute, with no administrator. One already there is only started.
 pub fn set_up(address: &str) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
-    let cli = one::config::CLI;
+    let cli = custom_build::config::CLI;
     let powershell = |args: &[&str]| -> Result<(), String> {
         // No console window for it.
         let done = std::process::Command::new("powershell.exe").args(["-NoProfile", "-ExecutionPolicy", "Bypass"]).args(args).creation_flags(0x0800_0000).output().map_err(|e| e.to_string())?;
         if done.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&done.stderr).trim().to_string()) }
     };
-    if one::home().join("bin").join(format!("{cli}.exe")).exists() {
+    if platform::home().join("bin").join(format!("{cli}.exe")).exists() {
         return powershell(&["-Command", &format!("Start-ScheduledTask -TaskName {cli}d")]);
     }
     let dir = std::env::temp_dir().join(format!("{cli}-set-up-{}", std::process::id()));

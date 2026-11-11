@@ -4,8 +4,8 @@
 //! device follows: it reaches it through the URL signer, copies there what it reaches of the old one, and keeps its
 //! data there from then on. A folder is only ever a machine's own choice, never taken from what others write.
 
-use crate::protocol::allowed;
-use crate::config::YOURS;
+use ::custom_build::allowed;
+use ::custom_build::config::YOURS;
 use super::*;
 
 pub(crate) mod routes;
@@ -41,7 +41,7 @@ impl Node {
     pub(super) fn network_place(&self, fields: &BTreeMap<String, String>) -> Result<Place> {
         let node = Arc::downgrade(&self.0);
         let joined = fields.get("address").cloned();
-        let address: crate::bucket::Address = Arc::new(move || {
+        let address: bucket::Address = Arc::new(move || {
             let node = Node(node.upgrade().context("this device stopped")?);
             node.with(|i| Ok(i.r.db().setting("address")?))?.or_else(|| joined.clone()).with_context(|| format!("{YOURS} has no address yet, where its bucket is reached: an admin sets one with cloudflare use"))
         });
@@ -160,13 +160,13 @@ fn to_move(names: &[String]) -> Vec<String> {
         if let Some((folder, last)) = name.rsplit_once('/')
             && let Some(prefix) = folder.strip_suffix("/copy")
             && let Ok(n) = last.parse()
-            && crate::database::stored::copy_name(prefix, n) == name
+            && bucket::names::copy_name(prefix, n) == name
         {
             return Some((prefix, n, true));
         }
-        crate::database::stored::position(name).map(|(prefix, n)| (prefix, n, false))
+        bucket::names::position(name).map(|(prefix, n)| (prefix, n, false))
     }
-    let steps: BTreeSet<(&str, u64)> = names.iter().filter_map(|n| of(n).filter(|(p, at, copy)| !copy && crate::database::stored::step_name(p, *at) == *n)).map(|(p, at, _)| (p, at)).collect();
+    let steps: BTreeSet<(&str, u64)> = names.iter().filter_map(|n| of(n).filter(|(p, at, copy)| !copy && bucket::names::step_name(p, *at) == *n)).map(|(p, at, _)| (p, at)).collect();
     let tidied: BTreeSet<&str> = names.iter().filter_map(|n| n.strip_suffix("/tidied")).collect();
     let mut ends: BTreeMap<&str, u64> = BTreeMap::new();
     for (prefix, _) in steps.iter().filter(|(p, _)| !tidied.contains(p)) {
@@ -189,38 +189,38 @@ mod tests {
     fn moving_copies_each_database_s_steps_up_to_a_gap() {
         let (log, db, old) = ("global/one/log", "user:a/notes/notes", "user:a/notes/old");
         let mut names: Vec<String> = [
-            crate::database::stored::step_name(log, 1),
-            crate::database::stored::step_name(log, 2),
-            crate::database::stored::step_name(log, 4),
-            crate::database::stored::copy_name(log, 2),
-            crate::database::stored::copy_name(log, 4),
-            crate::database::stored::newest_name(log),
-            crate::database::stored::step_name(db, 1),
-            crate::database::stored::sig_name(db, 1),
-            crate::database::stored::sig_name(db, 3),
-            crate::database::stored::step_name(db, 3),
-            crate::database::stored::step_name(db, 1_000_000),
-            crate::database::stored::tidied_name(old),
-            crate::database::stored::step_name(old, 200),
-            crate::database::stored::sig_name(old, 200),
-            crate::database::stored::step_name(old, 201),
-            crate::database::stored::copy_name(old, 200),
-            crate::database::stored::newest_name(old),
+            bucket::names::step_name(log, 1),
+            bucket::names::step_name(log, 2),
+            bucket::names::step_name(log, 4),
+            bucket::names::copy_name(log, 2),
+            bucket::names::copy_name(log, 4),
+            bucket::names::newest_name(log),
+            bucket::names::step_name(db, 1),
+            bucket::names::sig_name(db, 1),
+            bucket::names::sig_name(db, 3),
+            bucket::names::step_name(db, 3),
+            bucket::names::step_name(db, 1_000_000),
+            bucket::names::tidied_name(old),
+            bucket::names::step_name(old, 200),
+            bucket::names::sig_name(old, 200),
+            bucket::names::step_name(old, 201),
+            bucket::names::copy_name(old, 200),
+            bucket::names::newest_name(old),
             "user:a/blobs/abc".to_string(),
             "network".to_string(),
         ]
         .into();
         names.sort();
         let moved = super::to_move(&names);
-        let want = [crate::database::stored::step_name(log, 1), crate::database::stored::step_name(log, 2), crate::database::stored::copy_name(log, 2), crate::database::stored::newest_name(log), crate::database::stored::step_name(db, 1), crate::database::stored::sig_name(db, 1), "user:a/blobs/abc".to_string(), "network".to_string()];
+        let want = [bucket::names::step_name(log, 1), bucket::names::step_name(log, 2), bucket::names::copy_name(log, 2), bucket::names::newest_name(log), bucket::names::step_name(db, 1), bucket::names::sig_name(db, 1), "user:a/blobs/abc".to_string(), "network".to_string()];
         let whole = names.iter().filter(|n| n.starts_with(&format!("{old}/")));
         assert_eq!(moved.iter().collect::<std::collections::BTreeSet<_>>(), want.iter().chain(whole).collect(), "and a database whose older steps were deleted, whole");
         // As the URL signer creates them (`cloudflare/signer/worker.js`'s `after`), one after another in that order.
         let mut there = std::collections::BTreeSet::new();
         for name in &moved {
-            let due = match (name.rsplit_once("/copy/"), crate::database::stored::position(name).filter(|(p, at)| crate::database::stored::step_name(p, *at) == *name)) {
-                (Some((prefix, n)), _) => there.contains(&crate::database::stored::step_name(prefix, n.parse().unwrap())),
-                (None, Some((prefix, at))) => at == 1 || [crate::database::stored::step_name(prefix, at - 1), crate::database::stored::copy_name(prefix, at - 1), crate::database::stored::tidied_name(prefix)].iter().any(|n| there.contains(n)),
+            let due = match (name.rsplit_once("/copy/"), bucket::names::position(name).filter(|(p, at)| bucket::names::step_name(p, *at) == *name)) {
+                (Some((prefix, n)), _) => there.contains(&bucket::names::step_name(prefix, n.parse().unwrap())),
+                (None, Some((prefix, at))) => at == 1 || [bucket::names::step_name(prefix, at - 1), bucket::names::copy_name(prefix, at - 1), bucket::names::tidied_name(prefix)].iter().any(|n| there.contains(n)),
                 (None, None) => true,
             };
             assert!(due, "the URL signer refuses {name} then");

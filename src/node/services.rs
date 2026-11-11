@@ -1,7 +1,7 @@
 //! Device services, as the node knows them: which run on which device, registering them, and switching a device's
 //! parts on and off.
 
-use crate::config::YOURS;
+use ::custom_build::config::YOURS;
 use super::*;
 
 mod carry;
@@ -37,7 +37,7 @@ impl Node {
         let device = device.map(str::to_string).unwrap_or_else(|| self.device_name());
         let content = self.with(|i| {
             let scope = if on { added_scope(i, &caller.user, name)? } else { None };
-            crate::settings::service(i.r.db(), &caller.user, &device, name, on, scope.as_ref())
+            scope::settings::service(i.r.db(), &caller.user, &device, name, on, scope.as_ref())
         })?;
         self.member_content(caller, content).await?;
         Ok(())
@@ -80,7 +80,7 @@ impl Node {
             let mut entries = Vec::new();
             for name in unnamed {
                 if let Some(scope) = added_scope(i, &caller.user, &name)?
-                    && let Ok(entry) = crate::settings::service(m, &caller.user, &hex(&self.0.holds.device()), &name, true, Some(&scope))
+                    && let Ok(entry) = scope::settings::service(m, &caller.user, &hex(&self.0.holds.device()), &name, true, Some(&scope))
                 {
                     entries.push(entry);
                 }
@@ -110,7 +110,7 @@ impl Node {
     /// Whether this device runs apps' calls: unless its user switched its app service off.
     pub fn runs_apps(&self) -> bool {
         // What it can't read, it keeps running.
-        self.with_or(true, |i| Ok(!Self::off(i.r.db(), &self.0.id, crate::database::scopes::APPS_PART)?))
+        self.with_or(true, |i| Ok(!Self::off(i.r.db(), &self.0.id, scope::scopes::APPS_PART)?))
     }
 }
 

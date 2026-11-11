@@ -117,43 +117,43 @@ impl Node {
         let user = user.map_or_else(new_id, str::to_string);
         let recovery = SigningKey::from_bytes(&rand::random());
         // Its first device is the device this node is, or the runtime of, whose onet then lists that runtime.
-        let me = crate::keys::Endpoint { key: self.0.holds.device(), seal: crate::keys::Opens::public(&self.0.holds) };
+        let me = key::Endpoint { key: self.0.holds.device(), seal: key::Opens::public(&self.0.holds) };
         // The network's id, which every device of it pins, and `global`'s first epoch, named by its first freeze before
         // anything is sealed under it.
         let root = Hash::from_bytes(rand::random());
         let global: [u8; 32] = rand::random();
-        let start = content::first(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&global));
+        let start = content::first(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes(), &key::epoch_hash(&global));
         // Until it's moved to S3-compatible storage, the network's bucket is a folder here.
         let bucket: BTreeMap<String, String> = [("path".to_string(), self.network_dir().join("bucket").display().to_string())].into();
         Place::from_fields(&bucket)?.create(NETWORK_OBJECT, root.to_hex().as_bytes())?;
         self.save_network(&NetworkFile { root: root.to_hex(), user: user.clone(), bucket: Some(bucket), folders: BTreeMap::new() })?;
         self.open_network()?;
         let bucket = self.bucket()?;
-        let recovery_seal = crate::keys::twin_public(recovery.verifying_key().as_bytes())?;
+        let recovery_seal = key::twin_public(recovery.verifying_key().as_bytes())?;
         for (to, seal) in [("recovery".to_string(), recovery_seal), (hex(&me.key), me.seal)] {
-            crate::database::stored::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::keys::seal_to(&seal, &global)?).await?;
+            database::stored::created(&bucket, &database::keys::epoch_name("global", 1, &to), &key::seal_to(&seal, &global)?).await?;
         }
-        self.0.databases.epochs.lock().unwrap().insert(Scope::Global, crate::database::stored::Keys::from([(1, global)]));
+        self.0.databases.epochs.lock().unwrap().insert(Scope::Global, database::stored::Keys::from([(1, global)]));
         // Who's who, as the freeze its recovery key signs at step 1 of its scope database.
         let keys = self.step_keys(&Scope::Global).await?;
         self.with(|i| {
             i.read = true;
             Ok(())
         })?;
-        let first = crate::database::steps::first_freeze(&recovery, root, &start, &user, now_ms())?;
-        let name = crate::database::stored::step_name(&crate::database::steps::prefix("global"), 1);
-        let sealed = crate::database::steps::seal(&keys, &name, &crate::database::steps::encode(&first.step, first.copy.as_deref()))?;
-        ensure!(crate::bucket::Bucket::create(&bucket, &name, &sealed).await?, "the new network's bucket isn't empty");
+        let first = scope::steps::first_freeze(&recovery, root, &start, &user, now_ms())?;
+        let name = bucket::names::step_name(&scope::steps::prefix("global"), 1);
+        let sealed = scope::steps::seal(&keys, &name, &scope::steps::encode(&first.step, first.copy.as_deref()))?;
+        ensure!(bucket::Bucket::create(&bucket, &name, &sealed).await?, "the new network's bucket isn't empty");
         self.read_steps().await?;
         ensure!(self.frozen(), "the new network's freeze didn't count");
         let me = Caller::own(self.0.id, user);
         // Its Vault and its first user's own open on this machine, so a new network fills items with no other step.
         for scope in [Scope::Global, Scope::User(me.user.clone())] {
-            crate::settings::new_vault_key(self, &scope, 1, &[self.0.holds.device()]).await?;
+            scope::settings::new_vault_key(self, &scope, 1, &[self.0.holds.device()]).await?;
         }
         // Written first and run together: as each is written, settling would run them all again, holding up the next.
         let settling = self.0.settling.lock().await;
-        for (app, _) in crate::config::BUILT_IN {
+        for (app, _) in crate::carried::BUILT_IN {
             self.write_built_in(&me, app).await?;
         }
         for app in apps {

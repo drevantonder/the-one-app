@@ -9,7 +9,7 @@ use axum::{Json, Router};
 use serde_json::json;
 use tokio_stream::StreamExt;
 
-use crate::config::YOURS;
+use ::custom_build::config::YOURS;
 use crate::node::{Caller, Credential, Node};
 
 use super::local::{from_this_machine, not_this_machine};
@@ -20,7 +20,7 @@ use super::{Routes, Who};
 /// device that vouched for a session's endpoint), and until when what it hands counts (that session's certificate's
 /// `until`): only the node puts this on a request, as an extension, which nothing a client sends can set.
 #[derive(Clone, Copy)]
-pub struct FromClient(pub crate::keys::Key, pub u64);
+pub struct FromClient(pub key::Key, pub u64);
 
 /// `routes` as `Who` says each may be asked, with this machine's own programs asking any.
 pub fn guarded(routes: Routes, node: Node) -> Router {
@@ -38,8 +38,8 @@ pub fn guarded(routes: Routes, node: Node) -> Router {
 /// here in the same header of its answer, as base64 of its JSON (`node::trace`).
 async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     use crate::node::trace;
-    let asked = req.headers().contains_key(crate::protocol::header::TRACE);
-    let parent = req.headers().get(crate::protocol::header::TRACEPARENT).and_then(|h| h.to_str().ok()).map(str::to_string);
+    let asked = req.headers().contains_key(::custom_build::protocol::header::TRACE);
+    let parent = req.headers().get(::custom_build::protocol::header::TRACEPARENT).and_then(|h| h.to_str().ok()).map(str::to_string);
     let route = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string());
     let t = trace::Trace::continuing(asked, parent.as_deref());
     let began = std::time::Instant::now();
@@ -54,7 +54,7 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
     done["names"] = node.compute_names();
     let done = data_encoding::BASE64.encode(done.to_string().as_bytes());
     if let Ok(value) = done.parse() {
-        resp.headers_mut().insert(crate::protocol::header::TRACE, value);
+        resp.headers_mut().insert(::custom_build::protocol::header::TRACE, value);
     }
     resp
 }
@@ -69,29 +69,29 @@ async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<st
         return from_client(&node, key, until, who, req, next).await;
     }
     if !from_this_machine(node.local_token(), &req) {
-        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine(), "code": crate::protocol::code::NOT_THIS_MACHINE }))).into_response()).await;
+        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine(), "code": ::custom_build::protocol::code::NOT_THIS_MACHINE }))).into_response()).await;
     }
     next.run(req).await
 }
 
 /// A client device's request over iroh is its user's, for what `Who::Clients` lets in: the device must still be one of the network's, and the keys it hands are for its key, kept no longer than
 /// `until`.
-async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+async fn from_client(node: &Node, key: key::Key, until: u64, who: Who, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     if who != Who::Clients {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
     let Some((user, name)) = node.client_now(&key).await else {
-        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is", "code": crate::protocol::code::NOT_LET_IN }))).into_response()).await;
+        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is", "code": ::custom_build::protocol::code::NOT_LET_IN }))).into_response()).await;
     };
     let credential = Credential::Client(key);
-    if let Some(handed) = req.headers().get(crate::protocol::header::KEYS).and_then(|h| h.to_str().ok())
+    if let Some(handed) = req.headers().get(::custom_build::protocol::header::KEYS).and_then(|h| h.to_str().ok())
         && let Err(err) = node.hand(&credential, &user, handed, until)
     {
         return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
     }
     // A client older than what this build reads of who's who is told to update before it does anything.
-    if crate::database::reads_of(req.headers().get(crate::protocol::header::READS).and_then(|h| h.to_str().ok())) < crate::database::READS {
-        return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": crate::protocol::update_refusal(YOURS), "code": crate::protocol::code::UPDATE }))).into_response()).await;
+    if database::reads_of(req.headers().get(::custom_build::protocol::header::READS).and_then(|h| h.to_str().ok())) < ::custom_build::protocol::READS {
+        return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": ::custom_build::protocol::update_refusal(YOURS), "code": ::custom_build::protocol::code::UPDATE }))).into_response()).await;
     }
     req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, credential }, client: Some(name) });
     next.run(req).await

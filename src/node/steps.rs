@@ -2,10 +2,10 @@
 //! network's recovery key signed, and writing this device's own and those its users' other devices sign. What this
 //! device has read of each it keeps in its folder, checked against its hash when it starts again (`scope-kept/`).
 
-use crate::protocol::allowed;
+use ::custom_build::allowed;
 use super::*;
-use crate::database::steps;
-use crate::protocol::{Coded, code};
+use ::scope::steps;
+use ::custom_build::protocol::{Coded, code};
 
 impl Node {
     /// Whether this device has read who's who: `global`'s freeze, and the steps after it.
@@ -155,8 +155,8 @@ impl Node {
             self.share_blob(&Scope::Global, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
         }
         let keys = self.step_keys(&Scope::Global).await?;
-        let name = crate::database::stored::step_name(&steps::prefix("global"), at);
-        if !crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(step, None))?).await? {
+        let name = bucket::names::step_name(&steps::prefix("global"), at);
+        if !bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(step, None))?).await? {
             return Ok(false);
         }
         let handled = self.with(|i| i.r.take_step(at, step, now_ms()))?;
@@ -259,7 +259,7 @@ impl Node {
 
     /// A scope's steps read again from its start, for what an older build kept here (`read_global_again`), in its place
     /// if it read to the end of them. Where that ends is the bucket's to say: what's kept can stand at a position past it.
-    async fn read_scope_again(&self, scope: &Scope, keys: &crate::database::stored::Keys) -> Result<()> {
+    async fn read_scope_again(&self, scope: &Scope, keys: &database::stored::Keys) -> Result<()> {
         let bucket = self.bucket()?;
         let start = steps::ScopeReader::fetch_start(&bucket, keys, scope).await?;
         let (mut fresh, made) = self.with(|i| Ok((steps::ScopeReader::start(i.r.truth().context("global's log isn't frozen")?, scope, start.as_ref(), now_ms())?, i.r.db().epoch(scope)?)))?;
@@ -290,8 +290,8 @@ impl Node {
                 self.share_blob(scope, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
             }
             let keys = self.step_keys(scope).await?;
-            let name = crate::database::stored::step_name(&steps::prefix(&scope.to_string()), at);
-            if crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(&step, None))?).await? {
+            let name = bucket::names::step_name(&steps::prefix(&scope.to_string()), at);
+            if bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(&step, None))?).await? {
                 self.read_scope_steps_now(scope).await?;
                 let copy = self.with(|i| i.scope_dbs.get_mut(scope).map(|r| r.db.bytes()).transpose())?;
                 if let Some(bytes) = copy
@@ -364,7 +364,7 @@ impl Node {
         self.close_dbs(|scope, _| handled.dropped.contains(&scope.to_string()));
         if let Ok(bucket) = self.bucket() {
             for log in &handled.dropped {
-                if let Err(err) = bucket.forget(&crate::bucket::folder(log)) {
+                if let Err(err) = bucket.forget(&bucket::folder(log)) {
                     tracing::warn!("forgetting this device's copy of {log}: {err:#}");
                 }
             }

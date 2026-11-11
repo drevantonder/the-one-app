@@ -3,7 +3,7 @@
 
 
 use anyhow::Result;
-use one::config::{CLI, NAME, YOURS};
+use ::custom_build::config::{CLI, NAME, YOURS};
 use one::cli::{Command, Given};
 use one::api;
 use serde_json::Value;
@@ -95,7 +95,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if one::oned::invoked() {
         if let Err(err) = one::oned::run(&args) {
-            eprintln!("{}: {err:#}", one::oned::name());
+            eprintln!("{}: {err:#}", ::custom_build::programs::oned());
             std::process::exit(1);
         }
         return;
@@ -108,7 +108,7 @@ fn main() {
         return;
     }
     // Run by git, for a repo's address.
-    if one::os::invoked_as().is_some_and(|me| me == one::git_wire::helper()) {
+    if platform::os::invoked_as().is_some_and(|me| me == ::custom_build::programs::git_helper()) {
         match git_remote::run(&args) {
             Ok(code) => std::process::exit(code),
             Err(err) => {
@@ -175,7 +175,7 @@ fn own() -> Command {
                     None => return Err(one::cli::Failed::Typed(tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
                 },
                 ["version"] if g.json => println!("{}", one::release::Version::this().json()),
-                ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
+                ["version"] => println!("{} {} ({})", NAME, ::custom_build::config::BUILD, ::custom_build::config::TARGET),
                 _ => return Ok(false),
             }
             Ok(true)
@@ -231,17 +231,17 @@ impl one::api::client::Via for Http {
             let req = agent.configure_request(req.body(body.clone())?).timeout_global(wait).build();
             agent.run(req)
         };
-        let asked = || if api::local_token(&one::home()).is_some() { one::loopback::while_refused(&ask) } else { ask() };
+        let asked = || if api::local_token(&platform::home()).is_some() { one::loopback::while_refused(&ask) } else { ask() };
         let resp = match asked() {
             Ok(resp) => resp,
             Err(err) if one::loopback::lost(&err) => {
-                let apps = || self.send("GET", one::protocol::path::APPS, &[], None, None).ok().and_then(|a| serde_json::from_reader(a.body).ok());
+                let apps = || self.send("GET", ::api::path::APPS, &[], None, None).ok().and_then(|a| serde_json::from_reader(a.body).ok());
                 anyhow::ensure!(one::loopback::reads(method, path, &body, apps), "{}", one::loopback::lost_write());
                 asked().map_err(unreached)?
             }
             Err(err) => return Err(unreached(err)),
         };
-        let trace = resp.headers().get(one::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
+        let trace = resp.headers().get(::custom_build::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
         Ok(one::api::client::Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
     }
 }

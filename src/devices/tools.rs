@@ -4,7 +4,7 @@
 
 use serde_json::json;
 
-use crate::config::{CLI, NAME, YOURS};
+use ::custom_build::config::{CLI, NAME, YOURS};
 use crate::core_tools::{Feature, Tool, serves};
 
 pub fn feature() -> Feature {

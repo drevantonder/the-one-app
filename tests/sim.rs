@@ -30,8 +30,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use std::collections::BTreeSet;
-use one::bucket::{Bucket, Copied, Failed, Object, Trouble};
-use one::database::stored::{Contended, Db, Keys, MayHaveBeen, Missing, execute};
+use ::bucket::{Bucket, Failed, Object, Trouble};
+use one::node::copied::Copied;
+use ::database::stored::{Contended, Db, Keys, MayHaveBeen, Missing, execute};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::json;
@@ -163,7 +164,7 @@ impl Link {
             match wrote {
                 Err(e) if e.is::<Missing>() => Ok(Err(*e.downcast_ref::<Missing>().unwrap())),
                 // A step under an epoch newer than it was given: its node finds that epoch's entry, and hands it the key.
-                Err(e) if e.is::<one::database::stored::Ahead>() => Ok(Err(Missing { epoch: e.downcast_ref::<one::database::stored::Ahead>().unwrap().epoch })),
+                Err(e) if e.is::<::database::stored::Ahead>() => Ok(Err(Missing { epoch: e.downcast_ref::<::database::stored::Ahead>().unwrap().epoch })),
                 other => other.map(Ok),
             }
         })
@@ -287,18 +288,18 @@ async fn forge(link: Link, seed: u64, done: Arc<std::sync::atomic::AtomicBool>) 
     while !done.load(std::sync::atomic::Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(rng.gen_range(200..3_000))).await;
         let mut objects = link.objects.lock().unwrap();
-        let name = one::database::stored::newest_name(PREFIX);
-        let (at, copy, _) = objects.get(&name).map_or((0, 0, 0), |o| one::database::stored::newest(o));
+        let name = ::bucket::names::newest_name(PREFIX);
+        let (at, copy, _) = objects.get(&name).map_or((0, 0, 0), |o| ::database::stored::newest(o));
         let hint = match rng.gen_range(0..5) {
             0 => json!({ "at": 999_999_999u64, "copy": 0 }),
             1 => json!({ "at": 0, "copy": 0 }),
-            2 => json!({ "at": at, "copy": copy.saturating_sub(one::database::stored::COPY_EVERY).max(1) }),
+            2 => json!({ "at": at, "copy": copy.saturating_sub(::database::stored::COPY_EVERY).max(1) }),
             3 => json!({ "at": at, "copy": copy + 1 }),
             _ => {
                 for n in at..at + 3 {
-                    let junk = one::database::stored::copy_name(PREFIX, n.max(1) + one::database::stored::COPY_EVERY / 2 * rng.gen_range(0..3));
+                    let junk = ::bucket::names::copy_name(PREFIX, n.max(1) + ::database::stored::COPY_EVERY / 2 * rng.gen_range(0..3));
                     if !objects.contains_key(&junk) {
-                        objects.insert(junk.clone(), one::keys::seal(1, &rng.r#gen(), &junk, b"junk"));
+                        objects.insert(junk.clone(), key::seal(1, &rng.r#gen(), &junk, b"junk"));
                     }
                 }
                 continue;
@@ -312,8 +313,8 @@ async fn forge(link: Link, seed: u64, done: Arc<std::sync::atomic::AtomicBool>) 
 async fn tidier(link: Link, keys: Keys, done: Arc<std::sync::atomic::AtomicBool>) {
     while !done.load(std::sync::atomic::Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(2_000)).await;
-        let now = link.start.elapsed().as_millis() as u64 + one::database::stored::KEEP_STEPS_FOR - KEPT_FOR_MS;
-        if let Err(err) = one::database::stored::tidy(&link, PREFIX, &keys, &BTreeSet::new(), now).await {
+        let now = link.start.elapsed().as_millis() as u64 + ::database::stored::KEEP_STEPS_FOR - KEPT_FOR_MS;
+        if let Err(err) = ::database::stored::tidy(&link, PREFIX, &keys, &BTreeSet::new(), now).await {
             assert!(the_links_fault(&err), "the tidier failed, not the link: {err:#}");
         }
     }
@@ -364,14 +365,14 @@ fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
 
 /// A database's keys in epoch 1, and in epochs 1 and 2.
 fn keys(seed: u64) -> (Keys, Keys) {
-    let (one, two) = (one::keys::database_key(&[seed as u8; 32], "notes", "main"), one::keys::database_key(&[!(seed as u8); 32], "notes", "main"));
+    let (one, two) = (key::database_key(&[seed as u8; 32], "notes", "main"), key::database_key(&[!(seed as u8); 32], "notes", "main"));
     (Keys::from([(1, one)]), Keys::from([(1, one), (2, two)]))
 }
 
 /// Opens the database and brings it to the schema as a device does: handed `newer`, epoch 2, when it meets a step under
 /// it, as its node is once it finds that epoch's entry; never handed it, it doesn't open.
 async fn open(link: &Link, device: usize, older: &Keys, newer: Option<&Keys>) -> Option<Db> {
-    let ahead = |e: &anyhow::Error| e.is::<one::database::stored::Ahead>();
+    let ahead = |e: &anyhow::Error| e.is::<::database::stored::Ahead>();
     let mut keys = older.clone();
     let mut db = loop {
         match retry(async || match opened(link, &keys).await {
@@ -411,13 +412,13 @@ async fn write_handed(link: &Link, db: &mut Db, id: u64, device: usize, from: bo
 /// A step under epoch 1, written by a device that wasn't handed epoch 2, at the first free position: its own step at
 /// `at` again, so applied twice it would move the count twice; unless the tidier deleted it.
 async fn stale_step(link: &Link, key: &[u8; 32], at: u64) {
-    let name = one::database::stored::step_name("global/sim/main", at);
+    let name = ::bucket::names::step_name("global/sim/main", at);
     let Some(sealed) = link.objects.lock().unwrap().get(&name).cloned() else { return };
-    let step = one::keys::open(key, &name, &sealed).unwrap();
+    let step = key::open(key, &name, &sealed).unwrap();
     let mut objects = link.objects.lock().unwrap();
-    let free = (at + 1..).find(|n| !objects.contains_key(&one::database::stored::step_name("global/sim/main", *n))).unwrap();
-    let name = one::database::stored::step_name("global/sim/main", free);
-    objects.insert(name.clone(), one::keys::seal(1, key, &name, &step));
+    let free = (at + 1..).find(|n| !objects.contains_key(&::bucket::names::step_name("global/sim/main", *n))).unwrap();
+    let name = ::bucket::names::step_name("global/sim/main", free);
+    objects.insert(name.clone(), key::seal(1, key, &name, &step));
 }
 
 async fn run(seed: u64) {
@@ -484,9 +485,9 @@ async fn run(seed: u64) {
     }
     // Then everything a copy covers goes, the hint says a step past every step and no copy, and the device away since
     // the start reads on, as a new one does.
-    let gone = one::database::stored::tidy(&link.steady(), PREFIX, &all, &BTreeSet::new(), u64::MAX / 2).await.unwrap();
-    assert!(gone > 0 && !link.objects.lock().unwrap().contains_key(&one::database::stored::step_name(PREFIX, 1)), "seed {seed}: the steps a copy covers went");
-    link.objects.lock().unwrap().insert(one::database::stored::newest_name(PREFIX), serde_json::to_vec(&json!({ "at": 999_999_999u64, "copy": 0 })).unwrap());
+    let gone = ::database::stored::tidy(&link.steady(), PREFIX, &all, &BTreeSet::new(), u64::MAX / 2).await.unwrap();
+    assert!(gone > 0 && !link.objects.lock().unwrap().contains_key(&::bucket::names::step_name(PREFIX, 1)), "seed {seed}: the steps a copy covers went");
+    link.objects.lock().unwrap().insert(::bucket::names::newest_name(PREFIX), serde_json::to_vec(&json!({ "at": 999_999_999u64, "copy": 0 })).unwrap());
     retry(async || away.catch_up(&link).await).await;
     let fresh = opened(&link.steady(), &all).await.unwrap();
     link.none_failed_landed(&fresh, seed);
@@ -578,10 +579,10 @@ async fn run_copied(seed: u64) {
                 // Its step reaches some of the others, some of them forged on the way, and each keeps what the bucket
                 // confirms, fetching the rest from the bucket, if the link lets it.
                 if db.at() > at {
-                    let (name, next) = (one::database::stored::step_name("global/sim/main", db.at()), one::database::stored::step_name("global/sim/main", db.at() + 1));
+                    let (name, next) = (::bucket::names::step_name("global/sim/main", db.at()), ::bucket::names::step_name("global/sim/main", db.at() + 1));
                     let step = here.kept(&name).unwrap().expect("a step written is kept");
                     let first = &key[&1];
-                    let plain = one::keys::open(first, &name, &step).unwrap();
+                    let plain = key::open(first, &name, &step).unwrap();
                     for (_, copy) in copies.iter().enumerate().filter(|(o, _)| *o != device) {
                         let (sent, forged, ahead) = {
                             let mut rng = link.rng.lock().unwrap();
@@ -590,9 +591,9 @@ async fn run_copied(seed: u64) {
                         if !sent {
                             continue;
                         }
-                        let mut steps = vec![(name.clone(), if forged { one::keys::seal(1, first, &name, &plain) } else { step.clone() })];
+                        let mut steps = vec![(name.clone(), if forged { key::seal(1, first, &name, &plain) } else { step.clone() })];
                         if ahead {
-                            steps.push((next.clone(), one::keys::seal(1, first, &next, &plain)));
+                            steps.push((next.clone(), key::seal(1, first, &next, &plain)));
                         }
                         if !copy.take_sent(&steps).await.is_ok_and(|took| took[0]) {
                             let _ = copy.fill("global/sim/main", 0).await;
@@ -623,7 +624,7 @@ async fn run_copied(seed: u64) {
         // Its copy alone opens to a step some device read, with the key and only with it.
         let alone = opened(&copy.here_only(), &key).await.unwrap_or_else(|e| panic!("seed {seed}: device {i}'s copy didn't open: {e:#}"));
         saw(&seen, &alone, seed);
-        let other = Keys::from([(1, one::keys::database_key(&[!(seed as u8); 32], "notes", "main"))]);
+        let other = Keys::from([(1, key::database_key(&[!(seed as u8); 32], "notes", "main"))]);
         assert!(Db::open(&copy.here_only(), "global/sim/main", other).await.is_ok_and(|db| db.version().unwrap() == 0), "seed {seed}: another key opened device {i}'s copy");
     }
     for (i, copy) in copies.iter().enumerate() {

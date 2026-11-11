@@ -135,7 +135,7 @@ struct Listed {
 }
 
 async fn list(State(node): State<Node>, Body(body): Body<Listed>) -> Reply {
-    let endpoint = crate::keys::Endpoint { key: crate::keys::unhex(&body.key)?, seal: crate::keys::unhex(&body.seal)? };
+    let endpoint = key::Endpoint { key: key::unhex(&body.key)?, seal: key::unhex(&body.seal)? };
     node.list_part(&endpoint, &body.name).await?;
     done()
 }

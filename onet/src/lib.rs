@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use one::protocol::header;
+use ::custom_build::protocol::header;
 use iroh::endpoint::{Connection, RecvStream, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
 use n0_future::time::{Duration, Instant, timeout};
@@ -62,7 +62,7 @@ const STAGGER: Duration = Duration::from_millis(250);
 const FALLBACK: Duration = Duration::from_secs(1);
 const PATIENT: Duration = Duration::from_secs(10);
 /// The least a connected node is given to start answering a GET or HEAD before its connection is taken as gone quiet:
-/// its usual time to answer is learned (`one::hedge`), but a GET's first byte comes only after its work. (Other
+/// its usual time to answer is learned (`platform::hedge`), but a GET's first byte comes only after its work. (Other
 /// requests may run as long as they need: that one is for the connection's own idle timeout.)
 const ANSWER_LEAST: Duration = Duration::from_secs(1);
 const SKIP: Duration = Duration::from_secs(10);
@@ -75,7 +75,7 @@ const MOST_ELSEWHERE: usize = 2;
 
 /// What this custom build's clients speak to its nodes.
 fn alpn() -> Vec<u8> {
-    format!("{}/http/1", one::config::CLI).into_bytes()
+    format!("{}/http/1", ::custom_build::config::CLI).into_bytes()
 }
 
 /// Why a request failed; `sent` if it may have reached the node, so that sending it again might run it twice.
@@ -84,7 +84,7 @@ pub struct Error {
     pub sent: bool,
     /// The network doesn't list this device (yet, or any more): what an app shows is its own screen to approve it.
     pub not_let_in: bool,
-    /// What kind of refusal the node said it was (`one::protocol::code`), when it said.
+    /// What kind of refusal the node said it was (`::custom_build::protocol::code`), when it said.
     pub code: Option<String>,
     message: String,
     pub trace: Option<serde_json::Value>,
@@ -754,7 +754,7 @@ impl Client {
 
     async fn exchange(&self, node: &PublicKey, conn: &Connection, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {
         let usual = format!("node {}", data_encoding::HEXLOWER.encode(node.as_bytes()));
-        let limit = one::hedge::limit(&usual).max(ANSWER_LEAST);
+        let limit = platform::hedge::limit(&usual).max(ANSWER_LEAST);
         // A connection gone quiet takes no more streams once its peer's allowance is used: nothing was sent.
         let (mut send, recv) = match timeout(limit, conn.open_bi()).await {
             Ok(opened) => opened.map_err(unsent)?,
@@ -776,7 +776,7 @@ impl Client {
         let (status, headers, body) = if !last && matches!(req.method.as_str(), "GET" | "HEAD") {
             match timeout(limit, read_response(&mut recv, head_only)).await {
                 Ok(read) => {
-                    one::hedge::learn(&usual, asked.elapsed());
+                    platform::hedge::learn(&usual, asked.elapsed());
                     read
                 }
                 Err(_) => {
@@ -832,8 +832,8 @@ fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certif
     if let Some(certificate) = certificate.filter(|c| c.bytes().all(|b| b.is_ascii_graphic())) {
         head.push_str(&format!("{}: {certificate}\r\n", header::ENDPOINT));
     }
-    // A client that reads less than the network needs is told to update (`one::database::READS`).
-    head.push_str(&format!("{}: {}\r\n", header::READS, one::database::READS));
+    // A client that reads less than the network needs is told to update (`::custom_build::protocol::READS`).
+    head.push_str(&format!("{}: {}\r\n", header::READS, ::custom_build::protocol::READS));
     head.push_str(&format!("{}: 1\r\ncontent-length: {len}\r\n\r\n", header::ELSEWHERE));
     Ok(head.into_bytes())
 }

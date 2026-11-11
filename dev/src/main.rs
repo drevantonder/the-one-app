@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use one::api::Client;
-use one::config::{CLI, NAME};
+use ::custom_build::config::{CLI, NAME};
 use one::tools;
 
 mod ship;
@@ -21,14 +21,14 @@ pub fn dev() -> String {
 /// The program beside this one that is the node, the Workers and every command of a network: the custom build's own
 /// where it's installed (`ptc` beside `ptc-dev`), else the `one` Cargo builds beside it in a checkout (cli/).
 pub fn program() -> Result<PathBuf> {
-    let me = one::this_program()?;
+    let me = platform::this_program()?;
     let installed = me.with_file_name(CLI);
     Ok(if installed.is_file() { installed } else { me.with_file_name("one") })
 }
 
 /// This machine's node, asked as one of its programs.
 pub fn node() -> Client {
-    throwaway::node_at(&one::home(), &one::api::addr())
+    throwaway::node_at(&platform::home(), &one::api::addr())
 }
 
 /// An HTTP client for this machine's programs.

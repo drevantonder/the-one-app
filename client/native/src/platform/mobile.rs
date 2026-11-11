@@ -40,7 +40,7 @@ pub fn tell(method: &'static str, args: Value) {
 /// share the browser's passkeys and sign-ins) at `url`, or with `open` false (a test's), only waiting for the link →
 /// where it came back to, the app's own `<cli>://signed-in/…`.
 pub fn signed_in_at(url: String, open: bool) -> Result<String, String> {
-    let out = ask("signIn", json!({ "url": url, "scheme": one::config::CLI, "open": open }))?;
+    let out = ask("signIn", json!({ "url": url, "scheme": custom_build::config::CLI, "open": open }))?;
     out["url"].as_str().map(str::to_string).ok_or_else(|| "Sign in again.".into())
 }
 

@@ -59,7 +59,7 @@ impl Answer {
     }
 }
 
-/// `refused`, in `service/wire.json` and src/protocol.rs's `code`.
+/// `refused`, in `service/wire.json` and custom-build/src/protocol.rs's `code`.
 const REFUSED: &str = "refused";
 
 /// A service's answer that it can't serve this call here (a model it lacks), so the call goes on to the next device.

@@ -58,7 +58,7 @@ pub fn reads(method: &str, path: &str, body: &[u8], mut apps: impl FnMut() -> Op
     if matches!(method, "GET" | "HEAD") {
         return true;
     }
-    if path.split('?').next() != Some(crate::protocol::path::CALL) {
+    if path.split('?').next() != Some(::api::path::CALL) {
         return false;
     }
     let Ok(call) = serde_json::from_slice::<Value>(body) else { return false };
@@ -75,5 +75,5 @@ pub fn reads(method: &str, path: &str, body: &[u8], mut apps: impl FnMut() -> Op
 
 /// What a request that doesn't only read, lost as its onet stopped, says.
 pub fn lost_write() -> String {
-    format!("This computer's {}t stopped before it answered, as it does when it updates, so that may or may not have been done: check before asking again.", crate::config::CLI)
+    format!("This computer's {}t stopped before it answered, as it does when it updates, so that may or may not have been done: check before asking again.", custom_build::config::CLI)
 }

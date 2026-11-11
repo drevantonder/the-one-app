@@ -342,7 +342,7 @@ fn endpoint() -> (ed25519_dalek::SigningKey, String) {
 /// What `key`'s device signs for sign-in's `route`: `fields`, with the route, as devices sign requests.
 fn signed(key: &ed25519_dalek::SigningKey, route: &str, mut fields: Value) -> Value {
     fields["route"] = json!(route);
-    one::keys::signed_request(key, "one/auth", fields, now())
+    key::signed_request(key, "one/auth", fields, now())
 }
 
 /// What only the network's devices may write and read, a row at a time as its table holds it, and a read that can only be one of its own.
@@ -352,7 +352,7 @@ fn telemetry_takes_the_networks_devices_and_only_what_its_tables_hold() {
     let (stranger, _) = endpoint();
     let k = Workers::start_with(None, false, vec![key.clone()], None);
     let at = |path: &str| format!("{}/telemetry/{path}", k.relay_address());
-    let ask = |by: &ed25519_dalek::SigningKey, path: &str, fields: Value| post(&at(path), &[], one::keys::signed_request(by, one::protocol::TELEMETRY, fields, now()));
+    let ask = |by: &ed25519_dalek::SigningKey, path: &str, fields: Value| post(&at(path), &[], key::signed_request(by, custom_build::protocol::TELEMETRY, fields, now()));
     let span = |name: &str, status: &str, ms: u64| json!({ "time": now(), "trace": "a".repeat(32), "span": "b".repeat(16), "name": name, "service": "notes", "instance": key, "kind": "server", "status": status, "duration": ms, "attrs": json!({ "one.fingerprint": "TypeError|app.js:1:1|b1" }).to_string() });
     // One sampled where it was recorded, which stands for the 20 it's one of: what they add up to is counted beside it.
     let mut sampled = span("get", "unset", 3);
@@ -400,9 +400,9 @@ fn request_as_read_by(k: &Workers, by: &ed25519_dalek::SigningKey, device: &[u8;
 /// An invite `by` an endpoint for `name`, as its device makes one: → its secret and the user id it's for.
 fn invited(k: &Workers, by: &ed25519_dalek::SigningKey, name: &str, email: Option<&str>) -> (String, String) {
     let secret = B64U.encode(&rand::random::<[u8; 32]>());
-    let user = one::database::scopes::new_id();
+    let user = ::scope::scopes::new_id();
     let until = now() + 86_400_000;
-    let mut fields = json!({ "id": data_encoding::HEXLOWER.encode(&one::keys::sha256(secret.as_bytes())), "name": name, "user": user, "until": until });
+    let mut fields = json!({ "id": data_encoding::HEXLOWER.encode(&key::sha256(secret.as_bytes())), "name": name, "user": user, "until": until });
     if let Some(email) = email {
         fields["email"] = json!(email);
     }
@@ -504,14 +504,14 @@ fn an_invited_email_signs_in_and_only_who_may_answer_reads_its_proof() {
     let (admin, admin_hex) = endpoint();
     let (member, member_hex) = endpoint();
     let k = Workers::google(vec![admin_hex]);
-    assert_eq!(post(&format!("{}/relay/tell", k.address), &[], one::keys::signed_request(&admin, "one/relay", json!({ "add": member_hex, "role": "client" }), now())).0, 204);
+    assert_eq!(post(&format!("{}/relay/tell", k.address), &[], key::signed_request(&admin, "one/relay", json!({ "add": member_hex, "role": "client" }), now())).0, 204);
     let (_, sam) = invited(&k, &admin, "Sam", Some("sam@test.example"));
     let mut sams = k.browser();
     google_callback(&mut sams, "/", "/", "sam@test.example");
     assert_eq!(signed_in_as(&mut sams).as_deref(), Some(sam.as_str()), "signed in as who the invite named");
 
-    let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
-    let (status, out) = sams.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&device.key), "seal": HEXLOWER.encode(&device.seal), "name": "Sam's phone", "reads": one::database::READS }));
+    let device = key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let (status, out) = sams.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&device.key), "seal": HEXLOWER.encode(&device.seal), "name": "Sam's phone", "reads": custom_build::protocol::READS }));
     assert_eq!(status, 200, "{out}");
     let proof = "a.proof.kept";
     assert_eq!(post(&format!("{}/api/auth/test", k.address), &[], json!({ "keep_proof": { "key": HEXLOWER.encode(&device.key), "user": sam, "proof": { "id_token": proof } } })).0, 200);
@@ -525,8 +525,8 @@ fn an_invited_email_signs_in_and_only_who_may_answer_reads_its_proof() {
     assert_eq!(listed_to(&admin, "Sam's phone")["sign_in"]["id_token"], proof);
     assert_eq!(listed_to(&member, "Sam's phone")["sign_in"]["id_token"], proof, "a member's device lets in who an invite named");
 
-    let next = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
-    assert_eq!(sams.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&next.key), "seal": HEXLOWER.encode(&next.seal), "name": "Sam's laptop", "reads": one::database::READS })).0, 200);
+    let next = key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    assert_eq!(sams.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&next.key), "seal": HEXLOWER.encode(&next.seal), "name": "Sam's laptop", "reads": custom_build::protocol::READS })).0, 200);
     assert_eq!(post(&format!("{}/api/auth/test", k.address), &[], json!({ "keep_proof": { "key": HEXLOWER.encode(&next.key), "user": sam, "proof": { "id_token": proof } } })).0, 200);
     assert_eq!(listed_to(&admin, "Sam's laptop")["sign_in"]["id_token"], proof);
     assert!(listed_to(&member, "Sam's laptop").get("sign_in").is_none(), "another user's device read the ID token of a device no invite lets in");
@@ -543,15 +543,15 @@ fn only_its_users_own_device_or_an_admins_answers_a_request() {
     let (sams_box, sams_box_hex) = endpoint();
     let k = Workers::google(vec![admin_hex]);
     for hex in [&stranger_hex, &sams_box_hex] {
-        assert_eq!(post(&format!("{}/relay/tell", k.address), &[], one::keys::signed_request(&admin, "one/relay", json!({ "add": hex, "role": "client" }), now())).0, 204);
+        assert_eq!(post(&format!("{}/relay/tell", k.address), &[], key::signed_request(&admin, "one/relay", json!({ "add": hex, "role": "client" }), now())).0, 204);
     }
     let (_, sam) = invited(&k, &admin, "Sam", Some("sam@test.example"));
     let (_, lee) = invited(&k, &admin, "Lee", Some("lee@test.example"));
     let mut sams = k.browser();
     google_callback(&mut sams, "/", "/", "sam@test.example");
-    let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let device = key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     let key = HEXLOWER.encode(&device.key);
-    assert_eq!(sams.post("/api/auth/devices/requests", json!({ "key": key, "seal": HEXLOWER.encode(&device.seal), "name": "Sam's phone", "reads": one::database::READS })).0, 200);
+    assert_eq!(sams.post("/api/auth/devices/requests", json!({ "key": key, "seal": HEXLOWER.encode(&device.seal), "name": "Sam's phone", "reads": custom_build::protocol::READS })).0, 200);
 
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
     let answer = |by: &ed25519_dalek::SigningKey, query: &str| -> u16 {
@@ -576,11 +576,11 @@ fn only_its_users_own_device_or_an_admins_answers_a_request() {
     // Whoever signed in can name any key: it doesn't change whose one already is.
     let mut lees = k.browser();
     google_callback(&mut lees, "/", "/", "lee@test.example");
-    let (status, _) = lees.post("/api/auth/devices/requests", json!({ "key": sams_box_hex, "seal": HEXLOWER.encode(&device.seal), "name": "Mine now", "reads": one::database::READS }));
+    let (status, _) = lees.post("/api/auth/devices/requests", json!({ "key": sams_box_hex, "seal": HEXLOWER.encode(&device.seal), "name": "Mine now", "reads": custom_build::protocol::READS }));
     assert_eq!(status, 200);
-    let second = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let second = key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     let second_key = HEXLOWER.encode(&second.key);
-    assert_eq!(sams.post("/api/auth/devices/requests", json!({ "key": second_key, "seal": HEXLOWER.encode(&second.seal), "name": "Sam's laptop", "reads": one::database::READS })).0, 200);
+    assert_eq!(sams.post("/api/auth/devices/requests", json!({ "key": second_key, "seal": HEXLOWER.encode(&second.seal), "name": "Sam's laptop", "reads": custom_build::protocol::READS })).0, 200);
     let asked = B64U.encode(signed(&sams_box, &format!("DELETE /api/auth/devices/requests/{second_key}"), json!({})).to_string().as_bytes());
     assert_eq!(agent.delete(format!("{}/api/auth/devices/requests/{second_key}", k.address)).header("x-one-request", asked).call().unwrap().status().as_u16(), 200, "still Sam's");
 }
@@ -594,7 +594,7 @@ fn removing_a_device_ends_its_sign_in_and_only_its_own() {
     let (admin, admin_hex) = endpoint();
     let (stranger, stranger_hex) = endpoint();
     let k = Workers::for_devices(vec![admin_hex]);
-    assert_eq!(post(&format!("{}/relay/tell", k.address), &[], one::keys::signed_request(&admin, "one/relay", json!({ "add": stranger_hex, "role": "client" }), now())).0, 204);
+    assert_eq!(post(&format!("{}/relay/tell", k.address), &[], key::signed_request(&admin, "one/relay", json!({ "add": stranger_hex, "role": "client" }), now())).0, 204);
     let (secret, _) = invited(&k, &admin, "Andre", None);
     let passkey = k.passkey();
     let mut b = k.browser();
@@ -608,7 +608,7 @@ fn removing_a_device_ends_its_sign_in_and_only_its_own() {
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
     // Signs in for a new device as this client, and asks to join with its token: → its key and refresh token.
     let mut signs_in = || -> (String, String) {
-        let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+        let device = key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
         let (key, seal) = (HEXLOWER.encode(&device.key), HEXLOWER.encode(&device.seal));
         let verifier = B64U.encode(&rand::random::<[u8; 32]>());
         let challenge = B64U.encode(&sha2::Sha256::digest(verifier.as_bytes()));
@@ -622,7 +622,7 @@ fn removing_a_device_ends_its_sign_in_and_only_its_own() {
         let code = url_query(out["url"].as_str().unwrap())["code"].clone();
         let (status, tokens, _) = b.send("POST", "/api/auth/oauth2/token", None, Some(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", redirect), ("client_id", &client), ("code_verifier", &verifier)]));
         assert_eq!(status, 200, "{tokens}");
-        let resp = agent.post(format!("{}/api/auth/devices/requests", k.address)).header("authorization", format!("Bearer {}", tokens["access_token"].as_str().unwrap())).send_json(json!({ "key": key, "seal": seal, "name": "A program", "reads": one::database::READS })).unwrap();
+        let resp = agent.post(format!("{}/api/auth/devices/requests", k.address)).header("authorization", format!("Bearer {}", tokens["access_token"].as_str().unwrap())).send_json(json!({ "key": key, "seal": seal, "name": "A program", "reads": custom_build::protocol::READS })).unwrap();
         assert_eq!(resp.status(), 200);
         (key, tokens["refresh_token"].as_str().unwrap().to_string())
     };
@@ -706,7 +706,7 @@ fn a_further_identity_is_linked_only_from_someone_signed_in() {
     let (mut sams, passkey) = (k.browser(), k.passkey());
     let (_, options, _) = sams.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
     assert_eq!(sams.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
-    let device = one::keys::Endpoint::of(&admin);
+    let device = key::Endpoint::of(&admin);
     let join = format!("{}{}", data_encoding::HEXLOWER.encode(&device.key), data_encoding::HEXLOWER.encode(&device.seal));
     let claims = json!({ "sub": "sams-google", "email": "sam@anywhere.example", "email_verified": true, "name": "Sam" });
 
@@ -714,7 +714,7 @@ fn a_further_identity_is_linked_only_from_someone_signed_in() {
         let (status, out) = b.post(&format!("/api/auth/link-social?join={join}"), json!({ "provider": "google", "callbackURL": format!("/sign-in/link?join={join}&linked=google"), "errorCallbackURL": format!("/sign-in/link?join={join}") }));
         assert_eq!(status, 200, "{out}");
         let query = url_query(out["url"].as_str().unwrap());
-        assert_eq!(query.get("nonce"), Some(&one::onboarding::sign_in_proof::nonce(&ROOT, &device)), "its token will name the device");
+        assert_eq!(query.get("nonce"), Some(&::scope::sign_in_proof::nonce(&ROOT, &device)), "its token will name the device");
         b.get(&format!("/api/auth/callback/google?code={}&state={}", B64U.encode(claims.to_string().as_bytes()), query["state"])).2
     };
     assert_eq!(sams.get(&format!("/sign-in/link?join={join}")).0, 200);
@@ -750,12 +750,12 @@ fn a_further_identity_is_linked_only_from_someone_signed_in() {
 }
 
 /// A sign-in for a device names it, and auth passes what it showed on with that device's request to join, unchanged,
-/// for the user's devices to check themselves (src/onboarding/sign_in_proof.rs): a passkey's assertion signs a challenge naming
+/// for the user's devices to check themselves (scope/src/sign_in_proof.rs): a passkey's assertion signs a challenge naming
 /// the device and when, which checks; a sign-in for no device, or one for another device, lets nothing in; and with
 /// Google, the ID token asked for names the device.
 #[test]
 fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
-    use one::onboarding::sign_in_proof::{self, Account, Proof};
+    use ::scope::sign_in_proof::{self, Account, Proof};
     let (admin, admin_hex) = endpoint();
     let k = Workers::for_devices(vec![admin_hex.clone()]);
     let (secret, andre) = invited(&k, &admin, "Andre", None);
@@ -765,7 +765,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(status, 200, "{options}");
     let (status, out) = first.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true }));
     assert_eq!(status, 200, "{out}");
-    let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let device = key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     let join = format!("{}{}", data_encoding::HEXLOWER.encode(&device.key), data_encoding::HEXLOWER.encode(&device.seal));
     // Signing in for the device: the passkey signs a challenge naming it.
     let mut new = k.browser();
@@ -775,8 +775,8 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(challenge[..challenge.len() - 8], sign_in_proof::challenge(&ROOT, &device, 0)[..challenge.len() - 8], "the challenge names the device in this network");
     assert_eq!(new.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
     assert_eq!(signed_in_as(&mut new).as_deref(), Some(andre.as_str()));
-    let asked = |w: &Workers, b: &mut Browser, d: &one::keys::Endpoint| {
-        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": data_encoding::HEXLOWER.encode(&d.key), "seal": data_encoding::HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "platform": "mac", "reads": one::database::READS }));
+    let asked = |w: &Workers, b: &mut Browser, d: &key::Endpoint| {
+        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": data_encoding::HEXLOWER.encode(&d.key), "seal": data_encoding::HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "platform": "mac", "reads": custom_build::protocol::READS }));
         assert_eq!(status, 200, "{out}");
         let (_, out, _) = b.get(&format!("/api/auth/devices/requests/{}", data_encoding::HEXLOWER.encode(&d.key)));
         assert_eq!(out["platform"], "mac", "what a device says it is reaches the devices that approve it");
@@ -796,10 +796,10 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(new.delete(&format!("/api/auth/devices/requests/{key}")).0, 200);
     assert_eq!(asked(&k, &mut new, &device), Value::Null, "a refused device's sign-in is forgotten");
     // Another device asking as them carries none, nor does one signed in for no device.
-    assert_eq!(asked(&k, &mut new, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
+    assert_eq!(asked(&k, &mut new, &key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
     let mut plain = k.browser();
     assert_eq!(signs_in_with_passkey(&mut plain, &passkey), 200);
-    assert_eq!(asked(&k, &mut plain, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
+    assert_eq!(asked(&k, &mut plain, &key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
 
     // With Google, the ID token it asks for names the device.
     let g = Workers::google(vec![admin_hex]);
@@ -816,7 +816,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     browser.get(&format!("/api/auth/callback/google?code={}&state={}", B64U.encode(claims.to_string().as_bytes()), google["state"]));
     assert_eq!(signed_in_as(&mut browser).as_deref(), Some(invited_as.as_str()));
     assert!(asked(&g, &mut browser, &device)["id_token"].is_string(), "the device it names carries it");
-    assert_eq!(asked(&g, &mut browser, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null, "another carries none");
+    assert_eq!(asked(&g, &mut browser, &key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null, "another carries none");
     // An ID token handed to auth directly signs no one in, nor links, whoever holds one.
     let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "idToken": { "token": "a.b.c" } }));
     assert_eq!(status, 403, "{out}");
@@ -829,7 +829,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
 /// which still shows who signed in, but is never enough for an invite to let it in with no tap.
 #[test]
 fn a_sign_in_finished_from_a_link_says_so() {
-    use one::onboarding::sign_in_proof::{self, Proof};
+    use ::scope::sign_in_proof::{self, Proof};
     use sha2::Digest;
     let (admin, admin_hex) = endpoint();
     let k = Workers::for_devices(vec![admin_hex]);
@@ -843,7 +843,7 @@ fn a_sign_in_finished_from_a_link_says_so() {
     // Signs in with the passkey for a new device, through a client coming back to `back`, and asks to join with the
     // token it gave: → what its request carries.
     let carried = |back: &str| -> Value {
-        let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+        let device = key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
         let (key, join) = (data_encoding::HEXLOWER.encode(&device.key), format!("{}{}", data_encoding::HEXLOWER.encode(&device.key), data_encoding::HEXLOWER.encode(&device.seal)));
         let mut b = k.browser();
         let redirect = if back.starts_with('/') { format!("{}{back}", k.address) } else { back.to_string() };
@@ -868,7 +868,7 @@ fn a_sign_in_finished_from_a_link_says_so() {
         assert_eq!(status, 200, "{out}");
         let token = out["access_token"].as_str().unwrap().to_string();
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        let resp = agent.post(format!("{}/api/auth/devices/requests", k.address)).header("authorization", format!("Bearer {token}")).send_json(json!({ "key": key, "seal": data_encoding::HEXLOWER.encode(&device.seal), "name": "MacBook Pro", "reads": one::database::READS })).unwrap();
+        let resp = agent.post(format!("{}/api/auth/devices/requests", k.address)).header("authorization", format!("Bearer {token}")).send_json(json!({ "key": key, "seal": data_encoding::HEXLOWER.encode(&device.seal), "name": "MacBook Pro", "reads": custom_build::protocol::READS })).unwrap();
         assert_eq!(resp.status(), 200);
         let mut resp = agent.get(format!("{}/api/auth/devices/requests/{key}", k.address)).header("authorization", format!("Bearer {token}")).call().unwrap();
         assert!(resp.body_mut().read_json::<Value>().unwrap().get("sign_in").is_none(), "a sign-in alone read what its request carries");
@@ -888,7 +888,7 @@ fn a_sign_in_finished_from_a_link_says_so() {
     assert!(linked["sign_in"]["by_link"]["passkey"].is_object(), "{linked}");
     // Only loopback and the apps' own link count as on the device: another scheme can open any site.
     assert_eq!(carried("intent://attacker.example/cb")["goes_straight_in"], false);
-    assert_eq!(carried(&format!("{}://signed-in/", one::config::CLI))["goes_straight_in"], true, "the native apps' own link");
+    assert_eq!(carried(&format!("{}://signed-in/", custom_build::config::CLI))["goes_straight_in"], true, "the native apps' own link");
     assert_eq!(carried("http://127.0.0.1:49152/callback")["goes_straight_in"], true, "a computer's loopback");
     // Where a client's sign-ins go can't be changed once it's registered, nor a client made any other way.
     let registered = first.post("/api/auth/oauth2/register", json!({ "client_name": "Theirs", "redirect_uris": ["https://attacker.example/cb"], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }));
@@ -950,8 +950,8 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
     let mut andre = k.browser();
     let (_, options, _) = andre.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
     assert_eq!(andre.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
-    let ask = |b: &mut Browser, d: &one::keys::Endpoint| {
-        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&d.key), "seal": HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "reads": one::database::READS }));
+    let ask = |b: &mut Browser, d: &key::Endpoint| {
+        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&d.key), "seal": HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "reads": custom_build::protocol::READS }));
         assert_eq!(status, 200, "{out}");
     };
     let approved = |key: &str| {
@@ -960,7 +960,7 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
         agent.delete(format!("{}/api/auth/devices/requests/{key}?approved", k.address)).header("x-one-request", asked).call().unwrap().status().as_u16()
     };
     // Their phone joined as theirs, and gets pushes.
-    let phone_at = one::keys::Endpoint::of(&phone);
+    let phone_at = key::Endpoint::of(&phone);
     ask(&mut andre, &phone_at);
     assert_eq!(approved(&phone_hex), 200);
     let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
@@ -976,7 +976,7 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
             let mut sub = Some(sub);
             got.as_array().unwrap().iter().filter(|p| p["url"] == endpoint).map(|p| {
                 let text = sub.take().expect("one push to the device").open(&BASE64.decode(p["body"].as_str().unwrap().as_bytes()).unwrap());
-                let (note, by) = one::push::open_note(&one::keys::seal_secret(key), &B64U.decode(&text).unwrap()).unwrap();
+                let (note, by) = one::push::open_note(&key::seal_secret(key), &B64U.decode(&text).unwrap()).unwrap();
                 assert_eq!(by, None, "from the network's Workers");
                 note
             }).collect()
@@ -988,17 +988,17 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
     // Their Mac, which joined before, never asked here, and registers naming them.
     let old_endpoint = "https://fcm.googleapis.com/fcm/send/the-mac";
     let old_sub = Subscription::new();
-    let old_at = one::keys::Endpoint::of(&old);
+    let old_at = key::Endpoint::of(&old);
     let body = one::push::register_request(&old, &old_at.seal, &old_sub.address(old_endpoint), Some(&user), now()).unwrap();
     assert_eq!(post(&format!("{}/push/register", k.address), &[], body).0, 200);
     // A new device asks.
-    let mac = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let mac = key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     ask(&mut andre, &mac);
     let [notes, to_old]: [Vec<one::push::Note>; 2] = pushed_to(vec![(endpoint, sub, &phone), (old_endpoint, old_sub, &old)]).try_into().unwrap();
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!(to_old.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), ["MacBook Pro wants in"], "the Mac that only registered is pushed too");
     assert_eq!((notes[0].title.as_str(), notes[0].app.as_str(), notes[0].screen.as_str()), ("MacBook Pro wants in", "settings", "devices"));
-    assert_eq!(notes[0].action, Some(json!({ "join": one::keys::join_code(&mac) })));
+    assert_eq!(notes[0].action, Some(json!({ "join": key::join_code(&mac) })));
     // Approved: it joined.
     let sub = Subscription::new();
     register(&sub);
@@ -1172,7 +1172,7 @@ mod relay {
 
     fn tell(address: &str, key: &SecretKey, fields: Value) -> u16 {
         let key = ed25519_dalek::SigningKey::from_bytes(&key.to_bytes());
-        let request = one::keys::signed_request(&key, "one/relay", fields, at());
+        let request = key::signed_request(&key, "one/relay", fields, at());
         super::post(&format!("{address}/relay/tell"), &[], request).0
     }
 
@@ -1301,13 +1301,13 @@ mod relay {
             assert_eq!(tell(&address, &first, json!({ "remove": hex(&first) })), 403, "the last admin was taken out");
             assert_eq!(tell(&address, &first, json!({ "add": hex(&first), "role": "client" })), 403, "the last admin was made a member");
             assert_eq!(tell(&address, &stranger, json!({ "add": hex(&stranger), "role": "client" })), 403, "a stranger told the relay");
-            let request = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&stranger), "role": "client" }), at());
+            let request = key::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&stranger), "role": "client" }), at());
             let mut forged = request.clone();
             forged["add"] = json!(hex(&SecretKey::generate()));
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], forged).0, 403, "a changed tell was taken");
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], request.clone()).0, 204);
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], request).0, 403, "a tell was taken twice");
-            let big = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&phone), "role": "client", "pad": "x".repeat(5000) }), at());
+            let big = key::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&phone), "role": "client", "pad": "x".repeat(5000) }), at());
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], big).0, 403, "a big tell was read");
             assert_eq!(tell(&address, &stranger, json!({ "remove": hex(&stranger) })), 204);
             assert!(shut_out(&k, &stranger, None).await, "a key taken out reached the relay");
@@ -1386,7 +1386,7 @@ mod relay {
             assert_eq!(tell(&address, &first, json!({ "pairing": { "hash": sha256(&code), "until": lasts } })), 204);
             let d = online(&address, &SecretKey::generate(), Some(&code)).await.expect("a pairing code's computer isn't let in");
             let short = SecretKey::generate();
-            let cert = one::keys::certify(&signer(&phone), short.public().as_bytes(), lasts, super::now());
+            let cert = key::certify(&signer(&phone), short.public().as_bytes(), lasts, super::now());
             let brief = online(&address, &short, Some(&cert)).await.expect("a session isn't let in");
             assert!(reaches(&address, &d, &a).await, "a pairing code's computer doesn't reach the device that made it");
             assert!(reaches(&address, &brief, &a).await, "a session's endpoint doesn't reach the network's devices");
@@ -1426,7 +1426,7 @@ mod relay {
             let serve = |key: &SecretKey, gate: Option<Arc<tokio::sync::Notify>>| {
                 let (key, address, got) = (key.clone(), address.clone(), got.clone());
                 async move {
-                    let alpn = format!("{}/http/1", one::config::CLI).into_bytes();
+                    let alpn = format!("{}/http/1", custom_build::config::CLI).into_bytes();
                     let relay = RelayConfig::new(address.parse::<RelayUrl>().unwrap(), None);
                     let ep = Endpoint::builder(presets::Minimal).secret_key(key.clone()).alpns(vec![alpn]).clear_ip_transports().clear_address_lookup().relay_mode(RelayMode::Custom(relay.into())).bind().await.unwrap();
                     tokio::time::timeout(LET_IN, ep.online()).await.expect("a node isn't let in");
@@ -1490,17 +1490,17 @@ mod relay {
         let address = k.address.replace("localhost", "127.0.0.1");
         let phone = SecretKey::generate();
         let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
-        let computes = |by: &SecretKey, fields: Value| super::post(&format!("{address}/relay/computes"), &[], one::keys::signed_request(&signer(by), "one/relay", fields, at()));
+        let computes = |by: &SecretKey, fields: Value| super::post(&format!("{address}/relay/computes"), &[], key::signed_request(&signer(by), "one/relay", fields, at()));
         assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
-        for older in [json!({ "computes": true }), json!({ "computes": true, "reads": one::database::READS - 1 })] {
+        for older in [json!({ "computes": true }), json!({ "computes": true, "reads": custom_build::protocol::READS - 1 })] {
             let (status, said) = computes(&phone, older);
             assert_eq!(status, 426, "a device that reads less than this build wasn't told to update");
             assert!(said["error"].as_str().is_some_and(|e| e.starts_with("Update this device")), "{said}");
         }
-        assert_eq!(computes(&phone, json!({ "computes": true, "reads": one::database::READS })).0, 200);
+        assert_eq!(computes(&phone, json!({ "computes": true, "reads": custom_build::protocol::READS })).0, 200);
         // A browser's session runs the code the address serves, the newest: it isn't asked.
         let session = SecretKey::generate();
-        let cert = one::keys::certify(&signer(&phone), session.public().as_bytes(), super::now() + 60_000, super::now());
+        let cert = key::certify(&signer(&phone), session.public().as_bytes(), super::now() + 60_000, super::now());
         assert_eq!(computes(&session, json!({ "computes": true, "certificate": cert })).0, 200);
     }
 
@@ -1511,10 +1511,10 @@ mod relay {
         let address = k.address.replace("localhost", "127.0.0.1");
         let phone = SecretKey::generate();
         let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
-        let certify = |by: &SecretKey, endpoint: &SecretKey, until: u64| one::keys::certify(&signer(by), endpoint.public().as_bytes(), until, super::now());
+        let certify = |by: &SecretKey, endpoint: &SecretKey, until: u64| key::certify(&signer(by), endpoint.public().as_bytes(), until, super::now());
         let computes = |body: Value| super::post(&format!("{address}/relay/computes"), &[], body);
         // What a session asks the computes with: a request its own key signs, with its certificate.
-        let ask = |session: &SecretKey, cert: &str| one::keys::signed_request(&signer(session), "one/relay", json!({ "computes": true, "certificate": cert }), at());
+        let ask = |session: &SecretKey, cert: &str| key::signed_request(&signer(session), "one/relay", json!({ "computes": true, "certificate": cert }), at());
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
             let a = online(&address, &first, None).await.expect("the network's first device isn't let in");
@@ -1526,7 +1526,7 @@ mod relay {
             let s = online(&address, &session, Some(&cert)).await.expect("a session its device vouched for isn't let in");
             assert!(reaches(&address, &s, &a).await, "a session's endpoint doesn't reach the network's devices");
             // Its first nodes to ask: the computes, for it or a device on the list, and no one else.
-            let asked = one::keys::signed_request(&signer(&phone), "one/relay", json!({ "computes": true, "reads": one::database::READS }), at());
+            let asked = key::signed_request(&signer(&phone), "one/relay", json!({ "computes": true, "reads": custom_build::protocol::READS }), at());
             let by_session = ask(&session, &cert);
             // And which of them are on the relay's network now, which a client races first.
             for body in [by_session.clone(), asked.clone()] {
@@ -1545,13 +1545,13 @@ mod relay {
             }
             assert_eq!(computes(json!({ "certificate": cert })).0, 400, "a certificate alone was told the computes");
             assert_eq!(computes(ask(&SecretKey::generate(), &cert)).0, 400, "someone else's key asked with a session's certificate");
-            let late = one::keys::signed_request(&signer(&session), "one/relay", json!({ "computes": true, "certificate": cert }), super::now() - 120_000);
+            let late = key::signed_request(&signer(&session), "one/relay", json!({ "computes": true, "certificate": cert }), super::now() - 120_000);
             assert_eq!(computes(late).0, 400);
             let stranger = SecretKey::generate();
-            assert_eq!(computes(one::keys::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true, "reads": one::database::READS }), at())).0, 403, "a stranger was told the computes");
+            assert_eq!(computes(key::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true, "reads": custom_build::protocol::READS }), at())).0, 403, "a stranger was told the computes");
             // When each was last here, a session's as the device that vouched for it: told the network's own devices
             // and their sessions, as the computes are, and no one else.
-            let seen = |by: &SecretKey| super::post(&format!("{address}/relay/seen"), &[], one::keys::signed_request(&signer(by), "one/relay", json!({ "seen": true }), at()));
+            let seen = |by: &SecretKey| super::post(&format!("{address}/relay/seen"), &[], key::signed_request(&signer(by), "one/relay", json!({ "seen": true }), at()));
             let (status, said) = seen(&phone);
             assert_eq!(status, 200);
             for key in [&first, &phone] {
@@ -1571,7 +1571,7 @@ mod relay {
             // for another's certificate, it's challenged as any key is (and a stranger's then refused).
             let proof = |key: &SecretKey, at: u64| {
                 let nonce = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>());
-                data_encoding::BASE64URL_NOPAD.encode(&one::keys::canonical(&one::keys::signed_request(&signer(key), "one/socket", json!({ "nonce": nonce }), at)))
+                data_encoding::BASE64URL_NOPAD.encode(&key::canonical(&key::signed_request(&signer(key), "one/socket", json!({ "nonce": nonce }), at)))
             };
             let shown = format!("{cert}.{}", proof(&session, super::now()));
             assert_eq!(first_frame(&address, &shown), CONFIRMED, "a session with its proof was challenged");

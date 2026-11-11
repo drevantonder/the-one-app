@@ -68,8 +68,8 @@ pub(super) fn load_runtime_key(folder: &Path) -> Result<SigningKey> {
 }
 
 /// The endpoint of the app runtime of the device whose home is `dir` (`runtime_folder`), its key made the first time.
-pub fn runtime_endpoint(dir: &Path) -> Result<crate::keys::Endpoint> {
-    Ok(crate::keys::Endpoint::of(&load_runtime_key(&runtime_folder(dir))?))
+pub fn runtime_endpoint(dir: &Path) -> Result<key::Endpoint> {
+    Ok(key::Endpoint::of(&load_runtime_key(&runtime_folder(dir))?))
 }
 
 /// This machine's own programs' token (in its app runtime's folder, the one they ask that with), made once: only its

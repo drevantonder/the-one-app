@@ -53,7 +53,7 @@ impl Telemetry {
 
 /// A resource's name: Basin takes underscores and no hyphens.
 fn named(table: &str, kind: &str) -> String {
-    format!("{}_{table}_{kind}", crate::config::CLI.replace('-', "_"))
+    format!("{}_{table}_{kind}", custom_build::config::CLI.replace('-', "_"))
 }
 
 fn fields(columns: &[Column]) -> Value {
@@ -63,7 +63,7 @@ fn fields(columns: &[Column]) -> Value {
 /// Sets up what's missing and notes it in `settings`, keeping the token it makes beside the Workers' secrets.
 pub fn provision(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
     let account = cf.account.clone();
-    let bucket = format!("{}-telemetry", crate::config::CLI);
+    let bucket = format!("{}-telemetry", custom_build::config::CLI);
     let provisioned = (|| -> Result<_> {
         let buckets = format!("/accounts/{account}/r2/buckets");
         if cf.found(&format!("{buckets}/{bucket}"))?.is_none() {
@@ -109,7 +109,7 @@ pub fn usage(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
     let telemetry = settings.telemetry.clone().context("telemetry isn't in Basin yet")?;
     if settings.analytics_token.is_none() {
         let policies = json!([{ "effect": "allow", "resources": { format!("com.cloudflare.api.account.{}", cf.account): "*" }, "permission_groups": ANALYTICS_PERMISSIONS.iter().map(|id| json!({ "id": id })).collect::<Vec<_>>() }]);
-        let made = cf.post(&format!("/accounts/{}/tokens", cf.account), json!({ "name": format!("{}-usage", crate::config::CLI), "policies": policies })).context("making the token the telemetry Worker reads the account's analytics with, which needs a Cloudflare API token with Account API Tokens Write")?;
+        let made = cf.post(&format!("/accounts/{}/tokens", cf.account), json!({ "name": format!("{}-usage", custom_build::config::CLI), "policies": policies })).context("making the token the telemetry Worker reads the account's analytics with, which needs a Cloudflare API token with Account API Tokens Write")?;
         let token = made["value"].as_str().context("Cloudflare made the token and didn't give its value")?.to_string();
         settings.set_secret("ANALYTICS_TOKEN", &token)?;
         settings.analytics_token = Some(token);
@@ -134,7 +134,7 @@ pub const EXPORTED: [(&str, &str); 2] = [("traces", "opentelemetry-traces"), ("l
 
 /// The name of Cloudflare's destination for the Workers' own `signal`.
 pub fn destination(signal: &str) -> String {
-    format!("{}-worker-{signal}", crate::config::CLI)
+    format!("{}-worker-{signal}", custom_build::config::CLI)
 }
 
 /// Points Cloudflare's destination of each of `EXPORTED` at the telemetry Worker, with a header only it knows: Cloudflare's
@@ -179,7 +179,7 @@ fn worker_token(cf: &Cloudflare, account: &str, bucket: &str) -> Result<String> 
         { "effect": "allow", "resources": { format!("com.cloudflare.api.account.{account}"): "*" }, "permission_groups": groups(&ACCOUNT_PERMISSIONS) },
         { "effect": "allow", "resources": { resource: "*" }, "permission_groups": groups(&BUCKET_PERMISSIONS) },
     ]);
-    let made = cf.post(&format!("/accounts/{account}/tokens"), json!({ "name": format!("{}-telemetry", crate::config::CLI), "policies": policies }))?;
+    let made = cf.post(&format!("/accounts/{account}/tokens"), json!({ "name": format!("{}-telemetry", custom_build::config::CLI), "policies": policies }))?;
     Ok(made["value"].as_str().context("Cloudflare made the token and didn't give its value")?.to_string())
 }
 

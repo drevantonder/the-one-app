@@ -11,18 +11,18 @@ use crate::cloudflare::{Cloudflare, Files, NODE, Settings, Worker, upload_hash};
 /// The Cloudflare node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
 /// in (the apps themselves it reads from the bucket, each at its latest deploy).
 pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
-    let files = crate::ui_folder::wasm(crate::config::CLOUDFLARE_NODE_FILES, crate::config::CLOUDFLARE_NODE);
+    let files = crate::ui_folder::wasm(crate::carried::CLOUDFLARE_NODE_FILES, crate::carried::CLOUDFLARE_NODE);
     let built = |name: &str| {
         let found = files.iter().find(|(n, _)| n == name).map(|(_, b)| b.clone());
-        found.with_context(|| format!("this build of {} has no Cloudflare node: {}-dev update node builds one, on a Linux device with Rust", crate::config::NAME, crate::config::CLI))
+        found.with_context(|| format!("this build of {} has no Cloudflare node: {}-dev update node builds one, on a Linux device with Rust", custom_build::config::NAME, custom_build::config::CLI))
     };
     Ok(modules_from(built("one_cloudflare_node.js")?, built("one_cloudflare_node_bg.wasm")?))
 }
 
 /// Its modules, from its WebAssembly's glue and the WebAssembly, as wasm-bindgen makes them.
 pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, Vec<u8>)> {
-    let shim = crate::call::shim();
-    let services = crate::config::CLOUDFLARE_SERVICES;
+    let shim = ::api::call::shim();
+    let services = crate::carried::CLOUDFLARE_SERVICES;
     let imports: String = services.iter().enumerate().map(|(i, (name, _))| format!("import s{i} from {};\n", json!(format!("./service-{name}.js")))).collect();
     let named: Vec<String> = services.iter().enumerate().map(|(i, (name, _))| format!("{}: s{i}", json!(name))).collect();
     let built_js = format!("{imports}export const shim = {};\nexport const compatibilityDate = {};\nexport const services = {{ {} }};\n", json!(shim), json!(crate::app::runtime::COMPATIBILITY_DATE), named.join(", "));
@@ -31,7 +31,7 @@ pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, 
         ("one_cloudflare_node.js".into(), "application/javascript+module", glue),
         ("one_cloudflare_node_bg.wasm".into(), "application/wasm", wasm),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
-        ("protocol.js".into(), "application/javascript+module", crate::protocol::javascript().into_bytes()),
+        ("protocol.js".into(), "application/javascript+module", ::api::protocol_js::javascript().into_bytes()),
         ("crypto.js".into(), "application/javascript+module", include_bytes!("../../cloudflare/shared/crypto.js").to_vec()),
         ("http.js".into(), "application/javascript+module", include_bytes!("../../cloudflare/shared/http.js").to_vec()),
     ];

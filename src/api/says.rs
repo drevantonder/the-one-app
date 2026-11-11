@@ -2,12 +2,12 @@
 
 use serde_json::json;
 
-use crate::protocol::CallRequest;
+use ::api::call::CallRequest;
 use crate::says::{Op, Said, Who};
 
 pub fn listed() -> Vec<Said> {
     vec![
-        ("/api/state", Who::Clients, Op::get("Who's who and what this device reads of the network").answers::<crate::state::State>()),
+        ("/api/state", Who::Clients, Op::get("Who's who and what this device reads of the network").answers::<scope::state::State>()),
         ("/api/join", Who::ThisMachine, Op::post("Join a network with a pairing code").body::<Join>().done()),
         ("/api/create", Who::ThisMachine, Op::post("Make a new network, this computer its first device").body::<Create>().answers_as(json!({ "type": "object", "required": ["recovery"], "properties": { "recovery": { "type": "string", "description": "its recovery key, shown only this once" } } }))),
         ("/api/call", Who::Clients, Op::post("Run one call of an app's tool or a service's function").body::<CallRequest>().answers_as(json!({ "type": "object", "required": ["ok"], "properties": { "ok": { "description": "the tool's or function's answer, as its output schema says" } } }))),

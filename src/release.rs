@@ -44,10 +44,10 @@ pub fn install_commit(commit: &str, bytes: &[u8]) -> Result<PathBuf> {
     // Linux names a running program's file that was replaced since it started "<path> (deleted)": the path is still
     // where it's installed.
     let exe = exe.to_str().and_then(|p| p.strip_suffix(" (deleted)")).map(PathBuf::from).unwrap_or(exe).canonicalize().context("find where this program is installed")?;
-    ensure!(!in_app_bundle(), "this is the copy of {} inside the Mac app, which runs nothing: open the app, which sets up {} on this Mac, then update with that", crate::config::CLI, crate::config::CLI);
+    ensure!(!in_app_bundle(), "this is the copy of {} inside the Mac app, which runs nothing: open the app, which sets up {} on this Mac, then update with that", custom_build::config::CLI, custom_build::config::CLI);
     // Named for this process, since `one update` and a device's own check can both be installing at once.
     let tmp = exe.with_extension(format!("new.{}", std::process::id()));
-    let placed = placed_at(&tmp, commit, bytes).and_then(|()| crate::os::replace_program(&tmp, &exe).context("replace the binary"));
+    let placed = placed_at(&tmp, commit, bytes).and_then(|()| platform::os::replace_program(&tmp, &exe).context("replace the binary"));
     if placed.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -70,8 +70,8 @@ fn placed_at(tmp: &Path, commit: &str, bytes: &[u8]) -> Result<()> {
     }
     // The release step's commit and date aren't signed; the binary's own are.
     let version = Version::of(tmp);
-    if !version.as_ref().is_some_and(|v| v.commit == commit && v.target == crate::config::TARGET && v.committed >= crate::config::COMMITTED) {
-        anyhow::bail!("the binary says it's {}, not {} for {}", version.map_or("nothing".into(), |v| v.json()), commit, crate::config::TARGET);
+    if !version.as_ref().is_some_and(|v| v.commit == commit && v.target == custom_build::config::TARGET && v.committed >= custom_build::config::COMMITTED) {
+        anyhow::bail!("the binary says it's {}, not {} for {}", version.map_or("nothing".into(), |v| v.json()), commit, custom_build::config::TARGET);
     }
     Ok(())
 }
@@ -88,7 +88,7 @@ pub struct Version {
 impl Version {
     /// This build.
     pub fn this() -> Version {
-        Version { commit: crate::config::BUILD.into(), target: crate::config::TARGET.into(), committed: crate::config::COMMITTED }
+        Version { commit: custom_build::config::BUILD.into(), target: custom_build::config::TARGET.into(), committed: custom_build::config::COMMITTED }
     }
 
     /// What the program at `path` says it is: none if it can't run here (another platform's) or isn't one of ours.

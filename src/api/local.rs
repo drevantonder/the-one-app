@@ -15,10 +15,10 @@ pub fn agent() -> ureq::Agent {
 /// node started after the client is asked as itself.
 pub fn as_this_machine(mut req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
     if req.uri().authority().is_some_and(|a| a.as_str() == addr())
-        && let Some(token) = local_token(&crate::home())
+        && let Some(token) = local_token(&platform::home())
         && let Ok(value) = token.parse()
     {
-        req.headers_mut().insert(crate::protocol::header::LOCAL_TOKEN, value);
+        req.headers_mut().insert(custom_build::protocol::header::LOCAL_TOKEN, value);
     }
     next.handle(req)
 }
@@ -34,7 +34,7 @@ const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host",
 /// What a program that didn't show the token is told by the node, with `code::NOT_THIS_MACHINE`: the node can't know which
 /// home the program read its token from, so the program says that (`token_refused`) where it can.
 pub fn not_this_machine() -> String {
-    let name = crate::config::NAME;
+    let name = custom_build::config::NAME;
     format!("{name} on this machine didn't take this request as from one of its own programs: it needs the token in the node's home, which only this machine's user can read.")
 }
 
@@ -42,7 +42,7 @@ pub fn not_this_machine() -> String {
 /// the node's, and what sets it. One started before the node updated (an agent's MCP server, most often) is this
 /// machine's, and starting it again mends it.
 pub fn token_refused(home: &std::path::Path) -> String {
-    let (name, var) = (crate::config::NAME, crate::config::env("HOME"));
+    let (name, var) = (custom_build::config::NAME, custom_build::config::env("HOME"));
     let how = if std::env::var_os(&var).is_some() { format!("{var} sets it") } else { format!("{var} isn't set, so it is the default") };
     let found = if local_token(home).is_some() { "the token in" } else { "no token in" };
     let file = home.join(LOCAL_TOKEN);
@@ -60,7 +60,7 @@ pub fn from_this_machine(local_token: &str, req: &axum::extract::Request) -> boo
     let peer = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().is_some_and(|c| c.0.ip().is_loopback());
     // Compared as hashes, so how long it takes says nothing of the token.
     let digest = |t: &str| <sha2::Sha256 as sha2::Digest>::digest(t.as_bytes());
-    let token = header(crate::protocol::header::LOCAL_TOKEN).is_some_and(|t| digest(t.trim()) == digest(local_token));
+    let token = header(custom_build::protocol::header::LOCAL_TOKEN).is_some_and(|t| digest(t.trim()) == digest(local_token));
     // A proxy on this machine still says it passed on someone else's request.
     let forwarded = FORWARDED.iter().any(|h| req.headers().contains_key(*h));
     let page = header("origin").is_some() || header("sec-fetch-site").is_some_and(|s| s != "none");

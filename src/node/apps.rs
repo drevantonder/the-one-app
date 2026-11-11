@@ -1,6 +1,6 @@
 //! Apps: the network's, every one users may add, and adding, deploying, forking and retiring them.
 
-use crate::protocol::allowed;
+use ::custom_build::allowed;
 use super::*;
 
 pub(crate) mod routes;
@@ -130,9 +130,9 @@ impl Node {
                 .filter(|a| !a.erased)
                 .map(|a| -> Result<_> {
                     let states = i.views.iter().filter_map(|(scope, st)| Some((Scope::parse(scope).ok()?, st))).collect::<Vec<_>>();
-                    let added = crate::state::added(m, &a.name, &viewer.user, states.iter().map(|(s, st)| (s, *st)));
+                    let added = scope::state::added(m, &a.name, &viewer.user, states.iter().map(|(s, st)| (s, *st)));
                     let runs_on = runs_on(self, i, &switches, &a.name, &added, &viewer.user)?;
-                    let mut info = crate::state::app_info(m, a, &apps, &viewer.user, added)?;
+                    let mut info = scope::state::app_info(m, a, &apps, &viewer.user, added)?;
                     info["runs_on"] = json!(runs_on);
                     if let Some(bundle) = self.built_in(a) {
                         info["built_in"] = json!(bundle);
@@ -230,7 +230,7 @@ impl Node {
                 .map(|d| d.name)
                 .collect();
             if platforms.as_ref().is_some_and(|p| p.contains(&"cloudflare")) && m.cloudflare_node()?.is_some() && m.may(&viewer.user, "change-settings", scopes::NETWORK) {
-                nodes.push(crate::rank::CLOUDFLARE.to_string());
+                nodes.push(scope::rank::CLOUDFLARE.to_string());
             }
             Ok(nodes)
         })
@@ -292,7 +292,7 @@ impl Node {
         if present {
             return Ok(());
         }
-        ensure!(admin, "{app} is built in, but {} doesn't have it yet: an admin adds it first", crate::config::YOURS);
+        ensure!(admin, "{app} is built in, but {} doesn't have it yet: an admin adds it first", ::custom_build::config::YOURS);
         self.append_as(&Scope::Global, &caller.user, content::app(app, "admins")).await?;
         self.append_as(&Scope::Global, &caller.user, content::deploy(app, bundle, [])).await?;
         Ok(())
@@ -384,12 +384,12 @@ impl Node {
                 for service in names {
                     let running: Vec<Key> = switches.iter().filter(|((_, name), s)| name == service && ours(s)).map(|((k, _), _)| *k).collect();
                     let to = match chosen.as_deref().filter(|_| n == 0 || running.is_empty()) {
-                        Some(node) => Some(crate::settings::service(m, &caller.user, node, service, true, Some(scope))?),
+                        Some(node) => Some(scope::settings::service(m, &caller.user, node, service, true, Some(scope))?),
                         None => None,
                     };
                     let to_key = to.as_ref().and_then(|c| c.data["device"].as_str()).and_then(|k| unhex(k).ok());
                     for k in running.iter().filter(|k| !added || (to_key.is_some() && Some(**k) != to_key)) {
-                        out.push((Scope::Global, crate::settings::service(m, &caller.user, &hex(k), service, false, None)?));
+                        out.push((Scope::Global, scope::settings::service(m, &caller.user, &hex(k), service, false, None)?));
                     }
                     if let Some(to) = to.filter(|_| !running.contains(&to_key.unwrap_or_default())) {
                         out.push((Scope::Global, to));
@@ -532,8 +532,8 @@ impl Node {
 /// Where a built-in app's code is: its folder of `apps/` in the repo releases come from, at this build's commit when
 /// it's one (else main); none for a repo elsewhere, as only GitHub has a page for a folder at a commit.
 fn built_in_source(app: &str) -> Option<String> {
-    let repo = crate::config::REPO.strip_prefix("https://github.com/")?;
-    let commit = crate::config::BUILD.split(['-', '+']).next().filter(|c| !crate::config::BUILD.contains('+') && c.len() >= 7 && c.bytes().all(|b| b.is_ascii_hexdigit()));
+    let repo = ::custom_build::config::REPO.strip_prefix("https://github.com/")?;
+    let commit = ::custom_build::config::BUILD.split(['-', '+']).next().filter(|c| !::custom_build::config::BUILD.contains('+') && c.len() >= 7 && c.bytes().all(|b| b.is_ascii_hexdigit()));
     Some(format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
 }
 
@@ -555,7 +555,7 @@ fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::
             let parts = i.parts.get(k).cloned();
             let k = &m.runtime_for(k)?.unwrap_or(*k);
             let here = *k == node.0.id;
-            let name = if Some(*k) == cloudflare { Some(crate::rank::CLOUDFLARE.to_string()) } else { m.machine(k)?.filter(|d| !d.removed).map(|d| d.name) };
+            let name = if Some(*k) == cloudflare { Some(scope::rank::CLOUDFLARE.to_string()) } else { m.machine(k)?.filter(|d| !d.removed).map(|d| d.name) };
             let part = parts.and_then(|p| match p {
                 Value::Array(list) => list.into_iter().find(|v| v["name"] == app),
                 Value::Object(map) => map.get(app).cloned(),

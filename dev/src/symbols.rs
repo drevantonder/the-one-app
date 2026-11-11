@@ -7,7 +7,7 @@ use std::process::Command;
 
 use anyhow::{Result, ensure};
 use one::cli::{Command as Cli, Failed};
-use one::config::CLI;
+use ::custom_build::config::CLI;
 
 pub fn command() -> Cli {
     Cli {

@@ -15,11 +15,11 @@ use std::sync::{Arc, Mutex};
 
 use data_encoding::BASE64URL_NOPAD as B64U;
 use n0_future::time::Duration;
-use one::config::YOURS;
-use one::protocol::header;
-use one::database::scopes::{Scope, ScopeDb};
-use one::database::steps::{Reader, Welcome};
-use one::keys::{self, Handed, Handoff, Hash, Need, Opens, Signs, hex};
+use ::custom_build::config::YOURS;
+use ::custom_build::protocol::header;
+use ::scope::scopes::{Scope, ScopeDb};
+use ::scope::steps::{Reader, Welcome};
+use ::{api::handed::{Handed, Handoff, Need}, key::{Hash, Opens, Signs, hex}};
 use serde_json::{Value, json};
 
 use crate::{Body, Client, Error, Request, Response, not_let_in, unsent};
@@ -48,7 +48,7 @@ pub trait Keep {
 /// What a device reaches at its network's address: the bucket, through the URL signer; the relay, which alone says
 /// whether it's still let in; and sign-in, the relay and the push Worker as it asks them itself (`ask`).
 pub trait Address {
-    type Bucket: one::bucket::Bucket;
+    type Bucket: bucket::Bucket;
     fn bucket(&self) -> &Self::Bucket;
     /// False only if the relay says it no longer lets this device in.
     fn let_in(&self) -> impl Future<Output = bool>;
@@ -74,12 +74,12 @@ pub fn refused() -> Error {
 struct Known {
     reader: Reader,
     /// The keys `global`'s steps are sealed under, by epoch.
-    steps: one::database::stored::Keys,
+    steps: database::stored::Keys,
     user: String,
     /// The nodes it may ask, by key: their seal keys; and the Cloudflare node, if the network has one.
     nodes: HashMap<[u8; 32], [u8; 32]>,
     cloudflare_node: Option<[u8; 32]>,
-    /// Each node's run priority, as the network's admins set it (src/rank.rs): the Cloudflare node's too.
+    /// Each node's run priority, as the network's admins set it (scope/src/rank.rs): the Cloudflare node's too.
     ranks: HashMap<[u8; 32], u32>,
     at: u64,
 }
@@ -91,7 +91,7 @@ impl Known {
 
     /// What `reader` says, for the device whose key is `key`: fails `not_let_in` until it lists it as a client of its
     /// user's.
-    fn of(reader: Reader, steps: one::database::stored::Keys, key: &[u8; 32], at: u64) -> Result<Known, Error> {
+    fn of(reader: Reader, steps: database::stored::Keys, key: &[u8; 32], at: u64) -> Result<Known, Error> {
         let who = &reader.truth().ok_or_else(|| not_let_in("This device isn't listed yet."))?.db;
         let user = who.client(key).map_err(failed)?.map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
         // The nodes that run something of its user's, and the Cloudflare node, which runs anyone's calls.
@@ -102,12 +102,12 @@ impl Known {
                 nodes.insert(key, seal);
             }
         }
-        let set = one::rank::set(&who.settings().map_err(failed)?);
+        let set = ::scope::rank::set(&who.settings().map_err(failed)?);
         let ranks = nodes
             .keys()
             .map(|k| {
-                let id = if Some(*k) == cloudflare_node { one::rank::CLOUDFLARE.to_string() } else { hex(&who.device_of(k)) };
-                (*k, match one::rank::priority(&set, &id) { one::rank::Priority::Number(n) => n, one::rank::Priority::Last => u32::MAX })
+                let id = if Some(*k) == cloudflare_node { ::scope::rank::CLOUDFLARE.to_string() } else { hex(&who.device_of(k)) };
+                (*k, match ::scope::rank::priority(&set, &id) { ::scope::rank::Priority::Number(n) => n, ::scope::rank::Priority::Last => u32::MAX })
             })
             .collect();
         Ok(Known { reader, steps, user, nodes, cloudflare_node, ranks, at })
@@ -184,7 +184,7 @@ impl<O: Opens> Keyring<O> {
         let (epochs, steps) = match had {
             Some((kept, steps)) if reader.restart(&kept, now).is_ok() => {
                 if !reader.whole()
-                    && let Ok(Some((fresh, _))) = one::database::steps::read_again(bucket, reader.root(), reader.at(), &me, &self.opens, now).await
+                    && let Ok(Some((fresh, _))) = ::scope::steps::read_again(bucket, reader.root(), reader.at(), &me, &self.opens, now).await
                 {
                     reader = fresh;
                 }
@@ -194,13 +194,13 @@ impl<O: Opens> Keyring<O> {
                 let newest = reader.truth().map(|t| t.db.epoch(&Scope::Global)).transpose().map_err(failed)?.unwrap_or(0);
                 match steps.keys().next_back().is_some_and(|n| *n >= newest) {
                     true => (BTreeMap::new(), steps),
-                    false => one::database::steps::read_sealed_to(bucket, &mut reader, &me, &self.opens, &mut None, now).await.map_err(failed)?,
+                    false => ::scope::steps::read_sealed_to(bucket, &mut reader, &me, &self.opens, &mut None, now).await.map_err(failed)?,
                 }
             }
             _ => {
                 let mut welcome = on.get(WELCOME).await.and_then(|w| Welcome::parse(String::from_utf8_lossy(&w).trim()));
                 let had_welcome = welcome.is_some();
-                let read = one::database::steps::read_sealed_to(bucket, &mut reader, &me, &self.opens, &mut welcome, now).await.map_err(failed)?;
+                let read = ::scope::steps::read_sealed_to(bucket, &mut reader, &me, &self.opens, &mut welcome, now).await.map_err(failed)?;
                 if had_welcome && welcome.is_none() {
                     on.delete(WELCOME).await;
                 }
@@ -304,7 +304,7 @@ impl<O: Opens> Keyring<O> {
 
     /// Where who's who is read to, `global`'s newest epoch, and the keys its steps are sealed under: what the next step
     /// is written with.
-    pub(crate) fn next_step(&self) -> Option<(u64, u32, one::database::stored::Keys)> {
+    pub(crate) fn next_step(&self) -> Option<(u64, u32, database::stored::Keys)> {
         let known = self.known.lock().unwrap();
         let k = known.as_ref()?;
         Some((k.reader.at(), k.who().epoch(&Scope::Global).ok()?, k.steps.clone()))
@@ -379,7 +379,7 @@ impl<O: Opens> Keyring<O> {
             let headers = vec![("content-type".to_string(), "application/json".to_string())];
             return Ok(Response { node: [0; 32], status, headers, body: Body::whole(out.to_string().into_bytes()), trace: None });
         }
-        if request.method == "GET" && request.path.split('?').next() == Some(one::protocol::path::OPENAPI) {
+        if request.method == "GET" && request.path.split('?').next() == Some(::api::path::OPENAPI) {
             return self.document(client, on, request, until).await;
         }
         self.to_nodes(client, on, request, until).await
@@ -387,12 +387,12 @@ impl<O: Opens> Keyring<O> {
 
     /// The API's document for this device's user, from the apps a node lists for them.
     async fn document(&self, client: &Client, on: &(impl Address + Keep), mut request: Request, until: u64) -> Result<Response, Error> {
-        request.path = one::protocol::path::APPS.into();
+        request.path = ::api::path::APPS.into();
         let response = self.to_nodes(client, on, request, until).await?;
         if response.status != 200 {
             return Ok(response);
         }
-        let apps: Vec<Value> = serde_json::from_slice(&response.body.bytes().await?).map_err(|err| failed(format!("{} answered with a reply that wasn't JSON: {err}", one::protocol::path::APPS)))?;
+        let apps: Vec<Value> = serde_json::from_slice(&response.body.bytes().await?).map_err(|err| failed(format!("{} answered with a reply that wasn't JSON: {err}", ::api::path::APPS)))?;
         let body = one::openapi::document(&apps, false).to_string().into_bytes();
         let headers = vec![("content-type".to_string(), "application/json".to_string())];
         Ok(Response { headers, body: Body::whole(body), ..response })
@@ -433,12 +433,12 @@ impl<O: Opens> Keyring<O> {
                 let bytes = response.body.bytes().await?;
                 // A node that doesn't list this device may not have read its approval yet: the relay says if it's out,
                 // else it's asked again in a moment, once it has.
-                if serde_json::from_slice::<Value>(&bytes).is_ok_and(|v| v["code"] == one::protocol::code::NOT_LET_IN) {
+                if serde_json::from_slice::<Value>(&bytes).is_ok_and(|v| v["code"] == ::custom_build::protocol::code::NOT_LET_IN) {
                     if !on.let_in().await {
                         return Err(refused());
                     }
-                    if behind < keys::BEHIND.len() {
-                        n0_future::time::sleep(Duration::from_millis(keys::BEHIND[behind])).await;
+                    if behind < ::api::handed::BEHIND.len() {
+                        n0_future::time::sleep(Duration::from_millis(::api::handed::BEHIND[behind])).await;
                         behind += 1;
                         continue;
                     }
@@ -473,7 +473,7 @@ impl<O: Opens> Keyring<O> {
             return Vec::new();
         }
         let handoff = Handoff { for_: hex(&self.key), until, keys };
-        keys::seal_handoff(seal, &handoff).map(|k| vec![(header::KEYS.to_string(), k)]).unwrap_or_default()
+        ::api::handed::seal_handoff(seal, &handoff).map(|k| vec![(header::KEYS.to_string(), k)]).unwrap_or_default()
     }
 
     /// A request's JSON, handing no keys: what this device asks to open them, and to write.
@@ -482,7 +482,7 @@ impl<O: Opens> Keyring<O> {
         if body.is_some() {
             headers.push(("content-type".into(), "application/json".into()));
         }
-        let body = body.map(|b| keys::canonical(&b)).unwrap_or_default();
+        let body = body.map(|b| ::key::canonical(&b)).unwrap_or_default();
         let response = self.send(client, Request { method: method.into(), path: path.into(), headers, body: body.into() }, &[], 0).await?;
         json_of(response, path).await
     }
@@ -493,7 +493,7 @@ impl<O: Opens> Keyring<O> {
         if body.is_some() {
             headers.push(("content-type".into(), "application/json".into()));
         }
-        let body = body.map(|b| keys::canonical(&b)).unwrap_or_default();
+        let body = body.map(|b| ::key::canonical(&b)).unwrap_or_default();
         let response = self.to_nodes(client, on, Request { method: method.into(), path: path.into(), headers, body: body.into() }, now() + HANDED_FOR).await?;
         json_of(response, path).await
     }
@@ -524,7 +524,7 @@ impl<O: Opens> Keyring<O> {
         if self.needs_of(&kind.name) != sent_with {
             return Ok(());
         }
-        let mut need = keys::asked_for(&kind.route, &hex(node), answer).ok_or_else(|| failed("A device asked for keys that request doesn't use. Nothing was handed."))?;
+        let mut need = ::api::handed::asked_for(&kind.route, &hex(node), answer).ok_or_else(|| failed("A device asked for keys that request doesn't use. Nothing was handed."))?;
         if !self.nodes().contains_key(node) {
             return Err(failed("A device that isn't one of yours asked for keys. Nothing was handed."));
         }
@@ -540,14 +540,14 @@ impl<O: Opens> Keyring<O> {
         // Of each database, only epochs from the one its newest copy is under (`keys::oldest_needed`): older ones open
         // only its history.
         let bucket = on.bucket();
-        let prefix = |n: &Need| one::bucket::database_prefix(&n.scope, &n.app, &n.database);
+        let prefix = |n: &Need| bucket::names::database_prefix(&n.scope, &n.app, &n.database);
         let mut each: BTreeMap<String, &Scope> = BTreeMap::new();
         for (n, scope) in need.iter().zip(&scopes) {
             each.entry(prefix(n)).or_insert(scope);
         }
         let asked = n0_future::join_all(each.keys().map(|p| {
-            let name = one::database::stored::newest_name(p);
-            async move { one::bucket::Bucket::get(bucket, &name).await }
+            let name = bucket::names::newest_name(p);
+            async move { bucket::Bucket::get(bucket, &name).await }
         }));
         // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.
         let (hints, fetched) = n0_future::future::zip(asked, self.fetch_keys(client, &need)).await;
@@ -557,7 +557,7 @@ impl<O: Opens> Keyring<O> {
             let hint = hint.map_err(failed)?;
             let newest = self.who(|who| who.epoch(scope)).transpose().map_err(failed)?.unwrap_or(0);
             let database = p.rsplit('/').next().unwrap_or_default();
-            oldest.insert(p.clone(), keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest));
+            oldest.insert(p.clone(), ::api::handed::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest));
         }
         need.retain(|n| n.epoch >= oldest[&prefix(n)]);
         if need.is_empty() {
@@ -602,7 +602,7 @@ impl<O: Opens> Keyring<O> {
             for (m, sealed) in kept.iter().flat_map(|k| k["sealed"].as_object()).flatten() {
                 let Ok(m) = m.parse::<u32>() else { continue };
                 let Some(epoch) = self.epochs.lock().unwrap().get(&(scope.to_string(), m)).copied() else { continue };
-                let opened = B64U.decode(sealed.as_str().unwrap_or("").trim().as_bytes()).ok().and_then(|b| keys::open_app_key(&epoch, app, &b).ok());
+                let opened = B64U.decode(sealed.as_str().unwrap_or("").trim().as_bytes()).ok().and_then(|b| ::key::open_app_key(&epoch, app, &b).ok());
                 if let Some(key) = opened {
                     self.app_keys.lock().unwrap().insert((scope.to_string(), app.to_string(), m), key);
                 }
@@ -618,13 +618,13 @@ impl<O: Opens> Keyring<O> {
         let mut opened: Vec<(u32, [u8; 32])> = Vec::new();
         for (m, sealed) in kept["sealed"].as_object().into_iter().flatten() {
             let (Ok(m), Ok(sealed)) = (m.parse::<u32>(), B64U.decode(sealed.as_str().unwrap_or("").as_bytes())) else { continue };
-            if let Some(key) = keys::open_sealed_by(&self.opens, &sealed).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
+            if let Some(key) = ::key::open_sealed_by(&self.opens, &sealed).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
                 opened.push((m, key));
             }
         }
         for (m, key) in opened {
             let made = self.who(|who| who.epoch_hash(&parsed, m)).transpose().map_err(failed)?.flatten();
-            if made == Some(keys::epoch_hash(&key)) {
+            if made == Some(::key::epoch_hash(&key)) {
                 self.epochs.lock().unwrap().insert((scope.to_string(), m), key);
             }
         }
@@ -633,7 +633,7 @@ impl<O: Opens> Keyring<O> {
 
     /// A database's key in an epoch.
     async fn database_key(&self, client: &Client, on: &(impl Address + Keep), n: &Need) -> Result<[u8; 32], Error> {
-        Ok(keys::database_key(&self.app_key(client, on, &n.scope, &n.app, n.epoch).await?, &n.app, &n.database))
+        Ok(::key::database_key(&self.app_key(client, on, &n.scope, &n.app, n.epoch).await?, &n.app, &n.database))
     }
 
     /// An app's key in epoch `n` of a scope: the one sealed under the epoch, or one made now if it has none yet.
@@ -648,13 +648,13 @@ impl<O: Opens> Keyring<O> {
             Some(s) => s.to_string(),
             None => {
                 let made: [u8; 32] = rand::random();
-                let sealed = B64U.encode(&keys::seal_app_key(&epoch, app, &made));
+                let sealed = B64U.encode(&::key::seal_app_key(&epoch, app, &made));
                 let out = self.json(client, "POST", "/api/keys", Some(json!({ "scope": scope, "n": n, "app": app, "sealed": sealed }))).await?;
                 out["sealed"].as_str().unwrap_or_default().to_string()
             }
         };
         let bytes = B64U.decode(sealed.trim().as_bytes()).ok().ok_or_else(|| failed(format!("{app}'s key isn't one")))?;
-        let key = keys::open_app_key(&epoch, app, &bytes).map_err(|_| failed(format!("{app}'s key didn't open")))?;
+        let key = ::key::open_app_key(&epoch, app, &bytes).map_err(|_| failed(format!("{app}'s key didn't open")))?;
         self.app_keys.lock().unwrap().insert(id, key);
         Ok(key)
     }
@@ -682,16 +682,16 @@ impl<O: Opens> Keyring<O> {
 
 /// What a request is, to remember what it needed: its route (`keys::Route`) and the name it's remembered by.
 struct Kind {
-    route: keys::Route,
+    route: ::api::handed::Route,
     name: String,
 }
 
 impl Kind {
     /// An MCP request is remembered by its method and tool (a batch by none), anything else by its route.
     fn of(path: &str, body: &[u8]) -> Kind {
-        let route = keys::Route::of(path, || serde_json::from_slice::<Value>(body).ok().and_then(|b| b["app"].as_str().map(str::to_string)).unwrap_or_default());
+        let route = ::api::handed::Route::of(path, || serde_json::from_slice::<Value>(body).ok().and_then(|b| b["app"].as_str().map(str::to_string)).unwrap_or_default());
         let name = match &route {
-            keys::Route::Path(p) if p == one::protocol::path::MCP => match serde_json::from_slice::<Value>(body).ok().filter(|m| m["method"].is_string()) {
+            ::api::handed::Route::Path(p) if p == ::api::path::MCP => match serde_json::from_slice::<Value>(body).ok().filter(|m| m["method"].is_string()) {
                 Some(m) => {
                     let tool = m["params"]["name"].as_str().filter(|_| m["method"] == "tools/call").map(|t| format!(" {t}")).unwrap_or_default();
                     format!("{route} {}{tool}", m["method"].as_str().unwrap_or_default()).chars().take(160).collect()

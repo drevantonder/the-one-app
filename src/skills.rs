@@ -7,7 +7,7 @@
 
 use serde_json::{Value, json};
 
-use crate::config::{CLI, NAME, REPO, YOURS};
+use ::custom_build::config::{CLI, NAME, REPO, YOURS};
 use crate::core_tools::SENDS;
 
 /// Claude Code keeps only the first 4,096 characters (UTF-16 units) of an MCP server's instructions; stay under them.
@@ -50,12 +50,12 @@ pub fn mcp_entries() -> String {
     let server = server_name();
     format!(
         "On a device where `{CLI}` runs, MCP is a command there, one of two entries:\n\n- `{CLI} mcp`: every tool, and `search`. For agents that already find tools themselves or run code with them: Claude Code, OpenCode, Codex, Cursor. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`\n- `{CLI} mcp --code`: a few tools. `search` finds what's possible, `execute` runs a short script with it, and {} stay tools of their own. For every other agent.\n\nPick the one that fits you, or tell the user in one line which you're adding and why. On their devices, {NAME} adds the right one to Claude Code, Codex, OpenCode and Amp by itself.",
-        crate::config::ALWAYS_ON.iter().map(|a| format!("{a}'s tools")).chain(crate::code::DIRECT.iter().map(|t| format!("`{t}`"))).collect::<Vec<_>>().join(", ")
+        ::custom_build::config::ALWAYS_ON.iter().map(|a| format!("{a}'s tools")).chain(crate::code::DIRECT.iter().map(|t| format!("`{t}`"))).collect::<Vec<_>>().join(", ")
     )
 }
 
 fn install() -> String {
-    match crate::state::install_line() {
+    match scope::state::install_line() {
         Some(line) => format!("install it with `{line}`"),
         None => format!("ask an admin of {YOURS} to set it up there"),
     }
@@ -313,7 +313,7 @@ pub fn instructions(mode: Mode, apps: &[Value], user: Option<&str>) -> String {
         server_name(),
         server_name()
     );
-    for app in apps.iter().filter(|a| crate::config::ALWAYS_ON.contains(&a["name"].as_str().unwrap_or(""))) {
+    for app in apps.iter().filter(|a| ::custom_build::config::ALWAYS_ON.contains(&a["name"].as_str().unwrap_or(""))) {
         if let Some(i) = app["instructions"].as_str().filter(|i| !i.is_empty()) {
             let more = format!("\n\n## {}\n\n{i}", app["title"].as_str().unwrap_or(""));
             if len(&text) + len(&more) < INSTRUCTIONS_LIMIT - 200 {

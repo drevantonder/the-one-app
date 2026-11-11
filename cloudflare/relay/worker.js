@@ -92,7 +92,7 @@ initSync({ module: wasm });
 const PROTOCOL = "iroh-relay-v2";
 const TELL_BYTES = 4096;
 const VERSION_BYTES = 128;
-/// A scope's name (src/database/scopes.rs `Scope`): `global`, or a kind and an id.
+/// A scope's name (scope/src/scopes.rs `Scope`): `global`, or a kind and an id.
 const SCOPE = /^(global|[a-z]+:[0-9A-Za-z_-]{1,64})$/;
 const MOST_MOVED = 16;
 const PROVE_WITHIN = 30_000;

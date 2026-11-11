@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 
-use crate::protocol::Event;
+use ::api::call::Event;
 use crate::says::{Op, Said, Who};
 
 pub fn listed() -> Vec<Said> {

@@ -6,23 +6,6 @@
 
 use std::collections::BTreeMap;
 
-/// Whether `name` may be one of the network's settings: lowercase words joined by _, or a lab's, whose parts are an
-/// app's or service's name and a lab's.
-pub fn valid_setting(name: &str) -> bool {
-    let word = |w: &str| !w.is_empty() && w.len() <= 40 && w.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
-    match name.strip_prefix("lab.") {
-        Some(rest) => {
-            let parts: Vec<&str> = rest.split('.').collect();
-            match parts.as_slice() {
-                [_] => parts.iter().all(|p| word(p)),
-                ["app" | "service", _, _] => parts.iter().all(|p| word(p)),
-                _ => false,
-            }
-        }
-        None => !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'),
-    }
-}
-
 pub fn app_key(app: &str, lab: &str) -> String {
     format!("lab.app.{app}.{lab}")
 }

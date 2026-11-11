@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use crate::config::CLI;
+use ::custom_build::config::CLI;
 
 use crate::api::Client;
 

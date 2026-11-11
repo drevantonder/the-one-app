@@ -8,7 +8,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
 
-use crate::config::{CLI, COMMITTED, NAME};
+use ::custom_build::config::{CLI, COMMITTED, NAME};
 use crate::latest::{self, Thing};
 
 use super::FOLDER;

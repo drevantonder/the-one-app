@@ -22,7 +22,7 @@ pub(super) fn routes() -> Routes {
         for tool in &feature.tools {
             let serves = tool.serves;
             let path = feature.path(&tool.spec);
-            let who = if crate::settings::answered(&path) { Who::ThisMachine } else { Who::Clients };
+            let who = if scope::settings::answered(&path) { Who::ThisMachine } else { Who::Clients };
             let (spec, name) = (tool.spec.clone(), feature.mcp_name(&tool.spec));
             routes = routes.route(&path, who, post(move |node: State<Node>, me: Me, headers: HeaderMap, input: Json<Map<String, Value>>| serve(node, me, headers, input, serves, spec, name)));
         }
@@ -32,7 +32,7 @@ pub(super) fn routes() -> Routes {
 
 async fn serve(State(node): State<Node>, me: Me, headers: HeaderMap, Json(input): Json<Map<String, Value>>, serves: Serves, spec: Value, name: String) -> Reply {
     crate::tools::check(&spec["input"], &Value::Object(input.clone())).map_err(|e| super::Invalid(format!("{e:#}")))?;
-    let agent = headers.get(crate::protocol::header::AGENT).and_then(|a| data_encoding::BASE64URL_NOPAD.decode(a.as_bytes()).ok()).and_then(|a| String::from_utf8(a).ok());
+    let agent = headers.get(custom_build::protocol::header::AGENT).and_then(|a| data_encoding::BASE64URL_NOPAD.decode(a.as_bytes()).ok()).and_then(|a| String::from_utf8(a).ok());
     let me = Caller { agent: agent.or(me.caller.agent), ..me.caller };
     let answer = serves(node, me, input).await?;
     crate::tools::check(&spec["output"], &answer).map_err(|e| Error(e.context(format!("{name} answered what its output schema doesn't say"))))?;

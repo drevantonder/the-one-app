@@ -1,7 +1,7 @@
 //! What a running call's app asks the node: its grant, its databases and the node's internal API, its prompt hook, a
 //! service's call, and reading this device's logs.
 
-use crate::protocol::allowed;
+use ::custom_build::allowed;
 use super::*;
 
 impl Node {
@@ -37,7 +37,7 @@ impl Node {
             None => self.0.id,
         };
         let name = self.name_of(&target);
-        allowed!(self.may_read_logs_of(&me.user, &target)?, "only {name}'s user, or an admin of {}, reads its logs", crate::config::YOURS);
+        allowed!(self.may_read_logs_of(&me.user, &target)?, "only {name}'s user, or an admin of {}, reads its logs", ::custom_build::config::YOURS);
         // A device whose app runtime this is keeps its logs here: its onet's and oned's beside the runtime's own.
         if target == self.0.id || target == self.0.holds.device() {
             return Ok(Reply::Ok(crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)?));
@@ -89,7 +89,7 @@ impl Node {
         let session = event["session_id"].as_str().unwrap_or("").to_string();
         let caller = Caller::local(self)?;
         let path = self.0.dir.join("hooks.json");
-        let mut seen: serde_json::Map<String, Value> = crate::files::read_json(&path);
+        let mut seen: serde_json::Map<String, Value> = platform::files::read_json(&path);
         let now = now_ms();
         let mut asked = tokio::task::JoinSet::new();
         for (app, ctx, granted) in self.page_contexts(&caller, None)? {
@@ -135,17 +135,17 @@ impl Node {
 
     /// `scope`'s database of the app a call runs, as the call reads it: caught up at its first read, so it reads one
     /// state of the scope throughout, and that read traced (where its data came from, and how long getting it took).
-    pub(super) async fn call_db(&self, token: &str, grant: &Grant, scope: &Scope) -> Result<tokio::sync::OwnedMutexGuard<crate::database::stored::Db>> {
+    pub(super) async fn call_db(&self, token: &str, grant: &Grant, scope: &Scope) -> Result<tokio::sync::OwnedMutexGuard<database::stored::Db>> {
         ensure!(grant.scopes.contains(scope), "the call didn't name {scope}");
         let started = Instant::now();
         let first = !grant.caught_up.contains(scope);
         let traced = grant.trace.clone().filter(|_| first);
         let (db, at) = trace::within(traced.clone(), async {
-            let (db, bucket) = self.call_database(&grant.caller, scope, &grant.app, scopes::APP_DATABASE, None).await?;
+            let (db, bucket) = self.call_database(&grant.caller, scope, &grant.app, key::APP_DATABASE, None).await?;
             let mut db = db.lock_owned().await;
             let at = db.at();
             if first {
-                self.read_ready(&(scope.clone(), format!("{}/{}", grant.app, scopes::APP_DATABASE)), &mut db, &bucket).await?;
+                self.read_ready(&(scope.clone(), format!("{}/{}", grant.app, key::APP_DATABASE)), &mut db, &bucket).await?;
                 if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
                     g.caught_up.push(scope.clone());
                 }
@@ -159,13 +159,13 @@ impl Node {
         Ok(db)
     }
 
-    /// What the shim asks the node for a running call (`src/app/outbound.rs`), as `crate::call::Ask` names it.
+    /// What the shim asks the node for a running call (`src/app/outbound.rs`), as `::api::call::Ask` names it.
     pub async fn internal(&self, token: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
-        use crate::call::Ask;
+        use ::api::call::Ask;
         use axum::response::IntoResponse;
         let grant = &self.grant_of(token).context("only a running call asks the node")?;
         let ask = path.strip_prefix('/').and_then(Ask::parse).with_context(|| format!("the node has no ask {path}"))?;
-        ensure!(!(grant.read_only && ask.writes()), "{}", crate::call::READ_ONLY);
+        ensure!(!(grant.read_only && ask.writes()), "{}", ::api::call::READ_ONLY);
         let ok = |v: Value| axum::Json(v).into_response();
         Ok(match ask {
             Ask::Call => {
@@ -205,7 +205,7 @@ impl Node {
                 let asks: Vec<(String, String)> = serde_json::from_value(req["asks"].clone())?;
                 let types = self.0.apps.describe(&grant.app).await?["types"].clone();
                 let rows = match types.as_object().is_some_and(|t| !t.is_empty()) {
-                    true => crate::database::scopes::app_relations(self.call_db(token, grant, &scope).await?.connection()),
+                    true => scope::scopes::app_relations(self.call_db(token, grant, &scope).await?.connection()),
                     false => Vec::new(),
                 };
                 ok(json!({ "ok": self.with(|i| Ok(i.r.db().app_may(&grant.caller.user, &asks, &types, &rows, now_ms())))? }))
@@ -245,7 +245,7 @@ impl Node {
             Ask::Appends => {
                 ensure!(self.0.calls.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");
                 let req: Value = serde_json::from_slice(&body)?;
-                let appends = crate::call::appends(&req["appends"])?;
+                let appends = ::api::call::appends(&req["appends"])?;
                 self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller).await?;
                 ok(json!({}))
             }
@@ -284,7 +284,7 @@ impl Node {
                 }
                 let set = self.with(|i| Ok(rank::set(&i.r.db().settings()?)))?;
                 order.sort_by_cached_key(|s| (rank::priority(&set, s["key"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase()));
-                ok(json!({ "order": order, "admin": network.is_some_and(|n| n.role == Some(crate::database::scopes::Role::Admin)) }))
+                ok(json!({ "order": order, "admin": network.is_some_and(|n| n.role == Some(scope::scopes::Role::Admin)) }))
             }
             Ask::Priority => {
                 let req: Value = serde_json::from_slice(&body)?;

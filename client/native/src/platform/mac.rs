@@ -86,7 +86,7 @@ pub fn start(app: &tauri::App) {
         // Off the main thread: a download, and launchctl, take seconds.
         std::thread::spawn(move || {
             if let Err(e) = set_up(&address) {
-                one::logs::say(&format!("setting up {}: {e}", one::config::CLI));
+                one::logs::say(&format!("setting up {}: {e}", custom_build::config::CLI));
             }
         });
     }
@@ -99,7 +99,7 @@ pub fn start(app: &tauri::App) {
             show();
             command(e.id().as_ref());
         }
-        "pair" => crate::main(Some(format!("{}://settings/devices?add=1", one::config::CLI))),
+        "pair" => crate::main(Some(format!("{}://settings/devices?add=1", custom_build::config::CLI))),
         _ => {}
     });
 }
@@ -174,12 +174,12 @@ unsafe extern "C" {
 /// program made, to the copy inside the app: it's replaced, and their launch agent, the app's own, goes.
 pub fn set_up(address: &str) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let cli = one::config::CLI;
+    let cli = custom_build::config::CLI;
     let oned = format!("{cli}d");
     // A throwaway network's computer is its own, beside the Mac's.
     let throwaway = crate::env("THROWAWAY").is_some();
     let user = PathBuf::from(std::env::var_os("HOME").ok_or("This user has no home folder.")?);
-    let bin = if throwaway { one::home().join("bin") } else { user.join(".local/bin") };
+    let bin = if throwaway { platform::home().join("bin") } else { user.join(".local/bin") };
     let program = bin.join(cli);
     if !std::fs::symlink_metadata(&program).is_ok_and(|m| m.is_file()) {
         let bytes = super::desktop::program(address)?;
@@ -204,13 +204,13 @@ pub fn set_up(address: &str) -> Result<(), String> {
     let _ = launchctl(&["bootout", &format!("gui/{uid}/{before}")]);
     // A throwaway network's oned is a launch agent of its own beside the Mac's, named for its home.
     let label = match throwaway {
-        true => format!("app.{cli}.{oned}.throwaway-{}", &data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(one::home().to_string_lossy().as_bytes()))[..8]),
+        true => format!("app.{cli}.{oned}.throwaway-{}", &data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(platform::home().to_string_lossy().as_bytes()))[..8]),
         false => format!("app.{cli}.{oned}"),
     };
-    let plist = if throwaway { one::home() } else { user.join("Library/LaunchAgents") }.join(format!("{label}.plist"));
+    let plist = if throwaway { platform::home() } else { user.join("Library/LaunchAgents") }.join(format!("{label}.plist"));
     // What says which network and home it's for: the environment `one-dev throwaway` gives its programs, or a custom
     // build's home, as the window was started with.
-    let env: String = ["HOME", "ADDR", "THROWAWAY", "RELEASE_KEY"].iter().filter_map(|k| Some(format!("<key>{}</key><string>{}</string>", one::config::env(k), crate::env(k)?))).collect();
+    let env: String = ["HOME", "ADDR", "THROWAWAY", "RELEASE_KEY"].iter().filter_map(|k| Some(format!("<key>{}</key><string>{}</string>", custom_build::config::env(k), crate::env(k)?))).collect();
     let text = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array><string>{}</string></array><key>EnvironmentVariables</key><dict>{env}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ProcessType</key><string>Background</string></dict></plist>\n",
         bin.join(&oned).display()
@@ -234,11 +234,11 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
     use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem as P, Submenu};
     let pair = MenuItem::with_id(app, "pair", "Pair a Computer…", false, Some("CmdOrCtrl+Shift+I"))?;
     let join = MenuItem::with_id(app, "join", "Join with a Pairing Code…", false, Some("CmdOrCtrl+Shift+J"))?;
-    let about = AboutMetadata { name: Some(one::config::NAME.into()), ..Default::default() };
+    let about = AboutMetadata { name: Some(custom_build::config::NAME.into()), ..Default::default() };
     let menu = Menu::with_items(
         app,
         &[
-            &Submenu::with_items(app, one::config::NAME, true, &[&P::about(app, None, Some(about))?, &P::separator(app)?, &P::services(app, None)?, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?, &P::separator(app)?, &P::quit(app, None)?])?,
+            &Submenu::with_items(app, custom_build::config::NAME, true, &[&P::about(app, None, Some(about))?, &P::separator(app)?, &P::services(app, None)?, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?, &P::separator(app)?, &P::quit(app, None)?])?,
             &Submenu::with_items(app, "File", true, &[&pair, &join, &P::separator(app)?, &P::close_window(app, None)?])?,
             &Submenu::with_items(app, "Edit", true, &[&P::undo(app, None)?, &P::redo(app, None)?, &P::separator(app)?, &P::cut(app, None)?, &P::copy(app, None)?, &P::paste(app, None)?, &P::select_all(app, None)?])?,
             &Submenu::with_items(app, "View", true, &[&MenuItem::with_id(app, "sidebar", "Fold Sidebar", true, Some("CmdOrCtrl+\\"))?, &P::separator(app)?, &P::fullscreen(app, None)?])?,

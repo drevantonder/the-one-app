@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use data_encoding::BASE64URL_NOPAD as B64U;
 use ed25519_dalek::SigningKey;
-use one::config::YOURS;
-use one::keys::{self, Endpoint, Waited, hex};
+use ::custom_build::config::YOURS;
+use ::{key::{Endpoint, hex}, api::handed::Waited};
 use serde_json::{Value, json};
 
 use crate::answers::{Answers, Files};
@@ -30,7 +30,7 @@ pub fn join_of(secret: [u8; 32]) -> String {
 /// the device that sent it (hex), or none for one from the network's Workers. Opened here alone: nothing connects or starts.
 pub fn open_note(secret: [u8; 32], pushed: &str) -> Result<(one::push::Note, Option<String>), Error> {
     let sealed = B64U.decode(pushed.trim().trim_end_matches('=').as_bytes()).map_err(|_| failed("That push isn't a note."))?;
-    one::push::open_note(&keys::seal_secret(&SigningKey::from_bytes(&secret)), &sealed).map_err(|_| failed("That note isn't this device's."))
+    one::push::open_note(&::key::seal_secret(&SigningKey::from_bytes(&secret)), &sealed).map_err(|_| failed("That note isn't this device's."))
 }
 
 pub fn new_secret() -> [u8; 32] {
@@ -103,7 +103,7 @@ impl Device {
     /// which it reads who's who to find the network's address, if it has one yet (`address` is empty till then); and
     /// its own app runtime at `runtime` (where it answers, and its token), which it asks before any other node.
     #[cfg(feature = "computer")]
-    pub async fn on_computer(secret: [u8; 32], dir: &str, place: one::bucket::Place, address: Option<String>, runtime: Option<crate::computer::Runtime>) -> Result<Device, Error> {
+    pub async fn on_computer(secret: [u8; 32], dir: &str, place: bucket::Place, address: Option<String>, runtime: Option<crate::computer::Runtime>) -> Result<Device, Error> {
         let mut device = Device::with(secret, String::new(), dir, Reached::place(place, secret, address)).keeping();
         device.runtime = runtime;
         device.keyring.read(&device).await?;
@@ -135,7 +135,7 @@ impl Device {
     /// anything: an ask to update, for a computer's onet to hear (`one::node::heard`).
     #[cfg(feature = "computer")]
     pub(crate) async fn told(&self) -> Result<Value, Error> {
-        let asked = json!({ "computes": true, "reads": one::database::READS, "version": one::protocol::version() });
+        let asked = json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": ::custom_build::protocol::version() });
         let (_, out) = self.relay_computes(asked).await?;
         Ok(out["asked"].clone())
     }
@@ -147,7 +147,7 @@ impl Device {
             bucket,
             #[cfg(feature = "computer")]
             runtime: None,
-            keyring: Keyring::new(me.key, keys::seal_secret(&key)),
+            keyring: Keyring::new(me.key, ::key::seal_secret(&key)),
             me,
             key,
             address,
@@ -169,7 +169,7 @@ impl Device {
     /// Says which device it's on: that device's oned key (hex), on a machine with one, or an id of the device's own,
     /// hashed, that outlives signing out. Its request to join names it, and once it's in, its listing does.
     pub fn on(&self, device: &str) {
-        if keys::unhex(device).is_ok() {
+        if ::key::unhex(device).is_ok() {
             *self.on.lock().unwrap() = Some(device.to_string());
         }
     }
@@ -185,7 +185,7 @@ impl Device {
 
     /// The code it shows to be approved: "ABCD EFGH IJKL MNOP".
     pub fn code(&self) -> String {
-        keys::spaced_code(&keys::join_code(&self.me))
+        ::key::spaced_code(&::key::join_code(&self.me))
     }
 
     /// Asks auth to let it in, as the user signed in with `token`, calling it `name` (and with someone new's invite
@@ -310,7 +310,7 @@ impl Device {
     /// Whether the relay lets this device in: → the compute endpoints on its network, which it says are there, not
     /// what they may do; those on it now; and its count of writes to `global`, if it said.
     async fn computes(&self) -> Result<Option<(Vec<[u8; 32]>, Vec<[u8; 32]>, Option<u64>)>, Error> {
-        let (status, out) = self.relay_computes(json!({ "computes": true, "reads": one::database::READS, "version": one::protocol::version() })).await?;
+        let (status, out) = self.relay_computes(json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": ::custom_build::protocol::version() })).await?;
         // The relay answers 403 only for a key it doesn't let in.
         if status == 403 {
             return Ok(None);
@@ -318,7 +318,7 @@ impl Device {
         if status != 200 {
             return Err(failed(error(&out).unwrap_or_else(|| format!("{YOURS} answered {status}."))));
         }
-        let keys = |v: &Value| v.as_array().into_iter().flatten().filter_map(|c| keys::unhex(c.as_str().unwrap_or("")).ok()).collect::<Vec<_>>();
+        let keys = |v: &Value| v.as_array().into_iter().flatten().filter_map(|c| ::key::unhex(c.as_str().unwrap_or("")).ok()).collect::<Vec<_>>();
         Ok(Some((keys(&out["computes"]), keys(&out["online"]), out["moved"]["global"].as_u64())))
     }
 
@@ -326,12 +326,12 @@ impl Device {
     async fn relay_computes(&self, asked: Value) -> Result<(u16, Value), Error> {
         let url = format!("{}/relay/computes", self.address);
         // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
-        let mut at = keys::next_at(now());
-        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, asked.clone(), at))).await?;
-        if out["code"] == one::protocol::code::REPLAYED {
-            tokio::time::sleep(keys::again_in(at)).await;
-            at = keys::next_at(now());
-            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, asked, at))).await?;
+        let mut at = ::key::next_at(now());
+        let (mut status, mut out) = http("POST", &url, None, Some(::key::signed_request(&self.key, ::custom_build::protocol::RELAY, asked.clone(), at))).await?;
+        if out["code"] == ::custom_build::protocol::code::REPLAYED {
+            tokio::time::sleep(::key::again_in(at)).await;
+            at = ::key::next_at(now());
+            (status, out) = http("POST", &url, None, Some(::key::signed_request(&self.key, ::custom_build::protocol::RELAY, asked, at))).await?;
         }
         Ok((status, out))
     }
@@ -488,8 +488,8 @@ impl Device {
     /// The order things run in, from the node's `/api/state`; a node it lists that this device didn't know of has it
     /// read `global` again (now and then), and only nodes its own reading lists are asked.
     async fn learn_order(&self, bytes: &[u8]) {
-        let Ok(state) = serde_json::from_slice::<one::state::State>(bytes) else { return };
-        let mut said: Vec<(usize, [u8; 32])> = state.network.iter().flat_map(|n| &n.devices).filter(|d| d.serves_me).filter_map(|d| Some((d.order, keys::unhex(&d.key).ok()?))).collect();
+        let Ok(state) = serde_json::from_slice::<scope::state::State>(bytes) else { return };
+        let mut said: Vec<(usize, [u8; 32])> = state.network.iter().flat_map(|n| &n.devices).filter(|d| d.serves_me).filter_map(|d| Some((d.order, ::key::unhex(&d.key).ok()?))).collect();
         said.sort();
         let said: Vec<[u8; 32]> = said.into_iter().map(|s| s.1).collect();
         *self.order.lock().unwrap() = said.clone();
@@ -531,7 +531,7 @@ impl Keep for Device {
     }
 }
 
-impl keys::Signs for Device {
+impl ::key::Signs for Device {
     fn public(&self) -> [u8; 32] {
         self.me.key
     }
@@ -580,11 +580,11 @@ async fn http(method: &str, url: &str, header: Option<(&str, String)>, body: Opt
             request = request.header(name, value);
         }
         let request = match body {
-            Some(body) => request.header("content-type", "application/json").body(keys::canonical(&body)).map_err(failed)?,
+            Some(body) => request.header("content-type", "application/json").body(::key::canonical(&body)).map_err(failed)?,
             None => request.body(Vec::new()).map_err(failed)?,
         };
-        let twice = if method == "GET" { one::hedge::Twice::Safe } else { one::hedge::Twice::Never };
-        let (mut response, _) = one::hedge::run(&crate::bucket::AGENT, "address", request, twice).map_err(|e| failed(format!("Couldn't reach {YOURS}: {e}")))?;
+        let twice = if method == "GET" { platform::hedge::Twice::Safe } else { platform::hedge::Twice::Never };
+        let (mut response, _) = platform::hedge::run(&crate::bucket::AGENT, "address", request, twice).map_err(|e| failed(format!("Couldn't reach {YOURS}: {e}")))?;
         let status = response.status().as_u16();
         Ok((status, response.body_mut().read_json().unwrap_or(Value::Null)))
     })

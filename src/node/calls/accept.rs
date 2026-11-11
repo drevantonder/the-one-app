@@ -1,6 +1,6 @@
 //! Calls from other devices: checking who passed one on, and the keys they handed with it.
 
-use crate::protocol::allowed;
+use ::custom_build::allowed;
 use super::*;
 
 impl Node {

@@ -1,6 +1,6 @@
 //! The Cloudflare node's Rust: the machine node's own code, as WebAssembly on Workers. `worker.js` answers requests
 //! and runs apps; this checks who asks, opens the keys callers hand it, signs what it asks the URL signer, and
-//! reads and writes apps' databases in the bucket (`src/database/stored.rs`), through the presigned URLs `worker.js` gets. It holds
+//! reads and writes apps' databases in the bucket (`database/src/stored.rs`), through the presigned URLs `worker.js` gets. It holds
 //! no keys but those handed it for a device's requests.
 
 mod clients;
@@ -11,11 +11,11 @@ use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result, anyhow};
 use js_sys::Reflect;
-use one::bucket::Bucket;
-use one::call::Append;
-use one::database::stored::Db;
-use one::database::scopes::{Scope, ScopeDb, ScopeState};
-use one::keys::Hash;
+use ::bucket::Bucket;
+use ::api::call::Append;
+use ::database::stored::Db;
+use ::scope::scopes::{Scope, ScopeDb, ScopeState};
+use ::key::Hash;
 use onet::js::Js;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
@@ -27,43 +27,43 @@ fn thrown(err: anyhow::Error) -> JsError {
 /// An error as `worker.js` reads it: one that stopped at an epoch whose key it wasn't handed says which (`missing`).
 fn failed(err: anyhow::Error) -> JsValue {
     let out = js_sys::Error::new(&format!("{err:#}"));
-    if let Some(m) = err.downcast_ref::<one::database::stored::Missing>() {
+    if let Some(m) = err.downcast_ref::<::database::stored::Missing>() {
         let _ = Reflect::set(&out, &"missing".into(), &m.epoch.into());
     }
     out.into()
 }
 
 /// A database's keys as `worker.js` keeps them: JSON, `{ <epoch>: <key, base64url> }`.
-fn keys_of(keys: &str) -> Result<one::database::stored::Keys> {
+fn keys_of(keys: &str) -> Result<::database::stored::Keys> {
     let keys: BTreeMap<u32, String> = serde_json::from_str(keys)?;
-    keys.into_iter().map(|(n, k)| Ok((n, one::keys::decode_key(&k)?))).collect()
+    keys.into_iter().map(|(n, k)| Ok((n, ::key::decode_key(&k)?))).collect()
 }
 
 fn signing_key(seed: &str) -> Result<ed25519_dalek::SigningKey> {
-    Ok(ed25519_dalek::SigningKey::from_bytes(&one::keys::unhex(seed)?))
+    Ok(ed25519_dalek::SigningKey::from_bytes(&::key::unhex(seed)?))
 }
 
 /// This node as an endpoint, from its key (hex): `{ key, seal }`, hex, what a caller seals the keys it hands to.
 #[wasm_bindgen]
 pub fn endpoint_of(seed: &str) -> Result<String, JsError> {
-    let e = one::keys::Endpoint::of(&signing_key(seed).map_err(thrown)?);
+    let e = ::key::Endpoint::of(&signing_key(seed).map_err(thrown)?);
     Ok(json!({ "key": data_encoding::HEXLOWER.encode(&e.key), "seal": data_encoding::HEXLOWER.encode(&e.seal) }).to_string())
 }
 
 /// `fields` (JSON) signed by this node's key for `domain`, as devices sign what they ask the URL signer.
 #[wasm_bindgen]
 pub fn signed(seed: &str, domain: &str, fields: &str, at: f64) -> Result<String, JsError> {
-    Ok(one::keys::signed_request(&signing_key(seed).map_err(thrown)?, domain, serde_json::from_str(fields)?, at as u64).to_string())
+    Ok(::key::signed_request(&signing_key(seed).map_err(thrown)?, domain, serde_json::from_str(fields)?, at as u64).to_string())
 }
 
-static READS: one::bucket::Reads = one::bucket::Reads::new();
+static READS: ::bucket::Reads = ::bucket::Reads::new();
 
 /// A read of the bucket this node made, `name` and whether it was there, counted: → what it read, as the rows the
 /// telemetry Worker takes, once it's been a minute since it last said. `instance` is this node's key.
 #[wasm_bindgen]
 pub fn bucket_read(name: &str, found: bool, instance: &str, now: f64) -> Option<String> {
     READS.count(name, found);
-    READS.due(now as u64, instance, "cloudflare-node").map(|rows| rows.to_string())
+    one::insights::bucket_reads(&READS, now as u64, instance, "cloudflare-node").map(|rows| rows.to_string())
 }
 
 /// A call this node ran for `user` (their id), as the rows the telemetry Worker takes: one server span, by the same rules as any node's. `code` is
@@ -73,10 +73,10 @@ pub fn call_span(app: &str, tool: &str, user: &str, instance: &str, time: f64, m
     use one::insights::{Attrs, Batch, Failure, Span, SpanKind, Status, message, own, token};
     let failure = failed.then(|| Failure::of(code.as_deref(), None, one::insights::stage::RUN));
     let name = if token(tool) { tool } else { "_unknown" };
-    let mut attrs = Attrs::default().client("api").user(user).rpc(app, name).build(one::config::BUILD);
+    let mut attrs = Attrs::default().client("api").user(user).rpc(app, name).build(custom_build::config::BUILD);
     let mut text = None;
     if let Some(failure) = &failure {
-        attrs = attrs.failed(failure).stage(one::insights::stage::RUN).fingerprint(failure.kind(), "stage:run", one::config::BUILD);
+        attrs = attrs.failed(failure).stage(one::insights::stage::RUN).fingerprint(failure.kind(), "stage:run", custom_build::config::BUILD);
         if let Failure::Broke(_) = failure {
             text = said.as_deref().map(message::cleaned);
         }
@@ -96,7 +96,7 @@ const HANDED_MOST: usize = 256;
 /// lasts (`exp`, milliseconds): → `{ until, keys: [{ scope, epoch, app, database, key }] }`.
 #[wasm_bindgen]
 pub fn handoff(seed: &str, device: &str, sealed: &str, now: f64, exp: f64) -> Result<String, JsError> {
-    let handoff = one::keys::open_handoff(&one::keys::seal_secret(&signing_key(seed).map_err(thrown)?), sealed).map_err(thrown)?;
+    let handoff = ::api::handed::open_handoff(&::key::seal_secret(&signing_key(seed).map_err(thrown)?), sealed).map_err(thrown)?;
     if handoff.for_ != device {
         return Err(JsError::new("the keys handed are for another device"));
     }
@@ -110,7 +110,7 @@ pub fn handoff(seed: &str, device: &str, sealed: &str, now: f64, exp: f64) -> Re
 }
 
 /// What a sign-in needs for `wants` (JSON, `[{ scope, app, database, have: [epoch] }]`) that it wasn't handed, as a node
-/// on a machine says it (src/node/sessions.rs): every epoch from the oldest it needs (`one::keys::oldest_needed`) to the
+/// on a machine says it (src/node/sessions.rs): every epoch from the oldest it needs (`::api::handed::oldest_needed`) to the
 /// scope's current one, as the network's signed steps say (`epochs`, JSON `{ <scope>: n }`), never what the bucket
 /// holds, where any endpoint can put a name. → `[{ scope, epoch, app, database }]`.
 #[wasm_bindgen]
@@ -123,17 +123,17 @@ pub async fn needs(bucket: JsValue, wants: String, epochs: String) -> Result<Str
         let (scope, app, database) = (w["scope"].as_str().unwrap_or(""), w["app"].as_str().unwrap_or(""), w["database"].as_str().unwrap_or(""));
         let have: Vec<u32> = serde_json::from_value(w["have"].clone()).unwrap_or_default();
         let newest = epochs.get(scope).copied().unwrap_or(1).max(1);
-        let hint = bucket.get(&one::database::stored::newest_name(&prefix_of(scope, app, database).map_err(thrown)?)).await.map_err(thrown)?;
-        let oldest = one::keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest);
+        let hint = bucket.get(&::bucket::names::newest_name(&prefix_of(scope, app, database).map_err(thrown)?)).await.map_err(thrown)?;
+        let oldest = ::api::handed::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest);
         need.extend((oldest..=newest).filter(|n| !have.contains(n)).map(|epoch| json!({ "scope": scope, "epoch": epoch, "app": app, "database": database })));
     }
     Ok(Value::from(need).to_string())
 }
 
 /// The keys of a database a call uses, of those handed (`keys_of`), for a scope whose current epoch is `current`
-/// (`one::database::stored::handed`): a `missing` error names the epoch it lacks.
-fn usable(keys: &str, current: u32) -> Result<one::database::stored::Keys, JsValue> {
-    one::database::stored::handed(keys_of(keys).map_err(failed)?, current.max(1)).map_err(|m| failed(m.into()))
+/// (`::database::stored::handed`): a `missing` error names the epoch it lacks.
+fn usable(keys: &str, current: u32) -> Result<::database::stored::Keys, JsValue> {
+    ::database::stored::handed(keys_of(keys).map_err(failed)?, current.max(1)).map_err(|m| failed(m.into()))
 }
 
 /// How many users' databases and steps one isolate keeps, the least lately used going first: each user's are
@@ -178,12 +178,12 @@ fn put(handle: u32, db: (String, Db)) {
 
 #[wasm_bindgen]
 pub fn epoch_name(scope: &str, n: u32, to: &str) -> String {
-    one::keys::epoch_name(scope, n, to)
+    ::database::keys::epoch_name(scope, n, to)
 }
 
 #[wasm_bindgen]
 pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
-    one::keys::app_key_name(scope, app, n)
+    ::database::keys::app_key_name(scope, app, n)
 }
 
 /// A session's certificate (`x-one-endpoint`, `keys::certify`'s), checked at `now` (milliseconds): `{ by, endpoint,
@@ -191,8 +191,8 @@ pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
 /// to check.
 #[wasm_bindgen]
 pub fn check_certificate(certificate: &str, now: f64) -> Result<String, JsError> {
-    let s = one::keys::check_certificate(certificate, now as u64).map_err(thrown)?;
-    Ok(json!({ "by": one::keys::hex(&s.by), "endpoint": one::keys::hex(&s.endpoint), "until": s.until }).to_string())
+    let s = ::key::check_certificate(certificate, now as u64).map_err(thrown)?;
+    Ok(json!({ "by": ::key::hex(&s.by), "endpoint": ::key::hex(&s.endpoint), "until": s.until }).to_string())
 }
 
 /// Opens a database at `prefix` for `owner`'s object with the keys handed (`usable`, under the scope's `current`
@@ -258,7 +258,7 @@ pub fn may(owner: &str, handle: Option<u32>, user: &str, asks: &str, types: &str
     let asks: Vec<(String, String)> = serde_json::from_str(asks)?;
     let types: Value = serde_json::from_str(types)?;
     let rows = match handle {
-        Some(h) => OPEN.with(|o| o.borrow().1.get(&h).map(|(_, db)| one::database::scopes::app_relations(db.connection()))).context("that database isn't open").map_err(thrown)?,
+        Some(h) => OPEN.with(|o| o.borrow().1.get(&h).map(|(_, db)| ::scope::scopes::app_relations(db.connection()))).context("that database isn't open").map_err(thrown)?,
         None => Vec::new(),
     };
     replayed(owner, &[], |r| Ok(Value::from(r.global().app_may(user, &asks, &types, &rows, now as u64)).to_string())).map_err(thrown)
@@ -271,7 +271,7 @@ pub async fn write(handle: u32, bucket: JsValue, statements: String) -> Result<f
     let list: Vec<(String, Vec<Value>, Option<String>)> = serde_json::from_str(&statements)?;
     let (owner, mut db) = take(handle).map_err(thrown)?;
     let (at, bucket) = (db.at(), Js(bucket));
-    let wrote = db.write(&bucket, |c| one::database::stored::statements(c, &list)).await;
+    let wrote = db.write(&bucket, |c| ::database::stored::statements(c, &list)).await;
     let step = if db.at() > at { db.at() as f64 } else { 0.0 };
     put(handle, (owner, db));
     wrote.map_err(thrown)?;
@@ -331,7 +331,7 @@ fn lookup(opened: &str, app: &str, user: &str) -> Result<one::vault::Lookup, JsE
 pub fn statements(appends: &str, scopes: &str) -> Result<String, JsError> {
     let scopes: Vec<String> = serde_json::from_str(scopes)?;
     let mut out = serde_json::Map::new();
-    for append in one::call::appends(&serde_json::from_str(appends)?).map_err(thrown)? {
+    for append in ::api::call::appends(&serde_json::from_str(appends)?).map_err(thrown)? {
         match append {
             Append::Exec { scope, sql, params, blobs, check } => {
                 if !scopes.contains(&scope) {
@@ -358,16 +358,16 @@ pub fn screen(context: &str, body: &str, linked: bool) -> Result<String, JsError
 /// The custom build this node is: `{ name, cli, port, made_here }`, and the name a call gives for this node (`cloudflare`).
 #[wasm_bindgen]
 pub fn config() -> String {
-    json!({ "name": one::config::NAME, "cli": one::config::CLI, "port": one::config::PORT, "made_here": one::config::MADE_HERE, "cloudflare": one::rank::CLOUDFLARE }).to_string()
+    json!({ "name": custom_build::config::NAME, "cli": custom_build::config::CLI, "port": custom_build::config::PORT, "made_here": custom_build::config::MADE_HERE, "cloudflare": ::scope::rank::CLOUDFLARE }).to_string()
 }
 
-/// Where an app's database of a scope is in the bucket (`src/database/stored.rs`): only of a scope there can be, and an app and
+/// Where an app's database of a scope is in the bucket (`database/src/stored.rs`): only of a scope there can be, and an app and
 /// database whose names are only letters, digits and dashes.
 fn prefix_of(scope: &str, app: &str, database: &str) -> Result<String> {
     let scope = Scope::parse(scope)?.to_string();
     let plain = |s: &str| !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     anyhow::ensure!(plain(app) && plain(database), "{app}/{database} isn't an app's database");
-    Ok(one::bucket::database_prefix(&scope, app, database))
+    Ok(::bucket::names::database_prefix(&scope, app, database))
 }
 
 #[wasm_bindgen]
@@ -375,23 +375,23 @@ pub fn prefix(scope: &str, app: &str, database: &str) -> Result<String, JsError>
     prefix_of(scope, app, database).map_err(thrown)
 }
 
-// Who can do what: each scope's database's steps (`src/database/steps.rs`), which every question of who's who and who
+// Who can do what: each scope's database's steps (`scope/src/steps.rs`), which every question of who's who and who
 // may is asked of.
 
 /// A scope's steps this isolate read for one user's object, with the keys they were read with: `global`'s by who's
 /// who's reader, as every device reads it; another scope's by its own, once `global`'s log is frozen and its start read.
 struct Held {
-    keys: one::database::stored::Keys,
+    keys: ::database::stored::Keys,
     steps: Steps,
 }
 
 enum Steps {
-    Global(one::database::steps::Reader),
-    Scope(Option<one::database::steps::ScopeReader>),
+    Global(::scope::steps::Reader),
+    Scope(Option<::scope::steps::ScopeReader>),
 }
 
 impl Held {
-    fn truth(&self) -> Option<&one::database::steps::Truth> {
+    fn truth(&self) -> Option<&::scope::steps::Truth> {
         match &self.steps {
             Steps::Global(r) => r.truth(),
             Steps::Scope(_) => None,
@@ -433,7 +433,7 @@ pub async fn read_scope(owner: String, bucket: JsValue, scope: String, keys: Str
     let id = (owner, scope.to_string());
     if LOGS.with(|l| l.borrow().get(&id).is_none_or(|l| l.keys != keys)) {
         let steps = match scope {
-            Scope::Global => Steps::Global(one::database::steps::Reader::new(ROOT.with(|r| *r.borrow()))),
+            Scope::Global => Steps::Global(::scope::steps::Reader::new(ROOT.with(|r| *r.borrow()))),
             _ => Steps::Scope(None),
         };
         LOGS.with(|l| l.borrow_mut().insert(id.clone(), Held { keys: keys.clone(), steps }));
@@ -442,7 +442,7 @@ pub async fn read_scope(owner: String, bucket: JsValue, scope: String, keys: Str
 }
 
 /// Runs `f` on what `id`'s object read of a scope, if it's still read with `keys`, and on `global`'s as it is.
-fn held<R>(id: &(String, String), keys: &one::database::stored::Keys, f: impl FnOnce(&mut Held, Option<&Held>) -> Result<R>) -> Result<Option<R>> {
+fn held<R>(id: &(String, String), keys: &::database::stored::Keys, f: impl FnOnce(&mut Held, Option<&Held>) -> Result<R>) -> Result<Option<R>> {
     LOGS.with(|l| {
         let mut logs = l.borrow_mut();
         let Some(mut log) = logs.remove(id) else { return Ok(None) };
@@ -454,8 +454,8 @@ fn held<R>(id: &(String, String), keys: &one::database::stored::Keys, f: impl Fn
 
 /// A scope's database's steps after those read, with `keys`: another scope's once `global`'s log is frozen, from its
 /// start the first time. One under an epoch made whose key it wasn't handed is asked for (428, `Missing`).
-async fn read_steps(id: &(String, String), scope: &Scope, bucket: &Js, keys: &one::database::stored::Keys) -> Result<()> {
-    use one::database::steps::{self, ScopeReader};
+async fn read_steps(id: &(String, String), scope: &Scope, bucket: &Js, keys: &::database::stored::Keys) -> Result<()> {
+    use ::scope::steps::{self, ScopeReader};
     let waits = if *scope == Scope::Global {
         let at = held(id, keys, |h, _| Ok(match &h.steps {
             Steps::Global(r) => r.at(),
@@ -498,7 +498,7 @@ async fn read_steps(id: &(String, String), scope: &Scope, bucket: &Js, keys: &on
         read.waits
     };
     match waits {
-        Some(epoch) => Err(one::database::stored::Missing { epoch }.into()),
+        Some(epoch) => Err(::database::stored::Missing { epoch }.into()),
         None => Ok(()),
     }
 }
@@ -523,9 +523,9 @@ pub fn pin_root(root: &str) -> Result<(), JsError> {
 /// Fails before the log is frozen. The caller opens and checks them all itself: this trusts the node with nothing.
 #[wasm_bindgen]
 pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, from: f64, welcome: Option<String>) -> Result<String, JsValue> {
-    use one::database::steps;
+    use ::scope::steps;
     let bucket = Js(bucket);
-    let (member, epoch) = replayed(&owner, &[], |r| Ok((r.global().may(&user, "use", one::database::scopes::NETWORK), r.global().epoch(&Scope::Global)?))).map_err(failed)?;
+    let (member, epoch) = replayed(&owner, &[], |r| Ok((r.global().may(&user, "use", ::scope::scopes::NETWORK), r.global().epoch(&Scope::Global)?))).map_err(failed)?;
     if !member {
         return Err(failed(anyhow!("you aren't one of this network's users")));
     }
@@ -569,10 +569,10 @@ pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
 /// runs (a user's own only as their own device chose): `{ scopes, joined, removed, device, runs }`.
 #[wasm_bindgen]
 pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsError> {
-    let key = one::keys::unhex(device).ok();
+    let key = ::key::unhex(device).ok();
     let out = replayed(owner, &[], |r| {
         let m = r.global();
-        let scopes: Vec<Scope> = m.scopes()?.into_iter().filter(|s| m.may(user, "use", &one::database::scopes::object(s))).collect();
+        let scopes: Vec<Scope> = m.scopes()?.into_iter().filter(|s| m.may(user, "use", &::scope::scopes::object(s))).collect();
         let device = match key {
             Some(k) => m.client(&k)?,
             None => None,
@@ -612,7 +612,7 @@ pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
 pub fn runners(owner: &str, user: &str, scopes: &str) -> Result<String, JsError> {
     let scopes = serde_json::from_str::<Vec<String>>(scopes)?.iter().map(|s| Scope::parse(s)).collect::<Result<Vec<_>>>().map_err(thrown)?;
     let out = replayed(owner, &[], |r| {
-        Ok(r.global().runners(user, &scopes)?.iter().map(|r| json!({ "key": one::keys::hex(&r.key), "seal": one::keys::hex(&r.seal) })).collect::<Vec<_>>())
+        Ok(r.global().runners(user, &scopes)?.iter().map(|r| json!({ "key": ::key::hex(&r.key), "seal": ::key::hex(&r.seal) })).collect::<Vec<_>>())
     })
     .map_err(thrown)?;
     Ok(Value::from(out).to_string())
@@ -624,8 +624,8 @@ pub fn runners(owner: &str, user: &str, scopes: &str) -> Result<String, JsError>
 #[wasm_bindgen]
 pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, until: f64, keys: &str, scopes: &str) -> Result<String, JsError> {
     let from = signing_key(seed).map_err(thrown)?.verifying_key().to_bytes();
-    let seal = one::keys::unhex(seal).map_err(thrown)?;
-    let asked = one::keys::forwarded(&serde_json::from_str(call)?, user, client, &from, &seal, until as u64, serde_json::from_str(keys)?, &serde_json::from_str::<Vec<String>>(scopes)?).map_err(thrown)?;
+    let seal = ::key::unhex(seal).map_err(thrown)?;
+    let asked = ::api::handed::forwarded(&serde_json::from_str(call)?, user, client, &from, &seal, until as u64, serde_json::from_str(keys)?, &serde_json::from_str::<Vec<String>>(scopes)?).map_err(thrown)?;
     Ok(asked.to_string())
 }
 
@@ -656,17 +656,17 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
     let arrangements = state_of(&Scope::User(me.into())).map(|st| st.arrangements.clone()).unwrap_or_default();
     let cloudflare = m.cloudflare_node()?;
     // It knows of no device being on, nor of who else is looking.
-    let state = one::state::state(
+    let state = ::scope::state::state(
         Some(m),
         me,
-        one::state::Here {
-            me: one::state::Viewer { key: String::new(), name: client.to_string(), user: me.to_string() },
-            client: Some(one::state::ClientHere { key: String::new(), name: client.to_string() }),
-            device: one::state::Answering { key: cloudflare.map(|k| one::keys::hex(&k)).unwrap_or_default(), name: "Cloudflare".into(), ready: true, guide: None },
+        ::scope::state::Here {
+            me: ::scope::state::Viewer { key: String::new(), name: client.to_string(), user: me.to_string() },
+            client: Some(::scope::state::ClientHere { key: String::new(), name: client.to_string() }),
+            device: ::scope::state::Answering { key: cloudflare.map(|k| ::key::hex(&k)).unwrap_or_default(), name: "Cloudflare".into(), ready: true, guide: None },
             looking: None,
             member: false,
             steps: 0,
-            waiting: one::state::waiting(m, me, read(), now),
+            waiting: ::scope::state::waiting(m, me, read(), now),
             arrangements,
             backups: None,
             telemetry: false,
@@ -682,22 +682,22 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
         .iter()
         .filter(|a| !a.erased)
         .map(|a| -> Result<Value> {
-            let mut info = one::state::app_info(m, a, &every, me, one::state::added(m, &a.name, me, read()))?;
+            let mut info = ::scope::state::app_info(m, a, &every, me, ::scope::state::added(m, &a.name, me, read()))?;
             if a.deleted.is_some() {
                 info["reach"] = json!([]);
                 return Ok(info);
             }
-            let mut reach = one::state::reachable(m, me, |s| runs(s).then(|| state_of(s).is_some_and(|st| st.added.contains(&a.name))))?;
+            let mut reach = ::scope::state::reachable(m, me, |s| runs(s).then(|| state_of(s).is_some_and(|st| st.added.contains(&a.name))))?;
             // Only those this node runs, if it runs some, as a node on a machine leaves out a user's own scope that
             // no node running the rest runs (src/node/calls.rs: `reaching`): their own, until they choose this one.
             if reach.iter().any(runs) {
                 reach.retain(runs);
             }
-            info["reach"] = json!(one::state::handles(m, &reach, me)?);
+            info["reach"] = json!(::scope::state::handles(m, &reach, me)?);
             Ok(info)
         })
         .collect::<Result<_>>()?;
-    let me = one::state::me(m, me, String::new(), client.to_string(), None)?;
+    let me = ::scope::state::me(m, me, String::new(), client.to_string(), None)?;
     let erased: Vec<&String> = every.iter().filter(|a| a.erased).map(|a| &a.name).collect();
     Ok(json!({ "state": state, "apps": apps, "me": me, "erased": erased, "handles": m.handles()? }))
 }
@@ -707,11 +707,11 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
 #[wasm_bindgen]
 pub async fn bundle(bucket: JsValue, keys: String, hash: String) -> Result<String, JsValue> {
     let keys = keys_of(&keys).map_err(failed)?;
-    let name = one::bucket::blob_name("global", &hash);
+    let name = ::bucket::names::blob_name("global", &hash);
     let sealed = Js(bucket).get(&name).await.map_err(failed)?.ok_or_else(|| failed(anyhow!("{name} isn't in the bucket yet: a node on one of your machines puts it there")))?;
-    let epoch = one::keys::epoch_of(&sealed.bytes).map_err(failed)?;
-    let key = keys.get(&epoch).ok_or_else(|| failed(one::database::stored::Missing { epoch }.into()))?;
-    let bytes = one::keys::open(key, &name, &sealed.bytes).map_err(failed)?;
+    let epoch = ::key::epoch_of(&sealed.bytes).map_err(failed)?;
+    let key = keys.get(&epoch).ok_or_else(|| failed(::database::stored::Missing { epoch }.into()))?;
+    let bytes = ::key::open(key, &name, &sealed.bytes).map_err(failed)?;
     if blake3::hash(&bytes).to_hex().as_str() != hash {
         return Err(failed(anyhow!("the bundle kept as {hash} isn't it")));
     }

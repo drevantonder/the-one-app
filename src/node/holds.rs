@@ -12,7 +12,7 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 
 use super::*;
 use crate::api::{Body, Reply, Routes, Who};
-use crate::database::stored::Keys;
+use ::database::stored::Keys;
 
 pub(super) enum Holds {
     /// The device's key itself.
@@ -34,7 +34,7 @@ impl Holder {
         let (url, token) = (format!("http://{}{path}", self.at), self.token.clone());
         let (status, said) = tokio::task::spawn_blocking(move || -> Result<(u16, Value)> {
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-            let header = crate::protocol::header::LOCAL_TOKEN;
+            let header = custom_build::protocol::header::LOCAL_TOKEN;
             let mut resp = match body {
                 Some(body) => agent.post(&url).header(header, &token).send_json(body)?,
                 None => agent.run(ureq::http::Request::builder().method(method).uri(&url).header(header, &token).body(())?)?,
@@ -81,9 +81,9 @@ impl Holds {
     pub(super) async fn epochs(&self, bucket: &Copied, scope: &Scope, hashes: &BTreeMap<u32, String>) -> Result<Keys> {
         let mut out = Keys::new();
         for (n, hash) in hashes {
-            let name = crate::keys::epoch_name(&scope.to_string(), *n, &hex(&self.device()));
-            let Some(o) = crate::bucket::Bucket::get(bucket, &name).await? else { continue };
-            match crate::keys::open_sealed_by(self, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == *hash) {
+            let name = ::database::keys::epoch_name(&scope.to_string(), *n, &hex(&self.device()));
+            let Some(o) = bucket::Bucket::get(bucket, &name).await? else { continue };
+            match key::open_sealed_by(self, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| key::epoch_hash(k) == *hash) {
                 Some(key) => drop(out.insert(*n, key)),
                 None => tracing::warn!("{name} isn't the key {scope}'s epoch {n} entry made: passed over"),
             }
@@ -96,9 +96,9 @@ impl Holds {
     pub(super) async fn vault_keys(&self, bucket: &Copied, scope: &Scope, publics: &[(u32, [u8; 32])]) -> Result<BTreeMap<u32, [u8; 32]>> {
         let mut out = BTreeMap::new();
         for (n, public) in publics {
-            let name = crate::keys::vault_key_name(&scope.to_string(), *n, &hex(&self.device()));
-            let Some(o) = crate::bucket::Bucket::get(bucket, &name).await? else { continue };
-            match crate::keys::open_sealed_by(self, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::public_of(k) == *public) {
+            let name = ::database::keys::vault_key_name(&scope.to_string(), *n, &hex(&self.device()));
+            let Some(o) = bucket::Bucket::get(bucket, &name).await? else { continue };
+            match key::open_sealed_by(self, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| key::public_of(k) == *public) {
                 Some(key) => drop(out.insert(*n, key)),
                 None => tracing::warn!("{name} isn't the Vault key its step names: passed over"),
             }
@@ -112,16 +112,16 @@ impl Holds {
         let (scope, me) = (scope.to_string(), hex(&self.device()));
         let mut out = Keys::new();
         for (n, hash) in hashes {
-            let name = crate::keys::app_schedules_key_name(&scope, app, &me, *n);
-            let found = match crate::bucket::Bucket::get(bucket, &name).await? {
+            let name = ::database::keys::app_schedules_key_name(&scope, app, &me, *n);
+            let found = match bucket::Bucket::get(bucket, &name).await? {
                 Some(o) => Some(o),
-                None => crate::bucket::Bucket::get(bucket, &crate::keys::app_schedules_key_name_before(&scope, app, &me, *n)).await?,
+                None => bucket::Bucket::get(bucket, &::database::keys::app_schedules_key_name_before(&scope, app, &me, *n)).await?,
             };
             let Some(o) = found else {
                 tracing::warn!("{name} isn't in the bucket yet");
                 continue;
             };
-            match crate::keys::open_sealed_by(self, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == *hash) {
+            match key::open_sealed_by(self, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| key::epoch_hash(k) == *hash) {
                 Some(key) => drop(out.insert(*n, key)),
                 None => tracing::warn!("{name} isn't the key its app schedules name: passed over"),
             }
@@ -130,17 +130,17 @@ impl Holds {
     }
 }
 
-impl crate::keys::Opens for Holds {
+impl key::Opens for Holds {
     fn public(&self) -> [u8; 32] {
         match self {
-            Holds::Key(key) => crate::keys::public_of(&crate::keys::seal_secret(key)),
+            Holds::Key(key) => key::public_of(&key::seal_secret(key)),
             Holds::Asks { seal, .. } => *seal,
         }
     }
 
     async fn shared(&self, share: &[u8; 32]) -> Result<[u8; 32]> {
         match self {
-            Holds::Key(key) => Ok(crate::keys::agree(&crate::keys::seal_secret(key), share)),
+            Holds::Key(key) => Ok(key::agree(&key::seal_secret(key), share)),
             Holds::Asks { holder, .. } => {
                 let said = holder.ask("POST", "/api/holds/shared", Some(json!({ "share": B64U.encode(share) }))).await?;
                 let shared = B64U.decode(said["shared"].as_str().context("the holder said nothing it shares")?.as_bytes())?;
@@ -150,7 +150,7 @@ impl crate::keys::Opens for Holds {
     }
 }
 
-impl crate::keys::Signs for Holds {
+impl key::Signs for Holds {
     fn public(&self) -> [u8; 32] {
         self.device()
     }
@@ -172,7 +172,7 @@ impl crate::keys::Signs for Holds {
 pub fn sign_request(key: &SigningKey, bytes: &[u8]) -> Result<[u8; 64]> {
     let (domain, fields) = bytes.split_at(bytes.iter().position(|b| *b == 0).context("that isn't a signed request")?);
     let domain = std::str::from_utf8(domain)?;
-    ensure!([crate::protocol::RELAY, crate::protocol::AUTH_DOMAIN].contains(&domain), "the device signs only its requests to the relay and auth for its app runtime, not {domain}");
+    ensure!([custom_build::protocol::RELAY, custom_build::protocol::AUTH_DOMAIN].contains(&domain), "the device signs only its requests to the relay and auth for its app runtime, not {domain}");
     serde_json::from_slice::<Value>(&fields[1..]).context("that isn't a signed request")?;
     Ok(ed25519_dalek::Signer::sign(key, bytes).to_bytes())
 }
@@ -188,7 +188,7 @@ pub(crate) fn routes() -> Routes {
 /// The device's key and seal key.
 async fn held(State(node): State<Node>) -> Reply {
     let holds = &node.0.holds;
-    Ok(axum::Json(json!({ "key": hex(&holds.device()), "seal": hex(&crate::keys::Opens::public(holds)) })))
+    Ok(axum::Json(json!({ "key": hex(&holds.device()), "seal": hex(&key::Opens::public(holds)) })))
 }
 
 /// What `/api/holds/shared` takes: answered by whatever holds the device's key, its node or its onet.
@@ -202,7 +202,7 @@ pub struct HeldShare {
 /// The X25519 secret the device's seal key shares with `share`: what opens something sealed to the device.
 async fn shared(State(node): State<Node>, Body(body): Body<HeldShare>) -> Reply {
     let share = <[u8; 32]>::try_from(B64U.decode(body.share.as_bytes()).map_err(anyhow::Error::from)?).map_err(|_| anyhow!("a share is 32 bytes"))?;
-    let shared = crate::keys::Opens::shared(&node.0.holds, &share).await?;
+    let shared = key::Opens::shared(&node.0.holds, &share).await?;
     Ok(axum::Json(json!({ "shared": B64U.encode(&shared) })))
 }
 

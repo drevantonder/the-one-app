@@ -2,12 +2,12 @@
 //! sealed as they are), new keys a scope is owed, a device's services listed as its parts, and erasing what a device
 //! keeps. Letting devices in and taking them out is what this machine signs as its own device (`settings.rs`).
 
-use crate::protocol::allowed;
-use crate::config::YOURS;
+use ::custom_build::allowed;
+use ::custom_build::config::YOURS;
 use super::*;
 
 pub(crate) mod routes;
-use crate::bucket::Bucket;
+use ::bucket::Bucket;
 use data_encoding::BASE64URL_NOPAD as B64U;
 
 /// The most a sealed key may be: an epoch's key sealed to an endpoint, or an app's under an epoch, is far less.
@@ -15,7 +15,7 @@ const SEALED_MAX: usize = 256;
 
 /// Whom an epoch's key is sealed to, in `keys::epoch_name`: an endpoint's key in hex, or `recovery`.
 fn sealed_to(to: &str) -> Result<()> {
-    ensure!(to == "recovery" || crate::keys::unhex(to).is_ok(), "to is an endpoint's key (64 hex characters) or recovery");
+    ensure!(to == "recovery" || key::unhex(to).is_ok(), "to is an endpoint's key (64 hex characters) or recovery");
     Ok(())
 }
 
@@ -64,7 +64,7 @@ impl Node {
                 sealed_to(to)?;
                 // Every epoch at once: one wait on the bucket, not one each.
                 let got = futures_util::future::try_join_all((1..=newest).map(|n| {
-                    let (bucket, at) = (&bucket, crate::keys::epoch_name(&name, n, to));
+                    let (bucket, at) = (&bucket, database::keys::epoch_name(&name, n, to));
                     async move { Bucket::get(bucket, &at).await }
                 }))
                 .await?;
@@ -78,12 +78,12 @@ impl Node {
             // One the bucket hadn't is asked for again only once who's who has moved on, or this node keeps one: a
             // device that wants it makes it, and is given whichever is there (`seal_key`).
             (None, Some(app)) => {
-                ensure!(app == scopes::APP || scopes::valid_app_name(app), "{app} isn't an app's name");
+                ensure!(app == key::APP || scopes::valid_app_name(app), "{app} isn't an app's name");
                 let at = self.with(|i| Ok(i.r.at()))?;
                 let id = |n: u32| (scope.clone(), app.to_string(), n);
                 let asked: Vec<u32> = (1..=newest).filter(|n| self.0.no_app_keys.lock().unwrap().get(&id(*n)) != Some(&at)).collect();
                 let got = futures_util::future::try_join_all(asked.iter().map(|n| {
-                    let (bucket, at) = (&bucket, crate::keys::app_key_name(&name, app, *n));
+                    let (bucket, at) = (&bucket, database::keys::app_key_name(&name, app, *n));
                     async move { Bucket::get(bucket, &at).await }
                 }))
                 .await?;
@@ -119,11 +119,11 @@ impl Node {
                 let db = i.r.db();
                 allowed!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s user, or its admins, say which machines open its Vault");
                 let newest = db.vault(scope)?.filter(|v| v.n == n).with_context(|| format!("{scope}'s newest Vault key isn't {n}"))?;
-                ensure!(to == "recovery" || newest.to.contains(&crate::keys::unhex(to)?), "{scope}'s Vault key {n} doesn't open on that machine");
+                ensure!(to == "recovery" || newest.to.contains(&key::unhex(to)?), "{scope}'s Vault key {n} doesn't open on that machine");
                 Ok(())
             })?;
-            if !crate::database::stored::created(&bucket, &crate::keys::vault_key_name(&scope.to_string(), n, to), &sealed).await? {
-                return Err(crate::protocol::Coded::error(crate::protocol::code::ALREADY, format!("{scope}'s Vault key {n} is sealed to {to} already")));
+            if !database::stored::created(&bucket, &database::keys::vault_key_name(&scope.to_string(), n, to), &sealed).await? {
+                return Err(::custom_build::protocol::Coded::error(::custom_build::protocol::code::ALREADY, format!("{scope}'s Vault key {n} is sealed to {to} already")));
             }
             return Ok(json!({}));
         }
@@ -134,7 +134,7 @@ impl Node {
                 ensure!(scopes::valid_app_name(app), "{app} isn't an app's name");
                 allowed!(self.with(|i| Ok(i.r.db().may(&caller.user, "choose-devices", &scopes::object(scope))))?, "only {scope}'s user, or its group's admins, choose where its apps' schedules run");
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
-                crate::database::stored::created(&bucket, &crate::keys::app_schedules_vault_name(&name, app, n), &sealed).await?;
+                database::stored::created(&bucket, &database::keys::app_schedules_vault_name(&name, app, n), &sealed).await?;
                 Ok(json!({}))
             }
             (Some(_), Some(_)) if vault => bail!("the Vault's key for an app's schedules is kept under the app's, and sealed to no device"),
@@ -149,7 +149,7 @@ impl Node {
                     match to {
                         "recovery" => allowed!(db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins seal its keys to the recovery key"),
                         to => {
-                            let key = crate::keys::unhex(to)?;
+                            let key = key::unhex(to)?;
                             // A scope's epochs are its users' client devices' alone: a node is handed a call's keys,
                             // and a service holds none, reading nothing and asking its user's node to write.
                             let listed = db.client(&key)?.context("a scope's keys are sealed only to client devices and the recovery key")?;
@@ -159,18 +159,18 @@ impl Node {
                     }
                     Ok(())
                 })?;
-                if !crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, to), &sealed).await? {
-                    return Err(crate::protocol::Coded::error(crate::protocol::code::ALREADY, format!("{scope}'s epoch {n} is sealed to {to} already")));
+                if !database::stored::created(&bucket, &database::keys::epoch_name(&name, n, to), &sealed).await? {
+                    return Err(::custom_build::protocol::Coded::error(::custom_build::protocol::code::ALREADY, format!("{scope}'s epoch {n} is sealed to {to} already")));
                 }
                 Ok(json!({}))
             }
             (None, Some(app)) => {
-                ensure!(app == scopes::APP || scopes::valid_app_name(app), "{app} isn't an app's name");
+                ensure!(app == key::APP || scopes::valid_app_name(app), "{app} isn't an app's name");
                 allowed!(self.with(|i| Ok(i.r.db().may(&caller.user, "use", &scopes::object(scope))))?, "you don't use {scope}");
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
-                let key = crate::keys::app_key_name(&name, app, n);
+                let key = database::keys::app_key_name(&name, app, n);
                 self.0.no_app_keys.lock().unwrap().remove(&(scope.clone(), app.to_string(), n));
-                let there = match crate::database::stored::created(&bucket, &key, &sealed).await? {
+                let there = match database::stored::created(&bucket, &key, &sealed).await? {
                     true => sealed,
                     false => Bucket::get(&bucket, &key).await?.context("an app's key went as it was made")?.bytes,
                 };
@@ -178,7 +178,7 @@ impl Node {
             }
             (Some(to), Some(app)) => {
                 ensure!(scopes::valid_app_name(app), "{app} isn't an app's name");
-                let key = crate::keys::unhex(to)?;
+                let key = key::unhex(to)?;
                 self.with(|i| {
                     let db = i.r.db();
                     allowed!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s user, or its group's admins, choose where its apps' schedules run");
@@ -186,7 +186,7 @@ impl Node {
                     Ok(())
                 })?;
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
-                crate::database::stored::created(&bucket, &crate::keys::app_schedules_key_name(&name, app, to, n), &sealed).await?;
+                database::stored::created(&bucket, &database::keys::app_schedules_key_name(&name, app, to, n), &sealed).await?;
                 Ok(json!({}))
             }
             _ => bail!("give to (an endpoint's key, or recovery), app, or both"),
@@ -215,7 +215,7 @@ impl Node {
             let mut listed = Vec::new();
             for d in devices {
                 let holds = match &recovery {
-                    Some(r) => Bucket::get(&bucket, &crate::keys::recovery_held_name(r, &hex(&d.key))).await?.is_some_and(|o| crate::keys::unhex(r).is_ok_and(|key| crate::keys::held_sealed(&key, &hex(&d.key), &o.bytes).is_some())),
+                    Some(r) => Bucket::get(&bucket, &database::keys::recovery_held_name(r, &hex(&d.key))).await?.is_some_and(|o| key::unhex(r).is_ok_and(|key| key::held_sealed(&key, &hex(&d.key), &o.bytes).is_some())),
                     None => false,
                 };
                 listed.push(json!({ "key": hex(&d.key), "seal": hex(&d.seal), "name": d.name, "holds": holds }));
@@ -254,7 +254,7 @@ impl Node {
     /// Lists one of this device's parts, the service `service`, as its user's, a part of this device (oned turned it
     /// on, and it asked with its key and seal key). It holds no keys: it reads who's who from this device's runtime,
     /// which says who may ask it. A part listed before it named its device is listed again, naming it.
-    pub async fn list_part(&self, endpoint: &crate::keys::Endpoint, service: &str) -> Result<()> {
+    pub async fn list_part(&self, endpoint: &key::Endpoint, service: &str) -> Result<()> {
         let user = self.user()?;
         let caller = Caller::own(self.0.id, user.clone());
         let listed = self.with(|i| {
@@ -343,8 +343,8 @@ impl Node {
                 let mut unsealed = BTreeSet::new();
                 for (owing, n) in unsure {
                     let name = match &owing {
-                        Owing::Epoch(s) => crate::keys::epoch_name(&s.to_string(), n, &hex(&node.0.holds.device())),
-                        Owing::Vault(s) => crate::keys::vault_key_name(&s.to_string(), n, &hex(&node.0.holds.device())),
+                        Owing::Epoch(s) => database::keys::epoch_name(&s.to_string(), n, &hex(&node.0.holds.device())),
+                        Owing::Vault(s) => database::keys::vault_key_name(&s.to_string(), n, &hex(&node.0.holds.device())),
                     };
                     match Bucket::get(&bucket, &name).await {
                         Ok(Some(_)) => drop(node.0.owed.lock().unwrap().sealed.insert((owing, n))),
@@ -360,11 +360,11 @@ impl Node {
             tokio::spawn(async move {
                 let made = match &owing {
                     Owing::Epoch(scope) => match node.newest_epoch(scope).await {
-                        Ok(newest) => crate::settings::new_epoch(&node, scope, newest + 1, &[]).await,
+                        Ok(newest) => scope::settings::new_epoch(&node, scope, newest + 1, &[]).await,
                         Err(err) => Err(err),
                     },
                     Owing::Vault(scope) => match vaults.get(scope) {
-                        Some((n, to)) => crate::settings::new_vault_key(&node, scope, n + 1, to).await,
+                        Some((n, to)) => scope::settings::new_vault_key(&node, scope, n + 1, to).await,
                         None => Ok(()),
                     },
                 };

@@ -4,7 +4,7 @@
 //! (`x-one-keys`), that database's alone; and their secrets, hosts and apps only on a machine its admins granted the
 //! scope's Vault key, which nobody hands.
 
-use crate::protocol::allowed;
+use ::custom_build::allowed;
 use std::collections::BTreeSet;
 
 use crate::vault::{Items, Lookup};
@@ -15,7 +15,7 @@ use super::*;
 pub mod cli;
 pub(crate) mod routes;
 
-const VAULT: (&str, &str) = (scopes::APP, scopes::CoreDb::Vault.name());
+const VAULT: (&str, &str) = (key::APP, key::CoreDb::Vault.name());
 
 /// How an agent is told to ask the user for an item it may use: a request with no app is for agents, the user's own
 /// items, which they use with `vault_fetch`.
@@ -23,7 +23,7 @@ pub const ASK_FOR_AGENTS: &str = "vault_request, leaving out app,";
 
 /// Whether an app added can declare what it needs: the agents and the Vault itself are not apps.
 fn declares_needs(app: &str) -> bool {
-    app != scopes::AGENTS && app != scopes::APP
+    app != scopes::AGENTS && app != key::APP
 }
 
 impl Node {
@@ -385,7 +385,7 @@ impl Node {
     /// anew), one it's switched on for that it changes (its hosts only with every secret field given anew), or one it
     /// lets go of (`release`), deleted once no app uses it.
     pub(super) async fn call_item(&self, app: &str, me: &Caller, scopes: &[Scope], id: &str, scope: Option<String>, mut data: Value, same: Option<String>, release: bool) -> Result<()> {
-        ensure!(crate::database::scopes::is_id(id), "an item's id is 16 hex characters");
+        ensure!(scope::scopes::is_id(id), "an item's id is 16 hex characters");
         crate::vault::generate(&mut data);
         let obj = data.as_object_mut().context("an item is an object")?;
         for key in ["id", "app", "apps", "deleted"] {
@@ -461,7 +461,7 @@ impl Node {
             Some(_) if app == scopes::AGENTS => bail!(
                 "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the user"
             ),
-            Some(need) if app != scopes::APP => {
+            Some(need) if app != key::APP => {
                 let declared = self.declared_needs(app).await?;
                 let d = declared[need].clone();
                 if !d.is_object() {
@@ -489,17 +489,17 @@ impl Node {
         let why = if said.is_empty() { why } else { &said };
         self.with(|i| {
             allowed!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string())?);
-            ensure!(i.r.db().app(app)?.is_some_and(|a| !a.erased) || app == scopes::APP || app == scopes::AGENTS, "no app named {app}");
+            ensure!(i.r.db().app(app)?.is_some_and(|a| !a.erased) || app == key::APP || app == scopes::AGENTS, "no app named {app}");
             Ok(())
         })?;
         let request = content::Request { id: &id, app, title, fields, hosts, need, why, agent: caller.agent.as_deref() };
         self.append_as(scope, &caller.user, content::vault_request(request)).await?;
         // At the network's address (where users sign in) the web client opens it in any browser; a
         // network without one has only its apps to.
-        let web = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()?).remove("address")))?;
+        let web = self.with(|i| Ok(scope::state::settings(&i.r.db().settings()?).remove("address")))?;
         let link = match web.as_deref().filter(|w| w.starts_with("https://") || w.starts_with("http://")) {
             Some(web) => format!("{}/vault?id={id}&scope={scope}", web.trim_end_matches('/')),
-            None => format!("{}://vault?id={id}&scope={scope}", crate::config::CLI),
+            None => format!("{}://vault?id={id}&scope={scope}", ::custom_build::config::CLI),
         };
         Ok(json!({ "id": id, "scope": scope.to_string(), "link": link }))
     }
@@ -554,7 +554,7 @@ impl Node {
             let state = &i.views.get(&scope.to_string()).with_context(|| format!("no request {id} in {scope}"))?;
             let r = state.requests.get(id).with_context(|| format!("no request {id} in {scope}"))?;
             ensure!(r.answer.is_none(), "that request was already answered");
-            ensure!(now_ms().saturating_sub(r.time) <= crate::state::REQUEST_LIFE, "that request has expired: ask for it again");
+            ensure!(now_ms().saturating_sub(r.time) <= scope::state::REQUEST_LIFE, "that request has expired: ask for it again");
             allowed!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string())?);
             Ok(r.clone())
         })?;
@@ -584,7 +584,7 @@ impl Node {
                     let mut data = json!({ "id": made, "title": title, "fields": fields, "hosts": r.hosts, "apps": sharing });
                     // What the node asked for itself (the network's storage) is an item of that type; what an app
                     // declared, of the type it declared.
-                    if let Some(need) = r.need.as_ref().filter(|_| r.app == scopes::APP) {
+                    if let Some(need) = r.need.as_ref().filter(|_| r.app == key::APP) {
                         data["type"] = json!(need);
                     } else if let Some(kind) = &kind {
                         data["type"] = json!(kind);
@@ -596,7 +596,7 @@ impl Node {
         .await?;
         self.append_as(scope, &caller.user, content::vault_answer(id, false)).await?;
         // A place to back up to counts once an admin's device names it (`pin_place`), as answering does.
-        if r.app == scopes::APP && r.need.as_deref() == Some(crate::backups::KIND) && *scope == Scope::Global {
+        if r.app == key::APP && r.need.as_deref() == Some(crate::backups::KIND) && *scope == Scope::Global {
             let item = answer["item"].as_str().unwrap_or(&made).to_string();
             let fields = self.items(caller, scope).await?.get(&item).map(|it| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect());
             self.pin_place(caller, &item, Some(&fields.context("the place's item wasn't there")?)).await?;
@@ -624,7 +624,7 @@ impl Node {
                 for (rid, r) in state.requests.iter().filter(|(rid, _)| wanted(rid)) {
                     let state_now = match &r.answer {
                         Some((how, ..)) => how.as_str(),
-                        None if now.saturating_sub(r.time) > crate::state::REQUEST_LIFE => "expired",
+                        None if now.saturating_sub(r.time) > scope::state::REQUEST_LIFE => "expired",
                         None => "waiting",
                     };
                     let answered = r.answer.as_ref().map(|(_, by, t)| name(by).map(|by| json!({ "by": by, "time": t }))).transpose()?;
@@ -650,6 +650,6 @@ impl Node {
     pub(super) fn waiting_requests(&self, viewer: &Caller) -> Result<usize> {
         let now = now_ms();
         let scopes = self.managed_scopes(viewer, None)?;
-        self.with(|i| Ok(crate::state::waiting(i.r.db(), &viewer.user, scopes.iter().filter_map(|s| Some((s, i.views.get(&s.to_string())?))), now)))
+        self.with(|i| Ok(scope::state::waiting(i.r.db(), &viewer.user, scopes.iter().filter_map(|s| Some((s, i.views.get(&s.to_string())?))), now)))
     }
 }

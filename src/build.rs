@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use crate::config::{CLI, TARGET};
+use ::custom_build::config::{CLI, TARGET};
 use crate::release::Version;
 use serde_json::{Value, json};
 
@@ -292,10 +292,10 @@ mod tests {
     fn the_windows_installer_says_what_the_config_does() {
         assert!(include_str!("../install.ps1").contains(&format!("$cli-{WINDOWS}.exe\"")), "install.ps1 fetches the asset the table names");
         let says = |name: &str| include_str!("../install.ps1").lines().find_map(|l| l.strip_prefix(&format!("${name} = '"))?.strip_suffix('\''));
-        if crate::state::installer_says("cli") == Some(CLI) {
+        if scope::state::installer_says("cli") == Some(CLI) {
             assert_eq!(says("cli"), Some(CLI));
-            assert_eq!(says("repo"), Some(crate::config::REPO));
-            assert_eq!(says("key"), Some(crate::config::RELEASE_KEY));
+            assert_eq!(says("repo"), Some(::custom_build::config::REPO));
+            assert_eq!(says("key"), Some(::custom_build::config::RELEASE_KEY));
         }
     }
 
@@ -304,9 +304,9 @@ mod tests {
     fn the_installer_is_for_the_platforms_here() {
         let installer = include_str!("../install.sh");
         // A custom build's installer is its own: when it's this build's, it names the same repo and release key.
-        if crate::state::installer_says("cli") == Some(CLI) {
-            assert_eq!(crate::state::installer_says("repo"), Some(crate::config::REPO));
-            assert_eq!(crate::state::installer_says("key"), Some(crate::config::RELEASE_KEY));
+        if scope::state::installer_says("cli") == Some(CLI) {
+            assert_eq!(scope::state::installer_says("repo"), Some(::custom_build::config::REPO));
+            assert_eq!(scope::state::installer_says("key"), Some(::custom_build::config::RELEASE_KEY));
         }
         for p in PLATFORMS.iter().filter(|p| p.target != WINDOWS) {
             let (arch, rest) = p.target.split_once('-').unwrap();
@@ -377,7 +377,7 @@ const PACKAGES: &[(&str, &str, &str)] = &[
 /// The pinned Bun, downloaded and checked the first time.
 pub fn bun() -> Result<PathBuf> {
     let (_, package, integrity) =
-        PACKAGES.iter().find(|(target, _, _)| *target == crate::config::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", crate::config::TARGET))?;
+        PACKAGES.iter().find(|(target, _, _)| *target == ::custom_build::config::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", ::custom_build::config::TARGET))?;
     let url = format!("https://registry.npmjs.org/@oven/bun-{package}/-/bun-{package}-{BUN}.tgz");
     let bin = format!("bun{}", std::env::consts::EXE_SUFFIX);
     crate::app::runtime::pinned(&format!("bun-{BUN}"), &bin, &format!("package/bin/{bin}"), &url, integrity)
@@ -425,7 +425,7 @@ pub fn chrome() -> Option<std::process::Command> {
 /// The release key's private half, from the publisher's password manager by way of the config's release_signer, kept
 /// only in memory. It must be the key every build checks releases against.
 pub fn release_key() -> Result<ssh_key::PrivateKey> {
-    use crate::config::{RELEASE_KEY, RELEASE_SIGNER};
+    use ::custom_build::config::{RELEASE_KEY, RELEASE_SIGNER};
     anyhow::ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this custom build has no release key, so nothing it builds can be released");
     let out = Command::new("sh").args(["-c", RELEASE_SIGNER]).stdin(std::process::Stdio::null()).output().context("run release_signer")?;
     anyhow::ensure!(
@@ -466,7 +466,7 @@ pub fn mac_things(folder: &Path, version: &Version, config: &str) -> Result<Vec<
         let file = entry.file_name().to_string_lossy().to_string();
         let Some(service) = file.strip_prefix(&format!("{CLI}-")) else { continue };
         let name = service.strip_suffix(".zip").unwrap_or(service);
-        ensure!(crate::database::scopes::valid_app_name(name), "{file} in {} isn't a service's", folder.display());
+        ensure!(scope::scopes::valid_app_name(name), "{file} in {} isn't a service's", folder.display());
         things.push(thing(Thing::service_name(name, target), entry.path()));
     }
     for (_, file, ..) in &things {

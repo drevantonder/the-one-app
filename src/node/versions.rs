@@ -12,14 +12,15 @@ use std::process::Stdio;
 use anyhow::{Result, ensure};
 use serde_json::{Value, json};
 
-use crate::config::{CLI, YOURS};
-use crate::rank::CLOUDFLARE;
-use crate::database::scopes;
-use crate::keys::hex;
+use ::custom_build::config::{CLI, YOURS};
+use ::scope::rank::CLOUDFLARE;
+use ::scope::scopes;
+use ::key::hex;
 use crate::latest::{Latest, Thing, wanted};
 use crate::logs;
 
-use super::{Node, now_ms};
+use super::Node;
+use ::custom_build::now_ms;
 
 /// How the record names what a version is on.
 type Find = for<'a> fn(&'a Latest, &'a str) -> Option<&'a Thing>;
@@ -35,14 +36,14 @@ impl Node {
         // A record that's missing or doesn't read just offers no Update: the device that takes one checks it again itself.
         let builds = tokio::task::spawn_blocking(move || crate::latest::fetch(&address).ok().flatten().and_then(|text| Latest::read(crate::mode::here().release_key(), &text).ok())).await?.unwrap_or_default();
         let of = |version: &str, find: Find| -> Option<Value> {
-            let (commit, committed, on) = crate::protocol::told(version)?;
+            let (commit, committed, on) = ::custom_build::protocol::told(version)?;
             let newest = find(&builds, on);
             Some(json!({ "version": commit, "newest": newest.map(|b| &b.commit), "behind": newest.is_some_and(|b| wanted(b, commit, committed)) }))
         };
         let mut out: serde_json::Map<String, Value> = told.as_object().map(|v| v.iter().filter_map(|(key, version)| Some((key.clone(), of(version.as_str()?, Latest::to_update_to)?))).collect()).unwrap_or_default();
         let part = |of_what: &str, find: Find| workers[of_what].as_str().and_then(|v| of(v, find));
         if let (Some(sources), Some(web)) = (part("workers", Latest::get), part("web", Latest::get)) {
-            let from = workers["from"].as_str().and_then(|k| crate::keys::unhex(k).ok());
+            let from = workers["from"].as_str().and_then(|k| ::key::unhex(k).ok());
             let from = from.and_then(|key| self.with_or(None, |i| Ok(i.r.db().machine(&key)?.map(|d| d.name))));
             out.insert(CLOUDFLARE.into(), json!({ "version": sources["version"], "newest": sources["newest"], "behind": sources["behind"] == true || web["behind"] == true, "node": part("node", Latest::to_update_to).map(|n| n["version"].clone()), "from": from }));
         }
@@ -65,7 +66,7 @@ impl Node {
 
 /// What the relay left for the device `me` (`asked` in its answer to `POST /relay/computes`), as who's who says: taken
 /// if who signed it may ask it, said in this program's log either way. A computer's onet hears its device's.
-pub fn heard(who: &scopes::ScopeDb, me: &crate::keys::Key, asked: &Value) {
+pub fn heard(who: &scopes::ScopeDb, me: &::key::Key, asked: &Value) {
     match who_asked(who, me, asked).and_then(|(by, ask)| Ok((by, ask.start()?, ask))) {
         Ok((by, (), ask)) => logs::say(&format!("asked by {by}: starting {CLI} {}", ask.command().join(" "))),
         Err(err) => logs::say(&format!("an ask to update wasn't taken: {err:#}")),
@@ -74,8 +75,8 @@ pub fn heard(who: &scopes::ScopeDb, me: &crate::keys::Key, asked: &Value) {
 
 /// The device that signed `asked`, if it's one who may remove the device `me` (an admin's, for the Workers), and it asks
 /// that device: else why not.
-fn who_asked(who: &scopes::ScopeDb, me: &crate::keys::Key, asked: &Value) -> Result<(String, Ask)> {
-    let (by, fields) = crate::keys::check_request(crate::protocol::RELAY, asked, now_ms())?;
+fn who_asked(who: &scopes::ScopeDb, me: &::key::Key, asked: &Value) -> Result<(String, Ask)> {
+    let (by, fields) = ::key::check_request(::custom_build::protocol::RELAY, asked, now_ms())?;
     // The relay leaves the Workers' ask for the device they were last deployed from.
     let ask = if fields["cloudflare"] == true { Ask::Deploy } else { Ask::Update };
     ensure!(ask == Ask::Deploy || fields["update"] == hex(me), "it asks another device");
@@ -109,7 +110,7 @@ impl Ask {
     /// said to nobody: only a failure leaves words here.
     fn start(self) -> Result<()> {
         let words = self.command();
-        let started = crate::os::named(CLI)?.args(words).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+        let started = platform::os::named(CLI)?.args(words).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
         std::thread::spawn(move || match started.wait_with_output() {
             Ok(out) => logs::say(&format!("{CLI} {}: {}{}", words.join(" "), String::from_utf8_lossy(&out.stdout).trim(), String::from_utf8_lossy(&out.stderr).trim())),
             Err(err) => logs::say(&format!("{CLI} {}: {err}", words.join(" "))),

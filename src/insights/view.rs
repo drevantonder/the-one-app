@@ -192,7 +192,7 @@ pub fn service(rows: &Value, service: &str, status: &str, since: u64, now: u64, 
         out.push_str("\n\n");
         out.push_str(&errors);
     }
-    let worth: Vec<&Value> = rows["spans"].as_array().into_iter().flatten().filter(|s| s["kind"] == "server" && (s["status"] == ERROR || s["duration"].as_u64().is_some_and(|d| d >= super::SLOW_MS))).collect();
+    let worth: Vec<&Value> = rows["spans"].as_array().into_iter().flatten().filter(|s| s["kind"] == "server" && (s["status"] == ERROR || s["duration"].as_u64().is_some_and(|d| d >= custom_build::protocol::SLOW_MS))).collect();
     if !worth.is_empty() {
         let shown = listed(&worth, limit, |s| format!("{}  {}  {}  {}  {}", s["trace"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), took(s["duration"].as_f64()), s["attrs"]["error.type"].as_str().unwrap_or(s["status"].as_str().unwrap_or("")), ago(now, s["time"].as_u64().unwrap_or(0))));
         out.push_str(&format!("\n\nFailing or slow:\n{shown}"));

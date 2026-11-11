@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use one::config::CLI;
+use ::custom_build::config::CLI;
 
 use super::super::devices::{approve_code, didnt_sign_in};
 use super::super::network::{shares_native_build, spawn};
@@ -54,7 +54,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     let xvfb = spawn(dir, std::process::Command::new("Xvfb").args([display.as_str(), "-screen", "0", "1280x800x24", "-nolisten", "tcp"]), &format!("{name}/display.log"), true)?;
     std::fs::write(home.join("display.pid"), xvfb.to_string())?;
     std::thread::sleep(Duration::from_secs(1));
-    let env = |key: &str| one::config::env(key);
+    let env = |key: &str| ::custom_build::config::env(key);
     let log = format!("{name}/app.log");
     // On a session bus of its own, with a Secret Service there (GNOME's keyring, unlocked with a password of no worth, in its
     // folder), as a desktop has; told its computer's home and address as the throwaway network's programs are.

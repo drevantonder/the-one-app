@@ -37,7 +37,7 @@ const LOOPBACK: &str = "http://127.0.0.1/callback";
 /// Tells the browser it's signed in, with nowhere else to go.
 fn closing(s: &mut TcpStream) {
     let page = "<!doctype html><meta charset=utf-8><meta name=color-scheme content=\"light dark\"><body style=\"font:15px system-ui;display:grid;place-items:center;height:90vh;color:GrayText\"><p>You’re signed in. Go back to {}.</p>";
-    let page = page.replace("{}", one::config::NAME);
+    let page = page.replace("{}", custom_build::config::NAME);
     let _ = write!(s, "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{page}", page.len());
 }
 
@@ -86,7 +86,7 @@ impl SignIn {
     #[cfg_attr(desktop, allow(dead_code))]
     pub fn sign_in_here(&self, join: &str, open: impl FnOnce(String) -> Result<String, String>) -> Result<(), Failed> {
         let s = self.auth()?;
-        let back = format!("{}://signed-in/", one::config::CLI);
+        let back = format!("{}://signed-in/", custom_build::config::CLI);
         let asked = s.ask(&self.client(&s, &back)?, &back, join);
         let came = url::Url::parse(&open(s.url(&asked)?).map_err(failed)?).map_err(|e| failed(e.to_string()))?;
         self.keep(s.finish(&asked, &came.query_pairs().into_owned().collect())?)

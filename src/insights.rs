@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use crate::protocol::code;
+use ::custom_build::protocol::code;
 
 pub mod cost;
 pub mod message;
@@ -77,17 +77,9 @@ impl Ended {
     }
 }
 
-/// How long a call takes before it keeps a full span. ARCHITECTURE.md's targets state none for a whole call, and its
-/// nearest is a write seen elsewhere within 1 s.
-pub const SLOW_MS: u64 = 1_000;
-
-/// One trace in this many that went well is kept whole, to see what normal looks like. A client's (`shared/protocol.js`'s
-/// `KEPT_SPANS`) the same.
-pub const SAMPLED_ONE_IN: u64 = 20;
-
 /// Whether `trace` is one of those. By its id, so every span of a trace agrees, on any device.
 pub fn sampled(trace: &str) -> bool {
-    u64::from_str_radix(trace.get(trace.len().saturating_sub(8)..).unwrap_or(""), 16).is_ok_and(|n| n % SAMPLED_ONE_IN == 0)
+    u64::from_str_radix(trace.get(trace.len().saturating_sub(8)..).unwrap_or(""), 16).is_ok_and(|n| n % ::custom_build::protocol::SAMPLED_ONE_IN == 0)
 }
 
 /// The most a batch holds of each, past which what's new is dropped: as many as the telemetry Worker takes at once.
@@ -224,7 +216,7 @@ impl Exception {
     pub fn from_json(v: &Value) -> Option<Exception> {
         let kind = exception_type(v["type"].as_str()?).to_string();
         let frames = v["frames"].as_array().into_iter().flatten().filter_map(frame).take(MOST_FRAMES).collect();
-        let ask = v["ask"].as_str().and_then(crate::call::Ask::parse).map(crate::call::Ask::name);
+        let ask = v["ask"].as_str().and_then(::api::call::Ask::parse).map(::api::call::Ask::name);
         Some(Exception { kind, frames, message: v["message"].as_str().filter(|m| !m.is_empty()).map(str::to_string), ask })
     }
 
@@ -335,7 +327,7 @@ impl Attrs {
 
     /// Who made a call, as OTEL's `enduser.id`: a user's id, never their name.
     pub fn user(mut self, id: &str) -> Attrs {
-        if crate::database::scopes::is_id(id) {
+        if scope::scopes::is_id(id) {
             self.0.insert("enduser.id", json!(id));
         }
         self
@@ -669,7 +661,7 @@ pub fn parent_of(text: &str) -> Option<(String, String)> {
 
 /// The network's own program, as a service.
 pub fn own() -> &'static str {
-    crate::config::CLI
+    ::custom_build::config::CLI
 }
 
 /// What a device has to say, since it last said it.
@@ -746,6 +738,18 @@ pub struct Ask {
     /// Only traces with a span that took at least this long, in ms.
     pub least: Option<u64>,
     pub limit: usize,
+}
+
+/// What `client` read of the bucket (`reads`), the device `instance`'s (its key, hex), as the telemetry Worker writes it (`/telemetry/write`'s
+/// fields), once it's been a minute since it last said.
+pub fn bucket_reads(reads: &bucket::Reads, now: u64, instance: &str, client: &str) -> Option<serde_json::Value> {
+    let read = reads.due(now)?;
+    let mut batch = crate::insights::Batch::default();
+    for (kind, found, n) in read {
+        let attrs = crate::insights::Attrs::default().reached(kind).outcome(if found { "found" } else { "missing" }).client(client).scope("everyone").build(::custom_build::config::BUILD);
+        batch.metric(now, crate::insights::BUCKET_READS, crate::insights::own(), instance, &attrs, n);
+    }
+    (!batch.is_empty()).then(|| batch.rows())
 }
 
 #[cfg(test)]

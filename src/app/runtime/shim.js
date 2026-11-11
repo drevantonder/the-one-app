@@ -2,7 +2,7 @@
 // into a Worker that answers the node: tools, widgets, hooks and screens. Its databases, one per scope, are the
 // node's: a query asks the node, and a call's writes are handed to it when the call returns, as one write. A node on a
 // machine asks it over HTTP (`fetch`); the Cloudflare node by RPC (`Call`), handing it what answers for the node. What
-// it asks and hands back is src/call.rs's (`ASKS`, `READ_ONLY`, `CODE_HEADER`, written before this when it's built).
+// it asks and hands back is api/src/call.rs's (`ASKS`, `READ_ONLY`, `CODE_HEADER`, written before this when it's built).
 import { AsyncLocalStorage } from "node:async_hooks";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
@@ -289,7 +289,7 @@ function context(ask, body, appends, later, spans) {
     failing: async () => (await ask("failing")).json(),
     /// The network's devices, as `GET /api/state` gives them to the caller: online or not, and each one's load.
     devices: async () => (await ask("devices")).json(),
-    /// Run priority (src/rank.rs): `{ order, admin }`, every device and the Cloudflare node (key "cloudflare") in the
+    /// Run priority (scope/src/rank.rs): `{ order, admin }`, every device and the Cloudflare node (key "cloudflare") in the
     /// order things go to them, each with its `kind` and its `priority` (a number from 1, or "last"), and whether the
     /// caller is an admin. Given a device (its name or key, or "cloudflare") and a priority, gives it that one first,
     /// for an admin.
@@ -369,7 +369,7 @@ async function handle(what, name, body, send, waitUntil, out) {
     if (keep) waitUntil(calls.run(call, () => finish(ask, later, appends)));
     return reply;
   } catch (err) {
-    // An error with a `code` (`not_signed_in`, `refused`…: src/protocol.rs) says what kind it is, which callers act on.
+    // An error with a `code` (`not_signed_in`, `refused`…: custom-build/src/protocol.rs) says what kind it is, which callers act on.
     return { error: String(err?.message ?? err), ...(typeof err?.code === "string" ? { code: err.code } : {}), exception: exception(err), ...(spans.length ? { spans } : {}) };
   }
 }

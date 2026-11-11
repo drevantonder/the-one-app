@@ -1,8 +1,8 @@
 //! Pairing: a code that lets a new device join the network, and admitting it.
 
-use crate::protocol::allowed;
-use crate::config::YOURS;
-use crate::protocol::{code, Coded, PAIRING_LIFE};
+use ::custom_build::allowed;
+use ::custom_build::config::YOURS;
+use ::custom_build::protocol::{code, Coded, PAIRING_LIFE};
 use super::*;
 
 fn used() -> anyhow::Error {
@@ -82,7 +82,7 @@ pub async fn join_with(key: &SigningKey, name: &str, code: &str) -> Result<Joine
 }
 
 pub(super) fn load(dir: &Path) -> HashMap<[u8; 16], Pairing> {
-    let list: Vec<(String, Pairing)> = crate::files::read_json(&dir.join("pairings.json"));
+    let list: Vec<(String, Pairing)> = platform::files::read_json(&dir.join("pairings.json"));
     list.into_iter()
         .filter_map(|(k, v)| Some((data_encoding::HEXLOWER.decode(k.as_bytes()).ok()?.try_into().ok()?, v)))
         .collect()
@@ -100,7 +100,7 @@ impl Node {
         let user = user.map(|u| self.find_user(u)).transpose()?;
         self.with(|i| {
             let m = i.r.db();
-            ensure!(m.compute(&self.0.id)?.is_some(), "this device isn't in {} yet", crate::config::YOURS);
+            ensure!(m.compute(&self.0.id)?.is_some(), "this device isn't in {} yet", ::custom_build::config::YOURS);
             let kinds = if user.as_ref().is_none_or(|u| *u == asker.user) { MACHINE } else { &[scopes::Kind::Compute][..] };
             allowed!(devices::may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds)?, "only admins pair other users' machines");
             ensure!(m.serves(&self.0.id, &asker.user)?, "{} doesn't serve you", self.device_name());
@@ -115,7 +115,7 @@ impl Node {
         // reach only the key that told it of the code.
         let (node, fields) = (self.clone(), json!({ "pairing": { "hash": net::ticket_hash(&net::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE } }));
         tokio::spawn(async move {
-            if let Err(err) = crate::settings::tell(&node, &node.0.key, fields).await {
+            if let Err(err) = scope::settings::tell(&node, &node.0.key, fields).await {
                 tracing::warn!("telling {YOURS}'s relay of a pairing code: {err:#}");
             }
         });
@@ -206,7 +206,7 @@ impl Node {
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
         let (root, bucket) = self.with(|i| Ok((i.r.root().map(|r| r.to_hex()).context("no network")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
-        let endpoint = crate::keys::Endpoint { key, seal: crate::keys::twin_public(&key)? };
+        let endpoint = key::Endpoint { key, seal: key::twin_public(&key)? };
         // A machine of the user's own is their device too. An admin lists another user's as compute, which runs
         // what that admin's listing may (`global`, groups) but never that user's own scope, until a device of theirs
         // lists it again (`scope::derive`'s runners).
@@ -219,11 +219,11 @@ impl Node {
         // Waited for: until the relay lets it in, the machine that joined reaches nothing.
         if self.address().is_ok() {
             let admin = self.with(|i| Ok(i.r.db().may(&user, "invite", scopes::NETWORK)))?;
-            crate::settings::tell(self, self, json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.with_context(|| format!("{YOURS}'s network didn't take this machine: try again with the same code"))?;
+            scope::settings::tell(self, self, json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.with_context(|| format!("{YOURS}'s network didn't take this machine: try again with the same code"))?;
             // Auth learns whose it is only here, as it never signs in to ask: without this it just can't answer that
             // user's requests yet, so a refusal (a pairing device auth doesn't know either) doesn't stop the join.
             if user == pairing.user
-                && let Err(err) = crate::settings::ask_auth(self, "POST", "/api/auth/devices/theirs", json!({ "key": hex(&key), "user": user, "name": request.name })).await
+                && let Err(err) = scope::settings::ask_auth(self, "POST", "/api/auth/devices/theirs", json!({ "key": hex(&key), "user": user, "name": request.name })).await
             {
                 tracing::warn!("telling auth whose computer this is: {err:#}");
             }

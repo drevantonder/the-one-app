@@ -1,6 +1,6 @@
 //! A tool's `--help`, and a list of tools, from their input schemas.
 
-use crate::config::CLI;
+use ::custom_build::config::CLI;
 use serde_json::Value;
 
 use super::input::{kebab, places, required};

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
-use one::config::CLI;
+use ::custom_build::config::CLI;
 use serde_json::json;
 
 use super::super::devices::{agent_devices, approve_code, build, didnt_sign_in, on_device};
@@ -43,7 +43,7 @@ pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one:
         true => early?,
         false => apk(dir, checkout, &abi)?,
     };
-    let package = one::config::ANDROID;
+    let package = ::custom_build::config::ANDROID;
     agent_devices("install", json!({ "device": device, "app": apk }))?;
     // The launcher keeps drawing home-screen widgets from the APK it replaced ("Can't load widget") until it restarts.
     on_device(device, "am force-stop com.google.android.apps.nexuslauncher")?;
@@ -60,7 +60,7 @@ pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one:
     }
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{device}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
-    let env = |key: &str| one::config::env(key);
+    let env = |key: &str| ::custom_build::config::env(key);
     on_device(device, "logcat -c")?;
     on_device(
         device,

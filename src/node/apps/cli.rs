@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::api::Client;
 use crate::cli::{Command, Given, ago};
-use crate::config::CLI;
+use ::custom_build::config::CLI;
 use crate::{build, tools};
 
 pub fn commands() -> Command {

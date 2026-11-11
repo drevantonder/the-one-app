@@ -10,7 +10,7 @@ use serde_json::Map;
 
 use super::*;
 
-const AI_GATEWAY: (&str, &str) = (scopes::APP, scopes::CoreDb::AiGateway.name());
+const AI_GATEWAY: (&str, &str) = (key::APP, key::CoreDb::AiGateway.name());
 
 /// A call to AI Gateway, by `caller`, for `app` (none for the network's own, its tools), reaching `scopes`, in `trace`.
 pub(super) struct Gateway<'a> {
@@ -103,7 +103,7 @@ impl Host for Gateway<'_> {
 /// Posts a filled AI request, to anywhere but this machine's own `ports`, waiting as long as a call may.
 fn post(url: &str, headers: Vec<(String, String)>, body: Vec<u8>, ports: Vec<u16>) -> Result<Sent> {
     let config = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(::ai_gateway::MOST_SECONDS)));
-    let agent = crate::reach::agent(config, crate::reach::not_ports(ports));
+    let agent = platform::reach::agent(config, platform::reach::not_ports(ports));
     // Its key is in the headers or URL, so no error says either: only where it went.
     let uri: ureq::http::Uri = url.parse().context("an AI request's address isn't a web address")?;
     let host = uri.host().unwrap_or_default().to_string();
@@ -124,7 +124,7 @@ fn post(url: &str, headers: Vec<(String, String)>, body: Vec<u8>, ports: Vec<u16
 fn coded(err: anyhow::Error) -> anyhow::Error {
     match err.downcast_ref::<::ai_gateway::Failed>() {
         Some(f) => match f.code() {
-            Some(code) => crate::protocol::Coded::error(code, f),
+            Some(code) => custom_build::protocol::Coded::error(code, f),
             None => anyhow!("{f}"),
         },
         None => err,

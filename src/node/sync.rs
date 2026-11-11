@@ -59,16 +59,16 @@ impl Node {
 
     /// The keys a scope's database's steps are sealed with in the bucket, by epoch. Of one this
     /// device runs but doesn't open, those a caller who does handed it.
-    pub(super) async fn step_keys(&self, scope: &Scope) -> Result<crate::database::stored::Keys> {
+    pub(super) async fn step_keys(&self, scope: &Scope) -> Result<database::stored::Keys> {
         if !self.with(|i| self.opens(i.r.db(), scope))? {
             return self.handed_step_keys(scope).await;
         }
-        self.database_keys(scope, scopes::APP, scopes::CoreDb::Scope.name(), false).await
+        self.database_keys(scope, key::APP, key::CoreDb::Scope.name(), false).await
     }
 
     /// The keys of `global`'s steps in each of its epochs given.
-    pub(super) async fn step_keys_of(&self, epochs: &crate::database::stored::Keys) -> Result<crate::database::stored::Keys> {
-        crate::keys::database_keys(&self.bucket()?, "global", scopes::APP, scopes::CoreDb::Scope.name(), epochs, false).await
+    pub(super) async fn step_keys_of(&self, epochs: &database::stored::Keys) -> Result<database::stored::Keys> {
+        database::keys::database_keys(&self.bucket()?, "global", key::APP, key::CoreDb::Scope.name(), epochs, false).await
     }
 
     /// Tells the devices that hold `scope` it changed, so they read it now rather than at their next look: its steps,
@@ -85,7 +85,7 @@ impl Node {
         let mut input = json!({ "scope": scope.to_string() });
         if let Some((app, database, at)) = wrote {
             input = json!({ "scope": scope.to_string(), "app": app, "database": database, "at": at });
-            let name = crate::database::stored::step_name(&crate::bucket::database_prefix(&scope.to_string(), app, database), at);
+            let name = bucket::names::step_name(&bucket::names::database_prefix(&scope.to_string(), app, database), at);
             let bucket = self.bucket().ok();
             if let Some(step) = bucket.as_ref().and_then(|b| b.kept(&name).ok().flatten()).filter(|s| s.len() <= SENT_STEP) {
                 input["step"] = json!(data_encoding::BASE64.encode(&step));
@@ -115,12 +115,12 @@ impl Node {
             });
             return;
         };
-        self.hint_changed(&crate::bucket::database_prefix(&scope.to_string(), &app, &database));
+        self.hint_changed(&bucket::names::database_prefix(&scope.to_string(), &app, &database));
         let id = (scope, format!("{app}/{database}"));
         self.0.databases.behind.lock().unwrap().insert(id.clone());
         let open = self.open_dbs().iter().any(|(open, _)| *open == id);
         match step.filter(|_| open) {
-            Some(step) => self.confirm_sent(Sent { name: crate::database::stored::step_name(&crate::bucket::database_prefix(&id.0.to_string(), &app, &database), at), step, sig, id, at }),
+            Some(step) => self.confirm_sent(Sent { name: bucket::names::step_name(&bucket::names::database_prefix(&id.0.to_string(), &app, &database), at), step, sig, id, at }),
             None => drop(tokio::spawn(async move { node.fill_to(&[(id, at)]).await })),
         }
     }
@@ -190,14 +190,14 @@ impl Node {
             if filled {
                 self.0.databases.behind.lock().unwrap().remove(id);
             }
-            apps.extend(id.1.split('/').next().filter(|app| *app != scopes::APP && !apps.iter().any(|a: &String| a == app)).map(str::to_string));
+            apps.extend(id.1.split('/').next().filter(|app| *app != key::APP && !apps.iter().any(|a: &String| a == app)).map(str::to_string));
         }
         if !apps.is_empty() {
             self.emit(Event::Changed { apps });
         }
     }
 
-    /// What this device runs, for another that asks (`crate::protocol::message::STATE`, when a screen shows it or a call needs its services):
+    /// What this device runs, for another that asks (`custom_build::protocol::message::STATE`, when a screen shows it or a call needs its services):
     /// what each part registered here describes of itself, by its service's key, and what its oned runs and each one's
     /// state, as its onet said.
     pub(super) fn state_asked(&self) -> Value {
@@ -217,7 +217,7 @@ impl Node {
         let asking = async move {
             let asked: Vec<_> = due.into_iter().map(|r| {
                 let node = node.clone();
-                tokio::spawn(async move { (r, node.send(&r, crate::protocol::message::STATE, &json!({}), true, STATE_WAIT).await) })
+                tokio::spawn(async move { (r, node.send(&r, custom_build::protocol::message::STATE, &json!({}), true, STATE_WAIT).await) })
             }).collect();
             let mut changed = Vec::new();
             for asking in asked {
@@ -245,7 +245,7 @@ impl Node {
             let device = m.device_of(runtime);
             let mut now = HashMap::new();
             for (key, describe) in said["services"].as_object().into_iter().flatten() {
-                if let Ok(key) = crate::keys::unhex(key)
+                if let Ok(key) = key::unhex(key)
                     && m.service(&key)?.is_some_and(|s| s.device == Some(device))
                 {
                     now.insert(key, describe.clone());

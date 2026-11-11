@@ -36,7 +36,7 @@ pub use serve::serve;
 
 /// Where this machine's node serves its local API: the config's port, or `<CLI>_ADDR`.
 pub fn addr() -> String {
-    std::env::var(crate::config::env("ADDR")).unwrap_or_else(|_| format!("127.0.0.1:{}", crate::config::PORT))
+    std::env::var(custom_build::config::env("ADDR")).unwrap_or_else(|_| format!("127.0.0.1:{}", custom_build::config::PORT))
 }
 
 pub fn router(node: Node) -> Router {
@@ -115,7 +115,7 @@ pub fn port() -> u16 {
 }
 
 pub fn port_of(addr: &str) -> u16 {
-    addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(crate::config::PORT)
+    addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(custom_build::config::PORT)
 }
 
 #[cfg(test)]
@@ -179,7 +179,7 @@ mod tests {
         .await
         .unwrap();
         for (route, who, asker, status, body) in asked {
-            let refused = status == 403 && body["code"] != crate::protocol::code::NOT_LET_IN;
+            let refused = status == 403 && body["code"] != custom_build::protocol::code::NOT_LET_IN;
             let (want_refused, then) = match (who, asker) {
                 (_, Asker::Nobody | Asker::SignIn) => (true, None),
                 (Who::Clients, Asker::Client) => (false, Some(403)),

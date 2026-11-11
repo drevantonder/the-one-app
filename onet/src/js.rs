@@ -2,7 +2,7 @@
 //! where it keeps what outlives one run of it, and the relay, each a JS object's promises.
 
 use anyhow::{Context, Result, anyhow};
-use one::bucket::{Bucket, Failed, Object, Trouble};
+use ::bucket::{Bucket, Failed, Object, Trouble};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_futures::js_sys::{self, Function, Promise, Reflect, Uint8Array};
@@ -91,7 +91,7 @@ struct Me {
     address: String,
 }
 
-impl one::keys::Signs for Me {
+impl key::Signs for Me {
     fn public(&self) -> [u8; 32] {
         self.key
     }
@@ -102,7 +102,7 @@ impl one::keys::Signs for Me {
     }
 }
 
-impl one::keys::Signs for On {
+impl key::Signs for On {
     fn public(&self) -> [u8; 32] {
         self.bucket.me.key
     }
@@ -121,7 +121,7 @@ impl one::keys::Signs for On {
 pub struct Urls {
     me: Me,
     ahead: std::cell::RefCell<std::collections::HashMap<String, Option<Object>>>,
-    reads: one::bucket::Reads,
+    reads: ::bucket::Reads,
     client: String,
 }
 
@@ -129,10 +129,10 @@ impl Urls {
     /// What it read, if it's been a minute, to the telemetry Worker, which nothing waits for.
     fn say(&self) {
         let now = crate::keyring::now();
-        let Some(rows) = self.reads.due(now, &one::keys::hex(&self.me.key), &self.client) else { return };
+        let Some(rows) = one::insights::bucket_reads(&self.reads, now, &key::hex(&self.me.key), &self.client) else { return };
         let me = self.me.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            let Ok(signed) = one::keys::signed_request_by(&me, one::protocol::TELEMETRY, rows, one::keys::next_at(now)).await else { return };
+            let Ok(signed) = key::signed_request_by(&me, custom_build::protocol::TELEMETRY, rows, key::next_at(now)).await else { return };
             let args = ["POST".into(), format!("{}/telemetry/write", me.address).into(), JsValue::NULL, JsValue::NULL, signed.to_string().into()];
             let _ = me.js.ask("ask", &args).await;
         });
@@ -151,16 +151,16 @@ impl Bucket for Urls {
             }
         }
         let mut names = vec![name.to_string()];
-        names.extend(one::database::stored::following(name, 15));
+        names.extend(::bucket::names::following(name, 15));
         names.truncate(32);
-        let fields = serde_json::json!({ "get": names, "reads": one::database::READS });
-        let signed = one::keys::signed_request_by(&self.me, one::protocol::URLS, fields, one::keys::next_at(crate::keyring::now())).await?;
+        let fields = serde_json::json!({ "get": names, "reads": custom_build::protocol::READS });
+        let signed = key::signed_request_by(&self.me, custom_build::protocol::URLS, fields, key::next_at(crate::keyring::now())).await?;
         let args = ["POST".into(), format!("{}/urls", self.me.address).into(), JsValue::NULL, JsValue::NULL, signed.to_string().into()];
         let got = self.me.js.ask("ask", &args).await.map_err(|e| Failed(Trouble::Unreachable, format!("{e}")))?;
         let status = Reflect::get(&got, &"status".into()).ok().and_then(|s| s.as_f64()).unwrap_or(0.0) as u16;
         let out: serde_json::Value = Reflect::get(&got, &"body".into()).ok().and_then(|b| b.as_string()).and_then(|b| serde_json::from_str(&b).ok()).unwrap_or_default();
         if status != 200 {
-            let said = crate::keyring::error(&out).unwrap_or_else(|| format!("{}'s storage didn't answer ({status}). Try again.", one::config::YOURS));
+            let said = crate::keyring::error(&out).unwrap_or_else(|| format!("{}'s storage didn't answer ({status}). Try again.", custom_build::config::YOURS));
             return Err(if status >= 500 || status == 0 { Failed(Trouble::Unreachable, said).into() } else { anyhow!(said) });
         }
         let object = |n: &str| out["get"][n].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.trim_end_matches('=').as_bytes()).ok()).map(|bytes| Object { bytes, tag: String::new() });
@@ -222,7 +222,7 @@ impl Address for On {
     async fn ask(&self, method: &str, url: &str, header: Option<(&str, String)>, body: Option<serde_json::Value>) -> Result<(u16, serde_json::Value), crate::Error> {
         let (name, value) = header.map(|(n, v)| (JsValue::from(n), JsValue::from(v))).unwrap_or((JsValue::NULL, JsValue::NULL));
         let body = body.map(|b| JsValue::from(b.to_string())).unwrap_or(JsValue::NULL);
-        let got = self.js.ask("ask", &[method.into(), url.into(), name, value, body]).await.map_err(|e| crate::unsent(format!("Couldn't reach {}: {e}", one::config::YOURS)))?;
+        let got = self.js.ask("ask", &[method.into(), url.into(), name, value, body]).await.map_err(|e| crate::unsent(format!("Couldn't reach {}: {e}", custom_build::config::YOURS)))?;
         let status = Reflect::get(&got, &"status".into()).ok().and_then(|s| s.as_f64()).unwrap_or(0.0) as u16;
         let said = Reflect::get(&got, &"body".into()).ok().and_then(|b| b.as_string()).and_then(|b| serde_json::from_str(&b).ok()).unwrap_or_default();
         Ok((status, said))
@@ -236,7 +236,7 @@ pub struct Seal {
     pub js: Js,
 }
 
-impl one::keys::Opens for Seal {
+impl key::Opens for Seal {
     fn public(&self) -> [u8; 32] {
         self.public
     }

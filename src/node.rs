@@ -1,10 +1,11 @@
 //! A node: this device's network (a custom build holds one), its replica and views, its socket to the relay, and where
 //! calls run.
 
+use custom_build::now_ms;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use ed25519_dalek::SigningKey;
@@ -13,28 +14,30 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
 use crate::app::runtime::{Apps, Context};
-use crate::state::{Me, handles, whose};
-use crate::call::Append;
-use crate::protocol::{CallRequest, Event};
-use crate::bucket::{Copied, Place};
-use crate::database::stored::Db;
-use crate::database::content::Content;
-use crate::database::steps::Step;
-use crate::keys::{Hash, Key, hex, short, unhex};
-use crate::database::scopes::{Scope, new_id};
-use crate::database::scopes::{self, ScopeDb};
-use crate::database::content;
-use crate::database::scopes::{Principal, ScopeState};
-use crate::config::{CLI, YOURS};
-use crate::rank;
+use ::scope::state::{Me, handles, whose};
+use ::api::call::Append;
+use ::api::call::{CallRequest, Event};
+use crate::node::copied::Copied;
+use ::bucket::Place;
+use ::database::stored::Db;
+use ::scope::content::Content;
+use ::scope::steps::Step;
+use ::key::{Hash, Key, hex, short, unhex};
+use ::scope::scopes::{Scope, new_id};
+use ::scope::scopes::{self, ScopeDb};
+use ::scope::content;
+use ::scope::scopes::{Principal, ScopeState};
+use ::custom_build::config::{CLI, YOURS};
+use ::scope::rank;
 use crate::release;
 use crate::schedules::{self, Schedule};
-use crate::replica::{Handled, Replica};
+use ::scope::replica::{Handled, Replica};
 
 mod ai_gateway;
 pub mod apps;
 pub mod backups;
 pub mod blobs;
+pub mod copied;
 mod calls;
 mod databases;
 pub mod devices;
@@ -58,7 +61,7 @@ use calls::{Granted, Reply};
 use apps::built_in_bundle;
 use scheduled::switch_entry;
 use services::added_scope;
-pub use crate::keys::Needs;
+pub use ::api::handed::Needs;
 pub mod services;
 mod app_schedules;
 mod settings;
@@ -110,17 +113,13 @@ const RELAY_EVERY: Duration = Duration::from_secs(60);
 const STATE_FRESH: Duration = Duration::from_secs(60);
 const REFETCH_AFTER: Duration = Duration::from_secs(30);
 
-pub fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
-}
-
 /// A service serving on a device: its name, the users it serves, and what it describes of itself.
 pub type Service = (String, Vec<String>, Value);
 
 /// What another device said of itself in its last answer here: how loaded it is, and why it hasn't taken the latest
 /// update, if it says.
 struct Said {
-    load: Option<crate::load::Load>,
+    load: Option<::scope::state::Load>,
     updating: Option<String>,
 }
 
@@ -153,7 +152,7 @@ struct Network {
     moved: Option<(Instant, Value)>,
     /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
     /// last position read, and the database, once its anchor checked out here.
-    scope_dbs: HashMap<Scope, crate::database::steps::ScopeReader>,
+    scope_dbs: HashMap<Scope, ::scope::steps::ScopeReader>,
     /// Each scope's rows of how things went, as this device last read them.
     status: HashMap<String, status::Status>,
     /// Each scope's own state, as its database says it.
@@ -175,7 +174,7 @@ struct Network {
 impl Network {
     /// What a device runs, as it told the relay (`versions`): for an app runtime, what its device does.
     fn running(&self, key: &Key) -> Option<crate::release::Version> {
-        let (commit, committed, target) = crate::protocol::told(self.versions[hex(&self.r.db().device_of(key))].as_str()?)?;
+        let (commit, committed, target) = ::custom_build::protocol::told(self.versions[hex(&self.r.db().device_of(key))].as_str()?)?;
         Some(crate::release::Version { commit: commit.into(), target: target.into(), committed })
     }
 
@@ -323,24 +322,24 @@ pub async fn serve(listen: &str) -> Result<()> {
     // Asked to stop, even while it starts: its workerd first, then at once, rather than once every blocking task
     // ends, which a stuck request would hold up. Its endpoint is closed, so other devices connect at once to the one
     // oned starts next.
-    let stop = crate::os::stop_asked()?;
+    let stop = platform::os::stop_asked()?;
     let (ready_node, node_ready) = tokio::sync::oneshot::channel::<Node>();
     tokio::spawn(async move {
         stop.await;
-        crate::insights::Ended::Signal.write(&crate::home());
+        crate::insights::Ended::Signal.write(&platform::home());
         if let Ok(Ok(node)) = tokio::time::timeout(LAST_SAY, node_ready).await {
             let _ = tokio::time::timeout(LAST_SAY, async { tokio::join!(node.close_net(), node.flush_insights()) }).await;
         }
         crate::app::runtime::stop_all();
         std::process::exit(0)
     });
-    let dir = crate::home();
+    let dir = platform::home();
     let token = crate::api::local_token(&dir).with_context(|| format!("{} has no token for this device's own programs: its onet makes it as it starts", dir.display()))?;
     let node = Node::runtime(&dir, Holder { at: crate::api::addr(), token }).await?;
     let _ = ready_node.send(node.clone());
     node.node_started(crate::insights::Ended::read(&dir));
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
-    tracing::info!("{} app runtime {} answering {listen} from {}", crate::config::NAME, crate::keys::short(&node.id()), dir.display());
+    tracing::info!("{} app runtime {} answering {listen} from {}", ::custom_build::config::NAME, ::key::short(&node.id()), dir.display());
     tokio::spawn(crate::api::serve_guide(node.clone()));
     crate::watchdog::watch();
     let served = crate::api::serve(listener, crate::api::guarded(crate::api::routes(), node)).await;
@@ -374,7 +373,7 @@ impl Node {
         let apps = Apps::start(dir.join(RUNTIME_DIR), outbound.local_addr()?.port()).await?;
         let (events, _) = broadcast::channel(256);
         let mut built_in = BTreeMap::new();
-        for (app, files) in crate::config::BUILT_IN {
+        for (app, files) in crate::carried::BUILT_IN {
             built_in.insert(app.to_string(), release::put_blob(dir, &built_in_bundle(files)?)?);
         }
         let node = Node(Arc::new(Inner {
@@ -512,7 +511,7 @@ impl Node {
     /// Refuses a second network: a custom build holds one network, and another context is another custom build.
     fn ensure_no_network(&self) -> Result<()> {
         if self.has_network() {
-            return Err(crate::protocol::Coded::error(crate::protocol::code::ALREADY_IN_NETWORK, format!("this device already belongs to a network, and {} holds one; for another, network that context's own app", crate::config::NAME)));
+            return Err(::custom_build::protocol::Coded::error(::custom_build::protocol::code::ALREADY_IN_NETWORK, format!("this device already belongs to a network, and {} holds one; for another, network that context's own app", ::custom_build::config::NAME)));
         }
         Ok(())
     }
@@ -679,7 +678,7 @@ fn note_change(i: &mut Network, scope: &Scope) {
 /// The scopes a call of `app` as `user` reaches (`state::reachable`), as this device can tell: of each scope it holds,
 /// by what it read.
 fn reachable(i: &Network, app: &str, user: &str) -> Result<Vec<Scope>> {
-    crate::state::reachable(i.r.db(), user, |s| i.r.holds(s).then(|| i.views.get(&s.to_string()).is_some_and(|st| st.added.contains(app))))
+    ::scope::state::reachable(i.r.db(), user, |s| i.r.holds(s).then(|| i.views.get(&s.to_string()).is_some_and(|st| st.added.contains(app))))
 }
 
 /// A user's name in the network, removed users' too; none if it never knew them.
@@ -689,7 +688,7 @@ fn user_name(db: &ScopeDb, user: &str) -> Result<String> {
 
 fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Result<Me> {
     let name = if caller.key == node.0.id { node.device_name() } else { db.machine(&caller.key)?.map(|k| k.name).unwrap_or_default() };
-    crate::state::me(db, &caller.user, hex(&caller.key), name, caller.agent.clone())
+    ::scope::state::me(db, &caller.user, hex(&caller.key), name, caller.agent.clone())
 }
 
 fn scope_name(i: &Network, scope: &str) -> Result<String> {

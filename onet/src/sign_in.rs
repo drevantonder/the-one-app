@@ -40,7 +40,7 @@ fn said(out: &Value, otherwise: &str) -> String {
 
 /// `fields` as a form's body, or a URL's query.
 fn form(fields: &[(&str, &str)]) -> String {
-    fields.iter().map(|(k, v)| format!("{}={}", one::url_encode(k), one::url_encode(v))).collect::<Vec<_>>().join("&")
+    fields.iter().map(|(k, v)| format!("{}={}", custom_build::url_encode(k), custom_build::url_encode(v))).collect::<Vec<_>>().join("&")
 }
 
 /// A request to auth, for its client to send: → its status and JSON (null if it wasn't).
@@ -131,7 +131,7 @@ impl Auth {
     pub fn ask(&self, client: &str, redirect: &str, join: &str) -> Asked {
         let verifier = B64U.encode(&rand::random::<[u8; 32]>());
         let state = B64U.encode(&rand::random::<[u8; 32]>());
-        let challenge = B64U.encode(&one::keys::sha256(verifier.as_bytes()));
+        let challenge = B64U.encode(&key::sha256(verifier.as_bytes()));
         let fields = [
             ("response_type", "code"),
             ("client_id", client),
@@ -193,10 +193,10 @@ mod sent {
     fn send(r: Request) -> Result<(u16, Value), Failed> {
         let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(30))).http_status_as_error(false).build().into();
         let (request, twice) = match r.body {
-            None => (ureq::http::Request::get(&r.url).body(Vec::new()), one::hedge::Twice::Safe),
-            Some((kind, body)) => (ureq::http::Request::post(&r.url).header("content-type", kind).body(body.into()), one::hedge::Twice::Never),
+            None => (ureq::http::Request::get(&r.url).body(Vec::new()), platform::hedge::Twice::Safe),
+            Some((kind, body)) => (ureq::http::Request::post(&r.url).header("content-type", kind).body(body.into()), platform::hedge::Twice::Never),
         };
-        let (mut answer, _) = one::hedge::run(&agent, "auth", request.map_err(|e| failed(e.to_string()))?, twice).map_err(|e| failed(e.to_string()))?;
+        let (mut answer, _) = platform::hedge::run(&agent, "auth", request.map_err(|e| failed(e.to_string()))?, twice).map_err(|e| failed(e.to_string()))?;
         Ok((answer.status().as_u16(), answer.body_mut().read_json().unwrap_or_default()))
     }
 

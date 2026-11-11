@@ -50,7 +50,7 @@ fn release_key() -> String {
     if let Some(key) = crate::env("WEB_KEY") {
         return key;
     }
-    one::config::RELEASE_KEY.to_string()
+    custom_build::config::RELEASE_KEY.to_string()
 }
 
 /// `file` is a bundle the release key signed and this app can open. Not itself checked against what's kept: `kept` does that.
@@ -90,7 +90,7 @@ fn kept(data: &Path) -> Vec<Bundle> {
 
 /// What the built-in bundle is, by when its commit was made.
 fn built_in() -> u64 {
-    one::config::COMMITTED
+    custom_build::config::COMMITTED
 }
 
 /// Whether this app should run `b`: newer than the copy built into it, and a shell it has.
@@ -146,7 +146,7 @@ pub fn behind(data: &Path) -> bool {
 /// client does: `refused` is what it was told, if anything. Those things keep what they last had and the page says to update.
 pub fn own_client_behind(data: &Path, refused: Option<&str>) {
     let path = folder(data).join("reads-behind");
-    if refused.is_some_and(|e| e.contains(&one::protocol::update_refusal(one::config::YOURS))) {
+    if refused.is_some_and(|e| e.contains(&custom_build::protocol::update_refusal(custom_build::config::YOURS))) {
         let _ = std::fs::create_dir_all(folder(data));
         let _ = std::fs::write(path, "");
     } else if refused.is_none() {
@@ -170,7 +170,7 @@ fn base(address: &str) -> String {
 fn get(secs: u64, url: String) -> Result<ureq::http::Response<ureq::Body>, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(secs))).http_status_as_error(false).build().into();
     let request = ureq::http::Request::get(url).body(Vec::new()).map_err(|e| e.to_string())?;
-    one::hedge::run(&agent, "updates", request, one::hedge::Twice::Safe).map(|(r, _)| r).map_err(|e| e.to_string())
+    platform::hedge::run(&agent, "updates", request, platform::hedge::Twice::Safe).map(|(r, _)| r).map_err(|e| e.to_string())
 }
 
 /// What the place says is newest, of the web client: its `web` line of `updates/newest` (`web <commit> <committed> <sha256> <size> <config>`).

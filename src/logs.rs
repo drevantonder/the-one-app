@@ -42,7 +42,7 @@ fn file(home: &Path, name: &str) -> PathBuf {
 
 /// Starts keeping what this process says, as `name`'s log (`NODE`, or a service's name), in this machine's home.
 pub fn keep(name: &str) {
-    keep_in(&crate::home(), name);
+    keep_in(&platform::home(), name);
 }
 
 /// The same in `home`: a native app's own folder.

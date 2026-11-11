@@ -9,7 +9,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use one::config::{COMMITTED, TARGET};
+use ::custom_build::config::{COMMITTED, TARGET};
 use one::latest::{Latest, Thing, sha256};
 use one::mode::Throwaway;
 use one::release::Version;
@@ -240,7 +240,7 @@ fn a_mac_takes_its_window_beside_its_program() {
     // No window is running.
     stub("pgrep", "exit 1");
     // ditto -x -k <zip> <into>: our "zip" is the build the window says it is, put where an unpacked app has its Info.plist.
-    let name = one::config::NAME;
+    let name = ::custom_build::config::NAME;
     stub("ditto", &format!("mkdir -p \"$4/{name}.app/Contents\" && cp \"$3\" \"$4/{name}.app/Contents/Info.plist\""));
     // plutil -extract Build raw -o - <plist>
     stub("plutil", "cat \"$6\"");
@@ -263,7 +263,7 @@ fn a_mac_takes_its_window_beside_its_program() {
     let was = device.inode();
 
     // A window that says it's another build than the record names isn't installed.
-    publish((one::config::BUILD, build(one::config::BUILD, TARGET, COMMITTED)), ("window", b"another".to_vec()));
+    publish((::custom_build::config::BUILD, build(::custom_build::config::BUILD, TARGET, COMMITTED)), ("window", b"another".to_vec()));
     let (ok, _, err) = update();
     assert!(!ok, "it says it's another build than the record says");
     assert!(err.contains("another"), "{err}");
@@ -307,7 +307,7 @@ fn exits(child: &mut std::process::Child) -> bool {
 fn it_makes_oned_exit_and_leaves_a_stranger_alone() {
     let device = device();
     device.published("newer", NEWER, build("newer", TARGET, NEWER));
-    let mut oned = sleeping_as(&device.dir.join("as-oned"), &one::oned::name());
+    let mut oned = sleeping_as(&device.dir.join("as-oned"), &::custom_build::programs::oned());
     std::fs::write(device.home.join(one::update::PID), oned.id().to_string()).unwrap();
     let (ok, said, err) = device.update();
     assert!(ok, "{err}");
@@ -331,9 +331,9 @@ fn it_makes_oned_exit_and_leaves_a_stranger_alone() {
 #[test]
 fn update_restarts_an_oned_still_on_the_build_before() {
     let device = device();
-    let build = one::config::BUILD;
+    let build = ::custom_build::config::BUILD;
     device.published(build, COMMITTED, self::build(build, TARGET, COMMITTED));
-    let mut oned = sleeping_as(&device.dir.join("as-oned"), &one::oned::name());
+    let mut oned = sleeping_as(&device.dir.join("as-oned"), &::custom_build::programs::oned());
     std::fs::write(device.home.join(one::update::PID), oned.id().to_string()).unwrap();
     std::fs::write(device.home.join("running"), "the build before").unwrap();
     let (ok, said, err) = device.update();
@@ -342,7 +342,7 @@ fn update_restarts_an_oned_still_on_the_build_before() {
     assert!(exits(&mut oned), "oned didn't exit");
 
     // One that began on this build is left running.
-    let mut oned = sleeping_as(&device.dir.join("as-oned"), &one::oned::name());
+    let mut oned = sleeping_as(&device.dir.join("as-oned"), &::custom_build::programs::oned());
     std::fs::write(device.home.join(one::update::PID), oned.id().to_string()).unwrap();
     one::update::note_running(&device.home).unwrap();
     let (ok, said, err) = device.update();

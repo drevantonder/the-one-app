@@ -19,7 +19,7 @@ const IMAGE_MOST: usize = 2 << 20;
 pub async fn refresh(device: &crate::Reach, dir: &Path) -> Result<(), String> {
     static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _one = ONE.lock().await;
-    let state: one::state::State = serde_json::from_value(crate::node(device, "GET", "/api/state", None).await?).map_err(|e| e.to_string())?;
+    let state: scope::state::State = serde_json::from_value(crate::node(device, "GET", "/api/state", None).await?).map_err(|e| e.to_string())?;
     let apps = crate::node(device, "GET", "/api/apps", None).await?;
     let apps: Vec<Value> = apps.as_array().cloned().unwrap_or_default();
     if state.user.is_none() {

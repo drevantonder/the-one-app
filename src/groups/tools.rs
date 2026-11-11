@@ -4,7 +4,7 @@
 
 use serde_json::json;
 
-use crate::config::YOURS;
+use ::custom_build::config::YOURS;
 use crate::core_tools::{Feature, Tool, serves};
 
 pub fn feature() -> Feature {
@@ -43,9 +43,9 @@ mod serve {
     use anyhow::Result;
     use serde_json::{Map, Value, json};
 
-    use crate::config::YOURS;
+    use ::custom_build::config::YOURS;
     use crate::node::{Caller, Node};
-    use crate::state::State;
+    use ::scope::state::State;
 
     pub async fn list(node: Node, me: Caller, _: Map<String, Value>) -> Result<Value> {
         Ok(json!({ "said": said(&node.state_for(&me)?) }))
@@ -73,14 +73,14 @@ mod serve {
     fn said(state: &State) -> String {
         let Some(i) = &state.network else { return format!("Users in {YOURS}: none.\nNo groups yet.\n") };
         let names: std::collections::HashMap<&str, String> = i.users.iter().map(|u| (u.id.as_str(), handled(&u.name, &u.handle))).collect();
-        let mut users: Vec<&crate::state::NetworkUser> = i.users.iter().collect();
+        let mut users: Vec<&::scope::state::NetworkUser> = i.users.iter().collect();
         users.sort_by_key(|u| !u.me);
         let everyone: Vec<String> = users.iter().map(|u| {
             let (name, role) = (handled(&u.name, &u.handle), u.role.as_str());
             if u.me { format!("{name} (you, {role})") } else { format!("{name} ({role})") }
         }).collect();
-        let mut out = format!("Users in {YOURS} (@{}): {}.\n", crate::database::scopes::EVERYONE, everyone.join(", "));
-        let users = |list: &[crate::state::Member]| -> Vec<String> {
+        let mut out = format!("Users in {YOURS} (@{}): {}.\n", ::scope::scopes::EVERYONE, everyone.join(", "));
+        let users = |list: &[::scope::state::Member]| -> Vec<String> {
             list.iter().map(|m| {
                 let (name, role) = (names.get(m.user.as_str()).map_or(m.user.as_str(), String::as_str), m.role.as_str());
                 match i.user == m.user {

@@ -1,7 +1,7 @@
 //! The network's members and settings, as users and their clients see them and change them, and finding them by name.
 
 use super::*;
-use crate::state::{Answering, ClientHere, DeviceNow, InstalledService, State, Viewer};
+use ::scope::state::{Answering, ClientHere, DeviceNow, InstalledService, State, Viewer};
 
 impl Node {
     pub fn is_user(&self, user: &str) -> bool {
@@ -101,7 +101,7 @@ impl Node {
                 updating: if s.key == self.0.id { self.updating() } else { session.and_then(|s| s.updating.clone()) },
             })
         };
-        let here = crate::state::Here {
+        let here = ::scope::state::Here {
             me: match client {
                 None => Viewer { key: hex(&device.unwrap_or(viewer.key)), name: viewer_name.clone(), user: viewer.user.clone() },
                 Some(client) => Viewer { key: String::new(), name: client.to_string(), user: viewer.user.clone() },
@@ -120,7 +120,7 @@ impl Node {
             throwaway: matches!(crate::mode::here(), crate::mode::Mode::Throwaway(_)),
             device_now: &device_now,
         };
-        crate::state::state(network.as_ref().map(|i| i.r.db()), me, here)
+        ::scope::state::state(network.as_ref().map(|i| i.r.db()), me, here)
     }
 
     /// Signs one of `global`'s node entries with this device, for `caller`: it counts only if this device is theirs

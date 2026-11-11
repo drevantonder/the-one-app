@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use one::config::{CLI, NAME};
+use ::custom_build::config::{CLI, NAME};
 
 use super::super::devices::{approve_code, didnt_sign_in, shell_quote};
 use super::super::network::spawn;

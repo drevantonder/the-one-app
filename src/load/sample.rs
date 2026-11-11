@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use super::{Guest, Load, Space};
+use ::scope::state::{Guest, Load, Space};
 
 /// CPU and GPU are sampled this often, and memory, disk and containers every `SLOW` samples.
 const EVERY: Duration = Duration::from_secs(5);
@@ -137,7 +137,7 @@ fn find(paths: &[&'static str]) -> Option<&'static str> {
 
 fn disk() -> Option<Space> {
     let path = if cfg!(target_os = "macos") { "/System/Volumes/Data" } else if cfg!(windows) { "C:\\" } else { "/" };
-    let (used, free) = crate::os::disk_space(std::path::Path::new(path))?;
+    let (used, free) = platform::os::disk_space(std::path::Path::new(path))?;
     Some(Space { used, total: used + free })
 }
 

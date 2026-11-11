@@ -3,26 +3,26 @@
 use std::time::Duration;
 
 use one::node::Node;
-use one::protocol::CallRequest;
+use ::api::call::CallRequest;
 use serde_json::{Value, json};
 
 use crate::temp;
 
 pub(crate) async fn start(name: &str) -> Node {
     let dir = temp(name);
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": name }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": name }).to_string()).unwrap();
     Node::start(&dir).await.unwrap()
 }
 
 /// A new network on `a`: its recovery key's secret.
 pub(crate) async fn create(a: &Node, name: &str, user_name: &str) -> String {
-    a.create_with(name, user_name, None, one::config::STARTERS).await.unwrap()
+    a.create_with(name, user_name, None, one::carried::STARTERS).await.unwrap()
 }
 
 /// Workers whose relay the devices of `a`'s network reach each other through, taking only `a` and those it
 /// admits: `a` says it's the network's.
 async fn relay(a: &Node) -> crate::cloudflare::Workers {
-    let k = tokio::task::block_in_place(|| crate::cloudflare::Workers::for_devices(vec![one::keys::hex(&a.id())]));
+    let k = tokio::task::block_in_place(|| crate::cloudflare::Workers::for_devices(vec![::key::hex(&a.id())]));
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
     k
@@ -42,30 +42,30 @@ pub(crate) async fn eventually(what: &str, node: &Node, mut check: impl AsyncFnM
 }
 
 /// `content` written to `global`'s scope database as a step `caller`'s own device (`key`) signs, as a client does.
-pub(crate) async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: one::database::content::Content) {
-    let global = one::database::scopes::Scope::Global;
-    let next = a.global_steps(caller, one::database::steps::NUMBER_MAX, None).await.unwrap();
+pub(crate) async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: ::scope::content::Content) {
+    let global = ::scope::scopes::Scope::Global;
+    let next = a.global_steps(caller, ::scope::steps::NUMBER_MAX, None).await.unwrap();
     let (at, epoch) = (next["at"].as_u64().unwrap(), next["epoch"].as_u64().unwrap() as u32);
-    let step = one::database::steps::sign(key, &global, at + 1, &caller.user, epoch, one::node::now_ms(), content).unwrap();
+    let step = ::scope::steps::sign(key, &global, at + 1, &caller.user, epoch, custom_build::now_ms(), content).unwrap();
     a.put_signed_steps(caller, vec![step]).await.unwrap();
 }
 
 /// A request to join from the device of `key`, as auth lists it, for `user`, with the proof `secret`'s invite makes.
-fn asks(key: &ed25519_dalek::SigningKey, user: &str, secret: Option<&[u8]>) -> one::settings::Asked {
-    let e = one::keys::Endpoint::of(key);
-    let proof = secret.map(|s| one::keys::invite_proof(s, &e));
-    one::settings::Asked::of(&json!({ "key": one::keys::hex(&e.key), "seal": one::keys::hex(&e.seal), "name": "Sam's laptop", "user": user, "proof": proof })).unwrap()
+fn asks(key: &ed25519_dalek::SigningKey, user: &str, secret: Option<&[u8]>) -> ::scope::settings::Asked {
+    let e = ::key::Endpoint::of(key);
+    let proof = secret.map(|s| ::key::invite_proof(s, &e));
+    ::scope::settings::Asked::of(&json!({ "key": ::key::hex(&e.key), "seal": ::key::hex(&e.seal), "name": "Sam's laptop", "user": user, "proof": proof })).unwrap()
 }
 
 /// An invite for Sam, as a member, whose secret is `secret`.
-fn invited(secret: &str) -> one::settings::Invited {
+fn invited(secret: &str) -> ::scope::settings::Invited {
     serde_json::from_value(json!({ "secret": secret, "name": "Sam", "role": "member", "until": u64::MAX })).unwrap()
 }
 
 /// Sam, invited by `a`'s user as a member, let in with his first device, `key`, as `a` approves it: → his id.
 pub(crate) async fn let_sam_in(a: &Node, key: &ed25519_dalek::SigningKey) -> String {
-    let sam = one::database::scopes::new_id();
-    one::settings::approve(a, &asks(key, &sam, Some(b"the-invites-secret")), &one::settings::Joining::Link(invited("the-invites-secret"))).await.unwrap();
+    let sam = ::scope::scopes::new_id();
+    ::scope::settings::approve(a, &asks(key, &sam, Some(b"the-invites-secret")), &::scope::settings::Joining::Link(invited("the-invites-secret"))).await.unwrap();
     sam
 }
 
@@ -79,7 +79,7 @@ async fn add_notes(a: &Node) {
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
     a.deploy_making(&me, "notes", &bundle, Some("admins"), true).await.unwrap();
-    a.add(&me, "notes", &one::database::scopes::Scope::Global, true, None).await.unwrap();
+    a.add(&me, "notes", &::scope::scopes::Scope::Global, true, None).await.unwrap();
 }
 
 /// The command that opens a backup, on a machine with only the disk and the recovery key: nothing running or joined
@@ -93,7 +93,7 @@ fn the_command_checks_it_with_no_node(backup: &std::path::Path, recovery: &str) 
     for (key, stdin) in [(file.to_str().unwrap(), None), ("-", Some(recovery))] {
         let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
         command.args(["backups", "check", "--json", "--folder", backup.to_str().unwrap(), "--recovery-key", key]);
-        command.env(one::config::env("HOME"), &nothing).env(one::config::env("ADDR"), "127.0.0.1:1").env("HOME", &nothing);
+        command.env(custom_build::config::env("HOME"), &nothing).env(custom_build::config::env("ADDR"), "127.0.0.1:1").env("HOME", &nothing);
         let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
         let mut sent = child.stdin.take().unwrap();
         sent.write_all(stdin.unwrap_or("").as_bytes()).unwrap();
@@ -117,7 +117,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     b.join(&a.pair().unwrap()).await.unwrap();
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
-    a.set_item(&me, &one::database::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
+    a.set_item(&me, &::scope::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
     let bad = a.add_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" })).await.unwrap();
     assert!(bad["id"].is_null() && bad["tried"][0]["error"].is_string(), "{bad}");
@@ -139,9 +139,9 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(a.backups().unwrap()["places"][0]["checked"]["error"].is_null(), "and says it passed");
 
     // From nothing but the disk and the recovery key.
-    let place = one::bucket::Place::Folder(dir.clone());
+    let place = bucket::Place::Folder(dir.clone());
     let network = one::backups::networks(&place).unwrap().remove(0);
-    let keys = one::backups::open_keys(&place, &network, &one::keys::unhex(&recovery).unwrap()).unwrap();
+    let keys = one::backups::open_keys(&place, &network, &::key::unhex(&recovery).unwrap()).unwrap();
     assert!(keys.contains_key("global") && keys.contains_key(&format!("user:{}", me.user)), "{:?}", keys.keys());
     let checked = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None }).unwrap().0;
     assert_eq!(checked["problems"], json!([]), "{checked}");
@@ -149,11 +149,11 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert_eq!(checked["users"], json!(["Andre"]));
     assert!(checked["apps"].as_array().unwrap().contains(&json!("notes")), "{checked}");
     let mine = format!("user:{}", me.user);
-    let items = backed_up(&dir, &network, &one::keys::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
+    let items = backed_up(&dir, &network, &::key::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
     assert!(items.iter().any(|i| i.contains("\"Example key\"")), "the Vault's item came back: {items:?}");
     the_command_checks_it_with_no_node(&dir, &recovery);
     let restored = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
-    assert_eq!(backed_up_posts(&dir, &network, &one::keys::unhex(&recovery).unwrap()).await, ["before the backup"]);
+    assert_eq!(backed_up_posts(&dir, &network, &::key::unhex(&recovery).unwrap()).await, ["before the backup"]);
     let steps_then = restored.snapshot.databases["notes/main"].0;
     let files: Vec<Vec<u8>> = walk(&dir).iter().map(|f| std::fs::read(f).unwrap()).collect();
     assert!(!files.iter().any(|f| f.windows(12).any(|w| w == b"s3cret-value") || f.windows(17).any(|w| w == b"before the backup")), "nothing is readable on the disk");
@@ -166,7 +166,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     eventually("the second backup", &a, async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
     let again = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
     assert!(again.snapshot.databases["notes/main"].0 > steps_then);
-    assert_eq!(backed_up_posts(&dir, &network, &one::keys::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
+    assert_eq!(backed_up_posts(&dir, &network, &::key::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
     let checked = a.check_backups().await.unwrap();
     assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
     assert!(checked[0]["error"].is_null(), "{checked}");
@@ -194,9 +194,9 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
 
     // A folder named only by a Vault item, which anyone may write, is never written to: a folder is its own device's
     // choice. Nor is an S3 place no admin's setting names.
-    let global = one::database::scopes::Scope::Global;
+    let global = ::scope::scopes::Scope::Global;
     let planted = temp("backup-planted").join("home");
-    let fields = json!({ "path": { "value": planted }, "device": { "value": one::keys::hex(&a.id()) } });
+    let fields = json!({ "path": { "value": planted }, "device": { "value": ::key::hex(&a.id()) } });
     a.set_item(&me, &global, json!({ "title": "Planted", "type": one::backups::KIND, "fields": fields, "apps": ["node"] })).await.unwrap();
     let s3 = json!({ "endpoint": { "value": "http://127.0.0.1:9" }, "bucket": { "value": "b" }, "key_id": { "value": "k" }, "secret": { "value": "s", "secret": true } });
     a.set_item(&me, &global, json!({ "title": "Unnamed bucket", "type": one::backups::KIND, "fields": s3, "hosts": ["127.0.0.1"], "apps": ["node"] })).await.unwrap();
@@ -223,7 +223,7 @@ async fn backed_up_posts(dir: &std::path::Path, install: &str, recovery: &[u8; 3
 /// opened with the recovery key alone.
 async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str, sql: &str) -> Vec<String> {
     let (copy, keys) = backed_up_keys(dir, install, recovery, scope, app, database);
-    match one::database::stored::Db::open(&copy, &format!("{}/{app}/{database}", one::bucket::folder(scope)), keys).await {
+    match ::database::stored::Db::open(&copy, &format!("{}/{app}/{database}", bucket::folder(scope)), keys).await {
         Ok(db) => db.query(sql, &[]).unwrap().into_iter().filter_map(|r| r.values().next().and_then(|v| v.as_str()).map(str::to_string)).collect(),
         Err(_) => Vec::new(),
     }
@@ -231,14 +231,14 @@ async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], sc
 
 /// The backup's copy of the network's bucket, and the keys of `app`'s `database` in `scope` there, opened with the
 /// recovery key alone.
-fn backed_up_keys(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str) -> (one::bucket::Place, one::database::stored::Keys) {
-    let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
-    let folder = one::bucket::folder(scope);
-    let mut keys = one::database::stored::Keys::new();
+fn backed_up_keys(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str) -> (bucket::Place, ::database::stored::Keys) {
+    let copy = bucket::Place::Folder(dir.join(install).join("bucket"));
+    let folder = bucket::folder(scope);
+    let mut keys = ::database::stored::Keys::new();
     for n in copy.list(&format!("{folder}/_epochs")).unwrap().iter().filter_map(|n| n.parse::<u32>().ok()) {
-        let epoch = one::backups::unseal(recovery, &copy.get(&one::keys::epoch_name(scope, n, "recovery")).unwrap().unwrap()).unwrap();
-        let Ok(Some(sealed)) = copy.get(&one::keys::app_key_name(scope, app, n)) else { continue };
-        keys.insert(n, one::keys::open_database_key(&epoch, app, database, &sealed).unwrap());
+        let epoch = one::backups::unseal(recovery, &copy.get(&::database::keys::epoch_name(scope, n, "recovery")).unwrap().unwrap()).unwrap();
+        let Ok(Some(sealed)) = copy.get(&::database::keys::app_key_name(scope, app, n)) else { continue };
+        keys.insert(n, ::key::open_database_key(&epoch, app, database, &sealed).unwrap());
     }
     (copy, keys)
 }
@@ -259,22 +259,22 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 async fn only_someone_who_may_remove_a_device_can_ask_it_to_update() {
     let secret: [u8; 32] = rand::random();
     let dir = temp("update-asked");
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&secret), "name": "a" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&secret), "name": "a" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "n", "Ann").await;
     let me = ed25519_dalek::SigningKey::from_bytes(&secret);
     let sam = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let_sam_in(&a, &sam).await;
     let stranger = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let ask = |by: &ed25519_dalek::SigningKey, of: [u8; 32]| one::keys::signed_request(by, one::protocol::RELAY, json!({ "update": one::keys::hex(&of) }), one::node::now_ms());
+    let ask = |by: &ed25519_dalek::SigningKey, of: [u8; 32]| ::key::signed_request(by, custom_build::protocol::RELAY, json!({ "update": ::key::hex(&of) }), custom_build::now_ms());
     assert_eq!(a.who_asked_to_update(&ask(&me, a.id())).unwrap().0, "a", "its own user may");
     assert!(a.who_asked_to_update(&ask(&sam, a.id())).is_err(), "someone else's device may not");
     assert!(a.who_asked_to_update(&ask(&stranger, a.id())).is_err(), "nor a device who's who doesn't list");
     assert!(a.who_asked_to_update(&ask(&me, sam.verifying_key().to_bytes())).is_err(), "an ask for another device isn't for this one");
-    let forged = { let mut f = ask(&me, a.id()); f["update"] = json!(one::keys::hex(&rand::random::<[u8; 32]>())); f };
+    let forged = { let mut f = ask(&me, a.id()); f["update"] = json!(::key::hex(&rand::random::<[u8; 32]>())); f };
     assert!(a.who_asked_to_update(&forged).is_err(), "a change to the ask breaks its signature");
     // Deploying the Workers again, which the relay leaves for the device they're deployed from, is for an admin's device.
-    let deploy = |by: &ed25519_dalek::SigningKey| one::keys::signed_request(by, one::protocol::RELAY, json!({ "cloudflare": true }), one::node::now_ms());
+    let deploy = |by: &ed25519_dalek::SigningKey| ::key::signed_request(by, custom_build::protocol::RELAY, json!({ "cloudflare": true }), custom_build::now_ms());
     assert_eq!(a.who_asked_to_update(&deploy(&me)).unwrap().0, "a", "an admin's");
     assert!(a.who_asked_to_update(&deploy(&sam)).is_err(), "not someone else's");
     assert!(a.who_asked_to_update(&deploy(&stranger)).is_err(), "nor a device who's who doesn't list");
@@ -285,45 +285,45 @@ async fn only_someone_who_may_remove_a_device_can_ask_it_to_update() {
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     let dir = temp("approve");
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
-    let global = one::database::scopes::Scope::Global;
+    let global = ::scope::scopes::Scope::Global;
     let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let opens = async |key: &ed25519_dalek::SigningKey, scope: &one::database::scopes::Scope| -> Vec<u32> {
-        let got = a.sealed_keys(&me, scope, Some(&one::keys::hex(&key.verifying_key().to_bytes())), None).await.unwrap();
+    let opens = async |key: &ed25519_dalek::SigningKey, scope: &::scope::scopes::Scope| -> Vec<u32> {
+        let got = a.sealed_keys(&me, scope, Some(&::key::hex(&key.verifying_key().to_bytes())), None).await.unwrap();
         let sealed = got["sealed"].as_object().unwrap();
-        sealed.iter().filter(|(_, v)| one::keys::open_sealed(&one::keys::seal_secret(key), &data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap()).is_ok()).map(|(n, _)| n.parse().unwrap()).collect()
+        sealed.iter().filter(|(_, v)| ::key::open_sealed(&::key::seal_secret(key), &data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap()).is_ok()).map(|(n, _)| n.parse().unwrap()).collect()
     };
 
     // Andre's new laptop, approved from his machine, opens global.
     let laptop = new_key();
-    one::settings::approve(&a, &asks(&laptop, &me.user, None), &one::settings::Joining::Own { proved: true }).await.unwrap();
+    ::scope::settings::approve(&a, &asks(&laptop, &me.user, None), &::scope::settings::Joining::Own { proved: true }).await.unwrap();
     assert_eq!(opens(&laptop, &global).await, vec![1]);
 
     // Sam is let in only with the proof of the secret Andre's invite made.
-    let (sam, sams) = (one::database::scopes::new_id(), new_key());
-    let invite = one::settings::Joining::Link(invited("the-invites-secret"));
-    assert!(one::settings::approve(&a, &asks(&sams, &sam, Some(b"another-secret")), &invite).await.is_err());
+    let (sam, sams) = (::scope::scopes::new_id(), new_key());
+    let invite = ::scope::settings::Joining::Link(invited("the-invites-secret"));
+    assert!(::scope::settings::approve(&a, &asks(&sams, &sam, Some(b"another-secret")), &invite).await.is_err());
     assert!(!a.is_user(&sam), "a request whose proof doesn't match lets no one in");
-    one::settings::approve(&a, &asks(&sams, &sam, Some(b"the-invites-secret")), &invite).await.unwrap();
+    ::scope::settings::approve(&a, &asks(&sams, &sam, Some(b"the-invites-secret")), &invite).await.unwrap();
     assert!(a.is_user(&sam));
     assert_eq!(opens(&sams, &global).await, vec![1]);
 
     // Sam's next device is his to approve, not Andre's.
-    let refused = one::settings::approve(&a, &asks(&new_key(), &sam, None), &one::settings::Joining::Own { proved: true }).await.unwrap_err();
+    let refused = ::scope::settings::approve(&a, &asks(&new_key(), &sam, None), &::scope::settings::Joining::Own { proved: true }).await.unwrap_err();
     assert!(format!("{refused:#}").contains("only their own devices"), "{refused:#}");
 
     // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the notes go on.
-    let laptop_key = json!({ "device": one::keys::hex(&laptop.verifying_key().to_bytes()) });
-    let removed = one::settings::answer(&a, "POST", "/api/devices/remove", laptop_key.to_string().as_bytes()).await.unwrap().unwrap();
+    let laptop_key = json!({ "device": ::key::hex(&laptop.verifying_key().to_bytes()) });
+    let removed = ::scope::settings::answer(&a, "POST", "/api/devices/remove", laptop_key.to_string().as_bytes()).await.unwrap().unwrap();
     assert_eq!(removed["not_renewed"], json!([]), "{removed}");
     assert_eq!(opens(&laptop, &global).await, vec![1]);
     for f in walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_epochs/2/")) {
-        assert!(one::keys::open_sealed(&one::keys::seal_secret(&laptop), &std::fs::read(&f).unwrap()).is_err(), "{} opens for the removed laptop", f.display());
+        assert!(::key::open_sealed(&::key::seal_secret(&laptop), &std::fs::read(&f).unwrap()).is_err(), "{} opens for the removed laptop", f.display());
     }
     assert_eq!(opens(&sams, &global).await, vec![1, 2]);
     a.call(notes("post", json!({ "text": "after" }))).await.unwrap();
@@ -333,21 +333,21 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
 /// left without its device, nor a device without its runtime.
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_a_device_takes_its_app_runtime_and_naming_the_runtime_removes_the_device() {
-    use one::database::scopes::Kind;
+    use ::scope::scopes::Kind;
     let a = start("remove-runtime").await;
     create(&a, "Home", "Andre").await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     // A computer of Andre's, approved from his machine, listing its own app runtime, as its onet does.
     let computer = async || {
         let device = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-        one::settings::approve(&a, &asks(&device, &me.user, None), &one::settings::Joining::Own { proved: true }).await.unwrap();
-        let runtime = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
-        let listed = one::database::content::runtime(&runtime, &me.user, "computer", &device.verifying_key().to_bytes());
+        ::scope::settings::approve(&a, &asks(&device, &me.user, None), &::scope::settings::Joining::Own { proved: true }).await.unwrap();
+        let runtime = ::key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+        let listed = ::scope::content::runtime(&runtime, &me.user, "computer", &device.verifying_key().to_bytes());
         signed_by(&a, &me, &device, listed).await;
         (device.verifying_key().to_bytes(), runtime.key)
     };
-    let listed = |k: [u8; 32]| one::settings::Me::who(&a, |w| w.machine(&k)).unwrap().is_some();
-    let remove = async |k: [u8; 32]| one::settings::answer(&a, "POST", "/api/devices/remove", json!({ "device": one::keys::hex(&k) }).to_string().as_bytes()).await.unwrap();
+    let listed = |k: [u8; 32]| ::scope::settings::Me::who(&a, |w| w.machine(&k)).unwrap().is_some();
+    let remove = async |k: [u8; 32]| ::scope::settings::answer(&a, "POST", "/api/devices/remove", json!({ "device": ::key::hex(&k) }).to_string().as_bytes()).await.unwrap();
 
     let (device, runtime) = computer().await;
     assert!(listed(device) && listed(runtime));
@@ -364,42 +364,42 @@ async fn removing_a_device_takes_its_app_runtime_and_naming_the_runtime_removes_
 #[tokio::test(flavor = "multi_thread")]
 async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     use data_encoding::BASE64URL_NOPAD as B64U;
-    use one::keys::{Endpoint, hex, open_sealed, seal_secret, seal_to, unhex};
+    use ::key::{Endpoint, hex, open_sealed, seal_secret, seal_to, unhex};
     let dir = temp("holders");
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
-    let global = one::database::scopes::Scope::Global;
+    let global = ::scope::scopes::Scope::Global;
     let new_device = async |platform: &str| {
         let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
         let e = Endpoint::of(&key);
-        let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": platform, "user": me.user, "platform": platform })).unwrap();
-        one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
+        let asked = ::scope::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": platform, "user": me.user, "platform": platform })).unwrap();
+        ::scope::settings::approve(&a, &asked, &::scope::settings::Joining::Own { proved: true }).await.unwrap();
         key
     };
     let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
     let sealed_for = |key: &ed25519_dalek::SigningKey| {
         let sealed = seal_to(&Endpoint::of(key).seal, &secret).unwrap();
-        B64U.encode(&one::keys::held_copy(&recovery, &hex(&key.verifying_key().to_bytes()), &sealed))
+        B64U.encode(&::key::held_copy(&recovery, &hex(&key.verifying_key().to_bytes()), &sealed))
     };
-    let name = async |holds: bool| one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
+    let name = async |holds: bool| ::scope::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
     let (phone, browser) = (new_device("iphone").await, new_device("browser").await);
     let opens = async |key: &ed25519_dalek::SigningKey| a.sealed_keys(&me, &global, Some(&hex(&key.verifying_key().to_bytes())), None).await.unwrap()["sealed"].clone();
     let before = opens(&phone).await;
 
     let to = hex(&phone.verifying_key().to_bytes());
-    assert!(one::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.is_err(), "no one is named yet");
+    assert!(::scope::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.is_err(), "no one is named yet");
     name(true).await;
     assert_eq!(opens(&phone).await, before, "naming a holder rewrites nothing sealed");
-    let sealed_to_node = seal_to(&one::keys::public_of(&[9; 32]), &secret).unwrap();
-    assert!(one::settings::recovery::seal(&a, &hex(&a.id()), &B64U.encode(&one::keys::held_copy(&recovery, &hex(&a.id()), &sealed_to_node))).await.is_err(), "not a node");
-    assert!(one::settings::recovery::seal(&a, &hex(&browser.verifying_key().to_bytes()), &sealed_for(&browser)).await.is_err(), "not a browser");
+    let sealed_to_node = seal_to(&::key::public_of(&[9; 32]), &secret).unwrap();
+    assert!(::scope::settings::recovery::seal(&a, &hex(&a.id()), &B64U.encode(&::key::held_copy(&recovery, &hex(&a.id()), &sealed_to_node))).await.is_err(), "not a node");
+    assert!(::scope::settings::recovery::seal(&a, &hex(&browser.verifying_key().to_bytes()), &sealed_for(&browser)).await.is_err(), "not a browser");
 
     let bad_key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let sealed = seal_to(&Endpoint::of(&phone).seal, &secret).unwrap();
-    assert!(one::settings::recovery::seal(&a, &to, &B64U.encode(&one::keys::held_copy(&bad_key, &to, &sealed))).await.is_err(), "only the recovery key signs a copy");
-    one::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.unwrap();
+    assert!(::scope::settings::recovery::seal(&a, &to, &B64U.encode(&::key::held_copy(&bad_key, &to, &sealed))).await.is_err(), "only the recovery key signs a copy");
+    ::scope::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.unwrap();
     // Anyone who can reach the bucket can create an object at that name: it neither counts nor stands in the way.
     let files: Vec<_> = walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_recovery/")).collect();
     assert!(!files.is_empty());
@@ -407,21 +407,21 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
         std::fs::write(file, b"anyone can make this").unwrap();
     }
     assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "a fake isn't counted");
-    one::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.unwrap();
+    ::scope::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.unwrap();
     let listed = a.recovery_holders(&me).await.unwrap();
     assert_eq!(listed["holders"][0]["devices"][0]["holds"], true, "{listed}");
     assert_eq!(listed["holders"][0]["devices"].as_array().unwrap().len(), 1, "only the phone: {listed}");
-    assert!(one::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.is_err(), "the one there stays");
+    assert!(::scope::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.is_err(), "the one there stays");
     let held: Vec<_> = walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_recovery/")).collect();
     assert_eq!(held.len(), 1, "{held:?}");
     let copy = std::fs::read(&held[0]).unwrap();
-    let opened = one::keys::held_sealed(&recovery.verifying_key().to_bytes(), &to, &copy).expect("signed by the recovery key");
+    let opened = ::key::held_sealed(&recovery.verifying_key().to_bytes(), &to, &copy).expect("signed by the recovery key");
     assert_eq!(open_sealed(&seal_secret(&phone), opened).unwrap(), secret, "it opens to the key on that device alone");
     assert!(open_sealed(&seal_secret(&browser), opened).is_err());
 
     name(false).await;
     let laptop = new_device("linux").await;
-    assert!(one::settings::recovery::seal(&a, &hex(&laptop.verifying_key().to_bytes()), &sealed_for(&laptop)).await.is_err(), "taken off, none of their devices is sealed it");
+    assert!(::scope::settings::recovery::seal(&a, &hex(&laptop.verifying_key().to_bytes()), &sealed_for(&laptop)).await.is_err(), "taken off, none of their devices is sealed it");
     assert!(a.recovery_holders(&me).await.unwrap()["holders"].as_array().unwrap().is_empty());
 }
 
@@ -432,8 +432,8 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_holder_restores_someone_and_no_one_else_can() {
     use data_encoding::BASE64URL_NOPAD as B64U;
-    use one::database::scopes::Scope;
-    use one::keys::{Endpoint, hex, join_code, seal_to, unhex};
+    use ::scope::scopes::Scope;
+    use ::key::{Endpoint, hex, join_code, seal_to, unhex};
     let dir = temp("restore");
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
@@ -444,27 +444,27 @@ async fn a_holder_restores_someone_and_no_one_else_can() {
     let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
     let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = Endpoint::of(&phone);
-    let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "new phone", "user": me.user, "platform": "iphone" })).unwrap();
-    one::settings::approve(&a, &asked, &one::settings::Joining::Lost).await.unwrap();
+    let asked = ::scope::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "new phone", "user": me.user, "platform": "iphone" })).unwrap();
+    ::scope::settings::approve(&a, &asked, &::scope::settings::Joining::Lost).await.unwrap();
     let to = hex(&e.key);
-    let code = one::keys::spaced_code(&join_code(&e));
+    let code = ::key::spaced_code(&join_code(&e));
     let opens = async || a.sealed_keys(&me, &own, Some(&to), None).await.unwrap()["sealed"].as_object().unwrap().len();
-    let name = async |holds: bool| one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
-    let restore = async |confirm: bool| one::settings::answer(&a, "POST", "/api/devices/restore", json!({ "code": code, "confirm": confirm }).to_string().as_bytes()).await.unwrap();
+    let name = async |holds: bool| ::scope::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
+    let restore = async |confirm: bool| ::scope::settings::answer(&a, "POST", "/api/devices/restore", json!({ "code": code, "confirm": confirm }).to_string().as_bytes()).await.unwrap();
 
     assert!(restore(true).await.is_err(), "no one is named yet");
     name(true).await;
     assert!(restore(true).await.unwrap_err().to_string().contains("doesn't have the recovery key"), "named, without its own copy");
-    one::settings::recovery::seal(&a, &to, &B64U.encode(&one::keys::held_copy(&recovery, &to, &seal_to(&e.seal, &secret).unwrap()))).await.unwrap();
+    ::scope::settings::recovery::seal(&a, &to, &B64U.encode(&::key::held_copy(&recovery, &to, &seal_to(&e.seal, &secret).unwrap()))).await.unwrap();
     let phone_copy = walk(&dir).into_iter().find(|p| p.to_string_lossy().contains("/_recovery/")).unwrap();
     let mine = phone_copy.with_file_name(hex(&a.id()));
-    std::fs::write(&mine, one::keys::held_copy(&recovery, &hex(&a.id()), &seal_to(&one::settings::Me::seal(&a), &secret).unwrap())).unwrap();
+    std::fs::write(&mine, ::key::held_copy(&recovery, &hex(&a.id()), &seal_to(&::scope::settings::Me::seal(&a), &secret).unwrap())).unwrap();
 
     assert!(restore(false).await.unwrap()["said"].as_str().unwrap().contains("new phone"), "without confirm, whose it is");
     let done = restore(true).await.unwrap();
     assert!(done["given"].as_array().unwrap().iter().any(|s| s.as_str() == Some(&own.to_string())), "{done}");
     assert_eq!(opens().await, 1, "their own scope reaches them");
-    let wrong = one::settings::answer(&a, "POST", "/api/devices/restore", json!({ "code": "AAAA AAAA AAAA AAAA", "confirm": true }).to_string().as_bytes()).await.unwrap();
+    let wrong = ::scope::settings::answer(&a, "POST", "/api/devices/restore", json!({ "code": "AAAA AAAA AAAA AAAA", "confirm": true }).to_string().as_bytes()).await.unwrap();
     assert!(wrong.is_err(), "a code no listed device shows does nothing");
     name(false).await;
     assert!(restore(true).await.is_err(), "taken off the list, they restore no one");
@@ -475,24 +475,24 @@ async fn a_holder_restores_someone_and_no_one_else_can() {
 /// nothing more.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
-    use one::keys::{Endpoint, epoch_name, hex, open_sealed, seal_secret, seal_to, twin_public, unhex};
+    use ::{key::{Endpoint, hex, open_sealed, seal_secret, seal_to, twin_public, unhex}, database::keys::epoch_name};
     use data_encoding::BASE64URL_NOPAD as B64U;
     let dir = temp("replace");
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     let old_secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
-    let global = one::database::scopes::Scope::Global;
+    let global = ::scope::scopes::Scope::Global;
     let old = ed25519_dalek::SigningKey::from_bytes(&old_secret);
     let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = Endpoint::of(&phone);
-    let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "phone", "user": me.user, "platform": "iphone" })).unwrap();
-    one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
-    one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
-    one::settings::recovery::seal(&a, &hex(&e.key), &B64U.encode(&one::keys::held_copy(&old, &hex(&e.key), &seal_to(&e.seal, &old_secret).unwrap()))).await.unwrap();
+    let asked = ::scope::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "phone", "user": me.user, "platform": "iphone" })).unwrap();
+    ::scope::settings::approve(&a, &asked, &::scope::settings::Joining::Own { proved: true }).await.unwrap();
+    ::scope::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
+    ::scope::settings::recovery::seal(&a, &hex(&e.key), &B64U.encode(&::key::held_copy(&old, &hex(&e.key), &seal_to(&e.seal, &old_secret).unwrap()))).await.unwrap();
     assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], true);
 
-    let own = one::database::scopes::Scope::User(me.user.clone());
+    let own = ::scope::scopes::Scope::User(me.user.clone());
     a.set_item(&me, &own, json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
     let new = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let new_secret = seal_secret(&new);
@@ -501,12 +501,12 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     let before = a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap();
     let n1 = before["epoch"].as_u64().unwrap() as u32;
 
-    let said = one::settings::recovery::replace(&a, &old, &new, false).await.unwrap();
+    let said = ::scope::settings::recovery::replace(&a, &old, &new, false).await.unwrap();
     assert!(said["said"].as_str().unwrap().contains("Would"), "{said}");
     assert_eq!(a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap()["epoch"], n1, "and changes nothing");
-    assert!(one::settings::recovery::replace(&a, &new, &ed25519_dalek::SigningKey::from_bytes(&rand::random()), true).await.is_err(), "a file that isn't the recovery key changes nothing");
+    assert!(::scope::settings::recovery::replace(&a, &new, &ed25519_dalek::SigningKey::from_bytes(&rand::random()), true).await.is_err(), "a file that isn't the recovery key changes nothing");
 
-    let done = one::settings::recovery::replace(&a, &old, &new, true).await.unwrap();
+    let done = ::scope::settings::recovery::replace(&a, &old, &new, true).await.unwrap();
     assert!(done["not_renewed"].as_array().unwrap().is_empty() && done["not_carried"].as_array().unwrap().is_empty(), "{done}");
     assert_eq!(a.state().unwrap().network.unwrap().recovery.unwrap(), hex(&new.verifying_key().to_bytes()));
     let n2 = a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap()["epoch"].as_u64().unwrap() as u32;
@@ -517,17 +517,17 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     assert!(opened(&new_copy, &seal_secret(&old)).is_none(), "and never with the old");
     let to_phone = std::fs::read(file_at(&epoch_name("global", n2, &hex(&e.key))).unwrap()).unwrap();
     assert_eq!(opened(&to_phone, &seal_secret(&phone)), Some(key), "and its users' devices open it");
-    let carried = std::fs::read(file_at(&epoch_name("global", n1, &one::keys::recovery_to(&twin_public(&new.verifying_key().to_bytes()).unwrap()))).unwrap()).unwrap();
+    let carried = std::fs::read(file_at(&epoch_name("global", n1, &::key::recovery_to(&twin_public(&new.verifying_key().to_bytes()).unwrap()))).unwrap()).unwrap();
     let was = std::fs::read(file_at(&epoch_name("global", n1, "recovery")).unwrap()).unwrap();
     assert_eq!(opened(&carried, &new_secret), opened(&was, &seal_secret(&old)), "the new key opens what the old did, and the old copy is still there");
 
-    let vault = std::fs::read(file_at(&one::keys::vault_key_name(&own.to_string(), 2, "recovery")).expect("the Vault has new keys")).unwrap();
+    let vault = std::fs::read(file_at(&::database::keys::vault_key_name(&own.to_string(), 2, "recovery")).expect("the Vault has new keys")).unwrap();
     assert!(opened(&vault, &new_secret).is_some() && opened(&vault, &seal_secret(&old)).is_none(), "under the new key only");
 
     assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "old holders' copies stop counting");
     assert!(walk(&dir).into_iter().any(|p| p.to_string_lossy().contains(&format!("/_recovery/{}/", hex(&old.verifying_key().to_bytes())))), "and nothing sealed was deleted");
 
-    let again = one::settings::recovery::replace(&a, &old, &new, true).await.unwrap();
+    let again = ::scope::settings::recovery::replace(&a, &old, &new, true).await.unwrap();
     assert!(again["renewed"].as_array().unwrap().is_empty(), "run again, nothing's made twice: {again}");
     assert_eq!(a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap()["epoch"].as_u64().unwrap() as u32, n2);
 }
@@ -537,27 +537,27 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backup_keeps_a_holders_copy_of_the_recovery_key() {
     use data_encoding::BASE64URL_NOPAD as B64U;
-    use one::keys::{Endpoint, hex, open_sealed, seal_secret, seal_to, unhex};
+    use ::key::{Endpoint, hex, open_sealed, seal_secret, seal_to, unhex};
     let a = start("holder-backup").await;
     let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
     let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = Endpoint::of(&phone);
-    let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "phone", "user": me.user, "platform": "iphone" })).unwrap();
-    one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
-    one::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
+    let asked = ::scope::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "phone", "user": me.user, "platform": "iphone" })).unwrap();
+    ::scope::settings::approve(&a, &asked, &::scope::settings::Joining::Own { proved: true }).await.unwrap();
+    ::scope::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
     let to = hex(&e.key);
     let sealed = seal_to(&e.seal, &secret).unwrap();
-    one::settings::recovery::seal(&a, &to, &B64U.encode(&one::keys::held_copy(&recovery, &to, &sealed))).await.unwrap();
+    ::scope::settings::recovery::seal(&a, &to, &B64U.encode(&::key::held_copy(&recovery, &to, &sealed))).await.unwrap();
 
     let dir = temp("holder-backup-disk").join("One Backups");
     a.add_place(&me, &json!({ "path": dir, "title": "Disk" })).await.unwrap();
     eventually("the first backup", &a, async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
-    let place = one::bucket::Place::Folder(dir.clone());
+    let place = bucket::Place::Folder(dir.clone());
     let network = one::backups::networks(&place).unwrap().remove(0);
-    let copied = place.get(&format!("{network}/bucket/{}", one::keys::recovery_held_name(&hex(&recovery.verifying_key().to_bytes()), &to))).unwrap().expect("the backup keeps it");
-    let opened = one::keys::held_sealed(&recovery.verifying_key().to_bytes(), &to, &copied).expect("still signed");
+    let copied = place.get(&format!("{network}/bucket/{}", ::database::keys::recovery_held_name(&hex(&recovery.verifying_key().to_bytes()), &to))).unwrap().expect("the backup keeps it");
+    let opened = ::key::held_sealed(&recovery.verifying_key().to_bytes(), &to, &copied).expect("still signed");
     assert_eq!(open_sealed(&seal_secret(&phone), opened).unwrap(), secret, "and it opens with the holder's device alone");
 }
 
@@ -569,18 +569,18 @@ async fn a_backup_keeps_a_holders_copy_of_the_recovery_key() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_settings_change_that_doesnt_read_is_refused() {
     let dir = temp("bodies");
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = a.user().unwrap();
-    let ask = async |path: &str, body: Value| one::settings::answer(&a, "POST", path, body.to_string().as_bytes()).await.unwrap();
+    let ask = async |path: &str, body: Value| ::scope::settings::answer(&a, "POST", path, body.to_string().as_bytes()).await.unwrap();
     let group = ask("/api/group", json!({ "name": "Team" })).await.unwrap()["group"].as_str().unwrap().to_string();
     let refused = ask("/api/member", json!({ "group": group, "user": me, "role": "admn" })).await.unwrap_err();
     assert!(format!("{refused:#}").contains("admn"), "{refused:#}");
     assert!(ask("/api/invite", json!({ "group": group, "user": me, "role": "owner" })).await.is_err());
     assert!(ask("/api/role", json!({ "user": me, "role": "admin", "extra": true })).await.is_err());
-    let role = one::settings::Me::who(&a, |db| db.role_in(&me, &one::database::scopes::Scope::Group(group.clone()))).unwrap();
-    assert_eq!(role, Some(one::database::scopes::Role::Admin), "still the group's admin");
+    let role = ::scope::settings::Me::who(&a, |db| db.role_in(&me, &::scope::scopes::Scope::Group(group.clone()))).unwrap();
+    assert_eq!(role, Some(::scope::scopes::Role::Admin), "still the group's admin");
 
     std::fs::write(dir.join("invites.json"), b"{ not json").unwrap();
     let refused = ask("/api/devices/invite", json!({ "name": "Sam" })).await.unwrap_err();
@@ -593,15 +593,15 @@ async fn a_settings_change_that_doesnt_read_is_refused() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
     let dir = temp("kept-before");
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = a.user().unwrap();
     let kept = std::path::Path::new("network/scope-kept").join(data_encoding::HEXLOWER.encode(b"global"));
     let read = |dir: &std::path::Path| serde_json::from_slice::<Value>(&std::fs::read(dir.join(&kept)).unwrap()).unwrap();
     let mut before = read(&dir);
-    let answer = one::settings::answer(&a, "POST", "/api/group", json!({ "name": "Team" }).to_string().as_bytes()).await.unwrap().unwrap();
-    let group = one::database::scopes::Scope::Group(answer["group"].as_str().unwrap().to_string());
+    let answer = ::scope::settings::answer(&a, "POST", "/api/group", json!({ "name": "Team" }).to_string().as_bytes()).await.unwrap().unwrap();
+    let group = ::scope::scopes::Scope::Group(answer["group"].as_str().unwrap().to_string());
     let after = read(&dir);
     assert!(after["at"].as_u64() > before["at"].as_u64(), "making a group is a step");
 
@@ -612,7 +612,7 @@ async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
     std::fs::write(copy.join(&kept), before.to_string()).unwrap();
 
     let b = Node::start(&copy).await.unwrap();
-    let is_admin = async || one::settings::Me::who(&b, |db| db.role_in(&me, &group)).ok().flatten() == Some(one::database::scopes::Role::Admin);
+    let is_admin = async || ::scope::settings::Me::who(&b, |db| db.role_in(&me, &group)).ok().flatten() == Some(::scope::scopes::Role::Admin);
     eventually("the step it passed over", &b, is_admin).await;
 }
 
@@ -620,7 +620,7 @@ async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
 #[tokio::test(flavor = "multi_thread")]
 async fn erasing_an_app_deletes_its_keys_whoever_erases_it() {
     let dir = temp("erase");
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
@@ -628,7 +628,7 @@ async fn erasing_an_app_deletes_its_keys_whoever_erases_it() {
     let keys = || walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/notes/_key/")).count();
     assert!(keys() > 0, "notes has keys");
     for how in ["deleted", "erased"] {
-        one::settings::answer(&a, "POST", "/api/retire", json!({ "app": "notes", "how": how }).to_string().as_bytes()).await.unwrap().unwrap();
+        ::scope::settings::answer(&a, "POST", "/api/retire", json!({ "app": "notes", "how": how }).to_string().as_bytes()).await.unwrap().unwrap();
     }
     assert_eq!(keys(), 0, "notes' keys are gone");
 }
@@ -641,9 +641,9 @@ async fn an_app_taken_off_a_page_and_added_back_has_what_it_kept() {
     add_notes(&a).await;
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before it left" }))).await.is_ok()).await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
-    a.add(&me, "notes", &one::database::scopes::Scope::Global, false, None).await.unwrap();
+    a.add(&me, "notes", &::scope::scopes::Scope::Global, false, None).await.unwrap();
     assert!(a.call(notes("read", json!({}))).await.is_err(), "an app off the page doesn't run there");
-    a.add(&me, "notes", &one::database::scopes::Scope::Global, true, None).await.unwrap();
+    a.add(&me, "notes", &::scope::scopes::Scope::Global, true, None).await.unwrap();
     let read = a.call(notes("read", json!({}))).await.unwrap();
     assert!(read.to_string().contains("before it left"), "{read}");
 }
@@ -713,11 +713,11 @@ async fn a_refusals_words_never_reach_what_insights_keeps_and_a_failures_are_cle
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_devices_user_or_an_admin_reads_its_logs() {
     let dir = temp("logs");
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let andre = one::node::Caller::own(a.id(), a.user().unwrap());
-    let now = one::node::now_ms();
+    let now = custom_build::now_ms();
     let log: String = (0..3000).map(|i| format!("{} line {i}\n", now - 1000 + i)).collect();
     std::fs::create_dir_all(dir.join("logs")).unwrap();
     std::fs::write(dir.join("logs/node.log"), log).unwrap();
@@ -734,7 +734,7 @@ async fn only_a_devices_user_or_an_admin_reads_its_logs() {
     let refused = a.call_as(logs(json!({})), from_sam.clone()).await.unwrap_err();
     assert!(format!("{refused:#}").contains("reads its logs"), "{refused:#}");
     assert!(!a.may_read_logs(&sam).unwrap() && a.may_read_logs(&andre.user).unwrap());
-    a.member_content(&andre, one::database::content::role(&sam, one::database::scopes::Role::Admin)).await.unwrap();
+    a.member_content(&andre, ::scope::content::role(&sam, ::scope::scopes::Role::Admin)).await.unwrap();
     assert!(a.may_read_logs(&sam).unwrap(), "an admin of the network reads any device's logs");
 }
 
@@ -744,7 +744,7 @@ async fn only_a_devices_user_or_an_admin_reads_its_logs() {
 async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     use one::oned::Build;
     let dir = temp("service-build");
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
@@ -753,7 +753,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
         let files = vec![("app.js".to_string(), b"export default { tools: {} }".to_vec()), (one::app::bundle::SERVICES.to_string(), services.to_string().into_bytes())];
         a.put_blob(&one::app::bundle::pack(&files).unwrap()).unwrap()
     };
-    let named = bundle(json!({ one::config::TARGET: build }));
+    let named = bundle(json!({ custom_build::config::TARGET: build }));
     a.deploy_making(&me, "tiny", &named, None, false).await.unwrap();
     assert_eq!(a.service_builds().await.get("tiny"), Some(&Build::Deployed(build.clone())));
     assert_eq!(a.service_build(&build).await.unwrap(), b"a program");
@@ -773,7 +773,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     // Nor does Andre, from elsewhere, name a build he can't read: one Sam put, by its hash.
     let away = one::node::Caller { key: [7; 32], credential: one::node::Credential::Client([7; 32]), ..me.clone() };
     let (sams, _) = a.put_blob_from(&sam, axum::body::Body::from("Sam's program")).await.unwrap();
-    let (his, _) = a.put_blob_from(&away, axum::body::Body::from(one::app::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (one::app::bundle::SERVICES.to_string(), json!({ one::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
+    let (his, _) = a.put_blob_from(&away, axum::body::Body::from(one::app::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (one::app::bundle::SERVICES.to_string(), json!({ custom_build::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
     let refused = a.deploy(&away, "tiny", &his, false).await.unwrap_err();
     assert!(format!("{refused:#}").contains("put it first"), "{refused:#}");
 }
@@ -783,7 +783,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
 /// doesn't name, gets none of it.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_does() {
-    use one::database::scopes::Scope;
+    use ::scope::scopes::Scope;
     let a = start("vault-fill").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
@@ -805,13 +805,13 @@ async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_doe
 /// where no grant afterwards opens it; what's made once one does opens, and still does after the next grant.
 #[tokio::test(flavor = "multi_thread")]
 async fn nothing_secret_is_kept_where_no_machine_opens_the_vault_and_what_is_kept_opens_after_a_grant() {
-    use one::database::scopes::Scope;
+    use ::scope::scopes::Scope;
     let a = start("vault-grant").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let own = Scope::User(me.user.clone());
-    let grant = async |on: bool| one::settings::answer(&a, "POST", "/api/vault/grant", json!({ "device": a.device_name(), "on": on }).to_string().as_bytes()).await.unwrap().unwrap();
+    let grant = async |on: bool| ::scope::settings::answer(&a, "POST", "/api/vault/grant", json!({ "device": a.device_name(), "on": on }).to_string().as_bytes()).await.unwrap().unwrap();
     let item = |title: &str| json!({ "title": title, "type": "Token", "hosts": ["notes"], "apps": ["notes"], "fields": { "_key": { "value": "s3cret", "secret": true } } });
     let opens = async |id: &str| {
         let mut input = json!({ "key": format!("{{{{{id}:_key}}}}") });
@@ -832,7 +832,7 @@ async fn nothing_secret_is_kept_where_no_machine_opens_the_vault_and_what_is_kep
 /// databases and the Vault's, so a scheduled run sees the items switched on for it, as a call does, and no other app's.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_apps_schedules_see_its_vault_items_as_its_calls_do_while_theyre_set() {
-    use one::database::scopes::Scope;
+    use ::scope::scopes::Scope;
     let a = start("schedules-vault").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
@@ -842,8 +842,8 @@ async fn an_apps_schedules_see_its_vault_items_as_its_calls_do_while_theyre_set(
     }
     let run = || a.app_schedules_call(&Scope::Global, "notes", &me.user, "vault", json!({}), "schedule");
     assert!(run().await.is_err(), "nothing runs notes' schedules yet");
-    let body = json!({ "app": "notes", "device": one::keys::hex(&a.id()), "scope": "global" }).to_string();
-    let set = async |path: &str| one::settings::answer(&a, "POST", path, body.as_bytes()).await.unwrap().unwrap();
+    let body = json!({ "app": "notes", "device": ::key::hex(&a.id()), "scope": "global" }).to_string();
+    let set = async |path: &str| ::scope::settings::answer(&a, "POST", path, body.as_bytes()).await.unwrap().unwrap();
     set("/api/devices/run_schedules").await;
     assert_eq!(run().await.unwrap(), json!(["For notes"]), "a scheduled run sees its own items, and no other app's");
     set("/api/devices/stop_schedules").await;
@@ -864,7 +864,7 @@ async fn a_client_devices_mcp_runs_as_its_user() {
     let_sam_in(&a, &device).await;
     // Asked as the node asks its routes for a request over iroh: as the device its connection proved.
     let mut headers = axum::http::HeaderMap::new();
-    headers.insert(one::protocol::header::READS, one::database::READS.into());
+    headers.insert(custom_build::protocol::header::READS, custom_build::protocol::READS.into());
     let from = InProcess::new(a.clone(), Some(one::api::FromClient(device.verifying_key().to_bytes(), u64::MAX)), None, &headers);
     let from = std::sync::Arc::new(from);
     let mcp = async |body: Value| {
@@ -915,7 +915,7 @@ async fn a_tool_answers_what_its_output_says() {
     assert_eq!(deployed["lacking"], json!(["unsaid"]), "the deploy names the tool that says nothing of its answer: {deployed}");
     let schema = &one::openapi::document(&[], true)["paths"]["/api/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
     one::tools::check(schema, &deployed).unwrap_or_else(|err| panic!("a deploy answers what the document doesn't say: {err:#}\n{deployed}"));
-    a.add(&me, "answers", &one::database::scopes::Scope::Global, true, None).await.unwrap();
+    a.add(&me, "answers", &::scope::scopes::Scope::Global, true, None).await.unwrap();
     let call = |tool: &str| CallRequest { app: "answers".into(), tool: tool.into(), input: json!({}), ..Default::default() };
     eventually("answers to run", &a, async || a.call(call("keeps")).await.is_ok()).await;
     assert_eq!(a.call(call("keeps")).await.unwrap(), json!({ "n": 1 }));
@@ -959,7 +959,7 @@ async fn a_routes_answer_is_what_the_document_says() {
     let document = one::openapi::document(&a.apps(&me).await.unwrap(), true);
     // As this machine's own programs ask: over its loopback, with the token in the node's home.
     let mut headers = axum::http::HeaderMap::new();
-    headers.insert(one::protocol::header::LOCAL_TOKEN, one::api::local_token(a.dir()).unwrap().parse().unwrap());
+    headers.insert(custom_build::protocol::header::LOCAL_TOKEN, one::api::local_token(a.dir()).unwrap().parse().unwrap());
     let from = std::sync::Arc::new(InProcess::new(a.clone(), None, Some(axum::extract::ConnectInfo("127.0.0.1:1".parse().unwrap())), &headers));
     let mut asked = 0;
     for (method, path, body) in [
@@ -1004,7 +1004,7 @@ async fn ask_runtime(at: &str, token: &str, body: Value) -> (u16, Value) {
     let (url, token) = (format!("http://{at}/api/call"), token.to_string());
     tokio::task::spawn_blocking(move || {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        match agent.post(&url).header(one::protocol::header::LOCAL_TOKEN, &token).send_json(body) {
+        match agent.post(&url).header(custom_build::protocol::header::LOCAL_TOKEN, &token).send_json(body) {
             Ok(mut answer) => (answer.status().as_u16(), answer.body_mut().read_json().unwrap_or(Value::Null)),
             Err(err) => (0, json!(err.to_string())),
         }
@@ -1019,8 +1019,8 @@ async fn ask_runtime(at: &str, token: &str, body: Value) -> (u16, Value) {
 /// device's app schedules, once the device leaves them to it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
-    use one::database::content::{self, Change};
-    use one::database::scopes::Kind;
+    use ::scope::content::{self, Change};
+    use ::scope::scopes::Kind;
     let k = start("rt-device").await;
     create(&k, "Home", "Andre").await;
     add_notes(&k).await;
@@ -1038,30 +1038,30 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     // device as a compute naming it, let in at the relay; then the device drops its own Compute.
     let home = crate::temp("rt-runtime");
     let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let r = one::keys::Endpoint::of(&key);
+    let r = ::key::Endpoint::of(&key);
     let folder = one::node::runtime_folder(&home);
     std::fs::create_dir_all(&folder).unwrap();
-    std::fs::write(folder.join("key"), one::keys::hex(&key.to_bytes())).unwrap();
+    std::fs::write(folder.join("key"), ::key::hex(&key.to_bytes())).unwrap();
     std::fs::create_dir_all(home.join("network")).unwrap();
     std::fs::copy(k.dir().join("network/network.json"), home.join("network/network.json")).unwrap();
     std::fs::copy(k.dir().join(one::api::LOCAL_TOKEN), home.join(one::api::LOCAL_TOKEN)).unwrap();
     // The device runs its user's app schedules of notes, for everyone.
-    let ran = one::settings::answer(&k, "POST", "/api/devices/run_schedules", json!({ "app": "notes", "device": one::keys::hex(&k.id()), "scope": "global" }).to_string().as_bytes()).await.unwrap().unwrap();
+    let ran = ::scope::settings::answer(&k, "POST", "/api/devices/run_schedules", json!({ "app": "notes", "device": ::key::hex(&k.id()), "scope": "global" }).to_string().as_bytes()).await.unwrap().unwrap();
     assert!(ran["until"].is_u64(), "{ran}");
     let listing = |key: &[u8; 32], seal: &[u8; 32], name: &str, roles: &[Kind], device: Option<&[u8; 32]>| {
-        content::node(Change::Device, json!({ "key": one::keys::hex(key), "seal": one::keys::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(one::keys::hex) }))
+        content::node(Change::Device, json!({ "key": ::key::hex(key), "seal": ::key::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(::key::hex) }))
     };
     k.member_content(&me, listing(&r.key, &r.seal, "rt-device's runtime", &[Kind::Compute], Some(&k.id()))).await.unwrap();
-    one::settings::tell(&k, &k, json!({ "add": one::keys::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
-    k.member_content(&me, listing(&k.id(), &one::settings::Me::seal(&k), "rt-device", &[Kind::Client], None)).await.unwrap();
+    ::scope::settings::tell(&k, &k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
+    k.member_content(&me, listing(&k.id(), &::scope::settings::Me::seal(&k), "rt-device", &[Kind::Client], None)).await.unwrap();
 
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let at = format!("127.0.0.1:{port}");
     let log = std::fs::File::create(home.join("runtime.log")).unwrap();
     let mut oned = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
-    std::os::unix::process::CommandExt::arg0(&mut oned, one::oned::name());
-    oned.args([one::database::scopes::APPS_PART, &format!("--listen={at}")]);
-    oned.env(one::config::env("HOME"), &home).env(one::config::env("ADDR"), &holder_at).stdout(log.try_clone().unwrap()).stderr(log);
+    std::os::unix::process::CommandExt::arg0(&mut oned, custom_build::programs::oned());
+    oned.args([::scope::scopes::APPS_PART, &format!("--listen={at}")]);
+    oned.env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), &holder_at).stdout(log.try_clone().unwrap()).stderr(log);
     let _runtime = Runtime(oned.spawn().unwrap());
 
     // Only the device's own programs ask it, with the token in its folder, never the one in the device's home.
@@ -1083,9 +1083,9 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
 
     // The device's schedules, run by its runtime alone, the device no longer listed to run anything.
     eventually("a scheduled run", &b, async || lines(&b).await.contains("on schedule")).await;
-    let slots = k.dir().join("network/bucket/global").join(one::database::scopes::APP).join("slots/notes/tick");
+    let slots = k.dir().join("network/bucket/global").join(::key::APP).join("slots/notes/tick");
     let taken: Vec<String> = std::fs::read_dir(slots).unwrap().map(|f| std::fs::read_to_string(f.unwrap().path()).unwrap()).collect();
-    assert_eq!(taken, vec![one::keys::hex(&r.key)], "each slot's lease names who took it");
+    assert_eq!(taken, vec![::key::hex(&r.key)], "each slot's lease names who took it");
 }
 
 /// A computer's onet holds its device's key for the device's app runtime, an endpoint of its own key: the runtime asks
@@ -1093,8 +1093,8 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
 /// home's token isn't. A call made on onet runs there, and reaches the user's other devices.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
-    use one::database::content::{self, Change};
-    use one::database::scopes::Kind;
+    use ::scope::content::{self, Change};
+    use ::scope::scopes::Kind;
     let k = start("onet-device").await;
     create(&k, "Home", "Andre").await;
     add_notes(&k).await;
@@ -1111,16 +1111,16 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
         std::fs::copy(k.dir().join(file), home.join(file)).unwrap();
     }
     let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let r = one::keys::Endpoint::of(&key);
+    let r = ::key::Endpoint::of(&key);
     let folder = one::node::runtime_folder(&home);
     std::fs::create_dir_all(&folder).unwrap();
-    std::fs::write(folder.join("key"), one::keys::hex(&key.to_bytes())).unwrap();
+    std::fs::write(folder.join("key"), ::key::hex(&key.to_bytes())).unwrap();
     let listing = |key: &[u8; 32], seal: &[u8; 32], name: &str, roles: &[Kind], device: Option<&[u8; 32]>| {
-        content::node(Change::Device, json!({ "key": one::keys::hex(key), "seal": one::keys::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(one::keys::hex) }))
+        content::node(Change::Device, json!({ "key": ::key::hex(key), "seal": ::key::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(::key::hex) }))
     };
     k.member_content(&me, listing(&r.key, &r.seal, "onet-device's runtime", &[Kind::Compute], Some(&k.id()))).await.unwrap();
-    one::settings::tell(&k, &k, json!({ "add": one::keys::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
-    k.member_content(&me, listing(&k.id(), &one::settings::Me::seal(&k), "onet-device", &[Kind::Client], None)).await.unwrap();
+    ::scope::settings::tell(&k, &k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
+    k.member_content(&me, listing(&k.id(), &::scope::settings::Me::seal(&k), "onet-device", &[Kind::Client], None)).await.unwrap();
 
     let free = || format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
     let (onet_at, runtime_at) = (free(), free());
@@ -1128,15 +1128,15 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
         let log = std::fs::File::create(home.join(log)).unwrap();
         let mut program = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
         std::os::unix::process::CommandExt::arg0(&mut program, name);
-        program.args(args).env(one::config::env("HOME"), &home).env(one::config::env("ADDR"), addr).stdout(log.try_clone().unwrap()).stderr(log);
+        program.args(args).env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), addr).stdout(log.try_clone().unwrap()).stderr(log);
         Runtime(program.spawn().unwrap())
     };
     let _onet = started(onet::computer::name(), vec![format!("--listen={onet_at}"), format!("--runtime={runtime_at}")], &onet_at, "onet.log");
     let home_token = std::fs::read_to_string(home.join(one::api::LOCAL_TOKEN)).unwrap();
     let held = async || ask(&onet_at, "GET", "/api/holds", &home_token, None).await;
     polled("onet to answer", &home.join("onet.log"), async || held().await.0 == 200).await;
-    assert_eq!(held().await.1["key"], one::keys::hex(&k.id()), "it holds the device's key");
-    let _runtime = started(one::oned::name(), vec![one::database::scopes::APPS_PART.into(), format!("--listen={runtime_at}")], &onet_at, "runtime.log");
+    assert_eq!(held().await.1["key"], ::key::hex(&k.id()), "it holds the device's key");
+    let _runtime = started(custom_build::programs::oned(), vec![::scope::scopes::APPS_PART.into(), format!("--listen={runtime_at}")], &onet_at, "runtime.log");
     polled("the runtime to start", &home.join("runtime.log"), async || ask(&runtime_at, "GET", "/api/state", "", None).await.0 == 403).await;
     assert_eq!(ask(&runtime_at, "GET", "/api/state", &home_token, None).await.0, 403, "the runtime takes only its own token");
 
@@ -1167,7 +1167,7 @@ impl Drop for Oned {
 /// runtime the device's, a compute of its own key naming the device, and the device a client alone.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_computers_home_from_before_onet_is_the_same_device_with_its_runtime_listed() {
-    use one::database::scopes::Kind;
+    use ::scope::scopes::Kind;
     let k = start("switch-device").await;
     create(&k, "Home", "Andre").await;
     add_notes(&k).await;
@@ -1187,8 +1187,8 @@ async fn a_computers_home_from_before_onet_is_the_same_device_with_its_runtime_l
     let at = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
     let log = std::fs::File::create(home.join("oned.log")).unwrap();
     let mut oned = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
-    std::os::unix::process::CommandExt::arg0(&mut oned, one::oned::name());
-    oned.env(one::config::env("HOME"), &home).env(one::config::env("ADDR"), &at).stdout(log.try_clone().unwrap()).stderr(log);
+    std::os::unix::process::CommandExt::arg0(&mut oned, custom_build::programs::oned());
+    oned.env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), &at).stdout(log.try_clone().unwrap()).stderr(log);
     let _oned = Oned(oned.spawn().unwrap());
     let token = std::fs::read_to_string(home.join(one::api::LOCAL_TOKEN)).unwrap();
 
@@ -1203,14 +1203,14 @@ async fn a_computers_home_from_before_onet_is_the_same_device_with_its_runtime_l
     .await;
     assert!(lines.to_string().contains("before onet"), "{lines}");
     assert_eq!(std::fs::read(home.join("device.json")).unwrap(), key, "its key is the one it had");
-    assert_eq!(ask(&at, "GET", "/api/holds", &token, None).await.1["key"], one::keys::hex(&k.id()), "onet holds it");
+    assert_eq!(ask(&at, "GET", "/api/holds", &token, None).await.1["key"], ::key::hex(&k.id()), "onet holds it");
 
     // Who's who: the two listings, and nothing else.
     let runtime = one::node::runtime_endpoint(&home).unwrap();
     let listed = async || {
         let state = ask(&at, "GET", "/api/state", &token, None).await.1;
         let devices = state["network"]["devices"].as_array().cloned().unwrap_or_default().into_iter().chain(state["network"]["clients"].as_array().cloned().unwrap_or_default());
-        let roles = |key: &[u8; 32]| devices.clone().filter(|d| d["key"] == one::keys::hex(key)).flat_map(|d| d["roles"].as_array().cloned().unwrap_or_default()).collect::<Vec<_>>();
+        let roles = |key: &[u8; 32]| devices.clone().filter(|d| d["key"] == ::key::hex(key)).flat_map(|d| d["roles"].as_array().cloned().unwrap_or_default()).collect::<Vec<_>>();
         (roles(&k.id()), roles(&runtime.key))
     };
     polled("the runtime listed", &home.join("oned.log"), async || listed().await == (vec![json!(Kind::Client)], vec![json!(Kind::Compute)])).await;
@@ -1224,10 +1224,10 @@ async fn ask(at: &str, method: &str, path: &str, token: &str, body: Option<Value
     let (url, method, token) = (format!("http://{at}{path}"), method.to_string(), token.to_string());
     tokio::task::spawn_blocking(move || {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        let request = ureq::http::Request::builder().method(method.as_str()).uri(&url).header(one::protocol::header::LOCAL_TOKEN, &token).header(one::protocol::header::TRACE, "1").header("content-type", "application/json");
+        let request = ureq::http::Request::builder().method(method.as_str()).uri(&url).header(custom_build::protocol::header::LOCAL_TOKEN, &token).header(custom_build::protocol::header::TRACE, "1").header("content-type", "application/json");
         match agent.run(request.body(body.map(|b| b.to_string()).unwrap_or_default()).unwrap()) {
             Ok(mut answer) => {
-                let trace = answer.headers().get(one::protocol::header::TRACE).and_then(|t| data_encoding::BASE64.decode(t.as_bytes()).ok()).and_then(|t| serde_json::from_slice(&t).ok()).unwrap_or_default();
+                let trace = answer.headers().get(custom_build::protocol::header::TRACE).and_then(|t| data_encoding::BASE64.decode(t.as_bytes()).ok()).and_then(|t| serde_json::from_slice(&t).ok()).unwrap_or_default();
                 (answer.status().as_u16(), answer.body_mut().read_json().unwrap_or(Value::Null), trace)
             }
             Err(err) => (0, json!(err.to_string()), Value::Null),

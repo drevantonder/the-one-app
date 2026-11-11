@@ -41,7 +41,7 @@ struct Known {
 impl Logos {
     pub fn open(dir: &Path) -> Logos {
         let path = dir.join("logos.json");
-        let known = crate::files::read_json(&path);
+        let known = platform::files::read_json(&path);
         Logos { path, known: Mutex::new(known), fetching: Mutex::default(), urls: Mutex::default() }
     }
 
@@ -117,8 +117,8 @@ pub struct Logo {
 /// an ICO's largest picture, as PNG), with its type.
 pub fn fetch(domain: &str) -> Result<Logo> {
     ensure!(valid(domain), "{domain:?} isn't a site's name");
-    let config = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).user_agent(format!("{}/{}", crate::config::NAME, env!("CARGO_PKG_VERSION")));
-    let agent = crate::reach::agent(config, crate::reach::public);
+    let config = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(20))).user_agent(format!("{}/{}", custom_build::config::NAME, env!("CARGO_PKG_VERSION")));
+    let agent = platform::reach::agent(config, platform::reach::public);
     let home = format!("https://{domain}/");
     let (page, base) = match agent.get(&home).call() {
         Ok(mut r) => {

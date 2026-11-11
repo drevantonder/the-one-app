@@ -7,8 +7,7 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
 use crate::cli::{Command, Given};
-use crate::config::{CLI, NAME, YOURS};
-use crate::keys;
+use ::custom_build::config::{CLI, NAME, YOURS};
 
 pub fn commands() -> Command {
     Command {
@@ -30,7 +29,7 @@ fn run(g: &Given) -> Result<bool> {
         ["devices", "approve", code @ ..] => {
             let Some(file) = g.flag("recovery-key") else { return Ok(false) };
             let code = code.first().copied().or(g.flag("code")).context("give the code the new device shows")?;
-            let recovery = keys::recovery_key_in(file)?;
+            let recovery = key::recovery_key_in(file)?;
             let answer = g.node.post_for(g.agent, "/api/devices/approve-with-recovery", json!({ "code": code, "confirm": g.has("confirm"), "recovery": recovery }))?;
             println!("{}", answer["said"].as_str().unwrap_or(""));
         }
@@ -71,10 +70,10 @@ fn holders(said: &Value) {
 /// Replaces the recovery key. The new one is written to its file first, unreadable by anyone else, so a failure later
 /// never leaves a network whose key is lost; and read from it on a run that finishes one that stopped.
 fn replace(g: &Given) -> Result<()> {
-    let recovery = keys::recovery_key_in(g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?)?;
+    let recovery = key::recovery_key_in(g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?)?;
     let at = g.flag("new-key-file").context("give --new-key-file: a file for the new key, which goes in your admins' password manager")?;
     let confirm = g.has("confirm");
-    let next = keys::next_recovery_key(at, confirm)?;
+    let next = key::next_recovery_key(at, confirm)?;
     let answer = g.node.post_for(g.agent, "/api/devices/recovery-key/replace", json!({ "recovery": recovery, "next": next, "confirm": confirm }))?;
     println!("{}", answer["said"].as_str().unwrap_or(""));
     if confirm {
@@ -89,10 +88,10 @@ fn replace(g: &Given) -> Result<()> {
 /// computed here from the very key and seal key used, against what a person read off that device's own screen.
 fn seal(g: &Given, code: Option<&str>) -> Result<()> {
     let file = g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?;
-    let secret = keys::unhex(&keys::recovery_key_in(file)?)?;
+    let secret = key::unhex(&key::recovery_key_in(file)?)?;
     let said = g.node.get("/api/devices/recovery-holders")?;
     let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
-    ensure!(said["recovery"].as_str() == Some(keys::hex(&recovery.verifying_key().to_bytes()).as_str()), "That file doesn't hold {YOURS}'s recovery key.");
+    ensure!(said["recovery"].as_str() == Some(key::hex(&recovery.verifying_key().to_bytes()).as_str()), "That file doesn't hold {YOURS}'s recovery key.");
     let mut owed = Vec::new();
     for holder in said["holders"].as_array().into_iter().flatten() {
         for device in holder["devices"].as_array().into_iter().flatten().filter(|d| d["holds"] != true) {
@@ -114,8 +113,8 @@ fn seal(g: &Given, code: Option<&str>) -> Result<()> {
     let (name, device, to, seal) = owed
         .iter()
         .find_map(|(name, device)| {
-            let endpoint = keys::Endpoint { key: keys::unhex(device["key"].as_str()?).ok()?, seal: keys::unhex(device["seal"].as_str()?).ok()? };
-            (keys::join_code(&endpoint) == wanted).then_some((*name, *device, endpoint.key, endpoint.seal))
+            let endpoint = key::Endpoint { key: key::unhex(device["key"].as_str()?).ok()?, seal: key::unhex(device["seal"].as_str()?).ok()? };
+            (key::join_code(&endpoint) == wanted).then_some((*name, *device, endpoint.key, endpoint.seal))
         })
         .context("No device waiting for it shows that code. Read it again from that device's own screen: a different code means what this computer was told isn't that device.")?;
     let label = device["name"].as_str().unwrap_or("");
@@ -123,9 +122,9 @@ fn seal(g: &Given, code: Option<&str>) -> Result<()> {
         println!("Would seal it to {label}, {name}'s device. Whoever holds it can read everything in {YOURS}. Run it again with --confirm.");
         return Ok(());
     }
-    let to = keys::hex(&to);
-    let sealed = keys::seal_to(&seal, &secret)?;
-    let copy = keys::held_copy(&recovery, &to, &sealed);
+    let to = key::hex(&to);
+    let sealed = key::seal_to(&seal, &secret)?;
+    let copy = key::held_copy(&recovery, &to, &sealed);
     g.node.post_for(g.agent, "/api/devices/recovery-holders/seal", json!({ "to": to, "copy": B64U.encode(&copy) }))?;
     println!("Sealed it to {label}, {name}'s device.");
     Ok(())

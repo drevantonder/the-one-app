@@ -28,12 +28,12 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, ensure};
 use ssh_key::{HashAlg, LineEnding, PrivateKey, PublicKey, SshSig};
 
-/// The folder of the bucket, and the path at the network's address, updates are read from. (`src/protocol.rs` gives
+/// The folder of the bucket, and the path at the network's address, updates are read from. (`custom-build/src/protocol.rs` gives
 /// the Workers the same word.)
-pub const FOLDER: &str = crate::protocol::UPDATES;
+pub const FOLDER: &str = custom_build::protocol::UPDATES;
 /// The object replaced by each publish: `<folder>/newest`.
 pub fn newest_name() -> String {
-    format!("{FOLDER}/{}", crate::protocol::NEWEST)
+    format!("{FOLDER}/{}", custom_build::protocol::NEWEST)
 }
 
 /// The namespace the record is signed in, so nothing else the release key signs passes for one.
@@ -155,8 +155,8 @@ fn updates_url(address: &str, file: &str) -> String {
 
 /// The record's text at `address`; none if nothing has been published there yet.
 pub fn fetch(address: &str) -> Result<Option<String>> {
-    let request = ureq::http::Request::get(updates_url(address, crate::protocol::NEWEST)).body(Vec::new())?;
-    match crate::hedge::run(&agent(FETCH), "updates", request, crate::hedge::Twice::Safe) {
+    let request = ureq::http::Request::get(updates_url(address, custom_build::protocol::NEWEST)).body(Vec::new())?;
+    match platform::hedge::run(&agent(FETCH), "updates", request, platform::hedge::Twice::Safe) {
         Ok((mut r, _)) => Ok(Some(r.body_mut().with_config().limit(1 << 20).read_to_string()?)),
         Err(ureq::Error::StatusCode(404)) => Ok(None),
         Err(err) => Err(anyhow!("couldn't reach {address}: {err}")),
@@ -166,7 +166,7 @@ pub fn fetch(address: &str) -> Result<Option<String>> {
 /// `thing`'s file, whole and with the hash the record names.
 pub fn download(address: &str, thing: &Thing) -> Result<Vec<u8>> {
     let request = ureq::http::Request::get(updates_url(address, &thing.sha256)).body(Vec::new())?;
-    let (mut resp, _) = crate::hedge::run(&agent(DOWNLOAD), "updates", request, crate::hedge::Twice::Safe).with_context(|| format!("download {} {}", thing.name, thing.commit))?;
+    let (mut resp, _) = platform::hedge::run(&agent(DOWNLOAD), "updates", request, platform::hedge::Twice::Safe).with_context(|| format!("download {} {}", thing.name, thing.commit))?;
     let bytes = resp.body_mut().with_config().limit(2 << 30).read_to_vec().with_context(|| format!("download {} {}", thing.name, thing.commit))?;
     ensure!(sha256(&bytes) == thing.sha256, "{} {} isn't what the record names (its hash doesn't match)", thing.name, thing.commit);
     Ok(bytes)
@@ -175,7 +175,7 @@ pub fn download(address: &str, thing: &Thing) -> Result<Vec<u8>> {
 pub fn sha256(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest: [u8; 32] = Sha256::digest(bytes).into();
-    crate::keys::hex(&digest)
+    key::hex(&digest)
 }
 
 /// The hash and size of the file at `path`.

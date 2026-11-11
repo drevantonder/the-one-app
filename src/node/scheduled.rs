@@ -2,7 +2,7 @@
 //! app_schedules.rs), from its node, with their keys alone: each slot once, whichever such machine takes it first,
 //! and none while every one is off.
 
-use crate::protocol::allowed;
+use ::custom_build::allowed;
 use std::collections::BTreeSet;
 
 use super::*;
@@ -76,8 +76,8 @@ impl Node {
     /// slot first. How it went is written as every run's is, where this device opens the scope's own rows.
     async fn run_schedule(&self, scope: &Scope, app: &str, schedule: &Schedule, user: &str, slot: u64) -> Result<()> {
         self.app_schedules_keys(scope, app).await?;
-        let lease = format!("{}/{}/slots/{app}/{}/{slot}", crate::bucket::folder(&scope.to_string()), scopes::APP, schedule.name);
-        if !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
+        let lease = format!("{}/{}/slots/{app}/{}/{slot}", bucket::folder(&scope.to_string()), key::APP, schedule.name);
+        if !bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
             return Ok(());
         }
         let started = Instant::now();

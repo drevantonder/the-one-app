@@ -121,7 +121,7 @@ mod store {
 /// `<cli> <name>`; a throwaway build's, `<cli> throwaway <name>`, beside the user's own.
 fn service(name: &str) -> String {
     let throwaway = if env!("IDENTIFIER").ends_with(".throwaway") { " throwaway" } else { "" };
-    format!("{}{throwaway} {name}", one::config::CLI)
+    format!("{}{throwaway} {name}", custom_build::config::CLI)
 }
 
 /// What's kept, if it can be read: a store that can't answer now says nothing is there, and says so in the log.

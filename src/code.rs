@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
-use crate::config::CLI;
+use ::custom_build::config::CLI;
 use crate::skills::{Mode, path, ts};
 use serde_json::{Value, json};
 
@@ -257,7 +257,7 @@ pub const DIRECT: &[&str] = &["deploy", "vault_request", "vault_status"];
 pub fn code_tools(all: Vec<Value>) -> Vec<Value> {
     let direct = |t: &Value| {
         let name = t["name"].as_str().unwrap_or("");
-        DIRECT.contains(&name) || crate::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|tool| tool.starts_with('_')))
+        DIRECT.contains(&name) || ::custom_build::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|tool| tool.starts_with('_')))
     };
     [vec![search_tool(Mode::Code), execute_tool()], all.into_iter().filter(direct).collect()].concat()
 }
@@ -286,7 +286,7 @@ fn runner() -> Result<(PathBuf, PathBuf)> {
         hash.update(format!("{path}\0{}\0{text}", text.len()));
     }
     let hash = data_encoding::HEXLOWER.encode(&hash.finalize());
-    let dir = crate::cache().join(format!("codemode-{}", &hash[..16]));
+    let dir = platform::cache().join(format!("codemode-{}", &hash[..16]));
     if dir.join("node_modules/@opencode/codemode").is_dir() {
         return Ok((bun, dir));
     }
@@ -340,7 +340,7 @@ pub fn execute(node: &Client, script: &str, agent: Option<&str>) -> Result<Value
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(LIMITS.0 + 60_000));
         if !watching.load(std::sync::atomic::Ordering::SeqCst) {
-            crate::os::kill(pid as u32);
+            platform::os::kill(pid as u32);
         }
     });
     let mut result = None;

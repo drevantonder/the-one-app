@@ -15,7 +15,7 @@ pub fn commands() -> Command {
 
 fn run(g: &Given) -> Result<bool> {
     let (["backups", "check"], Some(folder)) = (g.words().as_slice(), g.flag("folder")) else { return Ok(false) };
-    let key = crate::keys::recovery_key_in(g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?)?;
+    let key = key::recovery_key_in(g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?)?;
     let report = check_folder(folder, &key)?;
     println!("{}", if g.json { report.to_string() } else { crate::tools::said(&report) });
     Ok(true)
@@ -23,8 +23,8 @@ fn run(g: &Given) -> Result<bool> {
 
 /// Every network the backup in `folder` holds, each opened and checked.
 fn check_folder(folder: &str, recovery_key: &str) -> Result<Value> {
-    let secret = crate::keys::unhex(recovery_key).context("a recovery key is 64 hex characters")?;
-    let place = crate::bucket::Place::Folder(folder.into());
+    let secret = key::unhex(recovery_key).context("a recovery key is 64 hex characters")?;
+    let place = bucket::Place::Folder(folder.into());
     let mut out = Vec::new();
     for network in crate::backups::networks(&place)? {
         let keys = crate::backups::open_keys(&place, &network, &secret)?;

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use one::config::CLI;
+use ::custom_build::config::CLI;
 use serde_json::{Value, json};
 
 use super::devices::{agent_devices, borrowed_for, devices, listed_devices};
@@ -90,7 +90,7 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settin
                 // what's listed is a copy that was lent before it stopped, or none, and then it's borrowed again.
                 Err(err) => match ours(&listed()) {
                     Some(device) => json!({ "device": device }),
-                    None if one::protocol::Coded::is(&err, one::protocol::code::STOPPED) => borrow()?,
+                    None if ::custom_build::protocol::Coded::is(&err, ::custom_build::protocol::code::STOPPED) => borrow()?,
                     None => return Err(err),
                 },
             };

@@ -108,7 +108,7 @@ fn lacking_said(names: &[String]) -> Option<String> {
 
 /// What a deploy did, and what's next, as `reader` would do it. `node` says whether the app is on a page of the caller's.
 pub fn said(node: &crate::api::Client, app: &str, r: &serde_json::Value, reader: crate::core_tools::Reader) -> String {
-    use crate::config::CLI;
+    use ::custom_build::config::CLI;
     use crate::core_tools::Reader;
     let short = |b: &serde_json::Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
     let added = node.get("/api/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["added"].as_array().is_some_and(|i| !i.is_empty()))) == Some(true);
@@ -205,7 +205,7 @@ fn screen_tools(installer: &Path, install: &[&str]) -> Result<PathBuf> {
         hash.update(format!("{path}\0{}\0", text.len()));
         hash.update(text);
     }
-    let dir = crate::cache().join(format!("screen-tools-{}", &data_encoding::HEXLOWER.encode(&hash.finalize())[..16]));
+    let dir = platform::cache().join(format!("screen-tools-{}", &data_encoding::HEXLOWER.encode(&hash.finalize())[..16]));
     if dir.join("node_modules").is_dir() {
         return Ok(dir);
     }
@@ -248,7 +248,7 @@ fn build_kept(files: &[(&str, &[u8])], build_screens: bool) -> Result<Vec<u8>> {
         hash.update(format!("{path}\0{}\0", bytes.len()));
         hash.update(bytes);
     }
-    let kept = crate::cache().join("built-in").join(format!("{}-{}{}.tar", data_encoding::HEXLOWER.encode(&hash.finalize()), crate::build::BUN, if build_screens { "" } else { "-prebuilt" }));
+    let kept = platform::cache().join("built-in").join(format!("{}-{}{}.tar", data_encoding::HEXLOWER.encode(&hash.finalize()), crate::build::BUN, if build_screens { "" } else { "-prebuilt" }));
     if let Ok(bundle) = std::fs::read(&kept) {
         return Ok(bundle);
     }
@@ -294,7 +294,7 @@ pub fn given(files: &serde_json::Map<String, serde_json::Value>) -> Result<Vec<(
 }
 
 fn tempdir() -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("{}-build-{}", crate::config::CLI, rand::random::<u64>()));
+    let dir = std::env::temp_dir().join(format!("{}-build-{}", ::custom_build::config::CLI, rand::random::<u64>()));
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

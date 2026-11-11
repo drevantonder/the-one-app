@@ -4,7 +4,7 @@
 //! so a call waits there while it starts again rather than being refused. Outside oned (tests), the node keeps one in a
 //! thread of its own.
 //! Each deployed app is an ES module inside `runtime/shim.js`, which asks the node to run its queries and writes on
-//! its databases (`src/database/stored.rs`), and runs its tools, widgets, hooks and screens.
+//! its databases (`database/src/stored.rs`), and runs its tools, widgets, hooks and screens.
 //! When the deploys change, the node writes the config again and restarts workerd.
 //! Every request an app makes (its `fetch`es, and the shim's asks of the node) goes to the node's outbound port,
 //! `src/app/outbound.rs`, carrying the token of the call it's made in.
@@ -20,8 +20,8 @@ use serde_json::{Value, json};
 use sha2::Digest;
 
 
-use crate::call::{Append, appends};
-use crate::state::{Me, ScopeHandle};
+use ::api::call::{Append, appends};
+use ::scope::state::{Me, ScopeHandle};
 
 /// The workerd build every node runs, and each platform's npm package of it with its sha512.
 const WORKERD: &str = "1.20261031.1";
@@ -204,7 +204,7 @@ impl Apps {
             if reply["exception"].is_object() {
                 crate::node::trace::note(json!({ "step": "exception", "exception": reply["exception"] }), Duration::ZERO);
             }
-            return Err(crate::protocol::Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("the app failed")));
+            return Err(custom_build::protocol::Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("the app failed")));
         }
         Ok(reply)
     }
@@ -377,7 +377,7 @@ pub fn stop_all() {
     let mut running = RUNNING.lock().unwrap();
     STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
     for pid in std::mem::take(&mut *running) {
-        crate::os::kill(pid);
+        platform::os::kill(pid);
     }
 }
 
@@ -418,9 +418,9 @@ fn keep(workerd: &Path, dir: &Path, listener: Option<&std::net::TcpListener>) {
 #[cfg(windows)]
 fn kill_serving(dir: &Path) -> bool {
     let Some(pid) = std::fs::read_to_string(dir.join(WORKERD_PID)).ok().and_then(|p| p.trim().parse().ok()) else { return false };
-    let running = crate::os::is_program(pid, "workerd.exe");
+    let running = platform::os::is_program(pid, "workerd.exe");
     if running {
-        crate::os::kill(pid);
+        platform::os::kill(pid);
     }
     running
 }
@@ -453,8 +453,8 @@ fn stop_previous(dir: &Path) {
 pub fn workerd() -> Result<PathBuf> {
     let (_, package, integrity) = PACKAGES
         .iter()
-        .find(|(target, _, _)| *target == crate::config::TARGET)
-        .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", crate::config::TARGET))?;
+        .find(|(target, _, _)| *target == custom_build::config::TARGET)
+        .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", custom_build::config::TARGET))?;
     let url = format!("https://registry.npmjs.org/@cloudflare/workerd-{package}/-/workerd-{package}-{WORKERD}.tgz");
     let dir = format!("workerd-{WORKERD}");
     #[cfg(windows)]
@@ -486,7 +486,7 @@ const VISUAL_C_RUNTIME: VisualCRuntime = VisualCRuntime {
 /// The file at `member` in an archive (an npm package, or a zip on Windows, which its `tar` reads too), downloaded once
 /// into the node's cache as `bin` and checked against the archive's pinned sha512.
 pub fn pinned(dir: &str, bin: &str, member: &str, url: &str, integrity: &str) -> Result<PathBuf> {
-    let dir = crate::cache().join(dir);
+    let dir = platform::cache().join(dir);
     let path = dir.join(bin);
     if path.exists() {
         return Ok(path);
@@ -557,11 +557,11 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16, outbound: u16,
     let mut bindings = Vec::new();
     let mut workers = Vec::new();
     for (i, (name, source)) in apps.iter().enumerate() {
-        ensure!(crate::database::scopes::valid_app_name(name), "app names are lowercase words joined by -");
+        ensure!(::scope::scopes::valid_app_name(name), "app names are lowercase words joined by -");
         let app_dir = modules.join(name);
         std::fs::create_dir_all(&app_dir)?;
         std::fs::write(app_dir.join("app.js"), source)?;
-        std::fs::write(app_dir.join("shim.js"), crate::call::shim())?;
+        std::fs::write(app_dir.join("shim.js"), ::api::call::shim())?;
         services.push(format!("(name = {}, worker = .app{i})", quote(&format!("app-{name}"))));
         bindings.push(format!("(name = {}, service = {})", quote(name), quote(&format!("app-{name}"))));
         workers.push(format!(

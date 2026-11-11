@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use one::keys::{self, hex};
+use ::key::hex;
 use serde_json::{Value, json};
 
 use crate::keyring::now;
@@ -96,7 +96,7 @@ impl<S: Shelf> Answers<S> {
 
 /// What a call's answer is kept by: the hash of its app, tool and input, the input's fields in any order.
 fn name(app: &str, tool: &str, input: &Value) -> String {
-    hex(&keys::sha256(&keys::canonical(&json!([app, tool, input]))))
+    hex(&::key::sha256(&::key::canonical(&json!([app, tool, input]))))
 }
 
 /// A native app's shelf: files in its device's folder (`answers/`), sealed under a key from the device's own.
@@ -109,19 +109,19 @@ pub struct Files {
 #[cfg(not(target_family = "wasm"))]
 impl Files {
     pub fn new(dir: &std::path::Path, key: &ed25519_dalek::SigningKey) -> Files {
-        Files { dir: dir.join("answers"), key: keys::answers_key(key) }
+        Files { dir: dir.join("answers"), key: ::key::answers_key(key) }
     }
 }
 
 #[cfg(not(target_family = "wasm"))]
 impl Shelf for Files {
     async fn get(&self, name: &str) -> Option<Vec<u8>> {
-        keys::open(&self.key, name, &std::fs::read(self.dir.join(name)).ok()?).ok()
+        ::key::open(&self.key, name, &std::fs::read(self.dir.join(name)).ok()?).ok()
     }
 
     async fn put(&self, name: &str, plain: &[u8], most: usize) {
         let _ = std::fs::create_dir_all(&self.dir);
-        let _ = std::fs::write(self.dir.join(name), keys::seal(0, &self.key, name, plain));
+        let _ = std::fs::write(self.dir.join(name), ::key::seal(0, &self.key, name, plain));
         let Ok(kept) = std::fs::read_dir(&self.dir) else { return };
         let mut kept: Vec<_> = kept.flatten().filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path()))).collect();
         if kept.len() > most {

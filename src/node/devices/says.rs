@@ -64,6 +64,6 @@ pub struct SealRecovery {
 }
 
 /// A recovery key, as the command that read its file sends it: 64 hex characters.
-pub fn recovery_key(hex: &str, what: &str) -> anyhow::Result<crate::keys::SigningKey> {
-    crate::keys::unhex(hex.trim()).map_err(|_| anyhow::anyhow!("{what} is 64 hex characters")).map(|k| crate::keys::SigningKey::from_bytes(&k))
+pub fn recovery_key(hex: &str, what: &str) -> anyhow::Result<key::SigningKey> {
+    key::unhex(hex.trim()).map_err(|_| anyhow::anyhow!("{what} is 64 hex characters")).map(|k| key::SigningKey::from_bytes(&k))
 }

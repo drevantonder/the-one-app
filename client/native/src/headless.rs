@@ -172,12 +172,12 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<onet::Device>>) -> Resu
             // one of this user's own devices whose sign-in names it, and never someone else's or one that would take
             // another device out, each of which has a card to read first.
             let code = crate::device_code(&text("code")?);
-            let code = code.get(..one::keys::JOIN_CODE_SHORT).unwrap_or(&code).to_string();
+            let code = code.get(..key::JOIN_CODE_SHORT).unwrap_or(&code).to_string();
             let device = device(mine).await?;
             match input["approve"] == true {
                 true => {
                     let about = crate::node(&device, "POST", "/api/devices/approve", Some(json!({ "code": code }))).await?;
-                    if !one::settings::approves_from_a_note(&about) {
+                    if !scope::settings::approves_from_a_note(&about) {
                         return Err("Open Settings › Devices to answer it.".to_string());
                     }
                     crate::node(&device, "POST", "/api/devices/approve", Some(json!({ "code": code, "confirm": true }))).await?

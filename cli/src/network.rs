@@ -3,9 +3,9 @@
 use anyhow::Context;
 use one::api::Client;
 use one::cli::Command;
-use one::config::{CLI, YOURS};
-use one::rank::Priority;
-use one::state::State;
+use ::custom_build::config::{CLI, YOURS};
+use ::scope::rank::Priority;
+use ::scope::state::State;
 use serde_json::{Value, json};
 
 /// Who's in the network and this device: status, making or joining a network, settings.
@@ -135,11 +135,11 @@ fn status(node: &Client, state: &State) {
             Priority::Number(n) => n.to_string(),
             Priority::Last => "last".to_string(),
         };
-        println!("  {}  the Cloudflare node, run priority {at}", one::rank::CLOUDFLARE);
+        println!("  {}  the Cloudflare node, run priority {at}", ::scope::rank::CLOUDFLARE);
     }
     // A device that's only a client (a phone, a computer, a browser) is listed with them; a passkey isn't one, and a
     // device with an app runtime of its own is listed as that runtime, above.
-    let (passkeys, clients): (Vec<&one::state::Client>, Vec<&one::state::Client>) = i.clients.iter().partition(|c| c.passkey.is_some());
+    let (passkeys, clients): (Vec<&::scope::state::Client>, Vec<&::scope::state::Client>) = i.clients.iter().partition(|c| c.passkey.is_some());
     for c in clients.iter().filter(|c| !i.devices.iter().any(|d| d.device.as_ref() == Some(&c.key))) {
         let glyph = if is_phone(c) { "▯" } else { "▭" };
         println!("  {glyph} {}  {}'s", c.name, name(&c.user));
@@ -153,7 +153,7 @@ fn status(node: &Client, state: &State) {
 }
 
 /// Whether a client is a phone, as it says, or for one that hasn't yet, as its name does.
-fn is_phone(c: &one::state::Client) -> bool {
+fn is_phone(c: &::scope::state::Client) -> bool {
     let name = c.name.to_lowercase();
     matches!(c.platform.as_deref(), Some("iphone" | "android")) || (c.platform.is_none() && ["phone", "ipad", "tablet", "android", "pixel", "galaxy"].iter().any(|w| name.contains(w)))
 }

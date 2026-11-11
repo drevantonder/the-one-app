@@ -5,7 +5,7 @@ pub mod tools;
 
 use ::ai_gateway::{Company, Paid};
 
-use crate::database::scopes::Scope;
+use ::scope::scopes::Scope;
 use crate::vault::Items;
 
 /// The key that pays for `company`'s models in a call of `app` (none for the network's own, an agent's) by `user`, of the
@@ -28,7 +28,7 @@ pub fn pays(scopes: &[(Scope, Items)], app: Option<&str>, user: &str, company: C
             .min_by_key(|(_, it)| it.made)
             .map(|(id, _)| id.clone())
     };
-    let nobodys = |it: &crate::vault::Item| it.apps.iter().all(|a| a == crate::database::scopes::APP);
+    let nobodys = |it: &crate::vault::Item| it.apps.iter().all(|a| a == key::APP);
     let apps = app.and_then(|app| oldest(None, &|it| it.apps.contains(app))).map(|id| (id, Paid::App));
     apps.or_else(|| oldest(Some(&Scope::User(user.to_string())), &nobodys).map(|id| (id, Paid::User)))
         .or_else(|| oldest(Some(&Scope::Global), &nobodys).map(|id| (id, Paid::Network)))

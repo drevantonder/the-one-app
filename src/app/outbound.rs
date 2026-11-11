@@ -26,8 +26,8 @@ async fn handle(State(node): State<Node>, req: Request) -> Response {
         // calls throw with.
         Err(err) => {
             let mut reply = (StatusCode::BAD_GATEWAY, format!("{err:#}")).into_response();
-            if let Some(code) = crate::protocol::Coded::of(&err).and_then(|c| c.parse().ok()) {
-                reply.headers_mut().insert(crate::protocol::header::CODE, code);
+            if let Some(code) = custom_build::protocol::Coded::of(&err).and_then(|c| c.parse().ok()) {
+                reply.headers_mut().insert(custom_build::protocol::header::CODE, code);
             }
             reply
         }
@@ -117,7 +117,7 @@ fn written(target: &str) -> String {
 pub fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>, ports: Vec<u16>) -> Result<(u16, Vec<(String, Vec<u8>)>, Vec<u8>)> {
     // Redirects go back to the app, whose next request comes here again: a secret never follows one to another host.
     let config = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30)));
-    let agent = crate::reach::agent(config, crate::reach::not_ports(ports));
+    let agent = platform::reach::agent(config, platform::reach::not_ports(ports));
     // Its secrets may be in `url`, so no error says it: only where the request went.
     let uri: ureq::http::Uri = url.parse().context("the address isn't a web address")?;
     let host = uri.host().unwrap_or_default().to_string();

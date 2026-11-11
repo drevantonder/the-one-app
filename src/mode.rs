@@ -33,11 +33,11 @@ const RELEASE_KEY: &str = "release-key";
 const RELEASE_KEY_PUBLIC: &str = "release-key.pub";
 
 fn var() -> String {
-    crate::config::env("THROWAWAY")
+    custom_build::config::env("THROWAWAY")
 }
 
 fn release_key_var() -> String {
-    crate::config::env("RELEASE_KEY")
+    custom_build::config::env("RELEASE_KEY")
 }
 
 pub fn here() -> &'static Mode {
@@ -54,8 +54,8 @@ impl Mode {
     pub fn bin(&self) -> PathBuf {
         match self {
             Mode::Throwaway(t) => t.home.join("bin"),
-            Mode::Own if cfg!(windows) => crate::home().join("bin"),
-            Mode::Own => crate::user_home().join(".local/bin"),
+            Mode::Own if cfg!(windows) => platform::home().join("bin"),
+            Mode::Own => platform::user_home().join(".local/bin"),
         }
     }
 
@@ -63,16 +63,16 @@ impl Mode {
     pub fn mac_app(&self) -> PathBuf {
         let folder = match self {
             Mode::Throwaway(t) => t.home.join("Applications"),
-            Mode::Own => crate::user_home().join("Applications"),
+            Mode::Own => platform::user_home().join("Applications"),
         };
-        folder.join(format!("{}.app", crate::config::NAME))
+        folder.join(format!("{}.app", custom_build::config::NAME))
     }
 
     /// The public half of the key what this device takes must be signed with: this build's, or a throwaway network's
     /// own, so what it publishes never needs the real one.
     pub fn release_key(&self) -> &str {
         match self {
-            Mode::Own => crate::config::RELEASE_KEY,
+            Mode::Own => custom_build::config::RELEASE_KEY,
             Mode::Throwaway(t) => &t.release_key,
         }
     }
@@ -82,7 +82,7 @@ impl Throwaway {
     /// Makes `command` a program of the throwaway network in `home`, whose node is at `addr`: its home and address, which
     /// it asks its node at as one of this machine's programs, and its mode.
     pub fn tell(command: &mut std::process::Command, home: &Path, addr: &str) {
-        command.env(var(), home).env(crate::config::env("HOME"), home).env(crate::config::env("ADDR"), addr);
+        command.env(var(), home).env(custom_build::config::env("HOME"), home).env(custom_build::config::env("ADDR"), addr);
         if let Ok(key) = std::fs::read_to_string(home.join(RELEASE_KEY_PUBLIC)) {
             command.env(release_key_var(), key.trim());
         }
@@ -97,7 +97,7 @@ impl Throwaway {
         }
         let key = ssh_key::PrivateKey::from(ssh_key::private::Ed25519Keypair::from_seed(&rand::random()));
         std::fs::create_dir_all(home)?;
-        std::io::Write::write_all(&mut crate::os::private_file().write(true).create(true).truncate(true).open(&path)?, key.to_openssh(ssh_key::LineEnding::LF)?.as_bytes())?;
+        std::io::Write::write_all(&mut platform::os::private_file().write(true).create(true).truncate(true).open(&path)?, key.to_openssh(ssh_key::LineEnding::LF)?.as_bytes())?;
         std::fs::write(home.join(RELEASE_KEY_PUBLIC), key.public_key().to_openssh()?)?;
         Ok(key)
     }
@@ -147,7 +147,7 @@ impl Throwaway {
                 let _ = std::fs::remove_file(home.join("pid"));
                 // Its Workers and browser, then its own group: it keeps its data, for `throwaway` to start it again.
                 stop_others(&home);
-                crate::os::ask_group_to_stop(0);
+                platform::os::ask_group_to_stop(0);
             }
         });
         routes.layer(axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
@@ -194,7 +194,7 @@ pub fn stop_others(home: &Path) {
     let me = std::process::id() as i32;
     for pid in programs(home, true) {
         if pid != me {
-            crate::os::ask_group_to_stop(-pid);
+            platform::os::ask_group_to_stop(-pid);
         }
     }
     let _ = std::fs::remove_file(home.join("pids"));
@@ -215,7 +215,7 @@ async fn bucket(home: PathBuf) -> Result<()> {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
-    let place = crate::bucket::Place::Folder(home.join("network").join("bucket"));
+    let place = bucket::Place::Folder(home.join("network").join("bucket"));
     let answer = move |method: Method, uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
         let place = place.clone();
         async move {
@@ -267,7 +267,7 @@ fn list(dir: &Path, prefix: &str, delimit: bool) -> Result<String> {
     let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
     let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult><IsTruncated>false</IsTruncated>");
     let (folder, start) = prefix.rsplit_once('/').map_or(("", prefix), |(f, s)| (f, s));
-    let place = crate::bucket::Place::Folder(dir.to_path_buf());
+    let place = bucket::Place::Folder(dir.to_path_buf());
     let names: Vec<String> = match delimit {
         true => place.list(folder)?.into_iter().filter(|n| n.starts_with(start)).map(|n| if folder.is_empty() { n } else { format!("{folder}/{n}") }).collect(),
         false => place.names()?.into_iter().filter(|n| n.starts_with(prefix)).collect(),

@@ -114,7 +114,7 @@ fn mcp_file(node: &Client, v: &Value) -> Result<Value> {
 /// are its user's, not theirs.
 fn fetch_file(node: &Client, url: &str) -> Result<ureq::http::Response<ureq::Body>> {
     let agent = match node.elsewhere() {
-        true => crate::reach::agent(ureq::Agent::config_builder().http_status_as_error(false), crate::reach::public),
+        true => platform::reach::agent(ureq::Agent::config_builder().http_status_as_error(false), platform::reach::public),
         false => crate::api::agent(),
     };
     agent.get(url).call().with_context(|| format!("couldn't get {url}"))

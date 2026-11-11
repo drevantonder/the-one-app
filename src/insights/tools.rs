@@ -64,7 +64,7 @@ mod serve {
         let raw = input.get("raw").and_then(Value::as_bool).unwrap_or(false);
         let trace = text("trace_id");
         let effect = text("effect_of");
-        let now = crate::node::now_ms();
+        let now = custom_build::now_ms();
         let since = match text("since").map(|s| crate::logs::since(&s)).transpose()? {
             Some(d) => Some(now.saturating_sub(d.as_millis() as u64)),
             None if raw || trace.is_some() => None,

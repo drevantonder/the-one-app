@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{CLI, NAME};
+use ::custom_build::config::{CLI, NAME};
 
 /// What an app declares its service may do: the hosts it may reach (`"*"`: any; `"*.example.com"`: that domain's;
 /// `"host:port"`: only that port), and whether it runs as the node's user, with their files.
@@ -122,7 +122,7 @@ pub fn unit(name: &str) -> String {
 
 /// Where its sandbox's folders are: in the user's home, but not the node's, which a throwaway network has apart.
 fn root() -> PathBuf {
-    crate::user_home().join(".local/share").join(format!("{CLI}-services"))
+    platform::user_home().join(".local/share").join(format!("{CLI}-services"))
 }
 
 /// The folder its program, the launcher and the socket to its endpoint are put in for it.
@@ -135,7 +135,7 @@ pub fn dir(name: &str) -> PathBuf {
 pub fn setup_script() -> Result<String> {
     let user = std::env::var("USER").ok().filter(|u| !u.is_empty() && u != "root").context("run it as the node's user, not root: <cli> services sandbox | sudo sh")?;
     ensure!(user.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)), "{user} isn't a user name this can write");
-    let home = crate::user_home();
+    let home = platform::user_home();
     let home = home.to_str().filter(|h| !h.contains(['\n', '"', '\'', '\\', '$', '`', ' '])).context("the home folder's path has characters a unit can't take")?;
     let unit = format!(
         "[Unit]
@@ -222,8 +222,8 @@ pub const BEFORE: &str = "data-before";
 pub fn prepare(name: &str, program: &Path, launcher: &Path, token: &str, launch: &Launch) -> Result<PathBuf> {
     let dir = dir(name);
     std::fs::create_dir_all(&dir)?;
-    crate::os::set_mode(&root(), 0o700)?;
-    crate::os::set_mode(&dir, 0o755)?;
+    platform::os::set_mode(&root(), 0o700)?;
+    platform::os::set_mode(&dir, 0o755)?;
     for (from, to) in [(launcher, format!("{CLI}d")), (program, PROGRAM.to_string())] {
         let to = dir.join(to);
         let _ = std::fs::remove_file(&to);
@@ -235,10 +235,10 @@ pub fn prepare(name: &str, program: &Path, launcher: &Path, token: &str, launch:
     }
     let token_file = dir.join(crate::api::LOCAL_TOKEN);
     std::fs::write(&token_file, token)?;
-    crate::os::set_mode(&token_file, 0o644)?;
+    platform::os::set_mode(&token_file, 0o644)?;
     std::fs::write(dir.join("sandbox.json"), serde_json::to_vec_pretty(launch)?)?;
     // A unit's data is systemd's (its own user's): what the service kept before is handed over once, readable to it.
-    let before = crate::home().join(name);
+    let before = platform::home().join(name);
     if launch.data.is_none() && before.is_dir() && std::fs::read_dir(&before)?.next().is_some() && !dir.join(BEFORE).exists() {
         std::fs::rename(&before, dir.join(BEFORE)).with_context(|| format!("moving {} into its sandbox", before.display()))?;
         readable(&dir.join(BEFORE))?;

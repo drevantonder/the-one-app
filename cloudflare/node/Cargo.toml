@@ -9,14 +9,20 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+custom-build = { path = "../../custom-build" }
+key = { path = "../../key" }
+bucket = { path = "../../bucket" }
+database = { path = "../../database" }
+scope = { path = "../../scope" }
+api = { path = "../../api" }
 anyhow = "1"
 blake3 = "1"
 data-encoding = "2"
-# Its endpoint key signs what it asks the URL signer (src/keys.rs).
+# Its endpoint key signs what it asks the URL signer (key/src/lib.rs).
 ed25519-dalek = "3"
 one = { path = "../..", default-features = false }
 serde_json = "1"
-# The SQLite rusqlite builds into WebAssembly (src/database/stored.rs on Workers) gets its clock and randomness from JavaScript.
+# The SQLite rusqlite builds into WebAssembly (database/src/stored.rs on Workers) gets its clock and randomness from JavaScript.
 sqlite-wasm-rs = { version = "0.6", features = ["wasm-bindgen"] }
 # The node's Rust runs in the Worker as WebAssembly, reading and writing the bucket through the Worker's own fetch:
 # wasm-bindgen is how it and the Worker's JavaScript (worker.js) call each other, js-sys and wasm-bindgen-futures how

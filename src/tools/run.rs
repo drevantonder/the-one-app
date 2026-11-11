@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 use crate::api::Client;
 use crate::api::client::Called;
 use crate::cli::Failed;
-use crate::config::CLI;
+use ::custom_build::config::CLI;
 use crate::core_tools::Reader;
 
 impl Reader {
