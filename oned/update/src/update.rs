@@ -65,8 +65,8 @@ pub fn address(home: &Path) -> Option<String> {
     std::fs::read_to_string(home.join(ADDRESS)).ok().map(|a| a.trim().to_string()).filter(|a| !a.is_empty())
 }
 
-/// Checks the record and, if it names a newer build for this computer, replaces this program with it and has oned exit
-/// so it comes back on it; on a Mac, takes the window it names too. Anything wrong (a bad signature, an older build, the
+/// Checks the record and, on a Mac, takes the window it names; then, if it names a newer build for this computer, replaces
+/// this program with it and has oned exit so it comes back on it. Anything wrong (a bad signature, an older build, the
 /// wrong target, a failed download) leaves what it's about as it was, and is kept for `why`. → what happened, to say.
 pub fn run() -> Result<String> {
     let home = platform::home();
@@ -85,6 +85,11 @@ fn take(home: &Path) -> Result<String> {
     let Some(text) = latest::fetch(&address)? else { return Ok(format!("Nothing has been published at {address} yet.")) };
     let record = Latest::read(key, &text).with_context(|| format!("the record at {address}"))?;
     let thing = record.to_update_to(TARGET).with_context(|| format!("the record at {address} has no build for {TARGET}"))?;
+    // The window first: restarting oned ends everything its service started, this update too when Update was pressed.
+    let window = match record.get(&Thing::app_name(TARGET)) {
+        Some(app) => mac::window(&home, &address, app)?.then(|| format!("Its window is on {} now.", app.commit)),
+        None => None,
+    };
     let said = if latest::wanted(thing, BUILD, COMMITTED) {
         let bytes = latest::download(&address, thing)?;
         release::install_commit(&thing.commit, &bytes)?;
@@ -95,10 +100,6 @@ fn take(home: &Path) -> Result<String> {
         Some(format!("This device's program is on {BUILD} already; restarting it, which still runs the build before."))
     } else {
         None
-    };
-    let window = match record.get(&Thing::app_name(TARGET)) {
-        Some(app) => mac::window(&home, &address, app)?.then(|| format!("Its window is on {} now.", app.commit)),
-        None => None,
     };
     Ok(match (said, window) {
         (None, None) => format!("This device is current, on {BUILD}. The newest published is {}.", thing.commit),
