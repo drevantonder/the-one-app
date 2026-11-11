@@ -30,6 +30,9 @@ struct Held {
     /// The epochs the bucket had no Vault key under the app's for, as of the app schedules lasting `until`: one is
     /// written as they're set or renewed, which moves that on.
     no_vault: std::collections::BTreeSet<u32>,
+    /// The epochs the bucket had no key of the app's sealed to the device for, as of the same: one is sealed as they're
+    /// set or renewed.
+    no_app: std::collections::BTreeSet<u32>,
     until: u64,
 }
 
@@ -62,11 +65,13 @@ impl Node {
         for (n, hash) in hashes {
             match had.app.get(&n).filter(|k| crate::keys::epoch_hash(k) == hash) {
                 Some(key) => drop(held.app.insert(n, *key)),
+                None if had.until == until && had.no_app.contains(&n) => drop(held.no_app.insert(n)),
                 None => drop(missing.insert(n, hash)),
             }
         }
         let bucket = self.bucket()?;
         held.app.extend(self.0.holds.app_schedules_keys(&bucket, scope, app, &missing).await?);
+        held.no_app.extend(missing.keys().filter(|n| !held.app.contains_key(n)));
         for (n, key) in &held.app {
             if let Some(vault) = had.vault.get(n).filter(|_| !missing.contains_key(n)) {
                 held.vault.insert(*n, *vault);
