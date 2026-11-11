@@ -144,14 +144,15 @@ fn chosen(rest: &[String]) -> Result<(Option<PathBuf>, Option<PathBuf>, &[String
     Ok((build, ui, rest))
 }
 
-/// Publishes this checkout's build at the throwaway network's address, under its own release key, for its device to take
-/// with `update`: it must be a different commit from the one the device runs, which `--build` starts it on.
+/// Publishes this checkout's build at the throwaway network's address, under its own release key, for its devices to
+/// take: its own computer with `update`, once `--build` started it on another commit, and any other computer of it (a
+/// client's, one joined by hand) with Update.
 fn publish(dir: &Path, addr: &str) -> Result<()> {
     let version = Version::of(&crate::program()?).context("ask this checkout's build what it is")?;
     let runs = Version::of(&network::program(dir)?).context("ask the throwaway network's program what it is")?;
-    anyhow::ensure!(version.commit != runs.commit, "the throwaway network runs this build already ({}), so it would have nothing to take: start it on an older build with {} throwaway --build <program>, or commit and build again", runs.commit, dev());
     publish_build(dir, addr)?;
-    println!("Published {} under this throwaway network's own release key. {} throwaway update takes it, and Cloudflare's Update in Devices its Workers.", version.commit, dev());
+    let own = if version.commit == runs.commit { format!("Its own computer runs it already: {} throwaway --build <program> starts it on another, for {} throwaway update to take it.", dev(), dev()) } else { format!("{} throwaway update takes it.", dev()) };
+    println!("Published {} under this throwaway network's own release key. {own} Its other computers take it with Update in Devices, and Cloudflare's Update there its Workers.", version.commit);
     Ok(())
 }
 
