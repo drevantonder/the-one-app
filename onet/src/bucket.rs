@@ -3,8 +3,9 @@
 //! by what opens it, so whoever passes it on can withhold it but not change it.
 //!
 //! A log's steps are read one after another until one's missing, and every request to a place far away costs a round
-//! trip, a new connection more, so reading a step also reads the ones after it, all at once (one signing, their
-//! downloads side by side), and the next reads are answered from those.
+//! trip, a new connection more, so reading a step that's there also reads the ones after it, all at once (one signing,
+//! their downloads side by side), and the next reads are answered from those. Past the end, where a device asks most
+//! often, only the step asked for is read.
 
 use one::config::YOURS;
 use std::collections::HashMap;
@@ -57,10 +58,14 @@ impl Bucket for Signed {
         let (signer, asked) = (self.signer.clone(), name.to_string());
         let (found, next) = tokio::task::spawn_blocking(move || -> Result<_> {
             let (url, urls) = signer.reads_from(&asked).map_err(|e| anyhow::anyhow!("Couldn't read from {YOURS}: {e:#}"))?;
-            // The ones after it, side by side with it; what they come to is for later, and a failure of theirs only theirs.
+            // The ones after it, once it's there, side by side; what they come to is for later, and a failure of theirs
+            // only theirs.
+            let found = download(&url);
+            if !matches!(found, Ok(Some(_))) {
+                return Ok((found, Vec::new()));
+            }
             Ok(std::thread::scope(|scope| {
                 let rest: Vec<_> = urls.iter().map(|(n, u)| scope.spawn(move || (n.clone(), download(u).ok()))).collect();
-                let found = download(&url);
                 let next: Vec<(String, Option<Object>)> = rest.into_iter().filter_map(|t| t.join().ok()).filter_map(|(n, got)| Some((n, got?))).collect();
                 (found, next)
             }))
