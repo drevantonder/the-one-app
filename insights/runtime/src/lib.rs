@@ -245,7 +245,8 @@ pub fn finish_route_request(rt: &Rt, traced: &trace::Trace, route: &str, took: D
 /// How trying the devices for a call went (`Host::route`): a span under its request, and, if no device's own run of it
 /// says how it ended (a service answered it, or none could) and nothing an app does is above it, the call's own span.
 pub async fn finish_route(rt: &Rt, call: Call, req: &CallRequest, me: &Caller, ended: &Result<Value>, run_says: bool) {
-    if ended.as_ref().err().is_some_and(|e| e.is::<::api::handed::Needs>()) {
+    // Asked for keys, or told to ask other devices itself, the client goes on: what it's asked next says how it went.
+    if ended.as_ref().err().is_some_and(|e| e.is::<::api::handed::Needs>() || e.is::<::api::Elsewhere>()) {
         return call.leave();
     }
     let tried = call.steps().into_iter().filter(|s| s["step"] == "device").collect::<Vec<_>>();
