@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ::custom_build::config::{CLI, NAME};
 
 use super::super::devices::{approve_code, didnt_sign_in, shell_quote};
@@ -60,7 +60,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Set
     let last = if iphone { simulator_name(dir) } else { format!("127.0.0.1:{}", control + 1) };
     let key = platform::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?;
     let build = format!("cd {there} && CARGO_TERM_COLOR=never PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH RELEASE_KEY={} native-apps/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&key), shell_quote(&last));
-    let said = build_on(&host, &build, &dir.join(format!("{script}-build.log")), started + Duration::from_secs(crate::ship::CALL - 90))?;
+    let said = crate::build::build_on(&host, &build, &dir.join(format!("{script}-build.log")), started + Duration::from_secs(crate::ship::CALL - 90))?;
     let last: Vec<&str> = said.lines().last().unwrap_or_default().split(' ').collect();
     // The iPhone's says its simulator; the Mac's what to publish, and its window's launch job, started once it is.
     let (sim, log) = match last.as_slice() {
@@ -142,38 +142,6 @@ fn publish_mac(dir: &Path, host: &str, folder: &str) -> Result<()> {
     oned::publish::publish_latest(&crate::throwaway::loopback_at(dir, addr.trim()), &platform::mode::Throwaway::own_release_key(dir)?, &things)?;
     eprintln!("Published {} for {} at the throwaway network's address: its program, helpers and window.", version.commit, version.target);
     Ok(())
-}
-
-/// Runs the build on `host` and gives its last line, in a session of its own that the Mac hangs up when its ssh ends, for any
-/// reason, and the build with it, so none is left running there when this is killed or the connection drops. At `deadline`,
-/// before the agent's harness would cut this call off, it ends the build the same way, saying so: what it built stays, and
-/// the same command again builds on from there.
-fn build_on(host: &str, command: &str, log: &Path, deadline: Instant) -> Result<String> {
-    #[cfg(target_os = "linux")]
-    use std::os::unix::process::CommandExt;
-    let mut ssh = std::process::Command::new("ssh");
-    // -tt: ssh without a terminal gives the command's processes no hangup when it ends; with one the Mac sends it to them all.
-    // The terminal merges the command's errors into what it printed. Its own death takes ssh with it, as a kill that leaves it
-    // no time to end it would otherwise leave the build running.
-    ssh.args(["-tt", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", host, command]).stdin(std::process::Stdio::null()).stdout(std::fs::File::create(log)?).stderr(std::process::Stdio::null());
-    // macOS has no PR_SET_PDEATHSIG, and one-dev is built there too.
-    #[cfg(target_os = "linux")]
-    unsafe { ssh.pre_exec(|| if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }) };
-    let mut ssh = ssh.spawn().with_context(|| format!("starting ssh to {host}"))?;
-    let status = loop {
-        if let Some(status) = ssh.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            ssh.kill()?;
-            ssh.wait()?;
-            anyhow::bail!("{host} was still building when this ran out of time, so it stopped the build there (what it built stays: it would otherwise run on after the agent's call was cut off). The same command again builds on from here. What it said so far: {}", log.display());
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    };
-    let said = std::fs::read_to_string(log)?.replace('\r', "");
-    anyhow::ensure!(status.success(), "on {host}: {command}: {}", said.trim());
-    Ok(said.trim().to_string())
 }
 
 /// The name of the iPhone simulator this throwaway network made, which no other has (its folder's name is its checkout's, and

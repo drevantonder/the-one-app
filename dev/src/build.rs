@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use platform::os::{cargo, quietly, succeeds};
@@ -153,4 +154,36 @@ pub fn mac_build_from(host: &str, folder: &str, here: &Path) -> Result<oned_upda
     anyhow::ensure!(copied.success(), "couldn't copy what {host} built from {folder}");
     let said = Command::new("ssh").args(["-o", "BatchMode=yes", host, &format!("{}/{} version --json", shell_quote(folder), ::custom_build::config::CLI)]).output()?;
     serde_json::from_slice(&said.stdout).with_context(|| format!("ask what {host} built what it is"))
+}
+
+/// Runs the build on `host` and gives its last line, in a session of its own that the Mac hangs up when its ssh ends, for any
+/// reason, and the build with it, so none is left running there when this is killed or the connection drops. At `deadline`,
+/// before the agent's harness would cut this call off, it ends the build the same way, saying so: what it built stays, and
+/// the same command again builds on from there.
+pub(crate) fn build_on(host: &str, command: &str, log: &Path, deadline: Instant) -> Result<String> {
+    #[cfg(target_os = "linux")]
+    use std::os::unix::process::CommandExt;
+    let mut ssh = std::process::Command::new("ssh");
+    // -tt: ssh without a terminal gives the command's processes no hangup when it ends; with one the Mac sends it to them all.
+    // The terminal merges the command's errors into what it printed. Its own death takes ssh with it, as a kill that leaves it
+    // no time to end it would otherwise leave the build running.
+    ssh.args(["-tt", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", host, command]).stdin(std::process::Stdio::null()).stdout(std::fs::File::create(log)?).stderr(std::process::Stdio::null());
+    // macOS has no PR_SET_PDEATHSIG, and one-dev is built there too.
+    #[cfg(target_os = "linux")]
+    unsafe { ssh.pre_exec(|| if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }) };
+    let mut ssh = ssh.spawn().with_context(|| format!("starting ssh to {host}"))?;
+    let status = loop {
+        if let Some(status) = ssh.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            ssh.kill()?;
+            ssh.wait()?;
+            anyhow::bail!("{host} was still building when this ran out of time, so it stopped the build there (what it built stays: it would otherwise run on after the agent's call was cut off). The same command again builds on from here. What it said so far: {}", log.display());
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    };
+    let said = std::fs::read_to_string(log)?.replace('\r', "");
+    anyhow::ensure!(status.success(), "on {host}: {command}: {}", said.trim());
+    Ok(said.trim().to_string())
 }

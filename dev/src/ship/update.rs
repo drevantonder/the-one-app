@@ -48,6 +48,7 @@ impl Part {
 
 /// Main's tip, or a commit, as this device's clean checkout has it, with the config it's built with: what one `update`
 /// sends and marks sent, whatever lands on main meanwhile.
+#[derive(Clone)]
 pub(super) struct At {
     pub(super) src: PathBuf,
     pub(super) commit: String,
@@ -153,14 +154,27 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<At> {
             // What went out with the program is only the program; its Workers and web client follow it, as a plain update has them.
             attempt("workers and web", front(&at, true, true));
         }
+        Some(Part::Mac) => {
+            attempt("mac", send(Part::Mac, &at, release));
+            attempt("mac's app", super::mac::build_and_publish(&at, started + Duration::from_secs(CALL) - super::mac::AFTER));
+        }
         Some(part) => attempt(part.name(), send(part, &at, release)),
         None => {
+            let mut mac = None;
             for part in ORDER.into_iter().filter(|p| !matches!(p, Part::Workers | Part::Web | Part::Dev)) {
                 attempt(part.name(), send(part, &at, release));
+                // Built on the Mac while the rest is built and sent here.
+                if part == Part::Mac {
+                    let (at, deadline) = (at.clone(), started + Duration::from_secs(CALL) - super::mac::AFTER);
+                    mac = Some(std::thread::spawn(move || super::mac::build_and_publish(&at, deadline)));
+                }
             }
             // Together: one deploy, not one for each.
             attempt("workers and web", front(&at, true, true));
             attempt("dev", send(Part::Dev, &at, release));
+            if let Some(mac) = mac {
+                attempt("mac's app", mac.join().unwrap_or_else(|_| Err(anyhow::anyhow!("its build stopped unexpectedly"))));
+            }
         }
     }
     ensure!(failed.is_empty(), "{} didn't go out: {CLI}-dev update again sends what's still due", failed.join(", "));

@@ -21,6 +21,7 @@ use oned_update::platform::{PLATFORMS, WINDOWS};
 mod apps;
 mod changes;
 mod cloudflare;
+mod mac;
 mod services;
 mod signoff;
 mod update;
