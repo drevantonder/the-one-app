@@ -24,7 +24,6 @@ pub fn javascript() -> String {
          export const ID_TOKEN_ALGS = {id_token_algs};\n\
          export const PAIRING_LIFE = {pairing_life};\n\
          export const MOST_URLS = {most_urls};\n\
-         export const MOST_NEEDED = {most_needed};\n\
          export const BEHIND = {behind};\n\
          export const IROH_PATHS = {iroh};\n\
          export const ROLES = {roles};\n\
@@ -73,7 +72,6 @@ pub fn javascript() -> String {
         id_token_algs = json!(scope::sign_in_proof::ID_TOKEN_ALGS),
         pairing_life = PAIRING_LIFE,
         most_urls = MOST_URLS,
-        most_needed = crate::handed::MOST_NEEDED,
         behind = json!(crate::handed::BEHIND),
         iroh = json!(IROH_PATHS.iter().copied().collect::<std::collections::BTreeMap<_, _>>()),
         roles = json!(scope::scopes::Kind::ON_THE_RELAY.map(scope::scopes::Kind::as_str)),

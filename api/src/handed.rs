@@ -181,14 +181,14 @@ pub fn oldest_needed(database: &str, hint: Option<&[u8]>, newest: u32) -> u32 {
     }
 }
 
-/// The most keys an app runtime's 428 may ask one request to hand, once each: a request that reads every app on a page
-/// (`/api/badges`, `/api/widgets`, `/mcp`) needs each one's, in each epoch from the oldest it needs. More is an app runtime asking
-/// for everything.
+/// The most databases an app runtime's 428 may ask one request to hand keys of: a request that reads every app on a page
+/// (`/api/badges`, `/api/widgets`, `/mcp`) needs each one's. More is an app runtime asking for everything. Each comes in
+/// every epoch from the oldest it needs, which isn't counted: a scope may have had dozens (a device taken out makes one).
 pub const MOST_NEEDED: usize = 64;
 
 /// What an app runtime's 428 (`answer`) asks a request of `route` to hand: taken only from the app runtime that answered (`node`, hex,
-/// as its connection proved), naming itself; one or more keys, MOST_NEEDED at most, each of a database that kind of
-/// request uses (`may_hand`). None if it asks for anything else. The seal key it names isn't read: what's handed is
+/// as its connection proved), naming itself; one or more keys, of MOST_NEEDED databases at most, each a database that kind
+/// of request uses (`may_hand`). None if it asks for anything else. The seal key it names isn't read: what's handed is
 /// sealed to the one the network's entries list for that app runtime.
 pub fn asked_for(route: &Route, node: &str, answer: &Value) -> Option<Vec<Need>> {
     if answer["to"].as_str() != Some(node) {
@@ -197,7 +197,8 @@ pub fn asked_for(route: &Route, node: &str, answer: &Value) -> Option<Vec<Need>>
     let mut need: Vec<Need> = serde_json::from_value(answer["need"].clone()).ok()?;
     need.sort();
     need.dedup();
-    (!need.is_empty() && need.len() <= MOST_NEEDED && need.iter().all(|n| may_hand(route, n))).then_some(need)
+    let databases: std::collections::BTreeSet<(&str, &str, &str)> = need.iter().map(|n| (n.scope.as_str(), n.app.as_str(), n.database.as_str())).collect();
+    (!need.is_empty() && databases.len() <= MOST_NEEDED && need.iter().all(|n| may_hand(route, n))).then_some(need)
 }
 
 /// How long a client waits, each time, to ask again an app runtime that doesn't list it yet (403 `not_let_in`) while the relay
@@ -304,6 +305,8 @@ mod tests {
         assert!(asked_for(&call("tally"), &node, &json!({ "to": node, "need": [{ "scope": "global", "epoch": -1, "app": "tally", "database": "main" }] })).is_none());
         assert!(asked_for(&at("/api/badges"), &node, &json!({ "to": node, "need": every(MOST_NEEDED) })).is_some());
         assert!(asked_for(&at("/api/badges"), &node, &json!({ "to": node, "need": every(MOST_NEEDED + 1) })).is_none());
+        let epochs = |n: u32| (1..=n).map(|epoch| json!({ "scope": "global", "epoch": epoch, "app": "tally", "database": "main" })).collect::<Vec<_>>();
+        assert!(asked_for(&at("/api/widgets"), &node, &json!({ "to": node, "need": epochs(MOST_NEEDED as u32 + 1) })).is_some(), "a scope's epochs aren't counted against it");
     }
 
     #[test]

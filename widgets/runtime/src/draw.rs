@@ -29,18 +29,20 @@ pub(crate) async fn widgets(rt: &Rt, viewer: Caller, scope: Option<&str>, only: 
     if let Some((app, _)) = only {
         pages.retain(|p| p.app == app);
     }
-    // The keys of every app's database here that the caller didn't hand, asked for at once (428), as the Vault
-    // does: an app's render reaches its data in its own process, which can't say what it lacked as a need, so a
-    // widget would only say it stopped working until something else had them.
-    let want: Vec<(Scope, &str, &str)> = pages.iter().flat_map(|p| p.scopes.iter().map(|s| (s.clone(), p.app.as_str(), key::APP_DATABASE))).collect();
+    let described = futures_util::future::try_join_all(pages.iter().map(|page| rt.describe(&page.app))).await?;
+    let drawing: Vec<(&PageApp, Vec<Value>)> = pages
+        .iter()
+        .zip(described)
+        .map(|(page, d)| (page, d["widgets"].as_array().into_iter().flatten().filter(|w| only.is_none_or(|(_, name)| w["name"] == name)).cloned().collect::<Vec<_>>()))
+        .filter(|(_, widgets)| !widgets.is_empty())
+        .collect();
+    // The keys of the database of each app here that draws a widget, those the caller didn't hand, asked for at once
+    // (428), as the Vault does: an app's render reaches its data in its own process, which can't say what it lacked as
+    // a need, so a widget would only say it stopped working until something else had them.
+    let want: Vec<(Scope, &str, &str)> = drawing.iter().flat_map(|(p, _)| p.scopes.iter().map(|s| (s.clone(), p.app.as_str(), key::APP_DATABASE))).collect();
     rt.needs(&viewer, &want).await?;
     let placed = &placed;
-    let apps = futures_util::future::try_join_all(pages.iter().map(|page| async move {
-        let described = rt.describe(&page.app).await?;
-        let widgets = described["widgets"].as_array().into_iter().flatten().filter(|w| only.is_none_or(|(_, name)| w["name"] == name));
-        anyhow::Ok(futures_util::future::join_all(widgets.map(|w| within(page, w, placed, only.is_none()))).await)
-    }))
-    .await?;
+    let apps = futures_util::future::join_all(drawing.iter().map(|(page, widgets)| futures_util::future::join_all(widgets.iter().map(|w| within(page, w, placed, only.is_none()))))).await;
     Ok(apps.into_iter().flatten().collect())
 }
 
