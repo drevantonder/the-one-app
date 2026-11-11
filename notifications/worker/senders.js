@@ -1,4 +1,4 @@
-// The push Worker's four senders, one per push service: each takes a device's address as it registered and the bytes
+// The notifications Worker's four senders, one per push service: each takes a device's address as it registered and the bytes
 // to carry (a note sealed to that device, which nobody on the way opens), and makes the one request its service
 // documents. `fetch` is given, so tests see each request as it would go out. Each says `sent`, `gone` (the address no
 // longer works: the app was deleted, say, so it's forgotten) or `failed` with why.

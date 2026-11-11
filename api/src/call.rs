@@ -35,7 +35,7 @@ pub enum Ask {
     Code,
     /// The caller's failing schedules (`ctx.failing`).
     Failing,
-    /// A push to the caller's devices (`ctx.notify`).
+    /// A notification to the caller's devices (`ctx.notify`).
     Notify,
     /// The network's devices (`ctx.devices`).
     Devices,
@@ -73,8 +73,8 @@ const ASKS: [(Ask, &str, bool, bool); 18] = [
     (Ask::AiRun, "ai.run", false, true),
 ];
 
-/// What a call that only reads is told when it writes, asks something that does, pushes or calls another app.
-pub const READ_ONLY: &str = "this call only reads (a widget's, badge's or hook's): it can't write, push, call other apps or change settings";
+/// What a call that only reads is told when it writes, asks something that does, notifies or calls another app.
+pub const READ_ONLY: &str = "this call only reads (a widget's, badge's or hook's): it can't write, notify, call other apps or change settings";
 
 impl Ask {
     pub fn parse(name: &str) -> Option<Ask> {

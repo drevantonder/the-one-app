@@ -1,4 +1,4 @@
-// Notifications. The network's push Worker (cloudflare/push/) carries each note, sealed to this computer's device,
+// Notifications. The network's notifications Worker (notifications/worker/) carries each note, sealed to this computer's device,
 // through WNS as a raw notification, its body the sealed bytes, which starts this helper (the Windows App SDK's
 // PushNotificationManager, by the custom build's Microsoft Entra app: CustomBuild.WnsApp and WnsObject, empty for none,
 // and then nothing registers). The app opens the note with the device's key (open-note), asking nothing of the
@@ -16,16 +16,16 @@ namespace One;
 
 public static class Notes
 {
-    static bool Pushes => CustomBuild.WnsApp.Length > 0 && CustomBuild.WnsObject.Length > 0 && PushNotificationManager.IsSupported();
+    static bool Available => CustomBuild.WnsApp.Length > 0 && CustomBuild.WnsObject.Length > 0 && PushNotificationManager.IsSupported();
 
-    /// As it starts, before it asks how it was started: toasts' clicks and pushes come here while it runs.
+    /// As it starts, before it asks how it was started: toasts' clicks and notifications come here while it runs.
     public static void Start()
     {
         try
         {
             AppNotificationManager.Default.NotificationInvoked += (_, e) => Clicked(e).Wait();
             AppNotificationManager.Default.Register();
-            if (!Pushes) return;
+            if (!Available) return;
             PushNotificationManager.Default.PushReceived += (_, e) => Received(e.Payload).Wait();
             PushNotificationManager.Default.Register();
         }
@@ -35,7 +35,7 @@ public static class Notes
         }
     }
 
-    /// Started for a push, or for a toast's click or button: done here.
+    /// Started for a notification, or for a toast's click or button: done here.
     public static void Started(AppActivationArguments activated)
     {
         switch (activated.Kind)
@@ -51,16 +51,16 @@ public static class Notes
         }
     }
 
-    /// This computer's WNS channel, registered with the push Worker as its device's by the app: each time the app
+    /// This computer's WNS channel, registered with the notifications Worker as its device's by the app: each time the app
     /// starts let in, since a channel lasts 30 days.
     public static async Task Register()
     {
-        if (!Pushes) return;
+        if (!Available) return;
         try
         {
             var made = await PushNotificationManager.Default.CreateChannelAsync(Guid.Parse(CustomBuild.WnsObject));
             if (made.Status != PushNotificationChannelStatus.CompletedSuccess) throw made.ExtendedError ?? new Exception($"WNS gave no channel: {made.Status}");
-            await App.Ask("register-push", new JsonObject { ["via"] = "wns", ["address"] = made.Channel.Uri.ToString() });
+            await App.Ask("register-notifications", new JsonObject { ["via"] = "wns", ["address"] = made.Channel.Uri.ToString() });
         }
         catch (Exception e)
         {
@@ -68,14 +68,14 @@ public static class Notes
         }
     }
 
-    /// A push came: its note opened by the app with this device's key, and shown. One it can't open (sealed to a
+    /// A notification came: its note opened by the app with this device's key, and shown. One it can't open (sealed to a
     /// device signed out of here) shows nothing.
     static async Task Received(byte[] payload)
     {
         // As every push service but WNS carries it: base64url.
-        var pushed = Convert.ToBase64String(payload).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var carried = Convert.ToBase64String(payload).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         JsonNode? note;
-        try { note = await App.Ask("open-note", new JsonObject { ["n"] = pushed }); }
+        try { note = await App.Ask("open-note", new JsonObject { ["n"] = carried }); }
         catch (Exception e)
         {
             App.Problem(e);

@@ -1,5 +1,5 @@
-# What a build with push adds (project.yml includes it when build.sh sets PUSH): the notification extension, which
-# opens what's pushed to this device with its key, from the Keychain group it shares with the app.
+# What a build with notifications adds (project.yml includes it when build.sh sets NOTIFICATIONS): the notification
+# extension, which opens what's sent to this device with its key, from the Keychain group it shares with the app.
 targets:
   Phone:
     dependencies:
@@ -9,7 +9,7 @@ targets:
         aps-environment: development
     info:
       properties:
-        Push: true
+        Notifications: true
   Notifications:
     type: app-extension
     platform: iOS

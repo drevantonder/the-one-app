@@ -1,10 +1,10 @@
 # The iPhone app's Xcode project, which build.sh generates with XcodeGen into target/iphone, filling in config.toml's
 # fields from its environment: the app (Tauri's window, its Rust built by build.sh into target/iphone/lib), the
-# home-screen widget, and with push (push.yml) the notification extension, sharing an App Group and its Keychain group.
+# home-screen widget, and with notifications (notifications.yml) the notification extension, sharing an App Group and its Keychain group.
 name: Phone
 include:
-  - path: push.yml
-    enable: ${PUSH}
+  - path: notifications.yml
+    enable: ${NOTIFICATIONS}
 options:
   deploymentTarget:
     iOS: "26.0"

@@ -36,8 +36,6 @@ mod bucket;
 mod device;
 #[cfg(not(target_family = "wasm"))]
 pub use device::{Device, PLATFORM, join_of, new_secret, open_note};
-#[cfg(not(target_family = "wasm"))]
-pub use one::push;
 pub mod sign_in;
 #[cfg(feature = "computer")]
 pub mod computer;

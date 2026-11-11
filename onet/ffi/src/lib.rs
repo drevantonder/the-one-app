@@ -1,4 +1,4 @@
-//! The client for the iPhone's notification extension (Swift, by uniffi): it opens a note pushed to this device with
+//! The client for the iPhone's notification extension (Swift, by uniffi): it opens a note sent to this device with
 //! the device's key, and nothing else, in the extension's few megabytes.
 
 uniffi::setup_scaffolding!();
@@ -28,7 +28,7 @@ fn failed(message: &str) -> OneError {
     OneError::Failed { reason: message.into() }
 }
 
-/// A note pushed to this device, opened: what to show, its app (the notifications it's grouped with), what a tap opens (`link`, as every platform's), and the code of a device asking to join, which its
+/// A note sent to this device, opened: what to show, its app (the notifications it's grouped with), what a tap opens (`link`, as every platform's), and the code of a device asking to join, which its
 /// notification answers with Approve and Not Me.
 #[derive(uniffi::Record)]
 pub struct Note {
@@ -39,12 +39,12 @@ pub struct Note {
     pub join: Option<String>,
 }
 
-/// Opens a note pushed to the device whose key is `secret` (`n` in the push, base64url). It only opens: nothing
+/// Opens a note sent to the device whose key is `secret` (`n` in what its push service carried, base64url). It only opens: nothing
 /// connects and nothing starts, so a notification extension calls it in its few megabytes.
 #[uniffi::export]
-pub fn open_note(secret: Vec<u8>, pushed: String) -> Result<Note, OneError> {
+pub fn open_note(secret: Vec<u8>, carried: String) -> Result<Note, OneError> {
     let secret: [u8; 32] = secret.try_into().map_err(|_| failed("a device's key is 32 bytes"))?;
-    let (n, _) = onet::open_note(secret, &pushed)?;
+    let (n, _) = onet::open_note(secret, &carried)?;
     let (link, join) = (n.link(), n.join().map(str::to_string));
     Ok(Note { title: n.title, body: n.body, app: n.app, link, join })
 }

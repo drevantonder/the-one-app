@@ -31,6 +31,7 @@ api = { path = "../api" }
 # What Devices' routes take (devices/): the recovery key's, which a computer's onet answers itself.
 devices = { path = "../devices" }
 device-logs = { path = "../device-logs" }
+notifications = { path = "../notifications" }
 # A client reaches nodes over iroh, as they reach each other (src/node/net.rs): only ring's TLS, no n0 discovery or
 # metrics. Pinned with the node's, since the relay runs iroh-relay's own code of this version.
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring"] }

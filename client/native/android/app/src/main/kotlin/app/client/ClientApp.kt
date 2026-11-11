@@ -5,7 +5,7 @@ import android.content.Context
 import android.os.Bundle
 import android.system.Os
 
-/** The app's process: what the system starts with no window (a widget's refresh, a push) finds the app's folder and
+/** The app's process: what the system starts with no window (a widget's refresh, a notification) finds the app's folder and
  *  keys through this, in the same process the window runs in. */
 class ClientApp : Application() {
     override fun onCreate() {

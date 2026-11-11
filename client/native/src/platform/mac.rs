@@ -268,7 +268,7 @@ pub fn badge(count: u32) {
     }
 }
 
-/// Pushes come only to computers that register a channel (Windows).
+/// Notifications come only to computers that register a channel (Windows).
 pub fn let_in() {}
 
 /// Links to the network's address open only the browser.

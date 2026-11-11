@@ -105,15 +105,15 @@ fn helper() -> Option<std::path::PathBuf> {
     helper.exists().then_some(helper)
 }
 
-/// Let in: this computer's WNS channel, registered with the push Worker by the helper (`register-push` back to this
+/// Let in: this computer's WNS channel, registered with the notifications Worker by the helper (`register-notifications` back to this
 /// program, src/headless.rs, which its onet registers), each start, since a channel lasts 30 days; a custom build with no
 /// Microsoft Entra app for WNS has none, and the helper ends.
 pub fn let_in() {
     let Some(helper) = helper() else { return };
     use std::os::windows::process::CommandExt;
     // No console window for it.
-    if let Err(e) = std::process::Command::new(helper).arg("--register-push").creation_flags(0x0800_0000).spawn() {
-        device_logs::say(&format!("push: {e}"));
+    if let Err(e) = std::process::Command::new(helper).arg("--register-notifications").creation_flags(0x0800_0000).spawn() {
+        device_logs::say(&format!("notifications: {e}"));
     }
 }
 

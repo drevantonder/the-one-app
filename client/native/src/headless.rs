@@ -1,15 +1,15 @@
 //! The app with no window, for what the platform runs beside it when nothing's open (a Windows Widgets board provider,
-//! a push woken in the background, a home-screen widget's button): the same program, signed in as the window is,
+//! the app woken by a notification in the background, a home-screen widget's button): the same program, signed in as the window is,
 //! answering one `kind` of thing, given as JSON, with JSON. Windows' helper starts it as `--headless <kind> <json>`
 //! (an answer on stdout); Swift and Kotlin call `run_here` across FFI or JNI. Whatever a platform would otherwise work
 //! out itself (a note's link, a widget's id or headline) is worked out here, so they only show it.
 //!
 //! - `call` `{ app, tool, input }`: runs a tool as the user, then keeps the widgets again → `{ "ok": … }`
 //! - `widgets` `{}`: the pages' widgets kept again where the platform's own read them (`crate::widgets_dir`) → `{ "dir" }`
-//! - `open-note` `{ n }`: a pushed note opened with this device's key → `{ id, title, body, app, link, join }`,
+//! - `open-note` `{ n }`: a note sent to this device, opened with its key → `{ id, title, body, app, link, join }`,
 //!   `link` what a tap opens and `join` the code of a device asking to join, if it does
 //! - `join` `{ code, approve }`: a device asking to join, let in or turned down → `{ "ok": null }`
-//! - `register-push` `{ via, address }`: this device's push address registered with the push Worker → `{ "ok": null }`
+//! - `register-notifications` `{ via, address }`: this device's push address registered with the notifications Worker → `{ "ok": null }`
 //! - `open` `{ link }`: a link of the app's, opened in its window (a tapped notification's)
 //!
 //! Each fails as `{ "error": "…" }`. On a computer each is asked of its onet, as the window asks it (`crate::here`). On a
@@ -161,7 +161,7 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<onet::Device>>) -> Resu
             let (note, _) = onet::open_note(signed_in(&data())?.2, &text("n")?).map_err(|e| e.to_string())?;
             // Sealed to the computer's key, which its onet opens it with.
             #[cfg(desktop)]
-            let note: one::push::Note = serde_json::from_value(crate::here::asked("/api/push/open", Some(json!({ "n": text("n")? })), 30).await?["note"].take()).map_err(|e| e.to_string())?;
+            let note: notifications::Note = serde_json::from_value(crate::here::asked("/api/notifications/open", Some(json!({ "n": text("n")? })), 30).await?["note"].take()).map_err(|e| e.to_string())?;
             let mut out = json!({ "id": note.id, "title": note.title, "body": note.body, "app": note.app, "link": note.link(), "join": note.join() });
             // Absent, not null: Kotlin's optString reads a null as "null".
             out.as_object_mut().unwrap().retain(|_, v| !v.is_null());
@@ -186,9 +186,9 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<onet::Device>>) -> Resu
             };
             Ok(json!({ "ok": null }))
         }
-        "register-push" => {
-            let address = one::push::Address { via: text("via")?, address: text("address")?, ..Default::default() };
-            device(mine).await?.register_push(&address).await?;
+        "register-notifications" => {
+            let address = notifications::Address { via: text("via")?, address: text("address")?, ..Default::default() };
+            device(mine).await?.register_notifications(&address).await?;
             Ok(json!({ "ok": null }))
         }
         "open" => {

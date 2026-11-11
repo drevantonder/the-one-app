@@ -1,17 +1,17 @@
-// The push Worker: how a device reaches another that isn't looking, in every network from its start. It carries notes,
+// The notifications Worker: how a device reaches another that isn't looking, in every network from its start. It carries notes,
 // each sealed to the one device it's for (that device's seal key, as everything is sealed to devices), to Apple's,
 // Google's, Microsoft's or a browser's push service, which wake that device; the device opens the note and shows it.
 // The Worker, and every push service on the way, carry locked bytes: none of them reads a note.
 //
-// A device that can get pushes registers its address here, by a request signed with its key (`signedRequest` in
-// shared/crypto.js, domain `one/push`, route `POST /push/register`, taken once), only if the relay lists it as one of
+// A device that can get notifications registers its address here, by a request signed with its key (`signedRequest` in
+// shared/crypto.js, domain `one/notifications`, route `POST /notifications/register`, taken once), only if the relay lists it as one of
 // the network's endpoints: `{ via, address, env?, topic?, keys?, seal }`, `via` one of apns (address: the APNs token,
 // hex; topic: the app's bundle id, one of `APNS_TOPICS`; env: sandbox or production), fcm (its FCM token), wns (its
 // channel URI) or webpush (its subscription's endpoint, with `keys: { p256dh, auth }`), and `seal`, its seal key (hex),
 // which only the network's own Workers seal to (below); and `user`, its user, as who's who lists it, once the device
-// knows. `POST /push/unregister` forgets it.
+// knows. `POST /notifications/unregister` forgets it.
 //
-// One of the network's endpoints sends with `POST /push/send`, signed the same way: `{ notes: [{ to, note, quiet? }] }`,
+// One of the network's endpoints sends with `POST /notifications/send`, signed the same way: `{ notes: [{ to, note, quiet? }] }`,
 // each `note` base64url bytes sealed to `to`'s seal key by the sender, which takes that key from the
 // network's signed steps, never from here. It says, of each `to`, `sent`, `none` (it registered no address), `gone`
 // (its address stopped working, or the relay no longer lists it, so it's forgotten) or `failed`. `quiet` wakes the
@@ -19,23 +19,23 @@
 //
 // The network's own Workers send through the `Sender` entrypoint, by binding: auth, for a device asking to join, whose
 // note it seals here to the seal key the device registered (`{ to, plain }`), or sends sealed (`{ to, note }`); and asks
-// which devices registered as a user's (`theirs`), whom it pushes about their devices joining. That is only where to
+// which devices registered as a user's (`theirs`), whom it notifies about their devices joining. That is only where to
 // send: a device names its user unchecked, so one that lies gets notes sealed to itself, which let no one in.
 //
 // Sends are limited: each sender `SENDS` requests a minute, each device `NOTES` notes a minute.
 //
-// What it holds is the network's push credentials (`APNS_*`, `FCM_ACCOUNT`, `WNS_*`, `VAPID_KEY`), Workers' secrets, and
+// What it holds is the network's credentials with the push services (`APNS_*`, `FCM_ACCOUNT`, `WNS_*`, `VAPID_KEY`), Workers' secrets, and
 // each device's address, in its Durable Object.
 
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { b64u, checkRequest, sealTo, hex, isKey, rolesOf } from "../shared/crypto.js";
 import { CORS, answer, json, refusal, refuse } from "../shared/http.js";
-import { PUSH } from "../shared/protocol.js";
+import { NOTIFICATIONS } from "../shared/protocol.js";
 import { apns, fcm, isWebPushEndpoint, isWnsChannel, vapidKey, webPush, wns } from "./senders.js";
 
 const VIAS = ["apns", "fcm", "wns", "webpush"];
 /// The most a sender sends a minute, the most notes one device gets a minute, the most in one send, and the most a
-/// sealed note may be: it has to fit in a push, 4 KB at Apple and in Web Push.
+/// sealed note may be: it has to fit in what a push service carries, 4 KB at Apple and in Web Push.
 const SENDS = 120;
 const NOTES = 30;
 const MOST = 64;
@@ -48,12 +48,12 @@ export default class extends WorkerEntrypoint {
   async fetch(request) {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { headers: { ...CORS, "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "content-type" } });
-    // What a browser subscribes with: the network's VAPID public key. And which services this network can push through.
-    if (url.pathname === "/push/key" && request.method === "GET") {
+    // What a browser subscribes with: the network's VAPID public key. And which push services this network sends through.
+    if (url.pathname === "/notifications/key" && request.method === "GET") {
       const vapid = this.env.VAPID_KEY ? b64u.encode((await vapidKey(this.env.VAPID_KEY)).public) : null;
       return json({ vapid, via: senders(this.env) }, 200, CORS);
     }
-    const route = { "/push/register": "register", "/push/unregister": "unregister", "/push/send": "send", "/push/devices": "devices" }[url.pathname];
+    const route = { "/notifications/register": "register", "/notifications/unregister": "unregister", "/notifications/send": "send", "/notifications/devices": "devices" }[url.pathname];
     if (!route || request.method !== "POST") return refusal(404, "not here", CORS);
     const body = await request.json().catch(() => null);
     if (!body) return refusal(400, "the body isn't JSON", CORS);
@@ -97,7 +97,7 @@ export class Push extends DurableObject {
   }
 
   async answer(what, route, body) {
-    const { by, fields } = await checkRequest(PUSH, body).catch((err) => refuse(403, `That request isn't signed as it should be: ${err.message}.`));
+    const { by, fields } = await checkRequest(NOTIFICATIONS, body).catch((err) => refuse(403, `That request isn't signed as it should be: ${err.message}.`));
     if (fields.route !== route) refuse(403, `That request was signed for ${fields.route}, not ${route}.`);
     const sql = this.ctx.storage.sql;
     sql.exec("delete from signed where at <= ?", Date.now() - 2 * MINUTE);
@@ -171,7 +171,7 @@ export class Push extends DurableObject {
 
   async send(by, notes = []) {
     if (!Array.isArray(notes) || notes.length > MOST) refuse(400, `notes is a list of at most ${MOST}`);
-    if (!this.count(`sender:${by}`, SENDS)) refuse(429, "That device sent too many pushes this minute. Try again in a minute.");
+    if (!this.count(`sender:${by}`, SENDS)) refuse(429, "That device sent too many notifications this minute. Try again in a minute.");
     const out = {};
     const sql = this.ctx.storage.sql;
     await Promise.all(

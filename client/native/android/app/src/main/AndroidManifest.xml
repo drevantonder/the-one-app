@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Notifications: a push's note, shown (Push.kt). -->
+    <!-- Notifications: a note, shown (Notifications.kt). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Chrome, for the Custom Tab sign-in opens. -->
@@ -64,13 +64,13 @@
             </intent-filter>
         </activity>
 
-        <!-- Pushes, from FCM, and a join's Approve and Not Me (Push.kt). -->
-        <service android:name=".PushService" android:exported="false">
+        <!-- Notifications, from FCM, and a join's Approve and Not Me (Notifications.kt). -->
+        <service android:name=".NotificationsService" android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
-        <receiver android:name=".PushActions" android:exported="false" />
+        <receiver android:name=".NotificationActions" android:exported="false" />
 
         <!-- Files a screen saves or shows, shared from the app's cache. -->
         <provider

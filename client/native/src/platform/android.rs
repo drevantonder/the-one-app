@@ -1,10 +1,10 @@
 //! What's Android's own, beside the window, in Kotlin (android/app/src/main/kotlin/app/client): signing in in a Chrome
-//! Custom Tab, the Keystore this device's keys are sealed by, pushes (FCM) and what a tapped
+//! Custom Tab, the Keystore this device's keys are sealed by, notifications (FCM) and what a tapped
 //! one opens or answers, the document scanner, the share sheet, haptics, the system bars, and the home-screen widgets.
 //!
 //! Two ways across, both JNI into this library, which the app's process loads whether or not its window is open:
 //! - Kotlin calls in (`Native.call`, `Java_app_client_Native_call`): what the system starts with no window (a widget's
-//!   button, the refresh WorkManager makes, a push) is answered here, by the same code the window uses (headless.rs).
+//!   button, the refresh WorkManager makes, a notification) is answered here, by the same code the window uses (headless.rs).
 //! - Rust calls out, to `Host` (what needs no window: the Keystore, the phone's name, the widgets drawn again) or to the
 //!   Tauri plugin `OnePlugin` (what needs the window's activity: the Custom Tab, the scanner, the share sheet).
 
@@ -40,7 +40,7 @@ pub extern "system" fn JNI_OnLoad(vm: JavaVM, _: *mut c_void) -> jint {
     JNI_VERSION_1_6
 }
 
-/// Kotlin's plugin. A phone's notifications are its own (Push.kt), which Tauri's plugin would take from it, and it saves
+/// Kotlin's plugin. A phone's notifications are its own (Notifications.kt), which Tauri's plugin would take from it, and it saves
 /// and opens what screens give with its own share sheet.
 pub fn plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     let plugin: TauriPlugin<tauri::Wry> = Builder::new("one")
@@ -116,7 +116,7 @@ pub fn redraw_widgets() {
 /// An Android launcher counts what notifications it shows, not what the app says.
 pub fn badge(_: u32) {}
 
-/// Whether this build shows notifications, asking the user first if `ask`; none where it has no pushes to show (no
+/// Whether this build shows notifications, asking the user first if `ask`; none where it has no notifications to show (no
 /// Firebase project in its config.toml), so Settings has no row for it.
 pub async fn notify(ask: bool) -> Option<String> {
     ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string))
@@ -160,11 +160,11 @@ pub fn text_scale() -> f64 {
     host("textScale", json!({})).ok().and_then(|v| v.as_f64()).unwrap_or(1.0)
 }
 
-/// Once let in, in a build with pushes (a Firebase project in its config.toml): gives the push Worker this phone's FCM
-/// token, as it starts and whenever it changes (`register-push`); and asks the user, once, whether it may show
-/// notifications. Notes are opened with the device's key by Kotlin's `PushService`.
+/// Once let in, in a build with notifications (a Firebase project in its config.toml): gives the notifications Worker this phone's FCM
+/// token, as it starts and whenever it changes (`register-notifications`); and asks the user, once, whether it may show
+/// notifications. Notes are opened with the device's key by Kotlin's `NotificationsService`.
 pub fn let_in(device: Arc<onet::Device>) {
-    push(device, |token| one::push::Address { via: "fcm".into(), address: token, ..Default::default() });
+    register_notifications(device, |token| notifications::Address { via: "fcm".into(), address: token, ..Default::default() });
     tell("notify", json!({ "ask": true, "once": true }));
 }
 
@@ -175,7 +175,7 @@ pub extern "system" fn Java_app_client_Native_call<'a>(mut env: JNIEnv<'a>, _: J
     let read = |env: &mut JNIEnv, s: &JString| -> String { env.get_string(s).map(Into::into).unwrap_or_default() };
     let (kind, json) = (read(&mut env, &kind), read(&mut env, &json));
     // One of the things the app answers with no window (`headless`): a widget's button (`call`), WorkManager's refresh
-    // (`widgets`), a push (`open-note`), its Approve or Not Me (`join`), a new FCM token (`register-push`).
+    // (`widgets`), a notification (`open-note`), its Approve or Not Me (`join`), a new FCM token (`register-notifications`).
     let out = tauri::async_runtime::block_on(crate::headless::run_here(&kind, &serde_json::from_str(&json).unwrap_or_default()));
     env.new_string(out.to_string()).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
 }

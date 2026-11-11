@@ -1,6 +1,6 @@
 // The gateway: the network's address, the one users use. It holds no keys and runs no app code; it only sends each
 // request where its path says: signing in to auth (with the gateway's host kept, since passkeys belong to it),
-// `/urls` and `/updates/…` (what devices update themselves from) to the URL signer, `/push/…` to the push Worker, `/telemetry/…` to the telemetry Worker, `/mcp`, `/api/` (but `/api/auth/`, which is auth's) and what MCP clients read to sign in to it to the
+// `/urls` and `/updates/…` (what devices update themselves from) to the URL signer, `/notifications/…` to the notifications Worker, `/telemetry/…` to the telemetry Worker, `/mcp`, `/api/` (but `/api/auth/`, which is auth's) and what MCP clients read to sign in to it to the
 // remote MCP server, everything under `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything
 // else to the web client's files. Devices reach the network's nodes over iroh, never through here, and so does git: a
 // git request here is git on a computer without the CLI, told how to get it.
@@ -28,7 +28,7 @@ export function routeOf(path) {
   if (iroh) return { to: "relay", route: iroh };
   if (path === "/urls") return { to: "signer", route: path };
   if (path.startsWith(`/${UPDATES}/`)) return { to: "signer", route: `/${UPDATES}/` };
-  if (path.startsWith("/push/")) return { to: "push", route: "/push/" };
+  if (path.startsWith("/notifications/")) return { to: "notifications", route: "/notifications/" };
   if (path.startsWith("/telemetry/")) return { to: "telemetry", route: "/telemetry/" };
   if (GIT.test(path)) return { to: "git", route: "git" };
   const mcp = prefixOf(path, MCP);
@@ -142,7 +142,7 @@ async function route(request, env) {
   switch (routeOf(url.pathname).to) {
     case "relay": return env.IROH.fetch(request);
     case "signer": return env.SIGNER.fetch(request);
-    case "push": return env.PUSH.fetch(request);
+    case "notifications": return env.PUSH.fetch(request);
     case "telemetry": return env.TELEMETRY.fetch(request);
     case "git": return gitWithoutCli(env, url);
     case "mcp": return env.MCP ? env.MCP.fetch(request) : refusal(503, "this network's MCP isn't set up yet", NOSNIFF);

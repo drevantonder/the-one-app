@@ -2911,6 +2911,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "notifications"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "custom-build",
+ "data-encoding",
+ "ed25519-dalek 3.0.0",
+ "key",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "notifications-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "custom-build",
+ "data-encoding",
+ "key",
+ "notifications",
+ "platform",
+ "serde_json",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3142,6 +3173,8 @@ dependencies = [
  "labs",
  "libc",
  "md-5",
+ "notifications",
+ "notifications-runtime",
  "onboarding",
  "opentelemetry-proto",
  "platform",
@@ -3254,6 +3287,7 @@ dependencies = [
  "jiff",
  "key",
  "libc",
+ "notifications",
  "one",
  "onet",
  "platform",
@@ -3382,6 +3416,7 @@ dependencies = [
  "n0-future",
  "n0-watcher",
  "noq-udp",
+ "notifications",
  "one",
  "platform",
  "rand 0.8.8",

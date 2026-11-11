@@ -236,13 +236,13 @@ impl Keyring {
         self.keyring.renew_app_schedules(&client, &self.on, &app).await
     }
 
-    /// Registers this browser's push subscription (`{ endpoint, keys }`, JSON) with the network's push Worker.
-    #[wasm_bindgen(js_name = registerPush)]
-    pub async fn register_push(&self, subscription: String) -> Result<(), Failed> {
+    /// Registers this browser's push subscription (`{ endpoint, keys }`, JSON) with the network's notifications Worker.
+    #[wasm_bindgen(js_name = registerNotifications)]
+    pub async fn register_notifications(&self, subscription: String) -> Result<(), Failed> {
         let sub: serde_json::Value = serde_json::from_str(&subscription).map_err(|e| Failed::of(crate::unsent(e)))?;
-        let address = one::push::Address { via: "webpush".into(), address: sub["endpoint"].as_str().unwrap_or_default().into(), env: String::new(), topic: String::new(), keys: Some(serde_json::json!({ "p256dh": sub["keys"]["p256dh"], "auth": sub["keys"]["auth"] })) };
+        let address = notifications::Address { via: "webpush".into(), address: sub["endpoint"].as_str().unwrap_or_default().into(), env: String::new(), topic: String::new(), keys: Some(serde_json::json!({ "p256dh": sub["keys"]["p256dh"], "auth": sub["keys"]["auth"] })) };
         self.keyring.load(&self.on).await.map_err(Failed::of)?;
-        self.keyring.register_push(&self.on, &address).await.map_err(Failed::of)
+        self.keyring.register_notifications(&self.on, &address).await.map_err(Failed::of)
     }
 
     /// Forgets all it knew and kept but the network's root, and its calls' answers, as a device that's out does.

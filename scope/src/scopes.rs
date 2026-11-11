@@ -1018,7 +1018,7 @@ pub struct Machine {
     pub platform: Option<String>,
     /// For a service, the service it offers (`whatsapp`): what calls naming it reach.
     pub service: Option<String>,
-    /// For a service, whether it serves everyone its user's listing lets it (a push sender, say), not only
+    /// For a service, whether it serves everyone its user's listing lets it (a notification sender, say), not only
     /// its own user.
     pub shared: bool,
     /// The device it's part of, when it's one's: for a service, its device's oned; for a native app's sign-in, the

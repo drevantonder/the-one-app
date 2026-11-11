@@ -73,7 +73,7 @@ val customBuild = tasks.register("customBuild") {
         // A notification's small icon is drawn from its shape alone: the menu bar's template, which is just that.
         out.resolve("res/drawable-xhdpi").mkdirs()
         menubar.copyTo(out.resolve("res/drawable-xhdpi/notification.png"))
-        // The custom build's Firebase project, which this app gets its pushes through, as Firebase reads it at start:
+        // The custom build's Firebase project, which this app gets its notifications through, as Firebase reads it at start:
         // its google-services.json's values for this app, as Google's own Gradle plugin would write them. None, none.
         if (firebase != null) {
             @Suppress("UNCHECKED_CAST")
@@ -211,7 +211,7 @@ dependencies {
     implementation("androidx.glance:glance-appwidget:1.2.0")
     implementation("androidx.work:work-runtime:2.12.0")
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
-    // Pushes (FCM): Google's own client is the only way an app gets one on Android, woken as its notes arrive.
+    // Notifications (FCM): Google's own client is the only way an app gets one on Android, woken as its notes arrive.
     implementation("com.google.firebase:firebase-messaging:26.0.1")
 }
 

@@ -5,9 +5,9 @@ edition = "2024"
 license = "MIT"
 publish = false
 
-# onet for the iPhone's notification extension, which opens a push's note with its device key: one
+# onet for the iPhone's notification extension, which opens a notification's note with its device key: one
 # definition (src/lib.rs) from which uniffi makes the Swift, by the app's build from the library it links, so no binding
-# is kept to drift. (The Tauri app, client/native, links onet itself, and Android's pushes are opened in it.)
+# is kept to drift. (The Tauri app, client/native, links onet itself, and Android's notifications are opened in it.)
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
 doctest = false

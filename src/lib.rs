@@ -54,7 +54,6 @@ pub mod oned;
 pub mod cloudflare;
 pub mod openapi;
 pub mod says;
-pub mod push;
 pub mod screen;
 pub mod ui_files;
 pub mod ui_folder;

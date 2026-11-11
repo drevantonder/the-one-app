@@ -38,6 +38,7 @@ key = { path = "../../key" }
 scope = { path = "../../scope" }
 api = { path = "../../api" }
 device-logs = { path = "../../device-logs" }
+notifications = { path = "../../notifications" }
 # The app: the system's web view (WebKitGTK, WKWebView, WebView2, Android's) in a window, the same on every platform,
 # with a tray or menu bar item on computers. Its plugins: opening links and files outside, and notifications (below).
 # `custom-protocol`: the window's files are the app's own, built in, as the Tauri CLI's builds have them; without it,
@@ -88,7 +89,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 
-# Android's own (src/platform/android.rs): Kotlin's Keystore, widgets and pushes call the app's library, and it calls them back,
+# Android's own (src/platform/android.rs): Kotlin's Keystore, widgets and notifications call the app's library, and it calls them back,
 # through JNI. Tauri already builds it (wry).
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

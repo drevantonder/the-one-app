@@ -39,11 +39,11 @@ relay_location = "oc"
 icon = "icons/AppIcon.png"
 menubar = "icons/MenuBarIcon.png"
 logo = "icons/Logo.png"
-# Where the native apps' pushes come from, each empty until the custom build has it (and those apps get no notifications
+# Where the native apps' notifications come from, each empty until the custom build has it (and those apps get no notifications
 # till then): Android's, the custom build's Firebase project's google-services.json (relative to this file), with an
 # Android app whose package is android's (below); Windows', its Microsoft Entra app registration's Application (client) ID
 # and its service principal's Object ID, which WNS knows the Windows app by once Microsoft maps its package to them. The
-# push Worker sends with their secrets (FCM_ACCOUNT, WNS_*).
+# notifications Worker sends with their secrets (FCM_ACCOUNT, WNS_*).
 firebase = ""
 wns_app = ""
 wns_object = ""

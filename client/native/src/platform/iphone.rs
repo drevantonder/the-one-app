@@ -1,5 +1,5 @@
 //! What's the iPhone's own, beside the window, in Swift (iphone/Sources/OneNative, a Tauri plugin of this app's own):
-//! signing in through the system's sign-in sheet, which shares Safari's passkeys; pushes (APNs), and what a tapped one
+//! signing in through the system's sign-in sheet, which shares Safari's passkeys; notifications (APNs), and what a tapped one
 //! opens or answers; the icon's count; haptics, the document camera, the share sheet and Quick Look; touch and hold
 //! lifting what's held out of the page with its menu, as the Home Screen does; and the App Group, where the widgets
 //! read what the app keeps for them. Rust asks Swift (`ask`); Swift tells Rust what happened (`one_ios`).
@@ -85,11 +85,11 @@ pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Resu
     signing.sign_in_here(join, |u| signed_in_at(u, true))
 }
 
-/// In a build with pushes (Info.plist's `Push`), once it's let in: asks the user the first time, and gives the push
+/// In a build with notifications (Info.plist's `Notifications`), once it's let in: asks the user the first time, and gives the push
 /// Worker this iPhone's token, each start, as a token can change. Its notification extension opens each one.
 pub fn let_in(device: Arc<onet::Device>) {
-    if super::apple::info_true("Push") {
-        push(device, |token| one::push::Address { via: "apns".into(), address: token, env: environment().into(), topic: crate::identifier().into(), keys: None });
+    if super::apple::info_true("Notifications") {
+        register_notifications(device, |token| notifications::Address { via: "apns".into(), address: token, env: environment().into(), topic: crate::identifier().into(), keys: None });
     }
 }
 
@@ -136,7 +136,7 @@ pub fn text_scale() -> f64 {
     1.0
 }
 
-/// Which APNs service this build's pushes come through: what its provisioning profile says, as a build installed
+/// Which APNs service this build's notifications come through: what its provisioning profile says, as a build installed
 /// from Xcode is signed for development; with none, the App Store's.
 fn environment() -> &'static str {
     let profile = std::env::current_exe().ok().and_then(|e| std::fs::read(e.with_file_name("embedded.mobileprovision")).ok());

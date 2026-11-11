@@ -120,13 +120,13 @@ impl Reach {
         }
     }
 
-    /// Registers where a push service reaches this device with the network's push Worker.
-    async fn register_push(&self, address: &one::push::Address) -> Result<(), String> {
+    /// Registers where a push service reaches this device with the network's notifications Worker.
+    async fn register_notifications(&self, address: &notifications::Address) -> Result<(), String> {
         match self {
             #[cfg(mobile)]
-            Reach::Device(device) => device.register_push(address).await.map_err(|e| e.to_string()),
+            Reach::Device(device) => device.register_notifications(address).await.map_err(|e| e.to_string()),
             #[cfg(desktop)]
-            Reach::Onet => here::asked("/api/push/register", Some(json!(address)), 30).await.map(drop),
+            Reach::Onet => here::asked("/api/notifications/register", Some(json!(address)), 30).await.map(drop),
         }
     }
 }
@@ -174,7 +174,7 @@ fn client(data: &std::path::Path, address: &str, id: &str, secret: [u8; 32]) -> 
     onet::Device::new(secret, address, &data.join("client").join(secrets::folder(id)).to_string_lossy()).keeping().logging(data)
 }
 
-/// A device's code, as typed or pushed: its letters and digits.
+/// A device's code, as typed or sent in a notification: its letters and digits.
 fn device_code(typed: &str) -> String {
     typed.chars().filter(|c| c.is_ascii_alphanumeric()).collect()
 }
@@ -269,7 +269,7 @@ fn keep_widgets() {
     });
 }
 
-/// Let in, now or as it starts: the platform's own widgets kept, and its pushes registered.
+/// Let in, now or as it starts: the platform's own widgets kept, and its notifications registered.
 fn let_in() {
     keep_widgets();
     #[cfg(mobile)]
@@ -668,7 +668,7 @@ fn waiting(code: String) {
 }
 
 /// The page's own client was let in: the app's own (Rust) client starts beside it, for what runs with no window (widgets,
-/// pushes). It may be behind what the network reads; the page isn't held up by it. Its invite is used, so it goes. The
+/// notifications). It may be behind what the network reads; the page isn't held up by it. Its invite is used, so it goes. The
 /// browser it signed in with, if it's held, is let go: this device needed no one's yes.
 #[tauri::command]
 fn joined() {
@@ -863,7 +863,7 @@ async fn sign_out() -> Result<(), String> {
 }
 
 /// Whether this device shows notifications, asking the user first if `ask` → "granted", "denied" or "default"; none
-/// where a phone's build has no pushes to show (no Firebase project in its config.toml), so Settings has no row for it.
+/// where a phone's build has no notifications to show (no Firebase project in its config.toml), so Settings has no row for it.
 #[tauri::command]
 async fn notify(ask: bool) -> Option<String> {
     platform::notify(ask).await

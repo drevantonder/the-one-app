@@ -24,8 +24,8 @@ pub const SOCKET_FRESH: u64 = 10_000;
 /// The most objects the URL signer signs URLs for at once, and a step range it names may be.
 pub const MOST_URLS: usize = 256;
 
-/// What a device signs its requests to the push Worker for.
-pub const PUSH: &str = "one/push";
+/// What a device signs its requests to the notifications Worker for.
+pub const NOTIFICATIONS: &str = "one/notifications";
 
 /// What a device signs a note for.
 pub const SIGNED_NOTE: &str = "one/note";
@@ -121,7 +121,7 @@ pub fn update_refusal(yours: &str) -> String {
     UPDATE_REFUSAL.replace("{yours}", yours)
 }
 
-/// What a push of a note whose text the phone can't open shows, as Apple's service shows it for the app that can't
+/// What a notification whose note the phone can't open shows, as Apple's service shows it for the app that can't
 /// (and the browser's, which can't open it either).
 pub const NOTE_FALLBACK: &str = "New notification";
 

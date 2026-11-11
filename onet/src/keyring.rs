@@ -46,7 +46,7 @@ pub trait Keep {
 }
 
 /// What a device reaches at its network's address: the bucket, through the URL signer; the relay, which alone says
-/// whether it's still let in; and sign-in, the relay and the push Worker as it asks them itself (`ask`).
+/// whether it's still let in; and sign-in, the relay and the notifications Worker as it asks them itself (`ask`).
 pub trait Address {
     type Bucket: bucket::Bucket;
     fn bucket(&self) -> &Self::Bucket;

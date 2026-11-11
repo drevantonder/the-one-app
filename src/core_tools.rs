@@ -1,12 +1,12 @@
 //! The core's features, the one list every client lists: add's and remove's, the Vault's, Backups', Groups', Devices',
-//! Widgets', Push's, logs', insights' and AI Gateway's, each defined beside its feature's others (`api::Feature`). They're
+//! Widgets', Notifications', logs', insights' and AI Gateway's, each defined beside its feature's others (`api::Feature`). They're
 //! not apps, so no list of apps has them. What serves each is its `Runs` (src/node/runtime.rs's `features()`).
 
 use ::api::Feature;
 
 /// Every feature's, in the order they're listed.
 pub fn all() -> Vec<Feature> {
-    vec![::deploy::tools::add_feature(), ::deploy::tools::remove_feature(), ::vault::tools::feature(), crate::backups::tools::feature(), ::groups::tools::feature(), ::devices::tools::feature(), ::widgets::tools::feature(), crate::push::tools::feature(), ::device_logs::tools::feature(), crate::insights::tools::feature(), crate::ai_gateway::tools::feature()]
+    vec![::deploy::tools::add_feature(), ::deploy::tools::remove_feature(), ::vault::tools::feature(), crate::backups::tools::feature(), ::groups::tools::feature(), ::devices::tools::feature(), ::widgets::tools::feature(), ::notifications::tools::feature(), ::device_logs::tools::feature(), crate::insights::tools::feature(), crate::ai_gateway::tools::feature()]
 }
 
 /// The feature with the tool `name` (as MCP names it), and the tool's place in it.

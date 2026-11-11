@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The app as Windows installs it: its program (client/native), and its links (@CLI@://open?…, which widgets and toasts open
      it at, and links to your One App network's address: the config's, or none yet for a build without one); beside it
-     the helper (Helper.cs), started for its toasts, its pushes, and the Widgets board's widgets as the package's COM
+     the helper (Helper.cs), started for its toasts, its notifications, and the Widgets board's widgets as the package's COM
      server. build.sh fills in the @…@ from config.toml, and repeats the widget's definition: the board pins only one of
      each definition, so there are a few alike, each showing whichever widget from your pages its user chooses. -->
 <Package
@@ -51,7 +51,7 @@
             </com:ExeServer>
           </com:ComServer>
         </com:Extension>
-        <!-- Its toasts' clicks and buttons start the helper (Notes.cs); and WNS's pushes, by the custom build's Microsoft Entra app
+        <!-- Its toasts' clicks and buttons start the helper (Notes.cs); and WNS's notifications, by the custom build's Microsoft Entra app
              (config.toml's wns_app), which build.sh leaves out for a custom build without one. -->
         <desktop:Extension Category="windows.toastNotificationActivation">
           <desktop:ToastNotificationActivation ToastActivatorCLSID="@NOTES@" />
@@ -66,7 +66,7 @@
         <!--wns-->
         <com:Extension Category="windows.comServer">
           <com:ComServer>
-            <com:ExeServer Executable="@FILE@Helper.exe" Arguments="----WindowsAppRuntimePushServer:" DisplayName="@NAME@ pushes">
+            <com:ExeServer Executable="@FILE@Helper.exe" Arguments="----WindowsAppRuntimePushServer:" DisplayName="@NAME@ notifications">
               <com:Class Id="@WNS_APP@" />
             </com:ExeServer>
           </com:ComServer>

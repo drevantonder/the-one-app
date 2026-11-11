@@ -26,11 +26,11 @@ pub fn join_of(secret: [u8; 32]) -> String {
     format!("{}{}", hex(&me.key), hex(&me.seal))
 }
 
-/// A note pushed to the device whose key is `secret`, as its push carried it (base64url): → the note, and the key of
+/// A note sent to the device whose key is `secret`, as its push service carried it (base64url): → the note, and the key of
 /// the device that sent it (hex), or none for one from the network's Workers. Opened here alone: nothing connects or starts.
-pub fn open_note(secret: [u8; 32], pushed: &str) -> Result<(one::push::Note, Option<String>), Error> {
-    let sealed = B64U.decode(pushed.trim().trim_end_matches('=').as_bytes()).map_err(|_| failed("That push isn't a note."))?;
-    one::push::open_note(&::key::seal_secret(&SigningKey::from_bytes(&secret)), &sealed).map_err(|_| failed("That note isn't this device's."))
+pub fn open_note(secret: [u8; 32], carried: &str) -> Result<(notifications::Note, Option<String>), Error> {
+    let sealed = B64U.decode(carried.trim().trim_end_matches('=').as_bytes()).map_err(|_| failed("That isn't a note."))?;
+    notifications::open_note(&::key::seal_secret(&SigningKey::from_bytes(&secret)), &sealed).map_err(|_| failed("That note isn't this device's."))
 }
 
 pub fn new_secret() -> [u8; 32] {
@@ -398,12 +398,12 @@ impl Device {
         self.out().await;
     }
 
-    /// Registers where a push service reaches it (`one::push::Address`) with the network's push Worker
-    /// (`<address>/push/register`), signed with its key and naming its seal key, which each note pushed to it is sealed
-    /// to, and its user as who's who lists it, so auth pushes it when another device of theirs asks to join. Once
-    /// it's out of the network, the Worker forgets it.
-    pub async fn register_push(&self, address: &one::push::Address) -> Result<(), Error> {
-        self.keyring.register_push(self, address).await
+    /// Registers where a push service reaches it (`notifications::Address`) with the network's notifications Worker
+    /// (`<address>/notifications/register`), signed with its key and naming its seal key, which each note sent to it is
+    /// sealed to, and its user as who's who lists it, so auth notifies it when another device of theirs asks to join.
+    /// Once it's out of the network, the Worker forgets it.
+    pub async fn register_notifications(&self, address: &notifications::Address) -> Result<(), Error> {
+        self.keyring.register_notifications(self, address).await
     }
 
     /// Whether the network took this device out: this key was in, and the relay, which alone says who's on the

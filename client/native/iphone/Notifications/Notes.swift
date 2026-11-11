@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-/// What's pushed to this device: each push carries a note sealed to it (src/push.rs), which this extension opens with
+/// What's sent to this device: each notification carries a note sealed to it (notifications/src/lib.rs), which this extension opens with
 /// this device's key and shows as its notification, with the app screen a tap opens (`link`). A note whose action is a
 /// device asking to join (`{ "join": "<its code>" }`) shows Approve and Not Me, which the app acts on (its plugin's
 /// `Notes`, iphone/Sources/OneNative), where the user's node checks the request is theirs.
@@ -12,9 +12,9 @@ enum Notes {
     /// Shows the note `content` carries (`n`), opened with one of this device's keys; or, if none opens it, only that one
     /// came.
     static func show(_ content: UNMutableNotificationContent) {
-        guard let pushed = content.userInfo["n"] as? String,
-              let note = DeviceKeys.all().lazy.compactMap({ try? openNote(secret: $0, pushed: pushed) }).first else {
-            // What the push Worker wrote is what shows: that one came, and nothing of it.
+        guard let carried = content.userInfo["n"] as? String,
+              let note = DeviceKeys.all().lazy.compactMap({ try? openNote(secret: $0, carried: carried) }).first else {
+            // What the notifications Worker wrote is what shows: that one came, and nothing of it.
             content.userInfo = [:]
             return
         }

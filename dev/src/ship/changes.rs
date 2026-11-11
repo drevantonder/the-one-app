@@ -115,6 +115,8 @@ impl Parts {
                 // What every Worker answers HTTP with, which the Cloudflare node carries too.
                 Some("gateway") if file == "gateway/http.js" => (parts.node, parts.workers) = (true, true),
                 Some("relay" | "auth" | "gateway" | "url-signer") => parts.workers = true,
+                // Notifications' Worker; the rest of the folder is Rust.
+                Some("notifications") if file.starts_with("notifications/worker/") => parts.workers = true,
                 // The Cloudflare node is Rust, built with the node; the remote MCP server runs that build, so the Workers
                 // go out with it.
                 Some("cloudflare") if file.starts_with("cloudflare/node/") => (parts.node, parts.workers) = (true, true),
@@ -166,7 +168,7 @@ mod tests {
         assert_eq!(of(&["dev/src/ship.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
         assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
         assert!(of(&["src/node.rs"]).is_built_in() && of(&["onet/src/lib.rs"]).is_built_in());
-        assert_eq!(of(&["auth/worker.js", "relay/worker.js", "auth/package.json"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
+        assert_eq!(of(&["auth/worker.js", "relay/worker.js", "auth/package.json", "notifications/worker/senders.js"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
         let http = of(&["gateway/http.js"]);
         assert!(http.node && http.workers && !http.web, "the Cloudflare node carries what every Worker answers HTTP with");
         for file in ["cloudflare/web/web.js", "cloudflare/shared/crypto.js", "src/screen/ui/dist/ui.js", "src/screen/settings/dist/vault.html", "src/screen/bridge.js", "onboarding/pages.js", "onboarding/pages.tsx"] {

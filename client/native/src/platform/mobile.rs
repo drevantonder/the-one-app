@@ -1,5 +1,5 @@
 //! What both phones do the same way, through the app's own Tauri plugin `one` (Swift's on an iPhone, Kotlin's on
-//! Android): asking it, and what's asked of it by name, the same on both (signing in, a push token, haptics, the
+//! Android): asking it, and what's asked of it by name, the same on both (signing in, a push service's token, haptics, the
 //! scanner, the share sheet, light or dark).
 
 use std::path::PathBuf;
@@ -44,16 +44,16 @@ pub fn signed_in_at(url: String, open: bool) -> Result<String, String> {
     out["url"].as_str().map(str::to_string).ok_or_else(|| "Sign in again.".into())
 }
 
-/// Gives the push Worker this phone's token from the plugin, as `address` makes it its push address.
-pub fn push(device: Arc<onet::Device>, address: impl FnOnce(String) -> one::push::Address + Send + 'static) {
+/// Gives the notifications Worker this phone's token from the plugin, as `address` makes it its push address.
+pub fn register_notifications(device: Arc<onet::Device>, address: impl FnOnce(String) -> notifications::Address + Send + 'static) {
     tauri::async_runtime::spawn(async move {
-        let token = match ask_off("push", json!({})).await {
+        let token = match ask_off("notificationToken", json!({})).await {
             Ok(out) => out["token"].as_str().map(str::to_string),
-            Err(e) => return device_logs::say(&format!("push: no token: {e}")),
+            Err(e) => return device_logs::say(&format!("notifications: no token: {e}")),
         };
         let Some(token) = token else { return };
-        if let Err(e) = device.register_push(&address(token)).await {
-            device_logs::say(&format!("push: can't register: {e}"));
+        if let Err(e) = device.register_notifications(&address(token)).await {
+            device_logs::say(&format!("notifications: can't register: {e}"));
         }
     });
 }

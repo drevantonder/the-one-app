@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 /// The folders of the Workers that have one of their own, and their names in the source tree they're built from.
-const WORKERS: [(&str, &str); 4] = [("relay", "relay"), ("auth", "auth"), ("gateway", "gateway"), ("url-signer", "signer")];
+const WORKERS: [(&str, &str); 5] = [("relay", "relay"), ("auth", "auth"), ("gateway", "gateway"), ("url-signer", "signer"), ("notifications/worker", "push")];
 
 /// The files of those folders that are among the others of the source tree they're built from: what other Workers import
 /// (`../shared/token.js`, `../shared/http.js`, `../shared/s3.js`), and the one package the Workers are installed with (`package.json`, `bun.lock`).

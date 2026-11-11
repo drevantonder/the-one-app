@@ -3,7 +3,7 @@ import Security
 
 /// The app's device keys, one for each user at each address, in the Keychain group it shares with this extension
 /// (Info.plist's `KeychainGroup`, the App Group's), where the app keeps them (src/secrets.rs): read here only to open
-/// what's pushed to this device; nothing copies one out.
+/// what's sent to this device; nothing copies one out.
 enum DeviceKeys {
     private static let cli = Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "one"
     private static let group = Bundle.main.object(forInfoDictionaryKey: "KeychainGroup") as? String

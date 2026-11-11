@@ -44,7 +44,7 @@ const CHECK_AGAIN: u64 = 24 * 3_600_000;
 const CHECK_SETTLE: u64 = 2 * 3_600_000;
 
 /// What's wrong with a place, for admins: what, in a sentence and in a few words for its row, its fix, since when,
-/// and from when it's worth a push.
+/// and from when it's worth a notification.
 #[derive(Clone, Debug)]
 pub struct Problem {
     pub place: String,
@@ -55,7 +55,7 @@ pub struct Problem {
     pub status: &'static str,
     pub fix: String,
     pub since: u64,
-    pub push: Option<u64>,
+    pub notify: Option<u64>,
 }
 
 impl Problem {
@@ -64,7 +64,7 @@ impl Problem {
     }
 }
 
-/// Each place's problem, as this device sees it: its runs failing (worth a push from the second failure in a row),
+/// Each place's problem, as this device sees it: its runs failing (worth a notification from the second failure in a row),
 /// or a scope this device holds with changes that have waited a day for it, whoever should have backed them up.
 /// Both end by themselves once a run works.
 fn problems(i: &Network, own: &::vault::Items, now: u64) -> Result<Vec<Problem>> {
@@ -101,17 +101,17 @@ fn problems(i: &Network, own: &::vault::Items, now: u64) -> Result<Vec<Problem>>
                 (None, _) => "It tries again every hour.".to_string(),
             };
             let since = failing.last().map_or(last.time, |r| r.time);
-            out.push(Problem { place: p.id.clone(), title: format!("Couldn't back up to {}", p.title), check: false, text, status, fix, since, push: failing.iter().rev().nth(1).map(|r| r.time) });
+            out.push(Problem { place: p.id.clone(), title: format!("Couldn't back up to {}", p.title), check: false, text, status, fix, since, notify: failing.iter().rev().nth(1).map(|r| r.time) });
             continue;
         }
-        // A restore check that failed, worth a push at once: what's there can't be counted on.
+        // A restore check that failed, worth a notification at once: what's there can't be counted on.
         let checks: Vec<&CheckRun> = status.checks.iter().filter(|c| c.place == p.id).collect();
         let failed: Vec<&&CheckRun> = checks.iter().rev().take_while(|c| c.error.is_some()).collect();
         if let Some(last) = failed.first() {
             let since = failed.last().map_or(last.time, |c| c.time);
             let text = format!("{}'s newest backup didn't restore as it should: {}.", p.title, last.error.as_deref().unwrap_or(""));
             let fix = "Don't count on it until a check passes. It's checked again tomorrow.".to_string();
-            out.push(Problem { place: p.id.clone(), title: format!("{} didn't pass its restore check", p.title), check: true, text, status: "Restore check failed", fix, since, push: Some(since) });
+            out.push(Problem { place: p.id.clone(), title: format!("{} didn't pass its restore check", p.title), check: true, text, status: "Restore check failed", fix, since, notify: Some(since) });
             continue;
         }
         let mut late: Option<(u64, String)> = None;
@@ -134,7 +134,7 @@ fn problems(i: &Network, own: &::vault::Items, now: u64) -> Result<Vec<Problem>>
                 Some(_) => format!("Check {backer} is on, with the disk plugged in."),
                 None => format!("Check {backer} is on: it backs this up."),
             };
-            out.push(Problem { place: p.id.clone(), title: format!("Couldn't back up to {}", p.title), check: false, text: format!("Nothing has gone to {} for a day.", p.title), status: "Not backed up for a day", fix, since, push: Some(since + LATE) });
+            out.push(Problem { place: p.id.clone(), title: format!("Couldn't back up to {}", p.title), check: false, text: format!("Nothing has gone to {} for a day.", p.title), status: "Not backed up for a day", fix, since, notify: Some(since + LATE) });
         }
     }
     // A place an admin named whose details changed since, by someone who isn't one: nothing goes there until an admin
@@ -149,7 +149,7 @@ fn problems(i: &Network, own: &::vault::Items, now: u64) -> Result<Vec<Problem>>
             status: "Details changed",
             fix: "An admin opens it in the Vault and saves it.".to_string(),
             since: it.time,
-            push: Some(it.time),
+            notify: Some(it.time),
         });
     }
     Ok(out)
@@ -272,7 +272,7 @@ impl Node {
         }
     }
 
-    /// Pushes a place's problem to the network's admins once it's worth it, through the network's push. Every device
+    /// Notifies the network's admins of a place's problem once it's worth it. Every device
     /// watches, so a device that's gone is noticed too; the first in line tells them, each after it only once the
     /// ones before have had time to, and the `backup-alert` it writes keeps the rest quiet until the next problem.
     async fn tell_admins(&self) -> Result<()> {
@@ -286,13 +286,13 @@ impl Node {
             let at = line(m, &Scope::Global, "alerts")?.iter().position(|k| *k == me).unwrap_or(usize::MAX / 2) as u64;
             let due: Vec<Problem> = problems(i, &self.own_vault(), now)?
                 .into_iter()
-                .filter(|p| p.push.is_some_and(|t| now >= t + at * STAGGER) && i.status.get("global").and_then(|s| s.alerted.get(&p.place)).is_none_or(|t| *t < p.since))
+                .filter(|p| p.notify.is_some_and(|t| now >= t + at * STAGGER) && i.status.get("global").and_then(|s| s.alerted.get(&p.place)).is_none_or(|t| *t < p.since))
                 .collect();
             let admins: Vec<String> = m.users()?.into_iter().filter(|u| !u.removed && m.may(&u.id, "change-settings", scopes::NETWORK)).map(|u| u.id).collect();
             Ok((due, admins))
         })?;
         for p in due {
-            // Said only once an admin was told, so a push that didn't go is tried again, hourly.
+            // Said only once an admin was told, so a notification that didn't go is tried again, hourly.
             {
                 let mut tried = self.0.backups.alert_tried.lock().unwrap();
                 if tried.get(&p.place).is_some_and(|t| now < t + 3_600_000) {
@@ -302,8 +302,8 @@ impl Node {
             }
             let mut told = false;
             for admin in &admins {
-                let note = crate::push::Send { title: p.title.clone(), body: p.fix.clone(), app: "settings".into(), screen: "backups".into(), ..Default::default() }.note("")?;
-                match self.push_note(admin, &note).await {
+                let note = ::notifications::Send { title: p.title.clone(), body: p.fix.clone(), app: "settings".into(), screen: "backups".into(), ..Default::default() }.note("")?;
+                match notifications_runtime::send(&self.rt(), admin, &note).await {
                     Ok(sent) => {
                         told = true;
                         tracing::info!("told {admin} about backups: {sent}");

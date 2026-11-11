@@ -50,11 +50,11 @@ package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a de
   `windows/build.sh`; where the computer has no `one`, the window sets it up by `install.ps1`.
 
 Not carried, by Andre's decision: the iPhone's own menus (the web's, but for what touch and hold lifts), Android's accent
-colour on what's tapped, a Mac build with push.
+colour on what's tapped, a Mac build with notifications.
 
 ## Still open
 
-- Pushes on every platform: built as the old apps', never received. The One App has no APNs key, Firebase project or WNS
+- Notifications on every platform: built as the old apps', never received. The One App has no APNs key, Firebase project or WNS
   app (Andre, top #87); then notification taps, Approve / Not Me with no window, the iPhone's count and banner.
 - TestFlight (`iphone/build.sh testflight`): waits on an App Store Connect app for the build's iPhone id (Andre, top #87);
   then Google sign-in, receipt scan and photo upload in Claims there.

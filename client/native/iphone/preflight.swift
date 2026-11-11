@@ -6,7 +6,7 @@ import Foundation
 
 let env = ProcessInfo.processInfo.environment
 func need(_ name: String) -> String { env[name] ?? "" }
-let id = need("CONFIG_IPHONE"), name = need("CONFIG_NAME"), push = need("PUSH") == "YES"
+let id = need("CONFIG_IPHONE"), name = need("CONFIG_NAME"), notifications = need("NOTIFICATIONS") == "YES"
 var missing: [String] = []
 
 func token() throws -> String {
@@ -44,7 +44,7 @@ func links(_ row: Row, _ key: String) -> [String] {
 
 // The app and each extension's identifier, with what it signs with.
 var targets = [(id, name + " App Store"), (id + ".widgets", name + " Widgets App Store")]
-if push { targets.append((id + ".notifications", name + " Notifications App Store")) }
+if notifications { targets.append((id + ".notifications", name + " Notifications App Store")) }
 let identifiers = try ask("bundleIds?filter[identifier]=\(targets.map(\.0).joined(separator: ","))&include=bundleIdCapabilities&limit=20")
 let capabilities = Dictionary(uniqueKeysWithValues: rows(identifiers, "included").map { ($0["id"] as? String ?? "", attributes($0)["capabilityType"] as? String ?? "") })
 var bundleRows: [String: Row] = [:]
@@ -53,7 +53,7 @@ for (identifier, _) in targets {
     guard let row = bundleRows[identifier] else { missing.append("No App ID \(identifier): register it at developer.apple.com"); continue }
     let has = Set(links(row, "bundleIdCapabilities").compactMap { capabilities[$0] })
     if !has.contains("APP_GROUPS") { missing.append("\(identifier) doesn't have App Groups on") }
-    if push && identifier == id && !has.contains("PUSH_NOTIFICATIONS") { missing.append("\(identifier) doesn't have Push Notifications on") }
+    if notifications && identifier == id && !has.contains("PUSH_NOTIFICATIONS") { missing.append("\(identifier) doesn't have Push Notifications on") }
 }
 if rows(try ask("apps?filter[bundleId]=\(id)")).isEmpty { missing.append("No app for \(id) in App Store Connect") }
 

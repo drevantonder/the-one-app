@@ -73,7 +73,7 @@ export default {
     await browsersReadStepsFromTheBucket();
     await stepsAreCreatedInTurn();
     await anOlderBuildWritesNothing();
-    await pushRequests();
+    await sendersRequests();
     const token = await sign({ iss: "https://a", sub: "u", exp });
     const forged = token.slice(0, token.lastIndexOf(".") + 1) + b64u.encode(new Uint8Array(64));
     await fails(() => verify(forged, { keys: [jwk] }, "https://a"), "a forged token");
@@ -186,7 +186,7 @@ async function remoteMcpClientsSecrets() {
 
 /// Each push service gets the request it documents, carrying the sealed note as it is; and Web Push's encryption is
 /// RFC 8291's, as its own example says.
-async function pushRequests() {
+async function sendersRequests() {
   const text = new TextEncoder();
   const asked = [];
   const answer = (status, body = {}) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

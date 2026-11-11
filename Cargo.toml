@@ -1,9 +1,9 @@
 [workspace]
-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "vault", "vault/runtime", "devices", "devices/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "devices", "devices/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
-default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "vault", "vault/runtime", "devices", "devices/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "devices", "devices/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 
 [package]
 name = "one"
@@ -23,7 +23,7 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:devices-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
+node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:devices-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
 # `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
 web-bundle = ["dep:ssh-key", "dep:flate2"]
 
@@ -52,6 +52,9 @@ vault-runtime = { path = "vault/runtime", optional = true }
 # app runtime does for them, only a node's.
 devices = { path = "devices" }
 devices-runtime = { path = "devices/runtime", optional = true }
+# Notifications (notifications/): a note sealed to one device and what a device registers, every build; sending them, only a node's.
+notifications = { path = "notifications" }
+notifications-runtime = { path = "notifications/runtime", optional = true }
 # Groups (groups/): who's in the network and its groups, every build; what the app runtime does for it, only a node's.
 groups = { path = "groups" }
 groups-runtime = { path = "groups/runtime", optional = true }
@@ -88,7 +91,7 @@ rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serial
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 serde_json = "1"
-# The push Worker's VAPID key is made with ring (src/cloudflare/workers.rs), and devices check a provider's RS256 ID tokens and
+# The notifications Worker's VAPID key is made with ring (src/cloudflare/workers.rs), and devices check a provider's RS256 ID tokens and
 # a passkey's ES256 or RS256 assertion with it (scope/src/sign_in_proof.rs): rustls and iroh build it already, browsers' client too.
 ring = "0.17"
 tracing = "0.1"

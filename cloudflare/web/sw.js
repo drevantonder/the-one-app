@@ -3,10 +3,10 @@
 // styles are named by their content (`?v=`), so the browser keeps them for good. Nothing else is touched: a node's
 // answers, signing in and every other file go to the network as they would without this.
 //
-// And its notifications: a push (cloudflare/push/) carries a note sealed to one of this browser's devices (one per user
+// And its notifications: each (notifications/worker/) carries a note sealed to one of this browser's devices (one per user
 // signed in here), which it opens with that device's seal key, kept in IndexedDB where it can't be read out
 // (device.js), and shows; tapping it opens the screen it names. A note it can't open still shows that one came, as
-// browsers require of every push, and so does one whose signature is wrong.
+// browsers require of every push message, and so does one whose signature is wrong.
 import { b64u, hex, openNote } from "/shared/crypto.js";
 import { NOTE_FALLBACK } from "/shared/protocol.js";
 
@@ -32,11 +32,11 @@ addEventListener("fetch", (e) => {
   e.respondWith(caches.open(KEPT).then((c) => c.match("/index.html")).then((kept) => kept || fresh).catch(() => fetch(e.request)));
 });
 
-// A note comes as base64url text (cloudflare/push/senders.js).
+// A note comes as base64url text (notifications/worker/senders.js).
 addEventListener("push", (e) => e.waitUntil(show(e.data ? e.data.text() : null)));
 
-async function show(pushed) {
-  const note = pushed && (await opened(pushed).catch(() => null));
+async function show(carried) {
+  const note = carried && (await opened(carried).catch(() => null));
   if (!note?.title) return registration.showNotification(NAME, { body: NOTE_FALLBACK, icon: "/icon.png" });
   const link = note.app ? { app: note.app, screen: note.screen || "main", params: note.params || {} } : null;
   return registration.showNotification(note.title, { body: note.body || "", tag: note.id || undefined, icon: "/icon.png", data: { link } });
@@ -62,8 +62,8 @@ addEventListener("notificationclick", (e) => {
 
 /// The note sealed to one of this browser's devices, which are kept as `device:<user>` in IndexedDB's `one` (kept.js):
 /// null if it's none's or its signature is wrong.
-async function opened(pushed) {
-  const sealed = b64u.decode(pushed);
+async function opened(carried) {
+  const sealed = b64u.decode(carried);
   for (const d of await devices()) {
     const note = await openNote({ secret: d.seal, public: hex.decode(d.sealKey) }, sealed).catch(() => null);
     if (note) return note;

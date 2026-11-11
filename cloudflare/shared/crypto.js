@@ -7,7 +7,7 @@
 // Sealed to a public key (an X25519 key: a user's, a device's, the recovery key's twin), bytes are
 // share ‖ AES-256-GCM(key, zero nonce, plain), where share is a fresh X25519 public key and key is HKDF-SHA256 of the
 // shared secret, salted with share ‖ the recipient's public key. Each key seals once, so the zero nonce is safe. What's
-// kept starts with 1, which is authenticated too; what a push carries doesn't (`sealTo`).
+// kept starts with 1, which is authenticated too; what a notification carries doesn't (`sealTo`).
 //
 // Sealed under a secret (a refresh token, an access token), bytes are
 // 1 ‖ nonce ‖ AES-256-GCM(key, nonce, plain, authenticating that 1), with key and the copy's id both derived from the
@@ -62,7 +62,7 @@ async function aes(key, use) {
 const ZERO = new Uint8Array(12);
 const NUMBERED = new Uint8Array([1]);
 
-/// Sealed with no version: what the push Worker sends, for a phone's shell, which changes only with a new build from the
+/// Sealed with no version: what the notifications Worker sends, for a phone's shell, which changes only with a new build from the
 /// App Store or TestFlight (`seal_unnumbered_to` in key/src/lib.rs).
 export async function sealTo(to, plain) {
   to = bytes(to);
@@ -96,7 +96,7 @@ async function openSealed(pair, sealed) {
   return open(sealed, new Uint8Array());
 }
 
-/// Opens a note sealed to the key pair `pair` (`open_note` in src/push.rs): → the note, signed by a device of the network
+/// Opens a note sealed to the key pair `pair` (`open_note` in notifications/src/lib.rs): → the note, signed by a device of the network
 /// (`by`, hex), or unsigned from the network's own Workers. One whose signature is wrong is refused.
 export async function openNote(pair, sealed) {
   const { sig, ...note } = JSON.parse(new TextDecoder().decode(await openSealed(pair, sealed)));

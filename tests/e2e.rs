@@ -884,7 +884,7 @@ async fn a_client_devices_mcp_runs_as_its_user() {
     assert!(said.contains("You act for Sam") && !said.contains("You act for Andre"), "{said}");
     let (_, listed) = mcp(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).await;
     let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
-    assert!(["notes_post", "vault_list", "push_send", "logs", "devices_remove", "backups_now"].iter().all(|n| names.contains(n)), "every client lists the same tools: {names:?}");
+    assert!(["notes_post", "vault_list", "notifications_send", "logs", "devices_remove", "backups_now"].iter().all(|n| names.contains(n)), "every client lists the same tools: {names:?}");
     let (status, vault) = mcp(json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "vault_list", "arguments": {} } })).await;
     assert!(status == 200 && vault["result"]["isError"] != true, "Sam uses his own Vault: {vault}");
     let (_, logs) = mcp(json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": { "name": "logs", "arguments": { "device": a.device_name() } } })).await;

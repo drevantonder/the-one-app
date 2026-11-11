@@ -46,7 +46,6 @@ mod versions;
 pub use versions::heard;
 #[path = "../onboarding/runtime/pairing.rs"]
 mod pairing;
-pub(crate) mod push;
 pub(crate) mod releases;
 mod scheduled;
 pub(crate) mod screens;

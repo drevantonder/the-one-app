@@ -202,7 +202,7 @@ pub fn seal_to(to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
     sealed_to(NUMBERED, to, plain)
 }
 
-/// `seal_to` with no version: what a push carries, since a phone's shell, which opens it with no window, changes only
+/// `seal_to` with no version: what a notification carries, since a phone's shell, which opens it with no window, changes only
 /// when the App Store or TestFlight brings a new build. Nothing keeps these.
 pub fn seal_unnumbered_to(to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
     sealed_to(UNNUMBERED, to, plain)

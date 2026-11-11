@@ -48,7 +48,7 @@ pub const WORKERS: &[Worker] = &[
     Worker { name: "mcp", entry: "mcp/worker.js", classes: &["Client"], place: None, own_address: false, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings, cron: None },
     Worker { name: "telemetry", entry: "telemetry/worker.js", classes: &[], place: None, own_address: true, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *") },
     Worker { name: "gateway", entry: "gateway/worker.js", classes: &[], place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None },
-    Worker { name: "push", entry: "push/worker.js", classes: &["Push"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings, cron: None },
+    Worker { name: "push", entry: "push/worker.js", classes: &["Push"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: notifications_bindings, cron: None },
 ];
 
 /// The Cloudflare node's Worker (`cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
@@ -200,10 +200,10 @@ pub struct Settings {
     /// CLOUDFLARE_API_TOKEN isn't set.
     #[serde(default, skip_serializing)]
     pub cloudflare_token: Option<String>,
-    /// The push Worker's secrets, by their names in `SCHEMA` (`PUSH_SECRETS`): the network's VAPID key, which is made
+    /// The notifications Worker's secrets, by their names in `SCHEMA` (`NOTIFICATIONS_SECRETS`): the network's VAPID key, which is made
     /// with the Workers, and the custom build's APNs, FCM and WNS credentials, as its admin adds them.
     #[serde(default, skip)]
-    pub push: std::collections::BTreeMap<String, String>,
+    pub notifications: std::collections::BTreeMap<String, String>,
     /// A throwaway network's one user, `(id, name)`, whom its auth lets in with no passkey and no Google, so clients
     /// are tested with nobody there. Only `one-dev throwaway` sets it, on the Workers it runs beside its throwaway network, listening
     /// only on this machine; `deploy` refuses settings with it, so no Workers users use ever have it.
@@ -269,7 +269,7 @@ ANALYTICS_TOKEN=
 # The Cloudflare node's endpoint key, made by cloudflare node deploy.
 # @optional
 CLOUDFLARE_NODE_KEY=
-# The push Worker's: the network's VAPID key (base64url PKCS#8, P-256), made with the Workers, which browsers' pushes
+# The notifications Worker's: the network's VAPID key (base64url PKCS#8, P-256), made with the Workers, which browsers' notifications
 # are signed with.
 # @optional
 VAPID_KEY=
@@ -280,10 +280,10 @@ APNS_KEY=
 APNS_KEY_ID=
 # @optional
 APNS_TEAM_ID=
-# The custom build's Firebase project's service account key (its JSON), which Android's pushes are sent with.
+# The custom build's Firebase project's service account key (its JSON), which Android's notifications are sent with.
 # @optional
 FCM_ACCOUNT=
-# The Windows app's Microsoft Entra app registration, which Windows' pushes are sent with.
+# The Windows app's Microsoft Entra app registration, which Windows' notifications are sent with.
 # @optional
 WNS_TENANT_ID=
 # @optional
@@ -292,9 +292,9 @@ WNS_CLIENT_ID=
 WNS_CLIENT_SECRET=
 ";
 
-const PUSH_SECRETS: &[&str] = &["VAPID_KEY", "APNS_KEY", "APNS_KEY_ID", "APNS_TEAM_ID", "FCM_ACCOUNT", "WNS_TENANT_ID", "WNS_CLIENT_ID", "WNS_CLIENT_SECRET"];
+const NOTIFICATIONS_SECRETS: &[&str] = &["VAPID_KEY", "APNS_KEY", "APNS_KEY_ID", "APNS_TEAM_ID", "FCM_ACCOUNT", "WNS_TENANT_ID", "WNS_CLIENT_ID", "WNS_CLIENT_SECRET"];
 
-/// A new VAPID key: base64url PKCS#8 of a P-256 key, as the push Worker imports it.
+/// A new VAPID key: base64url PKCS#8 of a P-256 key, as the notifications Worker imports it.
 fn vapid_key() -> String {
     let rng = ring::rand::SystemRandom::new();
     let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, &rng).expect("making a P-256 key");
@@ -466,7 +466,7 @@ impl Settings {
         settings.otlp_token = get("OTLP_TOKEN");
         settings.analytics_token = get("ANALYTICS_TOKEN");
         settings.cloudflare_node_key = get("CLOUDFLARE_NODE_KEY").unwrap_or_default();
-        settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
+        settings.notifications = NOTIFICATIONS_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
         if settings.throwaway_user.is_none() {
             for provider in &mut settings.providers {
                 provider.client = get(&provider.secret("CLIENT_ID")).zip(get(&provider.secret("CLIENT_SECRET")));
@@ -574,7 +574,7 @@ impl Settings {
             providers: providers(),
             cloudflare_token: None,
             devices: vec![],
-            push: [("VAPID_KEY".to_string(), vapid_key())].into(),
+            notifications: [("VAPID_KEY".to_string(), vapid_key())].into(),
             root: None,
             throwaway_user: None,
             telemetry: None,
@@ -618,7 +618,7 @@ impl Settings {
             if !self.cloudflare_node_key.is_empty() {
                 text += &format!("CLOUDFLARE_NODE_KEY={}\n", quoted(&self.cloudflare_node_key));
             }
-            for (name, value) in &self.push {
+            for (name, value) in &self.notifications {
                 text += &format!("{name}={}\n", quoted(value));
             }
             write_private(&local(&self.dir), &text)?;
@@ -672,17 +672,17 @@ fn gateway_bindings(_: &Settings) -> Vec<Binding> {
     bound.into_iter().chain(named).collect()
 }
 
-/// The push Worker: the network's push credentials, and the relay, which says which devices are the network's.
-fn push_bindings(settings: &Settings) -> Vec<Binding> {
+/// The notifications Worker: the network's credentials with the push services, and the relay, which says which devices are the network's.
+fn notifications_bindings(settings: &Settings) -> Vec<Binding> {
     let cli = custom_build::config::CLI;
     let mut out = vec![
         plain("RELAY", "service:relay"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", custom_build::config::NAME),
-        // The Apple apps' bundle ids (the iPhone's is config.toml's `iphone`, the Mac's is client/native/mac/build.sh's), which their pushes go to.
+        // The Apple apps' bundle ids (the iPhone's is config.toml's `iphone`, the Mac's is client/native/mac/build.sh's), which their notifications go to.
         plain("APNS_TOPICS", json!([custom_build::config::IPHONE, format!("app.{cli}.mac")]).to_string()),
     ];
-    out.extend(settings.push.iter().map(|(name, value)| secret(name, value.clone())));
+    out.extend(settings.notifications.iter().map(|(name, value)| secret(name, value.clone())));
     out
 }
 
@@ -773,7 +773,7 @@ fn auth_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![
         // Whether a request's signer is one of the network's endpoints, and an admin's.
         plain("RELAY", "service:relay"),
-        // Pushes to a user's devices, by the push Worker's entrypoint for the network's own Workers.
+        // Notifies a user's devices, by the notifications Worker's entrypoint for the network's own Workers.
         plain("PUSH", "service:push:Sender"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", custom_build::config::NAME),

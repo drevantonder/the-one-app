@@ -72,13 +72,13 @@ fn refused(status: StatusCode, error: String, code: Option<&str>) -> Response {
 }
 
 /// The routes a computer's onet answers itself, which `answer` takes before passing anything on: all but those of the
-/// window's joining, pushes and kept answers are its app runtime's routes too, for a node that's its own device.
+/// window's joining, notifications and kept answers are its app runtime's routes too, for a node that's its own device.
 pub const OWN: &[&str] = &[
     "/api/join",
     "/api/join/ask",
     "/api/join/wait",
-    "/api/push/register",
-    "/api/push/open",
+    "/api/notifications/register",
+    "/api/notifications/open",
     "/api/kept",
     "/api/create",
     "/api/devices/approve-with-recovery",
@@ -100,8 +100,8 @@ async fn answer(State((onet, routes)): State<(Arc<Onet>, Arc<Routes>)>, req: Req
         ("POST", "/api/join") => join(&onet, req).await,
         ("POST", "/api/join/ask") => ask(&onet, req).await,
         ("POST", "/api/join/wait") => wait(&onet, req).await,
-        ("POST", "/api/push/register") => register_push(&onet, req).await,
-        ("POST", "/api/push/open") => open_note(&onet, req).await,
+        ("POST", "/api/notifications/register") => register_notifications(&onet, req).await,
+        ("POST", "/api/notifications/open") => open_note(&onet, req).await,
         ("POST", "/api/kept") => kept(&onet, req).await,
         ("POST", "/api/create") => create(&onet, req).await,
         ("POST", "/api/devices/approve-with-recovery" | "/api/devices/recovery-key/replace" | "/api/devices/recovery-holders/seal") => recovery(&onet, &path, req).await,
@@ -224,24 +224,24 @@ async fn wait(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     Ok(json!({ "in": true }))
 }
 
-/// Registers where a push service reaches this device (`one::push::Address`): Windows' window hands it its channel.
-async fn register_push(onet: &Onet, req: Request) -> Result<Value> {
-    let address: one::push::Address = body(req).await?;
-    onet.device().await?.register_push(&address).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+/// Registers where a push service reaches this device (`notifications::Address`): Windows' window hands it its channel.
+async fn register_notifications(onet: &Onet, req: Request) -> Result<Value> {
+    let address: notifications::Address = body(req).await?;
+    onet.device().await?.register_notifications(&address).await.map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(json!({}))
 }
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Pushed {
-    /// The note as its push carried it (base64url).
+struct Carried {
+    /// The note as its push service carried it (base64url).
     n: String,
 }
 
-/// A note pushed to this device, opened with its key: → the note, and the key of the device that sent it.
+/// A note sent to this device, opened with its key: → the note, and the key of the device that sent it.
 async fn open_note(onet: &Onet, req: Request) -> Result<Value> {
-    let pushed: Pushed = body(req).await?;
-    let (note, from) = crate::open_note(onet.key.to_bytes(), &pushed.n).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let carried: Carried = body(req).await?;
+    let (note, from) = crate::open_note(onet.key.to_bytes(), &carried.n).map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(json!({ "note": note, "from": from }))
 }
 

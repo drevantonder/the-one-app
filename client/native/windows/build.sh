@@ -43,7 +43,7 @@ cp ./*.cs Helper.csproj ./*.ps1 "$stage/"
 file=${name//[^A-Za-z0-9]/}
 guid() { printf '%s' "$1" | sha1sum | sed -E 's/^(.{8})(.{4})(.{4})(.{4})(.{12}).*/\1-\2-\3-\4-\5/'; }
 widgets=$(guid "$cli widgets") notes=$(guid "$cli notifications")
-# Pushes come by the custom build's Microsoft Entra app, if it has one: none, and the package doesn't name it.
+# Notifications come by the custom build's Microsoft Entra app, if it has one: none, and the package doesn't name it.
 wns_app=$(field wns_app) wns_object=$(field wns_object)
 if [ -n "$wns_app" ]; then wns='/<!--\/\{0,1\}wns-->/d'; else wns='/<!--wns-->/,/<!--\/wns-->/d'; fi
 now=$(date -u +%s)
@@ -71,7 +71,7 @@ public static class CustomBuild
     /// The COM class the Widgets board starts the helper as, for its widgets (Package.appxmanifest).
     public const string WidgetClass = "$widgets";
     /// The custom build's Microsoft Entra app, which WNS knows this app by (config.toml's wns_app, and its service
-    /// principal's object id, wns_object): empty for none, and it gets no pushes.
+    /// principal's object id, wns_object): empty for none, and it gets no notifications.
     public const string WnsApp = $(quote "$wns_app");
     public const string WnsObject = $(quote "$wns_object");
 }

@@ -12,7 +12,7 @@ pub fn javascript() -> String {
          export const URLS = {urls};\n\
          export const RELAY = {relay};\n\
          export const TELEMETRY = {telemetry};\n\
-         export const PUSH = {push};\n\
+         export const NOTIFICATIONS = {notifications};\n\
          export const SIGNED_NOTE = {signed_note};\n\
          export const AUTH_DOMAIN = {auth};\n\
          export const ENDPOINT = {endpoint};\n\
@@ -61,7 +61,7 @@ pub fn javascript() -> String {
         urls = json!(URLS),
         relay = json!(RELAY),
         telemetry = json!(TELEMETRY),
-        push = json!(PUSH),
+        notifications = json!(NOTIFICATIONS),
         signed_note = json!(::custom_build::protocol::SIGNED_NOTE),
         auth = json!(AUTH_DOMAIN),
         endpoint = json!(key::ENDPOINT),

@@ -120,9 +120,9 @@ export function browser() {
     if (user) await Promise.all(["device", "joined", "nodes", "root", "welcome", "who.json", "needs.json", "invites.json"].map((k) => del(`${k}:${user}`))).catch(() => {});
   }
 
-  /// What was last registered for pushes here: the subscription's endpoint, the device's key and the network's VAPID
+  /// What was last registered for notifications here: the subscription's endpoint, the device's key and the network's VAPID
   /// key, and when.
-  const PUSHED = "one.pushed";
+  const REGISTERED = "one.notifications";
   /// Whether this browser can get notifications: "default" until the user says, "granted", "denied", or null where
   /// it can't.
   const notifyState = () => (device && "PushManager" in window && "Notification" in window ? Notification.permission : null);
@@ -165,7 +165,7 @@ export function browser() {
     async leave(api) {
       if (device) await Promise.race([api("/api/devices/remove", { method: "POST", body: { device: device.key } }), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));
       await navigator.serviceWorker?.getRegistration().then((r) => r?.pushManager.getSubscription()).then((s) => s?.unsubscribe()).catch(() => {});
-      localStorage.removeItem(PUSHED);
+      localStorage.removeItem(REGISTERED);
       await forgetDevice();
     },
     nodes: (state) => net.ordered(state),
@@ -190,22 +190,22 @@ export function browser() {
     fit() {},
 
     /// This browser gets notifications once its user allows them (`ask`, from Settings › Devices): its push
-    /// subscription is registered with the push Worker as this device's, again whenever it changes and daily. → the
+    /// subscription is registered with the notifications Worker as this device's, again whenever it changes and daily. → the
     /// permission, as `notifyState`.
     async notify(ask) {
       if (!notifyState()) return null;
       if (ask && Notification.permission === "default") await Notification.requestPermission();
       if (Notification.permission !== "granted") return notifyState();
-      const { vapid } = await (await fetch("/push/key")).json();
+      const { vapid } = await (await fetch("/notifications/key")).json();
       if (!vapid) return notifyState();
       const reg = await navigator.serviceWorker.ready;
       let sub = await reg.pushManager.getSubscription();
-      const was = JSON.parse(localStorage.getItem(PUSHED) || "null");
+      const was = JSON.parse(localStorage.getItem(REGISTERED) || "null");
       if (sub && was && was.vapid !== vapid) await sub.unsubscribe(), (sub = null);
       sub ||= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(vapid.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)) });
       if (was?.endpoint !== sub.endpoint || was?.key !== device.key || was?.vapid !== vapid || Date.now() - was.at > 86_400_000) {
-        await net.push(sub.toJSON());
-        localStorage.setItem(PUSHED, JSON.stringify({ endpoint: sub.endpoint, key: device.key, vapid, at: Date.now() }));
+        await net.registerNotifications(sub.toJSON());
+        localStorage.setItem(REGISTERED, JSON.stringify({ endpoint: sub.endpoint, key: device.key, vapid, at: Date.now() }));
       }
       return notifyState();
     },

@@ -19,23 +19,23 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONObject
 
-// Notifications. The network's push Worker (cloudflare/push/) carries each note, sealed to this phone's device, through
+// Notifications. The network's notifications Worker (notifications/worker/) carries each note, sealed to this phone's device, through
 // Firebase Cloud Messaging as a data message alone (`n`, base64url), which wakes this app; the app's library opens it with
 // the device's key (Native "open-note"), asking nothing of the network, and this shows it. Tapping one opens the app
-// screen it names. A device asking its user to join shows Approve and Not Me, answered from here (PushActions) as
+// screen it names. A device asking its user to join shows Approve and Not Me, answered from here (NotificationActions) as
 // Settings › Devices answers them. Firebase is the custom build's own project (config.toml's `firebase`), which a build
 // without one leaves out: then this phone registers nothing and gets no notifications.
 
-object Push {
+object Notifications {
     private const val CHANNEL = "notes"
 
-    /** Whether this build has a Firebase project, so pushes. */
+    /** Whether this build has a Firebase project, so notifications. */
     fun available(context: Context) = FirebaseApp.getApps(context).isNotEmpty()
 
-    /** This phone's FCM token, for the push Worker: blocks, so never on the main thread. */
+    /** This phone's FCM token, for the notifications Worker: blocks, so never on the main thread. */
     fun token(context: Context): String? = if (available(context)) runCatching { Tasks.await(FirebaseMessaging.getInstance().token) }.getOrNull() else null
 
-    /** A push came: its note opened with this device's key, and shown. One that opens with none (sealed to a device signed
+    /** A notification came: its note opened with this device's key, and shown. One that opens with none (sealed to a device signed
      *  out of here) shows nothing. Blocks, so never on the main thread. */
     fun received(context: Context, n: String) {
         val note = JSONObject(Native.call("open-note", JSONObject().put("n", n).toString()))
@@ -68,8 +68,8 @@ object Push {
             .setContentIntent(PendingIntent.getActivity(context, id.hashCode(), open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         join?.let { code ->
             built.setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
-            built.addAction(0, "Not Me", PushActions.intent(context, note, code, approve = false))
-            built.addAction(0, "Approve", PushActions.intent(context, note, code, approve = true))
+            built.addAction(0, "Not Me", NotificationActions.intent(context, note, code, approve = false))
+            built.addAction(0, "Approve", NotificationActions.intent(context, note, code, approve = true))
         }
         runCatching { NotificationManagerCompat.from(context).notify(id, 0, built.build()) }
     }
@@ -77,32 +77,32 @@ object Push {
     fun dismiss(context: Context, id: String) = NotificationManagerCompat.from(context).cancel(id, 0)
 }
 
-/** Where FCM hands this app its pushes, and its new tokens. */
-class PushService : FirebaseMessagingService() {
+/** Where FCM hands this app its notifications, and its new tokens. */
+class NotificationsService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        message.data["n"]?.let { Push.received(this, it) }
+        message.data["n"]?.let { Notifications.received(this, it) }
     }
 
     override fun onNewToken(token: String) {
-        Native.call("register-push", JSONObject().put("via", "fcm").put("address", token).toString())
+        Native.call("register-notifications", JSONObject().put("via", "fcm").put("address", token).toString())
     }
 }
 
 /** A join's Approve or Not Me, tapped: answered as this device, from here, with nothing opened. If it can't be, the
  *  notification says why, with the same two answers. */
-class PushActions : BroadcastReceiver() {
+class NotificationActions : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val code = intent.getStringExtra("code") ?: return
         val approve = intent.action == APPROVE
         val note = JSONObject().put("id", intent.getStringExtra("id") ?: "").put("title", intent.getStringExtra("title") ?: "")
             .put("body", intent.getStringExtra("body") ?: "").put("join", code)
         val done = goAsync()
-        Push.dismiss(context, note.getString("id"))
+        Notifications.dismiss(context, note.getString("id"))
         Thread {
             try {
                 val said = JSONObject(Native.call("join", JSONObject().put("code", code).put("approve", approve).toString()))
                 if (said.has("error")) {
-                    Push.show(context, note, problem = (if (approve) "Couldn’t approve it: " else "Couldn’t turn it down: ") + said.getString("error").ifEmpty { "try again." })
+                    Notifications.show(context, note, problem = (if (approve) "Couldn’t approve it: " else "Couldn’t turn it down: ") + said.getString("error").ifEmpty { "try again." })
                 }
             } finally {
                 done.finish()
@@ -111,11 +111,11 @@ class PushActions : BroadcastReceiver() {
     }
 
     companion object {
-        private const val APPROVE = "app.client.push.APPROVE"
-        private const val REFUSE = "app.client.push.REFUSE"
+        private const val APPROVE = "app.client.notifications.APPROVE"
+        private const val REFUSE = "app.client.notifications.REFUSE"
 
         fun intent(context: Context, note: JSONObject, code: String, approve: Boolean): PendingIntent {
-            val i = Intent(context, PushActions::class.java).apply {
+            val i = Intent(context, NotificationActions::class.java).apply {
                 action = if (approve) APPROVE else REFUSE
                 putExtra("code", code)
                 putExtra("id", note.optString("id"))

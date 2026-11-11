@@ -142,7 +142,7 @@ pub fn behind(data: &Path) -> bool {
     folder(data).join("behind").exists() || folder(data).join("reads-behind").exists()
 }
 
-/// Whether what runs with no window (widgets, and what a push asks) just learned the network reads more than this app's own
+/// Whether what runs with no window (widgets, and what a notification asks) just learned the network reads more than this app's own
 /// client does: `refused` is what it was told, if anything. Those things keep what they last had and the page says to update.
 pub fn own_client_behind(data: &Path, refused: Option<&str>) {
     let path = folder(data).join("reads-behind");

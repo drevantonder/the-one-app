@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the iPhone app (client/native: Tauri's window, in the Xcode project iphone/project.yml makes) with its
-# home-screen widget, and in a build with push its notification extension, and installs it:
+# home-screen widget, and in a build with notifications its notification extension, and installs it:
 #   build.sh               a debug build, on the booted simulator (or $SIMULATOR)
 #   build.sh device [dir]  signed with the team, on the paired iPhone (or $DEVICE); with dir, kept there for an update
 #                          to install
@@ -10,7 +10,8 @@
 # testflight_key_id and testflight_issuer. The App Store profiles are named after the app ("<name> App Store", "<name>
 # Widgets App Store", "<name> Notifications App Store"), on an Apple Distribution certificate in a keychain this user
 # searches: $BUILD_KEYCHAIN and $BUILD_KEYCHAIN_PASSWORD_FILE, if that keychain isn't the login one.
-# CONFIG=path/to/config.toml builds another custom build; push is on with its `push = true`, or PUSH=1.
+# CONFIG=path/to/config.toml builds another custom build; notifications are on with its `notifications = true`, or
+# NOTIFICATIONS=1.
 set -euo pipefail
 . "$(dirname "$0")/../apple.sh"
 [ "${1:-}" = preflight ] || alone "$@"
@@ -23,9 +24,10 @@ if [ "$mode" = simulator ]; then rust=aarch64-apple-ios-sim profile=debug config
 # TestFlight wants of each upload.
 config_count=$(git -C "$(dirname "$config")" rev-list --count HEAD 2>/dev/null || echo 0)
 export BUILD_NUMBER=$BUILD_NUMBER.$config_count
-# Push needs the Push Notifications capability on the App IDs and an APNs key for the push Worker, which only the team's
-# account holder makes: so builds leave it out until the config says `push = true`, or PUSH=1.
-if [ "${PUSH:-}" = 1 ] || [ "$(field push)" = true ]; then export PUSH=YES; else export PUSH=; fi
+# Notifications need the Push Notifications capability on the App IDs and an APNs key for the notifications Worker,
+# which only the team's account holder makes: so builds leave them out until the config says `notifications = true`, or
+# NOTIFICATIONS=1.
+if [ "${NOTIFICATIONS:-}" = 1 ] || [ "$(field notifications)" = true ]; then export NOTIFICATIONS=YES; else export NOTIFICATIONS=; fi
 
 if [ "$mode" = testflight ] || [ "$mode" = preflight ]; then
 	export ASC_KEY_ID=$(field testflight_key_id) ASC_ISSUER=$(field testflight_issuer)
@@ -34,7 +36,7 @@ if [ "$mode" = testflight ] || [ "$mode" = preflight ]; then
 	trap 'rm -rf "$private"' EXIT
 	export ASC_KEY=$private/key.p8
 	eval "$(field testflight_key)" > "$ASC_KEY"
-	export CONFIG_NAME CONFIG_IPHONE APPLE_TEAM PUSH
+	export CONFIG_NAME CONFIG_IPHONE APPLE_TEAM NOTIFICATIONS
 	swift "$native/iphone/preflight.swift"
 	[ "$mode" = testflight ] || exit 0
 fi
@@ -68,8 +70,8 @@ contents "" > "$out/Artwork.xcassets/Contents.json"
 cp "$(art logo)" "$out/Artwork.xcassets/Logo.imageset/logo.png"
 contents '{"filename":"logo.png","idiom":"universal"}' > "$out/Artwork.xcassets/Logo.imageset/Contents.json"
 
-# With push, onet (onet/ffi) and its Swift, for the notification extension to open notes with.
-if [ -n "$PUSH" ]; then
+# With notifications, onet (onet/ffi) and its Swift, for the notification extension to open notes with.
+if [ -n "$NOTIFICATIONS" ]; then
 	onet=$out/Onet
 	"$root/onet/ffi/bindings.sh" swift "$onet/generated"
 	mkdir -p "$onet/headers"
@@ -124,7 +126,7 @@ testflight)
   <key>provisioningProfiles</key><dict>
     <key>$id</key><string>$name App Store</string>
     <key>$id.widgets</key><string>$name Widgets App Store</string>
-$([ -z "$PUSH" ] || printf '    <key>%s.notifications</key><string>%s Notifications App Store</string>\n' "$id" "$name")  </dict>
+$([ -z "$NOTIFICATIONS" ] || printf '    <key>%s.notifications</key><string>%s Notifications App Store</string>\n' "$id" "$name")  </dict>
   <key>manageAppVersionAndBuildNumber</key><false/>
 </dict></plist>
 PLIST

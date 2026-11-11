@@ -12,7 +12,7 @@
 //
 // A tab says `start` with its user; then each `fetch` is answered with its status and headers, its body's parts as
 // they come, and `done` (or `error`); `cancel` stops one. What changes who can do what is a `fetch` too, of the path a
-// node's route has, which the keyring answers itself, signing it (onet's `settings`). `settle`, `renew` and `push`
+// node's route has, which the keyring answers itself, signing it (onet's `settings`). `settle`, `renew` and `notifications`
 // are the rest a device does as itself; `ask` and `waited`, what it does before it's one, asking to be let in; and
 // `auth`, signing in. `kept` gives what a call that only reads answered last (onet's
 // `answers`), and `forget` forgets what this device kept, as it signs out. `nodes` gives the order to ask nodes in, which is remembered; `reconnect`
@@ -422,11 +422,11 @@ export function server(version, givenHost) {
             if (s) await s.keyring.renewAppSchedules(m.app);
             return post({ id });
           }
-          // This browser's push subscription, registered with the network's push Worker.
-          case "push": {
+          // This browser's push subscription, registered with the network's notifications Worker.
+          case "notifications": {
             const s = await session?.ready;
             if (!s) throw new Error("This browser isn’t one of your devices yet.");
-            await s.keyring.registerPush(JSON.stringify(m.subscription));
+            await s.keyring.registerNotifications(JSON.stringify(m.subscription));
             return post({ id });
           }
           case "reconnect": {

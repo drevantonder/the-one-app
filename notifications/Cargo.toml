@@ -1,0 +1,23 @@
+# Notifications, as every build has them, WebAssembly too: a note, sealed to the one device it's for and opened there,
+# a device's address with its platform's push service, what it registers with the notifications Worker (worker/), and the
+# tools' specs. What serves the tools is the runtime's (runtime/).
+[package]
+name = "notifications"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+api = { path = "../api" }
+key = { path = "../key" }
+custom-build = { path = "../custom-build" }
+anyhow = "1"
+data-encoding = "2"
+ed25519-dalek = "3"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

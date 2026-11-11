@@ -256,9 +256,10 @@ export const net = {
     if (net.has) await ask({ op: "renew", app });
   },
 
-  /// This browser's push subscription (`{ endpoint, keys }`), registered with the network's push Worker as this device.
-  async push(subscription) {
-    await ask({ op: "push", subscription });
+  /// This browser's push subscription (`{ endpoint, keys }`), registered with the network's notifications Worker as this
+  /// device.
+  async registerNotifications(subscription) {
+    await ask({ op: "notifications", subscription });
   },
 
   still() {

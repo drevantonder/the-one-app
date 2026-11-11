@@ -1,7 +1,7 @@
 // The package's helper: what Windows starts beside the app for what only the Windows App SDK does, with no window and
 // no client or key of its own. The Widgets board starts it as the package's COM server for its widgets (Widgets.cs); a
-// toast's click or button, or a push, starts it to answer them (Notes.cs); the app starts it to register its push
-// channel (--register-push). Whatever it needs of the user's devices it asks the app's own program, which answers
+// toast's click or button, or a notification, starts it to answer them (Notes.cs); the app starts it to register its push
+// channel (--register-notifications). Whatever it needs of the user's devices it asks the app's own program, which answers
 // with no window (client/native/src/headless.rs), as JSON.
 using System;
 using System.Collections.Generic;
@@ -26,7 +26,7 @@ public static class Program
             return 0;
         }
         Notes.Start();
-        if (args.Contains("--register-push"))
+        if (args.Contains("--register-notifications"))
         {
             Notes.Register().Wait();
             return 0;

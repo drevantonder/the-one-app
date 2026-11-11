@@ -8,7 +8,7 @@ pub fn info(key: &str) -> Option<String> {
     value.downcast::<CFString>().map(|s| s.to_string()).filter(|s| !s.is_empty())
 }
 
-/// Whether the bundle's Info.plist says `key` is true (`Push`, in a build with pushes).
+/// Whether the bundle's Info.plist says `key` is true (`Notifications`, in a build with notifications).
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn info_true(key: &str) -> bool {
     use core_foundation::string::CFString;

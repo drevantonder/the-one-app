@@ -1,27 +1,30 @@
-//! Push: how an app, an agent or the network reaches someone who isn't looking, on every device of theirs that can get
-//! notifications. Every push is a note sealed to the one device it's for, which the network's push Worker
-//! (`cloudflare/push/`) carries to Apple's, Google's, Microsoft's or a browser's push service; only that device opens it.
+//! Notifications: how an app, an agent or the network reaches someone who isn't looking, on every device of theirs that
+//! can get them. Every notification is a note sealed to the one device it's for, which the network's notifications Worker
+//! (`notifications/worker/`) carries to Apple's, Google's, Microsoft's or a browser's push service; only that device
+//! opens it.
 //!
 //! A note is JSON (`Note`): what to show, the app screen a tap opens, and maybe an action its device checks itself,
 //! signed by the device that sent it (`keys::signed_request`, domain `one/note`, so its receiver can tell which of the
 //! network's devices it's from; a note the network's own Workers send is unsigned), then sealed to the receiving device's
 //! seal key (`keys::seal_to`), the key the network's signed entries list for it, never one a node or a Worker says.
 //!
-//! Each device that gets pushes registers its address with the Worker itself (`register_request`). A node pushes for any
-//! caller (`node::push`): it seals a note to each of the caller's devices and hands them to the Worker.
+//! Each device that gets notifications registers its address with the Worker itself (`register_request`). An app runtime
+//! sends for any caller (`notifications_runtime`): it seals a note to each of the caller's devices and hands them to the
+//! Worker.
 
 pub mod tools;
 
 use anyhow::{Result, anyhow, ensure};
 use data_encoding::{BASE64URL_NOPAD as B64U, HEXLOWER};
-use ed25519_dalek::SigningKey;
+use key::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-/// The most a sealed note may be: it fits in a push, 4 KB at Apple and in Web Push, with room to spare.
+/// The most a sealed note may be: it fits in what a push service carries, 4 KB at Apple and in Web Push, with room to
+/// spare.
 pub const NOTE_BYTES: usize = 2_600;
 
-/// What a push shows, and what tapping it opens.
+/// What a notification shows, and what tapping it opens.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Note {
@@ -70,7 +73,7 @@ impl Note {
     }
 }
 
-/// A note, signed by `by` at `at` (ms), sealed to a device's seal key `to`: the bytes a push carries. A body too long to
+/// A note, signed by `by` at `at` (ms), sealed to a device's seal key `to`: the bytes a push service carries. A body too long to
 /// fit is cut short.
 pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result<Vec<u8>> {
     let mut note = note.clone();
@@ -80,7 +83,7 @@ pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result
         if sealed.len() <= NOTE_BYTES {
             return Ok(sealed);
         }
-        ensure!(!note.body.is_empty(), "that note is too long to push: at most {NOTE_BYTES} bytes sealed");
+        ensure!(!note.body.is_empty(), "that note is too long to send: at most {NOTE_BYTES} bytes sealed");
         let keep = note.body.len().saturating_sub(sealed.len() - NOTE_BYTES + 3);
         let cut = (0..=keep).rev().find(|i| note.body.is_char_boundary(*i)).unwrap_or(0);
         note.body = format!("{}…", note.body[..cut].trim_end());
@@ -106,7 +109,7 @@ pub fn open_note(secret: &[u8; 32], sealed: &[u8]) -> Result<(Note, Option<Strin
     Ok((serde_json::from_value(v)?, by))
 }
 
-/// A device's address with a push service, as it registers it with the push Worker.
+/// A device's address with its platform's push service, as it registers it with the notifications Worker.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Address {
@@ -125,11 +128,11 @@ pub struct Address {
     pub keys: Option<Value>,
 }
 
-/// What a device sends the push Worker to register `address` (`POST <address>/push/register`): signed with its key,
-/// naming its seal key `seal`, which only the network's own Workers seal to, and its user `user`, as its own entries
-/// list it, whom sign-in pushes about their devices joining.
+/// What a device sends the notifications Worker to register `address` (`POST <address>/notifications/register`): signed
+/// with its key, naming its seal key `seal`, which only the network's own Workers seal to, and its user `user`, as its own
+/// entries list it, whom sign-in notifies about their devices joining.
 pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, user: Option<&str>, at: u64) -> Result<Value> {
-    Ok(key::signed_request(key, custom_build::protocol::PUSH, register_fields(seal, address, user)?, at))
+    Ok(key::signed_request(key, custom_build::protocol::NOTIFICATIONS, register_fields(seal, address, user)?, at))
 }
 
 /// What `register_request` signs.
@@ -139,16 +142,16 @@ pub fn register_fields(seal: &[u8; 32], address: &Address, user: Option<&str>) -
     if let Some(user) = user {
         fields["user"] = json!(user);
     }
-    fields["route"] = json!("POST /push/register");
+    fields["route"] = json!("POST /notifications/register");
     Ok(fields)
 }
 
-/// What a device sends the push Worker to stop getting pushes (`POST <address>/push/unregister`).
+/// What a device sends the notifications Worker to stop getting notifications (`POST <address>/notifications/unregister`).
 pub fn unregister_request(key: &SigningKey, at: u64) -> Value {
-    key::signed_request(key, custom_build::protocol::PUSH, json!({ "route": "POST /push/unregister" }), at)
+    key::signed_request(key, custom_build::protocol::NOTIFICATIONS, json!({ "route": "POST /notifications/unregister" }), at)
 }
 
-#[cfg(feature = "node")]
+/// What `notifications_send` and an app's `ctx.notify` take.
 #[derive(Default, Deserialize)]
 #[serde(default)]
 pub struct Send {
@@ -159,10 +162,9 @@ pub struct Send {
     pub params: Option<Map<String, Value>>,
 }
 
-#[cfg(feature = "node")]
 impl Send {
     /// The note it makes, from app `from` if an app sent it: what a tap opens is that app's screen, or else the one
-    /// the push names.
+    /// it names.
     pub fn note(&self, from: &str) -> Result<Note> {
         ensure!(!self.title.trim().is_empty(), "give it a title");
         let first = |a: &str, b: &str| if a.is_empty() { b.to_string() } else { a.to_string() };

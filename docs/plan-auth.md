@@ -21,7 +21,7 @@ Every network works the same way. A network's settings say which providers it ha
 | Lost every device | Sign in, then a holder of the recovery key approves and restores them; or the recovery key itself |
 | A computer with no browser, or no working sign-in | QR, or a one-time link or code, from a device already in. Single use, short-lived |
 
-A sign-in never lets anyone in by itself, for any network or user, so the "no tap" path goes. Being at the domain only decides who may ask. It's checked in the provider's signed token, not by the `hd` hint. Requests go out as ordinary pushes (a sleeping phone must still alert), and stay until answered or expired. Every join shows "joined · Remove" on the user's other devices. The approving device checks the sign-in's proof itself (`scope/src/sign_in_proof.rs`), so a hacked auth Worker can make requests and never approve one. The link-phishing guard stays (ARCHITECTURE.md's Trust): the short code doesn't cover it.
+A sign-in never lets anyone in by itself, for any network or user, so the "no tap" path goes. Being at the domain only decides who may ask. It's checked in the provider's signed token, not by the `hd` hint. Requests go out as ordinary notifications (a sleeping phone must still alert), and stay until answered or expired. Every join shows "joined · Remove" on the user's other devices. The approving device checks the sign-in's proof itself (`scope/src/sign_in_proof.rs`), so a hacked auth Worker can make requests and never approve one. The link-phishing guard stays (ARCHITECTURE.md's Trust): the short code doesn't cover it.
 
 An invited user's device is listed with no tap, by the provider's signed token as proof against the invite in the log. Its device holds no key to write that step, so any device of the network that's online writes it for it, by the provider's keys the invite saved (`ARCHITECTURE.md`). Every device checks that proof. Providers change their signing keys, so the key that was valid is saved with the proof, or old joins couldn't be checked. Shared data reaches them once a device holding those keys is online, with no tap.
 
@@ -31,7 +31,7 @@ The recovery key's holders, named by an admin, can read everything and restore a
 
 **Losing access.** Another of your devices, then a holder of the recovery key, then the recovery key on paper. No devices, no holder and no recovery key means access is gone.
 
-**What stays where it is.** Cloudflare; the relay, bucket and URL signer, push, update files, browser client and remote MCP.
+**What stays where it is.** Cloudflare; the relay, bucket and URL signer, notifications, update files, browser client and remote MCP.
 
 **Not doing, unless Andre asks.** KMS or AWS, a keeper, moving off Cloudflare, one key for the whole network, app attestation. Passkey PRF that skips the approval is a later shortcut.
 
@@ -42,7 +42,7 @@ The recovery key's holders, named by an admin, can read everything and restore a
 1. **Protect data.** A format version on everything sealed, with what's already written still opening. A test holding data sealed by an earlier build, which every later build must open. Permanent IDs instead of changeable names in keys and seals.
 2. **This page, and `ARCHITECTURE.md` and `GLOSSARY.md` to match.**
 3. **Identities.** Linked logins, passkeys that belong to an account, domain from the signed token.
-4. **One ask-and-approve flow.** Push, short code, invites and the domain rule in the log, QR and links as the fallback.
+4. **One ask-and-approve flow.** Notifications, short code, invites and the domain rule in the log, QR and links as the fallback.
 5. **User keys and sealing to the recovery key's holders.**
 6. **Recovery.** Holders restoring someone, and the recovery key admitting a device. Built.
 7. **Delete the old rules:** `passkey_only`, placeholder emails, today's request workflow and code pages, and any start and freshness rule the short code makes needless.

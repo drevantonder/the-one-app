@@ -874,8 +874,8 @@ fn a_sign_in_finished_from_a_link_says_so() {
     assert!(first.post("/api/auth/oauth2/create-client", json!({ "redirect_uris": ["http://127.0.0.1:1/cb"] })).0 >= 400);
 }
 
-/// A browser's push subscription, as its push service hands it to the push Worker and decrypts what's pushed to it
-/// (RFC 8291): good for one push, as its key pair is.
+/// A browser's push subscription, as its push service hands it to the notifications Worker and decrypts what it carries
+/// to it (RFC 8291): good for one notification, as its key pair is.
 pub(crate) struct Subscription {
     key: ring::agreement::EphemeralPrivateKey,
     pub(crate) public: Vec<u8>,
@@ -888,8 +888,8 @@ impl Subscription {
         Subscription { public: key.compute_public_key().unwrap().as_ref().to_vec(), key, auth: rand::random() }
     }
 
-    pub(crate) fn address(&self, endpoint: &str) -> one::push::Address {
-        one::push::Address { via: "webpush".into(), address: endpoint.into(), keys: Some(json!({ "p256dh": B64U.encode(&self.public), "auth": B64U.encode(&self.auth) })), ..Default::default() }
+    pub(crate) fn address(&self, endpoint: &str) -> notifications::Address {
+        notifications::Address { via: "webpush".into(), address: endpoint.into(), keys: Some(json!({ "p256dh": B64U.encode(&self.public), "auth": B64U.encode(&self.auth) })), ..Default::default() }
     }
 
     /// What the push service got (`body`, aes128gcm), decrypted: the push's text.
@@ -909,13 +909,13 @@ impl Subscription {
     }
 }
 
-/// What sign-in pushes about a device asking to join is what the apps read (src/push.rs's `Note`): to its user's other
+/// What sign-in sends about a device asking to join is what the apps read (`notifications::Note`): to its user's other
 /// devices, never the one asking, "<device> wants in" with the action `{ join: <code> }` (`keys::join_code`, which the
 /// apps' Approve and Not Me send their node) as it asks, and "<device> joined" once
 /// one let it in, each opening Settings › Devices. Their devices are those that asked to join as them here, and those that
-/// registered for pushes naming them, as a device that joined before sign-in kept whose devices asked does.
+/// registered for notifications naming them, as a device that joined before sign-in kept whose devices asked does.
 #[test]
-fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
+fn a_device_asking_to_join_is_notified_to_its_users_other_devices() {
     use data_encoding::{BASE64, HEXLOWER};
     let (admin, admin_hex) = endpoint();
     let (phone, phone_hex) = endpoint();
@@ -935,24 +935,24 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         agent.delete(format!("{}/api/auth/devices/requests/{key}?approved", k.address)).header("x-one-request", asked).call().unwrap().status().as_u16()
     };
-    // Their phone joined as theirs, and gets pushes.
+    // Their phone joined as theirs, and gets notifications.
     let phone_at = key::Endpoint::of(&phone);
     ask(&mut andre, &phone_at);
     assert_eq!(approved(&phone_hex), 200);
     let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
     let register = |sub: &Subscription| {
-        let body = one::push::register_request(&phone, &phone_at.seal, &sub.address(endpoint), None, now()).unwrap();
-        assert_eq!(post(&format!("{}/push/register", k.address), &[], body).0, 200);
+        let body = notifications::register_request(&phone, &phone_at.seal, &sub.address(endpoint), None, now()).unwrap();
+        assert_eq!(post(&format!("{}/notifications/register", k.address), &[], body).0, 200);
     };
     // What was pushed to each device, by its endpoint, with its subscription and key, from what was pushed since last asked.
-    let pushed_to = |devices: Vec<(&str, Subscription, &ed25519_dalek::SigningKey)>| -> Vec<Vec<one::push::Note>> {
+    let pushed_to = |devices: Vec<(&str, Subscription, &ed25519_dalek::SigningKey)>| -> Vec<Vec<notifications::Note>> {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         let got: Value = agent.get(format!("{}/pushes", k.sites)).call().unwrap().body_mut().read_json().unwrap();
         devices.into_iter().map(|(endpoint, sub, key)| {
             let mut sub = Some(sub);
             got.as_array().unwrap().iter().filter(|p| p["url"] == endpoint).map(|p| {
                 let text = sub.take().expect("one push to the device").open(&BASE64.decode(p["body"].as_str().unwrap().as_bytes()).unwrap());
-                let (note, by) = one::push::open_note(&key::seal_secret(key), &B64U.decode(&text).unwrap()).unwrap();
+                let (note, by) = notifications::open_note(&key::seal_secret(key), &B64U.decode(&text).unwrap()).unwrap();
                 assert_eq!(by, None, "from the network's Workers");
                 note
             }).collect()
@@ -965,14 +965,14 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
     let old_endpoint = "https://fcm.googleapis.com/fcm/send/the-mac";
     let old_sub = Subscription::new();
     let old_at = key::Endpoint::of(&old);
-    let body = one::push::register_request(&old, &old_at.seal, &old_sub.address(old_endpoint), Some(&user), now()).unwrap();
-    assert_eq!(post(&format!("{}/push/register", k.address), &[], body).0, 200);
+    let body = notifications::register_request(&old, &old_at.seal, &old_sub.address(old_endpoint), Some(&user), now()).unwrap();
+    assert_eq!(post(&format!("{}/notifications/register", k.address), &[], body).0, 200);
     // A new device asks.
     let mac = key::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     ask(&mut andre, &mac);
-    let [notes, to_old]: [Vec<one::push::Note>; 2] = pushed_to(vec![(endpoint, sub, &phone), (old_endpoint, old_sub, &old)]).try_into().unwrap();
+    let [notes, to_old]: [Vec<notifications::Note>; 2] = pushed_to(vec![(endpoint, sub, &phone), (old_endpoint, old_sub, &old)]).try_into().unwrap();
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert_eq!(to_old.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), ["MacBook Pro wants in"], "the Mac that only registered is pushed too");
+    assert_eq!(to_old.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), ["MacBook Pro wants in"], "the Mac that only registered is notified too");
     assert_eq!((notes[0].title.as_str(), notes[0].app.as_str(), notes[0].screen.as_str()), ("MacBook Pro wants in", "settings", "devices"));
     assert_eq!(notes[0].action, Some(json!({ "join": key::join_code(&mac) })));
     // Approved: it joined.

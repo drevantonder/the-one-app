@@ -53,7 +53,7 @@ fn the_workers_and_nodes_seal_keys_for_each_other() {
     let formats = Formats::start();
     let js = |body: Value| formats.js(body);
 
-    // Sealed to a key pair (the recovery key's twin): Rust opens what JavaScript sealed to it (push's notes).
+    // Sealed to a key pair (the recovery key's twin): Rust opens what JavaScript sealed to it (notifications' notes).
     let scope: [u8; 32] = rand::random();
     let (secret, public) = ::key::twin(&rand::random());
     let sealed = js(json!({ "op": "sealTo", "to": B64U.encode(&public), "plain": B64U.encode(&scope) }));
@@ -291,7 +291,7 @@ fn the_screens_name_agents_as_the_vault_does() {
     assert_eq!(formats.js(json!({ "op": "agents" }))["name"], json!(::scope::scopes::AGENTS));
 }
 
-/// Push (src/push.rs, cloudflare/push/): a device registers its address with the push Worker as Rust signs it, a node's
+/// Notifications (notifications/): a device registers its address with the notifications Worker as Rust signs it, a node's
 /// send of a note sealed to that device goes out from the Worker as the browser's push service takes it (RFC 8291,
 /// VAPID with the key the Workers made, the note as base64url text), and what arrives opens, only with the device's key, as the note the node
 /// sealed. Only the network's devices register or send, each request once.
@@ -299,7 +299,7 @@ fn the_screens_name_agents_as_the_vault_does() {
 fn a_note_reaches_only_the_device_it_was_sealed_to() {
     use data_encoding::{BASE64, BASE64URL_NOPAD as B64U, HEXLOWER};
     use ed25519_dalek::SigningKey;
-    use one::push::{self, Note};
+    use notifications::Note;
 
     let node = SigningKey::from_bytes(&rand::random());
     let phone = SigningKey::from_bytes(&rand::random());
@@ -312,19 +312,19 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
     let address = subscription.address(endpoint);
     let phone_seal = ::key::Endpoint::of(&phone).seal;
-    let register = push::register_request(&phone, &phone_seal, &address, None, now()).unwrap();
-    assert_eq!(post("/push/register", register.clone()), (200, json!({ "registered": true })), "the network's device registers");
-    assert_eq!(post("/push/register", register).0, 403, "a request is taken once");
+    let register = notifications::register_request(&phone, &phone_seal, &address, None, now()).unwrap();
+    assert_eq!(post("/notifications/register", register.clone()), (200, json!({ "registered": true })), "the network's device registers");
+    assert_eq!(post("/notifications/register", register).0, 403, "a request is taken once");
     let stranger = SigningKey::from_bytes(&rand::random());
-    assert_eq!(post("/push/register", push::register_request(&stranger, &phone_seal, &address, None, now()).unwrap()).0, 403, "only the network's devices register");
+    assert_eq!(post("/notifications/register", notifications::register_request(&stranger, &phone_seal, &address, None, now()).unwrap()).0, 403, "only the network's devices register");
 
     // The node seals a note to the phone and sends it.
     let note = Note { id: "0123456789abcdef".into(), title: "Tally".into(), body: "Sam counted".into(), app: "tally".into(), screen: "main".into(), ..Default::default() };
-    let sealed = push::seal_note(&node, &phone_seal, &note, now()).unwrap();
+    let sealed = notifications::seal_note(&node, &phone_seal, &note, now()).unwrap();
     let unregistered = HEXLOWER.encode(node.verifying_key().as_bytes());
     let to = HEXLOWER.encode(phone.verifying_key().as_bytes());
-    let fields = json!({ "route": "POST /push/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }, { "to": unregistered, "note": B64U.encode(&sealed) }] });
-    let (status, said) = post("/push/send", ::key::signed_request(&node, ::custom_build::protocol::PUSH, fields, now()));
+    let fields = json!({ "route": "POST /notifications/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }, { "to": unregistered, "note": B64U.encode(&sealed) }] });
+    let (status, said) = post("/notifications/send", ::key::signed_request(&node, ::custom_build::protocol::NOTIFICATIONS, fields, now()));
     assert_eq!((status, &said["to"][&to], &said["to"][&unregistered]), (200, &json!({ "sent": true }), &json!({ "none": true })), "it went to the device that registered: {said}");
 
     // What the browser's push service got: VAPID with the network's key, and the note, encrypted to the subscription.
@@ -333,29 +333,29 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     assert_eq!(pushes.as_array().unwrap().len(), 1);
     let got = &pushes[0];
     assert_eq!((got["url"].as_str(), got["headers"]["content-encoding"].as_str()), (Some(endpoint), Some("aes128gcm")));
-    let vapid: serde_json::Value = agent.get(format!("{}/push/key", k.address)).call().unwrap().body_mut().read_json().unwrap();
+    let vapid: serde_json::Value = agent.get(format!("{}/notifications/key", k.address)).call().unwrap().body_mut().read_json().unwrap();
     assert!(got["headers"]["authorization"].as_str().unwrap().ends_with(&format!(", k={}", vapid["vapid"].as_str().unwrap())), "signed with the network's VAPID key");
     let plain = subscription.open(&BASE64.decode(got["body"].as_str().unwrap().as_bytes()).unwrap());
     let plain = B64U.decode(&plain).expect("Web Push carries the note as base64url text");
     assert_eq!(plain, sealed, "the Worker carried the sealed note as it was");
-    let (opened, by) = push::open_note(&::key::seal_secret(&phone), &plain).unwrap();
+    let (opened, by) = notifications::open_note(&::key::seal_secret(&phone), &plain).unwrap();
     assert_eq!((opened, by), (note, Some(HEXLOWER.encode(node.verifying_key().as_bytes()))), "the phone opens the note, from the node");
-    assert!(push::open_note(&::key::seal_secret(&node), &plain).is_err(), "no other device opens it");
+    assert!(notifications::open_note(&::key::seal_secret(&node), &plain).is_err(), "no other device opens it");
 
     // A device that stops registering gets nothing more.
-    assert_eq!(post("/push/unregister", push::unregister_request(&phone, now())).0, 200);
-    let fields = json!({ "route": "POST /push/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }] });
-    assert_eq!(post("/push/send", ::key::signed_request(&node, ::custom_build::protocol::PUSH, fields, now())).1["to"][&to], json!({ "none": true }));
+    assert_eq!(post("/notifications/unregister", notifications::unregister_request(&phone, now())).0, 200);
+    let fields = json!({ "route": "POST /notifications/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }] });
+    assert_eq!(post("/notifications/send", ::key::signed_request(&node, ::custom_build::protocol::NOTIFICATIONS, fields, now())).1["to"][&to], json!({ "none": true }));
 }
 
-/// The browser's service worker opens a note as `push::open_note` does (`openNote` in `cloudflare/shared/crypto.js`): one a
+/// The browser's service worker opens a note as `notifications::open_note` does (`openNote` in `cloudflare/shared/crypto.js`): one a
 /// device signed shows with who signed it, one the network's own Workers send is unsigned, and one whose signature is
 /// wrong, or isn't signed by who it says, is refused.
 #[test]
 fn the_service_worker_opens_notes_as_rust_does() {
     use data_encoding::HEXLOWER;
     use ed25519_dalek::SigningKey;
-    use one::push::{self, Note};
+    use notifications::Note;
 
     let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
     let formats = Formats::start();
@@ -368,9 +368,9 @@ fn the_service_worker_opens_notes_as_rust_does() {
     let by = HEXLOWER.encode(node.verifying_key().as_bytes());
     let note = Note { id: "0123456789abcdef".into(), title: "Café \"Ü\"".into(), body: "é…".into(), app: "tally".into(), screen: "main".into(), params: Some(serde_json::from_value(json!({ "b": 1, "a": ["x"] })).unwrap()), ..Default::default() };
 
-    let sealed = push::seal_note(&node, &public, &note, now()).unwrap();
+    let sealed = notifications::seal_note(&node, &public, &note, now()).unwrap();
     let got = formats.js(json!({ "op": "openNote", "secret": B64U.encode(&secret), "public": B64U.encode(&public), "sealed": B64U.encode(&sealed) }))["note"].clone();
-    let (opened, from) = push::open_note(&secret, &sealed).unwrap();
+    let (opened, from) = notifications::open_note(&secret, &sealed).unwrap();
     assert_eq!((got["title"].as_str(), got["by"].as_str()), (Some(opened.title.as_str()), from.as_deref()), "a note a device signed: {got}");
     assert_eq!(got["by"], json!(by));
 
@@ -383,7 +383,7 @@ fn the_service_worker_opens_notes_as_rust_does() {
     let mut other = signed;
     other["by"] = json!(HEXLOWER.encode(SigningKey::from_bytes(&rand::random()).verifying_key().as_bytes()));
     assert!(open(&secret, &public, &serde_json::to_vec(&other).unwrap())["error"].is_string(), "a note signed by another than it says");
-    assert!(push::open_note(&secret, &::key::seal_to(&public, &serde_json::to_vec(&forged).unwrap()).unwrap()).is_err(), "Rust refuses the same");
+    assert!(notifications::open_note(&secret, &::key::seal_to(&public, &serde_json::to_vec(&forged).unwrap()).unwrap()).is_err(), "Rust refuses the same");
 }
 
 /// Auth's pages drawn by hand (`onboarding/render.js`) call the network what this build does (`config::YOURS`, from

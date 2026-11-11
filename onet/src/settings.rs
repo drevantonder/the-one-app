@@ -1,6 +1,6 @@
 //! A client device as the device that signs Settings' changes (`::scope::settings`): its keyring, asked as a node's routes
 //! of the same paths (`Keyring::request`), answers them itself, reading who's who as it read it and writing through its
-//! nodes; and what only a client does, leaving as it signs out and registering for pushes.
+//! nodes; and what only a client does, leaving as it signs out and registering for notifications.
 
 use ::scope::content::Content;
 use ::scope::scopes::{Scope, ScopeDb};
@@ -233,15 +233,15 @@ impl<O: Opens> Keyring<O> {
         ::scope::settings::renew_app_schedules(&self.mine(client, on), app).await;
     }
 
-    /// Registers where a push service reaches this device (`one::push::Address`) with the network's push Worker, signed
-    /// with its key and naming its seal key, which each note pushed to it is sealed to, and its user, so auth pushes
-    /// it when another device of theirs asks to join. Once it's out of the network, the Worker forgets it.
-    pub async fn register_push(&self, on: &(impl Address + Signs), address: &one::push::Address) -> Result<(), Error> {
-        let fields = one::push::register_fields(&self.opens().public(), address, self.user().as_deref()).map_err(unsent)?;
-        let body = ::key::signed_request_by(on, ::custom_build::protocol::PUSH, fields, now()).await.map_err(unsent)?;
-        let (status, out) = on.ask("POST", &format!("{}/push/register", on.address()), None, Some(body)).await?;
+    /// Registers where a push service reaches this device (`notifications::Address`) with the network's notifications
+    /// Worker, signed with its key and naming its seal key, which each note sent to it is sealed to, and its user, so auth
+    /// notifies it when another device of theirs asks to join. Once it's out of the network, the Worker forgets it.
+    pub async fn register_notifications(&self, on: &(impl Address + Signs), address: &notifications::Address) -> Result<(), Error> {
+        let fields = notifications::register_fields(&self.opens().public(), address, self.user().as_deref()).map_err(unsent)?;
+        let body = ::key::signed_request_by(on, ::custom_build::protocol::NOTIFICATIONS, fields, now()).await.map_err(unsent)?;
+        let (status, out) = on.ask("POST", &format!("{}/notifications/register", on.address()), None, Some(body)).await?;
         if status != 200 {
-            return Err(unsent(error(&out).unwrap_or_else(|| format!("{}'s push service didn't take this device ({status}).", ::custom_build::config::YOURS))));
+            return Err(unsent(error(&out).unwrap_or_else(|| format!("{}'s notifications didn't take this device ({status}).", ::custom_build::config::YOURS))));
         }
         Ok(())
     }

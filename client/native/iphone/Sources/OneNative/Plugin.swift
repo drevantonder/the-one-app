@@ -51,7 +51,7 @@ struct ValueArgs: Decodable {
 }
 
 /// What only Swift does on an iPhone, for the app's Rust, which asks it by name: signing in in the system's sheet,
-/// notifications and pushes, the icon's count, haptics, the document camera, files shared or shown, the widgets drawn
+/// notifications, the icon's count, haptics, the document camera, files shared or shown, the widgets drawn
 /// again, light or dark; and on its own, touch and hold (`Lift`) and what a tapped notification does.
 class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPresentationContextProviding {
   private let lift = Lift()
@@ -132,9 +132,9 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
     }
   }
 
-  /// This iPhone's APNs token (hex), for the push Worker; asking the user to notify the first time. A token comes
-  /// whatever they answer, for pushes that only wake the app.
-  @objc public func push(_ invoke: Invoke) throws {
+  /// This iPhone's APNs token (hex), for the notifications Worker; asking the user to notify the first time. A token comes
+  /// whatever they answer, for notifications that only wake the app.
+  @objc public func notificationToken(_ invoke: Invoke) throws {
     DispatchQueue.main.async {
       Tokens.waiting.append { token, failure in
         if let token { invoke.resolve(["token": token]) } else { invoke.reject(failure ?? "No token.") }

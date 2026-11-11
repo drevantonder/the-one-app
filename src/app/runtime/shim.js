@@ -277,9 +277,9 @@ function context(ask, body, appends, later, spans) {
     ai: {
       run: async (input, { retryKey } = {}) => (await post("ai.run", { input, retry_key: retryKey ?? null })).ok,
     },
-    /// Pushes a notification to each of the caller's devices that gets them, { title, body?, screen?, params? };
+    /// Sends a notification to each of the caller's devices that gets them, { title, body?, screen?, params? };
     /// tapping it opens this app's screen. → { sent, devices, why? }: how many it went to, and why none, if none.
-    notify: async (push) => (await post("notify", push)).ok,
+    notify: async (note) => (await post("notify", note)).ok,
     /// Every app in the network, as `GET /api/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),
     /// An app's code as deployed (the release's, for a built-in app no one has added): `{ files: [{ path, size }] }`, or

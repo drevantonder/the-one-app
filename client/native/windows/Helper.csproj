@@ -1,6 +1,6 @@
 <!-- The package: the app's own program (the Tauri one, client/native, cross-built by build.sh) as its app, and this
      helper (Helper.cs) beside it, for what only the Windows App SDK does: the Widgets board's provider, toasts and
-     pushes. Packaged as MSIX (signed with the certificate build.ps1 names), since the board takes widgets, and Windows
+     notifications. Packaged as MSIX (signed with the certificate build.ps1 names), since the board takes widgets, and Windows
      shows a badge, only from a packaged app; on the Windows App SDK's runtime package rather than a copy of it, whose
      registration is what lets the board reach the widgets (Customize, Done). .NET comes with it. build.sh writes
      CustomBuild.g.cs, Package.appxmanifest's details and Assets/ from config.toml before building. -->
@@ -31,7 +31,7 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Toasts and pushes (AppNotificationManager, PushNotificationManager) and how it was started (AppInstance). -->
+    <!-- Toasts and notifications (AppNotificationManager, PushNotificationManager) and how it was started (AppInstance). -->
     <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" Version="2.6.4" />
     <!-- The Widgets board's widget provider: IWidgetProvider, WidgetManager. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.Widgets" Version="2.6.4" />

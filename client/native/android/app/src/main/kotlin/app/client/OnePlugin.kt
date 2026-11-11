@@ -116,13 +116,19 @@ class OnePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /** Whether this phone shows notifications: "granted", "denied" or "default" (the user hasn't been asked); none in a
-     *  build with no Firebase project, which gets no pushes. Asks if `ask`; with `once`, only if it never has. */
+     *  build with no Firebase project, which gets no notifications. Asks if `ask`; with `once`, only if it never has. */
     @Command
     fun notify(invoke: Invoke) {
         val args = invoke.getArgs()
         val answer = { state: String? -> invoke.resolve(JSObject().put("state", state ?: JSONObject.NULL)) }
-        if (!Push.available(activity)) return answer(null)
-        val prefs = activity.getSharedPreferences("push", Context.MODE_PRIVATE)
+        if (!Notifications.available(activity)) return answer(null)
+        val prefs = activity.getSharedPreferences("notifications", Context.MODE_PRIVATE)
+        // Kept as "push" by builds before it was named notifications: carried over once, so the user isn't asked again.
+        val old = activity.getSharedPreferences("push", Context.MODE_PRIVATE)
+        if (old.contains("asked")) {
+            prefs.edit().putBoolean("asked", old.getBoolean("asked", false)).apply()
+            old.edit().clear().apply()
+        }
         val granted = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         if (granted) return answer("granted")
         val asked = prefs.getBoolean("asked", false)
@@ -135,11 +141,11 @@ class OnePlugin(private val activity: Activity) : Plugin(activity) {
         launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    /** This phone's FCM token, for the push Worker (none without the custom build's Firebase). */
+    /** This phone's FCM token, for the notifications Worker (none without the custom build's Firebase). */
     @Command
-    fun push(invoke: Invoke) {
+    fun notificationToken(invoke: Invoke) {
         Thread {
-            val token = Push.token(activity)
+            val token = Notifications.token(activity)
             invoke.resolve(JSObject().put("token", token ?: JSONObject.NULL))
         }.start()
     }

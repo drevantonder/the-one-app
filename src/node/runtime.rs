@@ -18,7 +18,7 @@ pub fn features() -> Vec<Runs> {
         groups_runtime::runs(),
         devices_runtime::runs(),
         widgets_runtime::runs(),
-        crate::push::tools::runs(),
+        notifications_runtime::runs(),
         device_logs_runtime::runs(),
         crate::insights::tools::runs(),
         crate::ai_gateway::tools::runs(),

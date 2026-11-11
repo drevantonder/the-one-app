@@ -2,7 +2,7 @@
 // the network's address (`/relay`, `/ping`, `/generate_204`, which the gateway sends here). One Durable Object per
 // network (`Relay`) keeps every endpoint's WebSocket, with Hibernation, so it sleeps between packets; another (`List`)
 // keeps the list of the network's endpoints, so a Relay busy with packets, or stalled, holds up no one asking who's on
-// it (sign-in, URLs, pushes, telemetry): the Relay asks the List once per socket it takes in, and the List tells the
+// it (sign-in, URLs, notifications, telemetry): the Relay asks the List once per socket it takes in, and the List tells the
 // Relay which sockets to end when a key is taken out or changed. iroh-relay's own code
 // (relay_protos_bg.wasm, built from protos/ by build.sh) checks each endpoint's handshake and reads and writes its
 // frames. It's blind: what endpoints send each other is QUIC, sealed end to end, so it can only drop it.
@@ -20,7 +20,7 @@
 // certificate's `until` or that key is taken out or made something else. With the certificate, `.`, and a request that
 // key signed just now (`proveSocket`: within ten seconds, its nonce taken once), it's taken in at once, with no
 // challenge's round trip; without one, or with one that's stale or taken, it answers the challenge as any key does. The
-// URL signer, auth and the push Worker ask it, by `allowed(key)`: `{ admin, role }`, or null. The telemetry Worker asks
+// URL signer, auth and the notifications Worker ask it, by `allowed(key)`: `{ admin, role }`, or null. The telemetry Worker asks
 // it `stats()` every hour: its sockets, and what it refused and ended since it was last asked.
 //
 // A browser's WebSocket can't set a header, so its certificate is `?token=` in the relay's URL, where logs may keep
@@ -192,7 +192,7 @@ export default class extends WorkerEntrypoint {
     return answer(this.relay().stats());
   }
 
-  /// The keys of the network's admins' devices, for auth to push to.
+  /// The keys of the network's admins' devices, for auth to notify.
   admins(most) {
     return answer(this.list().adminKeys(most));
   }
