@@ -1116,17 +1116,22 @@ async fn a_stalled_devices_call_is_answered_by_the_next_and_a_raced_write_runs_o
 
     rt.signal(libc::SIGSTOP);
     let asked = std::time::Instant::now();
-    c.call(notes("post", json!({ "text": "while it stalled" }))).await.unwrap();
+    let raced = || CallRequest { id: Some("raced-write".into()), ..notes("post", json!({ "text": "while it stalled" })) };
+    c.call(raced()).await.unwrap();
     let took = asked.elapsed();
     assert!(took < Duration::from_secs(5), "the next device answered within the stalled one's limit: {took:?}");
-    let asked = std::time::Instant::now();
-    c.call(notes("read", json!({}))).await.unwrap();
-    // No device's limit is under 250 ms.
-    assert!(asked.elapsed() < Duration::from_millis(250), "the next call went to the next device first: {:?}", asked.elapsed());
+    // The next call goes to the next device first, while the stalled one stays silent: its trace says no other was
+    // asked and passed over, however long it takes on a busy machine.
+    let read = api::trace::Trace::new();
+    api::trace::within(Some(read.clone()), c.call(notes("read", json!({})))).await.unwrap();
+    let tried: Vec<Value> = read.since(0).into_iter().filter(|s| s["step"] == "device").collect();
+    assert!(matches!(tried.as_slice(), [s] if s["device"] == "stall-other" && s["result"] == "ran"), "{tried:?}");
 
-    // Woken, it finds the write already taken: it ran once.
+    // Woken, it finds the write already taken, as it was asked or sent again: it ran once.
     rt.signal(libc::SIGCONT);
     polled("the runtime to answer again", &rt.log, async || ask_runtime(&rt.at, &rt.token, json!({ "app": "notes", "tool": "post", "input": { "text": "after" } })).await.0 == 200).await;
+    let again = ask_runtime(&rt.at, &rt.token, json!({ "id": "raced-write", "app": "notes", "tool": "post", "input": { "text": "while it stalled" } })).await;
+    assert_ne!(again.0, 200, "{}", again.1);
     eventually("the runtime's write to reach the other", &b, async || b.call(notes("read", json!({}))).await.is_ok_and(|v| posts(&v).contains(&"after".to_string()))).await;
     let all = posts(&b.call(notes("read", json!({}))).await.unwrap());
     assert_eq!(all.iter().filter(|p| *p == "while it stalled").count(), 1, "{all:?}");

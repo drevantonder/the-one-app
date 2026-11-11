@@ -388,7 +388,9 @@ impl Host {
                 Some(done) = futures_util::StreamExt::next(&mut asked) => done,
                 () = hedge => {
                     // The last asked hasn't started it in its usual time: down until it answers, or its socket opens again.
-                    self.set_down(candidates[next - 1], true);
+                    let late = candidates[next - 1];
+                    self.set_down(late, true);
+                    trace::note(req.named(json!({ "step": "device", "device": self.name_of(&late), "result": "didn't start in its usual time" })), started[next - 1].elapsed());
                     continue;
                 }
             };
@@ -718,7 +720,8 @@ impl Host {
             _ => false,
         } && self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
-        let mut request = req.named(json!({ "service": req.service, "device": req.device, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent } }));
+        // Its id goes with it, so whichever device starts it first takes its lease, and it runs once.
+        let mut request = req.named(json!({ "id": req.id, "service": req.service, "device": req.device, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent } }));
         // Keys handed here (a client device's, or with a call passed on) go on to another app runtime sealed
         // to it for this app runtime's key, of the scopes the call reaches alone, which it runs on them alone: only those the
         // device runs, and only the call's app's.
