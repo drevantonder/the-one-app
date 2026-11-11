@@ -78,7 +78,7 @@ pub use holds::Holder;
 use exclusive::*;
 use ::api::home::*;
 
-/// The folder in a node's home its app runtime's workerd keeps its files in.
+/// The folder in an app runtime's home its app runtime's workerd keeps its files in.
 const RUNTIME_DIR: &str = "runtime";
 
 const CALL_LIMIT: Duration = Duration::from_secs(30);
@@ -159,7 +159,7 @@ impl Network {
         Some(::oned_update::release::Version { commit: commit.into(), target: target.into(), committed })
     }
 
-    /// Whether a device is on, the same answer every node gives: what the relay says.
+    /// Whether a device is on, the same answer every app runtime gives: what the relay says.
     fn online(&self, device: &Key) -> bool {
         self.connected.contains(device)
     }
@@ -189,7 +189,7 @@ impl Network {
     }
 }
 
-/// What a machine's node is: the device its user's CLI, MCP and Mac app sign with, and compute.
+/// What a computer's app runtime is: the device its user's CLI, MCP and Mac app sign with, and compute.
 pub const MACHINE: &[scopes::Kind] = &[scopes::Kind::Client, scopes::Kind::Compute];
 
 thread_local!(static HOLDING: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) });
@@ -198,7 +198,7 @@ pub struct Inner {
     dir: PathBuf,
     /// What this machine's own programs send to say they are: `api::LOCAL_TOKEN`, a file only its user reads.
     local_token: String,
-    /// This node's own key, its endpoint's: what it signs and is handed keys under as itself.
+    /// This app runtime's own key, its endpoint's: what it signs and is handed keys under as itself.
     key: SigningKey,
     id: Key,
     /// What its device's key opens and signs.
@@ -261,11 +261,11 @@ pub struct Inner {
     settled: tokio::sync::watch::Sender<u64>,
     /// Held while settling, so one that read the members before a change can't load its apps after one that read it.
     settling: tokio::sync::Mutex<()>,
-    /// The erased apps this node erased here since it started (`follow_erased`).
+    /// The erased apps this app runtime erased here since it started (`follow_erased`).
     erased: Mutex<BTreeSet<String>>,
     /// Whether the last settling couldn't fetch an app's deploy, so it's tried again soon, not only at the next change.
     unfetched: std::sync::atomic::AtomicBool,
-    /// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, while this node serves it there (`api::serve_guide`).
+    /// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, while this app runtime serves it there (`api::serve_guide`).
     guide: Mutex<Option<String>>,
     /// What its features keep (`runtime::features`).
     kept: runtime::Kept,
@@ -280,7 +280,7 @@ impl std::fmt::Debug for Host {
     }
 }
 
-/// What a node stopping waits at most for its last insights to be written: they may be lost, and stopping may not wait.
+/// What an app runtime stopping waits at most for its last insights to be written: they may be lost, and stopping may not wait.
 const LAST_SAY: Duration = Duration::from_secs(3);
 
 /// `<cli>-apps --listen=<address>`: this device's app runtime, an endpoint of its own key (`Host::runtime`), answering on
@@ -330,7 +330,7 @@ pub async fn serve(listen: &str) -> Result<()> {
 }
 
 impl Host {
-    /// Starts a node of the home `dir` that is its own device, holding the device's key: the tests' devices. A
+    /// Starts an app runtime of the home `dir` that is its own device, holding the device's key: the tests' devices. A
     /// computer's is its app runtime (`runtime`), whose device is its onet.
     pub async fn start(dir: &Path) -> Result<Host> {
         std::fs::create_dir_all(dir)?;
@@ -446,7 +446,7 @@ impl Host {
         &self.0.dir
     }
 
-    /// The guide's address on the tailnet, if this node serves it there.
+    /// The guide's address on the tailnet, if this app runtime serves it there.
     pub fn guide(&self) -> Option<String> {
         self.0.guide.lock().unwrap().clone()
     }

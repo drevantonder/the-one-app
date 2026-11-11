@@ -18,7 +18,7 @@ fn run(g: &Given) -> Result<bool> {
     match g.words().as_slice() {
         ["vault", "requests"] => {
             g.takes_only(&[])?;
-            for r in g.node.get("/api/vault/requests")?.as_array().into_iter().flatten() {
+            for r in g.api.get("/api/vault/requests")?.as_array().into_iter().flatten() {
                 println!("{}  {} for {} in {}  {}  {}", r["id"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope_name"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""), r["why"].as_str().unwrap_or(""));
             }
         }
@@ -31,7 +31,7 @@ fn run(g: &Given) -> Result<bool> {
             } else if let Some(item) = g.flag("item") {
                 body["item"] = json!(item);
             } else {
-                let asked = g.node.get(&format!("/api/vault/requests?id={id}"))?;
+                let asked = g.api.get(&format!("/api/vault/requests?id={id}"))?;
                 let r = asked.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?;
                 let mut text = String::new();
                 std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
@@ -41,7 +41,7 @@ fn run(g: &Given) -> Result<bool> {
                     _ => json!({ r["fields"][0]["name"].as_str().unwrap_or(""): text }),
                 };
             }
-            g.node.post("/api/vault/answer", body)?;
+            g.api.post("/api/vault/answer", body)?;
             println!("Answered.");
         }
         _ => return Ok(false),

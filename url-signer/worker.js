@@ -8,7 +8,7 @@
 //   → { read, head, create, replace, remove: { name: url }, list: [url], confirm: { name: bool },
 //       newest: { prefix: text | null }, get: { name: base64url | null }, until }
 //
-// An item is a name, or a database's steps from one position to another (`{ steps: prefix, from, to }`), so a node
+// An item is a name, or a database's steps from one position to another (`{ steps: prefix, from, to }`), so an app runtime
 // asks for the positions it reads or writes next in one trip. Any endpoint of the network may read, list and create
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
 // admin's endpoint removes. A step at position n of a database (`<prefix>/<n>`, n > 1) is created only once the
@@ -22,7 +22,7 @@
 // hands out opens nothing without keys.
 // A request from a device that says it reads less of who's who than this build (`reads`, shared/protocol.js's `READS`;
 // an older build says nothing) is 426, telling it to update, if it would create, replace or remove, or comes from a
-// client alone. A machine that runs things still reads, so a node takes the release it updates to.
+// client alone. A machine that runs things still reads, so an app runtime takes the release it updates to.
 
 import { b64u, behind, checkRequest, rolesOf } from "../shared/crypto.js";
 import { Refused, answer, refusal, refuse } from "../shared/http.js";

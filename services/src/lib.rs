@@ -489,7 +489,7 @@ pub enum Build {
     None,
 }
 
-/// What a service may ask its user's node to run: only its own app (`name`), in its user's own scope, calling no
+/// What a service may ask its user's app runtime to run: only its own app (`name`), in its user's own scope, calling no
 /// other app, and naming a device only to reach itself there (Agent Devices listing every device's); until grants
 /// land, that app's database there is all it reaches. → the call.
 pub fn limited(name: &str, call: &Value) -> Result<Value> {

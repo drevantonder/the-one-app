@@ -1,4 +1,4 @@
-//! Repos' rules, as a node runs the app: who pushes to a repo and who deletes it, the objects a merge of packs keeps, and
+//! Repos' rules, as an app runtime runs the app: who pushes to a repo and who deletes it, the objects a merge of packs keeps, and
 //! whose GitHub sign-in and organization a user sees. It runs with the rest of `cargo test` (tests/main.rs), and a
 //! deploy leaves it out of the app (`tests/`).
 
@@ -66,7 +66,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let e = key::Endpoint::of(&sams);
     let sam_id = let_sam_in(&a, &sams).await;
 
-    // Repos' keys in global, as Sam's device opens them and hands them to the node with his calls.
+    // Repos' keys in global, as Sam's device opens them and hands them to the app runtime with his calls.
     let global = scope::scopes::Scope::Global;
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
     let epochs = a.sealed_keys(&me, &global, Some(&key::hex(&e.key)), None).await.unwrap();

@@ -1,4 +1,4 @@
-//! The node's own routes, asked in the node itself (`api::Client`), as the request its MCP answers asked them.
+//! The app runtime's own routes, asked in the app runtime itself (`api::Client`), as the request its MCP answers asked them.
 
 use std::io::Read;
 use std::time::Duration;
@@ -8,7 +8,7 @@ use ::api::client::{Answer, Via};
 
 use crate::Host;
 
-/// The node's own routes, asked in the node itself as the request its MCP answers asked them: with that request's proof
+/// The app runtime's own routes, asked in the app runtime itself as the request its MCP answers asked them: with that request's proof
 /// of who asks (the client device its connection proved, or this machine's own program), which
 /// `only_this_machine` checks for each, as it would over HTTP.
 pub struct InProcess {
@@ -44,7 +44,7 @@ impl Via for InProcess {
         }
         let service = hyper_util::service::TowerToHyperService::new(self.router.clone());
         let (parts, body) = self.runtime.block_on(service.call(req))?.into_parts();
-        // Its body as it comes: the node's events stream until whoever reads them stops.
+        // Its body as it comes: the app runtime's events stream until whoever reads them stops.
         let (sending, chunks) = std::sync::mpsc::channel();
         self.runtime.spawn(async move {
             use tokio_stream::StreamExt;

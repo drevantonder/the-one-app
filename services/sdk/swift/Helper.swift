@@ -102,10 +102,10 @@ enum Node {
     }
 }
 
-/// What a service and its node say to each other, in JSON: the same as `services/sdk/src/lib.rs` and WhatsApp's Go service say
+/// What a service and its app runtime say to each other, in JSON: the same as `services/sdk/src/lib.rs` and WhatsApp's Go service say
 /// it, which tests/contracts.rs holds all three to with `service/wire.json`.
 enum Wire {
-    /// A call the node hands it: `{ id, function, input, caller }`.
+    /// A call the app runtime hands it: `{ id, function, input, caller }`.
     struct Call: Sendable {
         var id: UInt64
         var function: String

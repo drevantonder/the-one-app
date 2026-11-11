@@ -1,6 +1,6 @@
-//! A client device as the device that signs Settings' changes (`::scope::settings`): its keyring, asked as a node's routes
+//! A client device as the device that signs Settings' changes (`::scope::settings`): its keyring, asked as an app runtime's routes
 //! of the same paths (`Keyring::request`), answers them itself, reading who's who as it read it and writing through its
-//! nodes; and what only a client does, leaving as it signs out and registering for notifications.
+//! app runtimes; and what only a client does, leaving as it signs out and registering for notifications.
 
 use ::scope::content::Content;
 use ::scope::scopes::{Scope, ScopeDb};
@@ -74,7 +74,7 @@ impl<O: Opens, D: Address + Keep + Signs> ::scope::settings::Me for Mine<'_, O, 
         self.keyring.write(self.client, self.on, content).await.map_err(to_one)
     }
 
-    /// Each sealed to it, as a node keeps them, opened and checked against the hash who's who names.
+    /// Each sealed to it, as an app runtime keeps them, opened and checked against the hash who's who names.
     async fn held(&self, scope: &Scope) -> anyhow::Result<Vec<(u32, [u8; 32])>> {
         let mine = self.keyring.asked(self.client, self.on, "GET", &format!("/api/keys?scope={}&to={}", query(&scope.to_string()), hex(&self.on.public())), None).await.map_err(to_one)?;
         let mut out = Vec::new();
@@ -159,7 +159,7 @@ impl<O: Opens> Keyring<O> {
     }
 
     /// The answer to a request this device answers itself (`::scope::settings::answer`): none for any other, which goes to
-    /// a node.
+    /// an app runtime.
     pub(crate) async fn answer(&self, client: &Client, on: &(impl Address + Keep + Signs), method: &str, path: &str, body: &[u8]) -> Option<Result<Value, Error>> {
         Some(::scope::settings::answer(&self.mine(client, on), method, path, body).await?.map_err(of_one))
     }
@@ -184,7 +184,7 @@ impl<O: Opens> Keyring<O> {
 
     /// Signs a step of `content` with `by` as `user`'s, and writes it to the bucket itself, at the next position: read
     /// again, and signed again for the one after, while another device's goes first. For the recovery key's steps, which
-    /// no node takes from a device as its user's (`POST /api/steps`), and on a computer, the device's own steps its app
+    /// no device takes from a device as its user's (`POST /api/steps`), and on a computer, the device's own steps its app
     /// runtime asks it to write (`app_runtime::Holder`), as the runtime signs nothing as the device.
     pub(crate) async fn write_to_bucket(&self, on: &(impl Address + Keep + Signs), by: &impl Signs, user: &str, content: Content) -> Result<(), Error> {
         use ::{scope::steps, database::stored};
@@ -213,7 +213,7 @@ impl<O: Opens> Keyring<O> {
     /// network. Its scopes keep their keys, as it forgets its own (ARCHITECTURE.md).
     pub async fn leave(&self, client: &Client, on: &(impl Address + Keep + Signs)) -> Result<(), Error> {
         self.read(on).await?;
-        // A node closes a removed device's connection as it applies its removal, so its answer may never come: off
+        // An app runtime closes a removed device's connection as it applies its removal, so its answer may never come: off
         // the network all the same.
         let wrote = self.write(client, on, ::scope::content::remove_device(&on.public())).await;
         ::scope::settings::take_out(&self.mine(client, on), &on.public()).await.map_err(of_one)?;
@@ -247,7 +247,7 @@ impl<O: Opens> Keyring<O> {
     }
 }
 
-/// Tells the relay, signed by the device, that it wrote to `global`, as a node does after each write (`moved`), for
+/// Tells the relay, signed by the device, that it wrote to `global`, as an app runtime does after each write (`moved`), for
 /// devices that read who's who again only once that count moves. Only a hint: one it doesn't take changes nothing.
 async fn moved(on: &(impl Address + Signs)) {
     if on.address().is_empty() {

@@ -1,5 +1,5 @@
-//! `GET /api/state`: the network as one user sees it, from `global`'s scope database, the same from a node on a
-//! machine and from the Cloudflare node. What only the node answering knows (which devices are online and how loaded,
+//! `GET /api/state`: the network as one user sees it, from `global`'s scope database, the same from an app runtime on a
+//! machine and from oned on Cloudflare. What only the app runtime answering knows (which devices are online and how loaded,
 //! who is looking) it says in `Here`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,14 +14,14 @@ use crate::scopes;
 use crate::scopes::{App, Kind, Machine, Role, Scope, ScopeState};
 use crate::rank::{self, Priority};
 
-/// `GET /api/state`'s answer, as every reader (the screens, the web client, widgets, the CLI, the Cloudflare node's
+/// `GET /api/state`'s answer, as every reader (the screens, the web client, widgets, the CLI, oned on Cloudflare's
 /// Worker) reads it: the field names are the wire's.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct State {
     pub config: Config,
     /// Who is looking.
     pub me: Viewer,
-    /// The node answering.
+    /// The app runtime answering.
     pub device: Answering,
     /// The user looking, if the network lists them.
     pub user: Option<User>,
@@ -48,7 +48,7 @@ impl State {
         self.network.as_ref()?.settings.get("address").map(String::as_str)
     }
 
-    /// The user looking, by name; with none listed, who the node says is looking.
+    /// The user looking, by name; with none listed, who the app runtime says is looking.
     pub fn looking(&self) -> &str {
         self.user.as_ref().map_or(self.me.name.as_str(), |u| u.name.as_str())
     }
@@ -78,7 +78,7 @@ pub struct ClientHere {
     pub name: String,
 }
 
-/// The node answering.
+/// The app runtime answering.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Answering {
     pub key: String,
@@ -125,7 +125,7 @@ pub struct SettingsItem {
     pub app: Option<String>,
 }
 
-/// The network as its scope database says it, and what the node answering adds to it.
+/// The network as its scope database says it, and what the app runtime answering adds to it.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Network {
     pub name: String,
@@ -142,7 +142,7 @@ pub struct Network {
     /// When the network's recovery key last let a device in, and whose.
     pub recovery_used: Option<RecoveryUsed>,
     pub recovery_set: u64,
-    /// Whether the node answering is one of the network's devices.
+    /// Whether the app runtime answering is one of the network's devices.
     pub member: bool,
     pub users: Vec<NetworkUser>,
     /// For an admin: who's invited by email and hasn't joined yet.
@@ -156,10 +156,10 @@ pub struct Network {
     /// scope, until when, and who set them. Ones whose endpoint is gone, or whose setter may set them no more, are
     /// over.
     pub app_schedules: Vec<AppSchedule>,
-    /// `global`'s steps the node answering read.
+    /// `global`'s steps the app runtime answering read.
     pub steps: u64,
     pub settings: BTreeMap<String, String>,
-    /// The Cloudflare node, once an admin deployed one (`cloudflare oned deploy` sets it).
+    /// oned on Cloudflare, once an admin deployed one (`cloudflare oned deploy` sets it).
     pub cloudflare_node: Option<CloudflareNode>,
 }
 
@@ -235,21 +235,21 @@ pub struct Device {
     pub off_services: Vec<Switched>,
     /// Whether the viewer is looking from it.
     pub me: bool,
-    /// What only the node answering knows of it.
+    /// What only the app runtime answering knows of it.
     #[serde(flatten)]
     pub now: DeviceNow,
 }
 
-/// What the node answering knows of a device that the scope database doesn't: nothing, for the Cloudflare node.
+/// What the app runtime answering knows of a device that the scope database doesn't: nothing, for oned on Cloudflare.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeviceNow {
-    /// The node answering.
+    /// The app runtime answering.
     #[serde(default)]
     pub here: bool,
     /// Its socket is open at the relay.
     #[serde(default)]
     pub online: bool,
-    /// When it was last seen (ms), if it ever was: the relay's record and what this node itself exchanged with it.
+    /// When it was last seen (ms), if it ever was: the relay's record and what this app runtime itself exchanged with it.
     #[serde(default)]
     pub seen: Option<u64>,
     #[serde(default)]
@@ -274,7 +274,7 @@ pub struct DeviceNow {
     /// The commit it should be on, as the record at the network's address says (`oned_update::latest`), if it's a build it could take.
     #[serde(default)]
     pub latest: Option<String>,
-    /// Why it hasn't taken it, if it knows: its node's words.
+    /// Why it hasn't taken it, if it knows: its app runtime's words.
     #[serde(default)]
     pub updating: Option<String>,
 }
@@ -312,7 +312,7 @@ pub struct Part {
     pub on: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// `apps` on the Cloudflare node, which an admin can't switch off.
+    /// `apps` on oned on Cloudflare, which an admin can't switch off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fixed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -368,17 +368,17 @@ pub struct CloudflareNode {
     pub runs_for: Vec<String>,
 }
 
-/// What the node answering knows that the scope database doesn't.
+/// What the app runtime answering knows that the scope database doesn't.
 pub struct Here<'a> {
     /// Who is looking.
     pub me: Viewer,
     /// The client looking, if it's a device and not this one.
     pub client: Option<ClientHere>,
-    /// The node answering.
+    /// The app runtime answering.
     pub device: Answering,
     /// The device the viewer is looking from, to say "This device": none from a sign-in.
     pub looking: Option<Key>,
-    /// Whether that node is one of the network's devices.
+    /// Whether that app runtime is one of the network's devices.
     pub member: bool,
     pub steps: u64,
     /// How this user arranged each of their pages.
@@ -394,7 +394,7 @@ pub struct Here<'a> {
     pub device_now: &'a dyn Fn(&Machine) -> Result<DeviceNow>,
 }
 
-/// The network as `user` sees it, with `here` from the node answering; None for `network` if it has none.
+/// The network as `user` sees it, with `here` from the app runtime answering; None for `network` if it has none.
 pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<State> {
     let settings = settings(&m.map(ScopeDb::settings).transpose()?.unwrap_or_default());
     let network = m.map(|m| network(m, user, &settings, &here)).transpose()?;
@@ -662,8 +662,8 @@ fn settings_items(m: &ScopeDb, user: &str, features: &BTreeMap<String, Value>, s
 }
 
 
-// What a node tells an app and a user of the network beyond `state`, the same from a node on a machine and from the
-// Cloudflare node: each gives who's who (`global`'s scope database) and what it read of each scope (`ScopeState`).
+// What an app runtime tells an app and a user of the network beyond `state`, the same from an app runtime on a computer and from the
+// oned on Cloudflare: each gives who's who (`global`'s scope database) and what it read of each scope (`ScopeState`).
 
 /// Who a call, widget or hook runs for.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -718,9 +718,9 @@ pub fn whose(m: &ScopeDb, scope: &Scope) -> Result<String> {
 
 /// The scopes a call of an app as `user` reaches: their own if it's added for them at all, each of their groups it's
 /// added for (in the group or in `global`), and `global` if it's added there. `added` says whether the app is added in
-/// a scope, or None for one the node answering doesn't run, and so can't read: such a group counts, so that the call
-/// goes to a node that runs it, which answers for it, and what a call reaches never depends on which node answers. A
-/// scope the node runs but hasn't read yet has nothing added.
+/// a scope, or None for one the app runtime answering doesn't run, and so can't read: such a group counts, so that the call
+/// goes to an app runtime that runs it, which answers for it, and what a call reaches never depends on which app runtime answers. A
+/// scope the app runtime runs but hasn't read yet has nothing added.
 pub fn reachable(m: &ScopeDb, user: &str, added: impl Fn(&Scope) -> Option<bool>) -> Result<Vec<Scope>> {
     let is = |s: &Scope| added(s) == Some(true);
     let global = is(&Scope::Global);

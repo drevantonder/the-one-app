@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Helper
 
-/// What a service and its node say to each other is in service/wire.json, which tests/contracts.rs holds the node, the
+/// What a service and its app runtime say to each other is in service/wire.json, which tests/contracts.rs holds the app runtime, the
 /// Rust service crate and WhatsApp's Go service to. This holds the Swift helpers to it (`swift test` on a Mac).
 private func wire() -> [String: Any] { try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appending(path: "wire.json"))) as! [String: Any] }
 

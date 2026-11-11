@@ -34,6 +34,6 @@ pub struct State {
     rows: Mutex<HashMap<Scope, rows::Runs>>,
     /// When it last read every scope's runs.
     read: Mutex<u64>,
-    /// The scopes whose runs builds before kept in the node's `main` it copied (`rows::copy_once`).
+    /// The scopes whose runs builds before kept in the app runtime's `main` it copied (`rows::copy_once`).
     copied: Mutex<HashSet<Scope>>,
 }

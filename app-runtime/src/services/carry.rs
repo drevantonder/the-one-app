@@ -1,4 +1,4 @@
-//! Services carried by their device's app runtime (`services::carried`): a node asks a service through the runtime of
+//! Services carried by their device's app runtime (`services::carried`): an app runtime asks a service through the runtime of
 //! the device it's part of, which hands the sealed ask to the part over its socket (`Parts`, long-polled on the
 //! loopback) and passes back its sealed answer, reading neither; and a part's own asks (a call, what insights keeps)
 //! come to this device's runtime, signed by it.

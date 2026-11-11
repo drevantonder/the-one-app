@@ -1,4 +1,4 @@
-//! The web client's and the Cloudflare node's WebAssembly, built in this checkout for its throwaway network, which reads
+//! The web client's and oned on Cloudflare's WebAssembly, built in this checkout for its throwaway network, which reads
 //! them from there.
 
 use std::path::Path;

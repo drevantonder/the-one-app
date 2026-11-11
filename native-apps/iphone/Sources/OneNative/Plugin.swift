@@ -164,7 +164,7 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
   }
 
   /// A tapped notification opens its screen (the app's Rust takes the link); Approve and Not Me answer the device that
-  /// asked to join, as this device, where the user's node checks the request is theirs.
+  /// asked to join, as this device, where the user's app runtime checks the request is theirs.
   func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
     let info = response.notification.request.content.userInfo
     if let code = info["join"] as? String, [Notes.approve, Notes.notMe].contains(response.actionIdentifier) {

@@ -313,7 +313,7 @@ pub fn source(name: &str, owner: &str, link: &str) -> Content {
 }
 
 /// A deploy of `app`: the bundle at blob `bundle`, and the builds of its service it names (`bundle::SERVICES`), each a
-/// blob too, so a node that runs it finds it.
+/// blob too, so an app runtime that runs it finds it.
 pub fn deploy(app: &str, bundle: &str, builds: impl IntoIterator<Item = String>) -> Content {
     let blobs = std::iter::once(bundle.to_string()).chain(builds).collect();
     Content { blobs, ..node(Change::Deploy, json!({ "app": app, "bundle": bundle })) }

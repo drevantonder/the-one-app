@@ -1,6 +1,6 @@
 //! `one deploy <dir>` and the deploy tool: build an app with a pinned Bun, npm packages and all, into a bundle that
 //! holds the built module and the files it was built from, as written. An app with React screens has them built first,
-//! with the deploying machine's own Bun or Node (`screens`). Bun and workerd, which runs what it builds, are pinned
+//! with the deploying machine's own Bun or App runtime (`screens`). Bun and workerd, which runs what it builds, are pinned
 //! here, each downloaded once and checked (`pinned`).
 
 use std::io::Write as _;
@@ -30,7 +30,7 @@ pub fn bun() -> Result<PathBuf> {
     pinned(&format!("bun-{BUN}"), &bin, &format!("package/bin/{bin}"), &url, integrity)
 }
 
-/// The workerd build every node runs, and each platform's npm package of it with its sha512.
+/// The workerd build every app runtime runs, and each platform's npm package of it with its sha512.
 const WORKERD: &str = "1.20261031.1";
 const WORKERD_PACKAGES: &[(&str, &str, &str)] = &[
     ("x86_64-unknown-linux-gnu", "linux-64", "42mhHUcRRqs0FI3Ej6HybrxuCeOoHiH9A1h8CC341bT/FSNBzJZWNLiiCHaQQH+dpYU+Vz/bC6DurKnuJZTW3Q=="),
@@ -74,7 +74,7 @@ const VISUAL_C_RUNTIME: VisualCRuntime = VisualCRuntime {
 };
 
 /// The file at `member` in an archive (an npm package, or a zip on Windows, which its `tar` reads too), downloaded once
-/// into the node's cache as `bin` and checked against the archive's pinned sha512.
+/// into the app runtime's cache as `bin` and checked against the archive's pinned sha512.
 pub fn pinned(dir: &str, bin: &str, member: &str, url: &str, integrity: &str) -> Result<PathBuf> {
     let dir = platform::cache().join(dir);
     let path = dir.join(bin);
@@ -86,8 +86,8 @@ pub fn pinned(dir: &str, bin: &str, member: &str, url: &str, integrity: &str) ->
     let digest = data_encoding::BASE64.encode(&sha2::Sha512::digest(&tarball)[..]);
     ensure!(digest == *integrity, "the download of {bin} doesn't match its pinned hash");
     // Unpack into a folder of our own and move the binary into place in one step,
-    // so nodes starting at the same time can't see a half-written one.
-    // Several nodes in one process (as in tests) can download at once, so the folder is this call's alone.
+    // so app runtimes starting at the same time can't see a half-written one.
+    // Several app runtimes in one process (as in tests) can download at once, so the folder is this call's alone.
     static CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = dir.with_extension(format!("{}-{call}.part", std::process::id()));
@@ -102,7 +102,7 @@ pub fn pinned(dir: &str, bin: &str, member: &str, url: &str, integrity: &str) ->
     Ok(path)
 }
 
-/// The Workers' compatibility date that apps, the Cloudflare node and the Workers run at.
+/// The Workers' compatibility date that apps, oned on Cloudflare and the Workers run at.
 pub const COMPATIBILITY_DATE: &str = "2026-10-01";
 
 /// The files an app's build starts from, in this order.
@@ -246,7 +246,7 @@ fn screen_name(file: &str) -> bool {
 
 /// Builds the app's React screens, if it has any: each `screens/<name>.jsx` or `.tsx` into `dist/<name>.html`, the
 /// screen's HTML that app.js imports as text (`with { type: "text" }`), opted in to @one/ui, with its own styles and
-/// module in it and React and @one/ui left to the page (ui/src/screen.rs). Built by this machine's Bun, or else Node: the
+/// module in it and React and @one/ui left to the page (ui/src/screen.rs). Built by this machine's Bun, or else App runtime: the
 /// pinned Bun is only for bundling app.js, not for running build tools.
 pub fn screens(dir: &Path) -> Result<()> {
     let some = std::fs::read_dir(dir.join("screens")).into_iter().flatten().flatten().any(|e| screen_name(&e.file_name().to_string_lossy()));
@@ -259,7 +259,7 @@ pub fn screens(dir: &Path) -> Result<()> {
         let ran = std::process::Command::new(&path).arg("--version").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
         ran.is_ok_and(|s| s.success()).then_some(path)
     };
-    // Bun runs the build and installs its tools; Node runs it, and npm, which comes with it, installs them.
+    // Bun runs the build and installs its tools; App runtime runs it, and npm, which comes with it, installs them.
     let (runtime, install): (PathBuf, (PathBuf, &[&str])) = match (runs("bun"), runs("node"), runs("npm")) {
         (Some(bun), _, _) => (bun.clone(), (bun, &["install", "--frozen-lockfile", "--ignore-scripts"])),
         (None, Some(node), Some(npm)) => (node, (npm, &["install", "--ignore-scripts", "--no-audit", "--no-fund"])),
@@ -334,7 +334,7 @@ pub fn build_files(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
 }
 
 /// A built-in app's files built the same way, its React screens as its `dist/` has them: a release is built where they
-/// were, and no node needs Bun or Node to run them.
+/// were, and no device needs Bun or App runtime to run them.
 pub fn build_built_in(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
     build_kept(files, false)
 }

@@ -19,7 +19,7 @@ pub fn alpn() -> Vec<u8> {
 }
 
 /// iroh's minimal endpoint without its captive portal check, a request to the relay's address on each full net report
-/// that tells a device nothing it acts on. Every endpoint of a node and its services binds with it; onet's own is the
+/// that tells a device nothing it acts on. Every endpoint of an app runtime and its services binds with it; onet's own is the
 /// same (onet/src/lib.rs, `Endpoints`).
 pub struct Endpoints;
 

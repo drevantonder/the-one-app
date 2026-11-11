@@ -1,21 +1,21 @@
-// The browser's one way to its nodes: iroh (onet, as WebAssembly), in one SharedWorker every tab of the web client
+// The browser's one way to its app runtimes: iroh (onet, as WebAssembly), in one SharedWorker every tab of the web client
 // shares, so a browser keeps one connection however many tabs and screens ask; where there's no SharedWorker, in the
 // one tab that holds the `one.net` lock, for the others (net.js).
 //
 // Its endpoint is a key of the session's, made here, which the browser's device key vouches for (`certify`): that key
-// can't be read out of WebCrypto, and iroh signs with raw bytes. The relay and nodes take the endpoint as the device.
+// can't be read out of WebCrypto, and iroh signs with raw bytes. The relay and app runtimes take the endpoint as the device.
 //
 // The browser as a device of its user is onet's keyring (onet/src/keyring.rs, `Keyring` in its WebAssembly),
 // here too: who's who as it reads it from the bucket itself, the keys it opens, and each request, with the keys its kind
-// needed, sealed to the one node it's sent to. Its seal key's secret stays in WebCrypto: the keyring asks it for each
+// needed, sealed to the one app runtime it's sent to. Its seal key's secret stays in WebCrypto: the keyring asks it for each
 // secret it agrees (`shared`).
 //
 // A tab says `start` with its user; then each `fetch` is answered with its status and headers, its body's parts as
 // they come, and `done` (or `error`); `cancel` stops one. What changes who can do what is a `fetch` too, of the path a
-// node's route has, which the keyring answers itself, signing it (onet's `settings`). `settle`, `renew` and `notifications`
+// app runtime's route has, which the keyring answers itself, signing it (onet's `settings`). `settle`, `renew` and `notifications`
 // are the rest a device does as itself; `ask` and `waited`, what it does before it's one, asking to be let in; and
 // `auth`, signing in. `kept` gives what a call that only reads answered last (onet's
-// `answers`), and `forget` forgets what this device kept, as it signs out. `nodes` gives the order to ask nodes in, which is remembered; `reconnect`
+// `answers`), and `forget` forgets what this device kept, as it signs out. `nodes` gives the order to ask app runtimes in, which is remembered; `reconnect`
 // starts a fresh endpoint, after the network came back.
 
 /// How long before a session's certificate ends it's renewed, and how long after a renewal that failed it's tried again.
@@ -29,7 +29,7 @@ let opened = null;
 const Socket = self.WebSocket;
 
 /// The relay's sockets that are open, and each tab, told as the last goes or the first comes: until the connection's own
-/// timeout, half a minute on, this is the only sign the way to every node has gone.
+/// timeout, half a minute on, this is the only sign the way to every app runtime has gone.
 const relays = new Set();
 const tabs = new Set();
 let relayed = false;
@@ -107,8 +107,8 @@ export function server(version, givenHost) {
   // Imported here, not above, so the WebAssembly is fetched first.
   const code = fetched(() => Promise.all([import("/shared/crypto.js"), import("/shared/protocol.js"), import("/kept.js")]));
   const host = givenHost || browserHost(code().then((c) => c[2]));
-  /// Of `keys`, the nodes the network's signed steps, as `device` last read them, list as running something of its
-  /// user's: all of them before it's read any. A node the relay or a node names besides isn't asked.
+  /// Of `keys`, the app runtimes the network's signed steps, as `device` last read them, list as running something of its
+  /// user's: all of them before it's read any. An app runtime the relay or an app runtime names besides isn't asked.
   function theirs(device, keys) {
     const listed = device && JSON.parse(device.nodes()).nodes;
     return listed?.length ? keys.filter((key) => listed.includes(key)) : keys;
@@ -246,7 +246,7 @@ export function server(version, givenHost) {
     const secret = crypto.getRandomValues(new Uint8Array(32));
     const endpoint = await ed25519Public(secret);
     const key = await signingKey(secret);
-    // A minute short of a day, as no certificate lasts longer than a day from when the relay or a node checks it.
+    // A minute short of a day, as no certificate lasts longer than a day from when the relay or an app runtime checks it.
     const until = Date.now() + SESSION - FRESH;
     const certificate = await certify(device.sign, hex.decode(device.key), endpoint, until);
     const socket = async (certificate) => early(host.address, `${certificate}.${await proveSocket(key, endpoint)}`);
@@ -262,8 +262,8 @@ export function server(version, givenHost) {
       });
       return answer;
     };
-    // The computes, a new client's first nodes, which say whether this browser is let in at all, and which of them are
-    // on the relay's network now (`online`, raced first): waited for only the first time; after that, the nodes it
+    // The computes, a new client's first app runtimes, which say whether this browser is let in at all, and which of them are
+    // on the relay's network now (`online`, raced first): waited for only the first time; after that, the app runtimes it
     // asked before are asked at once, and the computes only checked beside them.
     const computes = ask(certificate).then(async (asked) => {
       // Not let in: this browser isn't one of its user's devices (yet, or any more).
@@ -289,7 +289,7 @@ export function server(version, givenHost) {
           if (Array.isArray(c.online)) client.online(c.online);
           return;
         }
-        // Taken out: it forgets its nodes, and the session says it isn't a device, keeping what it kept for if the relay
+        // Taken out: it forgets its app runtimes, and the session says it isn't a device, keeping what it kept for if the relay
         // lets it in again. A session started since is that one's.
         put(`nodes:${user}`, []);
         client.close();

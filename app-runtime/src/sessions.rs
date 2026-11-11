@@ -51,7 +51,7 @@ impl Session {
 }
 
 /// What a caller's session is kept by: a client device's by its key (forgotten once
-/// that device is removed), a call passed on by the node that passed it and its user.
+/// that device is removed), a call passed on by the app runtime that passed it and its user.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) enum Held {
     Client(Key),
@@ -59,7 +59,7 @@ pub(super) enum Held {
 }
 
 impl Held {
-    /// The `for` of a handoff with its calls: a client device's key, or the key of the node that passed it on.
+    /// The `for` of a handoff with its calls: a client device's key, or the key of the app runtime that passed it on.
     fn handoff_for(&self) -> String {
         match self {
             Held::Client(key) | Held::Passed(key, _) => hex(key),
@@ -124,11 +124,11 @@ impl Host {
 
     /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for its calls with `credential`, as `user`'s:
     /// only if they were sealed to it (any others are left), for that credential (`for`: a client device's or the
-    /// Cloudflare node's key), and not yet expired; and no longer than `most`, until when its caller's own
+    /// oned on Cloudflare's key), and not yet expired; and no longer than `most`, until when its caller's own
     /// word lasts (a session's certificate's).
     pub fn hand(&self, credential: &Credential, user: &str, sealed: &str, most: u64) -> Result<()> {
         let held = held(credential).context("nothing is handed for this device's own calls, or app schedules'")?;
-        // Keys this device can't open (sealed to another: the node a client asked before, say) are left, never refused:
+        // Keys this device can't open (sealed to another: the app runtime a client asked before, say) are left, never refused:
         // the call goes on without them and asks for what it needs (428), sealed to this device, which the client
         // checks against its own entries before handing anything. Leaving them gives nothing away.
         let handoff = match ::api::handed::open_handoff(&self.seal_secret(), sealed) {
@@ -175,9 +175,9 @@ impl Host {
         Ok(())
     }
 
-    /// Keeps the keys another node, `from`, handed with a call it passed on for `user`: sealed here for
+    /// Keeps the keys another app runtime, `from`, handed with a call it passed on for `user`: sealed here for
     /// `from`'s key, and only of `scopes`, those the call names; a service's call (`service`) only with some, since
-    /// a node's word alone runs no service. → the call's credential.
+    /// an app runtime's word alone runs no service. → the call's credential.
     pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope], service: bool) -> Result<Credential> {
         let handoff = ::api::handed::open_handoff(&self.seal_secret(), sealed)?;
         ensure!(handoff.for_ == hex(from), "the keys handed are for another app runtime");
@@ -190,7 +190,7 @@ impl Host {
     }
 
     /// The keys a call of `app` was handed here, of `scopes` alone, for passing it on, until when they're kept: what a
-    /// client would hand a node for that call (`keys::may_hand`), never another app's.
+    /// client would hand an app runtime for that call (`keys::may_hand`), never another app's.
     pub(super) fn passing_on(&self, credential: &Credential, scopes: &[Scope], app: &str) -> (Vec<::api::handed::Handed>, u64) {
         let Some(held) = held(credential) else { return (Vec::new(), 0) };
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();

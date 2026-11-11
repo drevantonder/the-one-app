@@ -1,6 +1,6 @@
 //! A call to AI Gateway, wherever it runs: resolve the model, pick whose key pays, hold a `retryKey`'s answer, send it
 //! and record what it used, as a GenAI span. `Host` is what runs it: the app runtime on a machine (`ai-gateway-runtime`)
-//! or the Cloudflare node, each sending through its own fill and keeping its own rows.
+//! or oned on Cloudflare, each sending through its own fill and keeping its own rows.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -11,14 +11,14 @@ use serde_json::{Map, Value, json};
 use crate::retry;
 use crate::{Asked, Company, Defaults, Failed, Kind, Outgoing, Paid, Span, Usage};
 
-/// What `Host` gives back, in time: sent between threads on a machine, and not on the Cloudflare node, whose futures are
+/// What `Host` gives back, in time: sent between threads on a machine, and not on oned on Cloudflare, whose futures are
 /// JavaScript's promises.
 #[cfg(not(target_family = "wasm"))]
 pub type Fut<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 #[cfg(target_family = "wasm")]
 pub type Fut<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + 'a>>;
 
-/// What a host must be to be shared: across threads on a machine; on the Cloudflare node, nothing.
+/// What a host must be to be shared: across threads on a machine; on oned on Cloudflare, nothing.
 #[cfg(not(target_family = "wasm"))]
 pub trait Shared: Send + Sync {}
 #[cfg(not(target_family = "wasm"))]

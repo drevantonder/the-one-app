@@ -21,7 +21,7 @@ pub struct Client(std::rc::Rc<crate::Client>);
 impl Client {
     /// `secret`: the 32 bytes of this session's key, kept in WebAssembly's memory while it runs (the device's own key
     /// stays in WebCrypto). `certificate`: the device's word for it (`certify` in key/crypto.js).
-    /// `address`: the network's, where its relay is. `nodes`: the nodes to ask, hex, in the order things run on them.
+    /// `address`: the network's, where its relay is. `nodes`: the app runtimes to ask, hex, in the order things run on them.
     pub async fn start(secret: Vec<u8>, certificate: String, address: String, nodes: Vec<String>) -> Result<Client, JsError> {
         let secret: [u8; 32] = secret.try_into().map_err(|_| js("a session's key is 32 bytes"))?;
         let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
@@ -42,24 +42,24 @@ impl Client {
         self.0.set_nodes(&nodes).map_err(js)
     }
 
-    /// Each node's run priority, `keys` (hex) beside `ranks`: those on the same one are raced at once.
+    /// Each app runtime's run priority, `keys` (hex) beside `ranks`: those on the same one are raced at once.
     pub fn ranks(&self, keys: Vec<String>, ranks: Vec<u32>) -> Result<(), JsError> {
         let keys = keys.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
         self.0.set_ranks(&keys.into_iter().zip(ranks).collect::<Vec<_>>()).map_err(js)
     }
 
-    /// The node that wakes when asked (the Cloudflare node), hex, if the network has one.
+    /// The app runtime that wakes when asked (oned on Cloudflare), hex, if the network has one.
     pub fn wakes(&self, node: Option<String>) -> Result<(), JsError> {
         self.0.set_wakes(node.map(|n| key(&n)).transpose()?).map_err(js)
     }
 
-    /// The nodes the relay says are on its network now, hex: raced first.
+    /// The app runtimes the relay says are on its network now, hex: raced first.
     pub fn online(&self, nodes: Vec<String>) -> Result<(), JsError> {
         let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
         self.0.set_online(&nodes).map_err(js)
     }
 
-    /// `headers`: names and values, one after the other. `keys`, if given, is asked for the `x-one-keys` of the one node
+    /// `headers`: names and values, one after the other. `keys`, if given, is asked for the `x-one-keys` of the one app runtime
     /// the request is sent to, once it's picked (its key, hex → a promise of the header's value, or none), so keys are
     /// sealed to no other. A request with `x-one-trace` has its trace in its response, or in what it failed with.
     pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>, keys: Option<js_sys::Function>) -> Result<Response, Failed> {
@@ -182,7 +182,7 @@ impl Keyring {
         self.keyring.read(&self.on).await.map_err(Failed::of)
     }
 
-    /// The nodes it may ask, hex (`nodes`), with each one's run priority (`ranks`, by key), and the Cloudflare node's
+    /// The app runtimes it may ask, hex (`nodes`), with each one's run priority (`ranks`, by key), and oned on Cloudflare's
     /// key (`wakes`), if the network has one, as JSON.
     pub fn nodes(&self) -> String {
         let hex = |k: &[u8; 32]| data_encoding::HEXLOWER.encode(k);
@@ -191,8 +191,8 @@ impl Keyring {
         serde_json::json!({ "nodes": nodes, "ranks": ranks, "wakes": self.keyring.cloudflare_node().as_ref().map(hex) }).to_string()
     }
 
-    /// A request to its user's nodes (`Keyring::request`), with the keys its kind needed, handed until `until` (ms),
-    /// learning what a node asks for: as `Client::fetch`, with its trace. Before who's who lists
+    /// A request to its user's app runtimes (`Keyring::request`), with the keys its kind needed, handed until `until` (ms),
+    /// learning what an app runtime asks for: as `Client::fetch`, with its trace. Before who's who lists
     /// this device, it's read again a few times while the relay lets it in, as its approval may not be there yet.
     pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>, until: f64) -> Result<Response, Failed> {
         use crate::keyring::Address;
@@ -259,7 +259,7 @@ fn traced(trace: Option<serde_json::Value>) -> String {
     trace.map(|t| t.to_string()).unwrap_or_default()
 }
 
-/// Why a request failed, and the nodes it tried, as JSON.
+/// Why a request failed, and the app runtimes it tried, as JSON.
 #[wasm_bindgen]
 pub struct Failed {
     message: String,
@@ -282,7 +282,7 @@ impl Failed {
         self.not_let_in
     }
 
-    /// What kind of refusal the node said it was (shared/protocol.js `CODES`), if it said.
+    /// What kind of refusal the app runtime said it was (shared/protocol.js `CODES`), if it said.
     #[wasm_bindgen(getter)]
     pub fn code(&self) -> Option<String> {
         self.code.clone()
@@ -312,7 +312,7 @@ pub struct Response {
 
 #[wasm_bindgen]
 impl Response {
-    /// The node that answered, hex, as its connection proved.
+    /// The app runtime that answered, hex, as its connection proved.
     #[wasm_bindgen(getter)]
     pub fn node(&self) -> String {
         self.node.clone()
@@ -323,7 +323,7 @@ impl Response {
         self.status
     }
 
-    /// The nodes it tried and what the one that answered did, as JSON.
+    /// The app runtimes it tried and what the one that answered did, as JSON.
     #[wasm_bindgen(getter)]
     pub fn trace(&self) -> String {
         self.trace.clone()
@@ -343,7 +343,7 @@ impl Response {
         part.map_err(js)
     }
 
-    /// Stops reading the body: the node stops sending it.
+    /// Stops reading the body: the app runtime stops sending it.
     pub fn cancel(&self) {
         self.body.borrow_mut().take();
     }

@@ -88,7 +88,7 @@ fn main() {
     // The apps every agent needs from the start: their guide is in MCP's instructions, and code mode keeps their tools.
     let always_on: String = config.get("always_on").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()).map(|n| format!("{n:?},")).collect();
     let out = format!("{out}pub const ALWAYS_ON: &[&str] = &[{always_on}];\n");
-    // Which build this is, so a node can tell a release apart from itself.
+    // Which build this is, so an app runtime can tell a release apart from itself.
     let commit = std::process::Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])
         .output()
@@ -99,7 +99,7 @@ fn main() {
     // A build with uncommitted changes isn't that commit; say so, so it can't be released as it.
     let dirty = std::process::Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).output().is_ok_and(|o| !o.stdout.is_empty());
     let dirty = dirty || config_commit.as_ref().is_some_and(|c| c.2);
-    // A custom build's build is main's commit and its config's, so a change to either is a new build that nodes take.
+    // A custom build's build is main's commit and its config's, so a change to either is a new build that app runtimes take.
     let commit = match &config_commit {
         Some((config, ..)) => format!("{commit}-{config}"),
         None => commit,

@@ -222,7 +222,7 @@ pub fn sealed_copy_holds(prefix: &str, keys: &Keys, at: u64, copy: &[u8], step: 
     copy_holds(at, &bytes, &opened, signed.as_ref()).holds
 }
 
-/// The keys a node uses, of those a caller handed it, for a database of a scope whose current epoch is `current`, as
+/// The keys an app runtime uses, of those a caller handed it, for a database of a scope whose current epoch is `current`, as
 /// the network's signed `epoch` entries say: none above it (one a member made up would leave the database where nobody
 /// else can follow), and `current`'s among them, the one it writes under. A key with the right number but the wrong
 /// bytes only fails to open what's under its epoch, so a database opened with handed keys is shared only with calls

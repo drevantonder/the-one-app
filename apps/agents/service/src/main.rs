@@ -1,7 +1,7 @@
 //! AGENTS.md's service: writes the user's AGENTS.md and skills, as its app keeps them, into every agent harness on its
 //! device, as it starts and every minute after, so a harness installed later gets them too. A file is written only if
 //! it's missing or unchanged since this service last wrote it, so an edit made on disk is never overwritten;
-//! `agents_set` keeps it for every device. The node writes the rest (its MCP server, prompt hook and built-in skills).
+//! `agents_set` keeps it for every device. The app runtime writes the rest (its MCP server, prompt hook and built-in skills).
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 use one_service::{Answer, Call, Host, Service};
 use serde_json::json;
 
-/// The custom build's command (`one`), and whether this service writes into the harnesses: not for a node with a
+/// The custom build's command (`one`), and whether this service writes into the harnesses: not for an app runtime with a
 /// home of its own (a throwaway network's), which writes nowhere else.
 static HERE: OnceLock<(String, bool)> = OnceLock::new();
 
@@ -46,13 +46,13 @@ fn start(host: &Host) {
     });
 }
 
-/// Marks a skill folder as this custom build's AGENTS.md's, so the node's built-in skills and another custom build's
+/// Marks a skill folder as this custom build's AGENTS.md's, so the app runtime's built-in skills and another custom build's
 /// are left alone.
 fn marker() -> String {
     format!(".synced-{}-agents", cli())
 }
 
-/// What the node marked its skills with: taken over by the next write, never removed.
+/// What the app runtime marked its skills with: taken over by the next write, never removed.
 fn node_marker() -> String {
     format!(".synced-{}", cli())
 }

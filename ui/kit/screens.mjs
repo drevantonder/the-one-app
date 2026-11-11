@@ -1,9 +1,9 @@
 // React screens, each <name>.jsx or .tsx in a folder built into <name>.html: one screen's HTML with its own styles and
 // module in it. React and @one/ui (`shared`) are left to the page's import map, so a screen never brings its own copy.
 // The one way a screen is built: an app's (`one deploy`, src/app/deploy.rs, which runs this with the deploying machine's
-// Bun or Node from a folder holding these tools), and the client's own Settings screens (build.js, here).
+// Bun or App runtime from a folder holding these tools), and the client's own Settings screens (build.js, here).
 //
-// node screens.mjs <screens folder> <out folder> <folder their classes are in> <the tag a screen opts in with> <shared name>...
+// app runtime screens.mjs <screens folder> <out folder> <folder their classes are in> <the tag a screen opts in with> <shared name>...
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -64,7 +64,7 @@ export async function buildScreens(from, to, source, tag, shared, prefix = "") {
       // The module says where it starts, as a line of its own: browsers number an inline script's lines differently, and the
       // bridge turns what's thrown into lines of the module (ui/bridge.js).
       const started = `globalThis.__oneScreen={name:${JSON.stringify(name)},at:new Error().stack};`
-      // Beside the screen, what its built lines came from, which only the node reads (src/insights/source_map.rs): its files
+      // Beside the screen, what its built lines came from, which only the app runtime reads (src/insights/source_map.rs): its files
       // from the screen's own folder, and its first line left for the one the screen starts with here.
       const mappings = chunk.map.mappings.split(";").filter((_, i) => kept[i]).join(";")
       const sources = chunk.map.sources.map((s) => {

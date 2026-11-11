@@ -50,7 +50,7 @@ fn refused(status: StatusCode, error: String, code: Option<&str>) -> Response {
 }
 
 /// The routes a computer's onet answers itself, which `answer` takes before passing anything on: all but those of the
-/// window's joining, notifications and kept answers are its app runtime's routes too, for a node that's its own device.
+/// window's joining, notifications and kept answers are its app runtime's routes too, for an app runtime that's its own device.
 pub const OWN: &[&str] = &[
     "/api/join",
     "/api/join/ask",
@@ -340,8 +340,8 @@ async fn pass_on(onet: &Arc<Onet>, req: Request) -> Response {
         (Err(err), None) => return said(StatusCode::CONFLICT, &err),
     };
     let path = req.uri().path().to_string();
-    // What its own app runtime serves itself for this computer's programs, as a node that's its own device did: a
-    // route a client answers alone, a node answers with more than that (`::scope::settings::on_a_node`).
+    // What its own app runtime serves itself for this computer's programs, as an app runtime that's its own device did: a
+    // route a client answers alone, an app runtime answers with more than that (`::scope::settings::on_a_node`).
     let method = req.method().to_string();
     if let Some(runtime) = &onet.runtime
         && device.local().is_some()

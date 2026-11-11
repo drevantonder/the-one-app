@@ -37,8 +37,8 @@ devices = { path = "../devices" }
 onboarding = { path = "../onboarding" }
 device-logs = { path = "../device-logs" }
 notifications = { path = "../notifications" }
-# A client reaches nodes over iroh, as they reach each other (app-runtime/src/net.rs): only ring's TLS, no n0 discovery or
-# metrics. Pinned with the node's, since the relay runs iroh-relay's own code of this version.
+# A client reaches app runtimes over iroh, as they reach each other (app-runtime/src/net.rs): only ring's TLS, no n0 discovery or
+# metrics. Pinned with the app runtime's, since the relay runs iroh-relay's own code of this version.
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring"] }
 # iroh's own task and timer abstraction, which works the same natively (tokio) and in browsers.
 n0-future = "0.3"
@@ -60,7 +60,7 @@ anyhow = "1"
 serde_json = "1"
 # A new app key, where a device makes one (src/keyring.rs).
 rand = "0.8"
-# A transport of its own, as the Cloudflare node's (src/relayed.rs): iroh's custom transports, at the node's iroh.
+# A transport of its own, as oned on Cloudflare's (src/relayed.rs): iroh's custom transports, at the app runtime's iroh.
 iroh-base = { version = "=1.4.1", default-features = false, features = ["key", "relay"], optional = true }
 n0-watcher = { version = "1", optional = true }
 noq-udp = { version = "1.4", optional = true }
@@ -76,8 +76,8 @@ blake3 = { version = "1", optional = true }
 # A throwaway network's bucket lists its objects with when each was written, as S3 does (src/computer/throwaway.rs).
 jiff = { version = "0.2", optional = true }
 
-# Natively, the app is a device of its user (src/device.rs), with the node's own formats and rules (entries, members,
-# logs, keys); ureq, which that crate's node uses too, to ask auth, the relay and the URL signer at the network's
+# Natively, the app is a device of its user (src/device.rs), with the app runtime's own formats and rules (entries, members,
+# logs, keys); ureq, which that crate's app runtime uses too, to ask auth, the relay and the URL signer at the network's
 # address.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 ed25519-dalek = "3"
@@ -85,7 +85,7 @@ ureq = { version = "3", features = ["json"] }
 tokio = { version = "1", default-features = false, features = ["sync", "rt"] }
 
 # In browsers: how the page's JavaScript calls it (src/wasm.rs); and SQLite, built into its WebAssembly as the
-# Cloudflare node's is, with its clock and randomness from JavaScript (a third more on the wire: 776 KB brotli to 1.1 MB).
+# oned on Cloudflare's is, with its clock and randomness from JavaScript (a third more on the wire: 776 KB brotli to 1.1 MB).
 [target.'cfg(target_family = "wasm")'.dependencies]
 sqlite-wasm-rs = { version = "0.6", features = ["wasm-bindgen"] }
 wasm-bindgen = "=0.2.130"

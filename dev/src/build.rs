@@ -1,4 +1,4 @@
-//! What only whoever builds this repo builds: the WebAssembly a release carries (the Cloudflare node's and onet's), a
+//! What only whoever builds this repo builds: the WebAssembly a release carries (oned on Cloudflare's and onet's), a
 //! browser to draw screens with, and the checks that what a machine is set up with is what the repo asks for.
 
 use std::path::{Path, PathBuf};

@@ -168,7 +168,7 @@ pub(super) fn ship(commit: Option<&str>, limit: Duration) -> Result<()> {
 
 /// What a build changed against the one before it, as `insights` says it: how a ship reads it, and a sign-off's evidence.
 fn effect_of(build: &str) -> String {
-    match crate::node().post("/api/insights/insights", serde_json::json!({ "effect_of": build })) {
+    match crate::loopback().post("/api/insights/insights", serde_json::json!({ "effect_of": build })) {
         Ok(text) => text.as_str().unwrap_or("Couldn't read its effect from insights.").to_string(),
         Err(err) => format!("Couldn't read its effect from insights: {err:#}"),
     }

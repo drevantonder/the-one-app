@@ -1,6 +1,6 @@
 //! `one update`, the one path that must never break. Each test runs the real program, by a hard link of it in a folder of
 //! its own (the file it replaces), against a small web server standing in for the network's address, with no background
-//! program, node or relay anywhere: what `one update` depends on is only what these give it. A build here is a shell
+//! program, app runtime or relay anywhere: what `one update` depends on is only what these give it. A build here is a shell
 //! script, since all that's asked of one is that it says what it is.
 
 use std::collections::HashMap;

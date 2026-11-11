@@ -149,7 +149,7 @@ pub(crate) fn item_hash(it: &vault::Item) -> String {
     place_hash(&it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect())
 }
 
-/// A place to back up to, as its Vault item says: one in Everyone that the node is switched on for.
+/// A place to back up to, as its Vault item says: one in Everyone that the app runtime is switched on for.
 pub(crate) struct PlaceItem {
     pub id: String,
     pub title: String,

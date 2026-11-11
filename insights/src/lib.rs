@@ -30,7 +30,7 @@ pub mod view;
 #[cfg(not(target_family = "wasm"))]
 pub mod cli;
 
-/// Why this node's last process ended, kept in its home so the next one can say: what it said when it stopped. A crash can't
+/// Why this app runtime's last process ended, kept in its home so the next one can say: what it said when it stopped. A crash can't
 /// say (`panic = "abort"`), so none there, after a run that started, is `Abort`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ended {
@@ -78,7 +78,7 @@ impl Ended {
 
 /// The most a batch holds of each, past which what's new is dropped: as many as the telemetry Worker takes at once.
 const MOST_ROWS: usize = 5000;
-/// The Workers read as `worker.<name>` services (`worker_service`): all but the Cloudflare node, which reports as a node.
+/// The Workers read as `worker.<name>` services (`worker_service`): all but oned on Cloudflare, which reports as an app runtime.
 pub const WORKERS: [&str; 7] = ["gateway", "auth", "relay", "url-signer", "notifications", "onet", "telemetry"];
 /// Those whose traces and logs Cloudflare exports, as the telemetry Worker's `TRACED` says: not the telemetry Worker itself,
 /// as an export of what it did would be the next thing it was handed.
@@ -155,7 +155,7 @@ pub const CLIENTS: &[&str] = &["cli", "mcp", "code", "mac", "phone", "android", 
 /// The JavaScript errors whose name is the engine's, not a program's: anything else is `Error`.
 const EXCEPTIONS: &[&str] = &["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];
 
-/// How a client's try of a node went (onet/src/lib.rs).
+/// How a client's try of an app runtime went (onet/src/lib.rs).
 const TRY_RESULTS: &[&str] = &["answered", "elsewhere", "no connection", "not taking requests", "no answer", "unreachable", "lost", "failed"];
 
 /// Why a process ended or an update wasn't taken.
@@ -181,7 +181,7 @@ pub struct Exception {
     pub frames: Vec<String>,
     /// As it came: `Attrs::message` cleans it.
     pub message: Option<String>,
-    /// What it had asked the node (`call::Ask`) when the node's answer was the failure: the runtime threw it, not the app.
+    /// What it had asked the app runtime (`call::Ask`) when the app runtime's answer was the failure: the runtime threw it, not the app.
     pub ask: Option<&'static str>,
 }
 
@@ -195,7 +195,7 @@ impl Exception {
     }
 
     /// What says where it failed: the first frame of the app's or screen's own, past the runtime's that carried it there;
-    /// with none of its own, what it had asked the node, as `ask:<name>`, since the runtime's frames are the same for every app.
+    /// with none of its own, what it had asked the app runtime, as `ask:<name>`, since the runtime's frames are the same for every app.
     pub fn top_frame(&self) -> Option<String> {
         let own = self.frames.iter().find(|f| !RUNTIME_FRAMES.iter().any(|r| f.starts_with(r)));
         own.cloned().or(self.ask.map(|ask| format!("ask:{ask}"))).or(self.frames.first().cloned())
@@ -268,7 +268,7 @@ impl Attrs {
         self
     }
 
-    /// What a client tried: which node, and how it went.
+    /// What a client tried: which app runtime, and how it went.
     pub fn tried(mut self, node: &str, result: &str) -> Attrs {
         if node.len() == 64 && node.bytes().all(|b| b.is_ascii_hexdigit()) {
             self.0.insert("one.node", json!(node));
@@ -318,7 +318,7 @@ impl Attrs {
         self
     }
 
-    /// Who says a device is on or off: the relay, or this node.
+    /// Who says a device is on or off: the relay, or this app runtime.
     pub fn says(mut self, who: &'static str) -> Attrs {
         self.0.insert("one.says", json!(who));
         self

@@ -82,7 +82,7 @@ pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[
     let cli = commands.is_some();
     let apps = sets(node)?;
     let tools_of = |a: &Value| -> Vec<String> { a["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).map(String::from).collect() };
-    // One the user could add: the node lists it, without tools for them, since it isn't added where they are.
+    // One the user could add: the app runtime lists it, without tools for them, since it isn't added where they are.
     let addable = |a: &Value| a["tools"].is_null() && a["deleted"].is_null();
     if let Some(a) = apps.iter().find(|a| a["name"] == app) {
         let title = a["title"].as_str().unwrap_or(app);

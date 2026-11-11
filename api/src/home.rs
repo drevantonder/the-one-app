@@ -106,7 +106,7 @@ pub const NETWORK_DIR: &str = "network";
 
 pub const NETWORK_FILE: &str = "network.json";
 
-/// The network a computer is in, as its home keeps it (`<home>/network/network.json`): read by its node and its onet.
+/// The network a computer is in, as its home keeps it (`<home>/network/network.json`): read by its app runtime and its onet.
 #[derive(Serialize, Deserialize)]
 pub struct NetworkFile {
     pub root: String,

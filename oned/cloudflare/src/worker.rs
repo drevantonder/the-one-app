@@ -1,4 +1,4 @@
-//! The Cloudflare node (`oned/cloudflare/worker/`) on Cloudflare: a node of the network as a Worker in the account of its other Workers, with
+//! oned on Cloudflare (`oned/cloudflare/worker/`) on Cloudflare: an app runtime of the network as a Worker in the account of its other Workers, with
 //! no address of its own, and an iroh endpoint of its own key, which the relay wakes. A release carries its built
 //! WebAssembly (`update program` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the network's
 //! bucket, each at its latest deploy.
@@ -8,7 +8,7 @@ use serde_json::{json};
 
 use crate::{Cloudflare, Files, ONED, Settings, Worker, upload_hash};
 
-/// The Cloudflare node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
+/// oned on Cloudflare's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
 /// in (the apps themselves it reads from the bucket, each at its latest deploy).
 pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
     let files = ::ui::ui_folder::wasm(::ui::carried::ONED_CLOUDFLARE_FILES, ::ui::carried::ONED_CLOUDFLARE);
@@ -50,7 +50,7 @@ pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u
     }
 }
 
-/// Puts the Cloudflare node in the Cloudflare account of the network's Workers, with no address, and
+/// Puts oned on Cloudflare in the Cloudflare account of the network's Workers, with no address, and
 /// the relay again, from `sources`, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<()> {
     anyhow::ensure!(settings.throwaway_user.is_none(), "a throwaway network's Workers run only beside its throwaway network");

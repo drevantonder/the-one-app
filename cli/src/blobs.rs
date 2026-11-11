@@ -13,9 +13,9 @@ pub fn commands() -> Command {
         ],
         run: |g| {
             match g.words().as_slice() {
-                ["file", "put", file] => println!("{}", g.node.put_blob(&std::fs::read(file).with_context(|| format!("read {file}"))?)?),
+                ["file", "put", file] => println!("{}", g.api.put_blob(&std::fs::read(file).with_context(|| format!("read {file}"))?)?),
                 ["file", "get", hash, file] => {
-                    let mut answer = g.node.open(&format!("/api/blobs/{hash}"), None)?;
+                    let mut answer = g.api.open(&format!("/api/blobs/{hash}"), None)?;
                     if !(200..300).contains(&answer.status) {
                         bail!("{}", serde_json::from_reader::<_, Value>(answer.body)?["error"].as_str().unwrap_or("failed"));
                     }

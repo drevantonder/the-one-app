@@ -10,7 +10,7 @@ made_here = "Made here"
 address = ""
 # The git address `one-dev update` and `one-dev release` get the code from, on any host. Releases are only on GitHub.
 repo = "https://github.com/drevantonder/the-one-app"
-# Nodes and the installer take only releases signed by this key (OpenSSH, Ed25519). Its private half stays with the
+# App runtimes and the installer take only releases signed by this key (OpenSSH, Ed25519). Its private half stays with the
 # publisher: `one-dev update` and `one-dev release` run release_signer to get it, and keep it only in memory.
 release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM"
 release_signer = "op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'"

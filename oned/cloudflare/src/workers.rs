@@ -26,7 +26,7 @@ pub struct Worker {
     place: Option<fn(&Settings) -> (&str, u16)>,
     /// Whether it's also reached at its workers.dev address: by what mustn't come through the gateway.
     own_address: bool,
-    /// Whether it runs the Cloudflare node's build, which carries its devices' endpoints.
+    /// Whether it runs oned on Cloudflare's build, which carries its devices' endpoints.
     oned_build: bool,
     /// Whether it serves the web client's files, as its static assets.
     pub serves_web: bool,
@@ -64,11 +64,11 @@ pub const WORKERS: &[Worker] = &[
     Worker { name: "notifications", entry: "notifications/worker.js", classes: &["Notifications"], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: false, bindings: notifications_bindings, cron: None, was: Some(Was { name: "push", classes: &[("Push", "Notifications")] }) },
 ];
 
-/// The Cloudflare node's Worker (`oned/cloudflare/worker/`), `<cli>-oned`, oned on Cloudflare: no address, and an iroh
+/// oned on Cloudflare's Worker (`oned/cloudflare/worker/`), `<cli>-oned`, oned on Cloudflare: no address, and an iroh
 /// endpoint of its own key, which the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
 pub const ONED: Worker = Worker { name: "oned", entry: "oned/worker.js", classes: &["Oned"], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: true, bindings: oned_bindings, cron: None, was: Some(Was { name: "node", classes: &[("Node", "Oned")] }) };
 
-/// The Workers traced at 100% (`metadata`), their logs exported too: all but the telemetry Worker and the Cloudflare node.
+/// The Workers traced at 100% (`metadata`), their logs exported too: all but the telemetry Worker and oned on Cloudflare.
 /// The web client is the gateway's assets.
 const TRACED: [&str; 6] = ::insights::TRACED;
 
@@ -86,7 +86,7 @@ impl Worker {
         (self.bindings)(settings)
     }
 
-    /// Its modules besides its own, (name, bytes): its WebAssembly, and, for the remote MCP server, the Cloudflare node's
+    /// Its modules besides its own, (name, bytes): its WebAssembly, and, for the remote MCP server, oned on Cloudflare's
     /// build (`node`), which runs its devices' endpoints. None if it needs that and there's none.
     pub fn modules(&self, files: &Files, node: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
         let mut out = wasm(files, self.entry);
@@ -174,28 +174,28 @@ pub struct Settings {
     pub address: String,
     /// Where the CLI's Cloudflare commands reach auth; users reach it at the address.
     pub auth_url: String,
-    /// Whether the network has a Cloudflare node (`cloudflare oned deploy`), which the relay wakes.
+    /// Whether the network has oned on Cloudflare (`cloudflare oned deploy`), which the relay wakes.
     #[serde(default)]
     pub cloudflare_node: bool,
     /// The local ports auth and the gateway listen on, when this machine runs them. The other services
     /// have none: other Workers reach them by binding.
     pub ports: [u16; 2],
     /// The network's devices (`{ key, role, admin }`: key in hex, roles joined by spaces), and its recovery key as a
-    /// client, from the node on this machine when the Workers are deployed or served: the relay starts its list with
+    /// client, from the app runtime on this machine when the Workers are deployed or served: the relay starts its list with
     /// them when it has none yet.
     #[serde(skip)]
     pub devices: Vec<serde_json::Value>,
-    /// The network's root (hex), from the node on this machine as `devices` is: what a sign-in for a
+    /// The network's root (hex), from the app runtime on this machine as `devices` is: what a sign-in for a
     /// device names beside it (`sign_in_proof`). None for Workers made before their network.
     #[serde(skip)]
     pub root: Option<String>,
-    /// The Cloudflare node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
+    /// oned on Cloudflare's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
     #[serde(default, skip_serializing)]
     pub cloudflare_node_key: String,
     /// Better Auth's own secret, for its cookies and the keys it keeps.
     #[serde(default, skip_serializing)]
     pub auth_secret: String,
-    /// Nodes' own addresses MCP clients sign in for (each a resource, in OAuth's words), besides the network's.
+    /// App runtimes' own addresses MCP clients sign in for (each a resource, in OAuth's words), besides the network's.
     #[serde(default)]
     pub resources: Vec<String>,
     /// The network's bucket: `{ endpoint, bucket, region, key_id, secret }`, the URL signer's only secret: nothing else
@@ -250,7 +250,7 @@ pub struct Settings {
     /// what they're on.
     #[serde(skip)]
     pub deployed: Option<String>,
-    /// The node home these are kept in (`load_in`): this machine's, or a throwaway network's.
+    /// The app runtime home these are kept in (`load_in`): this machine's, or a throwaway network's.
     #[serde(skip)]
     pub(super) dir: PathBuf,
 }
@@ -603,7 +603,7 @@ impl Settings {
     }
 
     /// A throwaway network's Workers (`one-dev throwaway`): on free ports here, its address its gateway's at 127.0.0.1, which `one-dev throwaway`
-    /// lets each device it borrows reach at the same address; its bucket where its node serves its data (`bucket`), and
+    /// lets each device it borrows reach at the same address; its bucket where its app runtime serves its data (`bucket`), and
     /// `user` signed in with nothing to show.
     pub fn for_throwaway(home: &Path, bucket: &str, user: (String, String)) -> Result<Settings> {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
@@ -613,7 +613,7 @@ impl Settings {
         settings.ports = ports;
         settings.throwaway_user = Some(user);
         settings.dir = home.to_path_buf();
-        // Its node serves its data there (throwaway::bucket), signatures unchecked: the URL signer holds these.
+        // Its app runtime serves its data there (throwaway::bucket), signatures unchecked: the URL signer holds these.
         settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway", "region": "auto", "key_id": "throwaway", "secret": "throwaway" }));
         Ok(settings)
     }
@@ -658,7 +658,7 @@ impl Settings {
         self.keep_in_1password()
     }
 
-    /// The Cloudflare node's endpoint (its public key, hex), once it has a key.
+    /// oned on Cloudflare's endpoint (its public key, hex), once it has a key.
     pub fn cloudflare_node_endpoint(&self) -> Option<String> {
         let seed: [u8; 32] = data_encoding::HEXLOWER.decode(self.cloudflare_node_key.as_bytes()).ok()?.try_into().ok()?;
         Some(data_encoding::HEXLOWER.encode(ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().as_bytes()))
@@ -700,7 +700,7 @@ fn notifications_bindings(settings: &Settings) -> Vec<Binding> {
 }
 
 /// The relay holds no secrets: only the keys of the network's first devices, which it starts its list with, and the
-/// Cloudflare node's, whose datagrams it hands its Durable Object, and the remote MCP server's devices, each bound to its
+/// oned on Cloudflare's, whose datagrams it hands its Durable Object, and the remote MCP server's devices, each bound to its
 /// object while it runs; and what the Workers are on and the device they're deployed from (`Newest::deployed`), which it
 /// says to every device.
 fn relay_bindings(settings: &Settings) -> Vec<Binding> {
@@ -749,7 +749,7 @@ fn telemetry_bindings(settings: &Settings) -> Vec<Binding> {
     out
 }
 
-/// The Cloudflare node: its endpoint's key, and the relay it's reached through.
+/// oned on Cloudflare: its endpoint's key, and the relay it's reached through.
 fn oned_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![
         plain("AUTH", "service:auth"),
@@ -806,7 +806,7 @@ fn auth_bindings(settings: &Settings) -> Vec<Binding> {
         }
     }
     out.extend(settings.root.clone().map(|root| plain("ROOT", root)));
-    // Tokens are for the network's address unless a client asks for a node's own.
+    // Tokens are for the network's address unless a client asks for an app runtime's own.
     let resources: Vec<&String> = std::iter::once(&settings.address).chain(&settings.resources).collect();
     out.push(plain("RESOURCES", json!(resources).to_string()));
     out.push(secret("AUTH_SECRET", settings.auth_secret.clone()));
@@ -819,15 +819,15 @@ fn reaches(value: &str) -> Option<&str> {
 }
 
 /// The network's Workers as one workerd runs them, the gateway serving the web client's files from `web`; and the
-/// Cloudflare node, if the network has one and this build carries it.
+/// oned on Cloudflare, if the network has one and this build carries it.
 pub fn served(settings: &Settings, web: &Path, sources: &Files) -> Result<Vec<Served>> {
     served_with(settings, web, sources, crate::worker::modules().ok())
 }
 
-/// `served`, with the Cloudflare node's build `cloudflare_node` (this build's, or a test's).
+/// `served`, with oned on Cloudflare's build `cloudflare_node` (this build's, or a test's).
 pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_node: Option<Modules>) -> Result<Vec<Served>> {
     let node = cloudflare_node.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::worker::served(settings, modules));
-    // A build without the Cloudflare node's WebAssembly has no remote MCP server, and nothing binds one.
+    // A build without oned on Cloudflare's WebAssembly has no remote MCP server, and nothing binds one.
     let mut served = Vec::new();
     for worker in WORKERS {
         let Some(modules) = worker.modules(sources, cloudflare_node.as_ref()) else { continue };
@@ -1554,7 +1554,7 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
                 bindings.push(binding)
             }
             Some(_) => complete = false,
-            // Another Worker's class, once it's there: the relay and the Cloudflare node each bind the other's, so the
+            // Another Worker's class, once it's there: the relay and oned on Cloudflare each bind the other's, so the
             // first of them deployed goes without, and has it when it's deployed again.
             None if object.is_some() => {
                 if let Some((other, class)) = object.filter(|(other, _)| exists(&worker_name(other))) {
@@ -1572,7 +1572,7 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
     }
     let mut meta = json!({ "main_module": "worker.js", "compatibility_date": ::deploy::build::COMPATIBILITY_DATE, "bindings": bindings, "observability": { "enabled": true } });
     // Kept in Cloudflare, sent to the telemetry Worker once a deploy has made where to (`basin::exports`), and never for the
-    // Cloudflare node, which reports its calls as every node does, or the telemetry Worker.
+    // oned on Cloudflare, which reports its calls as every app runtime does, or the telemetry Worker.
     if TRACED.contains(&worker.name) {
         meta["observability"]["traces"] = json!({ "enabled": true, "head_sampling_rate": 1 });
         for (signal, _) in crate::basin::EXPORTED {
@@ -1700,7 +1700,7 @@ mod observability_tests {
     use super::*;
 
     /// Every Worker's traces and logs are exported but the telemetry Worker's, which would be handed its own export, and
-    /// the Cloudflare node's, which reports its calls as every node does.
+    /// oned on Cloudflare's, which reports its calls as every app runtime does.
     #[test]
     fn every_worker_but_telemetry_and_the_node_is_exported() {
         let mut settings = Settings::new("https://example.org");

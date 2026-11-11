@@ -81,7 +81,7 @@ export default {
 };
 
 /// A browser reads a database's steps from the bucket itself, through the URL signer's `get`, as the bucket holds them
-/// (sealed: it opens nothing), each by its name and null past the last: never as a node passes them on, which could
+/// (sealed: it opens nothing), each by its name and null past the last: never as an app runtime passes them on, which could
 /// hand it junk for a real step. Only a device of the network's reaches it.
 async function browsersReadStepsFromTheBucket() {
   const objects = new Map([["global/node/scope/000000000001", new Uint8Array([1, 2, 3])], ["global/node/scope/000000000002", new Uint8Array([4])]]);

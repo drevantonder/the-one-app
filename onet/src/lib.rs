@@ -1,12 +1,12 @@
-//! How a client device reaches its network's nodes: an iroh endpoint of the device's own key, through the relay at
-//! the network's address (and natively, directly where a path opens), connections raced to the nodes the relay says
-//! are on, in the order things run on them, the first up asked and each kept open, and each request to one node alone,
-//! HTTP/1.1 on a stream of its own, which the node answers with its local API as the device's user
+//! How a client device reaches its network's app runtimes: an iroh endpoint of the device's own key, through the relay at
+//! the network's address (and natively, directly where a path opens), connections raced to the app runtimes the relay says
+//! are on, in the order things run on them, the first up asked and each kept open, and each request to one app runtime alone,
+//! HTTP/1.1 on a stream of its own, which the app runtime answers with its local API as the device's user
 //! (app-runtime/src/net.rs). The same natively, for the CLI and the apps, and in browsers as WebAssembly (src/wasm.rs).
 //!
 //! A device whose key can't be read out (a browser's, in WebCrypto) is reached as an endpoint of a key of the session's,
-//! which the device vouches for with a certificate (`keys::certify` in the node): shown to the relay as its auth token,
-//! and sent with each request (`x-one-endpoint`), so the node takes it as the device.
+//! which the device vouches for with a certificate (`keys::certify` in the app runtime): shown to the relay as its auth token,
+//! and sent with each request (`x-one-endpoint`), so the app runtime takes it as the device.
 //!
 //! Every method takes `&self`, so many requests run at once on one client: on a connection, opening a stream costs no
 //! round trip, so a request takes one.
@@ -43,7 +43,7 @@ pub mod sign_in;
 pub mod computer;
 
 /// iroh's minimal endpoint without its captive portal check, a request to the relay's address on each full net report
-/// that tells a device nothing it acts on: the same as a node's (app-runtime/src/net.rs, `Endpoints`).
+/// that tells a device nothing it acts on: the same as an app runtime's (app-runtime/src/net.rs, `Endpoints`).
 struct Endpoints;
 
 impl presets::Preset for Endpoints {
@@ -54,14 +54,14 @@ impl presets::Preset for Endpoints {
     }
 }
 
-/// How long a connection to a node may take before the next is started alongside it: the first up is asked, and the
-/// rest are kept for later. A connection carries nothing but itself, so racing them hands no node anything.
+/// How long a connection to an app runtime may take before the next is started alongside it: the first up is asked, and the
+/// rest are kept for later. A connection carries nothing but itself, so racing them hands no device anything.
 const STAGGER: Duration = Duration::from_millis(250);
-/// How long the nodes the relay says are on are given before those it doesn't (the Cloudflare node, which wakes when
+/// How long the app runtimes the relay says are on are given before those it doesn't (oned on Cloudflare, which wakes when
 /// asked, and any that may have come on since) are raced too.
 const FALLBACK: Duration = Duration::from_secs(1);
 const PATIENT: Duration = Duration::from_secs(10);
-/// The least a connected node is given to start answering a GET or HEAD before its connection is taken as gone quiet:
+/// The least a connected app runtime is given to start answering a GET or HEAD before its connection is taken as gone quiet:
 /// its usual time to answer is learned (`platform::hedge`), but a GET's first byte comes only after its work. (Other
 /// requests may run as long as they need: that one is for the connection's own idle timeout.)
 const ANSWER_LEAST: Duration = Duration::from_secs(1);
@@ -69,22 +69,22 @@ const SKIP: Duration = Duration::from_secs(10);
 const HEAD_LIMIT: usize = 64 << 10;
 const READ: usize = 64 << 10;
 
-/// What every request says, so a node that can't run a call itself answers 421 with the nodes that can
+/// What every request says, so an app runtime that can't run a call itself answers 421 with the app runtimes that can
 /// (`{ elsewhere }`), which this client asks itself, handing each its own keys, rather than passing it on.
 const MOST_ELSEWHERE: usize = 2;
 
-/// What this custom build's clients speak to its nodes.
+/// What this custom build's clients speak to its app runtimes.
 fn alpn() -> Vec<u8> {
     format!("{}/http/1", ::custom_build::config::CLI).into_bytes()
 }
 
-/// Why a request failed; `sent` if it may have reached the node, so that sending it again might run it twice.
+/// Why a request failed; `sent` if it may have reached the app runtime, so that sending it again might run it twice.
 #[derive(Debug)]
 pub struct Error {
     pub sent: bool,
     /// The network doesn't list this device (yet, or any more): what an app shows is its own screen to approve it.
     pub not_let_in: bool,
-    /// What kind of refusal the node said it was (`::custom_build::protocol::code`), when it said.
+    /// What kind of refusal the app runtime said it was (`::custom_build::protocol::code`), when it said.
     pub code: Option<String>,
     message: String,
     pub trace: Option<serde_json::Value>,
@@ -110,7 +110,7 @@ fn sent(message: impl std::fmt::Display) -> Error {
     Error { sent: true, not_let_in: false, code: None, message: message.to_string(), trace: None }
 }
 
-/// A request to a node's local API: `path` with its query, from `/`.
+/// A request to an app runtime's local API: `path` with its query, from `/`.
 pub struct Request {
     pub method: String,
     pub path: String,
@@ -171,17 +171,17 @@ impl Sent {
 }
 
 pub struct Response {
-    /// The node that answered, as its connection proved: the one a 428 may be believed from, and keys sealed to.
+    /// The app runtime that answered, as its connection proved: the one a 428 may be believed from, and keys sealed to.
     pub node: [u8; 32],
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Body,
-    /// `{ tries, node }`, each node it tried in order, with how long it waited and why it moved on, and for a request that
-    /// asked for one (`header::TRACE`), what the node that answered did, as it said.
+    /// `{ tries, node }`, each app runtime it tried in order, with how long it waited and why it moved on, and for a request that
+    /// asked for one (`header::TRACE`), what the app runtime that answered did, as it said.
     pub trace: Option<serde_json::Value>,
 }
 
-/// A client device's way to its network's nodes. Clones share it.
+/// A client device's way to its network's app runtimes. Clones share it.
 #[derive(Clone)]
 pub struct Client(Arc<Inner>);
 
@@ -189,29 +189,29 @@ struct Inner {
     secret: SecretKey,
     way: Way,
     certificate: Mutex<Option<String>>,
-    /// The nodes to ask, in the order things run on them: the first connected is asked.
+    /// The app runtimes to ask, in the order things run on them: the first connected is asked.
     nodes: Mutex<Vec<PublicKey>>,
-    /// The nodes the relay last said are on its network now, if it said: raced first, in that order.
+    /// The app runtimes the relay last said are on its network now, if it said: raced first, in that order.
     online: Mutex<Option<HashSet<PublicKey>>>,
-    /// Each node's run priority, where the network's state said it: nodes on the same one are raced at once.
+    /// Each app runtime's run priority, where the network's state said it: app runtimes on the same one are raced at once.
     ranks: Mutex<HashMap<PublicKey, u32>>,
-    /// The node that wakes when asked, the Cloudflare node, which the relay never says is on: raced first only once an
+    /// The app runtime that wakes when asked, oned on Cloudflare, which the relay never says is on: raced first only once an
     /// admin gave it a number in run priority, else after the rest.
     wakes: Mutex<Option<PublicKey>>,
     /// The endpoint, made again after the network was lost.
     endpoint: tokio::sync::Mutex<Option<Endpoint>>,
-    /// A connection to each node raced or asked, held while it's being opened, so one is opened at a time.
+    /// A connection to each app runtime raced or asked, held while it's being opened, so one is opened at a time.
     conns: Mutex<HashMap<PublicKey, Arc<tokio::sync::Mutex<Option<Connection>>>>>,
-    /// The nodes that didn't answer, and when: asked after the others, until one is reached again.
+    /// The app runtimes that didn't answer, and when: asked after the others, until one is reached again.
     down: Mutex<HashMap<PublicKey, Down>>,
-    /// What answers a node that opens a stream on a connection of this client's, if anything does.
+    /// What answers an app runtime that opens a stream on a connection of this client's, if anything does.
     asked: Mutex<Option<Asked>>,
     /// This device's own app runtime, on its own machine, if it has one: asked first, over its loopback.
     local: Mutex<Option<Local>>,
 }
 
 /// This device's own app runtime, on its own machine: its endpoint's key, and where its loopback answers this machine's
-/// own programs, which show its token (`api::local::LOCAL_TOKEN`). It's asked ahead of every node over iroh, as this
+/// own programs, which show its token (`api::local::LOCAL_TOKEN`). It's asked ahead of every app runtime over iroh, as this
 /// device's own, so it hands it nothing and passes calls on itself; one it doesn't answer goes to the rest.
 #[derive(Clone)]
 pub struct Local {
@@ -221,12 +221,12 @@ pub struct Local {
     pub token: Arc<dyn Fn() -> Option<String> + Send + Sync>,
 }
 
-/// How a client answers a node that asks for its log over a connection the client opened: the ask as JSON (`logs`'s
-/// `since`, `grep` and `lines`), and the answer as JSON (`{ ok }` or `{ error }`). A node asks only for someone who may
+/// How a client answers an app runtime that asks for its log over a connection the client opened: the ask as JSON (`logs`'s
+/// `since`, `grep` and `lines`), and the answer as JSON (`{ ok }` or `{ error }`). An app runtime asks only for someone who may
 /// remove this device: its user and the network's admins (app-runtime/src/calls/running.rs).
 pub type Asked = Arc<dyn Fn(serde_json::Value) -> serde_json::Value + Send + Sync>;
 
-/// The most a node's ask may say.
+/// The most an app runtime's ask may say.
 const ASKED_LIMIT: usize = 4 << 10;
 
 struct Down {
@@ -237,7 +237,7 @@ struct Down {
 impl Client {
     /// The client of the device whose key is `secret`, in the network at `address`, asking `nodes` (in the order things
     /// run on them); or of a session's endpoint whose key is `secret`, with its device's `certificate`. It starts
-    /// connecting to the first node at once.
+    /// connecting to the first app runtime at once.
     pub async fn start(secret: [u8; 32], certificate: Option<String>, address: &str, nodes: &[[u8; 32]]) -> Result<Client, Error> {
         let url: RelayUrl = address.trim_end_matches('/').parse().map_err(|_| unsent("the network's address isn't a URL"))?;
         // A Worker has no UDP, so the relay serves no QUIC address discovery.
@@ -257,7 +257,7 @@ impl Client {
     }
 
     /// `start`'s client, for a device whose own app runtime is on this machine (`Local`): no endpoint is made, nor any
-    /// node connected to, until a request finds the runtime doesn't answer, as only it is asked while it does.
+    /// app runtime connected to, until a request finds the runtime doesn't answer, as only it is asked while it does.
     #[cfg(feature = "computer")]
     pub async fn beside(secret: [u8; 32], address: &str, nodes: &[[u8; 32]], local: Local) -> Result<Client, Error> {
         let url: RelayUrl = address.trim_end_matches('/').parse().map_err(|_| unsent("the network's address isn't a URL"))?;
@@ -303,12 +303,12 @@ impl Client {
         self.reconnect().await;
     }
 
-    /// Answers what a node asks of this client (`Asked`), on the connections it opens from now on.
+    /// Answers what an app runtime asks of this client (`Asked`), on the connections it opens from now on.
     pub fn answer_with(&self, asked: Asked) {
         *self.0.asked.lock().unwrap() = Some(asked);
     }
 
-    /// The nodes to ask, in the order things run on them, as the network's state says; connecting to them starts now.
+    /// The app runtimes to ask, in the order things run on them, as the network's state says; connecting to them starts now.
     pub fn set_nodes(&self, nodes: &[[u8; 32]]) -> Result<(), Error> {
         let nodes = keys(nodes)?;
         *self.0.nodes.lock().unwrap() = nodes;
@@ -321,7 +321,7 @@ impl Client {
         Ok(())
     }
 
-    /// Each node's run priority (a number, the lowest first, as the network's state says it): those on the same one
+    /// Each app runtime's run priority (a number, the lowest first, as the network's state says it): those on the same one
     /// are equal, so they're raced at once, and the quickest is asked.
     pub fn set_ranks(&self, ranks: &[([u8; 32], u32)]) -> Result<(), Error> {
         let keys = keys(&ranks.iter().map(|r| r.0).collect::<Vec<_>>())?;
@@ -329,7 +329,7 @@ impl Client {
         Ok(())
     }
 
-    /// The nodes the relay says are on its network now (`/relay/computes`' `online`): raced first, in the order things
+    /// The app runtimes the relay says are on its network now (`/relay/computes`' `online`): raced first, in the order things
     /// run on them, before those it doesn't name.
     pub fn set_online(&self, online: &[[u8; 32]]) -> Result<(), Error> {
         *self.0.online.lock().unwrap() = Some(keys(online)?.into_iter().collect());
@@ -434,10 +434,10 @@ impl Client {
         self.fetch_with(req, |_| std::future::ready(Vec::new())).await
     }
 
-    /// Asks one node: the first in order whose connection is up, or else the first whose connection comes up as they're
-    /// raced (`pick`), each started `STAGGER` after the last. Only then are `node`'s headers made, for that node alone
+    /// Asks one app runtime: the first in order whose connection is up, or else the first whose connection comes up as they're
+    /// raced (`pick`), each started `STAGGER` after the last. Only then are `node`'s headers made, for that app runtime alone
     /// (its key): what's sealed to it. A request that never reached it is sent to the next; one whose connection was
-    /// lost, again once on a fresh one, unless it may have reached the node and isn't a GET or HEAD. A node that says
+    /// lost, again once on a fresh one, unless it may have reached the app runtime and isn't a GET or HEAD. An app runtime that says
     /// it can't run it (421, `{ elsewhere }`) is followed to those it names that this client knows, with their own
     /// headers.
     pub async fn fetch_with<F, H>(&self, req: Request, node: H) -> Result<Response, Error>
@@ -592,7 +592,7 @@ impl Client {
         Err(unsent("no runtime of this device's is on this machine"))
     }
 
-    /// The node to ask of `first` and then `fallback`, and its connection: the first whose connection is up (another
+    /// The app runtime to ask of `first` and then `fallback`, and its connection: the first whose connection is up (another
     /// before it that isn't up is connected to in the background, for the next request); or else they're raced,
     /// `first` each `STAGGER` after the last (at once once all started have failed), then `fallback` all at once
     /// `FALLBACK` after, and the first up wins. → it, and how long its connection took to open, if it was opened now.
@@ -717,7 +717,7 @@ impl Client {
         }
     }
 
-    /// Answers the streams a node opens on `conn` (`Asked`), as long as it's open, with what answers when each comes: this
+    /// Answers the streams an app runtime opens on `conn` (`Asked`), as long as it's open, with what answers when each comes: this
     /// client's `answer_with` may be called after its connections start.
     fn answering(&self, conn: &Connection) {
         let (conn, me) = (conn.clone(), Arc::downgrade(&self.0));
@@ -735,7 +735,7 @@ impl Client {
                     let _ = send.finish();
                 });
             }
-            // A node closes a connection idle a few minutes; with none left, this client's relay socket goes too.
+            // An app runtime closes a connection idle a few minutes; with none left, this client's relay socket goes too.
             if let Some(me) = me.upgrade() {
                 Client(me).close_if_unused().await;
             }
@@ -955,7 +955,7 @@ enum Framing {
     Done,
 }
 
-/// A response's body, read as it comes: dropping it before the end stops the node sending it.
+/// A response's body, read as it comes: dropping it before the end stops the app runtime sending it.
 pub struct Body {
     recv: Option<Stream>,
     buf: Vec<u8>,
@@ -1025,7 +1025,7 @@ impl Body {
         self.bytes_within(usize::MAX).await
     }
 
-    /// The rest of the body, whole, if it's at most `most` bytes: a node that sends more is stopped.
+    /// The rest of the body, whole, if it's at most `most` bytes: an app runtime that sends more is stopped.
     pub async fn bytes_within(mut self, most: usize) -> Result<Vec<u8>, Error> {
         let mut out = Vec::new();
         while let Some(part) = self.chunk().await? {

@@ -15,7 +15,7 @@ unsafe extern "C" {
     fn one_menu_update(json: *const c_char);
 }
 
-/// The items, showing what's kept, until the node's answer redraws them.
+/// The items, showing what's kept, until the app runtime's answer redraws them.
 pub fn start() {
     let mark = include_bytes!(concat!(env!("OUT_DIR"), "/menubar.png"));
     // SAFETY: Swift copies the bytes before it returns.
@@ -61,7 +61,7 @@ fn items() -> Vec<Value> {
     out
 }
 
-/// The items again, as things are now. Off the main thread, since asking this Mac's node for its key can take seconds;
+/// The items again, as things are now. Off the main thread, since asking this Mac's onet for its key can take seconds;
 /// one at a time, so the last asked is the last drawn.
 pub fn update() {
     static ONE: Mutex<()> = Mutex::new(());

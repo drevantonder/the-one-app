@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::{Failed, Trouble};
 
-/// How many positions after a step a read, HEAD or create of it asks for too, for a node; a client device only reads,
+/// How many positions after a step a read, HEAD or create of it asks for too, for an app runtime; a client device only reads,
 /// and reads a log from its start, so it asks for more at a time.
 const READ_AHEAD: u64 = 15;
 const CLIENT_READ_AHEAD: u64 = 31;

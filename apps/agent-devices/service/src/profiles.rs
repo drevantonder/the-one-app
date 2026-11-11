@@ -1,6 +1,6 @@
 //! Browser profiles. A profile is a Vault item of the user's: its profile folder, as a tarball without caches, is a
 //! blob encrypted with a key made from the item's secret field and a salt of its own, so each save has a fresh key.
-//! The app over this service names the item in its calls, and the node fills in the secret, so only this process ever
+//! The app over this service names the item in its calls, and the app runtime fills in the secret, so only this process ever
 //! holds it or the profile; the app records each save on the item (its blob, salt and sites), and nothing here keeps a
 //! profile once its device is gone.
 
@@ -25,7 +25,7 @@ pub struct Profile {
     /// Its title, the profile's folder in the device.
     #[serde(default)]
     pub name: String,
-    /// Its secret field, filled in by the node.
+    /// Its secret field, filled in by the app runtime.
     #[serde(default)]
     pub key: String,
     /// Its last save; none for a new one.

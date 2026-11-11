@@ -10,7 +10,7 @@ pub fn commands() -> ::api::cli::Command {
         run: |g| {
             match g.words().as_slice() {
                 ["skills"] => {
-                    let skills = ::mcp::mcp::skills(g.node);
+                    let skills = ::mcp::mcp::skills(g.api);
                     let width = skills.iter().map(|s| s.name.len()).max().unwrap_or(0);
                     for s in &skills {
                         println!("{:width$}  {}", s.name, s.description);
@@ -18,7 +18,7 @@ pub fn commands() -> ::api::cli::Command {
                     println!("\n{CLI} skills <name> prints one; {CLI} skills <name> <file> one of its other files.");
                 }
                 ["skills", name, path @ ..] => {
-                    let skill = ::mcp::mcp::skills(g.node).into_iter().find(|s| s.name == *name || s.name.strip_prefix(&format!("{}-", server_name())) == Some(*name));
+                    let skill = ::mcp::mcp::skills(g.api).into_iter().find(|s| s.name == *name || s.name.strip_prefix(&format!("{}-", server_name())) == Some(*name));
                     let skill = skill.ok_or_else(|| ::api::cli::Failed::Typed(format!("no skill {name}: {CLI} skills lists them")))?;
                     let path = path.first().copied().unwrap_or("SKILL.md");
                     print!("{}", anyhow::Context::with_context(skill.file(path), || format!("{} has no {path}: it has {}", skill.name, skill.all_files().iter().map(|f| f.0.as_str()).collect::<Vec<_>>().join(", ")))?);

@@ -1,5 +1,5 @@
 //! What a deploy sends: the Workers' sources and the web client, from the signed record at the network's address where
-//! that's newer than what this program was built with, so a change to them alone reaches Cloudflare with no node build
+//! that's newer than what this program was built with, so a change to them alone reaches Cloudflare with no device build
 //! and no wait for this device to take one.
 
 use anyhow::{Context, Result};
@@ -29,7 +29,7 @@ impl Newest {
 
     /// What the relay says of the Workers (`DEPLOYED`, `workers` in its answer to `POST /relay/computes`): the device they
     /// were last deployed from (this one), which an ask to deploy them again is left for, and what each is on. The Cloudflare
-    /// node is on what the program that deploys it is.
+    /// app runtime is on what the program that deploys it is.
     pub fn deployed(&self, settings: &crate::Settings) -> String {
         serde_json::json!({
             "from": ::api::home::device_here(&settings.dir).ok().map(|(key, _)| key),

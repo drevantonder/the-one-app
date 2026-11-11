@@ -1,5 +1,5 @@
 //! Running a tool, the one way every caller does: the command line, MCP and code mode scripts. The core's run here, on
-//! the client, asking its node; an app's run as a call, on a device.
+//! the client, asking its app runtime; an app's run as a call, on a device.
 
 use anyhow::bail;
 use serde_json::{Map, Value, json};

@@ -1,12 +1,12 @@
-//! Calls: where each runs, running it here or on another device, what it wrote, and what its app asks the node while it runs.
+//! Calls: where each runs, running it here or on another device, what it wrote, and what its app asks the app runtime while it runs.
 //!
 //! A call runs once. It names the scopes it touches before it runs, so a device that can't run it says so before doing
 //! anything; one that writes takes a lease in the bucket first, so failing over never repeats it. It writes nothing if
 //! it fails, or is stopped at its limit, which happens only before it writes: what it keeps goes in the bucket first,
-//! and once it writes, it's waited for. A node a client picked runs a call itself if it runs every scope the call
-//! reaches; if it doesn't, it answers 421 with the nodes that do, and the client asks one itself, with keys for it,
-//! rather than the node passing it on. A node asked by what doesn't pick its node (this machine's own programs, a
-//! auth, the Cloudflare node's relay) passes a call on to the devices that run it. Calls go to the devices in run
+//! and once it writes, it's waited for. An app runtime a client picked runs a call itself if it runs every scope the call
+//! reaches; if it doesn't, it answers 421 with the app runtimes that do, and the client asks one itself, with keys for it,
+//! rather than the app runtime passing it on. An app runtime asked by what doesn't pick its app runtime (this machine's own programs, a
+//! auth, oned on Cloudflare's relay) passes a call on to the devices that run it. Calls go to the devices in run
 //! priority's order (`scope/src/rank.rs`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -58,7 +58,7 @@ impl Reply {
     }
 }
 
-/// What a running call may do through the node: whose it is, which app's, and which scopes it reaches.
+/// What a running call may do through the app runtime: whose it is, which app's, and which scopes it reaches.
 #[derive(Clone, Debug)]
 pub struct Grant {
     pub app: String,
@@ -207,15 +207,15 @@ impl Host {
         self.route(req, me).await
     }
 
-    /// Runs a call for a client device that picks the node it asks itself (`x-one-elsewhere`), as `me`: here if this
-    /// node runs every scope it reaches, whatever the order things run in would pick, as the client raced its way here.
+    /// Runs a call for a client device that picks the app runtime it asks itself (`x-one-elsewhere`), as `me`: here if this
+    /// app runtime runs every scope it reaches, whatever the order things run in would pick, as the client raced its way here.
     /// One it can't run (it doesn't run them all, or isn't ready for that app) is `Elsewhere`, naming those that can,
-    /// which the client asks itself with keys for each, rather than this node passing it on. A service's call, which
+    /// which the client asks itself with keys for each, rather than this app runtime passing it on. A service's call, which
     /// runs where its service is, and one for a named device, go where `route` sends them.
     pub async fn call_picked(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let me = Caller { agent: req.agent.clone().or(me.agent), ..me };
         let req = self.identified(req)?;
-        // The Cloudflare node answers a device of the caller's that asks it itself, as no node does: this client is told so.
+        // oned on Cloudflare answers a device of the caller's that asks it itself, as no device does: this client is told so.
         if let Some(cloudflare) = self.names_cloudflare(&req) {
             let why = self.cloudflare_is_asked_directly();
             trace::note(req.named(json!({ "step": "device", "device": self.device_name(), "result": "elsewhere", "here": true, "why": why })), Duration::ZERO);
@@ -340,7 +340,7 @@ impl Host {
                     if here {
                         let _ = said.send((i, true));
                         // Keys it lacks are its caller's to hand this device, which they were sealed to: no other runs it.
-                        // A call this node named, that no device has tried before, has no other to take its lease first: none is.
+                        // A call this app runtime named, that no device has tried before, has no other to take its lease first: none is.
                         return match self.run_or_need(&CallRequest { unleased: req.named_here && first, ..req.clone() }, me).await {
                             Ok(reply) => Ok((reply, None)),
                             Err(need) => Err(Asked::Needs(need)),
@@ -519,8 +519,8 @@ impl Host {
         custom_build::protocol::Coded::new(custom_build::protocol::code::NOT_ADDED, text)
     }
 
-    /// Why `app`'s service runs nowhere for `me` though it was put on a node, as its problem box in the App Store says
-    /// it: that node is off, was removed, or said what went wrong.
+    /// Why `app`'s service runs nowhere for `me` though it was put on an app runtime, as its problem box in the App Store says
+    /// it: that app runtime is off, was removed, or said what went wrong.
     async fn service_problem(&self, app: &str, me: &Caller) -> Option<String> {
         let title = self.title(app).await;
         let info = self.catalog(me, false).await.ok()?.into_iter().find(|a| a["name"] == app)?;
@@ -572,7 +572,7 @@ impl Host {
         Ok(Value::Object(out))
     }
 
-    /// The Cloudflare node's key, if the call names it (`--device cloudflare`).
+    /// oned on Cloudflare's key, if the call names it (`--device cloudflare`).
     fn names_cloudflare(&self, req: &CallRequest) -> Option<Key> {
         let found = self.with(|i| i.r.db().find_runner(req.device.as_deref().unwrap_or_default())).ok()?;
         self.is_cloudflare_node(&found).then_some(found)
@@ -588,7 +588,7 @@ impl Host {
         let passed = passed(me);
         if let Some(device) = &req.device {
             // A service's call goes to the service offering it on that device, if one serves the caller: their own
-            // first (never for a call another node passed on), then the device itself, then one its user shares
+            // first (never for a call another app runtime passed on), then the device itself, then one its user shares
             // with everyone.
             if req.service.is_some() {
                 let own = (!passed).then(|| self.find_service(&req.app, device, &me.user, true)).flatten();
@@ -597,7 +597,7 @@ impl Host {
                     return Ok(vec![found]);
                 }
             }
-            // A client's log is read through a node it's connected to, which only that node knows: each is tried.
+            // A client's log is read through an app runtime it's connected to, which only that app runtime knows: each is tried.
             if req.app == key::APP && self.with(|i| Ok(i.r.db().find_machine(device).and_then(|k| Ok(i.r.db().client(&k)?.is_some())).unwrap_or(false)))? {
                 let mut nodes = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|m| m.key).filter(|k| *k == self.0.id || i.reachable(k)).collect::<Vec<_>>()))?;
                 nodes.sort_by_key(|k| *k != self.0.id);
@@ -609,7 +609,7 @@ impl Host {
         // A function of a service that's about its own machine (`prefer: { run: "here" }`: Shell's run, Models' here) runs on
         // the caller's first.
         let about_here = |d: &Value| d["prefer"][req.runs()] == "here";
-        // This device: its node, or a part of it.
+        // This device: its app runtime, or a part of it.
         let ours = |i: &Network, k: &Key| -> Result<bool> { Ok(*k == self.0.id || i.r.db().machine(k)?.is_some_and(|m| m.device == Some(self.0.holds.device()))) };
         // Each service that serves the caller and may be up, by its key, with whether it's about its own machine: this
         // device's while its part is registered here; another's while its device's runtime can be reached and the
@@ -682,7 +682,7 @@ impl Host {
         })
     }
 
-    /// A call as the node runs it: one that names a service is that service's, whatever app shares its name; so is one
+    /// A call as the app runtime runs it: one that names a service is that service's, whatever app shares its name; so is one
     /// that names an app with no deploy, or that runs on every device.
     pub(super) fn resolve(&self, mut req: CallRequest) -> CallRequest {
         if let Some(service) = &req.service {
@@ -701,10 +701,10 @@ impl Host {
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller, limit: Duration, taken: impl FnOnce(bool)) -> Result<(Reply, Option<Value>)> {
         // A call handed keys passes on its keys alone (below), and app schedules' calls pass on none.
         let service = self.is_service(&device);
-        // A node of the caller's own client device (the device's own, or its app runtime) asks as itself: always for a
+        // An app runtime of the caller's own client device (the device's own, or its app runtime) asks as itself: always for a
         // call it runs with its device's keys (one another device of its user passed here as itself, whose key the
         // receiving device would refuse from this connection), and a direct client's call only for a service — never
-        // one another node passed on: forwarding another client's key, or app database keys, would make the receiving
+        // one another app runtime passed on: forwarding another client's key, or app database keys, would make the receiving
         // device refuse its own user's call.
         let as_own_client = match &me.credential {
             Credential::Own => true,
@@ -713,8 +713,8 @@ impl Host {
         } && self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
         let mut request = req.named(json!({ "service": req.service, "device": req.device, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent } }));
-        // Keys handed here (a client device's, or with a call passed on) go on to another node sealed
-        // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone: only those the
+        // Keys handed here (a client device's, or with a call passed on) go on to another app runtime sealed
+        // to it for this app runtime's key, of the scopes the call reaches alone, which it runs on them alone: only those the
         // device runs, and only the call's app's.
         let resolved = self.resolve(req.clone());
         if matches!(me.credential, Credential::Client(_) | Credential::Passed { .. })
@@ -863,7 +863,7 @@ impl Host {
         if !self.runs_apps() {
             return Ok(Reply::Elsewhere(format!("{} doesn't run apps: its user switched that off", self.device_name())));
         }
-        // Before it's read every scope it holds (just taken over from an update's node, say), what's added where reads as
+        // Before it's read every scope it holds (just taken over from an update's app runtime, say), what's added where reads as
         // nothing: another device runs it.
         if !self.ready() {
             return Ok(Reply::Elsewhere("it isn't ready yet".into()));
@@ -994,7 +994,7 @@ pub(super) fn address(m: &ScopeDb) -> Result<Option<String>> {
     Ok(m.setting("address")?.map(|a| a.trim_end_matches('/').to_string()))
 }
 
-/// Whether a call is one another node passed on: it runs only on what it was handed, never as this device's own user.
+/// Whether a call is one another app runtime passed on: it runs only on what it was handed, never as this device's own user.
 fn passed(me: &Caller) -> bool {
     matches!(me.credential, Credential::Passed { .. })
 }

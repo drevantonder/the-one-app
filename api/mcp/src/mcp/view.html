@@ -340,7 +340,7 @@
         try {
           events = (await call("screens_changes", { apps }))?.events || [];
         } catch {
-          // A chat or node that can't wait: asked again a while later.
+          // A chat or app runtime that can't wait: asked again a while later.
           await sleep(30_000);
           continue;
         }

@@ -285,7 +285,7 @@ fn version_tag(tag: &str) -> bool {
 }
 
 fn key_address() -> String {
-    crate::node().state().ok().and_then(|s| s.address().map(str::to_string)).unwrap_or_default()
+    crate::loopback().state().ok().and_then(|s| s.address().map(str::to_string)).unwrap_or_default()
 }
 
 /// Waits for a Mac to publish its app built from `commit`: → it, and where it's read from.
@@ -316,7 +316,7 @@ fn publish_source(at: &At, release: bool) -> Result<()> {
     if release {
         things.push(("source-release".into(), None, version, at.config_commit().into()));
     }
-    publish::publish_latest(&crate::node(), &key, &things)?;
+    publish::publish_latest(&crate::loopback(), &key, &things)?;
     println!("Every Mac's app is now made from {}.", &at.commit[..12]);
     Ok(())
 }
@@ -390,7 +390,7 @@ fn publish_web_bundle(bundle: &ui::bundle::Bundle, version: &Version, config: &s
     std::fs::create_dir_all(&dir)?;
     let file = dir.join(format!("{}.signed", version.commit));
     std::fs::write(&file, ui::bundle::signed(key, &bundle.packed()?)?)?;
-    publish::publish_latest(&crate::node(), key, &[(Thing::WEB.into(), Some(file), version.clone(), config.to_string())])?;
+    publish::publish_latest(&crate::loopback(), key, &[(Thing::WEB.into(), Some(file), version.clone(), config.to_string())])?;
     std::fs::write(&last, hash)?;
     println!("Published the web client of {}.", version.commit);
     Ok(())

@@ -1,9 +1,9 @@
-//! A screen's page, an app's as every node serves it, or a client's own as every client makes it: `@one/ui` and the bridge (ui/kit, ui/bridge.js), what the
+//! A screen's page, an app's as every app runtime serves it, or a client's own as every client makes it: `@one/ui` and the bridge (ui/kit, ui/bridge.js), what the
 //! screen is told (`window.__one`), and the screen's own HTML.
 //!
 //! The clients' own screens (the user's pages, a page's Accounts, a request for a Vault item, Settings) are drawn
 //! here once, the same on every client, and act through the bridge's `one.api` as the user looking: each client makes
-//! them from what it ships and never takes them from a node (the web client's, which is the native app's window too,
+//! them from what it ships and never takes them from an app runtime (the web client's, which is the native app's window too,
 //! from its address's `screens/`), and answers `one.api` only for a screen it chose to show as its own. The page that
 //! holds them answers the bridge for whatever a user touches: menus, alerts, sheets, files, scanning and links.
 

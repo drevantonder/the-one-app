@@ -25,7 +25,7 @@ async function use(ctx, app, tool, input) {
   }
 }
 
-// What the device's browser tells of a page is an outline, one node per line:
+// What the device's browser tells of a page is an outline, one app runtime per line:
 //
 //   - row "Kim Unread message: Lunch? 2 hours ago More options for Kim"
 //     - link "Kim Unread message: Lunch? 2 hours ago" [focusable=true]

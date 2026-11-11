@@ -5,7 +5,7 @@ import Helper
 /// Lets the user's own agents use this Mac (its apps, keyboard and pointer) once they turn it on, through Cua Driver
 /// (github.com/trycua/cua). It runs as this helper's child, embedded, so the Accessibility and Screen Recording
 /// permissions it needs are this helper's, granted once, rather than Cua Driver's own. Its tools act in the background
-/// where they can, with an agent cursor of their own, so the user's pointer stays theirs. The node serves a service
+/// where they can, with an agent cursor of their own, so the user's pointer stays theirs. The app runtime serves a service
 /// only to its Mac's local user, so only the owner's agents reach it. Computer Use lists it beside the agent devices.
 struct ComputerApp: Service {
     let app = "computer"

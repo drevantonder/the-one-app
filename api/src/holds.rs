@@ -17,7 +17,7 @@ pub fn sign_request(key: &SigningKey, bytes: &[u8]) -> Result<[u8; 64]> {
     Ok(ed25519_dalek::Signer::sign(key, bytes).to_bytes())
 }
 
-/// What `/api/holds/shared` takes: answered by whatever holds the device's key, its node or its onet.
+/// What `/api/holds/shared` takes: answered by whatever holds the device's key, its app runtime or its onet.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HeldShare {
@@ -25,7 +25,7 @@ pub struct HeldShare {
     pub share: String,
 }
 
-/// What `/api/holds/write` takes: answered by whatever holds the device's key, its node or its onet.
+/// What `/api/holds/write` takes: answered by whatever holds the device's key, its app runtime or its onet.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HeldWrite {
@@ -33,7 +33,7 @@ pub struct HeldWrite {
     pub content: Content,
 }
 
-/// What `/api/holds/sign` takes: answered by whatever holds the device's key, its node or its onet.
+/// What `/api/holds/sign` takes: answered by whatever holds the device's key, its app runtime or its onet.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HeldSign {

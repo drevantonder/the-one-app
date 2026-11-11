@@ -3,7 +3,7 @@
 //!
 //! A step is one change, signed by the device that made it as its user (`Step`): its content (`content`'s kinds), for
 //! one position. Its position is signed in it (its `seq`), so a step can't be written twice, or anywhere but where its
-//! writer meant it: one that loses its position to another is signed again for the next. A node only carries a client's
+//! writer meant it: one that loses its position to another is signed again for the next. An app runtime only carries a client's
 //! step to the bucket: it can hold one back, but change none.
 //!
 //! ```text
@@ -42,7 +42,7 @@
 //! counted one changes is its kind's rule's (`rules`), applied to a fresh copy of the database (`scope::fresh`).
 //!
 //! Its steps are sealed with the key the frozen log had in each epoch (`keys::permanent`, `seal`), under their own names. A
-//! reader opens them itself: a node passes them on sealed. The frozen logs (`<prefix>/../log/`) are history, kept in the
+//! reader opens them itself: an app runtime passes them on sealed. The frozen logs (`<prefix>/../log/`) are history, kept in the
 //! bucket and read by nothing.
 //!
 //! ```text
@@ -249,7 +249,7 @@ pub fn decode(scope: &Scope, at: u64, bytes: &[u8]) -> Result<Given> {
 }
 
 /// A step a device of the network's own passed on opened (`encode`'s bytes): none if it isn't one. Only a service
-/// endpoint takes them so, from its own device's node, holding no keys of its own.
+/// endpoint takes them so, from its own device's app runtime, holding no keys of its own.
 pub fn given(scope: &Scope, at: u64, opened: Option<&[u8]>) -> Option<Given> {
     opened.and_then(|b| decode(scope, at, b).ok())
 }
@@ -596,7 +596,7 @@ impl Truth {
     /// Who's who as `welcome` says it: from `freeze`, the step at its freeze's position, and `start`, the copy at
     /// `Welcome::copy` (its bytes, opened), or none to start from the freeze's own, then `after`, the steps after that
     /// one up to the Welcome's, each taken as any reader takes it. Fails unless it comes to the Welcome's hash, in this
-    /// release's form: a freeze, copy or step a node or another device swapped is never used.
+    /// release's form: a freeze, copy or step an app runtime or another device swapped is never used.
     pub fn welcomed(welcome: &Welcome, freeze: &Given, start: Option<&[u8]>, after: &[Option<Given>], now: u64) -> Result<Truth> {
         ensure!(u64::from(freeze.step.seq()) == welcome.freeze, "that isn't the freeze it was welcomed with");
         let anchored = Truth::of_freeze(freeze, welcome.freeze, now).context("the step it was welcomed with isn't a freeze")?;
@@ -616,7 +616,7 @@ impl Truth {
 }
 
 /// `global`'s steps as the bucket holds them, sealed, by position: what a reader takes (`Reader::add`), fetched from the
-/// bucket itself (`fetch`) or passed on by a node (`to_json`, `from_json`). With a Welcome, the step at its freeze's
+/// bucket itself (`fetch`) or passed on by an app runtime (`to_json`, `from_json`). With a Welcome, the step at its freeze's
 /// position and the copy at `Welcome::copy` (`start`), when the bucket has them.
 #[derive(Default)]
 pub struct Sealed {
@@ -627,7 +627,7 @@ pub struct Sealed {
 }
 
 impl Sealed {
-    /// As a node passes them on, and a browser gives them: `{ steps: [{ at, sealed }], welcome, freeze: { at, sealed },
+    /// As an app runtime passes them on, and a browser gives them: `{ steps: [{ at, sealed }], welcome, freeze: { at, sealed },
     /// start: { at, sealed } }`, base64url. One whose bytes don't decode isn't there.
     pub fn from_json(v: &Value) -> Sealed {
         let bytes = |s: &Value| data_encoding::BASE64URL_NOPAD.decode(s["sealed"].as_str()?.as_bytes()).ok();
@@ -971,7 +971,7 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Step)
 }
 
 /// A scope's own database (not `global`'s) as one reader reads it, step by step: from its start (`ScopeReader::start`),
-/// the last position it applied or passed over, and the database there. Every node reads a scope with one.
+/// the last position it applied or passed over, and the database there. Every app runtime reads a scope with one.
 pub struct ScopeReader {
     pub at: u64,
     pub db: ScopeDb,
@@ -1138,14 +1138,14 @@ fn named(db: &Connection, step: &Step) -> Result<()> {
     Ok(())
 }
 
-/// How many releases of each platform's build of the node, and of each service's, keep their builds: the newest a
+/// How many releases of each platform's build of the app runtime, and of each service's, keep their builds: the newest a
 /// device behind updates to is among them.
 const RELEASES_KEPT: i64 = 5;
 
 /// Forgets the builds that only releases older than their platform's (and service's) last `RELEASES_KEPT` name: no
 /// newer release names them, and no deploy's bundle is one. A forgotten blob goes from the bucket as any other does
 /// (`Host::take_forgotten`). As each step of `global` is applied, so a database whose release steps came before this
-/// rule forgets them at its next step, where a node notes what it forgot.
+/// rule forgets them at its next step, where an app runtime notes what it forgot.
 fn forget_old_releases(db: &Connection) -> Result<()> {
     let old = format!(
         "WITH ranked AS (

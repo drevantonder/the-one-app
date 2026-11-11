@@ -1,5 +1,5 @@
 # iroh's relay protocol, as the relay Worker (relay/worker.js) runs it: iroh-relay's own files, built to
-# WebAssembly by ../build.sh. Its own workspace, so the node's builds and tests never build it.
+# WebAssembly by ../build.sh. Its own workspace, so the app runtime's builds and tests never build it.
 [package]
 name = "relay-protos"
 version = "0.1.0"

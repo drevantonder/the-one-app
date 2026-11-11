@@ -13,18 +13,18 @@ pub(crate) fn devices(dir: &Path) -> serde_json::Map<String, Value> {
     platform::files::read_json(&dir.join("devices.json"))
 }
 
-/// One of this machine's network's Agent Devices tools (not the throwaway network's, which has none). When the node
+/// One of this machine's network's Agent Devices tools (not the throwaway network's, which has none). When the app runtime
 /// restarts during it (an update), or its service is still coming back, it's asked again once they answer.
 pub(crate) fn agent_devices(tool: &str, input: Value) -> Result<Value> {
-    Ok(again(|| crate::node().post("/api/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one-dev throwaway" })))?["ok"].clone())
+    Ok(again(|| crate::loopback().post("/api/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one-dev throwaway" })))?["ok"].clone())
 }
 
-/// What this machine's node says as it restarts: that it is, or, if it's gone before it can, nothing at all.
+/// What this computer's app runtime says as it restarts: that it is, or, if it's gone before it can, nothing at all.
 fn restarting(err: &anyhow::Error) -> bool {
     ::custom_build::protocol::Coded::is(err, ::custom_build::protocol::code::RESTARTING) || err.chain().any(|e| e.downcast_ref::<ureq::Error>().is_some_and(|e| matches!(e, ureq::Error::Io(_) | ureq::Error::ConnectionFailed)))
 }
 
-/// What `ask` gives, asking again for up to 3 minutes while this machine's node or a service of its restarts.
+/// What `ask` gives, asking again for up to 3 minutes while this computer's app runtime or a service of its restarts.
 pub(crate) fn again(ask: impl Fn() -> Result<Value>) -> Result<Value> {
     let start = Instant::now();
     loop {
@@ -54,14 +54,14 @@ pub(crate) fn borrowed_for(checkout: &Path, kind: &str) -> String {
     format!("one-dev throwaway client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
 }
 
-/// One of this machine's network's Agent Devices tools, asked once, for what needn't wait for its node to come back.
+/// One of this machine's network's Agent Devices tools, asked once, for what needn't wait for its app runtime to come back.
 fn asked_once(tool: &str, input: Value) -> Result<Value> {
-    Ok(crate::node().post("/api/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one-dev throwaway" }))?["ok"].clone())
+    Ok(crate::loopback().post("/api/call", json!({ "app": "agent-devices", "tool": tool, "input": input, "client": "one-dev throwaway" }))?["ok"].clone())
 }
 
 /// Gives back every device borrowed for the throwaway network, asking once: those devices.json names, and any Agent Devices lists as
-/// borrowed for this checkout (what the file lost, or never got because the node restarted as it was lent). What
-/// isn't given back while the node restarts goes back by itself after 15 minutes without a call.
+/// borrowed for this checkout (what the file lost, or never got because the app runtime restarted as it was lent). What
+/// isn't given back while the app runtime restarts goes back by itself after 15 minutes without a call.
 pub(crate) fn give_back(dir: &Path, checkout: &Path) {
     let mut all: Vec<(String, String)> = devices(dir).into_iter().filter_map(|(kind, d)| Some((kind, d.as_str()?.to_string()))).collect();
     let ours = format!(", for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
@@ -121,7 +121,7 @@ pub(crate) fn didnt_sign_in(what: &str, said: &[(&str, String)], elsewhere: &str
 /// A native client's code, approved by the throwaway network's machine, as its user's device: then it's let in.
 pub(crate) fn approve_code(dir: &Path, code: &str) -> Result<()> {
     eprintln!("Approving the device that shows {code}…");
-    let approved = super::network::node_in(dir)?.post("/api/devices/approve", json!({ "code": code.replace(' ', ""), "confirm": true }));
+    let approved = super::network::loopback_in(dir)?.post("/api/devices/approve", json!({ "code": code.replace(' ', ""), "confirm": true }));
     // Let in already, by an invite naming their email, by that same machine: nothing waits.
     match approved {
         Err(err) if format!("{err:#}").contains("No device is waiting") => Ok(()),

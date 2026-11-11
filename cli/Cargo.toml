@@ -74,7 +74,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
-# AI Gateway's own code, run against a stand-in node (ai-gateway/tests/ai_gateway.rs).
+# AI Gateway's own code, run against a stand-in app runtime (ai-gateway/tests/ai_gateway.rs).
 ai-gateway = { path = "../ai-gateway" }
 # The Vault as the tests' devices run it: an item set or a request answered as a user (tests/e2e.rs).
 vault-runtime = { path = "../vault/runtime" }
@@ -84,7 +84,7 @@ devices-runtime = { path = "../devices/runtime" }
 deploy-runtime = { path = "../deploy/runtime" }
 # What a test device recorded, taken before it's sent (tests/e2e.rs).
 insights-runtime = { path = "../insights/runtime" }
-# What a browser's push service does with a push (RFC 8291's decryption, tests/contracts.rs): the node's own crypto.
+# What a browser's push service does with a push (RFC 8291's decryption, tests/contracts.rs): the app runtime's own crypto.
 aes-gcm = "0.10"
 hkdf = "0.13"
 ring = "0.17"

@@ -1,4 +1,4 @@
-// Presigned URLs for the network's S3-compatible bucket (AWS Signature Version 4, in the query), so nodes reach it
+// Presigned URLs for the network's S3-compatible bucket (AWS Signature Version 4, in the query), so app runtimes reach it
 // without holding the bucket's credentials: only the URL signer (url-signer/) does. A create URL signs
 // `If-None-Match: *` in, so the request must send it and can only make an object that isn't there; a replace URL signs
 // `If-Match: <ETag>` in, so it changes only the version it names.

@@ -17,7 +17,7 @@ fn no_file_has_a_conflict_marker_left() {
     assert!(left.is_empty(), "a merge's conflict markers are left in: {}", left.join(", "));
 }
 
-/// The Cloudflare node and the web client build for wasm, without the node feature, which only `one-dev update` and
+/// oned on Cloudflare and the web client build for wasm, without what only a computer's app runtime uses, which only `one-dev update` and
 /// `one-dev throwaway` build otherwise: a `#[cfg]` that hides what they use shows here, not when an update fails.
 #[test]
 fn what_runs_in_wasm_builds() {
@@ -76,8 +76,8 @@ fn the_native_app_builds() {
 }
 
 /// The relay Worker runs a WebAssembly build of iroh-relay's protocol that `relay/build.sh` makes by hand from
-/// `relay/protos/` and commits: editing the sources without building, or moving the nodes to another iroh-relay than the
-/// files were copied from, leaves a relay that speaks something else than the nodes do.
+/// `relay/protos/` and commits: editing the sources without building, or moving the app runtimes to another iroh-relay than the
+/// files were copied from, leaves a relay that speaks something else than the app runtimes do.
 #[test]
 fn the_relays_wasm_is_built_from_the_sources_beside_it() {
     use sha2::{Digest, Sha256};
@@ -107,9 +107,9 @@ fn the_relays_wasm_is_built_from_the_sources_beside_it() {
     assert_eq!(nodes, wasm, "the nodes link iroh-relay {nodes}, but relay/protos holds its files at {wasm}: copy them again, then run relay/build.sh");
 }
 
-/// The Cloudflare node's WebAssembly holds its own exports and onet's (a class `Foo`'s methods are exported as
-/// `foo_<method>`, so a `foo_bar` function of the node's is the same name): wasm-bindgen links either one in place of the
-/// other, and the node answers with the wrong code. Read from the sources, which is cheaper than building the wasm.
+/// oned on Cloudflare's WebAssembly holds its own exports and onet's (a class `Foo`'s methods are exported as
+/// `foo_<method>`, so a `foo_bar` function of the app runtime's is the same name): wasm-bindgen links either one in place of the
+/// other, and the app runtime answers with the wrong code. Read from the sources, which is cheaper than building the wasm.
 #[test]
 fn oned_on_cloudflares_wasm_has_each_export_name_once() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));

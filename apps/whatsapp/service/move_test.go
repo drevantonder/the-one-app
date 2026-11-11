@@ -1,7 +1,7 @@
 package main
 
-// Moving a link between two devices, each with a node of its own that passes
-// calls to the other's service, as the real nodes do; WhatsApp is never
+// Moving a link between two devices, each with a an app runtime of its own that passes
+// calls to the other's service, as the real app runtimes do; WhatsApp is never
 // reached. A link must end on exactly one device, whatever answer is lost.
 
 import (

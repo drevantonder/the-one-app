@@ -384,11 +384,11 @@ fn canonical(db: &Connection) -> Result<()> {
 
 /// Works out again, in `global`'s database, what follows from its rows, which no step writes: everyone owns their own
 /// scope, each device listed its user, and each app its owners (the network's or a group's admins, or a user still
-/// in); a shared service is everyone's to use; the Cloudflare node, which an admin's setting names, is the network's
+/// in); a shared service is everyone's to use; oned on Cloudflare, which an admin's setting names, is the network's
 /// admins' device; and which devices run each scope's calls. A user's own scope runs on their machines they listed
 /// themselves (one an admin listed for them runs only what that admin's could), and on others their own device chose
 /// (`runs`); a group's on its admins' machines and the network's; `global`'s on the network's admins'; and every one
-/// but a user's own on the Cloudflare node, which runs a user's own only once they chose it. Only users still in,
+/// but a user's own on oned on Cloudflare, which runs a user's own only once they chose it. Only users still in,
 /// and devices still listed, hold anything; a user's role in the network or a group is the only row a step writes.
 pub fn derive(db: &Connection) -> Result<()> {
     let cloudflare: Option<String> = db.query_row("SELECT value FROM settings WHERE name = ?1", [crate::scopes::CLOUDFLARE_NODE], |r| r.get(0)).optional()?;

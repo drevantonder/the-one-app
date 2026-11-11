@@ -26,7 +26,7 @@ async fn deploy(State(rt): State<Rt>, me: Me, Body(body): Body<Deploy>) -> Reply
     let bundle = match &body.files {
         Some(files) => {
             let files = deploy::build::given(files)?;
-            // Built only where the deploy was asked, by its runtime: never on a node for someone elsewhere.
+            // Built only where the deploy was asked, by its runtime: never on an app runtime for someone elsewhere.
             if let Some((screen, _)) = files.iter().find(|(p, _)| deploy::build::has_screens([p.as_str()])) {
                 return Err(anyhow::anyhow!("{screen} is a React screen, built on the machine that deploys it with Bun or Node: deploy it from there, with {cli} deploy <folder> or {cli} mcp's deploy tool", cli = custom_build::config::CLI).into());
             }

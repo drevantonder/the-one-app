@@ -8,11 +8,11 @@ import (
 	"strings"
 )
 
-// toNode sends what a client asks the node with the token in the node's home
+// toNode sends what a client asks the app runtime with the token in the app runtime's home
 // (ONE_HOME, else ~/.local/share/<ONE_CLI>), which only this machine's user
-// can read: the node takes nothing else as one of this machine's own programs
+// can read: the app runtime takes nothing else as one of this machine's own programs
 // (src/api.rs). http.DefaultClient uses it, and so must every other client
-// that asks the node; http.DefaultTransport stays as it is, which libraries
+// that asks the app runtime; http.DefaultTransport stays as it is, which libraries
 // (whatsmeow) take to be an *http.Transport.
 var toNode http.RoundTripper = http.DefaultTransport
 
@@ -26,7 +26,7 @@ func nodeAddr() string {
 	return addr
 }
 
-// asThisMachine reads the token for each request, so the node may start after
+// asThisMachine reads the token for each request, so the app runtime may start after
 // the service.
 type asThisMachine struct {
 	addr, token string

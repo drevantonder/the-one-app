@@ -1,8 +1,8 @@
-//! The Cloudflare node's iroh endpoint (`Node` in worker.js, a Durable Object): the endpoint of its own key, as every
-//! node is, with no socket. The relay hands it the datagrams sent to its key, by RPC (`deliver`), and passes on what it
-//! sends, so to every other endpoint it's one more behind the relay. It speaks what nodes speak (app-runtime/src/net.rs): to
-//! client devices, HTTP/1.1 on a stream of its own per request (`<cli>/http/1`), answered by `worker.js` as a node's
-//! local API answers; to nodes on machines, an ask on a stream, its answer the same stream back (`<cli>/1`). Its
+//! oned on Cloudflare's iroh endpoint (`Node` in worker.js, a Durable Object): the endpoint of its own key, as every
+//! app runtime is, with no socket. The relay hands it the datagrams sent to its key, by RPC (`deliver`), and passes on what it
+//! sends, so to every other endpoint it's one more behind the relay. It speaks what app runtimes speak (app-runtime/src/net.rs): to
+//! client devices, HTTP/1.1 on a stream of its own per request (`<cli>/http/1`), answered by `worker.js` as an app runtime's
+//! local API answers; to computers' app runtimes, an ask on a stream, its answer the same stream back (`<cli>/1`). Its
 //! connections live as long as the object, which ends itself once nobody asks (worker.js), so it holds nothing while
 //! asleep.
 
@@ -40,7 +40,7 @@ fn alpn() -> Vec<u8> {
     format!("{}/1", custom_build::config::CLI).into_bytes()
 }
 
-/// What client devices speak to nodes.
+/// What client devices speak to app runtimes.
 fn http_alpn() -> Vec<u8> {
     format!("{}/http/1", custom_build::config::CLI).into_bytes()
 }
@@ -202,7 +202,7 @@ pub async fn endpoint_start(seed: Vec<u8>, send: Function, asked: Function) -> R
                     Ok(accepting) => accepting.await.ok(),
                     Err(_) => None,
                 };
-                // A client's connection is only ever its requests': what this node asks machines goes on its own.
+                // A client's connection is only ever its requests': what this app runtime asks machines goes on its own.
                 if let Some(conn) = accepted {
                     let remote = *conn.remote_id().as_bytes();
                     answer(&net, conn, remote).await;

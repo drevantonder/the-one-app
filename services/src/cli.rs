@@ -18,7 +18,7 @@ pub fn commands() -> Command {
         run: |g| {
             match g.words().as_slice() {
                 ["services"] => {
-                    let Some(network) = g.node.state()?.network else { return Ok(true) };
+                    let Some(network) = g.api.state()?.network else { return Ok(true) };
                     for s in &network.devices {
                         let (installed, off) = (&s.now.installed_services, &s.off_services);
                         let away = Some(::api::cli::presence(s.now.online, s.now.seen)).filter(|p| !s.now.online && !p.is_empty()).map(|p| format!(" ({p})")).unwrap_or_default();
@@ -58,12 +58,12 @@ pub fn commands() -> Command {
                 // What lets this machine's user start services in their sandbox, for root to run once: `| sudo sh`.
                 ["services", "sandbox"] => print!("{}", crate::sandbox::setup_script()?),
                 ["services", how @ ("on" | "off"), name] => {
-                    let names = known(g.node)?;
+                    let names = known(g.api)?;
                     if !names.contains(*name) {
                         return Err(Failed::Typed(format!("no service called {name}: {}", names.into_iter().collect::<Vec<_>>().join(", "))).into());
                     }
                     let device = g.flag("device");
-                    g.node.post("/api/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
+                    g.api.post("/api/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
                     let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
                     match (*how, *name == scope::scopes::APPS_PART) {
                         _ if device.is_some_and(|d| d.eq_ignore_ascii_case(scope::rank::CLOUDFLARE)) => println!("{name} is switched {how} on Cloudflare."),

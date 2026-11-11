@@ -51,7 +51,7 @@ const CANARY: &str = "telemetry.canary";
 /// The most reports a client's device may make a minute, and events a report may hold.
 const REPORTS_A_MINUTE: u32 = 10;
 const MOST_REPORTED: usize = 300;
-/// How long ago what a client reports may have happened: a client keeps what no node took while none answers, and
+/// How long ago what a client reports may have happened: a client keeps what no device took while none answers, and
 /// sends it once one does.
 const KEPT_UNSENT: u64 = 86_400_000;
 /// How long a span this device sent stays with it too, and the most that do: a row takes a minute or two to be readable,
@@ -645,11 +645,11 @@ pub async fn service_said(rt: &Rt, remote: &Key, body: &Value) {
     }
 }
 
-/// A request a client made of its nodes (`client.call`), as OTEL's client span, the parent of what the node that took
-/// it recorded: it sent the trace and span in its `traceparent`. A call by its app's tool, as the node names its own;
+/// A request a client made of its app runtimes (`client.call`), as OTEL's client span, the parent of what the app runtime that took
+/// it recorded: it sent the trace and span in its `traceparent`. A call by its app's tool, as the app runtime names its own;
 /// anything else by its route. The client keeps only what failed, was slow or is sampled, and says nothing else of it:
-/// which node answered and whether what it answered failed, or why none did (`error`). One no node answered has no
-/// node's span to be found by, so it's in the Errors list itself.
+/// which app runtime answered and whether what it answered failed, or why none did (`error`). One no device answered has no
+/// app runtime's span to be found by, so it's in the Errors list itself.
 async fn client_called(rt: &Rt, me: &Caller, e: &Value, time: u64, ms: u64, attrs: Attrs) {
     let Some((trace, span)) = e["traceparent"].as_str().and_then(api::traceparent::parent_of) else { return };
     let attrs = attrs.user(&me.user);

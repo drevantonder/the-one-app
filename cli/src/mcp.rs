@@ -16,7 +16,7 @@ pub fn commands() -> ::api::cli::Command {
             if g.words() != ["mcp"] {
                 return Ok(false);
             }
-            stdio(g.node.again(), if g.has("code") { Mode::Code } else { Mode::All })?;
+            stdio(g.api.again(), if g.has("code") { Mode::Code } else { Mode::All })?;
             Ok(true)
         },
     }

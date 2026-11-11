@@ -1,4 +1,4 @@
-//! Publishing a build of the node, or of a service's program, from this machine.
+//! Publishing a build of the app runtime, or of a service's program, from this machine.
 
 use axum::Json;
 use axum::extract::State;

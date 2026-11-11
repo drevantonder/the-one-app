@@ -13,7 +13,7 @@ use ::api::{Caller, Error, Invalid, Me, Reply, Who};
 use super::Routes;
 
 /// Every one, asked by a client device; but one a client answers itself (`settings::answered`) only by this
-/// machine's own programs, which its node answers as its own device. What serves each is its feature's `Runs`.
+/// machine's own programs, which its app runtime answers as its own device. What serves each is its feature's `Runs`.
 pub(super) fn routes() -> Routes {
     let runs = crate::runtime::features();
     let mut routes = Routes::default();

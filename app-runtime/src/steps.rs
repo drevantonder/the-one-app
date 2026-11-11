@@ -128,7 +128,7 @@ impl Host {
 
     /// Writes `content` to `global`'s scope database as a step this device signs as `user`, at the next position: when
     /// another device wrote there first, it reads that, and signs it again for the one after. Signed by the device's key,
-    /// never this node's own, which may be its app runtime's, whose device's holder writes it (`Holds::write_global`).
+    /// never this app runtime's own, which may be its app runtime's, whose device's holder writes it (`Holds::write_global`).
     pub(super) async fn write_step(&self, user: &str, content: Content) -> Result<()> {
         self.0.holds.write_global(self, user, content).await
     }
@@ -194,7 +194,7 @@ impl Host {
 
     /// `global`'s steps after `from` as the bucket holds them, sealed, each `{ at, sealed }` (base64url), its freeze
     /// among them: a client device opens them with its own keys and applies them itself, never taking who's who, nor
-    /// that a step isn't one, from a node. With `{ at, epoch }`, the last there and `global`'s newest epoch, after which
+    /// that a step isn't one, from an app runtime. With `{ at, epoch }`, the last there and `global`'s newest epoch, after which
     /// and under which a writer signs its own. Fails
     /// before the log is frozen here, so a writer writes entries. For a device that starts from its `welcome`
     /// (`steps::Welcome`), those after the copy before its step instead, with that copy and the freeze's step, sealed:

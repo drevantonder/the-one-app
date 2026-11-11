@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 
 use super::super::devices::approve_code;
-use super::super::network::{node_in, spawn};
+use super::super::network::{loopback_in, spawn};
 use crate::agent;
 
 /// The web client's folder in the throwaway network's, for its first user or someone else.
@@ -57,7 +57,7 @@ pub(crate) fn joined(dir: &Path, settings: &oned_cloudflare::Settings, name: &st
     let marker = folder.join("joined");
     if !marker.exists() {
         eprintln!("Inviting {name}…");
-        let invited = node_in(dir)?.post("/api/devices/invite", json!({ "name": name }))?;
+        let invited = loopback_in(dir)?.post("/api/devices/invite", json!({ "name": name }))?;
         args.push(invited["link"].as_str().context("the throwaway network made no invite link")?.to_string());
     }
     let code = web_script(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
@@ -86,7 +86,7 @@ pub(crate) fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
 
 /// The throwaway network's browser for its first user or someone else, started if it isn't running: → its DevTools port.
 pub(crate) fn browser(dir: &Path, settings: &oned_cloudflare::Settings, user: Option<&str>) -> Result<u16> {
-    // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it can't sign anyone in.
+    // A browser reaches app runtimes over iroh, as the client's WebAssembly; a build without it can't sign anyone in.
     let page = agent().get(&settings.address).call()?.body_mut().read_to_string()?;
     anyhow::ensure!(!page.contains(r#"<meta name="onet" content="">"#), "the throwaway network's program has no web client's WebAssembly: run it on this checkout's build (no --build), which builds it");
     let web = web_folder(dir, user);

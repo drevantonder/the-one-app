@@ -20,7 +20,7 @@ pub fn this_program() -> std::io::Result<PathBuf> {
     Ok(PathBuf::from(std::env::current_exe()?.to_string_lossy().trim_end_matches(" (deleted)")))
 }
 
-/// Where this machine's node keeps its data: `<CLI>_HOME`, else `~/.local/share/<cli>`, on Windows the user's own
+/// Where this computer's app runtime keeps its data: `<CLI>_HOME`, else `~/.local/share/<cli>`, on Windows the user's own
 /// `%LOCALAPPDATA%\<cli>`.
 pub fn home() -> PathBuf {
     match std::env::var_os(config::env("HOME")) {
@@ -34,7 +34,7 @@ fn windows_data() -> PathBuf {
     std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| user_home().join("AppData/Local"))
 }
 
-/// Where it keeps what it can download or build again: inside a home given with `<CLI>_HOME`, so a node given one
+/// Where it keeps what it can download or build again: inside a home given with `<CLI>_HOME`, so an app runtime given one
 /// writes nowhere else; otherwise `~/.cache/<cli>`, on Windows beside its data.
 pub fn cache() -> PathBuf {
     match std::env::var_os(config::env("HOME")) {

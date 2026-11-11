@@ -1,13 +1,13 @@
-//! What's published at the network's address, as a node reads the signed record there (`oned_update::latest`): the
+//! What's published at the network's address, as an app runtime reads the signed record there (`oned_update::latest`): the
 //! services' builds, and the builds of a service a deploy names, which a device runs instead of any release. A device
-//! takes its own build only by `one update`, which reads the record itself, needing nothing of a node.
+//! takes its own build only by `one update`, which reads the record itself, needing nothing of an app runtime.
 
 use super::*;
 use ::insights::{Attrs, Status};
 
 pub(crate) mod routes;
 
-/// How often a node reads the record (`oned_update::latest`).
+/// How often an app runtime reads the record (`oned_update::latest`).
 const PULL_EVERY: Duration = Duration::from_secs(30);
 
 /// What each record kept in `updates/` beside the newest is named after, then its publish and when it was written (ms).
@@ -55,7 +55,7 @@ impl Host {
         ::oned_update::update::why(&self.0.dir)
     }
 
-    /// What the record last said, as this node read it.
+    /// What the record last said, as this app runtime read it.
     pub fn latest(&self) -> ::oned_update::latest::Latest {
         self.0.latest.lock().unwrap().clone()
     }

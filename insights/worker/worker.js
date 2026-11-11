@@ -60,7 +60,7 @@ export const TABLES = {
   metrics: { time: [asTime, 1], name: [word, 1], type: [word, 1], unit: [text(32), 1], service: [word, 1], instance: [(v) => hex(v, 64), 1], count: [count, 1], sum: [number, 1], buckets: [json], attrs: [json, 1] },
 };
 
-/// `row` as its table holds it, or null. A device names only itself; a node also what its clients reported through it.
+/// `row` as its table holds it, or null. A device names only itself; an app runtime also what its clients reported through it.
 function kept(row, columns, by, relays) {
   if (!row || typeof row !== "object") return null;
   const out = {};
@@ -106,7 +106,7 @@ async function signed(request, env, most) {
 
 const STREAMS = { spans: "SPANS", logs: "LOGS", metrics: "METRICS" };
 
-/// The Workers whose own traces and logs are kept: never `node`, which reports its calls as every node does, whatever a
+/// The Workers whose own traces and logs are kept: never `node`, which reports its calls as every app runtime does, whatever a
 /// request says of itself, and not this one, as an export of what it did would be the next thing it was handed (insights/src/lib.rs).
 export const TRACED = ["gateway", "auth", "relay", "url-signer", "notifications", "onet"];
 const token = (v) => typeof v === "string" && /^[A-Za-z0-9_.+-]{1,72}$/.test(v);
@@ -136,7 +136,7 @@ const NAMES_A_SECRET = ["token", "key", "secret", "password", "passwd", "pwd", "
 /// What a Worker said of a failure, kept to its plain words: Cloudflare's own ("internal error; reference = …", "Network
 /// connection lost.") are what explains a failure there. Any other word, a value of any kind, is `<value>`, as are a word
 /// all of hex, one a word naming a secret goes before, and so anything insights/src/message.rs would hide, which also
-/// makes failures that differ only by one read the same. It never passes through a node, so this is its cleaner.
+/// makes failures that differ only by one read the same. It never passes through an app runtime, so this is its cleaner.
 export function plainWords(said) {
   // `named`: the word before named a secret, and an `=` or `:` would say this one is it; `secret`: this one is.
   let named = false;
@@ -214,7 +214,7 @@ export function workerSpans(request, cli) {
     const { s } = x;
     const method = attribute(s.attributes, "jsrpc.method");
     if (token(method)) return [attribute(s.attributes, "cloudflare.entrypoint"), method].filter(token).join(".");
-    // The gateway's requests by the route it sent each to, as a node's by its route.
+    // The gateway's requests by the route it sent each to, as an app runtime's by its route.
     const path = pathOf(s);
     if (x.job === "gateway" && asked(x) && path) return routeOf(path).route;
     return token(s.name) ? s.name : "span";

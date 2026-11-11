@@ -550,7 +550,7 @@ struct Outline {
 }
 
 impl Outline {
-    /// inside: within the node scope_ref names; within: within something acted on, whose inner editor isn't one.
+    /// inside: within the app runtime scope_ref names; within: within something acted on, whose inner editor isn't one.
     fn walk(&mut self, nd: &Value, by_id: &HashMap<&str, &Value>, mut depth: usize, mut inside: bool, within: bool, frame: &str) {
         let role = ax_text(&nd["role"]).to_lowercase();
         let name = clip(&ax_text(&nd["name"]), 200);

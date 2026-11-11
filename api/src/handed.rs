@@ -1,5 +1,5 @@
-//! The keys a caller hands a node for one call: which a kind of request may be handed, sealed to the node that runs it,
-//! and what a node that lacks one asks for.
+//! The keys a caller hands an app runtime for one call: which a kind of request may be handed, sealed to the app runtime that runs it,
+//! and what an app runtime that lacks one asks for.
 
 use anyhow::{Context, Result, anyhow};
 use data_encoding::{BASE64URL_NOPAD as B64U, HEXLOWER};
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use key::*;
 
-/// A database key a caller hands a node for one call.
+/// A database key a caller hands an app runtime for one call.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Handed {
     pub scope: String,
@@ -18,7 +18,7 @@ pub struct Handed {
     pub key: [u8; 32],
 }
 
-/// What a caller hands a node, sealed to it: the database keys a call needs, for calls with one access token (`for`,
+/// What a caller hands an app runtime, sealed to it: the database keys a call needs, for calls with one access token (`for`,
 /// its sha256 in hex) or from one client device over iroh (`for`, its key in hex), until `until` (milliseconds).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Handoff {
@@ -28,22 +28,22 @@ pub struct Handoff {
     pub keys: Vec<Handed>,
 }
 
-/// A handoff sealed to the node's seal key, as base64url: the `x-one-keys` header's value.
+/// A handoff sealed to the app runtime's seal key, as base64url: the `x-one-keys` header's value.
 pub fn seal_handoff(to: &[u8; 32], handoff: &Handoff) -> Result<String> {
     Ok(B64U.encode(&seal_to(to, &serde_json::to_vec(handoff)?)?))
 }
 
-/// Opens a handoff sealed to this node, with its seal secret.
+/// Opens a handoff sealed to this app runtime, with its seal secret.
 pub fn open_handoff(secret: &[u8; 32], sealed: &str) -> Result<Handoff> {
     let bytes = B64U.decode(sealed.trim().as_bytes()).map_err(|_| anyhow!("the keys handed aren't base64url"))?;
     let plain = open_sealed(secret, &bytes).context("the keys handed weren't sealed to this device")?;
     serde_json::from_slice(&plain).context("the keys handed aren't a handoff")
 }
 
-/// What a node (the Cloudflare node, or a machine's passing on a call it was handed keys
-/// for) asks another node to run a call with (`app-runtime/src/net.rs`): the call, naming `scopes`, the scopes it reaches,
-/// the user it's for, and the keys of those scopes it was handed, sealed to that node's `seal` key for calls from
-/// its own endpoint (`from`), until `until`. Never keys of a scope the call doesn't name. The other node runs it on those keys alone, and only if `from` may run
+/// What an app runtime (oned on Cloudflare, or a machine's passing on a call it was handed keys
+/// for) asks another app runtime to run a call with (`app-runtime/src/net.rs`): the call, naming `scopes`, the scopes it reaches,
+/// the user it's for, and the keys of those scopes it was handed, sealed to that app runtime's `seal` key for calls from
+/// its own endpoint (`from`), until `until`. Never keys of a scope the call doesn't name. The other app runtime runs it on those keys alone, and only if `from` may run
 /// every one of `scopes`.
 pub fn forwarded(call: &Value, user: &str, client: &str, from: &[u8; 32], seal: &[u8; 32], until: u64, keys: Vec<Handed>, scopes: &[String]) -> Result<Value> {
     let mut call = call.as_object().cloned().unwrap_or_default();
@@ -66,7 +66,7 @@ pub struct Needs {
     pub seal: String,
 }
 
-/// A key a call lacked, which its caller hands it when it sends the call again: what a node answers with 428.
+/// A key a call lacked, which its caller hands it when it sends the call again: what an app runtime answers with 428.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Need {
     pub scope: String,
@@ -75,7 +75,7 @@ pub struct Need {
     pub database: String,
 }
 
-/// What a request runs, which decides what a client hands a node with it (`may_hand`), and what it remembers each kind of
+/// What a request runs, which decides what a client hands an app runtime with it (`may_hand`), and what it remembers each kind of
 /// request needed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
@@ -122,11 +122,11 @@ impl std::fmt::Display for Route {
     }
 }
 
-/// Whether a client hands a node the key of `need`'s database with a kind of request (`route`), when the node asks (428):
+/// Whether a client hands an app runtime the key of `need`'s database with a kind of request (`route`), when the app runtime asks (428):
 /// only what that kind of request can use. One that runs an app, that app's databases; an
 /// MCP request (`/mcp`), which may run any, or widgets (and the tool that shows them) and badges, which run every app's, apps' own databases; and each
-/// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there), and `global`'s
-/// blobs, where apps' deployed code is (a node that keeps nothing, the Cloudflare node, reads it there). The list of
+/// of those the app runtime's Vault and log of a scope too (which fill in its items, and say who's who there), and `global`'s
+/// blobs, where apps' deployed code is (an app runtime that keeps nothing, oned on Cloudflare, reads it there). The list of
 /// apps, which says what each does from its code, the log and that code. The Vault's routes, its Vault and log; any
 /// other, the log alone.
 ///
@@ -165,7 +165,7 @@ pub fn hands(route: &Route) -> Vec<&'static str> {
 /// copy is under, as its newest hint (`hint`, if it has one) says, which holds all before it; every epoch from the first
 /// while it has no copy; the newest if it has no hint, being new. Blobs have neither: each is kept under the epoch it
 /// was put in, so every epoch from the first. The log, a scope's steps, needs every epoch from the first too: every
-/// reader replays it from the first (`steps::Truth::read`), whatever copies there are. Nodes ask for no older, and
+/// reader replays it from the first (`steps::Truth::read`), whatever copies there are. App runtimes ask for no older, and
 /// clients hand no older.
 pub fn oldest_needed(database: &str, hint: Option<&[u8]>, newest: u32) -> u32 {
     use ::key::CoreDb;
@@ -181,15 +181,15 @@ pub fn oldest_needed(database: &str, hint: Option<&[u8]>, newest: u32) -> u32 {
     }
 }
 
-/// The most keys a node's 428 may ask one request to hand, once each: a request that reads every app on a page
-/// (`/api/badges`, `/api/widgets`, `/mcp`) needs each one's, in each epoch from the oldest it needs. More is a node asking
+/// The most keys an app runtime's 428 may ask one request to hand, once each: a request that reads every app on a page
+/// (`/api/badges`, `/api/widgets`, `/mcp`) needs each one's, in each epoch from the oldest it needs. More is an app runtime asking
 /// for everything.
 pub const MOST_NEEDED: usize = 64;
 
-/// What a node's 428 (`answer`) asks a request of `route` to hand: taken only from the node that answered (`node`, hex,
+/// What an app runtime's 428 (`answer`) asks a request of `route` to hand: taken only from the app runtime that answered (`node`, hex,
 /// as its connection proved), naming itself; one or more keys, MOST_NEEDED at most, each of a database that kind of
 /// request uses (`may_hand`). None if it asks for anything else. The seal key it names isn't read: what's handed is
-/// sealed to the one the network's entries list for that node.
+/// sealed to the one the network's entries list for that app runtime.
 pub fn asked_for(route: &Route, node: &str, answer: &Value) -> Option<Vec<Need>> {
     if answer["to"].as_str() != Some(node) {
         return None;
@@ -200,8 +200,8 @@ pub fn asked_for(route: &Route, node: &str, answer: &Value) -> Option<Vec<Need>>
     (!need.is_empty() && need.len() <= MOST_NEEDED && need.iter().all(|n| may_hand(route, n))).then_some(need)
 }
 
-/// How long a client waits, each time, to ask again a node that doesn't list it yet (403 `not_let_in`) while the relay
-/// still lets it in: a node may not have read its approval yet. After the last, it says so.
+/// How long a client waits, each time, to ask again an app runtime that doesn't list it yet (403 `not_let_in`) while the relay
+/// still lets it in: an app runtime may not have read its approval yet. After the last, it says so.
 pub const BEHIND: [u64; 2] = [2_000, 4_000];
 
 /// What sign-in said of a device's request to be let in (`GET /api/auth/devices/requests/<key>`: its status, 0 if it
@@ -276,7 +276,7 @@ mod tests {
         assert!(may_hand(&call("tally"), &need("tally", "main")) && !may_hand(&call("tally"), &need("notes", "main")));
         assert!(may_hand(&at("/api/steps"), &need("node", "log")) && !may_hand(&at("/api/steps"), &need("tally", "main")) && !may_hand(&at("/api/state"), &need("node", "vault")));
         assert!(may_hand(&at("/api/vault"), &need("node", "vault")) && !may_hand(&at("/api/vault"), &need("tally", "main")));
-        // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
+        // Apps' code, `global`'s blobs, goes to an app runtime running an app (oned on Cloudflare keeps none); a scope's own
         // blobs, its users' files, never.
         let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
         assert!(may_hand(&call("tally"), &blobs("global")) && may_hand(&Route::Screens("tally".into()), &blobs("global")) && may_hand(&at("/api/badges"), &blobs("global")) && may_hand(&at("/api/widgets/show"), &blobs("global")) && may_hand(&at("/api/apps"), &blobs("global")) && may_hand(&at(crate::path::OPENAPI), &blobs("global")));

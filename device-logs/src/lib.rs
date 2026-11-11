@@ -1,6 +1,6 @@
-//! What this node and each of its services say, kept in a file of its own so a user's agent can read it over the
+//! What this app runtime and each of its services say, kept in a file of its own so a user's agent can read it over the
 //! network (`one logs <device>`), without ssh and without knowing where the machine's supervisor puts it (systemd's
-//! journal isn't readable by the node's own user). Each is `<home>/logs/<name>.log`, `node` or the service's name, each
+//! journal isn't readable by the app runtime's own user). Each is `<home>/logs/<name>.log`, `node` or the service's name, each
 //! line `<ms since 1970> <text>`, and the one before it, `.log.1`, once it passes `KEPT`: so at most twice that is kept.
 //!
 //! The text is what `tracing` and the services' programs write to stderr, which still goes there too. Nothing here
@@ -16,7 +16,7 @@ use anyhow::{Result, bail, ensure};
 use serde_json::{Value, json};
 
 pub const NODE: &str = "node";
-/// A client's: what its app, page and native side say, kept on the device itself and read through a node that holds its
+/// A client's: what its app, page and native side say, kept on the device itself and read through an app runtime that holds its
 /// connection (`Net::ask_client`).
 pub const CLIENT: &str = "client";
 /// The most a log file holds before the next line starts a new one.
@@ -137,7 +137,7 @@ fn strip(text: &str) -> String {
 
 /// What a reader asks for.
 pub struct Ask {
-    /// A service's log; none, the node's.
+    /// A service's log; none, the app runtime's.
     pub service: Option<String>,
     /// Only the last this long.
     pub since: Option<Duration>,
@@ -210,7 +210,7 @@ pub fn read(home: &Path, ask: &Ask) -> Result<Value> {
     Ok(json!({ "log": name, "matched": matched.len(), "shown": shown.len(), "oldest": oldest, "lines": shown }))
 }
 
-/// A client's answer when a node asks for its log (`Net::ask_client`): `{ ok }` as `read` gives it, or `{ error }`. A client
+/// A client's answer when an app runtime asks for its log (`Net::ask_client`): `{ ok }` as `read` gives it, or `{ error }`. A client
 /// has the one log.
 pub fn answer(home: &Path, input: &Value) -> Value {
     let read = Ask::from_json(input).and_then(|ask| {

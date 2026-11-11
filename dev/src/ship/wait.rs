@@ -6,7 +6,7 @@ use super::*;
 
 /// This user's own devices, as this one sees them now: none while its program restarts.
 pub(super) fn devices() -> Vec<Value> {
-    let state = crate::node().get("/api/state").unwrap_or_default();
+    let state = crate::loopback().get("/api/state").unwrap_or_default();
     let me = state["network"]["user"].clone();
     state["network"]["devices"].as_array().into_iter().flatten().filter(|d| d["user"] == me).cloned().collect()
 }
@@ -39,11 +39,11 @@ pub(super) fn limit(g: &api::cli::Given, default: u64) -> Result<Duration> {
 /// each of them (those named, online or not) runs `commit`, or a build with it
 /// in, and its services answer, or its update fails; says what each did, and fails unless all made it. One that isn't
 /// named and is offline at the start isn't waited for: it's named, with how far behind it is, to be updated when it's
-/// back. Why one hasn't yet is what its own node says (`updating`).
+/// back. Why one hasn't yet is what its own app runtime says (`updating`).
 pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     keep_history()?;
-    // Says so when no program answers, which later polls (a node restarting on the new build) never do.
-    crate::node().get("/api/state")?;
+    // Says so when no program answers, which later polls (an app runtime restarting on the new build) never do.
+    crate::loopback().get("/api/state")?;
     let all: Vec<Value> = devices();
     ensure!(!all.is_empty(), "no devices are listed here yet");
     for n in names {
@@ -119,7 +119,7 @@ fn record() -> Option<Latest> {
 /// Waits until each of `wanted` runs `commit`, or a build with it in, with its link back and its services answering,
 /// or its update fails; says what each did, and fails unless all made it. `named` says whether one offline at the
 /// start is waited for too (it was asked for by name) or only named, with how far behind it is (to be updated when it's
-/// back). Why one hasn't yet is what its own node says (`updating`). The one place that says a device took a build.
+/// back). Why one hasn't yet is what its own app runtime says (`updating`). The one place that says a device took a build.
 pub(super) fn wait_for(commit: &str, wanted: &[Value], named: bool, limit: Duration) -> Result<()> {
     let short = &commit[..commit.len().min(12)];
     let mut fetched = std::collections::HashSet::new();
@@ -149,7 +149,7 @@ pub(super) fn wait_for(commit: &str, wanted: &[Value], named: bool, limit: Durat
     for d in waited.iter().filter(|d| offline.contains(d["key"].as_str().unwrap_or(""))) {
         println!("  {}: offline, on {}{}: waiting for it to come back", d["name"].as_str().unwrap_or(""), d["build"].as_str().unwrap_or("?"), behind(goal_of(d), d["build"].as_str().unwrap_or("")));
     }
-    // A node restarting onto a build is listed as on it a moment before its link is back, and what deploys through it
+    // An app runtime restarting onto a build is listed as on it a moment before its link is back, and what deploys through it
     // needs the link; one offline from the start isn't held to that.
     let linked: std::collections::HashSet<String> = waited.iter().filter(|d| d["online"] == true).map(|d| d["key"].as_str().unwrap_or("").to_string()).collect();
     let mut failed = false;
@@ -220,7 +220,7 @@ pub(super) fn update_here() -> Result<()> {
 /// Presses Update, as Settings › Devices does, for each of `devices` online that's behind what's published for it, but
 /// this one, which `update_here` updates: nothing takes a build by itself.
 fn press_update(devices: &[Value]) -> Result<()> {
-    let versions = crate::node().post("/api/devices/versions", json!({}))?;
+    let versions = crate::loopback().post("/api/devices/versions", json!({}))?;
     // An app runtime is listed beside its device, and updates with it.
     let here: BTreeSet<&str> = devices.iter().filter(|d| d["here"] == true).filter_map(|d| d["device"].as_str().or(d["key"].as_str())).collect();
     let mut asked = BTreeSet::new();
@@ -230,7 +230,7 @@ fn press_update(devices: &[Value]) -> Result<()> {
             continue;
         }
         let name = d["name"].as_str().unwrap_or("");
-        match crate::node().post("/api/devices/update", json!({ "device": key })) {
+        match crate::loopback().post("/api/devices/update", json!({ "device": key })) {
             Ok(_) => println!("  {name}: Update pressed, for {}", versions[key]["newest"].as_str().unwrap_or("the newest")),
             Err(err) => println!("  {name}: couldn't press Update for it: {err:#}"),
         }

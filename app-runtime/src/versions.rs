@@ -21,9 +21,9 @@ type Find = for<'a> fn(&'a Latest, &'a str) -> Option<&'a Thing>;
 
 impl Host {
     /// What each device told the relay it's on: `{ key: { version, newest, behind } }`, and the Workers as `cloudflare`, with
-    /// the version of the Cloudflare node (`node`) if there is one, and the name of the device they were last deployed from (`from`). `newest` is the build published for what it runs on,
+    /// the version of oned on Cloudflare (`node`) if there is one, and the name of the device they were last deployed from (`from`). `newest` is the build published for what it runs on,
     /// from the signed record, which a browser can't read for itself (a redirect to the bucket). The Workers are behind
-    /// if their sources or the web client are; the Cloudflare node is on what the device that deploys it is, so it follows that.
+    /// if their sources or the web client are; oned on Cloudflare is on what the device that deploys it is, so it follows that.
     pub async fn versions(&self) -> Result<Value> {
         let (told, workers) = self.with_or((Value::Null, Value::Null), |i| Ok((i.versions.clone(), i.workers.clone())));
         let address = self.address().unwrap_or_default();

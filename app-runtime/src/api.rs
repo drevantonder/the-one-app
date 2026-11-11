@@ -1,9 +1,9 @@
-//! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; how a client device
+//! The local HTTP API: how this machine's shells, CLI and MCP reach its app runtime, as its local user; how a client device
 //! reaches it over iroh (app-runtime/src/net.rs), as its user. A sign-in reaches no route here, ever: it only lets a device ask
 //! auth to be let in, and a device that's let in is a client device.
 //!
 //! A request that isn't a client device's is this machine's own programs', over its loopback with the
-//! token in the node's home (`local-token`, which only its user reads), or refused. A file put from elsewhere is read back
+//! token in the app runtime's home (`local-token`, which only its user reads), or refused. A file put from elsewhere is read back
 //! only by whoever put it or may use a scope that names it, up to 512 MiB each and 2 GiB per user that nothing keeps
 //! yet, deleted an hour on (or once its request is answered) unless something does.
 
@@ -93,7 +93,7 @@ mod tests {
         let host = crate::Host::start(&dir).await.unwrap();
         let routes = super::routes();
         let who: Vec<(String, Who)> = routes.who().to_vec();
-        // Only a client device's requests over iroh carry `FromClient`, which the node puts on them: here, a header.
+        // Only a client device's requests over iroh carry `FromClient`, which the app runtime puts on them: here, a header.
         let router = super::guarded(routes, host.clone()).layer(axum::middleware::from_fn(|mut req: axum::extract::Request, next: axum::middleware::Next| async move {
             if req.headers().contains_key("x-test-client") {
                 req.extensions_mut().insert(super::FromClient([7; 32], u64::MAX));

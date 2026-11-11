@@ -1,14 +1,14 @@
-//! What a running call's app (`ctx`, `app-runtime/src/app/runtime/shim.js`) and the node that runs it say to each other, on a machine
-//! and on the Cloudflare node alike: what the app asks the node while it runs, and what it hands back to write when it
-//! returns. The shim and the Cloudflare node's Worker read this from what `javascript` writes, so nothing is copied by hand;
-//! `tests/contracts.rs` holds the shim's asks and the Cloudflare node's answers to it.
+//! What a running call's app (`ctx`, `app-runtime/src/app/runtime/shim.js`) and the app runtime that runs it say to each other, on a machine
+//! and on oned on Cloudflare alike: what the app asks the app runtime while it runs, and what it hands back to write when it
+//! returns. The shim and oned on Cloudflare's Worker read this from what `javascript` writes, so nothing is copied by hand;
+//! `tests/contracts.rs` holds the shim's asks and oned on Cloudflare's answers to it.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// What an app asks the node for the call it runs in, by name: on a machine `POST one.internal/<name>`
-/// (`app-runtime/src/app/outbound.rs`), on the Cloudflare node `node.ask(name, body)`.
+/// What an app asks the app runtime for the call it runs in, by name: on a machine `POST one.internal/<name>`
+/// (`app-runtime/src/app/outbound.rs`), on oned on Cloudflare `node.ask(name, body)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ask {
     /// Runs a tool of an app it uses, or a function of its own service (`ctx.apps`, `ctx.services`).
@@ -43,7 +43,7 @@ pub enum Ask {
     Order,
     /// Changes a device's run priority (`ctx.order` with a device).
     Priority,
-    /// An app's request out, on the Cloudflare node, which has no outbound to give an app: a machine's node takes each
+    /// An app's request out, on oned on Cloudflare, which has no outbound to give an app: a computer's app runtime takes each
     /// as it's made (`app-runtime/src/app/outbound.rs`).
     Fetch,
     /// Asks an AI model, through AI Gateway (`ctx.ai.run`): it writes only the caller's own `node/ai-gateway`.
@@ -51,7 +51,7 @@ pub enum Ask {
 }
 
 /// Each ask: its name, whether a call that only reads (a widget's, badge's or hook's) is refused it, and whether the
-/// Cloudflare node answers it yet (an app that asks one there is told to use a machine).
+/// oned on Cloudflare answers it yet (an app that asks one there is told to use a machine).
 const ASKS: [(Ask, &str, bool, bool); 18] = [
     (Ask::Call, "call", true, true),
     (Ask::Query, "query", false, true),
@@ -94,13 +94,13 @@ impl Ask {
         self.row().2
     }
 
-    /// Every ask's name, and those the Cloudflare node answers.
+    /// Every ask's name, and those oned on Cloudflare answers.
     pub fn names() -> impl Iterator<Item = (&'static str, bool)> {
         ASKS.iter().map(|a| (a.1, a.3))
     }
 }
 
-/// What a call asks the node to write once it returns, as the shim hands it: `{ kind, … }`.
+/// What a call asks the app runtime to write once it returns, as the shim hands it: `{ kind, … }`.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Append {
@@ -148,7 +148,7 @@ pub fn appends(list: &Value) -> Result<Vec<Append>> {
     Ok(serde_json::from_value(if list.is_null() { json!([]) } else { list.clone() })?)
 }
 
-/// The constants above, as the shim and the Cloudflare node's Worker read them.
+/// The constants above, as the shim and oned on Cloudflare's Worker read them.
 pub fn javascript() -> String {
     let asks: serde_json::Map<String, Value> = Ask::names().map(|(name, cloudflare)| (name.to_string(), json!({ "writes": Ask::parse(name).is_some_and(Ask::writes), "cloudflare": cloudflare }))).collect();
     format!("export const ASKS = {};\nexport const READ_ONLY = {};\n", Value::Object(asks), json!(READ_ONLY))
@@ -209,7 +209,7 @@ pub struct CallRequest {
     /// it (`Host::carried`): never a client's to name.
     #[serde(skip)]
     pub puts: Vec<String>,
-    /// This node named the call (`Host::identified`), no client did.
+    /// This app runtime named the call (`Host::identified`), no client did.
     #[serde(skip)]
     pub named_here: bool,
     /// It runs where it was named, first, so no other device has it or the id: it takes no lease.

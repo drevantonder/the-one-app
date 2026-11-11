@@ -1,12 +1,12 @@
 //! Apps run in workerd, Cloudflare's open-source Workers runtime. The app runtime is our wrapper around it, a program of
 //! its own (`<cli>-apps`, `run`) that oned starts while the device's `apps` part is switched on and again if it stops: it
-//! holds no key and no endpoint, and only keeps a workerd serving the config the node writes, on a port the node holds,
-//! so a call waits there while it starts again rather than being refused. Outside oned (tests), the node keeps one in a
+//! holds no key and no endpoint, and only keeps a workerd serving the config the app runtime writes, on a port the app runtime holds,
+//! so a call waits there while it starts again rather than being refused. Outside oned (tests), the app runtime keeps one in a
 //! thread of its own.
-//! Each deployed app is an ES module inside `runtime/shim.js`, which asks the node to run its queries and writes on
+//! Each deployed app is an ES module inside `runtime/shim.js`, which asks the app runtime to run its queries and writes on
 //! its databases (`database/src/stored.rs`), and runs its tools, widgets, hooks and screens.
-//! When the deploys change, the node writes the config again and restarts workerd.
-//! Every request an app makes (its `fetch`es, and the shim's asks of the node) goes to the node's outbound port,
+//! When the deploys change, the app runtime writes the config again and restarts workerd.
+//! Every request an app makes (its `fetch`es, and the shim's asks of the app runtime) goes to the app runtime's outbound port,
 //! `app-runtime/src/app/outbound.rs`, carrying the token of the call it's made in.
 
 use std::path::{Path, PathBuf};
@@ -36,7 +36,7 @@ pub struct Context {
     pub scopes: Vec<ScopeHandle>,
     /// A call on data opened for its caller: appends fail.
     pub read_only: bool,
-    /// What the call's requests carry, so the node knows whose they are (see `app-runtime/src/app/outbound.rs`).
+    /// What the call's requests carry, so the app runtime knows whose they are (see `app-runtime/src/app/outbound.rs`).
     pub token: String,
     /// The app whose `ctx.apps` made the call, if one did.
     pub from: Option<String>,
@@ -62,12 +62,12 @@ pub struct Apps(Arc<Runtime>);
 struct Runtime {
     dir: PathBuf,
     base: String,
-    /// The node's port that apps' requests go out through.
+    /// The app runtime's port that apps' requests go out through.
     outbound: u16,
     /// The apps loaded, (name, module source); the built-in apps the network hasn't added, loaded only to be described;
     /// and how many times the runtime was configured.
     loaded: Mutex<(Vec<(String, String)>, Vec<(String, String)>, u64)>,
-    /// The port workerd serves, held for as long as the node runs and handed to each that serves it. None on Windows,
+    /// The port workerd serves, held for as long as the app runtime runs and handed to each that serves it. None on Windows,
     /// where workerd can't be handed one: it binds the config's port itself, so a call while it restarts is refused.
     listener: Option<std::net::TcpListener>,
     /// What each loaded app says it is, once asked.
@@ -77,14 +77,14 @@ struct Runtime {
 }
 
 impl Apps {
-    /// Starts workerd with no apps yet, keeping its files in `dir`; apps' requests go out through the node's
+    /// Starts workerd with no apps yet, keeping its files in `dir`; apps' requests go out through the app runtime's
     /// `outbound` port.
     pub async fn start(dir: PathBuf, outbound: u16) -> Result<Self> {
         tokio::task::spawn_blocking(move || Apps::start_blocking(&dir, outbound)).await?
     }
 
     fn start_blocking(dir: &Path, outbound: u16) -> Result<Self> {
-        // Held for as long as the node runs, and handed to each workerd: no one takes the port meanwhile.
+        // Held for as long as the app runtime runs, and handed to each workerd: no one takes the port meanwhile.
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         write_config(dir, &[], port, outbound, 0)?;
@@ -125,7 +125,7 @@ impl Apps {
         .await?
     }
 
-    /// The port workerd serves the node on.
+    /// The port workerd serves the app runtime on.
     pub fn port(&self) -> u16 {
         self.0.base.rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(0)
     }
@@ -448,7 +448,7 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16, outbound: u16,
     let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
     let mut services = vec![
         "(name = \"router\", worker = .router)".to_string(),
-        // Every request an app makes goes to the node, which makes it (filling in secrets) or answers it itself.
+        // Every request an app makes goes to the app runtime, which makes it (filling in secrets) or answers it itself.
         format!("(name = \"outbound\", external = (address = \"127.0.0.1:{outbound}\", http = (style = host, forwardedProtoHeader = \"x-forwarded-proto\")))"),
     ];
     let mut bindings = Vec::new();

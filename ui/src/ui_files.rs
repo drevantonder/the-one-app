@@ -52,7 +52,7 @@ pub fn list(root: &Path) -> Vec<(String, PathBuf)> {
             }
         }
     }
-    // The gateway serves the screens' design kit beside the web client, the same files nodes put in screens.
+    // The gateway serves the screens' design kit beside the web client, the same files app runtimes put in screens.
     files.extend(collect(&root.join(KIT)).into_iter().map(|(rel, abs)| (format!("web/screen/ui/{rel}"), abs)));
     for script in SCREEN_SCRIPTS {
         files.push((format!("web/screen/{}", script.rsplit('/').next().unwrap_or(script)), root.join(script)));

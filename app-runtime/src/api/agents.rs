@@ -1,4 +1,4 @@
-//! What agents read from the node: its skills at `/llms.txt`, on its Tailscale address too for agents on the user's
+//! What agents read from the app runtime: its skills at `/llms.txt`, on its Tailscale address too for agents on the user's
 //! other devices, and what an agent harness's prompt hook asks.
 
 use axum::Router;
@@ -21,7 +21,7 @@ async fn skills(host: &Host) -> Vec<::mcp::skills::Skill> {
             tracing::warn!("the skills leave out apps' own: {err:#}");
             json!([])
         }),
-        // A node not in a network yet has no user whose apps they'd be.
+        // An app runtime not in a network yet has no user whose apps they'd be.
         Err(_) => json!([]),
     };
     let sets: Vec<Value> = onet::features().iter().map(::api::Feature::listed).chain(apps.as_array().into_iter().flatten().cloned()).collect();

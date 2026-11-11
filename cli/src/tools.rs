@@ -21,8 +21,8 @@ pub fn commands() -> ::api::cli::Command {
             let args = g.args;
             match g.words().as_slice() {
                 [app] if !app.starts_with('-') => {
-                    let apps = sets(g.node)?;
-                    let Some(found) = apps.iter().find(|a| a["name"] == *app) else { return Err(Failed::Typed(unknown(g.node, app, None, Some(g.commands))?).into()) };
+                    let apps = sets(g.api)?;
+                    let Some(found) = apps.iter().find(|a| a["name"] == *app) else { return Err(Failed::Typed(unknown(g.api, app, None, Some(g.commands))?).into()) };
                     println!("{} ({app})", found["title"].as_str().unwrap_or(app));
                     if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
                         println!("\n{i}\n");
@@ -34,7 +34,7 @@ pub fn commands() -> ::api::cli::Command {
                     let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
                     run(g, app, tool, &args[at(tool, at(app, 0))..])?
                 }
-                [first, ..] => return Err(Failed::Typed(unknown(g.node, first, None, Some(g.commands))?).into()),
+                [first, ..] => return Err(Failed::Typed(unknown(g.api, first, None, Some(g.commands))?).into()),
                 _ => return Ok(false),
             }
             Ok(true)
@@ -44,7 +44,7 @@ pub fn commands() -> ::api::cli::Command {
 
 /// `<CLI> <app> <tool> [words] [--<input> <value>]...`: runs it and prints what it gives back.
 pub fn run(g: &::api::cli::Given, app: &str, tool: &str, args: &[String]) -> Result<()> {
-    let onet = g.node;
+    let onet = g.api;
     let (mut words, mut flags) = split(args);
     // A last word `-` asks for inputs from stdin even when none is missing; otherwise stdin is read only when one is,
     // so a command inside a `while read` loop doesn't eat the loop's input.

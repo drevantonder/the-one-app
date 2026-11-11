@@ -46,7 +46,7 @@ impl<S: Shelf> Answers<S> {
         Some((plain[8..].to_vec(), at))
     }
 
-    /// A node's answer to a request, as it passes: the apps' list, to learn which calls only read, and what such a
+    /// An app runtime's answer to a request, as it passes: the apps' list, to learn which calls only read, and what such a
     /// call answered, kept. Each is read whole first.
     pub async fn passing(&self, method: &str, path: &str, sent: &[u8], response: Response) -> Result<Response, Error> {
         if response.status != 200 || !matches!((method, path), ("GET", "/api/apps") | ("POST", "/api/call")) {

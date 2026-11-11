@@ -525,7 +525,7 @@ fn stop(name: &str, mut child: std::process::Child) {
     tracing::info!("oned stopped {name}");
 }
 
-/// Puts the usual tool folders on PATH: launchd starts the Mac's node with almost none, and the shell, agents and
+/// Puts the usual tool folders on PATH: launchd starts the Mac's app runtime with almost none, and the shell, agents and
 /// services it starts need Homebrew's and the user's own tools.
 fn usual_path() {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
@@ -568,8 +568,8 @@ pub fn run(args: &[String]) -> Result<()> {
         ([], ["--help"]) => println!("{}", usage()),
         #[cfg(target_os = "linux")]
         ([], [_]) if let Some(dir) = flag("--sandboxed=") => return ::services::sandbox::launch(std::path::Path::new(dir)),
-        // A device's node from before oned started onet starts the build it installed to take over from it, so: this
-        // exits at once, and that node, which can't hand over, exits for its supervisor to start this build afresh.
+        // A device's app runtime from before oned started onet starts the build it installed to take over from it, so: this
+        // exits at once, and that app runtime, which can't hand over, exits for its supervisor to start this build afresh.
         ([], [_]) if flag("--handoff=").is_some() => {}
         ([], []) => {
             usual_path();
@@ -710,8 +710,8 @@ async fn serve() -> Result<()> {
 
 /// Writes the network's address beside its bucket's fields in this computer's network file, where it's S3-compatible
 /// storage and they don't say it: what a computer's onet and app runtime reach the bucket through, before either has
-/// read who's who, which names it. A computer that joined before its node kept it there has it only in the file its
-/// node kept for `one update`.
+/// read who's who, which names it. A computer that joined before its app runtime kept it there has it only in the file its
+/// app runtime kept for `one update`.
 fn with_bucket_address(home: &std::path::Path) -> Result<()> {
     let Some(mut network) = ::api::home::NetworkFile::read(home)? else { return Ok(()) };
     let Some(bucket) = network.bucket.as_mut().filter(|b| b.contains_key("endpoint") && !b.contains_key("address")) else { return Ok(()) };

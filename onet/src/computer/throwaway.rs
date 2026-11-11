@@ -1,5 +1,5 @@
 //! What only a throwaway network's computer serves, beside its onet (`one-dev throwaway`): its bucket (an S3 stand-in,
-//! the folder its node made the network in), and stopping itself when nobody has asked it anything for an hour;
+//! the folder its app runtime made the network in), and stopping itself when nobody has asked it anything for an hour;
 //! `one-dev throwaway` starts it again as it was.
 
 use std::path::{Path, PathBuf};
@@ -8,10 +8,10 @@ use std::time::Duration;
 use anyhow::Result;
 use platform::mode::{Throwaway, stop_others};
 
-/// How long a throwaway network's node runs with nobody asking it anything.
+/// How long a throwaway network's app runtime runs with nobody asking it anything.
 const IDLE: Duration = Duration::from_secs(60 * 60);
 
-/// Serves what only a throwaway network's node does, from where it serves: its bucket, and stopping it when it's left
+/// Serves what only a throwaway network's app runtime does, from where it serves: its bucket, and stopping it when it's left
 /// idle. → `routes`, noting each request.
 pub(super) fn serve_beside(network: &Throwaway, routes: axum::Router) -> axum::Router {
     use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
@@ -45,13 +45,13 @@ pub(super) fn serve_beside(network: &Throwaway, routes: axum::Router) -> axum::R
     }))
 }
 
-/// The throwaway network's bucket, at `bucket-addr` in its folder: the folder its node made the network in, served S3's way
+/// The throwaway network's bucket, at `bucket-addr` in its folder: the folder its app runtime made the network in, served S3's way
 /// for the URLs its URL signer presigns (read, HEAD, list, create only if absent, replace while unchanged,
 /// delete), signatures unchecked, as it's only this machine's and only a throwaway network's.
 async fn bucket(home: PathBuf) -> Result<()> {
     use axum::http::{HeaderMap, Method, StatusCode, Uri};
     let Ok(at) = std::fs::read_to_string(home.join("bucket-addr")) else { return Ok(()) };
-    // A node taking over from another waits for the one before to let the port go.
+    // An app runtime taking over from another waits for the one before to let the port go.
     let mut tries = 0;
     let listener = loop {
         match tokio::net::TcpListener::bind(at.trim()).await {

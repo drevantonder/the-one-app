@@ -63,7 +63,7 @@ impl Host {
                 }
                 Ok(json!({ "epoch": newest, "sealed": sealed }))
             }
-            // One the bucket hadn't is asked for again only once who's who has moved on, or this node keeps one: a
+            // One the bucket hadn't is asked for again only once who's who has moved on, or this app runtime keeps one: a
             // device that wants it makes it, and is given whichever is there (`seal_key`).
             (None, Some(app)) => {
                 ensure!(app == key::APP || scopes::valid_app_name(app), "{app} isn't an app's name");
@@ -138,8 +138,8 @@ impl Host {
                         "recovery" => allowed!(db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins seal its keys to the recovery key"),
                         to => {
                             let key = key::unhex(to)?;
-                            // A scope's epochs are its users' client devices' alone: a node is handed a call's keys,
-                            // and a service holds none, reading nothing and asking its user's node to write.
+                            // A scope's epochs are its users' client devices' alone: an app runtime is handed a call's keys,
+                            // and a service holds none, reading nothing and asking its user's app runtime to write.
                             let listed = db.client(&key)?.context("a scope's keys are sealed only to client devices and the recovery key")?;
                             allowed!(db.may(&listed.user, "use", &scopes::object(scope)), "that endpoint's user doesn't use {scope}");
                             ensure!(db.service(&key)?.is_none(), "a service is sealed no keys");

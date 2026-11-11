@@ -14,7 +14,7 @@ impl Host {
         self.member_content(caller, content::setting(name, value)).await
     }
 
-    /// Gives a device (by name or key: all of its endpoints of that name and user), or the Cloudflare node
+    /// Gives a device (by name or key: all of its endpoints of that name and user), or oned on Cloudflare
     /// (`cloudflare`), its run priority, for an admin: the `priority` setting, every other kept as set.
     pub async fn set_priority(&self, caller: &Caller, device: &str, priority: rank::Priority) -> Result<()> {
         let ids = if device.eq_ignore_ascii_case(rank::CLOUDFLARE) {
@@ -38,7 +38,7 @@ impl Host {
     }
 
     /// The same for someone signed in at the network's address through `client` (its name), which is no device: not the
-    /// device it reached, as the Cloudflare node says too.
+    /// device it reached, as oned on Cloudflare says too.
     pub fn state_for_client(&self, viewer: &Caller, client: &str) -> Result<State> {
         self.state_as(viewer, Some(client))
     }
@@ -121,7 +121,7 @@ impl Host {
         ::scope::state::state(network.as_ref().map(|i| i.r.db()), me, here)
     }
 
-    /// Signs one of `global`'s node entries with this device, for `caller`: it counts only if this device is theirs
+    /// Signs one of `global`'s app runtime entries with this device, for `caller`: it counts only if this device is theirs
     /// (on this machine, the CLI, MCP and the Mac app), and one that wouldn't count is refused, not written.
     pub async fn member_content(&self, caller: &Caller, content: Content) -> Result<()> {
         self.append_as(&Scope::Global, &caller.user, content).await?;
@@ -208,8 +208,8 @@ impl Host {
         ::api::cli::off(&self.name_of(key), self.with_or(None, |i| Ok(i.seen(key))))
     }
 
-    /// The network's compute devices' names by key (hex), and the Cloudflare node's (`cloudflare`): what a trace's reader calls the
-    /// nodes a client tried.
+    /// The network's compute devices' names by key (hex), and oned on Cloudflare's (`cloudflare`): what a trace's reader calls the
+    /// app runtimes a client tried.
     pub fn compute_names(&self) -> Value {
         self.with(|i| {
             let m = i.r.db();

@@ -21,7 +21,7 @@ pub fn commands() -> ::api::cli::Command {
                         "-" => std::io::read_to_string(std::io::stdin())?,
                         file => std::fs::read_to_string(file).with_context(|| format!("read {file}"))?,
                     };
-                    let result = execute(g.node, &script, g.agent)?;
+                    let result = execute(g.api, &script, g.agent)?;
                     for line in result["logs"].as_array().into_iter().flatten() {
                         eprintln!("{}", line.as_str().map(String::from).unwrap_or_else(|| line.to_string()));
                     }
@@ -39,7 +39,7 @@ pub fn commands() -> ::api::cli::Command {
                         (false, _) => 8,
                         (true, given) => given.and_then(|l| l.parse().ok()).ok_or_else(|| ::api::cli::Failed::Typed(format!("--limit is how many tools, a number: not {}", given.unwrap_or("nothing"))))?,
                     };
-                    let (apps, addable) = catalogs(g.node)?;
+                    let (apps, addable) = catalogs(g.api)?;
                     println!("{}", search(&apps, &addable, &words.join(" "), limit, Reader::Cli));
                 }
                 _ => return Ok(false),

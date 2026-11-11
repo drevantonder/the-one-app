@@ -8,6 +8,6 @@ publish = false
 [dependencies]
 one-service = { path = "../../../services/sdk" }
 anyhow = "1"
-# The hashes of what it last wrote, as the node kept them before (agents-written.json), so it takes those files over.
+# The hashes of what it last wrote, as the app runtime kept them before (agents-written.json), so it takes those files over.
 blake3 = "1"
 serde_json = "1"

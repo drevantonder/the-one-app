@@ -1,5 +1,5 @@
 //! Keys as devices hold them: each endpoint's own key, each scope's numbered epochs sealed to the endpoints that may
-//! open it, what's sealed under an epoch, signed requests, and the keys a caller hands a node for one call.
+//! open it, what's sealed under an epoch, signed requests, and the keys a caller hands an app runtime for one call.
 //! `key/crypto.js` writes the same formats, and `tests/contracts.rs` checks they agree.
 //!
 //! Every client is a device with its own key pair, never shared by a user's devices: a native app's in the Keychain,
@@ -414,9 +414,9 @@ pub const SESSION: u64 = 24 * 3_600_000;
 
 /// A device's word that `endpoint` is its own until `until` (ms, at most `SESSION` after `at`, and after whenever it's
 /// checked, so a device whose clock is fast asks for a little less): a signed request,
-/// as base64url JSON, the way the relay (iroh's auth token) and nodes (`x-one-endpoint`) take it. A browser's device
+/// as base64url JSON, the way the relay (iroh's auth token) and app runtimes (`x-one-endpoint`) take it. A browser's device
 /// key can't be read out of WebCrypto, and iroh signs with raw bytes, so its endpoint is a key of the session's, and
-/// this certificate is how the relay and nodes take that endpoint as the device.
+/// this certificate is how the relay and app runtimes take that endpoint as the device.
 pub fn certify(device: &SigningKey, endpoint: &[u8; 32], until: u64, at: u64) -> String {
     let request = signed_request(device, ENDPOINT, json!({ "endpoint": HEXLOWER.encode(endpoint), "until": until }), at);
     B64U.encode(&canonical(&request))

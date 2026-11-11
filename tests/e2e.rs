@@ -1,4 +1,4 @@
-//! Real nodes on this machine, reaching each other through the relay at a real network's gateway.
+//! Real app runtimes on this machine, reaching each other through the relay at a real network's gateway.
 
 use std::time::Duration;
 
@@ -83,7 +83,7 @@ async fn add_notes(a: &Host) {
 }
 
 /// The command that opens a backup, on a machine with only the disk and the recovery key: nothing running or joined
-/// here, and whatever it asked a node at would refuse the connection. The key comes from a file or stdin, and is never
+/// here, and whatever it asked an app runtime at would refuse the connection. The key comes from a file or stdin, and is never
 /// printed.
 fn the_command_checks_it_with_no_node(backup: &std::path::Path, recovery: &str) {
     use std::io::Write;
@@ -358,7 +358,7 @@ async fn removing_a_device_takes_its_app_runtime_and_naming_the_runtime_removes_
     assert!(!listed(device) && !listed(runtime), "naming its runtime removes the device");
 }
 
-/// The recovery key is sealed only to a device of someone an admin named, not to a node, and only where nothing holds it
+/// The recovery key is sealed only to a device of someone an admin named, not to an app runtime, and only where nothing holds it
 /// yet; naming a holder changes nothing a device already opens; and one taken off is sealed no more.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
@@ -425,9 +425,9 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
 }
 
 /// Someone who lost every device: a holder's own copy of the recovery key gives their new device their own scope's keys,
-/// by the code on that device's screen, and someone not named as a holder can't. The holder's device here is a node
-/// standing in for a client, its copy put where a client's would be, as a node is never sealed one; and being the same
-/// user's, its node may also hand the device their keys, so what shows restoring did it is what restoring says it opened.
+/// by the code on that device's screen, and someone not named as a holder can't. The holder's device here is an app runtime
+/// standing in for a client, its copy put where a client's would be, as an app runtime is never sealed one; and being the same
+/// user's, its app runtime may also hand the device their keys, so what shows restoring did it is what restoring says it opened.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_holder_restores_someone_and_no_one_else_can() {
     use data_encoding::BASE64URL_NOPAD as B64U;
@@ -737,7 +737,7 @@ async fn only_a_devices_user_or_an_admin_reads_its_logs() {
     assert!(a.may_read_logs(&sam).unwrap(), "an admin of the network reads any device's logs");
 }
 
-/// A node runs a build of an app's service only if its app's latest deploy names it: one whose bytes aren't that hash's
+/// An app runtime runs a build of an app's service only if its app's latest deploy names it: one whose bytes aren't that hash's
 /// is refused, a deploy naming none for this platform runs none, and only someone who may deploy the app names one.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_service_runs_only_the_build_its_apps_deploy_names() {
@@ -849,7 +849,7 @@ async fn an_apps_schedules_see_its_vault_items_as_its_calls_do_while_theyre_set(
     assert!(run().await.is_err(), "stopped, they run nothing");
 }
 
-/// A client device's MCP request (the remote MCP server's, say) is answered as its user, never as the node's own: it
+/// A client device's MCP request (the remote MCP server's, say) is answered as its user, never as the app runtime's own: it
 /// lists every tool any client does, its tools run as them, with what they may do and the keys they hand, and a tool
 /// needing keys they didn't hand is answered 428 with what it needs, for them to hand and ask again.
 #[tokio::test(flavor = "multi_thread")]
@@ -862,7 +862,7 @@ async fn a_client_devices_mcp_runs_as_its_user() {
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let device = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let_sam_in(&a, &device).await;
-    // Asked as the node asks its routes for a request over iroh: as the device its connection proved.
+    // Asked as the app runtime asks its routes for a request over iroh: as the device its connection proved.
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(custom_build::protocol::header::READS, custom_build::protocol::READS.into());
     let from = InProcess::new(a.clone(), Some(app_runtime::api::FromClient(device.verifying_key().to_bytes(), u64::MAX)), None, &headers);
@@ -890,10 +890,10 @@ async fn a_client_devices_mcp_runs_as_its_user() {
     assert!(logs["result"]["isError"] == true && logs.to_string().contains("admin"), "Sam reads no log of Andre's device: {logs}");
     let (_, backups) = mcp(json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": "backups_status", "arguments": {} } })).await;
     assert!(backups["result"]["isError"] == true && backups.to_string().contains("Only admins"), "Backups are admins': {backups}");
-    // A node signs who can do what only as its own user's device, for its own programs: a device answers that itself.
+    // An app runtime signs who can do what only as its own user's device, for its own programs: a device answers that itself.
     let (_, devices) = mcp(json!({ "jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": { "name": "devices_remove", "arguments": { "device": "mac", "confirm": true } } })).await;
     assert!(devices["result"]["isError"] == true, "{devices}");
-    // The recovery key is used only by this machine's own programs: no device hands it to a node.
+    // The recovery key is used only by this machine's own programs: no device hands it to an app runtime.
     let asked = from.clone();
     let recovered = tokio::task::spawn_blocking(move || asked.send("POST", "/api/devices/approve-with-recovery", &[("content-type", "application/json")], Some(json!({ "code": "ABCDEFGH", "recovery": "00".repeat(32) }).to_string().into_bytes()), None).unwrap().status).await.unwrap();
     assert_eq!(recovered, 403);
@@ -958,7 +958,7 @@ async fn a_routes_answer_is_what_the_document_says() {
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
     let document = onet::document(&a.apps(&me).await.unwrap(), true);
-    // As this machine's own programs ask: over its loopback, with the token in the node's home.
+    // As this machine's own programs ask: over its loopback, with the token in the app runtime's home.
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(custom_build::protocol::header::LOCAL_TOKEN, api::local::local_token(a.dir()).unwrap().parse().unwrap());
     let from = std::sync::Arc::new(InProcess::new(a.clone(), None, Some(axum::extract::ConnectInfo("127.0.0.1:1".parse().unwrap())), &headers));
@@ -1162,7 +1162,7 @@ impl Drop for Oned {
     }
 }
 
-/// A computer's home as a node that was its own device left it, started by this build's oned: its onet holds the same
+/// A computer's home as an app runtime that was its own device left it, started by this build's oned: its onet holds the same
 /// key and its app runtime opens what that key opened, and the only steps written are the two listings that make the
 /// runtime the device's, a compute of its own key naming the device, and the device a client alone.
 #[tokio::test(flavor = "multi_thread")]

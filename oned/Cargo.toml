@@ -1,5 +1,5 @@
 # oned (`<cli>d`): a computer's always-on program, keeping its onet, its app runtime and its services running. The
-# update path is oned/update/; the Workers' deploy and the Cloudflare node, which is oned on Cloudflare, oned/cloudflare/.
+# update path is oned/update/; the Workers' deploy and oned on Cloudflare, which is oned on Cloudflare, oned/cloudflare/.
 [package]
 name = "oned"
 version = "0.1.0"

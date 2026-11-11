@@ -27,9 +27,9 @@ impl Host {
         self.with_or(false, |i| Ok(i.r.db().app(app)?.is_some_and(|a| a.deleted.is_some() || a.erased)))
     }
 
-    /// Erases each app who's who says is erased that this node hasn't since it started, whichever device wrote the
+    /// Erases each app who's who says is erased that this app runtime hasn't since it started, whichever device wrote the
     /// step (`settings::retire`): its databases closed and forgotten here, and its keys deleted from the bucket, before
-    /// the step's read is done. Each node that reads the step does it, as deleting what's gone does nothing; one that
+    /// the step's read is done. Each app runtime that reads the step does it, as deleting what's gone does nothing; one that
     /// fails (the bucket didn't answer) is tried again the next time who's who changes.
     pub(super) async fn follow_erased(&self) {
         let Ok(erased) = self.with(|i| Ok(i.r.db().apps()?.into_iter().filter(|a| a.erased).map(|a| a.name).collect::<Vec<_>>())) else { return };
@@ -118,7 +118,7 @@ impl Host {
     /// title and icon, and for one built in, the bundle this release has of it; for those added for them, what it
     /// does (tools, widgets, screens, instructions). With `not_added`, also the built-in apps the network hasn't
     /// added yet, with no deploys, each as its own code describes it. Every app that says what it is has `offers` (a
-    /// main screen it `opens` to, `screens`: that or a widget, `accounts`), and, with a service, `nodes`: the names of the viewer's own nodes it can
+    /// main screen it `opens` to, `screens`: that or a widget, `accounts`), and, with a service, `nodes`: the names of the viewer's own app runtimes it can
     /// run on.
     pub async fn catalog(&self, viewer: &Caller, not_added: bool) -> Result<Vec<Value>> {
         let listed = self.with(|i| {
@@ -205,7 +205,7 @@ impl Host {
     }
 
     /// Where an app that `described` itself runs its service for `viewer`, if it has one (its own, or one it uses): the
-    /// names of their own nodes on a platform the service is built for.
+    /// names of their own app runtimes on a platform the service is built for.
     pub(super) fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
         let platforms: Option<Vec<&str>> = described["service"]["platforms"].as_array().map(|p| p.iter().filter_map(Value::as_str).collect());
         let uses_service = described["uses"]["services"].as_array().is_some_and(|s| !s.is_empty());
@@ -299,8 +299,8 @@ fn built_in_source(app: &str) -> Option<String> {
     Some(format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
 }
 
-/// Where `app`'s service runs for the scopes `added` names, and for `user` on their own nodes: `{ scope, node,
-/// name, online, seen (ms), problem }` each, `name` none once that node was removed, `problem` what its node said went wrong.
+/// Where `app`'s service runs for the scopes `added` names, and for `user` on their own app runtimes: `{ scope, app runtime,
+/// name, online, seen (ms), problem }` each, `name` none once that node was removed, `problem` what its app runtime said went wrong.
 fn runs_on(host: &Host, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, app: &str, added: &[String], user: &str) -> Result<Vec<Value>> {
     let m = i.r.db();
     let cloudflare = m.cloudflare_node()?;

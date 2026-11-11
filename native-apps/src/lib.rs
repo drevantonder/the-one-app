@@ -224,7 +224,7 @@ impl App {
     }
 }
 
-/// What a node answers `method` at `path` (with `body`, as JSON), as JSON: its `error`, or a status that isn't a success,
+/// What an app runtime answers `method` at `path` (with `body`, as JSON), as JSON: its `error`, or a status that isn't a success,
 /// an Err.
 async fn node(reach: &Reach, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
     let (headers, body) = match body {
@@ -735,7 +735,7 @@ async fn wait() -> Result<(), Failure> {
     }
 }
 
-/// A request to the user's nodes → its status and headers, and an id its body is read by (`read`), part by part.
+/// A request to the user's app runtimes → its status and headers, and an id its body is read by (`read`), part by part.
 #[tauri::command]
 async fn fetch(method: String, path: String, headers: Vec<(String, String)>, body: Option<String>) -> Result<Value, String> {
     let body = body.map(String::into_bytes).unwrap_or_default();
@@ -893,7 +893,7 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
 }
 
 /// What the page says went wrong (an error it didn't catch, a file that didn't load), for this device's log, which a user's
-/// agent reads through a node (`one logs <device>`). The log's own caps and filters keep it small and free of what's secret.
+/// agent reads through an app runtime (`one logs <device>`). The log's own caps and filters keep it small and free of what's secret.
 #[tauri::command]
 fn log(text: String) {
     device_logs::record(&format!("page: {text}"));

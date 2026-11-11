@@ -1,4 +1,4 @@
-//! What a node's and its services' output goes through to be kept (`super`'s log files).
+//! What an app runtime's and its services' output goes through to be kept (`super`'s log files).
 
 use std::io::{BufRead, Write};
 

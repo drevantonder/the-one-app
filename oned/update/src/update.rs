@@ -17,7 +17,7 @@ pub mod cli;
 mod mac;
 
 /// The file in a device's home holding its network's address, the only thing an update needs that's the network's.
-/// The address itself is a setting in who's who, which this can't read: the node keeps it here, each time it checks.
+/// The address itself is a setting in who's who, which this can't read: the app runtime keeps it here, each time it checks.
 const ADDRESS: &str = "address";
 /// The file in a device's home holding the pid of its running oned.
 pub const PID: &str = "pid";

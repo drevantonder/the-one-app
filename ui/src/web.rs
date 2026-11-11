@@ -34,7 +34,7 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
             .replacen("const NAME = \"\";", &format!("const NAME = {};", json!(custom_build::config::NAME)), 1)
             .into_bytes();
     }
-    // The client's own screens, which it shows from here and never from a node (`screen::client_template`).
+    // The client's own screens, which it shows from here and never from an app runtime (`screen::client_template`).
     files.extend(crate::screen::client_screens().map(|name| (format!("screens/{name}.html"), crate::screen::client_template(name).into_bytes())));
     // Each file the page loads is named by its content (`?v=`, which the gateway checks), so a browser keeps it for
     // good and asks again only once it changes: those it names itself, and those web.js asks for (`one-files`).
@@ -43,7 +43,7 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
         format!("/{path}?v={}", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(bytes))[..16])
     };
     // A script names the scripts it imports by their content too (each after its own imports), so a reopen fetches
-    // none of them: web.js's, and the worker's that reaches nodes. What it's named by is what it is with them.
+    // none of them: web.js's, and the worker's that reaches app runtimes. What it's named by is what it is with them.
     let scripts: Vec<String> = files.iter().map(|(path, _)| path.clone()).filter(|path| path.ends_with(".js") && !["sw.js", "start.js"].contains(&path.as_str())).collect();
     let mut done: std::collections::HashMap<String, (Vec<u8>, String)> = Default::default();
     for path in &scripts {

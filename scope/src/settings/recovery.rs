@@ -1,6 +1,6 @@
 //! What the network's recovery key does on the computer where its file is read, never asked over the network: letting
 //! back in someone who lost every device, replacing the key, and keeping a holder's sealed copy of it. Every computer
-//! runs this one copy as its device (`Me`): its node, and its onet.
+//! runs this one copy as its device (`Me`): its app runtime, and its onet.
 
 use std::collections::BTreeMap;
 

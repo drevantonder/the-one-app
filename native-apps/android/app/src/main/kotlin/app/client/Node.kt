@@ -21,7 +21,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
 // What a widget is, as the app keeps it for the home screen (native-apps/src/widgets.rs): its tree at each size, as the
-// node gave it. A field with a default may be left out; one without must be there.
+// app runtime gave it. A field with a default may be left out; one without must be there.
 
 val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true; isLenient = true }
 

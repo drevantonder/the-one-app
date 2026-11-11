@@ -1,4 +1,4 @@
-//! The Cloudflare node's Rust: the machine node's own code, as WebAssembly on Workers. `worker.js` answers requests
+//! oned on Cloudflare's Rust: the computer's app runtime's own code, as WebAssembly on Workers. `worker.js` answers requests
 //! and runs apps; this checks who asks, opens the keys callers hand it, signs what it asks the URL signer, and
 //! reads and writes apps' databases in the bucket (`database/src/stored.rs`), through the presigned URLs `worker.js` gets. It holds
 //! no keys but those handed it for a device's requests.
@@ -43,14 +43,14 @@ fn signing_key(seed: &str) -> Result<ed25519_dalek::SigningKey> {
     Ok(ed25519_dalek::SigningKey::from_bytes(&::key::unhex(seed)?))
 }
 
-/// This node as an endpoint, from its key (hex): `{ key, seal }`, hex, what a caller seals the keys it hands to.
+/// This app runtime as an endpoint, from its key (hex): `{ key, seal }`, hex, what a caller seals the keys it hands to.
 #[wasm_bindgen]
 pub fn endpoint_of(seed: &str) -> Result<String, JsError> {
     let e = ::key::Endpoint::of(&signing_key(seed).map_err(thrown)?);
     Ok(json!({ "key": data_encoding::HEXLOWER.encode(&e.key), "seal": data_encoding::HEXLOWER.encode(&e.seal) }).to_string())
 }
 
-/// `fields` (JSON) signed by this node's key for `domain`, as devices sign what they ask the URL signer.
+/// `fields` (JSON) signed by this app runtime's key for `domain`, as devices sign what they ask the URL signer.
 #[wasm_bindgen]
 pub fn signed(seed: &str, domain: &str, fields: &str, at: f64) -> Result<String, JsError> {
     Ok(::key::signed_request(&signing_key(seed).map_err(thrown)?, domain, serde_json::from_str(fields)?, at as u64).to_string())
@@ -58,15 +58,15 @@ pub fn signed(seed: &str, domain: &str, fields: &str, at: f64) -> Result<String,
 
 static READS: ::bucket::Reads = ::bucket::Reads::new();
 
-/// A read of the bucket this node made, `name` and whether it was there, counted: → what it read, as the rows the
-/// telemetry Worker takes, once it's been a minute since it last said. `instance` is this node's key.
+/// A read of the bucket this app runtime made, `name` and whether it was there, counted: → what it read, as the rows the
+/// telemetry Worker takes, once it's been a minute since it last said. `instance` is this app runtime's key.
 #[wasm_bindgen]
 pub fn bucket_read(name: &str, found: bool, instance: &str, now: f64) -> Option<String> {
     READS.count(name, found);
     insights::bucket_reads(&READS, now as u64, instance, "cloudflare-node").map(|rows| rows.to_string())
 }
 
-/// A call this node ran for `user` (their id), as the rows the telemetry Worker takes: one server span, by the same rules as any node's. `code` is
+/// A call this app runtime ran for `user` (their id), as the rows the telemetry Worker takes: one server span, by the same rules as any app runtime's. `code` is
 /// what it failed with, and `said` what it said; a refusal keeps none of that.
 #[wasm_bindgen]
 pub fn call_span(app: &str, tool: &str, user: &str, instance: &str, time: f64, ms: f64, failed: bool, code: Option<String>, said: Option<String>, traceparent: Option<String>) -> String {
@@ -92,7 +92,7 @@ pub fn call_span(app: &str, tool: &str, user: &str, instance: &str, time: f64, m
 /// The most keys one handoff may carry: a call's databases in each epoch since their newest copies.
 const HANDED_MOST: usize = 256;
 
-/// The keys the device `device` (hex) handed this node with its requests (`x-one-keys`), kept no longer than its word
+/// The keys the device `device` (hex) handed this app runtime with its requests (`x-one-keys`), kept no longer than its word
 /// lasts (`exp`, milliseconds): → `{ until, keys: [{ scope, epoch, app, database, key }] }`.
 #[wasm_bindgen]
 pub fn handoff(seed: &str, device: &str, sealed: &str, now: f64, exp: f64) -> Result<String, JsError> {
@@ -109,7 +109,7 @@ pub fn handoff(seed: &str, device: &str, sealed: &str, now: f64, exp: f64) -> Re
     Ok(json!({ "until": handoff.until.min(exp as u64), "keys": handoff.keys }).to_string())
 }
 
-/// What a sign-in needs for `wants` (JSON, `[{ scope, app, database, have: [epoch] }]`) that it wasn't handed, as a node
+/// What a sign-in needs for `wants` (JSON, `[{ scope, app, database, have: [epoch] }]`) that it wasn't handed, as an app runtime
 /// on a machine says it (app-runtime/src/sessions.rs): every epoch from the oldest it needs (`::api::handed::oldest_needed`) to the
 /// scope's current one, as the network's signed steps say (`epochs`, JSON `{ <scope>: n }`), never what the bucket
 /// holds, where any endpoint can put a name. → `[{ scope, epoch, app, database }]`.
@@ -197,7 +197,7 @@ pub fn check_certificate(certificate: &str, now: f64) -> Result<String, JsError>
 
 /// Opens a database at `prefix` for `owner`'s object with the keys handed (`usable`, under the scope's `current`
 /// epoch) and brings it to `migrations` (JSON, its app's schema for the scope's kind), signing what it writes with the
-/// node's endpoint key (`seed`): → a handle for `query`, `write` and `close`.
+/// app runtime's endpoint key (`seed`): → a handle for `query`, `write` and `close`.
 #[wasm_bindgen]
 pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, current: u32, migrations: String, seed: String) -> Result<u32, JsValue> {
     touch(&owner);
@@ -252,7 +252,7 @@ pub fn query(handle: u32, sql: &str, params: &str) -> Result<String, JsError> {
 
 /// Whether `user` may do each permission to each object of `asks` (JSON, `[[permission, object]]`), in order (JSON,
 /// `[bool]`), by `owner`'s scope database and an app's own `types` (JSON, as it declares them) and relation rows in its
-/// open database `handle`, if it declares any (`ScopeDb::app_may`), as a node on a machine answers.
+/// open database `handle`, if it declares any (`ScopeDb::app_may`), as an app runtime on a computer answers.
 #[wasm_bindgen]
 pub fn may(owner: &str, handle: Option<u32>, user: &str, asks: &str, types: &str, now: f64) -> Result<String, JsError> {
     let asks: Vec<(String, String)> = serde_json::from_str(asks)?;
@@ -297,7 +297,7 @@ pub fn vault_items(opened: &str, app: &str, user: &str) -> Result<String, JsErro
 
 /// An app's request out (JSON `{ url, headers, body }`, its body text or null) with the fields of the items it's
 /// switched on for filled in from `opened` (as `vault_items`), a secret one only if `host` is one of its item's hosts,
-/// as a node on a machine fills an app's requests (`app-runtime/src/app/outbound.rs`).
+/// as an app runtime on a computer fills an app's requests (`app-runtime/src/app/outbound.rs`).
 #[wasm_bindgen]
 pub fn vault_fill(opened: &str, app: &str, user: &str, host: &str, request: &str) -> Result<String, JsError> {
     let found = lookup(opened, app, user)?;
@@ -326,7 +326,7 @@ fn lookup(opened: &str, app: &str, user: &str) -> Result<vault::Lookup, JsError>
 }
 
 /// A call's appends (JSON, as the shim gives them) as each scope's statements, `{ <scope>: [[sql, params, check]] }`,
-/// for the scopes the call named; what this node can't write yet refuses the call, so it writes nothing.
+/// for the scopes the call named; what this app runtime can't write yet refuses the call, so it writes nothing.
 #[wasm_bindgen]
 pub fn statements(appends: &str, scopes: &str) -> Result<String, JsError> {
     let scopes: Vec<String> = serde_json::from_str(scopes)?;
@@ -355,7 +355,7 @@ pub fn screen(context: &str, body: &str, linked: bool) -> Result<String, JsError
     Ok(ui::screen::page(&serde_json::from_str(context)?, body, linked))
 }
 
-/// The custom build this node is: `{ name, cli, port, made_here }`, and the name a call gives for this node (`cloudflare`).
+/// The custom build this app runtime is: `{ name, cli, port, made_here }`, and the name a call gives for this app runtime (`cloudflare`).
 #[wasm_bindgen]
 pub fn config() -> String {
     json!({ "name": custom_build::config::NAME, "cli": custom_build::config::CLI, "port": custom_build::config::PORT, "made_here": custom_build::config::MADE_HERE, "cloudflare": ::scope::rank::CLOUDFLARE }).to_string()
@@ -504,7 +504,7 @@ async fn read_steps(id: &(String, String), scope: &Scope, bucket: &Js, keys: &::
 }
 
 thread_local! {
-    /// The network's root, as the device that deployed this node holds it (`pin_root`).
+    /// The network's root, as the device that deployed this app runtime holds it (`pin_root`).
     static ROOT: RefCell<Option<Hash>> = const { RefCell::new(None) };
 }
 
@@ -517,10 +517,10 @@ pub fn pin_root(root: &str) -> Result<(), JsError> {
     Ok(())
 }
 
-/// `global`'s scope database's steps after `from` as the bucket holds them, sealed, for `user`, as a node on a machine
+/// `global`'s scope database's steps after `from` as the bucket holds them, sealed, for `user`, as an app runtime on a computer
 /// gives them (`Host::global_steps`): `{ at, epoch, steps: [{ at, sealed }] }` (base64url), and for a device that starts
 /// from its `welcome` (`steps::Welcome`), its freeze's step and the copy before its step, `{ welcome, freeze, start }`.
-/// Fails before the log is frozen. The caller opens and checks them all itself: this trusts the node with nothing.
+/// Fails before the log is frozen. The caller opens and checks them all itself: this trusts the app runtime with nothing.
 #[wasm_bindgen]
 pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, from: f64, welcome: Option<String>) -> Result<String, JsValue> {
     use ::scope::steps;
@@ -565,7 +565,7 @@ pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
 }
 
 /// The scopes `user` may use, as the network's log says, whether they're a user of it, whether they were removed
-/// from it, the name of `device` (hex) if it's a client device of theirs, else null, and the scopes of theirs this node
+/// from it, the name of `device` (hex) if it's a client device of theirs, else null, and the scopes of theirs this app runtime
 /// runs (a user's own only as their own device chose): `{ scopes, joined, removed, device, runs }`.
 #[wasm_bindgen]
 pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsError> {
@@ -589,7 +589,7 @@ pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsErro
 }
 
 /// Each of `scopes`' (JSON) current epoch, as the network's signed `epoch` steps say, 1 for one with none yet:
-/// `{ <scope>: n }`, all a node writes under.
+/// `{ <scope>: n }`, all an app runtime writes under.
 #[wasm_bindgen]
 pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
     let scopes: Vec<String> = serde_json::from_str(scopes)?;
@@ -606,7 +606,7 @@ pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
     Ok(Value::Object(out).to_string())
 }
 
-/// The nodes on machines a call of `user`'s reaching `scopes` (JSON) may be passed on to (`ScopeDb::runners`), each
+/// The computers' app runtimes a call of `user`'s reaching `scopes` (JSON) may be passed on to (`ScopeDb::runners`), each
 /// `{ key, seal }` in hex.
 #[wasm_bindgen]
 pub fn runners(owner: &str, user: &str, scopes: &str) -> Result<String, JsError> {
@@ -618,7 +618,7 @@ pub fn runners(owner: &str, user: &str, scopes: &str) -> Result<String, JsError>
     Ok(Value::from(out).to_string())
 }
 
-/// What this node (its key, `seed`) asks a node on a machine to run `user`'s call (JSON) with, handing it `keys` (JSON,
+/// What this app runtime (its key, `seed`) asks an app runtime on a computer to run `user`'s call (JSON) with, handing it `keys` (JSON,
 /// `[{ scope, epoch, app, database, key }]`) of the call's `scopes` (JSON) sealed to its `seal` key until `until`
 /// (`keys::forwarded`): the message, as JSON.
 #[wasm_bindgen]
@@ -629,15 +629,15 @@ pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, unt
     Ok(asked.to_string())
 }
 
-/// The API's document for a client of `apps` (JSON, as `GET /api/apps` gives them): what a node on a machine serves a
-/// client, the routes this node doesn't serve itself among them.
+/// The API's document for a client of `apps` (JSON, as `GET /api/apps` gives them): what an app runtime on a computer serves a
+/// client, the routes this app runtime doesn't serve itself among them.
 #[wasm_bindgen]
 pub fn openapi(apps: &str) -> Result<String, JsError> {
     Ok(onet::document(&serde_json::from_str::<Vec<Value>>(apps)?, false).to_string())
 }
 
 /// The network as `user` sees it, from the steps of `scopes` (JSON) `owner`'s object read: `{ state, apps, me, erased }`.
-/// `state` is `GET /api/state`'s, for a node that knows of no device being on; `apps` is `GET /api/apps`'s from the
+/// `state` is `GET /api/state`'s, for an app runtime that knows of no device being on; `apps` is `GET /api/apps`'s from the
 /// members alone, each with `reach`, the scopes it reaches for `user` (what its widgets and calls are given), for
 /// `worker.js` to add what each app says it does; `me` is what an app is told of who it runs for; `erased`, the apps
 /// erased, whose copies it forgets. `client` names auth's client.
@@ -670,7 +670,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
             // Of the features, only the Vault's requests are known from who's who alone.
             features: vault::waiting(::scope::state::waiting(m, me, read(), now)).map(|v| ("vault".to_string(), v)).into_iter().collect(),
             guide: None,
-            // No throwaway network has a Cloudflare node.
+            // No throwaway network has oned on Cloudflare.
             throwaway: false,
             device_now: &|_| Ok(Default::default()),
         },
@@ -687,8 +687,8 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
                 return Ok(info);
             }
             let mut reach = ::scope::state::reachable(m, me, |s| runs(s).then(|| state_of(s).is_some_and(|st| st.added.contains(&a.name))))?;
-            // Only those this node runs, if it runs some, as a node on a machine leaves out a user's own scope that
-            // no node running the rest runs (app-runtime/src/calls.rs: `reaching`): their own, until they choose this one.
+            // Only those this app runtime runs, if it runs some, as an app runtime on a computer leaves out a user's own scope that
+            // no device running the rest runs (app-runtime/src/calls.rs: `reaching`): their own, until they choose this one.
             if reach.iter().any(runs) {
                 reach.retain(runs);
             }
@@ -701,7 +701,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
     Ok(json!({ "state": state, "apps": apps, "me": me, "erased": erased, "handles": m.handles()? }))
 }
 
-/// A deploy's bundle from the bucket (`bucket::blob_name`), opened with the keys of the node's `blobs` database in
+/// A deploy's bundle from the bucket (`bucket::blob_name`), opened with the keys of the app runtime's `blobs` database in
 /// `global` and checked against its hash: → the app's module.
 #[wasm_bindgen]
 pub async fn bundle(bucket: JsValue, keys: String, hash: String) -> Result<String, JsValue> {
@@ -723,7 +723,7 @@ pub fn ai_gateway_schema() -> String {
     json!(ai_gateway::SCHEMA).to_string()
 }
 
-/// AI Gateway for a call this node runs: as a machine's app runtime does (ai-gateway/runtime/), but Workers AI through the
+/// AI Gateway for a call this app runtime runs: as a machine's app runtime does (ai-gateway/runtime/), but Workers AI through the
 /// account's binding, which no key pays for but the network's account, and a device's model through a machine, as any
 /// call of a service goes from here. What it needs of `worker.js` is `out`: `{ workersAi(model, input), fetch(url,
 /// headers, body) → { status, retryAfter, body }, device(function, input) → { ok } | { unavailable } | { error } }`,

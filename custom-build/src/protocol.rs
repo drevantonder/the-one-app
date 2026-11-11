@@ -14,7 +14,7 @@ pub const RELAY: &str = "one/relay";
 pub const TELEMETRY: &str = "one/telemetry";
 /// What a device signs its requests to auth under.
 pub const AUTH_DOMAIN: &str = "one/auth";
-/// How long a pairing code works (ms): what a node tells the relay it lasts, which the relay holds it to.
+/// How long a pairing code works (ms): what an app runtime tells the relay it lasts, which the relay holds it to.
 pub const PAIRING_LIFE: u64 = 3_600_000;
 /// What a session's endpoint signs to open its relay socket.
 pub const SOCKET: &str = "one/socket";
@@ -39,7 +39,7 @@ pub const SLOW_MS: u64 = 1_000;
 pub const SAMPLED_ONE_IN: u64 = 20;
 
 /// What this build reads of who's who: the scope database's tables, types, roles and rules of this number. A device
-/// that reads less is told to update, by nodes (`protocol::header::READS`), the relay, auth and the URL signer (`reads` in what it
+/// that reads less is told to update, by app runtimes (`protocol::header::READS`), the relay, auth and the URL signer (`reads` in what it
 /// asks them, `shared/protocol.js`'s `READS`, which `protocol::javascript` writes from this). A release that changes
 /// `scope::SCHEMA`, `permissions::SCHEMA` or `permissions::DEFAULTS`, or takes away a route older devices use, or writes a
 /// sealed format older devices can't open (`keys::FORMAT`), reads one more.
@@ -49,17 +49,17 @@ pub const READS: u32 = 16;
 pub mod header {
     /// A line an app's `_http` wants git to show whoever asked.
     pub const APP_SAYS: &str = "x-app-says";
-    /// The database keys a caller hands a node with a request, sealed to it (`keys::Handoff`).
+    /// The database keys a caller hands an app runtime with a request, sealed to it (`keys::Handoff`).
     pub const KEYS: &str = "x-one-keys";
-    /// A session's endpoint, certified by its device, so the node takes it as that device.
+    /// A session's endpoint, certified by its device, so the app runtime takes it as that device.
     pub const ENDPOINT: &str = "x-one-endpoint";
-    /// A client that picks its node itself: the node it asks says where else to ask, if it won't run the call.
+    /// A client that picks its app runtime itself: the app runtime it asks says where else to ask, if it won't run the call.
     pub const ELSEWHERE: &str = "x-one-elsewhere";
     /// A request that asks for a trace of what it did, answered in the same header.
     pub const TRACE: &str = "x-one-trace";
     /// W3C's: the trace and span a request is part of.
     pub const TRACEPARENT: &str = "traceparent";
-    /// Whose request it is, which a node checks against the device's key.
+    /// Whose request it is, which an app runtime checks against the device's key.
     pub const USER: &str = "x-one-user";
     /// A signed request that has no body to carry it (a GET's or DELETE's).
     pub const REQUEST: &str = "x-one-request";
@@ -67,14 +67,14 @@ pub mod header {
     pub const READS: &str = "x-one-reads";
     /// The agent a client's tool call is for, base64url of its name (names aren't all ASCII): credit, which proves nothing.
     pub const AGENT: &str = "x-one-agent";
-    /// What a machine's own programs send a node of theirs to say they're its own.
+    /// What a machine's own programs send an app runtime of theirs to say they're its own.
     pub const LOCAL_TOKEN: &str = "x-one-local-token";
-    /// The code (`code`) of an error the node answers a running call's ask with, which the app's error then carries.
+    /// The code (`code`) of an error the app runtime answers a running call's ask with, which the app's error then carries.
     pub const CODE: &str = "x-one-code";
 }
 
-/// The kinds of message devices send each other over iroh, as `{ kind, body }`: a node's with another, and what a
-/// client or the Cloudflare node asks of a node.
+/// The kinds of message devices send each other over iroh, as `{ kind, body }`: an app runtime's with another, and what a
+/// client or oned on Cloudflare asks of an app runtime.
 pub mod message {
     /// A call to run (`{ call }`), or a user's request to join a network (`{ join }`).
     pub const ASK: &str = "ask";
@@ -132,7 +132,7 @@ pub const NOTE_FALLBACK: &str = "New notification";
 pub const WIDGET_LIMIT_MS: u64 = 1_000;
 pub const LATE_WIDGET: &str = "Still drawing.";
 
-/// The codes the node's errors carry beside their text (`{ error, code }`), which callers act on, never on the text.
+/// The codes the app runtime's errors carry beside their text (`{ error, code }`), which callers act on, never on the text.
 /// An app's error may carry one too (an error with a `code`), the Workers and clients of other languages read the
 /// same ones from `shared/protocol.js`'s `CODES`, each as its value in camelCase.
 pub mod code {
@@ -151,12 +151,12 @@ pub mod code {
         NOT_LET_IN = "not_let_in",
         /// What was asked isn't the caller's to do, or needs `--confirm`.
         REFUSED = "refused",
-        /// A request to the node that didn't show the token in its home, as the machine's own programs do: the caller
-        /// knows which home it read (`api::token_refused`), the node doesn't.
+        /// A request to the app runtime that didn't show the token in its home, as the machine's own programs do: the caller
+        /// knows which home it read (`api::token_refused`), the app runtime doesn't.
         NOT_THIS_MACHINE = "not_this_machine",
         /// What was asked needs an account or a sign-in that isn't there.
         NOT_SIGNED_IN = "not_signed_in",
-        /// No device runs what was asked now: its node or service is starting, asking again in a moment answers.
+        /// No device runs what was asked now: its app runtime or service is starting, asking again in a moment answers.
         RESTARTING = "restarting",
         /// A service's program stopped while it ran the call, which may have done some of it: look at what it did before
         /// asking again.
@@ -199,7 +199,7 @@ pub mod code {
     }
 }
 
-/// An error that says what kind it is, as `{ error, code }` on the wire: the node's answers, and what a device passes
+/// An error that says what kind it is, as `{ error, code }` on the wire: the app runtime's answers, and what a device passes
 /// on to the one that asked.
 #[derive(Debug)]
 pub struct Coded {

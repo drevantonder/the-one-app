@@ -23,49 +23,49 @@ scope = { path = "../scope" }
 api = { path = "../api" }
 # The UI (ui/): a screen's page, the client's own screens, the web client's and the Workers' files.
 ui = { path = "../ui" }
-# Deploy (deploy/): bundles, building an app with the pinned Bun, every build; what a node does for it, only a node's.
+# Deploy (deploy/): bundles, building an app with the pinned Bun, every build; what an app runtime does for it, only an app runtime's.
 deploy = { path = "../deploy" }
 deploy-runtime = { path = "../deploy/runtime" }
-# Insights (insights/): its signals, the batch, reading rows back, every build; recording and sending them, only a node's.
+# Insights (insights/): its signals, the batch, reading rows back, every build; recording and sending them, only an app runtime's.
 insights = { path = "../insights" }
 insights-runtime = { path = "../insights/runtime" }
-# The Vault (vault/): items, their sealing and filling, every build; what the app runtime does for it, only a node's.
+# The Vault (vault/): items, their sealing and filling, every build; what the app runtime does for it, only an app runtime's.
 vault = { path = "../vault" }
 # Labs (labs/): which of the network's labs are on, every build.
 labs = { path = "../labs" }
 # Onboarding (onboarding/): what a pairing code says and what joining with one asks, every build; its screens are the files beside it, and what serves a code the app runtime's (onboarding/runtime/).
 onboarding = { path = "../onboarding" }
-# Device logs (device-logs/): what a device's programs and services print, kept and read, every build; what the app runtime does for the tool that reads them, only a node's.
+# Device logs (device-logs/): what a device's programs and services print, kept and read, every build; what the app runtime does for the tool that reads them, only an app runtime's.
 device-logs = { path = "../device-logs" }
 device-logs-runtime = { path = "../device-logs/runtime" }
 vault-runtime = { path = "../vault/runtime" }
 # Devices (devices/): their tools' specs, the recovery key's commands and a machine's load, every build; what the
-# app runtime does for them, only a node's.
+# app runtime does for them, only an app runtime's.
 devices = { path = "../devices" }
 devices-runtime = { path = "../devices/runtime" }
 # Services (services/): what a service's program registers on, carried asks, sandboxes and their commands, a computer's;
-# what the app runtime does for them, only a node's.
+# what the app runtime does for them, only an app runtime's.
 services = { path = "../services" }
 # The signed record at the network's address it reads and publishes to, and the address `one update` reads (oned/update/).
 oned-update = { path = "../oned/update", features = ["machine"] }
 services-runtime = { path = "../services/runtime" }
-# Notifications (notifications/): a note sealed to one device and what a device registers, every build; sending them, only a node's.
+# Notifications (notifications/): a note sealed to one device and what a device registers, every build; sending them, only an app runtime's.
 notifications = { path = "../notifications" }
 notifications-runtime = { path = "../notifications/runtime" }
-# Backups (backups/): a place's Vault item kind and the tools' specs, every build; running them and the format, only a node's.
+# Backups (backups/): a place's Vault item kind and the tools' specs, every build; running them and the format, only an app runtime's.
 backups = { path = "../backups" }
 backups-runtime = { path = "../backups/runtime" }
-# App schedules (app-schedules/): an app's schedules as its deploy declares them, every build; running them, only a node's.
+# App schedules (app-schedules/): an app's schedules as its deploy declares them, every build; running them, only an app runtime's.
 app-schedules = { path = "../app-schedules" }
 app-schedules-runtime = { path = "../app-schedules/runtime" }
-# Groups (groups/): who's in the network and its groups, every build; what the app runtime does for it, only a node's.
+# Groups (groups/): who's in the network and its groups, every build; what the app runtime does for it, only an app runtime's.
 groups = { path = "../groups" }
 groups-runtime = { path = "../groups/runtime" }
-# Widgets (widgets/): the tool that shows them, every build; what the app runtime does for them, only a node's.
+# Widgets (widgets/): the tool that shows them, every build; what the app runtime does for them, only an app runtime's.
 widgets = { path = "../widgets" }
 widgets-runtime = { path = "../widgets/runtime" }
 anyhow = "1"
-# AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes, tools' specs, whose key pays and a call's flow, every build; running it on a machine, only a node's.
+# AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes, tools' specs, whose key pays and a call's flow, every build; running it on a machine, only an app runtime's.
 ai-gateway = { path = "../ai-gateway" }
 ai-gateway-runtime = { path = "../ai-gateway/runtime" }
 data-encoding = "2"
@@ -76,7 +76,7 @@ schemars = "1"
 ed25519-dalek = "3"
 rand = "0.8"
 blake3 = "1"
-# A scope database's steps are kept in CBOR in the bucket (scope/src/steps.rs); the Cloudflare node reads them too.
+# A scope database's steps are kept in CBOR in the bucket (scope/src/steps.rs); oned on Cloudflare reads them too.
 ciborium = "0.2"
 # `serialize` makes and reads an app database's copy in memory (database/src/stored.rs).
 rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"] }
@@ -85,7 +85,7 @@ sha2 = "0.11"
 serde_json = "1"
 tracing = "0.1"
 
-# On Workers (the Cloudflare node, oned/cloudflare/worker/), rand gets its randomness from the runtime's crypto.getRandomValues.
+# On Workers (oned on Cloudflare, oned/cloudflare/worker/), rand gets its randomness from the runtime's crypto.getRandomValues.
 # The features every client lists, which this runtime serves, and the API's document made of them.
 onet = { path = "../onet" }
 # MCP at /mcp and the skills it serves.
@@ -98,12 +98,12 @@ toml = "0.9"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
-# What only a node on a machine uses (the `node` feature): the rest of the node, which src/lib.rs keeps apart from what
-# the Cloudflare node and the native apps' client share.
+# What only an app runtime on a computer uses (none of it built for wasm): the rest of the app runtime, which src/lib.rs keeps apart from what
+# oned on Cloudflare and the native apps' client share.
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 axum = { version = "0.8" }
-# Its join_all and BoxFuture run a node's asks of several things at once ; axum and iroh
+# Its join_all and BoxFuture run an app runtime's asks of several things at once ; axum and iroh
 # already build it.
 futures-util = { version = "0.3", default-features = false }
 # Devices reach each other over iroh (app-runtime/src/net.rs): QUIC between their device keys, direct where a path opens and
@@ -114,7 +114,7 @@ iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "
 # A device applies a database step another device sent only once the bucket confirms it holds those bytes, by their
 # ETag, which for R2's single PUT is their MD5 (bucket/src/place.rs); nothing already built gives MD5.
 md-5 = { version = "0.11" }
-# So workerd dies with its node on Linux (prctl PR_SET_PDEATHSIG).
+# So workerd dies with its app runtime on Linux (prctl PR_SET_PDEATHSIG).
 libc = { version = "0.2" }
 # Release signatures are OpenSSH signatures (sshsig), which install.sh checks with ssh-keygen; this reads the keys and
 # makes and checks the signatures.
@@ -128,7 +128,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
 # Agent devices' screens come as PNG or JPEG and go out as JPEG at the width asked (src/agent_devices/picture.rs).
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
-# Client devices ask a node's local API over iroh, HTTP/1.1 on each stream (app-runtime/src/net.rs), which hyper's server
+# Client devices ask an app runtime's local API over iroh, HTTP/1.1 on each stream (app-runtime/src/net.rs), which hyper's server
 # answers as axum's does over TCP (axum already builds hyper).
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }

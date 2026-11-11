@@ -74,7 +74,7 @@ fn device_client(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Settin
     let mut borrowed = devices(dir);
     let what = borrowed_for(checkout, kind);
     let listed = listed_devices;
-    // A copy borrowed for this checkout's throwaway network that it lost track of (the node restarted as it was lent) is
+    // A copy borrowed for this checkout's throwaway network that it lost track of (the app runtime restarted as it was lent) is
     // taken, not left beside a second one.
     let ours = |listed: &Value| listed.as_array().into_iter().flatten().find(|d| d["borrowed"]["for"] == what.as_str()).and_then(|d| d["name"].as_str()).map(String::from);
     let now = listed();

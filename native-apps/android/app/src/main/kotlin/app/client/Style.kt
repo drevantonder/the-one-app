@@ -239,7 +239,7 @@ fun tileBitmap(look: TileLook, px: Int, title: String = look.seed): Bitmap {
 
 private val pictures = LruCache<String, Bitmap>(40)
 
-/** An app's picture, from the data URL its node gives. */
+/** An app's picture, from the data URL its app runtime gives. */
 private fun pictureOf(url: String): Bitmap? {
     pictures.get(url)?.let { return it }
     val bytes = runCatching { Base64.decode(url.substringAfter(','), Base64.DEFAULT) }.getOrNull() ?: return null

@@ -3,7 +3,7 @@
 //! oned/src/part.rs) holds its key and starts its program; the program never sees the key.
 //!
 //! - **Linux**, a service not run as the user: a unit of the template `<cli>-service@.service`, which `<cli> services
-//!   sandbox` writes once as root (install.sh runs it) with a polkit rule letting the node's user start and stop
+//!   sandbox` writes once as root (install.sh runs it) with a polkit rule letting the app runtime's user start and stop
 //!   only those. systemd gives it its own OS user (`DynamicUser=`), its own folder (`StateDirectory=`), no home and a
 //!   read-only system. Its program, our launcher (`oned --sandboxed=<dir>`, `launch`) and a socket to its endpoint
 //!   are put in its folder here (`dir`), which the unit sees read-only at `/run/<cli>`.
@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use ::custom_build::config::{CLI, NAME};
 
 /// What an app declares its service may do: the hosts it may reach (`"*"`: any; `"*.example.com"`: that domain's;
-/// `"host:port"`: only that port), and whether it runs as the node's user, with their files.
+/// `"host:port"`: only that port), and whether it runs as the app runtime's user, with their files.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Declared {
     #[serde(default)]
@@ -120,7 +120,7 @@ pub fn unit(name: &str) -> String {
     format!("{CLI}-service@{}.service", instance(name))
 }
 
-/// Where its sandbox's folders are: in the user's home, but not the node's, which a throwaway network has apart.
+/// Where its sandbox's folders are: in the user's home, but not the app runtime's, which a throwaway network has apart.
 fn root() -> PathBuf {
     platform::user_home().join(".local/share").join(format!("{CLI}-services"))
 }

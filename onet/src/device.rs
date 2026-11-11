@@ -1,6 +1,6 @@
 //! A native app, or a computer's onet (`crate::computer`), as a device of its user, the same on each: its own key, which
 //! an app keeps in the Keychain, the keystore or the Credential Locker and hands it at start, and a computer in its
-//! home; asking to be let in, with the code it shows; and once a device of theirs approved it, asking its nodes with the
+//! home; asking to be let in, with the code it shows; and once a device of theirs approved it, asking its app runtimes with the
 //! keys it opens (`crate::keyring`), keeping what outlives it in its folder. A browser runs the same keyring in its worker.
 
 use std::path::PathBuf;
@@ -45,7 +45,7 @@ fn failed(message: impl std::fmt::Display) -> Error {
 /// browser.js `join` and `leave`, web.js `start`, request.js `takenOut`). Whether this key was ever let in here is kept on disk (`joined`), as it
 /// outlives the program: `removed` asks it.
 enum Stage {
-    /// Not reaching its nodes: not let in yet, having asked auth with `asked` if it has since it started (`ask`, then
+    /// Not reaching its app runtimes: not let in yet, having asked auth with `asked` if it has since it started (`ask`, then
     /// `wait`); or let in, and its connections closed until it's asked again (`disconnect`: its app in the background,
     /// or a program ending).
     Off { asked: Option<Value> },
@@ -82,14 +82,14 @@ pub struct Device {
     /// Held while it connects, so it connects once.
     stage: tokio::sync::Mutex<Stage>,
     keyring: Keyring,
-    /// The order things run in, as the node last said (`/api/state`): only ever used to sort nodes it knows.
+    /// The order things run in, as the app runtime last said (`/api/state`): only ever used to sort app runtimes it knows.
     order: Mutex<Vec<[u8; 32]>>,
     /// The device it's on, as its app says (`on`): signing in there again replaces this sign-in.
     on: Mutex<Option<String>>,
     /// The last answer of each call that only reads, for its app's screens (`kept`): a phone's and a computer's onet
     /// keep them (`keeping`).
     answers: Option<Answers<Files>>,
-    /// Where it keeps its log (`device_logs`), which a node asking for it is answered from.
+    /// Where it keeps its log (`device_logs`), which an app runtime asking for it is answered from.
     logs: Option<PathBuf>,
 }
 
@@ -101,7 +101,7 @@ impl Device {
 
     /// A computer's device, its onet's (`crate::computer`): its bucket the place its home's network file names, from
     /// which it reads who's who to find the network's address, if it has one yet (`address` is empty till then); and
-    /// its own app runtime at `runtime` (where it answers, and its token), which it asks before any other node.
+    /// its own app runtime at `runtime` (where it answers, and its token), which it asks before any other app runtime.
     #[cfg(feature = "computer")]
     pub async fn on_computer(secret: [u8; 32], dir: &str, place: bucket::Place, address: Option<String>, runtime: Option<crate::computer::Runtime>) -> Result<Device, Error> {
         let mut device = Device::with(secret, String::new(), dir, Reached::place(place, secret, address)).keeping();
@@ -160,7 +160,7 @@ impl Device {
         }
     }
 
-    /// Answers a node that asks for its log, from the log kept in `dir` (`device_logs::keep_in`).
+    /// Answers an app runtime that asks for its log, from the log kept in `dir` (`device_logs::keep_in`).
     pub fn logging(mut self, dir: &std::path::Path) -> Device {
         self.logs = Some(dir.to_path_buf());
         self
@@ -199,7 +199,7 @@ impl Device {
         join::ask(self, token, &asked).await
     }
 
-    /// Whether it's been let in: it reaches a node as itself. While it waits, what auth says of its request
+    /// Whether it's been let in: it reaches an app runtime as itself. While it waits, what auth says of its request
     /// (`keys::waited`) is acted on as every client does: once approved, the network the device that approved it said it's
     /// in (its root) is the only one it takes, kept before it reads any, so none it's shown first can be another; one
     /// gone from auth is asked again unless it's in; a sign-in that's no more fails, to sign in again.
@@ -223,7 +223,7 @@ impl Device {
         Ok(false)
     }
 
-    /// Reaches its network's nodes, if it's been let in: false if not yet. Then, each time, as each start of a browser
+    /// Reaches its network's app runtimes, if it's been let in: false if not yet. Then, each time, as each start of a browser
     /// does, it settles its user's own things (`settle_own`), if they aren't: what fails is tried again at the next.
     pub async fn connect(&self) -> Result<bool, Error> {
         if !self.reach().await? {
@@ -238,7 +238,7 @@ impl Device {
         Ok(true)
     }
 
-    /// Reaches its network's nodes, if it's let in: false if it isn't (yet, or any more).
+    /// Reaches its network's app runtimes, if it's let in: false if it isn't (yet, or any more).
     async fn reach(&self) -> Result<bool, Error> {
         let mut stage = self.stage.lock().await;
         match &*stage {
@@ -348,7 +348,7 @@ impl Device {
     }
 
     /// Closes its connections, until it's asked again, still knowing it was in: when its app goes to the background or
-    /// a program using it ends, so a node isn't left holding a connection it counts against this device.
+    /// a program using it ends, so an app runtime isn't left holding a connection it counts against this device.
     pub async fn disconnect(&self) {
         let mut stage = self.stage.lock().await;
         if matches!(*stage, Stage::In(_))
@@ -407,7 +407,7 @@ impl Device {
     }
 
     /// Whether the network took this device out: this key was in, and the relay, which alone says who's on the
-    /// network, lets it in no more. Never a node's word, which may only not have read its approval yet, nor a
+    /// network, lets it in no more. Never an app runtime's word, which may only not have read its approval yet, nor a
     /// relay that didn't answer. It stops, keeping its key and what it kept: the app says so, and only its user
     /// signing in again, with the relay still refusing it, starts over (`start_over`).
     pub async fn removed(&self) -> bool {
@@ -429,7 +429,7 @@ impl Device {
         std::fs::read_to_string(self.dir.join("joined")).is_ok_and(|key| key.trim() == self.key())
     }
 
-    /// A request to its network's nodes as its user (`Keyring::request`), given up on once the relay says this device
+    /// A request to its network's app runtimes as its user (`Keyring::request`), given up on once the relay says this device
     /// is out. `/api/state` is read for the order things run in, and a screen's calls that only read are kept.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: impl Into<Sent>) -> Result<Response, Error> {
         let body = body.into();
@@ -446,7 +446,7 @@ impl Device {
             Err(err) => err,
         };
         // A request that failed may be one a device taken out can't make: the relay says who's on its network, so it's
-        // asked, whatever a node said. Out, this device starts over at joining, where nothing but its approval or sign-in
+        // asked, whatever an app runtime said. Out, this device starts over at joining, where nothing but its approval or sign-in
         // is shown.
         if !self.let_in().await {
             self.stop().await;
@@ -456,7 +456,7 @@ impl Device {
     }
 
     /// Never answers while the relay lets this device in; once it doesn't, it's `refused`. A request that's slow may be
-    /// one a device taken out can't be answered, which would otherwise wait out every node's time: asked once it's slow,
+    /// one a device taken out can't be answered, which would otherwise wait out every app runtime's time: asked once it's slow,
     /// then only now and then, as an agent's tool call can run for minutes and each ask is a request to the network's
     /// address.
     async fn watch(&self) -> Result<Response, Error> {
@@ -485,8 +485,8 @@ impl Device {
         }
     }
 
-    /// The order things run in, from the node's `/api/state`; a node it lists that this device didn't know of has it
-    /// read `global` again (now and then), and only nodes its own reading lists are asked.
+    /// The order things run in, from the app runtime's `/api/state`; an app runtime it lists that this device didn't know of has it
+    /// read `global` again (now and then), and only app runtimes its own reading lists are asked.
     async fn learn_order(&self, bytes: &[u8]) {
         let Ok(state) = serde_json::from_slice::<scope::state::State>(bytes) else { return };
         let mut said: Vec<(usize, [u8; 32])> = state.network.iter().flat_map(|n| &n.devices).filter(|d| d.serves_me).filter_map(|d| Some((d.order, ::key::unhex(&d.key).ok()?))).collect();

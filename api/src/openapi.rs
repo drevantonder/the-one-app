@@ -1,7 +1,7 @@
 //! A network's API as an OpenAPI 3.2 document, made from what's defined already: the core's tools, each app's as
 //! `GET /api/apps` gives them to this caller, the routes that say what they are (`says`) and what a client answers
 //! itself (`settings`). What OpenAPI has no word for goes in `x-one-` extensions, which `ABOUT` says. Every host makes it
-//! the same way, a node for those it serves and onet for its own client; what lists tools reads it back (`sets`). Not in it:
+//! the same way, an app runtime for those it serves and onet for its own client; what lists tools reads it back (`sets`). Not in it:
 //! a client's keys and signed steps (`/api/keys`, `/api/steps`), and what isn't the product's API, an app's own requests
 //! (`/<app>/…`, Repos' git among them).
 

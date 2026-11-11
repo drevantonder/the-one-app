@@ -1,6 +1,6 @@
 //! `one-dev`, for whoever builds this repo: sending out its builds (`ship`), and a throwaway network of their
-//! checkout's build (`throwaway`). It asks this machine's node as one of its programs, and runs the `one` program Cargo
-//! builds beside it for what that does: a node, the Workers, and any command in a throwaway network.
+//! checkout's build (`throwaway`). It asks this computer's app runtime as one of its programs, and runs the `one` program Cargo
+//! builds beside it for what that does: an app runtime, the Workers, and any command in a throwaway network.
 
 use std::path::PathBuf;
 
@@ -18,7 +18,7 @@ pub fn dev() -> String {
     format!("{CLI}-dev")
 }
 
-/// The program beside this one that is the node, the Workers and every command of a network: the custom build's own
+/// The program beside this one that is the app runtime, the Workers and every command of a network: the custom build's own
 /// where it's installed (`ptc` beside `ptc-dev`), else the `one` Cargo builds beside it in a checkout (cli/).
 pub fn program() -> Result<PathBuf> {
     let me = platform::this_program()?;
@@ -26,9 +26,9 @@ pub fn program() -> Result<PathBuf> {
     Ok(if installed.is_file() { installed } else { me.with_file_name("one") })
 }
 
-/// This machine's node, asked as one of its programs.
-pub fn node() -> Client {
-    throwaway::node_at(&platform::home(), &api::local::addr())
+/// This computer's onet, asked as one of its programs.
+pub fn loopback() -> Client {
+    throwaway::loopback_at(&platform::home(), &api::local::addr())
 }
 
 /// An HTTP client for this machine's programs.
@@ -54,9 +54,9 @@ fn run(args: Vec<String>) -> Result<()> {
         return throwaway::run(&args[1..]);
     }
     let (positional, flags) = api::tools::split(&args);
-    let node = node();
+    let api = loopback();
     let forms: Vec<(String, String)> = commands().into_iter().flat_map(|c| c.help).collect();
-    let given = api::cli::Given { words: &positional, flags: &flags, args: &args, node: &node, agent: None, json: false, trace: false, commands: &forms };
+    let given = api::cli::Given { words: &positional, flags: &flags, args: &args, api: &api, agent: None, json: false, trace: false, commands: &forms };
     let asked_help = positional.is_empty() || positional[0] == "help" || flags.contains_key("help") || flags.contains_key("h");
     if !asked_help {
         for command in commands() {

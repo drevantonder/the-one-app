@@ -1,4 +1,4 @@
-//! A small JSON file a node keeps beside its data (pairings, offered services, hook times). Absent is what a first run
+//! A small JSON file an app runtime keeps beside its data (pairings, offered services, hook times). Absent is what a first run
 //! has, so it reads as the default; a file that is there and can't be read says so in the log, never as empty.
 
 use std::path::Path;

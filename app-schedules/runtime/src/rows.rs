@@ -1,4 +1,4 @@
-//! How schedules ran, as devices say it: each schedule's latest runs in a scope. Rows of that scope's node database
+//! How schedules ran, as devices say it: each schedule's latest runs in a scope. Rows of that scope's app runtime database
 //! `app-schedules`, changed in place, not steps of their own: written often, and needed only as they are now. Each device
 //! reads them back into its `State`.
 
@@ -118,7 +118,7 @@ async fn read(rt: &Rt, scope: &Scope) -> Result<()> {
     Ok(())
 }
 
-/// Builds before these rows had a database of their own kept them in the node's `main`: the first device on this build
+/// Builds before these rows had a database of their own kept them in the app runtime's `main`: the first device on this build
 /// copies a scope's here, once, keeping any already here.
 async fn copy_once(rt: &Rt, me: &Caller, scope: &Scope) {
     if rt.state::<State>().copied.lock().unwrap().contains(scope) {

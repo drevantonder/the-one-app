@@ -30,7 +30,7 @@ import (
 // link is this device's link to the account: whatsmeow's client, and the
 // database it shares with the messages.
 type link struct {
-	node string // this device's node, through which it asks the user's other devices
+	node string // this device's app runtime, through which it asks the user's other devices
 	path string
 
 	mu        sync.Mutex

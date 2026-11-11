@@ -1,5 +1,5 @@
 # The network's Workers on Cloudflare as devices meet them: building and running them in workerd, deploying them
-# (`one cloudflare`), Basin, and the Cloudflare node's Worker (node/, which is oned on Cloudflare).
+# (`one cloudflare`), Basin, and oned on Cloudflare's Worker (node/, which is oned on Cloudflare).
 [package]
 name = "oned-cloudflare"
 version = "0.1.0"
@@ -20,7 +20,7 @@ deploy = { path = "../../deploy" }
 insights = { path = "../../insights" }
 ai-gateway = { path = "../../ai-gateway" }
 oned-update = { path = "../update" }
-# The web client's files, the Workers' sources and the Cloudflare node's WebAssembly this build carries.
+# The web client's files, the Workers' sources and oned on Cloudflare's WebAssembly this build carries.
 ui = { path = "../../ui" }
 # The guide the address serves (llms.txt).
 mcp = { path = "../../api/mcp" }

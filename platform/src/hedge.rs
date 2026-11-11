@@ -1,4 +1,4 @@
-//! Requests from a device or node to Cloudflare (the bucket, and the Workers at the network's address), routed around a
+//! Requests from a device or app runtime to Cloudflare (the bucket, and the Workers at the network's address), routed around a
 //! connection that has gone quiet. Home routers' NAT sometimes kills a connection, mixing up two devices behind it that
 //! used the same source port; the reset that says so comes after half a minute, or in a container behind one, never.
 //! So a request waits for the first byte of its answer only as long as that host's answers usually take, its limit,
@@ -6,7 +6,7 @@
 //! gets it twice is sent again on a new connection and whichever answers first is taken; one that mustn't fails then,
 //! and its connection is dropped. How often a limit passes, and which side won, is counted for insights (`take_late`).
 //! The same limit is learned of anything else a first byte is waited for by name (`limit`, `learn`): another device's
-//! "taken" (app-runtime/src/calls.rs), and a node's first answer to a client (onet).
+//! "taken" (app-runtime/src/calls.rs), and an app runtime's first answer to a client (onet).
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;

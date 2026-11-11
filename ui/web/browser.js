@@ -84,7 +84,7 @@ export function browser() {
   /// This browser as its user's device, once it's listed as one (`join`): null until then.
   let device = null;
 
-  /// Makes this browser a device of its user, before anything is asked of a node: one already, or let in by one of their
+  /// Makes this browser a device of its user, before anything is asked of an app runtime: one already, or let in by one of their
   /// devices (or, for someone new, their inviter's), which it asks at auth and waits for there, showing its code
   /// (`waiting`). Just signed in, with a key the relay let in once and refuses now, it starts over with a new one: a
   /// removed key can't be let in again.

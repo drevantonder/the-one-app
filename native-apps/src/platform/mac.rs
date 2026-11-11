@@ -229,7 +229,7 @@ pub fn set_up(address: &str) -> Result<(), String> {
 
 /// The app's menus, macOS's own with the Mac app's keys, as items of them so they work wherever the focus is (a key
 /// pressed in a screen's frame never reaches the page): View's Fold Sidebar (⌘\), File's Pair a Computer… (⌘⇧I, signed
-/// in) and Join with a Pairing Code… (⌘⇧J, while this Mac's node is in no network).
+/// in) and Join with a Pairing Code… (⌘⇧J, while this Mac's onet is in no network).
 fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem as P, Submenu};
     let pair = MenuItem::with_id(app, "pair", "Pair a Computer…", false, Some("CmdOrCtrl+Shift+I"))?;
@@ -252,7 +252,7 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
 
 static MENU: std::sync::OnceLock<(tauri::menu::MenuItem<tauri::Wry>, tauri::menu::MenuItem<tauri::Wry>)> = std::sync::OnceLock::new();
 
-/// Pair a Computer… while someone's signed in here; Join with a Pairing Code… while this Mac's node is in no network.
+/// Pair a Computer… while someone's signed in here; Join with a Pairing Code… while this Mac's onet is in no network.
 pub fn menus(signed_in: bool, unpaired: bool) {
     if let Some((pair, join)) = MENU.get() {
         let _ = pair.set_enabled(signed_in);

@@ -2,7 +2,7 @@
 // request where its path says: signing in to auth (with the gateway's host kept, since passkeys belong to it),
 // `/urls` and `/updates/…` (what devices update themselves from) to the URL signer, `/notifications/…` to the notifications Worker, `/telemetry/…` to the telemetry Worker, `/mcp`, `/api/` (but `/api/auth/`, which is auth's) and what MCP clients read to sign in to it to the
 // remote MCP server, everything under `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything
-// else to the web client's files. Devices reach the network's nodes over iroh, never through here, and so does git: a
+// else to the web client's files. Devices reach the network's app runtimes over iroh, never through here, and so does git: a
 // git request here is git on a computer without the CLI, told how to get it.
 import { hex, sha256 } from "../shared/crypto.js";
 import { refusal } from "../shared/http.js";

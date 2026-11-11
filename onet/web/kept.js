@@ -1,6 +1,6 @@
 // What this browser keeps in IndexedDB's `one` database, its one store: its keys by user (`device:<user>`), the
-// nodes it asks (`nodes:<user>`), and what its keyring keeps (`<name>:<user>`,
-// onet's `keyring::Keep`). A module of its own, for the worker that reaches the nodes (net-worker.js) to read
+// app runtimes it asks (`nodes:<user>`), and what its keyring keeps (`<name>:<user>`,
+// onet's `keyring::Keep`). A module of its own, for the worker that reaches the app runtimes (net-worker.js) to read
 // with nothing else.
 
 function kept(mode, act) {

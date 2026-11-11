@@ -26,13 +26,13 @@ impl std::fmt::Display for Failed {
 
 impl std::error::Error for Failed {}
 
-/// What was typed, for a command to run: the words (its own first), the flags, and the node to ask.
+/// What was typed, for a command to run: the words (its own first), the flags, and the API to ask (this computer's onet).
 pub struct Given<'a> {
     pub words: &'a [String],
     pub flags: &'a crate::tools::Flags,
     /// Everything typed, as typed.
     pub args: &'a [String],
-    pub node: &'a Client,
+    pub api: &'a Client,
     /// The agent running it, if one is.
     pub agent: Option<&'a str>,
     /// What a tool gives back is printed as JSON (`--json`).
@@ -195,7 +195,7 @@ pub fn exit_code(err: &anyhow::Error) -> i32 {
 pub mod exit {
     /// Refused: a command that wasn't allowed, or needs `--confirm` (`exit_code`).
     pub const REFUSED: i32 = 3;
-    /// The device's node isn't the build being sent out yet: ask again once it is (the exit code `sh` programs use for
+    /// The device's app runtime isn't the build being sent out yet: ask again once it is (the exit code `sh` programs use for
     /// "try again", EX_TEMPFAIL).
     pub const NOT_YET: i32 = 75;
 }

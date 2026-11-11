@@ -113,7 +113,7 @@ pub fn device_deliver(to: &[u8], src: &[u8], segment_size: u32, contents: &[u8])
     }
 }
 
-/// The nodes the device `me` (hex) asks, in order.
+/// The app runtimes the device `me` (hex) asks, in order.
 #[wasm_bindgen]
 pub fn device_nodes(me: &str, nodes: Vec<String>) -> Result<(), JsError> {
     let me = key(me)?;
@@ -121,9 +121,9 @@ pub fn device_nodes(me: &str, nodes: Vec<String>) -> Result<(), JsError> {
     client.set_nodes(&keys(&nodes)?).map_err(thrown)
 }
 
-/// Asks the first of the device `me`'s nodes that answers, as its user, with the keys that kind of request needs
+/// Asks the first of the device `me`'s app runtimes that answers, as its user, with the keys that kind of request needs
 /// (`Keyring::request`), handed until `until` (ms), through `on` (`On`): `headers` names and values, one after the other.
-/// → `{ node, status, headers, body }`, `node` the key (hex) of the node that answered, the body whole, at most
+/// → `{ node, status, headers, body }`, `node` the key (hex) of the app runtime that answered, the body whole, at most
 /// `ANSWER_MOST`. Throws with `sent: false` if it reached none, and `notLetIn` if who's who doesn't list it.
 #[wasm_bindgen]
 pub async fn device_fetch(me: String, method: String, path: String, headers: Vec<String>, body: Vec<u8>, until: f64, on: JsValue) -> Result<JsValue, JsValue> {
@@ -156,7 +156,7 @@ fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8])
 
 /// The answer to an MCP client's call of a core tool that's one request the device answers itself (`onet::features`,
 /// `scope::settings::answered`): one that changes who can do what, which it signs as its user's, as any device does.
-/// None for any other MCP message, which goes to a node, as its user.
+/// None for any other MCP message, which goes to an app runtime, as its user.
 async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, onet::Error>> {
     use api::Reader;
     let msg: Value = serde_json::from_slice(body).ok()?;
@@ -167,7 +167,7 @@ async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8
     let (feature, at) = onet::find(name)?;
     let mut input = msg["params"]["arguments"].as_object().cloned().unwrap_or_default();
     let confirmed = input.remove("confirm") == Some(json!(true));
-    // Any other a node runs.
+    // Any other an app runtime runs.
     let asks = Some(feature.request(at, &input, confirmed)).filter(|r| scope::settings::answered(&r.path))?;
     if feature.tools[at]["confirm"] == true && !confirmed {
         return Some(Ok(result(&msg, Err(Reader::Mcp.unconfirmed(name)))));
@@ -191,7 +191,7 @@ async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8
     Some(Ok(result(&msg, said)))
 }
 
-/// An MCP answer to `msg` of what a tool said, as a node's MCP answers it: text as it is, anything else as JSON.
+/// An MCP answer to `msg` of what a tool said, as an app runtime's MCP answers it: text as it is, anything else as JSON.
 fn result(msg: &Value, said: Result<Value, String>) -> Vec<u8> {
     let result = match said {
         Ok(Value::String(text)) => json!({ "content": [{ "type": "text", "text": text }] }),
@@ -208,7 +208,7 @@ fn failed(err: &onet::Error) -> JsValue {
     out.into()
 }
 
-/// Ends the device `me` (hex): its connections close, telling the nodes, and its key leaves this isolate.
+/// Ends the device `me` (hex): its connections close, telling the app runtimes, and its key leaves this isolate.
 #[wasm_bindgen]
 pub async fn device_close(me: String) {
     let Ok(me) = key(&me) else { return };
@@ -220,7 +220,7 @@ pub async fn device_close(me: String) {
 
 /// What the device `me` (hex), whose seal key's secret is `seal`, knows of who's who, read through `on` (`On`): the first
 /// time, everything, after that what's new. → `{ user, nodes: [{ key, seal }] }`: its user as who's who lists it, and
-/// the nodes it may ask, hex. Throws with `notLetIn` until who's who lists it as a client device, with its keys.
+/// the app runtimes it may ask, hex. Throws with `notLetIn` until who's who lists it as a client device, with its keys.
 #[wasm_bindgen]
 pub async fn device_view(me: String, seal: Vec<u8>, on: JsValue) -> Result<String, JsValue> {
     let me = key(&me).map_err(JsValue::from)?;

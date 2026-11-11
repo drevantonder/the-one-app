@@ -154,7 +154,7 @@ impl Rule<'_> {
         crate::permissions::may_make(self.who.conn(), &user_principal(self.w), verb, container, subject, relation, object, self.who.now()).unwrap_or(false)
     }
 
-    /// Whether `k` is one of the network's machines that run things, or its Cloudflare node.
+    /// Whether `k` is one of the network's machines that run things, or its oned on Cloudflare.
     fn by_recovery(&self) -> Result<bool> {
         Ok(self.who.recovery()? == Some(self.step.author()))
     }
@@ -347,7 +347,7 @@ impl Rule<'_> {
             let gone = self.who.machine(&key)?.context("no such key")?;
             allowed!(self.may("remove", &crate::scopes::device(&key)), "only its user or an admin removes a device");
             // A device signing itself out deletes its own keys: signed by it, or, in steps written before devices
-            // signed their own, by a node of its user's it asked (`itself`). So does a sign-in before on a device
+            // signed their own, by an app runtime of its user's it asked (`itself`). So does a sign-in before on a device
             // signed in again (`settings::approve`). One removed otherwise may still hold them.
             let author = self.step.author();
             let itself = author == key || (self.data["itself"] == true && self.who.machine_ever(&author)?.is_some_and(|a| a.user == gone.user));
@@ -384,7 +384,7 @@ impl Rule<'_> {
     }
 
     /// Where a user's own things run besides their own machines: only from their own device, for their own scope,
-    /// and only the network's machines that run things, and its Cloudflare node.
+    /// and only the network's machines that run things, and its oned on Cloudflare.
     fn runs(&self) -> Result<()> {
         let on: BTreeSet<Key> = self.keys("on").context("on is a list of endpoints' keys")?.into_iter().collect();
         for k in &on {
@@ -403,7 +403,7 @@ impl Rule<'_> {
         let endpoint = self.key("endpoint")?;
         let scope = Scope::parse(&self.text("scope")?)?;
         let app = self.text("app")?;
-        // The node's own databases of a scope (its log, its Vault) are never an app's to schedule.
+        // The app runtime's own databases of a scope (its log, its Vault) are never an app's to schedule.
         ensure!(valid_app_name(&app), "app schedules are an app's");
         let until = self.data["until"].as_u64().context("no until")?;
         let mut hashes = Vec::new();
@@ -622,7 +622,7 @@ impl Rule<'_> {
         Ok(())
     }
 
-    /// A part of a device's oned switched on or off: by the device's user (the Cloudflare node's are its admins'),
+    /// A part of a device's oned switched on or off: by the device's user (oned on Cloudflare's are its admins'),
     /// and a service run for a scope's app only by who may add apps there, who may switch it off there too.
     fn service(&self) -> Result<()> {
         let device = self.key("device")?;
@@ -689,7 +689,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             }
             ensure!(answered.is_none(), "that request is already made");
             let app = data["app"].as_str().context("no app")?;
-            // An item the node itself uses (a backup place's) is asked for as the node's, and one agents use
+            // An item the app runtime itself uses (a backup place's) is asked for as the app runtime's, and one agents use
             // (vault_fetch) as theirs.
             ensure!(who.app(app)?.is_some() || app == APP || app == AGENTS, "no such app");
             let fields: Vec<(String, bool)> = data["fields"].as_object().context("no fields: give the item's fields and hosts, or need")?.iter().map(|(n, f)| (n.clone(), f["secret"] == true)).collect();
@@ -991,7 +991,7 @@ mod tests {
     }
 
     /// Only an admin names who holds the recovery key; a value that doesn't read, or someone since taken out, names no
-    /// one; and it's sealed only to a holder's own client devices that say what they are, never a node, a browser, a
+    /// one; and it's sealed only to a holder's own client devices that say what they are, never an app runtime, a browser, a
     /// remote MCP client, a passkey or a service.
     #[test]
     fn only_an_admin_names_a_recovery_holder_and_only_some_devices_may_hold_it() -> anyhow::Result<()> {
@@ -1303,16 +1303,16 @@ mod tests {
         net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", BOTH, None));
         let (linux_id, bobs_id) = (linux.id(), bobs.id());
         let whatsapp = |db: &ScopeDb, k: &Key| db.switch(k, "whatsapp").unwrap().map(|s| (s.on, s.scope));
-        // Bob runs it on his own node for himself, not for everyone; Andre runs it on his for everyone.
+        // Bob runs it on his own app runtime for himself, not for everyone; Andre runs it on his for everyone.
         assert!(!net.step(&bobs, BOB, service(&bobs_id, "whatsapp", true, Some(&Scope::Global))));
         net.step(&bobs, BOB, service(&bobs_id, "whatsapp", true, Some(&Scope::User(BOB.into()))));
         net.step(&linux, ANDRE, service(&linux_id, "whatsapp", true, Some(&Scope::Global)));
-        // Bob may not stop everyone's on Andre's node, nor Andre Bob's own on Bob's.
+        // Bob may not stop everyone's on Andre's app runtime, nor Andre Bob's own on Bob's.
         assert!(!net.step(&bobs, BOB, service(&linux_id, "whatsapp", false, None)));
         assert!(!net.step(&mac, ANDRE, service(&bobs_id, "whatsapp", false, None)));
         assert_eq!(whatsapp(&net.db, &linux_id), Some((true, Some("global".into()))));
         assert_eq!(whatsapp(&net.db, &bobs_id), Some((true, Some(format!("user:{BOB}")))));
-        // Once Bob is an admin, he stops everyone's on Andre's node (moving it, or removing the app), and it stays named.
+        // Once Bob is an admin, he stops everyone's on Andre's app runtime (moving it, or removing the app), and it stays named.
         net.step(&mac, ANDRE, role(BOB, Role::Admin));
         assert!(net.step(&bobs, BOB, service(&linux_id, "whatsapp", false, None)));
         assert_eq!(whatsapp(&net.db, &linux_id), Some((false, Some("global".into()))));
@@ -1371,7 +1371,7 @@ mod tests {
         let (bobs, linux) = (Dev::new(3), Dev::new(4));
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
         net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
-        // Andre's device can't sign as Bob, Bob's can't as Andre, and a node signs no change to who's who.
+        // Andre's device can't sign as Bob, Bob's can't as Andre, and an app runtime signs no change to who's who.
         assert!(!net.step(&mac, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
         assert!(!net.step(&bobs, ANDRE, node("setting", json!({ "name": "a", "value": "1" }))));
         assert!(!net.step(&linux, ANDRE, node("setting", json!({ "name": "b", "value": "1" }))));
@@ -1382,7 +1382,7 @@ mod tests {
         assert!(!net.step(&bobs, BOB, device(&Dev::new(5).endpoint(), ANDRE, "x", &[Kind::Client], None)));
         assert!(!net.step(&mac, ANDRE, device(&Dev::new(6).endpoint(), BOB, "y", &[Kind::Client], None)));
         assert_eq!(net.db.user(BOB)?.unwrap().name, "Bobby");
-        // The node runs Andre's scope and the network's, not Bob's.
+        // The app runtime runs Andre's scope and the network's, not Bob's.
         assert!(net.db.runs_for(&linux.id(), &Scope::User(ANDRE.into())) && net.db.runs_for(&linux.id(), &Scope::Global));
         assert!(!net.db.runs_for(&linux.id(), &Scope::User(BOB.into())) && !net.db.runs_for(&bobs.id(), &Scope::User(BOB.into())));
         // A machine an admin lists as Bob's runs what Bob may run elsewhere, never Bob's own scope, until Bob's own
@@ -1417,7 +1417,7 @@ mod tests {
         Ok(())
     }
 
-    /// A network whose recovery key is `recovery`'s, with Andre's mac and linux (a node), and Bob in with his phone.
+    /// A network whose recovery key is `recovery`'s, with Andre's mac and linux (an app runtime), and Bob in with his phone.
     fn with_bob(recovery: &Dev) -> (Dev, Dev, Dev, Net) {
         let (mac, linux, bobs) = (Dev::new(1), Dev::new(4), Dev::new(3));
         let mut net = Net::new(&mac, BOTH, &recovery.id());
@@ -1493,7 +1493,7 @@ mod tests {
         net.step(&mac, ANDRE, epoch(&work, 1, &[mac_id], &H.repeat(64)));
         net.step(&mac, ANDRE, invite("c000000000000003", BOB, Role::Member));
         net.step(&bobs, BOB, accept("c000000000000003"));
-        // Apps of the group's, the admins' and Bob's, and a Cloudflare node, which change nothing owed.
+        // Apps of the group's, the admins' and Bob's, and oned on Cloudflare, which change nothing owed.
         net.step(&mac, ANDRE, node("app", json!({ "name": "notes", "owner": "group:c000000000000003" })));
         net.step(&mac, ANDRE, node("app", json!({ "name": "tally", "owner": "admins" })));
         net.step(&bobs, BOB, node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
@@ -1505,7 +1505,7 @@ mod tests {
         // Signing itself out, a device deletes its own keys: nothing's owed.
         assert!(net.step(&laptop, BOB, remove_device(&laptop.id())));
         assert!(net.owed().is_empty() && net.db.machine(&laptop.id())?.is_none(), "signing out owes nothing");
-        // Nor one a node of its user's wrote for it, saying it signed itself out; an admin's saying so for another's
+        // Nor one an app runtime of its user's wrote for it, saying it signed itself out; an admin's saying so for another's
         // device is taken as removing it.
         let (asked, said) = (Dev::new(12), Dev::new(13));
         net.step(&bobs, BOB, device(&asked.endpoint(), BOB, "app", &[Kind::Client], None));
@@ -1557,7 +1557,7 @@ mod tests {
     }
 
     /// Who may write each kind of step, as the rules say it: each step below, alone on one network, signed by each of
-    /// its users' devices and its nodes in turn, counts (Y) or doesn't (.). The network: Andre and Carol its admins,
+    /// its users' devices and its app runtimes in turn, counts (Y) or doesn't (.). The network: Andre and Carol its admins,
     /// Bob and Dan members, Fay removed; Bob made group G and invited Dan, who's in, and Carol, who hasn't said; Andre's
     /// linux runs everyone's and Bob's own; a box Andre listed for Bob, which Bob listed again; Bob's tablet removed.
     #[test]

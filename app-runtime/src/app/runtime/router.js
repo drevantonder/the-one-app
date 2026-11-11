@@ -1,4 +1,4 @@
-// The one Worker the node talks to: /<app>/... goes to that app's Worker. /ready says which config it runs.
+// The one Worker the app runtime talks to: /<app>/... goes to that app's Worker. /ready says which config it runs.
 export default {
   fetch(req, env) {
     const app = new URL(req.url).pathname.split("/")[1];

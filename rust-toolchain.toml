@@ -1,4 +1,4 @@
-# rustup installs this on first use, on every machine that builds: the WebAssembly target for the Cloudflare node and the
+# rustup installs this on first use, on every machine that builds: the WebAssembly target for oned on Cloudflare and the
 # web client, and the targets the Mac, iPhone, Android and Windows apps are built or checked for (tests/tree.rs).
 [toolchain]
 channel = "1.99.1"

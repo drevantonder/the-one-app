@@ -1,5 +1,5 @@
-//! How a client asks its node's local API: the CLI and its MCP server over HTTP, as one of this machine's own programs
-//! (cli/src/main.rs), and the node's own MCP in the node itself (`InProcess`), with the proof of who asks that the request it
+//! How a client asks its app runtime's local API: the CLI and its MCP server over HTTP, as one of this machine's own programs
+//! (cli/src/main.rs), and the app runtime's own MCP in the app runtime itself (`InProcess`), with the proof of who asks that the request it
 //! answers came with.
 
 use std::io::Read;
@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 
-/// What the node answered: its status, its trace when asked for one (`protocol::header::TRACE`, as sent), and its body as
+/// What the app runtime answered: its status, its trace when asked for one (`protocol::header::TRACE`, as sent), and its body as
 /// it comes.
 pub struct Answer {
     pub status: u16,
@@ -18,18 +18,18 @@ pub struct Answer {
     pub body: Box<dyn Read + Send>,
 }
 
-/// How a client's requests reach its node.
+/// How a client's requests reach its app runtime.
 pub trait Via: Send + Sync {
-    /// Asks `method` `path`: an error only when no node answered. `wait` bounds the whole answer, for one that streams.
+    /// Asks `method` `path`: an error only when no device answered. `wait` bounds the whole answer, for one that streams.
     fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<Duration>) -> Result<Answer>;
 
-    /// The home it reads the token it shows the node from, for the refusal that says it was the wrong one.
+    /// The home it reads the token it shows the app runtime from, for the refusal that says it was the wrong one.
     fn home(&self) -> std::path::PathBuf {
         platform::home()
     }
 }
 
-/// A client of the node: what the CLI's commands and the MCP server ask it with, one for each command or MCP message.
+/// A client of the app runtime: what the CLI's commands and the MCP server ask it with, one for each command or MCP message.
 pub struct Client {
     via: std::sync::Arc<dyn Via>,
     elsewhere: bool,
@@ -54,7 +54,7 @@ struct Asked {
 
 impl Client {
     /// `elsewhere`: it asks for someone who isn't this machine's own user, a device of theirs, whose MCP
-    /// request the node answers. `client`: what it is, as a call names it (`Reader::client`).
+    /// request the app runtime answers. `client`: what it is, as a call names it (`Reader::client`).
     pub fn new(via: impl Via + 'static, elsewhere: bool, client: &'static str) -> Client {
         Client { via: std::sync::Arc::new(via), elsewhere, client, needed: Mutex::new(None), apps: Mutex::new(None), sets: Mutex::new(None) }
     }
@@ -64,7 +64,7 @@ impl Client {
         Client { via: self.via.clone(), elsewhere: self.elsewhere, client: self.client, needed: Mutex::new(None), apps: Mutex::new(None), sets: Mutex::new(None) }
     }
 
-    /// Every app, the node's own among them, as `GET /api/apps` gives them: asked once, the first time.
+    /// Every app, the app runtime's own among them, as `GET /api/apps` gives them: asked once, the first time.
     pub fn apps(&self) -> Result<Vec<Value>> {
         let mut kept = self.apps.lock().unwrap();
         if kept.is_none() {
@@ -91,7 +91,7 @@ impl Client {
         self.answered(self.send("GET", path, &[], None, None, None)?)
     }
 
-    /// The network as this node says it (`GET /api/state`).
+    /// The network as this app runtime says it (`GET /api/state`).
     pub fn state(&self) -> Result<scope::state::State> {
         serde_json::from_value(self.get("/api/state")?).context("the answer isn't a state: the device answering may be a different build than this one")
     }
@@ -108,12 +108,12 @@ impl Client {
         self.answered(self.send("POST", path, &headers, Some(serde_json::to_vec(&body)?), None, None)?)
     }
 
-    /// Keeps `bytes` as a blob on the node: → its hash.
+    /// Keeps `bytes` as a blob on the app runtime: → its hash.
     pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
         Ok(self.answered(self.send("POST", "/api/blobs", &[], Some(bytes.to_vec()), None, None)?)?["blob"].as_str().unwrap_or("").to_string())
     }
 
-    /// What `path` answers, as it comes, whatever its status: a screen's page, a blob, the node's events.
+    /// What `path` answers, as it comes, whatever its status: a screen's page, a blob, the app runtime's events.
     pub fn open(&self, path: &str, wait: Option<Duration>) -> Result<Answer> {
         let (answer, asked) = self.send("GET", path, &[], None, wait, None)?;
         self.ended(asked, if answer.status < 400 { json!({}) } else { json!({ "failed": true }) });
@@ -151,8 +151,8 @@ impl Client {
         Called { ok: ok.map(answered), trace }
     }
 
-    /// Asks the node as the client span of a trace of its own (W3C's `traceparent`), named by `what` it asked (a call's
-    /// app and tool), or else its path: → its answer, and the span, to end once the answer's read. One no node answered
+    /// Asks the app runtime as the client span of a trace of its own (W3C's `traceparent`), named by `what` it asked (a call's
+    /// app and tool), or else its path: → its answer, and the span, to end once the answer's read. One no device answered
     /// has ended here.
     fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<Duration>, what: Option<Value>) -> Result<(Answer, Asked)> {
         let traceparent = format!("00-{}-{}-01", crate::traceparent::ids::trace(), crate::traceparent::ids::span());
@@ -170,7 +170,7 @@ impl Client {
         }
     }
 
-    /// What the node answered, read, and the span that asked it ended.
+    /// What the app runtime answered, read, and the span that asked it ended.
     fn answered(&self, (answer, asked): (Answer, Asked)) -> Result<Value> {
         let read = self.json(answer);
         // A call that needs keys it wasn't handed is answered so, and asked again: it hasn't failed.
@@ -181,8 +181,8 @@ impl Client {
     }
 
     /// Ends a request's span with how it went, and records it if it's kept: only what failed, was slow or is one trace in
-    /// 20 (`traceparent::sampled`). It's sent to the node at once, with what wasn't sent before, or kept for the next to send
-    /// once a node answers, for as long as a node takes them back (a day).
+    /// 20 (`traceparent::sampled`). It's sent to the app runtime at once, with what wasn't sent before, or kept for the next to send
+    /// once an app runtime answers, for as long as an app runtime takes them back (a day).
     fn ended(&self, Asked { mut call, began }: Asked, how: Value) {
         let ms = began.elapsed().as_millis() as u64;
         call.as_object_mut().unwrap().extend(how.as_object().cloned().unwrap_or_default().into_iter().filter(|(_, v)| !v.is_null()));
@@ -208,7 +208,7 @@ impl Client {
         }
     }
 
-    /// What a call it made needed and wasn't handed, since this was last asked (`{ error, need, to, seal }`): the node's
+    /// What a call it made needed and wasn't handed, since this was last asked (`{ error, need, to, seal }`): the app runtime's
     /// MCP answers its caller 428 with it, to hand them and ask again.
     pub fn needed(&self) -> Option<Value> {
         self.needed.lock().unwrap().take()
@@ -223,7 +223,7 @@ impl Client {
     }
 }
 
-/// How long what a client recorded is kept while no node takes it, as long as a node takes it back; the most kept; and
+/// How long what a client recorded is kept while no device takes it, as long as an app runtime takes it back; the most kept; and
 /// how long sending it may hold up the command that made it.
 const UNSENT_FOR: u64 = 86_400_000;
 const MOST_UNSENT: usize = 300;
@@ -233,19 +233,19 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
-/// Why no node answered a request, as insights names it: it timed out, or none could be reached.
+/// Why no device answered a request, as insights names it: it timed out, or none could be reached.
 fn unreached(err: &anyhow::Error) -> &'static str {
     let said = format!("{err:#}").to_lowercase();
     if said.contains("timeout") || said.contains("timed out") { crate::traceparent::TIMEOUT } else { crate::traceparent::UNREACHABLE }
 }
 
-/// The code of what a node answered failed, as `answered` read it: a refusal's is `refused`.
+/// The code of what an app runtime answered failed, as `answered` read it: a refusal's is `refused`.
 fn code_of(err: &anyhow::Error) -> Option<String> {
     let refused = matches!(err.downcast_ref::<crate::cli::Failed>(), Some(crate::cli::Failed::Refused(_)));
     custom_build::protocol::Coded::of(err).or_else(|| refused.then(|| custom_build::protocol::code::REFUSED.to_string()))
 }
 
-/// What the node answered, or what it says failed: refused (401, 403 or `code::REFUSED`) as `cli::Failed::Refused`, the
+/// What the app runtime answered, or what it says failed: refused (401, 403 or `code::REFUSED`) as `cli::Failed::Refused`, the
 /// rest with its code, if it has one (`protocol::Coded`). `home` is where the asker read its token from.
 pub fn answered(status: u16, body: Value, home: &std::path::Path) -> Result<Value> {
     let Some(err) = body.get("error") else { return Ok(body) };

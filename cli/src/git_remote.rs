@@ -2,7 +2,7 @@
 //! (`url.<CLI>::<address>/.insteadOf`) to reach it as `<CLI>::<address>/<app>/…`, so it runs this program as
 //! `git-remote-<CLI>`, its remote helper. That runs git's own HTTP transport (`git remote-http`) for the address, with
 //! this program as its proxy while it runs: what git asks goes where every command's request goes, to this machine's
-//! node. Git's own transport speaks git; the proxy only carries it, and answers only the git it started (a secret only
+//! app runtime. Git's own transport speaks git; the proxy only carries it, and answers only the git it started (a secret only
 //! that git has).
 
 use std::io::Read;
@@ -17,7 +17,7 @@ use ::custom_build::config::{CLI, NAME, YOURS};
 /// Run as git's remote helper, `git-remote-<CLI> <remote> <url>`: → the exit code of git's HTTP transport.
 pub fn run(args: &[String]) -> Result<i32> {
     let [remote, url] = args else { bail!("{} is git's, for {CLI}:: addresses: git clone <your repo's address>", ::custom_build::programs::git_helper()) };
-    // Before any thread starts. A home the user gave rules; else the node's, as it told git.
+    // Before any thread starts. A home the user gave rules; else the app runtime's, as it told git.
     if std::env::var_os(::custom_build::config::env("HOME")).is_none()
         && let Some(home) = ::api::git_wire::node_home()
     {
@@ -57,14 +57,14 @@ pub fn run(args: &[String]) -> Result<i32> {
     Ok(status.code().unwrap_or(128))
 }
 
-/// The address of the network this computer's node is in.
+/// The address of the network this computer's app runtime is in.
 fn here() -> Result<String> {
-    let state = crate::node(api::Reader::Cli.client()).state()?;
+    let state = crate::loopback(api::Reader::Cli.client()).state()?;
     let address = state.address().with_context(|| format!("this computer's {NAME} has no address yet: an admin sets it with {CLI} cloudflare use"))?;
     Ok(address.trim_end_matches('/').to_string())
 }
 
-/// Carries what git asks of an app's address on this machine's node until this program exits.
+/// Carries what git asks of an app's address on this computer's app runtime until this program exits.
 fn proxy(listener: std::net::TcpListener, auth: String) {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     runtime.block_on(async move {
@@ -129,14 +129,14 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
             eprintln!("remote: {said}");
         }
         let kind = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();
-        // What the node says is wrong, as git shows it: each line of a plain answer, after "remote:".
+        // What the app runtime says is wrong, as git shows it: each line of a plain answer, after "remote:".
         if status >= 400 && kind.starts_with("application/json") {
             let said: serde_json::Value = resp.body_mut().read_json().unwrap_or_default();
             let error = match said["code"].as_str() {
                 Some(::custom_build::protocol::code::NOT_THIS_MACHINE) => api::local::token_refused(&platform::home()),
                 _ => said["error"].as_str().unwrap_or("that didn't work").to_string(),
             };
-            return drop(head.send((status, "text/plain".into(), Some(crate::tools::in_cli_words(&crate::node(api::Reader::Cli.client()), &error)))));
+            return drop(head.send((status, "text/plain".into(), Some(crate::tools::in_cli_words(&crate::loopback(api::Reader::Cli.client()), &error)))));
         }
         if head.send((status, kind, None)).is_err() {
             return;

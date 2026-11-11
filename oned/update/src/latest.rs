@@ -1,6 +1,6 @@
 //! The signed "latest" record: one small file, `<address>/updates/newest`, that says what's newest of everything a device
 //! takes from `one-dev update`, so `one update` takes a device's update with nothing else of the network working: not the
-//! protocol, READS, the relay or a node. Each thing it names has its file beside it, `<address>/updates/<sha256>`, unsealed. A publish
+//! protocol, READS, the relay or an app runtime. Each thing it names has its file beside it, `<address>/updates/<sha256>`, unsealed. A publish
 //! keeps its record there too, and removes the files none of the last few publishes names (`Host::replace_latest`).
 //!
 //! THIS FORMAT MUST NEVER BREAK. A device too old to speak anything else still reads it, and only by reading it does it

@@ -44,7 +44,7 @@ fn main() {
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({:?}))", abs.to_string_lossy())).collect();
     let mut out = format!("pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
     out.push_str(&client_screens(&root));
-    // The Cloudflare node's WebAssembly (oned/cloudflare/worker/) and onet's, for browsers (onet/src/wasm.rs), which `one-dev update program`
+    // oned on Cloudflare's WebAssembly (oned/cloudflare/worker/) and onet's, for browsers (onet/src/wasm.rs), which `one-dev update program`
     // builds into CLOUDFLARE_NODE and ONET where Rust builds for WebAssembly, so a release carries them to devices with no
     // Rust to deploy it from, and the address serves the web client. With neither set, the ones `update program`, `throwaway cloudflare
     // oned deploy` and `throwaway client web` build into target/, if they're there, so every build of a checkout is the same one,

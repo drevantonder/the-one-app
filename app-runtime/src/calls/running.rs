@@ -1,4 +1,4 @@
-//! What a running call's app asks the node: its grant, its databases and the node's internal API, its prompt hook, a
+//! What a running call's app asks the app runtime: its grant, its databases and the app runtime's internal API, its prompt hook, a
 //! service's call, and reading this device's logs.
 
 use ::custom_build::allowed;
@@ -7,7 +7,7 @@ use super::*;
 impl Host {
     /// Fills in an app's call of `app`'s service (`from` the app that made it): the fields of the items it's switched on
     /// for, a secret one only for a service named among its item's hosts. → the secrets it filled, to blot out of the
-    /// answer. The node that runs the call fills it: a service endpoint fills nothing itself.
+    /// answer. The app runtime that runs the call fills it: a service endpoint fills nothing itself.
     pub async fn fill_for_service(&self, app: &str, input: &mut Value, me: &Caller, from: Option<&str>) -> Result<Vec<String>> {
         let used = std::sync::Mutex::new(Vec::<String>::new());
         if let Some(from) = from.filter(|_| input.to_string().contains("{{")) {
@@ -27,9 +27,9 @@ impl Host {
         Ok(used.into_inner().unwrap())
     }
 
-    /// Reads the log of the device a call names (this node's own, or its device's, or one of its services'; or a client's, through the
-    /// connection it holds to this node, else `Elsewhere`: another node may hold it), for a user over the network
-    /// (`one logs`): the one tool of the node's own a call asks.
+    /// Reads the log of the device a call names (this app runtime's own, or its device's, or one of its services'; or a client's, through the
+    /// connection it holds to this app runtime, else `Elsewhere`: another app runtime may hold it), for a user over the network
+    /// (`one logs`): the one tool of the app runtime's own a call asks.
     pub(in crate) async fn read_logs(&self, req: &CallRequest, input: &Value, me: &Caller) -> Result<Reply> {
         ensure!(req.tool == "logs", "the app runtime has no tool {}", req.tool);
         let target = match &req.device {
@@ -62,7 +62,7 @@ impl Host {
         self.with(|i| Ok(i.r.db().may(user, "remove", &scopes::device(device))))
     }
 
-    /// Lets the requests of a call, widget or hook of `app` through the node as `caller`'s, while it runs.
+    /// Lets the requests of a call, widget or hook of `app` through the app runtime as `caller`'s, while it runs.
     pub(in crate) fn grant(&self, app: &str, caller: &Caller, ctx: &mut Context, depth: u32) -> Granted {
         let token = hex(&rand::random::<[u8; 32]>());
         let scopes = ctx.scopes.iter().filter_map(|s| Scope::parse(&s.id).ok()).collect();
@@ -72,7 +72,7 @@ impl Host {
         Granted(self.clone(), token)
     }
 
-    /// The ports this node serves on this machine: its local API, workerd, and apps' outbound requests.
+    /// The ports this app runtime serves on this machine: its local API, workerd, and apps' outbound requests.
     pub fn own_ports(&self) -> Vec<u16> {
         vec![::api::local::port(), self.0.apps.port(), self.0.outbound]
     }
@@ -82,7 +82,7 @@ impl Host {
     }
 
     /// What every app added for this machine's user says with an agent's prompt here: each app's `prompt` hook,
-    /// asked at once, their answers joined. The node remembers, per app and session, when it last asked, and tells
+    /// asked at once, their answers joined. The app runtime remembers, per app and session, when it last asked, and tells
     /// the app as `since` (null on a session's first prompt). An app that fails, says nothing or takes longer than
     /// `PROMPT_LIMIT` (the harness waits for this) is left out.
     pub async fn prompt(&self, event: Value) -> Result<String> {
@@ -159,7 +159,7 @@ impl Host {
         Ok(db)
     }
 
-    /// What the shim asks the node for a running call (`app-runtime/src/app/outbound.rs`), as `::api::call::Ask` names it.
+    /// What the shim asks the app runtime for a running call (`app-runtime/src/app/outbound.rs`), as `::api::call::Ask` names it.
     pub async fn internal(&self, token: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
         use ::api::call::Ask;
         use axum::response::IntoResponse;

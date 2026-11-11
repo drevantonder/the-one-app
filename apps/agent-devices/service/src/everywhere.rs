@@ -1,4 +1,4 @@
-//! This service reaches the same service on the user's other devices through its own node's local API, as any app
+//! This service reaches the same service on the user's other devices through its own app runtime's local API, as any app
 //! would: list and backups show every device's agent devices, and move restores one on another. Calls passed on carry
 //! here: true, so they go no further.
 
@@ -62,7 +62,7 @@ fn is_zero_i(n: &i64) -> bool {
 }
 
 impl Devices {
-    /// Runs `function` on the device `on` (by name; "" for wherever the node picks): its answer.
+    /// Runs `function` on the device `on` (by name; "" for wherever the app runtime picks): its answer.
     pub(super) fn call_node(&self, on: &str, function: &str, input: &Value) -> Result<Value> {
         let mut req = json!({ "app": NAME, "service": NAME, "function": function, "input": input });
         if !on.is_empty() {
@@ -80,7 +80,7 @@ impl Devices {
         Ok(self.host.post("/api/call", &json!({ "app": NAME, "tool": tool, "input": input }))?["ok"].clone())
     }
 
-    /// This device's name and the user's other online devices that run agent devices, as the node says.
+    /// This device's name and the user's other online devices that run agent devices, as the app runtime says.
     pub(super) fn hosts(&self) -> Result<(String, Vec<String>)> {
         let (me, all) = self.ordered()?;
         let others = all.into_iter().filter(|s| *s != me).collect();

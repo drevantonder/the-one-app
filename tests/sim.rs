@@ -163,7 +163,7 @@ impl Link {
             }
             match wrote {
                 Err(e) if e.is::<Missing>() => Ok(Err(*e.downcast_ref::<Missing>().unwrap())),
-                // A step under an epoch newer than it was given: its node finds that epoch's entry, and hands it the key.
+                // A step under an epoch newer than it was given: its app runtime finds that epoch's entry, and hands it the key.
                 Err(e) if e.is::<::database::stored::Ahead>() => Ok(Err(Missing { epoch: e.downcast_ref::<::database::stored::Ahead>().unwrap().epoch })),
                 other => other.map(Ok),
             }
@@ -370,7 +370,7 @@ fn keys(seed: u64) -> (Keys, Keys) {
 }
 
 /// Opens the database and brings it to the schema as a device does: handed `newer`, epoch 2, when it meets a step under
-/// it, as its node is once it finds that epoch's entry; never handed it, it doesn't open.
+/// it, as its app runtime is once it finds that epoch's entry; never handed it, it doesn't open.
 async fn open(link: &Link, device: usize, older: &Keys, newer: Option<&Keys>) -> Option<Db> {
     let ahead = |e: &anyhow::Error| e.is::<::database::stored::Ahead>();
     let mut keys = older.clone();

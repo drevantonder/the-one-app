@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds iroh's relay protocol (protos/) into relay_protos.js and relay_protos_bg.wasm beside this, which are
-# committed, so nothing that builds the node needs a WebAssembly toolchain: run it when protos/ changes. Needs the
+# committed, so nothing that builds the app runtime needs a WebAssembly toolchain: run it when protos/ changes. Needs the
 # wasm32-unknown-unknown target and wasm-bindgen at Cargo.lock's version; wasm-opt, if there, makes it smaller. It
 # records what it was built from in protos.sha256, which `cargo test` holds protos/ to (tests/tree.rs).
 set -eu

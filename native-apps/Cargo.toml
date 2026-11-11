@@ -78,7 +78,7 @@ windows-collections = "0.3"
 keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }
 
 # Apple's own (src/secrets.rs, src/platform/mac.rs): the Keychain in the group the extensions read, Info.plist, and the Mac's
-# login item, node and defaults. All already built for Tauri (wry, tao) and keyring.
+# login item, oned and defaults. All already built for Tauri (wry, tao) and keyring.
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 security-framework = { version = "3", features = ["OSX_10_15"] }
 core-foundation = "0.10"

@@ -2,7 +2,7 @@ package main
 
 // Moving the link: this service on the device that holds it hands its
 // database (the link's keys and the messages kept) to the same service on
-// another of the user's devices, in calls through the nodes, end-to-end
+// another of the user's devices, in calls through the app runtimes, end-to-end
 // encrypted between them. Nothing is written anywhere else, so once the
 // other device has it and this one deletes its copy, there is one copy; the
 // link's state (state.go) keeps it off here until the other device answered.
@@ -32,7 +32,7 @@ import (
 )
 
 // partSize is how much of the database goes in one call, well inside what a
-// call may carry, even through older nodes (2 MB).
+// call may carry, even through older app runtimes (2 MB).
 var partSize = 1 << 20
 
 type holding struct {

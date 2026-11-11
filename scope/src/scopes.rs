@@ -264,8 +264,8 @@ impl ScopeDb {
         Ok(self.clients()?.into_iter().filter(|c| self.may(&c.user, "use", &object(scope))).collect())
     }
 
-    /// The nodes that run calls, each with the key what's handed it is sealed to: the devices listed as compute, and
-    /// the Cloudflare node, whose seal key is its key's twin.
+    /// The app runtimes that run calls, each with the key what's handed it is sealed to: the devices listed as compute, and
+    /// oned on Cloudflare, whose seal key is its key's twin.
     pub fn nodes(&self) -> Result<Vec<(Key, Key)>> {
         let mut out: Vec<(Key, Key)> = self.computes()?.into_iter().map(|d| (d.key, d.seal)).collect();
         if let Some(k) = self.cloudflare_node()?
@@ -332,7 +332,7 @@ impl ScopeDb {
     }
 
     /// The devices of a holder of the recovery key that it may be sealed to: only a client's, with no app runtime of its
-    /// own, as a node holds no keys; never a browser's, whose code a Worker serves, a remote MCP client's, or a passkey's,
+    /// own, as an app runtime holds no keys; never a browser's, whose code a Worker serves, a remote MCP client's, or a passkey's,
     /// which is wherever that passkey syncs; and only one that has said what it is.
     pub fn recovery_devices(&self, user: &str) -> Result<Vec<Machine>> {
         let runtimes = self.with_runtimes()?;
@@ -373,7 +373,7 @@ impl ScopeDb {
         Self::find_among(nodes, name)
     }
 
-    /// A node that runs a call, as someone names it for one (`--device`): a machine's, or the Cloudflare node, whose
+    /// An app runtime that runs a call, as someone names it for one (`--device`): a machine's, or oned on Cloudflare, whose
     /// name is `cloudflare` wherever a device is named.
     pub fn find_runner(&self, name: &str) -> Result<Key> {
         let mut nodes: Vec<(Key, String)> = self.running_machines()?.into_iter().map(|(m, named)| (m.key, named)).collect();
@@ -573,7 +573,7 @@ impl ScopeDb {
         Ok(self.machine(k)?.filter(|m| m.is(Kind::Client)))
     }
 
-    /// A device that runs apps' calls: a node.
+    /// A device that runs apps' calls: an app runtime.
     pub fn compute(&self, k: &Key) -> Result<Option<Machine>> {
         Ok(self.machine(k)?.filter(|m| m.is(Kind::Compute)))
     }
@@ -662,7 +662,7 @@ impl ScopeDb {
         Ok(self.machine(k)?.map(|m| m.seal))
     }
 
-    /// The Cloudflare node, as an admin's `CLOUDFLARE_NODE` setting names it.
+    /// oned on Cloudflare, as an admin's `CLOUDFLARE_NODE` setting names it.
     pub fn cloudflare_node(&self) -> Result<Option<Key>> {
         Ok(self.setting(CLOUDFLARE_NODE)?.and_then(|k| unhex(&k).ok()))
     }
@@ -844,7 +844,7 @@ impl ScopeDb {
             .collect())
     }
 
-    /// Whether a step named `blob` and the scope still needs it: forgotten, only if a node entry other than a keep
+    /// Whether a step named `blob` and the scope still needs it: forgotten, only if an app runtime entry other than a keep
     /// named it; or it's a deploy's bundle, which is never forgotten.
     pub fn names_blob(&self, blob: &str) -> Result<bool> {
         let named = self.row("SELECT pinned OR NOT EXISTS (SELECT 1 FROM forgotten WHERE blob = ?1) FROM blobs WHERE blob = ?1", [blob], |r| r.get::<_, bool>(0))?.unwrap_or(false);
@@ -902,7 +902,7 @@ impl ScopeDb {
     }
 }
 
-/// The setting that names the Cloudflare node's endpoint (its key, hex).
+/// The setting that names oned on Cloudflare's endpoint (its key, hex).
 pub const CLOUDFLARE_NODE: &str = "cloudflare_node";
 /// The setting that says who holds the recovery key: a JSON list of users' ids. Only an admin changes a setting.
 pub const RECOVERY_HOLDERS: &str = "recovery_holders";
@@ -1138,7 +1138,7 @@ pub fn valid_app_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && name != APP && name != AGENTS
 }
 
-/// What a scope's own node entries add up to: the apps added to it, every `open` of it, requests for Vault items
+/// What a scope's own app runtime entries add up to: the apps added to it, every `open` of it, requests for Vault items
 /// (the items themselves are in its `vault` database, `src/vault.rs`), and its schedules' switches.
 #[derive(Clone, Debug, Default)]
 pub struct ScopeState {

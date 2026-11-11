@@ -55,7 +55,7 @@ impl Reader {
         }
     }
 
-    /// Its name on a call, which the node keeps with who used each app.
+    /// Its name on a call, which the app runtime keeps with who used each app.
     pub fn client(self) -> &'static str {
         match self {
             Reader::Cli => "cli",

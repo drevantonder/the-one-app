@@ -238,7 +238,7 @@ fn send_program(at: &At) -> Result<()> {
             things.push((Thing::service_name(::scope::scopes::APPS_PART, &version.target), Some(folder.join(runtime)), version, "-".to_string()));
         }
     }
-    publish::publish_latest(&crate::node(), &key, &things)?;
+    publish::publish_latest(&crate::loopback(), &key, &things)?;
     for (name, _, version, _) in &things {
         println!("Published {name} {}.", version.commit);
     }
@@ -395,7 +395,7 @@ fn publish_workers(at: &At, key: &ssh_key::PrivateKey) -> Result<()> {
     let file = cache().join("workers").join(format!("{}.bundle", at.build_name()));
     std::fs::create_dir_all(file.parent().context("its folder")?)?;
     std::fs::write(&file, packed)?;
-    publish::publish_latest(&crate::node(), key, &[(Thing::WORKERS.into(), Some(file), at.version(), at.config_commit().to_string())])?;
+    publish::publish_latest(&crate::loopback(), key, &[(Thing::WORKERS.into(), Some(file), at.version(), at.config_commit().to_string())])?;
     println!("Published the Workers of {}.", at.build_name());
     Ok(())
 }

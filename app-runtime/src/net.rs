@@ -40,7 +40,7 @@ const CLIENT_CONNS: usize = 4;
 const CLIENT_BODY: usize = 4 << 20;
 /// How long a client device's request may take to send its body.
 const CLIENT_BODY_TIME: Duration = Duration::from_secs(60);
-/// How long a client device is waited for when this node asks it for something, and the most it may answer.
+/// How long a client device is waited for when this app runtime asks it for something, and the most it may answer.
 const CLIENT_ASK: Duration = Duration::from_secs(10);
 const CLIENT_ANSWER: usize = 128 << 10;
 /// How long a connection, a device's or a client's, stays open with nothing asked on it. Nothing keeps one open to say
@@ -98,7 +98,7 @@ impl Drop for Held {
     }
 }
 
-/// What client devices of this custom build speak to a node: HTTP/1.1, one request on each stream, to its local API.
+/// What client devices of this custom build speak to an app runtime: HTTP/1.1, one request on each stream, to its local API.
 fn http_alpn() -> Vec<u8> {
     format!("{}/http/1", ::custom_build::config::CLI).into_bytes()
 }
@@ -520,7 +520,7 @@ impl Host {
         self.with_or(false, |i| Ok(i.r.db().service(key)?.is_some()))
     }
 
-    /// Whether `key` is the network's Cloudflare node's endpoint, as `cloudflare oned deploy` set it.
+    /// Whether `key` is the network's oned on Cloudflare's endpoint, as `cloudflare oned deploy` set it.
     pub(super) fn is_cloudflare_node(&self, key: &Key) -> bool {
         self.with_or(false, |i| Ok(i.r.db().setting(scope::scopes::CLOUDFLARE_NODE)?.is_some_and(|k| k == hex(key))))
     }
@@ -722,8 +722,8 @@ impl Host {
         });
     }
 
-    /// Asks the client device `to` for its log, on a connection it opened to this node (`take_client`), where a client
-    /// answers whatever a node asks on one (onet/src/lib.rs's `Asked`): → its answer, or None if it isn't connected here.
+    /// Asks the client device `to` for its log, on a connection it opened to this app runtime (`take_client`), where a client
+    /// answers whatever an app runtime asks on one (onet/src/lib.rs's `Asked`): → its answer, or None if it isn't connected here.
     pub(super) async fn ask_client(&self, to: &Key, ask: &Value) -> Result<Option<Value>> {
         let conn = self.0.net.clients.lock().unwrap().get(to).and_then(|open| open.iter().rev().map(|(c, _)| c).find(|c| c.close_reason().is_none()).cloned());
         let Some(conn) = conn else { return Ok(None) };

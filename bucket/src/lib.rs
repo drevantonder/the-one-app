@@ -110,7 +110,7 @@ pub fn scope_of(folder: &str) -> String {
 }
 
 /// What a program read of the bucket, by kind of object and whether it was there, since it last said (the metric
-/// `bucket.reads`): a node's in its insights, a client's written by itself, once a minute, as it reads.
+/// `bucket.reads`): an app runtime's in its insights, a client's written by itself, once a minute, as it reads.
 #[derive(Default)]
 pub struct Reads(std::sync::Mutex<(std::collections::BTreeMap<(&'static str, bool), u64>, u64)>);
 

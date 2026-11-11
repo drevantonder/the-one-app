@@ -1,7 +1,7 @@
 //! A service in Rust: a program of its own, which its device's oned starts (`oned <name>`, oned/src/part.rs) and tells
 //! where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`) and where its data goes (`<NAME>_DATA`).
 //! It registers, long-polls for calls and answers each on a thread of its own, registering again whenever it's
-//! forgotten, until oned stops it. What it says to its node, and the node to it, is `services/sdk/wire.json`, which WhatsApp's service
+//! forgotten, until oned stops it. What it says to its app runtime, and the app runtime to it, is `services/sdk/wire.json`, which WhatsApp's service
 //! in Go and the Mac's in Swift (`services/sdk/swift`) say as well; tests/contracts.rs holds them to it.
 
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ pub const BUILD: &str = match option_env!("ONE_BUILD") {
     None => "dev",
 };
 
-/// Who a call is for, as its node says.
+/// Who a call is for, as its app runtime says.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Me {
@@ -111,7 +111,7 @@ pub struct Service {
     pub start: Option<fn(host: &Host)>,
 }
 
-/// What a service has: its folder, and its node.
+/// What a service has: its folder, and its app runtime.
 #[derive(Clone)]
 pub struct Host {
     pub name: &'static str,
@@ -133,7 +133,7 @@ impl Host {
         Ok(answer(self.agent.post(format!("{}{path}", self.node)).config().timeout_global(Some(limit)).build().send_json(body))?.unwrap_or_default())
     }
 
-    /// The port of its node's loopback.
+    /// The port of its app runtime's loopback.
     pub fn port(&self) -> u16 {
         self.node.rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(0)
     }
@@ -209,7 +209,7 @@ pub fn serve(service: Service) -> Result<()> {
         // SAFETY: before this program starts a thread of its own; nothing reads the environment meanwhile.
         unsafe { std::env::remove_var(var) };
     }
-    // Read for each request, as Go's service does, so a node that starts after it still lets it in.
+    // Read for each request, as Go's service does, so an app runtime that starts after it still lets it in.
     let token = home.join("local-token");
     let as_this_program = move |mut req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext| {
         if let Some(value) = std::fs::read_to_string(&token).ok().and_then(|t| t.trim().parse().ok()) {

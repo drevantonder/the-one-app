@@ -1,6 +1,6 @@
-//! Run priority. Each device, and the Cloudflare node, has a number, 1 first, or is always last: what the network's
+//! Run priority. Each device, and oned on Cloudflare, has a number, 1 first, or is always last: what the network's
 //! admins set (the `priority` setting, a JSON object of each device's key, or `cloudflare`, to its number or "last"),
-//! or by default 1, and the Cloudflare node always last. Calls, services' functions and new agent devices go to the
+//! or by default 1, and oned on Cloudflare always last. Calls, services' functions and new agent devices go to the
 //! lowest number that can run them, is up and has room; devices on the same number are equal, and the quickest
 //! runs it; a nearer one only when every one before it is far. Pure: settings in, priorities out; `app-runtime/src/calls.rs`,
 //! `oned/cloudflare/worker/` and every client (`onet/src/device.rs`, `ui/web/browser.js`) order by it, and the app
@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 /// The network setting that holds them.
 pub const SETTING: &str = "priority";
-/// The Cloudflare node's name in it.
+/// oned on Cloudflare's name in it.
 pub const CLOUDFLARE: &str = "cloudflare";
 /// The highest number a device may have.
 const MOST: u64 = 99;
@@ -72,7 +72,7 @@ pub fn set(settings: &BTreeMap<String, String>) -> BTreeMap<String, Priority> {
     parsed.into_iter().filter_map(|(k, v)| Some((k, Priority::from_value(&v)?))).collect()
 }
 
-/// A device's priority: what was set for it, or 1; the Cloudflare node's, or always last.
+/// A device's priority: what was set for it, or 1; oned on Cloudflare's, or always last.
 pub fn priority(set: &BTreeMap<String, Priority>, id: &str) -> Priority {
     set.get(id).copied().unwrap_or(if id == CLOUDFLARE { Priority::Last } else { Priority::Number(1) })
 }

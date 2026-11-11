@@ -29,12 +29,12 @@ fn unit() -> Option<String> {
     (unit.ends_with(".service") && std::env::var_os("INVOCATION_ID").is_some()).then_some(unit)
 }
 
-/// What's held the node's who's who since when (`Host::with`), which a stuck runtime is usually waiting for: what says why
+/// What's held the app runtime's who's who since when (`Host::with`), which a stuck runtime is usually waiting for: what says why
 /// when it can't be seen from outside.
 static HELD_AT: AtomicPtr<Location<'static>> = AtomicPtr::new(std::ptr::null_mut());
 static HELD_SINCE: AtomicU64 = AtomicU64::new(0);
 
-/// While it lives, says who has the node's who's who, for a stall to name.
+/// While it lives, says who has the app runtime's who's who, for a stall to name.
 pub struct Held;
 
 impl Held {
@@ -53,7 +53,7 @@ impl Drop for Held {
 }
 
 /// What a stuck runtime was doing, as far as can be seen from outside it: what held its who's who, how many tasks it
-/// had and threads it was waiting on, and, on a Mac, every thread's stack, kept in the node's log folder.
+/// had and threads it was waiting on, and, on a Mac, every thread's stack, kept in the app runtime's log folder.
 fn stuck_on(runtime: &tokio::runtime::Handle, now: u64) -> String {
     let at = HELD_AT.load(Ordering::Relaxed);
     // Set only from `Location::caller()`, which is 'static, and never freed.
@@ -69,12 +69,12 @@ fn stuck_on(runtime: &tokio::runtime::Handle, now: u64) -> String {
     said
 }
 
-/// A node whose runtime has made no progress for a minute says so and exits, for its supervisor to start it again. A node
+/// An app runtime whose runtime has made no progress for a minute says so and exits, for its supervisor to start it again. An app runtime
 /// whose every thread is stuck still listens, and what's asked of it would otherwise wait unanswered, every agent and the
 /// CLI with it, until someone restarts it by hand. Progress is a task on the runtime that ticks every few seconds, not a
-/// request answered in time: a busy node (an update building on its machine) answers slowly, and is not stuck. Starting a
-/// node costs its machine enough to stall what comes next, so each restart in a row waits longer before the next, up to
-/// `MOST_STUCK_FOR`: a real hang still recovers, and a node that stays up (`SETTLED`) has none in a row.
+/// request answered in time: a busy app runtime (an update building on its machine) answers slowly, and is not stuck. Starting a
+/// app runtime costs its machine enough to stall what comes next, so each restart in a row waits longer before the next, up to
+/// `MOST_STUCK_FOR`: a real hang still recovers, and an app runtime that stays up (`SETTLED`) has none in a row.
 pub fn watch() {
     if !supervised() {
         return;

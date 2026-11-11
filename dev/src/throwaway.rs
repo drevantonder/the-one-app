@@ -1,4 +1,4 @@
-//! `throwaway`: a throwaway network, a network of its own, made as `create` makes every new one, by a node beside this machine's own with its own
+//! `throwaway`: a throwaway network, a network of its own, made as `create` makes every new one, by an app runtime beside this machine's own with its own
 //! home and ports, so it touches nothing of the user's (`platform::mode`). There's one for each checkout it's run in, from any folder in it, so threads working in different ones each have their
 //! own. Its Workers run beside it, and its auth lets its first user in with no passkey (cloudflare::Settings::throwaway_user), so a
 //! client of this checkout's build, on a device borrowed for it (`throwaway client`), signs in with nobody there; others join
@@ -24,7 +24,7 @@ mod network;
 mod rebuild;
 pub(crate) mod sign_in;
 
-pub(crate) use network::node_at;
+pub(crate) use network::loopback_at;
 use network::{older_build, no_client_running, running, start, stop, stop_some};
 
 fn is_checkout(top: &Path) -> bool {
@@ -63,7 +63,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     let Some((dir, checkout)) = folder() else {
         bail!("{} throwaway is for a checkout of The One App, and this folder isn't in one: run it in the checkout, or any folder in it", dev())
     };
-    // A browser (the web client, and anyone `--as` joins in one) and the Cloudflare node need the WebAssembly, which a
+    // A browser (the web client, and anyone `--as` joins in one) and oned on Cloudflare need the WebAssembly, which a
     // throwaway network running this checkout's build reads from the checkout, as it reads its pages from its UI folder.
     let given = ui.is_some();
     let mut ui = ui;
@@ -123,7 +123,7 @@ pub fn run(rest: &[String]) -> Result<()> {
         Some("git") => return git(&dir, &addr, &rest[1..]),
         _ => {}
     }
-    // As one of its programs: its home, so the CLI asks its node with its token, as nobody signed in, and its Cloudflare
+    // As one of its programs: its home, so the CLI asks its app runtime with its token, as nobody signed in, and its Cloudflare
     // settings are its own Workers'; and its mode, so nothing of this machine's own network's is touched.
     use std::os::unix::process::CommandExt;
     let mut command = std::process::Command::new(network::program(&dir)?);
@@ -160,7 +160,7 @@ fn publish(dir: &Path, addr: &str) -> Result<()> {
 pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
     let build = crate::program()?;
     let version = Version::of(&build).context("ask this checkout's build what it is")?;
-    let (node, key) = (node_at(dir, addr), Throwaway::own_release_key(dir)?);
+    let (node, key) = (loopback_at(dir, addr), Throwaway::own_release_key(dir)?);
     // With its app runtime, built beside it, and the Workers and the web client, which Cloudflare's Update in Devices
     // takes from the record.
     let bundle = |files| ui::bundle::Bundle { commit: version.commit.clone(), committed: version.committed, shell: ui::web::SHELL, files };
@@ -205,7 +205,7 @@ fn update(dir: &Path, addr: &str) -> Result<()> {
 }
 
 fn say_where(dir: &Path, addr: &str) -> Result<()> {
-    let state = node_at(dir, addr).state()?;
+    let state = loopback_at(dir, addr).state()?;
     let (me, address) = (state.looking(), state.address().unwrap_or(""));
     println!(
         "This checkout's throwaway network is running on this machine: a new network, Throwaway, with only what every new network
@@ -220,10 +220,10 @@ recovery key; its Workers' settings are in {}.
 }
 
 /// `git`, told that the throwaway network's repos (`<its address>/repos/…`) are reached through this build's remote helper, as
-/// git is on a computer with a node: this build's helper is linked in a folder of the throwaway network's, put
-/// first on git's PATH (the one the real network's CLI links is another build, reaching another node).
+/// git is on a computer with an app runtime: this build's helper is linked in a folder of the throwaway network's, put
+/// first on git's PATH (the one the real network's CLI links is another build, reaching another app runtime).
 fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
-    let address = node_at(dir, addr).state()?.address().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
+    let address = loopback_at(dir, addr).state()?.address().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
     let helper = bin.join(::custom_build::programs::git_helper());
@@ -250,7 +250,7 @@ fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Runs the throwaway network's Cloudflare node beside its Workers, in their workerd, as `cloudflare oned deploy` puts one in
+/// Runs the throwaway network's oned on Cloudflare beside its Workers, in their workerd, as `cloudflare oned deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
 fn oned_cloudflare(dir: &Path) -> Result<()> {
     let mut settings = oned_cloudflare::Settings::load_in(dir)?;
@@ -262,7 +262,7 @@ fn oned_cloudflare(dir: &Path) -> Result<()> {
     }
     let addr = running(dir).context("the throwaway network didn't start again")?;
     let key = settings.cloudflare_node_endpoint().context("the throwaway network's Workers have no key for oned on Cloudflare")?;
-    node_at(dir, &addr).post("/api/settings", json!({ "name": scope::scopes::CLOUDFLARE_NODE, "value": key }))?;
+    loopback_at(dir, &addr).post("/api/settings", json!({ "name": scope::scopes::CLOUDFLARE_NODE, "value": key }))?;
     println!("The throwaway network's oned on Cloudflare runs beside its Workers, its endpoint {}.", &key[..8]);
     Ok(())
 }

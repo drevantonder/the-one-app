@@ -2,9 +2,9 @@
 
 use custom_build::config::CLI;
 
-/// A platform a release is for: what installers and nodes name it, and what Go and a user do.
+/// A platform a release is for: what installers and app runtimes name it, and what Go and a user do.
 pub struct Platform {
-    /// Rust's target triple, which a node and a release name it by.
+    /// Rust's target triple, which an app runtime and a release name it by.
     pub target: &'static str,
     /// Go's `GOOS` and `GOARCH`.
     pub os: &'static str,

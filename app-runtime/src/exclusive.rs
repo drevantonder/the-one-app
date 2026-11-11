@@ -4,7 +4,7 @@ use super::*;
 
 /// A lock that refuses the thread already holding it. A std `Mutex` asked for again on the thread holding it waits on
 /// itself for good, and every thread asking after that waits on it too: once those are all the runtime's workers, the
-/// node takes no connection and answers nothing, though it still listens. Refused instead, and said where.
+/// app runtime takes no connection and answers nothing, though it still listens. Refused instead, and said where.
 pub(super) struct Exclusive<T>(pub(super) Mutex<T>);
 
 pub(super) struct Held<'a, T>(std::sync::MutexGuard<'a, T>, usize);

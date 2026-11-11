@@ -66,8 +66,8 @@ pub fn database_prefix(scope: &str, app: &str, database: &str) -> String {
     format!("{}/{}/{}", crate::folder(scope), permanent.app, permanent.database)
 }
 
-/// Where a blob named in `scope` is kept in the bucket, by its hash: under the scope's node folder, sealed with the key
-/// of the node's database `blobs` there. A deploy's bundle and a release's binary are `global`'s.
+/// Where a blob named in `scope` is kept in the bucket, by its hash: under the scope's app runtime folder, sealed with the key
+/// of the app runtime's database `blobs` there. A deploy's bundle and a release's binary are `global`'s.
 pub fn blob_name(scope: &str, hash: &str) -> String {
     format!("{}/{hash}", crate::names::core_prefix(key::CoreDb::Blobs, scope))
 }

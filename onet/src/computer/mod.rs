@@ -142,7 +142,7 @@ impl Onet {
 
     /// What it does from its start, and again every so often (`KEEP_EVERY`), if its home says it's in a network: lists
     /// its app runtime as its device's (`list_runtime`); and once the network has an address, keeps it in its home for
-    /// `<cli> update` and oned, reaches its nodes, tells the relay what this device is on and hears an ask left for it;
+    /// `<cli> update` and oned, reaches its app runtimes, tells the relay what this device is on and hears an ask left for it;
     /// and while it answers the API's own address, keeps this computer's harnesses and git pointed at it.
     async fn start(self: &Arc<Self>) -> Result<()> {
         if NetworkFile::read(&self.home)?.is_none() {

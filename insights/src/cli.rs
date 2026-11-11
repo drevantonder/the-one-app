@@ -13,7 +13,7 @@ pub fn commands() -> Command {
             g.takes_only(&["service", "trace-id", "effect-of", "parts", "raw", "name", "min-ms", "since", "status", "limit", "check"])?;
             let schema = super::tools::feature().tools.remove(0)["input"].clone();
             let input = ::api::tools::input(&schema, &[], vec![], g.flags.clone(), &[]).map_err(|e| ::api::cli::Failed::Typed(format!("{e:#}")))?;
-            let ran = g.node.route(g.agent, "/api/insights/insights", &Value::Object(input), g.trace);
+            let ran = g.api.route(g.agent, "/api/insights/insights", &Value::Object(input), g.trace);
             let said = ran.ok.inspect_err(|_| ::api::cli::print_trace(ran.trace.as_deref()))?;
             match &said {
                 Value::String(text) => println!("{text}"),

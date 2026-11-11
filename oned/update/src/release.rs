@@ -1,4 +1,4 @@
-//! Releases of the node itself, and of the services in other languages it runs as its parts.
+//! Releases of the app runtime itself, and of the services in other languages it runs as its parts.
 
 use std::path::{Path, PathBuf};
 

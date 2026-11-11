@@ -66,7 +66,7 @@ pub struct State {
     changed: Mutex<HashMap<Scope, (u64, u64)>>,
     /// How backups went, as the rows last said.
     rows: Mutex<rows::Rows>,
-    /// Whether it has copied the rows builds before kept in the node's `main` (`rows::copy_once`).
+    /// Whether it has copied the rows builds before kept in the app runtime's `main` (`rows::copy_once`).
     copied: AtomicBool,
 }
 

@@ -20,7 +20,7 @@ pub fn commands() -> Command {
 fn run(g: &Given) -> Result<bool> {
     match g.words().as_slice() {
         ["storage"] => {
-            let s = g.node.get("/api/storage")?;
+            let s = g.api.get("/api/storage")?;
             match s["kind"].as_str() {
                 Some("folder") => println!("The network's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other devices join: {CLI} storage move --endpoint <url> --bucket <name>.", s["device"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
                 Some(_) => println!("The network's data is kept in {} at {}.", s["where"].as_str().unwrap_or(""), s["endpoint"].as_str().unwrap_or("")),
@@ -31,7 +31,7 @@ fn run(g: &Given) -> Result<bool> {
             let get = |k: &str| g.flag(k);
             let endpoint = get("endpoint").context("give --endpoint, like https://<account>.r2.cloudflarestorage.com")?;
             let bucket = get("bucket").context("give --bucket, the bucket's name: its key is the Workers' (BUCKET, which only the URL signer holds)")?;
-            let r = g.node.post("/api/storage", json!({ "endpoint": endpoint, "bucket": bucket, "region": get("region") }))?;
+            let r = g.api.post("/api/storage", json!({ "endpoint": endpoint, "bucket": bucket, "region": get("region") }))?;
             print!("{}", tried_said(&r));
             if r["kept"] == true {
                 println!("Every device moves the network's data there now.");

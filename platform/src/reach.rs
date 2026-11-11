@@ -38,7 +38,7 @@ fn on_the_internet(ip: IpAddr) -> bool {
     }
 }
 
-/// Anything but `ports` on this machine: the node's own, which would let a request act as someone else (the local
+/// Anything but `ports` on this machine: the app runtime's own, which would let a request act as someone else (the local
 /// API, workerd) or loop back here.
 pub fn not_ports(ports: Vec<u16>) -> impl Fn(SocketAddr) -> Option<String> + Send + Sync + 'static {
     move |at| {

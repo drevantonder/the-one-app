@@ -1,4 +1,4 @@
-//! The network's Workers running in the pinned workerd, as nodes and auth use them.
+//! The network's Workers running in the pinned workerd, as app runtimes and auth use them.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -911,7 +911,7 @@ impl Subscription {
 
 /// What sign-in sends about a device asking to join is what the apps read (`notifications::Note`): to its user's other
 /// devices, never the one asking, "<device> wants in" with the action `{ join: <code> }` (`keys::join_code`, which the
-/// apps' Approve and Not Me send their node) as it asks, and "<device> joined" once
+/// apps' Approve and Not Me send their app runtime) as it asks, and "<device> joined" once
 /// one let it in, each opening Settings › Devices. Their devices are those that asked to join as them here, and those that
 /// registered for notifications naming them, as a device that joined before sign-in kept whose devices asked does.
 #[test]
@@ -992,7 +992,7 @@ fn a_device_asking_to_join_is_notified_to_its_users_other_devices() {
 /// The network the tests' Workers are for: its root, as the device deploying them holds it.
 const ROOT: [u8; 32] = [5; 32];
 
-/// iroh endpoints, as nodes are, through the relay at a network's address and nothing else: its relay protocol is
+/// iroh endpoints, as app runtimes are, through the relay at a network's address and nothing else: its relay protocol is
 /// iroh-relay's Rust as WebAssembly in a Durable Object (relay/), which must agree with iroh's own.
 mod relay {
     use std::time::Duration;
@@ -1186,7 +1186,7 @@ mod relay {
         data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>())
     }
 
-    /// A device is taken out (its key forgotten, its user signed out) only when the relay says so: a node that doesn't
+    /// A device is taken out (its key forgotten, its user signed out) only when the relay says so: an app runtime that doesn't
     /// list it, which may not have read its approval yet, says nothing of it, nor does an old key that was in where a
     /// new one signs in.
     #[test]
@@ -1383,9 +1383,9 @@ mod relay {
 
     /// A browser's endpoint is a key of its session's, which its device vouches for (keys::certify): the relay lets it
     /// in as that device, only for the key the certificate names, until its `until`, and while the device is listed.
-    /// A client races connections to its nodes and asks the first one up, keeping the others it raced for the next
-    /// request. The keys a request hands are sealed as the node it's sent to is picked, to that one alone: never to a
-    /// node it only raced a connection to (onet/src/lib.rs, `fetch_with`).
+    /// A client races connections to its app runtimes and asks the first one up, keeping the others it raced for the next
+    /// request. The keys a request hands are sealed as the app runtime it's sent to is picked, to that one alone: never to a
+    /// app runtime it only raced a connection to (onet/src/lib.rs, `fetch_with`).
     #[test]
     fn a_request_hands_keys_only_to_the_node_it_is_sent_to() {
         use std::sync::{Arc, Mutex};
@@ -1396,7 +1396,7 @@ mod relay {
         assert_eq!(tell(&address, &slow, json!({ "add": hex(&SecretKey::from_bytes(&secret)), "role": "client" })), 204);
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            // Each node answers every request, noting the keys it was handed with it (`x-one-keys`); the slow one lets
+            // Each app runtime answers every request, noting the keys it was handed with it (`x-one-keys`); the slow one lets
             // a connection open only once the test lets it.
             let got: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
             let serve = |key: &SecretKey, gate: Option<Arc<tokio::sync::Notify>>| {
@@ -1501,7 +1501,7 @@ mod relay {
             let cert = certify(&phone, &session, super::now() + 60_000);
             let s = online(&address, &session, Some(&cert)).await.expect("a session its device vouched for isn't let in");
             assert!(reaches(&address, &s, &a).await, "a session's endpoint doesn't reach the network's devices");
-            // Its first nodes to ask: the computes, for it or a device on the list, and no one else.
+            // Its first app runtimes to ask: the computes, for it or a device on the list, and no one else.
             let asked = key::signed_request(&signer(&phone), "one/relay", json!({ "computes": true, "reads": custom_build::protocol::READS }), at());
             let by_session = ask(&session, &cert);
             // And which of them are on the relay's network now, which a client races first.
@@ -1515,7 +1515,7 @@ mod relay {
                 assert_eq!((status, said), (200, json!({ "computes": [hex(&first)], "moved": {}, "online": [hex(&first)], "versions": {}, "workers": { "from": hex(&first), "workers": super::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null } })));
             }
             // Each request is taken once; a certificate alone, or one signed by a key it doesn't name, gets nothing; a
-            // clock that's off isn't told it's out (403), so it keeps the nodes it knows.
+            // clock that's off isn't told it's out (403), so it keeps the app runtimes it knows.
             for replayed in [by_session, asked] {
                 assert_eq!(computes(replayed).0, 400, "a computes request was taken twice");
             }

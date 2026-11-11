@@ -6,7 +6,7 @@
 //! A note is JSON (`Note`): what to show, the app screen a tap opens, and maybe an action its device checks itself,
 //! signed by the device that sent it (`keys::signed_request`, domain `one/note`, so its receiver can tell which of the
 //! network's devices it's from; a note the network's own Workers send is unsigned), then sealed to the receiving device's
-//! seal key (`keys::seal_to`), the key the network's signed entries list for it, never one a node or a Worker says.
+//! seal key (`keys::seal_to`), the key the network's signed entries list for it, never one an app runtime or a Worker says.
 //!
 //! Each device that gets notifications registers its address with the Worker itself (`register_request`). An app runtime
 //! sends for any caller (`notifications_runtime`): it seals a note to each of the caller's devices and hands them to the

@@ -1,7 +1,7 @@
 //! Bundles: what a deploy names. A tar holding `app.js`, the built ES module, `src/`, the files it was built from, and
 //! for an app with a service, `services.json`, the hash of each platform's build of it (`services`).
 //! Plain ustar, written the same way every time, so the same files give the same blob. Each app's latest is kept in
-//! the bucket too, sealed, for a node that has no other way to get it (the Cloudflare node).
+//! the bucket too, sealed, for an app runtime that has no other way to get it (oned on Cloudflare).
 
 use std::path::Path;
 
@@ -63,7 +63,7 @@ pub fn module(bundle: &[u8]) -> Result<String> {
 
 /// What names an app's service's builds in its bundle: `{ "<platform>": "<blob hash>" }`, the platform as releases say
 /// it (`x86_64-unknown-linux-gnu`). The deploy names the bundle, so it names them too, signed by whoever deployed it;
-/// a node runs a build of the service only if it's the one its app's latest deploy names, or a release (`oned`).
+/// an app runtime runs a build of the service only if it's the one its app's latest deploy names, or a release (`oned`).
 pub const SERVICES: &str = "services.json";
 
 /// The builds of its app's service a bundle names, by platform: none if it names none.

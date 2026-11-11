@@ -1,13 +1,13 @@
-//! What a client device knows of its network, the keys it opened, and how it asks a node with them, the same on every
+//! What a client device knows of its network, the keys it opened, and how it asks an app runtime with them, the same on every
 //! client that runs this crate: the CLI and native apps (`device.rs`), and the remote MCP server's devices
 //! (oned/cloudflare/worker/src/clients.rs), and browsers (`wasm::Keyring`, in onet/web/net-worker.js).
 //!
-//! It trusts no node, nor the relay, for who's who: it reads `global`'s scope database's steps from the bucket itself,
-//! opens them with the epochs sealed to it, and applies them by the node's own rules (`steps::Reader`). It asks only
-//! endpoints those list as nodes that run its user's things, takes a 428 only from the node that answered, and only
+//! It trusts no device, nor the relay, for who's who: it reads `global`'s scope database's steps from the bucket itself,
+//! opens them with the epochs sealed to it, and applies them by the app runtime's own rules (`steps::Reader`). It asks only
+//! endpoints those list as app runtimes that run its user's things, takes a 428 only from the app runtime that answered, and only
 //! for scopes they say it runs, databases that kind of request uses (`keys::asked_for`) and epochs from each one's
-//! newest copy (`keys::oldest_needed`); and hands what it named to the one node each request is sent to, of the scopes
-//! they say that node runs, sealed to the seal key they list for it. An epoch it's given opens only if its hash is the
+//! newest copy (`keys::oldest_needed`); and hands what it named to the one app runtime each request is sent to, of the scopes
+//! they say that app runtime runs, sealed to the seal key they list for it. An epoch it's given opens only if its hash is the
 //! one who's who names, whoever passed it on.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use crate::{Body, Client, Error, Request, Response, not_let_in, unsent};
 
 const REREAD: u64 = 30_000;
-/// How long a node keeps the keys a request handed it.
+/// How long an app runtime keeps the keys a request handed it.
 pub const HANDED_FOR: u64 = 3_600_000;
 /// The most kinds of request whose needs are kept: the remote MCP server keeps one for each tool an MCP client calls.
 const KINDS_KEPT: usize = 128;
@@ -76,10 +76,10 @@ struct Known {
     /// The keys `global`'s steps are sealed under, by epoch.
     steps: database::stored::Keys,
     user: String,
-    /// The nodes it may ask, by key: their seal keys; and the Cloudflare node, if the network has one.
+    /// The app runtimes it may ask, by key: their seal keys; and oned on Cloudflare, if the network has one.
     nodes: HashMap<[u8; 32], [u8; 32]>,
     cloudflare_node: Option<[u8; 32]>,
-    /// Each node's run priority, as the network's admins set it (scope/src/rank.rs): the Cloudflare node's too.
+    /// Each app runtime's run priority, as the network's admins set it (scope/src/rank.rs): oned on Cloudflare's too.
     ranks: HashMap<[u8; 32], u32>,
     at: u64,
 }
@@ -94,7 +94,7 @@ impl Known {
     fn of(reader: Reader, steps: database::stored::Keys, key: &[u8; 32], at: u64) -> Result<Known, Error> {
         let who = &reader.truth().ok_or_else(|| not_let_in("This device isn't listed yet."))?.db;
         let user = who.client(key).map_err(failed)?.map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
-        // The nodes that run something of its user's, and the Cloudflare node, which runs anyone's calls.
+        // The app runtimes that run something of its user's, and oned on Cloudflare, which runs anyone's calls.
         let cloudflare_node = who.cloudflare_node().map_err(failed)?;
         let mut nodes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
         for (key, seal) in who.nodes().map_err(failed)? {
@@ -123,14 +123,14 @@ pub struct Keyring<O = [u8; 32]> {
     reading: tokio::sync::Mutex<()>,
     epochs: Mutex<HashMap<(String, u32), [u8; 32]>>,
     app_keys: Mutex<HashMap<(String, String, u32), [u8; 32]>>,
-    /// What each kind of request needed (`Kind::name`): the last 428's, and the node that sent it (hex); none until
+    /// What each kind of request needed (`Kind::name`): the last 428's, and the app runtime that sent it (hex); none until
     /// read from where it's kept.
     needs: Mutex<Option<BTreeMap<String, (String, Vec<Need>)>>>,
     /// Held while a kind of request learns from a 428: another of its kind waits for it, and goes with what it learned.
     learning: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// When it last read who's who to renew app schedules (`settings::renew_app_schedules`).
     renew_checked: Mutex<u64>,
-    /// The nodes a node said that it read who's who again for (`reread_for`): each only once.
+    /// The app runtimes an app runtime said that it read who's who again for (`reread_for`): each only once.
     reread: Mutex<std::collections::HashSet<[u8; 32]>>,
 }
 
@@ -248,7 +248,7 @@ impl<O: Opens> Keyring<O> {
 
 
     /// Who's who as it last read it, if the relay's count of writes to `global` (`writes`, as its computes say) is still
-    /// what it was then: else read from the bucket, keeping that count. As nodes go by it (`app_runtime`): only a hint, as
+    /// what it was then: else read from the bucket, keeping that count. As app runtimes go by it (`app_runtime`): only a hint, as
     /// the bucket is the truth, so with none it reads.
     pub async fn read_if_moved(&self, on: &(impl Address + Keep), writes: Option<u64>) -> Result<(), Error> {
         let kept = on.get(WRITES).await.and_then(|b| String::from_utf8(b).ok()?.trim().parse::<u64>().ok());
@@ -262,7 +262,7 @@ impl<O: Opens> Keyring<O> {
         Ok(())
     }
 
-    /// Reads who's who again if a node said of `nodes` one it doesn't know, the first time one's said: one who's who
+    /// Reads who's who again if an app runtime said of `nodes` one it doesn't know, the first time one's said: one who's who
     /// still doesn't list after that isn't one to ask.
     pub async fn reread_for(&self, on: &(impl Address + Keep), nodes: &[[u8; 32]]) {
         let Some(known) = self.known.lock().unwrap().as_ref().map(|k| k.nodes.keys().copied().collect::<std::collections::HashSet<_>>()) else { return };
@@ -290,12 +290,12 @@ impl<O: Opens> Keyring<O> {
         self.known.lock().unwrap().as_ref().map(|k| k.user.clone())
     }
 
-    /// The nodes it may ask, by key, with their seal keys.
+    /// The app runtimes it may ask, by key, with their seal keys.
     pub fn nodes(&self) -> HashMap<[u8; 32], [u8; 32]> {
         self.known.lock().unwrap().as_ref().map(|k| k.nodes.clone()).unwrap_or_default()
     }
 
-    /// This device's own app runtime among the nodes it may ask: the compute that names it as its device.
+    /// This device's own app runtime among the app runtimes it may ask: the compute that names it as its device.
     pub fn own_runtime(&self) -> Option<[u8; 32]> {
         let known = self.known.lock().unwrap();
         let k = known.as_ref()?;
@@ -314,8 +314,8 @@ impl<O: Opens> Keyring<O> {
         self.known.lock().unwrap().as_ref().and_then(|k| k.cloudflare_node)
     }
 
-    /// The nodes it may ask, in the order things run on them: `first`, as last said, then those it wasn't told of, the
-    /// Cloudflare node last of them; then by run priority, which may put the Cloudflare node first.
+    /// The app runtimes it may ask, in the order things run on them: `first`, as last said, then those it wasn't told of, the
+    /// oned on Cloudflare last of them; then by run priority, which may put oned on Cloudflare first.
     pub fn ordered(&self, first: &[[u8; 32]]) -> Vec<[u8; 32]> {
         let nodes = self.nodes();
         let last = self.cloudflare_node();
@@ -329,8 +329,8 @@ impl<O: Opens> Keyring<O> {
         out
     }
 
-    /// Every node it knows failed: who's who read again, now and then, in case a device has a runtime of its own by now.
-    /// → whether that listed a node it hadn't known of, which it now asks too.
+    /// Every app runtime it knows failed: who's who read again, now and then, in case a device has a runtime of its own by now.
+    /// → whether that listed an app runtime it hadn't known of, which it now asks too.
     async fn found_nodes(&self, client: &Client, on: &(impl Address + Keep)) -> bool {
         let stale = self.known.lock().unwrap().as_ref().is_some_and(|k| now() > k.at + REREAD);
         let had = self.nodes();
@@ -363,12 +363,12 @@ impl<O: Opens> Keyring<O> {
         }
     }
 
-    /// A request to its network's nodes as its user, with the keys its kind needed last time, sealed to the node it's
-    /// sent to until `until` (ms). One a node needs others for (428) is sent again with them, a few times, as a node may
-    /// find what it needs as it goes (the Cloudflare node, its logs' keys first, then a call's); one a node refuses as
+    /// A request to its network's app runtimes as its user, with the keys its kind needed last time, sealed to the app runtime it's
+    /// sent to until `until` (ms). One an app runtime needs others for (428) is sent again with them, a few times, as an app runtime may
+    /// find what it needs as it goes (oned on Cloudflare, its logs' keys first, then a call's); one an app runtime refuses as
     /// it doesn't list this device yet, again in a moment while the relay lets it in.
-    /// One this device answers itself (`answer`: what it signs as its user) never reaches a node, and the API's document
-    /// (`crate::document`) is made here from the apps a node lists for it.
+    /// One this device answers itself (`answer`: what it signs as its user) never reaches an app runtime, and the API's document
+    /// (`crate::document`) is made here from the apps an app runtime lists for it.
     pub async fn request(&self, client: &Client, on: &(impl Address + Keep + Signs), request: Request, until: u64) -> Result<Response, Error> {
         if let Some(answer) = self.answer(client, on, &request.method, &request.path, request.body.bytes()).await {
             let (status, out) = match answer {
@@ -385,7 +385,7 @@ impl<O: Opens> Keyring<O> {
         self.to_nodes(client, on, request, until).await
     }
 
-    /// The API's document for this device's user, from the apps a node lists for them.
+    /// The API's document for this device's user, from the apps an app runtime lists for them.
     async fn document(&self, client: &Client, on: &(impl Address + Keep), mut request: Request, until: u64) -> Result<Response, Error> {
         request.path = ::api::path::APPS.into();
         let response = self.to_nodes(client, on, request, until).await?;
@@ -398,7 +398,7 @@ impl<O: Opens> Keyring<O> {
         Ok(Response { headers, body: Body::whole(body), ..response })
     }
 
-    /// `request`, of its nodes.
+    /// `request`, of its app runtimes.
     async fn to_nodes(&self, client: &Client, on: &(impl Address + Keep), request: Request, until: u64) -> Result<Response, Error> {
         let kind = Kind::of(&request.path, request.body.bytes());
         if self.needs.lock().unwrap().is_none() {
@@ -431,7 +431,7 @@ impl<O: Opens> Keyring<O> {
             }
             if response.status == 403 {
                 let bytes = response.body.bytes().await?;
-                // A node that doesn't list this device may not have read its approval yet: the relay says if it's out,
+                // An app runtime that doesn't list this device may not have read its approval yet: the relay says if it's out,
                 // else it's asked again in a moment, once it has.
                 if serde_json::from_slice::<Value>(&bytes).is_ok_and(|v| v["code"] == ::custom_build::protocol::code::NOT_LET_IN) {
                     if !on.let_in().await {
@@ -454,9 +454,9 @@ impl<O: Opens> Keyring<O> {
         self.needs.lock().unwrap().as_ref().and_then(|n| n.get(kind).cloned())
     }
 
-    /// A request saying whose it is (`x-one-user`), which a node checks against this device's key, with the keys
-    /// `handed` of the scopes who's who says run on the node the client sends it to, for that node alone, sealed to the
-    /// seal key it lists for it: never to a node it only raced a connection to, nor one it doesn't list.
+    /// A request saying whose it is (`x-one-user`), which an app runtime checks against this device's key, with the keys
+    /// `handed` of the scopes who's who says run on the app runtime the client sends it to, for that app runtime alone, sealed to the
+    /// seal key it lists for it: never to an app runtime it only raced a connection to, nor one it doesn't list.
     async fn send(&self, client: &Client, mut request: Request, handed: &[Handed], until: u64) -> Result<Response, Error> {
         let user = self.user().ok_or_else(refused)?;
         request.headers.push((header::USER.into(), user));
@@ -499,7 +499,7 @@ impl<O: Opens> Keyring<O> {
     }
 
 
-    /// The keys a kind of request needed last time (`needs`), opened: none it can't open. Each node it's sent to is
+    /// The keys a kind of request needed last time (`needs`), opened: none it can't open. Each app runtime it's sent to is
     /// handed only those of the scopes it runs (`sealed_for`).
     async fn handed(&self, client: &Client, on: &(impl Address + Keep), needs: Option<&(String, Vec<Need>)>) -> Result<Vec<Handed>, Error> {
         let Some((_, needs)) = needs else { return Ok(Vec::new()) };
@@ -513,9 +513,9 @@ impl<O: Opens> Keyring<O> {
         Ok(handed)
     }
 
-    /// A node's 428, taken only from the node that answered (`node`), naming itself, asking only keys of scopes who's
+    /// An app runtime's 428, taken only from the app runtime that answered (`node`), naming itself, asking only keys of scopes who's
     /// who says it runs, and of databases that kind of request uses (`keys::asked_for`): what the request needed,
-    /// remembered for that kind of request and that node, in place of what it needed before. Fails, remembering
+    /// remembered for that kind of request and that app runtime, in place of what it needed before. Fails, remembering
     /// nothing, if it asks for more, or this device can't open them. One of a kind of request that another learned for
     /// since it was sent (`sent_with`, what it went with) learns nothing more.
     async fn learn(&self, client: &Client, on: &(impl Address + Keep), kind: &Kind, node: &[u8; 32], answer: &Value, sent_with: Option<(String, Vec<Need>)>) -> Result<(), Error> {
@@ -704,7 +704,7 @@ impl Kind {
     }
 }
 
-/// A node's answer as JSON: its error, with its code, unless it's 200.
+/// An app runtime's answer as JSON: its error, with its code, unless it's 200.
 async fn json_of(response: Response, path: &str) -> Result<Value, Error> {
     let status = response.status;
     let out: Value = match serde_json::from_slice(&response.body.bytes().await?) {

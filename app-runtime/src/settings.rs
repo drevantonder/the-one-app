@@ -1,4 +1,4 @@
-//! A machine with a node as its user's own device (`::scope::settings::Me`), as it's listed (`MACHINE`): what its CLI,
+//! A machine with an app runtime as its user's own device (`::scope::settings::Me`), as it's listed (`MACHINE`): what its CLI,
 //! MCP and Mac app change of who can do what is signed by it, with the one copy every client runs; and on an admin's,
 //! it lets in those an invite already said yes to, as Settings does while it lists requests.
 
@@ -149,7 +149,7 @@ impl Me for Host {
     }
 }
 
-/// The routes a machine with a node answers as its own device (`settings::on_a_node`), for its own programs.
+/// The routes a machine with an app runtime answers as its own device (`settings::on_a_node`), for its own programs.
 pub(crate) fn routes() -> crate::api::Routes {
     let mut routes = crate::api::Routes::default();
     for (method, path) in ::scope::settings::on_a_node() {
@@ -221,7 +221,7 @@ impl Host {
     }
 
     /// What each start of a device does once it's in (`settings::settle_own`), in the background, on a client of its
-    /// user's: their own scope's first epoch made as this node makes any it needs, one at a time.
+    /// user's: their own scope's first epoch made as this app runtime makes any it needs, one at a time.
     pub(super) fn settle_own(&self) {
         let Ok(me) = self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.filter(|c| c.user == i.user).map(|c| c.user))) else { return };
         let Some(me) = me else { return };

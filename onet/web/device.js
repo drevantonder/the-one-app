@@ -1,7 +1,7 @@
 // This browser as a device of its user (ARCHITECTURE.md): its own Ed25519 key, which signs, and X25519 key, which
 // what's sealed to it is sealed to, both made here, not extractable, kept in IndexedDB by user; and what it asks to be
 // let in with. Everything it does as that device is onet's keyring (onet/src/keyring.rs, settings.rs), in the
-// worker that reaches the nodes (net-worker.js), which signs with these keys without reading them. The epoch, app and
+// worker that reaches the app runtimes (net-worker.js), which signs with these keys without reading them. The epoch, app and
 // database keys it opens live in that worker's WebAssembly memory.
 
 import { hex, joinCode } from "../shared/crypto.js";

@@ -1,9 +1,9 @@
-//! What the device's own key opens and signs, which a node asks of its holder rather than taking for its own: the
+//! What the device's own key opens and signs, which an app runtime asks of its holder rather than taking for its own: the
 //! epochs of the scopes the device opens, the Vault keys and app schedules' keys and anything else sealed to it; its
 //! steps in `global`'s scope database, which only a user's own devices sign; and its requests to the relay and auth,
 //! which say what it lets in and who it is. A computer's app runtime is an endpoint of its own key, and asks its
 //! device's holder, the computer's onet, on this machine's loopback (`Holder`), with the token the device's own programs
-//! ask with; a node that is its own device (the tests', and the Cloudflare node's kind) holds the key itself, and
+//! ask with; an app runtime that is its own device (the tests', and oned on Cloudflare's kind) holds the key itself, and
 //! answers `/api/holds` for one asking it in turn.
 
 use axum::extract::State;

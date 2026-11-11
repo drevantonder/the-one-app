@@ -1,4 +1,4 @@
-// The Workers' formats, which nodes read too (oned/cloudflare/; tests/contracts.rs checks they agree).
+// The Workers' formats, which app runtimes read too (oned/cloudflare/; tests/contracts.rs checks they agree).
 //
 // Keys are a tree per scope. A scope's key is 32 random bytes, and so is each app's key in it, kept sealed under the
 // scope's key: 1 ‖ nonce ‖ AES-256-GCM(HKDF-SHA256(scope key, "one/app\0<app>"), nonce, app key), so erasing an app (deleting
@@ -239,7 +239,7 @@ async function checkSigned(domain, request) {
 }
 
 /// A device's word (`key`, its public half `by`) that `endpoint` (bytes) is its own until `until`: base64url JSON, as
-/// the relay and nodes take it (keys::certify).
+/// the relay and app runtimes take it (keys::certify).
 export async function certify(key, by, endpoint, until, at = Date.now()) {
   return b64u.encode(canonical(await signedRequest(key, by, ENDPOINT, { endpoint: hex.encode(endpoint), until }, at)));
 }

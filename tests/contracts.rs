@@ -46,7 +46,7 @@ fn b(v: &Value) -> Vec<u8> {
     B64U.decode(v.as_str().unwrap().as_bytes()).unwrap()
 }
 
-/// The Workers (JavaScript, `key/crypto.js`) and nodes each open what the other seals: to key pairs and
+/// The Workers (JavaScript, `key/crypto.js`) and app runtimes each open what the other seals: to key pairs and
 /// under secrets.
 #[test]
 fn the_workers_and_nodes_seal_keys_for_each_other() {
@@ -145,8 +145,8 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     assert!(out["checked"].as_array().unwrap().iter().skip(1).all(|c| c.get("error").is_some()), "only the first is good");
 }
 
-/// Who's who as steps (`scope/src/steps.rs`), as a browser reads it: the node's key sealed under an epoch, the
-/// freeze the recovery key signed and a step a browser signed, sealed as a node
+/// Who's who as steps (`scope/src/steps.rs`), as a browser reads it: the app runtime's key sealed under an epoch, the
+/// freeze the recovery key signed and a step a browser signed, sealed as an app runtime
 /// puts them in the bucket and read from it as the URL signer's `get` gives them (`onet/web/net-worker.js`),
 /// opened and applied by the client's keyring; and from a Welcome, sign-in's word passed on as JavaScript reads it.
 #[test]
@@ -194,7 +194,7 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     let mut elsewhere = Reader::new(Some(Hash::from_bytes(rand::random())));
     add(&mut elsewhere, &read).unwrap();
     assert!(!frozen(&elsewhere), "a freeze that isn't the network it joined");
-    // Welcomed: from the freeze and the steps up to the Welcome's, as a node passes them on with `?welcome=`.
+    // Welcomed: from the freeze and the steps up to the Welcome's, as an app runtime passes them on with `?welcome=`.
     let welcome = steps::Welcome { freeze: 1, at: 3, hash: database::stored::state_hash(who.conn()).unwrap() };
     let ::api::handed::Waited::Approved { welcome: Some(said), .. } = ::api::handed::waited(200, &json!({ "approved": true, "root": root.to_hex(), "welcome": welcome.to_string() })) else { panic!("an approval's welcome is taken") };
     let given = json!({ "welcome": said, "freeze": s1, "at": 3, "steps": [s2, s3] });
@@ -281,7 +281,7 @@ fn the_workers_name_the_buckets_objects_as_nodes_do() {
     assert_eq!(out["codes"], Value::Object(codes), "the codes answers carry");
 }
 
-/// The Settings screens say who agents are in an item's apps (`ui/settings/agents.js`) by the name the node
+/// The Settings screens say who agents are in an item's apps (`ui/settings/agents.js`) by the name the app runtime
 /// gives them.
 #[test]
 fn the_screens_name_agents_as_the_vault_does() {
@@ -289,9 +289,9 @@ fn the_screens_name_agents_as_the_vault_does() {
     assert_eq!(formats.js(json!({ "op": "agents" }))["name"], json!(::scope::scopes::AGENTS));
 }
 
-/// Notifications (notifications/): a device registers its address with the notifications Worker as Rust signs it, a node's
+/// Notifications (notifications/): a device registers its address with the notifications Worker as Rust signs it, an app runtime's
 /// send of a note sealed to that device goes out from the Worker as the browser's push service takes it (RFC 8291,
-/// VAPID with the key the Workers made, the note as base64url text), and what arrives opens, only with the device's key, as the note the node
+/// VAPID with the key the Workers made, the note as base64url text), and what arrives opens, only with the device's key, as the note the app runtime
 /// sealed. Only the network's devices register or send, each request once.
 #[test]
 fn a_note_reaches_only_the_device_it_was_sealed_to() {
@@ -316,7 +316,7 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let stranger = SigningKey::from_bytes(&rand::random());
     assert_eq!(post("/notifications/register", notifications::register_request(&stranger, &phone_seal, &address, None, now()).unwrap()).0, 403, "only the network's devices register");
 
-    // The node seals a note to the phone and sends it.
+    // The app runtime seals a note to the phone and sends it.
     let note = Note { id: "0123456789abcdef".into(), title: "Tally".into(), body: "Sam counted".into(), app: "tally".into(), screen: "main".into(), ..Default::default() };
     let sealed = notifications::seal_note(&node, &phone_seal, &note, now()).unwrap();
     let unregistered = HEXLOWER.encode(node.verifying_key().as_bytes());
@@ -428,7 +428,7 @@ fn insights_on_the_screen_and_for_agents_agree_on_a_p95() {
     assert_eq!(worker, json!(insights::BOUNDS), "and in the telemetry Worker");
 }
 
-/// A service answers its node in the words of `services/sdk/wire.json`, in whatever language it's written: started as its
+/// A service answers its app runtime in the words of `services/sdk/wire.json`, in whatever language it's written: started as its
 /// endpoint starts it, registering what's about its machine, taking calls and answering with `ok`, `error` or
 /// `elsewhere`, registering again when its endpoint forgets it, always with the token in its home. What it talks to is
 /// the endpoint's own registry and routes (`services::Registry`). Rust's Shell and Go's WhatsApp run as programs;
@@ -528,7 +528,7 @@ mod service_protocol {
     #[tokio::test(flavor = "multi_thread")]
     async fn services_in_rust_and_go_speak_the_protocol_their_node_reads() {
         let fixture = wire();
-        // The node sends a call as the file says, and replies as the file says reach it as what they are.
+        // The app runtime sends a call as the file says, and replies as the file says reach it as what they are.
         let sent = Call { id: 7, function: "events".into(), input: fixture["call"]["input"].clone(), caller: me(), from: Some("calendar".into()), traceparent: fixture["call"]["traceparent"].as_str().map(str::to_string) };
         assert_eq!(serde_json::to_value(&sent).unwrap(), fixture["call"], "wire.json's call is what the node sends");
         let allowed: Vec<&str> = fixture["registers"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
@@ -623,8 +623,8 @@ fn every_renderer_of_a_widgets_tree_draws_the_same_types_and_tones() {
     assert!(missing.is_empty(), "{}", missing.join("\n"));
 }
 
-/// A widget too slow to draw beside the rest of its page comes marked `late`, from either node, and is then asked for
-/// alone with `kind=<app>.<widget>`: a client that doesn't take it in shows "Still drawing." for good, and a node that
+/// A widget too slow to draw beside the rest of its page comes marked `late`, from either app runtime, and is then asked for
+/// alone with `kind=<app>.<widget>`: a client that doesn't take it in shows "Still drawing." for good, and an app runtime that
 /// doesn't send it holds back the whole page again.
 #[test]
 fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
@@ -645,7 +645,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
     assert!(missing.is_empty(), "{}", missing.join("\n"));
 }
 
-/// Every `state.<field>` the screens, the web client and the Workers read of `GET /api/state` is a field the node says
+/// Every `state.<field>` the screens, the web client and the Workers read of `GET /api/state` is a field the app runtime says
 /// (`::scope::state::State`): a field renamed or dropped there shows as a screen that reads nothing, which no one sees fail.
 /// The sample has a value in every field, so a field added to the Rust is added here (it won't compile otherwise).
 #[test]
@@ -776,10 +776,10 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
     assert!(unknown.is_empty(), "these read what the node's state doesn't say (scope/src/state.rs):\n{}", unknown.join("\n"));
 }
 
-/// Every path of the node's API that the Workers, the screens, the web client and the native apps ask is one of its routes
+/// Every path of the app runtime's API that the Workers, the screens, the web client and the native apps ask is one of its routes
 /// (`api::routes`), one a device answers itself (`::scope::settings::answered`) or one a computer's onet does (`onet::computer::OWN`): a path misspelled or dropped from one
 /// fails as a 404, which no one sees until it's used. Each is in the OpenAPI document too, but a client's keys and signed
-/// steps, which it asks as itself, and what the document lists is what the node serves.
+/// steps, which it asks as itself, and what the document lists is what the app runtime serves.
 #[test]
 fn every_path_asked_of_a_node_is_one_it_serves() {
     // Not an app's own requests (`/{app}/{*path}`), which take any path that isn't the API's.
@@ -836,7 +836,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
                 }
                 let end = line[at..].find(['"', '\'', '`', '?', ' ', '\\']).map_or(line.len(), |e| at + e);
                 let literal = &line[at..end];
-                // Auth's, at the gateway, not a node's.
+                // Auth's, at the gateway, not an app runtime's.
                 if literal.starts_with("/api/auth") {
                     continue;
                 }
@@ -869,9 +869,9 @@ fn the_apis_paths_are_never_taken_for_an_apps() {
     }
 }
 
-/// An app runs the same on a machine's node and on the Cloudflare node: the shim it runs in, asked as each node asks it
-/// (over HTTP with its asks going out through the node, and by RPC with the node answering them), gives the same answer,
-/// the same error and code, the same code on an error the node answers its ask with, and writes the node reads.
+/// An app runs the same on a computer's app runtime and on oned on Cloudflare: the shim it runs in, asked as each app runtime asks it
+/// (over HTTP with its asks going out through the app runtime, and by RPC with the app runtime answering them), gives the same answer,
+/// the same error and code, the same code on an error the app runtime answers its ask with, and writes the app runtime reads.
 #[test]
 fn an_app_answers_the_same_on_a_computer_and_in_oned_on_cloudflare() {
     const APP: &str = r#"
@@ -911,20 +911,20 @@ fn an_app_answers_the_same_on_a_computer_and_in_oned_on_cloudflare() {
         const SHIM = {shim};
         const APP = {app};
         const CODE = {code};
-        // The node, answering what the app asks the same however it asks.
+        // The app runtime, answering what the app asks the same however it asks.
         function answer(name, body) {{
           if (name === "query") return Response.json({{ ok: [{{ n: 1 }}] }});
           if (name === "vault.match") return Response.json({{ id: "v0" }});
           if (name === "call") return new Response("not yours to call", {{ status: 400, headers: {{ [CODE]: "refused" }} }});
           return new Response(`no ask ${{name}}`, {{ status: 400 }});
         }}
-        // A machine's node: the app's asks reach it as requests to one.internal.
+        // A computer's app runtime: the app's asks reach it as requests to one.internal.
         export class Node extends WorkerEntrypoint {{
           async fetch(req) {{
             return answer(new URL(req.url).pathname.slice(1), await req.text());
           }}
         }}
-        // The Cloudflare node: it hands the app this to ask.
+        // oned on Cloudflare: it hands the app this to ask.
         class Asks extends RpcTarget {{
           ask(name, body) {{
             return answer(name, body);
@@ -980,8 +980,8 @@ fn an_app_answers_the_same_on_a_computer_and_in_oned_on_cloudflare() {
     assert_eq!(appends.len(), 11, "every write the app made: {appends:?}");
 }
 
-/// What the shim asks the node is what `::api::call::Ask` names, and the Cloudflare node answers exactly those it says it
-/// does (a machine's node answers each, which the compiler holds it to).
+/// What the shim asks the app runtime is what `::api::call::Ask` names, and oned on Cloudflare answers exactly those it says it
+/// does (a computer's app runtime answers each, which the compiler holds it to).
 #[test]
 fn oned_on_cloudflare_answers_the_asks_it_says_it_does() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
@@ -1030,7 +1030,7 @@ fn the_iphone_build_scripts_name_the_app_as_the_build_does() {
 }
 
 /// What a screen's bridge reports of what threw is its type, where, and what it said: a frame stays only a location, however
-/// a message is dressed (lines like a stack's, a URL's query on a frame), and what the node keeps of the message is cleaned.
+/// a message is dressed (lines like a stack's, a URL's query on a frame), and what the app runtime keeps of the message is cleaned.
 #[test]
 fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
@@ -1108,7 +1108,7 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
 
 /// Cloudflare's export of the Workers' logs keeps only what broke, an error-level line or an exception, and of it only what
 /// an allow-list names: its ids, its severity and OTEL's `exception.*`, cleaned. Whatever else Cloudflare sends (a request's
-/// URL and headers, the caller's address, `cf`) is never kept, nor any of what node or telemetry logged.
+/// URL and headers, the caller's address, `cf`) is never kept, nor any of what app runtime or telemetry logged.
 #[test]
 fn a_workers_logs_keep_only_what_broke_cleaned() {
     let formats = Formats::start();
@@ -1144,8 +1144,8 @@ fn a_workers_logs_keep_only_what_broke_cleaned() {
     assert_eq!(rows[1]["severity_number"], 17);
 }
 
-/// The Workers' cleaner keeps a message's plain words alone, so it hides at least what the node's (insights/src/message.rs)
-/// does: no word the node's would hide survives it.
+/// The Workers' cleaner keeps a message's plain words alone, so it hides at least what the app runtime's (insights/src/message.rs)
+/// does: no word the app runtime's would hide survives it.
 #[test]
 fn a_workers_cleaner_hides_what_a_nodes_does() {
     let formats = Formats::start();
@@ -1297,8 +1297,8 @@ c3NoLWVkMjU1MTkAAABAUeB9U2B9jrEiyXjrLWnEvrqlbLS56VB86VjOfE1OkDAZmMhXQd
     assert!(latest.to_update_to("aarch64-unknown-linux-gnu").is_none(), "a platform with no line has nothing, as before");
 }
 
-/// `ctx.ai.run` crosses from the shim's JavaScript to the node's Rust: the shim asks `ai.run` with `{ input, retry_key }`,
-/// which both nodes read by those names, and every code AI Gateway throws is one the protocol carries to `err.code`
+/// `ctx.ai.run` crosses from the shim's JavaScript to the app runtime's Rust: the shim asks `ai.run` with `{ input, retry_key }`,
+/// which both app runtimes read by those names, and every code AI Gateway throws is one the protocol carries to `err.code`
 /// (`custom-build/src/protocol.rs`) and the shim says apps catch.
 #[test]
 fn ai_run_ask() {

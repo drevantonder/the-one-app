@@ -208,7 +208,7 @@ pub struct State {
 pub struct Page {
     pub target: String,
     pub session: String,
-    /// Backend DOM node ids by ref, since its last navigation.
+    /// Backend DOM app runtime ids by ref, since its last navigation.
     pub refs: HashMap<String, i64>,
     /// Its last snapshot's lines, for a continuation.
     pub outline: Vec<String>,
@@ -788,7 +788,7 @@ fn may_choose(caller: &str, owner: &str, machine: &str) -> Result<()> {
     Ok(())
 }
 
-/// One of the network's devices, as its node's /api/state says.
+/// One of the network's devices, as its app runtime's /api/state says.
 #[derive(Clone, Default)]
 struct Machine {
     name: String,

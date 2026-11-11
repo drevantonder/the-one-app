@@ -1,5 +1,5 @@
 //! How backups went, as devices say it: each run to each place, when admins were told of a place's trouble, and each
-//! restore check. Rows of `global`'s node database `backups`, changed in place, not steps of their own: written often,
+//! restore check. Rows of `global`'s app runtime database `backups`, changed in place, not steps of their own: written often,
 //! and needed only as they are now. Each device reads them back into its `State`.
 
 use std::collections::BTreeMap;
@@ -154,7 +154,7 @@ pub(crate) async fn read(rt: &Rt) -> Result<()> {
     Ok(())
 }
 
-/// Builds before these rows had a database of their own kept them in the node's `main`: the first device on this build
+/// Builds before these rows had a database of their own kept them in the app runtime's `main`: the first device on this build
 /// copies them here, once, keeping any already here.
 async fn copy_once(rt: &Rt, me: &Caller) {
     if rt.state::<State>().copied.swap(true, std::sync::atomic::Ordering::Relaxed) {

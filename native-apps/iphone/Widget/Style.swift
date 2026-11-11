@@ -60,7 +60,7 @@ struct Glyph: View {
     }
 }
 
-/// The app's name before the node tells us its config.
+/// The app's name before the app runtime tells us its config.
 var appName: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? ""
 }

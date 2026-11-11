@@ -557,7 +557,7 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
 fn who(place: &Place, network: &str, root: Option<::key::Hash>, keys: &[[u8; 32]]) -> Result<ScopeDb> {
     use ::scope::steps;
     let bucket = |name: &str| place.get(&format!("{network}/bucket/{name}"));
-    // The steps' key in each epoch the place holds: the node's app key there, opened with whichever of the epochs' keys does.
+    // The steps' key in each epoch the place holds: the app runtime's app key there, opened with whichever of the epochs' keys does.
     let mut step_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
     for name in place.list(&format!("{network}/bucket/{}", database::keys::app_keys_folder("global", ::key::APP)))? {
         let Ok(n) = name.parse::<u32>() else { continue };
@@ -617,7 +617,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
     for (database, (at, copied)) in &snapshot.databases {
         let Some((app, db)) = database.split_once('/') else { continue };
         let prefix = ::bucket::names::database_prefix(scope, app, db);
-        // What a user calls it: the app, or of the node's own, its Vault, its history (entries) or its status rows.
+        // What a user calls it: the app, or of the app runtime's own, its Vault, its history (entries) or its status rows.
         let said = match (::key::CoreDb::of(app, db), app, db) {
             (Some(core), ..) => core.said().to_string(),
             (None, ::key::APP, db) => db.to_string(),
@@ -658,7 +658,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
             out.push(wrong);
             continue;
         }
-        // The node's log of a scope is entries, which `check` restored, and its scope database's steps who's who, which
+        // The app runtime's log of a scope is entries, which `check` restored, and its scope database's steps who's who, which
         // it checked too (`steps_of`); the rest are SQLite.
         if matches!(::key::CoreDb::of(app, db), Some(::key::CoreDb::Log | ::key::CoreDb::Scope)) || keys.is_empty() {
             continue;

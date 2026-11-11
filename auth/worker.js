@@ -2,7 +2,7 @@
 // the network has registered with (`PROVIDERS`, its settings: Google is one like any other), at the network's domain if it
 // has one (`JOIN_DOMAIN`, read from the provider's signed token); and an OAuth server (per
 // MCP's authorization spec) that every client signs in through: the iPhone and Mac apps, and MCP clients like Claude
-// Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at /api/auth/jwks, so nodes check them
+// Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at /api/auth/jwks, so app runtimes check them
 // offline. It opens nothing: keys are only on users' devices, so faking a sign-in opens nothing either.
 //
 // Signing in only lets you ask: someone already in the network says yes. Nobody signs up uninvited, the network's first
@@ -14,9 +14,9 @@
 //
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
 // its user (or, for a newcomer's first, an admin's, or any by their invite) finds by its join code and approves, then clears with
-// `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
+// `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no device until it's in), with
 // `&root=`, the network's root as the approving device holds it: the only network the new device then takes, so no
-// node it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
+// app runtime it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
 // where the approving device read them to, which the new device starts from (scope/src/steps.rs `Welcome`). Set
 // once, with the approval. A service asks nothing here:
 // its device's oned lists it.
@@ -888,7 +888,7 @@ export class Auth extends DurableObject {
 
   /// What a client's tokens are for, whatever it asks: the network's address (asking auth to be let in) only for its own apps, each a client whose every redirect comes back to one of them (`firstParty`);
   /// any other, a remote MCP client, gets `<address>/mcp`, the remote MCP server's, where it's a device of its user's,
-  /// which nodes refuse.
+  /// which app runtimes refuse.
   async audience(clientId) {
     const address = JSON.parse(this.env.RESOURCES || "[]")[0] || this.env.ADDRESS;
     const client = clientId && (await this.client(String(clientId)).catch(() => null));

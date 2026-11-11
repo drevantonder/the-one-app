@@ -1,6 +1,6 @@
 //! Who asked, decided for every route: the layers `guarded` puts on the routes, and the client devices and this
 //! machine's own programs they tell apart. A sign-in is never one of them: it only lets its device ask to be let in, at
-//! auth, and a device that isn't let in reaches no node.
+//! auth, and a device that isn't let in reaches no device.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -18,7 +18,7 @@ use super::Routes;
 
 /// A request a client device sent over iroh (app-runtime/src/net.rs), with the key its connection proved it holds (or the
 /// device that vouched for a session's endpoint), and until when what it hands counts (that session's certificate's
-/// `until`): only the node puts this on a request, as an extension, which nothing a client sends can set.
+/// `until`): only the app runtime puts this on a request, as an extension, which nothing a client sends can set.
 #[derive(Clone, Copy)]
 pub struct FromClient(pub key::Key, pub u64);
 
@@ -59,7 +59,7 @@ async fn traced(State(host): State<Host>, req: axum::extract::Request, next: axu
     resp
 }
 
-/// Only this machine's own programs (`from_this_machine`) drive its node: no web page, an app's screen this node served
+/// Only this machine's own programs (`from_this_machine`) drive its app runtime: no web page, an app's screen this app runtime served
 /// included, and no program in a VM or emulator here. A client device's request is someone's instead, for what its
 /// route's `Who` lets them ask.
 async fn only_this_machine(State((host, routes)): State<(Host, std::sync::Arc<std::collections::HashMap<String, Who>>)>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
@@ -119,7 +119,7 @@ async fn refuse(req: axum::extract::Request, mut refusal: Response) -> Response 
     refusal
 }
 
-/// Nothing this node answers runs as script at its address, where a page would ask as this machine's own programs: a
+/// Nothing this app runtime answers runs as script at its address, where a page would ask as this machine's own programs: a
 /// browser shows it sandboxed with no script, and never sniffs it into another type.
 async fn sandboxed(mut resp: Response) -> Response {
     let headers = resp.headers_mut();

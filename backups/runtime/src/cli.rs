@@ -1,5 +1,5 @@
 //! Opening a backup on a disk with the recovery key alone. This is recovery from nothing, so it's a command on the
-//! machine the disk is in, and asks no node: there may be none, and no network. The key stays in this process.
+//! machine the disk is in, and asks no device: there may be none, and no network. The key stays in this process.
 
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};

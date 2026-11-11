@@ -3,10 +3,10 @@
 // app (onet, in oned/cloudflare/worker/src/clients.rs), which the user approves like any device, removes like any device, and
 // which acts as them with nothing barred. It serves them the API at `<address>/api/*` (`/api/auth/` stays auth's, in
 // the gateway) and MCP at `<address>/mcp`: both are requests of that device, over iroh (`<cli>/http/1`), which hands
-// a node the keys each needs, sealed to that node and bound to the device's key; it sends nodes no token. MCP is
-// translated where a node answers `/mcp`, with what that request is handed; this Worker's own side holds no keys
+// an app runtime the keys each needs, sealed to that app runtime and bound to the device's key; it sends app runtimes no token. MCP is
+// translated where an app runtime answers `/mcp`, with what that request is handed; this Worker's own side holds no keys
 // outside the device. A tool that changes who can do what it answers itself, signing as that device
-// (`one::settings_tools`), since a node signs that only for its own machine's programs.
+// (`one::settings_tools`), since an app runtime signs that only for its own machine's programs.
 //
 // A device's secret is kept only sealed under its client's own tokens (copies.js), so nothing here opens it alone: the
 // Worker is on its clients' token path (its own token endpoint, in the authorization server's metadata it serves for
@@ -19,10 +19,10 @@
 //
 // Each device is a Durable Object (`Client`), one per client and user, so no two users' state meet: its iroh
 // endpoint, with no socket, which the relay hands the datagrams sent to its key by RPC (`deliver`), its connections to
-// nodes kept warm between calls, and the keys it opened, all while it's asked; once nobody has asked for `IDLE`, it
+// app runtimes kept warm between calls, and the keys it opened, all while it's asked; once nobody has asked for `IDLE`, it
 // closes its endpoint, forgets its keys and ends itself.
 //
-// It trusts no node for who's who or for keys, as every client device: what it knows, the keys it opens and the 428s it
+// It trusts no device for who's who or for keys, as every client device: what it knows, the keys it opens and the 428s it
 // takes are onet's keyring (onet/src/keyring.rs, through oned/cloudflare/worker/src/clients.rs), which keeps what each
 // tool needed in this object's storage, so a call hands only its own.
 //
@@ -65,7 +65,7 @@ const issuerOf = (env) => (issuer ||= new Issuer(`${origin(env)}/api/auth`, () =
 
 /// A token's claims, unchecked: only for one auth just gave us by its binding.
 const claimsOf = (token) => JSON.parse(new TextDecoder().decode(b64u.decode(token.split(".")[1])));
-/// The `code` a node's refusal carries, if the body is one: a node's own body is JSON, but a proxy's isn't.
+/// The `code` an app runtime's refusal carries, if the body is one: an app runtime's own body is JSON, but a proxy's isn't.
 const codeOf = (body) => {
   try {
     return JSON.parse(new TextDecoder().decode(body))?.code;
@@ -196,7 +196,7 @@ export default {
   },
 };
 
-/// The JSON-RPC answer to each message of an MCP request with no node behind it: `text` as each request's error, a
+/// The JSON-RPC answer to each message of an MCP request with no device behind it: `text` as each request's error, a
 /// tool call's as its failed result; nothing for notifications. → a response.
 function answerAll(body, text) {
   let msg;
@@ -412,7 +412,7 @@ export class Client extends DurableObject {
     await this.ctx.storage.put("bound", { key: run.key, ticket: bound.ticket });
   }
 
-  /// Reads who's who from the bucket (what's new, after the first time), one reading at a time, and the nodes it asks
+  /// Reads who's who from the bucket (what's new, after the first time), one reading at a time, and the app runtimes it asks
   /// with it: those who's who lists as running its user's calls, that are on the relay now, in run priority's
   /// order as it last read it.
   see(me, writes = null) {
@@ -431,8 +431,8 @@ export class Client extends DurableObject {
     return (await answer(this.relay().writes()).catch(() => null))?.global ?? null;
   }
 
-  /// Reads who's who again only if the relay counted a write to it since it last did (`writes`, as nodes go by), and
-  /// the nodes' order again either way.
+  /// Reads who's who again only if the relay counted a write to it since it last did (`writes`, as app runtimes go by), and
+  /// the app runtimes' order again either way.
   async seeIfMoved(me) {
     const writes = await this.writes();
     if (writes === null || writes !== this.view?.writes) return this.see(me, writes);
@@ -440,7 +440,7 @@ export class Client extends DurableObject {
     await this.reorder(me);
   }
 
-  /// The nodes in the order they're tried: those online (in run priority's order), then the rest, the most recently
+  /// The app runtimes in the order they're tried: those online (in run priority's order), then the rest, the most recently
   /// seen first. → how many are online.
   async reorder(me) {
     const nodes = this.view?.nodes || new Map();
@@ -454,7 +454,7 @@ export class Client extends DurableObject {
     return online.size;
   }
 
-  /// Reads run priority's order from the network's state, for the nodes it asks: only nodes the network lists are
+  /// Reads run priority's order from the network's state, for the app runtimes it asks: only app runtimes the network lists are
   /// ever in it, whatever the state says.
   async learnOrder(me) {
     if (!this.run || this.run.learned) return;
@@ -497,8 +497,8 @@ export class Client extends DurableObject {
     };
   }
 
-  /// Asks a node as this device, with the keys its request needs (the keyring's 428s); once more, if no node answered,
-  /// with the nodes on the relay now.
+  /// Asks an app runtime as this device, with the keys its request needs (the keyring's 428s); once more, if no device answered,
+  /// with the app runtimes on the relay now.
   async forward(me, { method, path, headers, body }, say) {
     for (let tries = 0; ; tries++) {
       let r;

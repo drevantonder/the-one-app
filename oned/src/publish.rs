@@ -65,7 +65,7 @@ pub fn commands() -> ::api::cli::Command {
             let ["publish-mac", folder] = words.as_slice() else { return Ok(false) };
             let folder = Path::new(folder);
             let version = Version::of(&folder.join(CLI)).with_context(|| format!("{} has no program of this Mac's that says what it is", folder.display()))?;
-            publish_latest(g.node, &release_key()?, &mac_things(folder, &version, g.flag("config").unwrap_or("-"))?)?;
+            publish_latest(g.api, &release_key()?, &mac_things(folder, &version, g.flag("config").unwrap_or("-"))?)?;
             println!("Published {} for {}: every Mac takes it with {CLI} update.", version.commit, version.target);
             Ok(true)
         },

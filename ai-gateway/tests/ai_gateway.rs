@@ -1,5 +1,5 @@
 //! AI Gateway's secrets, who pays and what's kept: what using it wouldn't show. Each runs the gateway's own code
-//! (`ai_gateway::run`) against a stand-in for the node it runs on (`Stand`), whose `send` is where the outside
+//! (`ai_gateway::run`) against a stand-in for the app runtime it runs on (`Stand`), whose `send` is where the outside
 //! world begins: no request leaves it. It runs with the rest of `cargo test` (tests/main.rs).
 
 use std::sync::Mutex;
@@ -25,7 +25,7 @@ fn items(list: &[(&str, Item)]) -> Items {
     list.iter().map(|(id, it)| (id.to_string(), it.clone())).collect()
 }
 
-/// A node as AI Gateway sees it: the caller's own and Everyone's `node/ai-gateway` in memory, the key `pays` picks from
+/// An app runtime as AI Gateway sees it: the caller's own and Everyone's `node/ai-gateway` in memory, the key `pays` picks from
 /// `vault`, and a company that answers with `answer`, counting what's sent.
 struct Stand {
     own: Mutex<Connection>,

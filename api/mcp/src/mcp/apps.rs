@@ -120,7 +120,7 @@ pub fn call(node: &Client, name: &str, input: &Value) -> Option<Value> {
     Some(result.unwrap_or_else(|e| json!({ "isError": true, "content": [{ "type": "text", "text": format!("{e:#}") }] })))
 }
 
-/// What threw in a screen on a chat's page, to its node.
+/// What threw in a screen on a chat's page, to its app runtime.
 fn thrown(node: &Client, input: &Value) -> anyhow::Result<Value> {
     node.post("/api/insights/report", json!({ "platform": "mcp", "events": [{ "name": "screen.exception", "app": input["app"], "screen": input["screen"], "exception": input["exception"] }] }))?;
     Ok(json!({ "content": [] }))
@@ -135,7 +135,7 @@ fn shown(node: &Client, input: &Value) -> anyhow::Result<Value> {
 fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     let app = input["app"].as_str().unwrap_or_default();
     let screen = input["screen"].as_str().unwrap_or("main");
-    // A node shows a page for what isn't there, with the way home: from a chat, the agent should hear it.
+    // An app runtime shows a page for what isn't there, with the way home: from a chat, the agent should hear it.
     let apps = node.apps().unwrap_or_default();
     let found = apps.iter().find(|a| a["name"] == app);
     let screens = found.map(|a| a["screens"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
@@ -182,7 +182,7 @@ fn for_screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     Ok(json!({ "content": [{ "type": "text", "text": "Done." }], "structuredContent": { "ok": ok } }))
 }
 
-/// The node's next event that changes what the view shows of `apps` (their data, or which apps there are), within 25
+/// The app runtime's next event that changes what the view shows of `apps` (their data, or which apps there are), within 25
 /// seconds; none if nothing does by then.
 fn changes(node: &Client, input: &Value) -> anyhow::Result<Value> {
     use std::io::BufRead;
@@ -191,7 +191,7 @@ fn changes(node: &Client, input: &Value) -> anyhow::Result<Value> {
     let mut events = vec![];
     let resp = node.open("/api/events", Some(WAIT))?;
     if resp.status == 204 {
-        // A node with none to say (the Cloudflare node, while no machine is on): the view asks again after the wait.
+        // An app runtime with none to say (oned on Cloudflare, while no machine is on): the view asks again after the wait.
         std::thread::sleep(WAIT);
     } else {
         anyhow::ensure!(resp.status == 200, "the network's events didn't open ({})", resp.status);

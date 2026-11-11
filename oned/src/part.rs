@@ -303,7 +303,7 @@ impl Service {
         let answered = async {
             let sealed = carried::unb64(&ask.ask)?;
             let (signer, body, at) = carried::open_ask(&self.0.key, &sealed, &self.0.once)?;
-            // A node this service hasn't read of yet: who's who is read again first.
+            // An app runtime this service hasn't read of yet: who's who is read again first.
             if !self.is_node(&signer) {
                 self.read_whos_who().await?;
             }
@@ -352,16 +352,16 @@ impl Service {
         }
     }
 
-    /// Whether `key` is a node of the network, as this service knows it.
+    /// Whether `key` is an app runtime of the network, as this service knows it.
     fn is_node(&self, key: &Key) -> bool {
         // Who's who that can't answer lists no one, so no one is let in.
         self.0.known.lock().unwrap().compute(key).map(|d| d.is_some()).unwrap_or_else(|err| {
-            tracing::warn!("reading whether {} is a node: {err:#}", short(key));
+            tracing::warn!("reading whether {} is an app runtime: {err:#}", short(key));
             false
         })
     }
 
-    /// Runs a call a node asked for, if it may: → `{ ok }`, `{ error }`, or `{ elsewhere }` for a call this service
+    /// Runs a call an app runtime asked for, if it may: → `{ ok }`, `{ error }`, or `{ elsewhere }` for a call this service
     /// can't run here.
     async fn run(&self, remote: Key, call: &Value, traceparent: Option<&str>) -> Result<Value> {
         let me = &call["me"];
@@ -445,12 +445,12 @@ impl Service {
     }
 
     /// The loopback the program offering it registers at, with the local token in its folder: the services' API, its
-    /// machine as `/api/state` says, and `/api/call`, which a node of its user's runs.
+    /// machine as `/api/state` says, and `/api/call`, which an app runtime of its user's runs.
     fn loopback(&self) -> Router {
         Router::new()
             .route("/api/state", get(state))
             .route("/api/call", post(call))
-            // A file is as big as it is (a browser profile is hundreds of MB): the node gives each user their room.
+            // A file is as big as it is (a browser profile is hundreds of MB): the app runtime gives each user their room.
             .route("/api/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::disable()))
             .route("/api/blobs/{hash}", get(get_blob))
             // Standard OTLP/JSON from its program, as `OTEL_EXPORTER_OTLP_ENDPOINT` says (`program_env`).
@@ -471,7 +471,7 @@ impl Service {
         // read from the switches, not the listing; whether one that's on is online, it can't know: asked, one that isn't says so.
         let listed = m.service(&self.key())?;
         let device = listed.as_ref().and_then(|s| s.device);
-        // As a node reads its own parts: a process of oned's is on by its entry.
+        // As an app runtime reads its own parts: a process of oned's is on by its entry.
         let switched_on = |d: &Key| match m.switch(d, &self.0.name) {
             Ok(Some(s)) => s.on,
             Ok(None) => false,
@@ -499,9 +499,9 @@ impl Service {
     }
 }
 
-/// Whether a node, `remote`, may ask this service (`me`) for a call by `user` from their device `key`: this service
-/// serves them (its own user, or everyone, as its listing says), and the node is one of their own, calling for its
-/// own user. A node of someone else's, an admin's too, never calls as them.
+/// Whether an app runtime, `remote`, may ask this service (`me`) for a call by `user` from their device `key`: this service
+/// serves them (its own user, or everyone, as its listing says), and the app runtime is one of their own, calling for its
+/// own user. An app runtime of someone else's, an admin's too, never calls as them.
 pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str) -> Result<()> {
     let service = m.service(me)?.with_context(|| format!("this service isn't one of {YOURS}'s yet"))?;
     let node = m.compute(remote)?.with_context(|| format!("only {YOURS}'s devices are answered"))?;
@@ -512,7 +512,7 @@ pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str) -> R
 }
 
 /// A reader of who's who in the network `root`, from what it kept at `path`, and who's who as it read. One it can't read
-/// starts over, and nodes bring the steps again.
+/// starts over, and app runtimes bring the steps again.
 fn reader_kept(root: Hash, path: &Path) -> (Reader, ScopeDb) {
     let kept: Value = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let mut reader = Reader::new(Some(root));
@@ -552,9 +552,9 @@ async fn state(State(s): State<Service>, headers: HeaderMap) -> Response {
     }
 }
 
-/// OTLP from the program, JSON or protobuf: passed to its node, which keeps what closed sets allow
+/// OTLP from the program, JSON or protobuf: passed to its app runtime, which keeps what closed sets allow
 /// (`::insights::otlp`), said back as taken whatever happens to it, as an exporter would only retry. A program's
-/// metrics aren't kept: what's a metric is the node's own to say.
+/// metrics aren't kept: what's a metric is the app runtime's own to say.
 async fn otlp(State(s): State<Service>, uri: axum::http::Uri, headers: HeaderMap, body: axum::body::Bytes) -> Response {
     if let Err(r) = s.0.registry.ours(&headers) {
         return r;
@@ -583,7 +583,7 @@ async fn call(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Val
 }
 
 /// A blob its program keeps (`POST /api/blobs`) or reads (`GET /api/blobs/<hash>`), through its own device's oned, as
-/// a service in oned's own process does: one it keeps is named in its call's answer, which the call's node keeps.
+/// a service in oned's own process does: one it keeps is named in its call's answer, which the call's app runtime keeps.
 async fn put_blob(State(s): State<Service>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
     blobs(&s, &headers, "POST", "/api/blobs", Some(body.to_vec())).await
 }

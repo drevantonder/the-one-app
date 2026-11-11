@@ -1,11 +1,11 @@
 //! What a device changes of who can do what, signed by itself as its user's device: Settings' changes (roles, groups,
 //! handles, names, settings, removing a device or a user, the new epochs that go with it), letting devices in or
 //! turning them down, inviting someone new, and app schedules. Every device runs this one copy (`Me`): each client
-//! through its keyring (onet/src/settings.rs), and a machine with a node as its own device, which its CLI and MCP
-//! use (app-runtime/src/settings.rs). Each is asked as a node's route of the same path (`ROUTES`).
+//! through its keyring (onet/src/settings.rs), and a machine with an app runtime as its own device, which its CLI and MCP
+//! use (app-runtime/src/settings.rs). Each is asked as an app runtime's route of the same path (`ROUTES`).
 //!
 //! What it signs, it signs with what each device has (`keys::Signs`): a native app's key, a browser's WebCrypto key,
-//! which can't be read, or a node's own. Who may do what is judged by the steps' own rules wherever they're read
+//! which can't be read, or an app runtime's own. Who may do what is judged by the steps' own rules wherever they're read
 //! (scope/src/rules.rs): what's checked here only says why sooner.
 
 use ::custom_build::config::CLI;
@@ -83,7 +83,7 @@ pub trait Me: Signs {
     fn open(&self, sealed: &[u8]) -> impl Future<Output = Result<Vec<u8>>>;
 }
 
-/// What a device answers itself of a node's routes, signing what they change.
+/// What a device answers itself of an app runtime's routes, signing what they change.
 #[derive(Clone, Copy)]
 enum Route {
     LinkSignIn,
@@ -116,8 +116,8 @@ enum Route {
 }
 
 /// The only list of them: a route of a path and method, which `answer` runs (its `match` fails to compile for one
-/// missing here or there), and `answered` tells a request that comes by of; and whether a machine with a node answers
-/// it with this alone (`on_a_node`), false where the node serves that path itself: its own name, and services, which it serves for
+/// missing here or there), and `answered` tells a request that comes by of; and whether a machine with an app runtime answers
+/// it with this alone (`on_a_node`), false where the app runtime serves that path itself: its own name, and services, which it serves for
 /// more than its own programs, and a tool that is a route (`api::Runs`), which asks `answer_as_mine` itself.
 const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/api/role", Route::Role, true),
@@ -143,7 +143,7 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/api/devices/refuse", Route::Refuse, true),
     ("GET", "/api/devices/seen", Route::Seen, true),
     ("POST", "/api/devices/update", Route::Update, false),
-    // A machine with a node that opens the Vault seals what's in it to the new key at once.
+    // A machine with an app runtime that opens the Vault seals what's in it to the new key at once.
     ("POST", "/api/vault/grant", Route::VaultGrant, false),
     ("POST", "/api/devices/recovery-holder", Route::RecoveryHolder, true),
     ("GET", "/api/devices/code", Route::Code, true),
@@ -193,12 +193,12 @@ pub fn answered_routes() -> impl Iterator<Item = (&'static str, &'static str, &'
     })
 }
 
-/// Whether a device answers the node's route of this path itself, whatever the method.
+/// Whether a device answers the app runtime's route of this path itself, whatever the method.
 pub fn answered(path: &str) -> bool {
     ROUTES.iter().any(|(_, p, _, _)| *p == path)
 }
 
-/// The routes a machine with a node answers as its own device, by method and path.
+/// The routes a machine with an app runtime answers as its own device, by method and path.
 pub fn on_a_node() -> impl Iterator<Item = (&'static str, &'static str)> {
     ROUTES.iter().filter(|r| r.3).map(|(m, p, _, _)| (*m, *p))
 }
@@ -254,8 +254,8 @@ pub struct Invited {
     until: u64,
 }
 
-/// The answer to a request a device answers itself, as a node's route of the same path would (`/api/role`, `/api/remove`,
-/// `/api/devices/approve`, …): none for any other, which goes to a node. Its body is the route's own (`body`), every
+/// The answer to a request a device answers itself, as an app runtime's route of the same path would (`/api/role`, `/api/remove`,
+/// `/api/devices/approve`, …): none for any other, which goes to an app runtime. Its body is the route's own (`body`), every
 /// field known and of its kind, or it's refused.
 pub async fn answer(m: &impl Me, method: &str, path: &str, body: &[u8]) -> Option<Result<Value>> {
     let path = path.split('?').next().unwrap_or(path);
@@ -649,7 +649,7 @@ pub async fn new_vault_key(m: &impl Me, scope: &Scope, n: u32, to: &[[u8; 32]]) 
 /// The step that deletes `app` (`deleted`), restores it (`restored`) or erases it for good (`erased`), as `user`, who
 /// acts for its owner, says it: whoever writes it, from any device or an app's call. `title` is what users call it.
 /// A deleted app stops running and leaves every page, but keeps its data until it's erased, which deletes its keys in
-/// the bucket as each node reads the step (`Host::follow_erased`).
+/// the bucket as each app runtime reads the step (`Host::follow_erased`).
 pub fn retire(who: &ScopeDb, user: &str, app: &str, how: &str, title: &str) -> Result<Content> {
     let a = who.app(app)?.ok_or_else(|| anyhow!("no app named {app}"))?;
     allowed!(who.may(user, "delete", &scopes::app(app)), "Only {title}'s owners can delete, restore or erase it.");
@@ -666,21 +666,21 @@ pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, sco
         allowed!(db.may(user, "add-apps", &scopes::object(s)), "only who may add apps there runs a service for them");
     }
     let managed = |k: &Key| -> Result<bool> { Ok(!on && db.switch(k, name)?.and_then(|s| s.scope).and_then(|s| Scope::parse(&s).ok()).is_some_and(|s| db.may(user, "add-apps", &scopes::object(&s)))) };
-    // The Cloudflare node, by its name in run priority or its key: it runs apps and no service, which its admins switch.
+    // oned on Cloudflare, by its name in run priority or its key: it runs apps and no service, which its admins switch.
     if let Some(k) = db.cloudflare_node()?.filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
         ensure!(name == scopes::APPS_PART, "Cloudflare can't run {name}: it runs apps, and services run on computers");
         allowed!(db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what Cloudflare runs");
         return Ok(content::service(&k, name, on, scope));
     }
     let mut found: Vec<scopes::Machine> = db.machines()?.into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
-    // A machine's services are named for it: by its name, it's its node.
+    // A machine's services are named for it: by its name, it's its app runtime.
     if found.len() > 1 {
         found.retain(|s| s.is(scopes::Kind::Compute));
     }
     let key = match found.as_slice() {
         // What a device's app runtime runs is switched for the device, whose switches it reads (`ScopeDb::device_of`).
         [s] => s.runtime_of().unwrap_or(s.key),
-        // A node that was removed still has its records, which who added the app may switch off.
+        // An app runtime that was removed still has its records, which who added the app may switch off.
         _ => match unhex(device).ok() {
             Some(k) if managed(&k)? => k,
             _ => bail!("no device is called {device}, or more than one is"),
@@ -841,7 +841,7 @@ pub async fn tell(m: &impl Me, by: &impl Signs, fields: Value) -> Result<()> {
 pub async fn take_out(m: &impl Me, key: &[u8; 32]) -> Result<()> {
     if m.address().is_some() {
         let (status, out) = asked_auth(m, "POST", "/api/auth/devices/removed", json!({ "key": hex(key) })).await?;
-        // A network's auth from before this route has no sign-in to end: a node is sent out before the Workers.
+        // A network's auth from before this route has no sign-in to end: an app runtime is sent out before the Workers.
         ensure!((200..300).contains(&status) || status == 404, "{}", error(&out).unwrap_or_else(|| format!("{YOURS}'s auth answered {status}.")));
     }
     match tell(m, m, json!({ "remove": hex(key) })).await {
@@ -1349,7 +1349,7 @@ pub async fn approve(m: &impl Me, r: &Asked, joining: &Joining) -> Result<Value>
         let listed = who.client(&e.key)?.is_some_and(|c| c.user == r.user && c.seal == e.seal);
         Ok((removed, listed, who.may(&user, "invite", scopes::NETWORK)))
     })?;
-    // Taken out, or turned down: never sealed anything again, whatever a node says.
+    // Taken out, or turned down: never sealed anything again, whatever an app runtime says.
     ensure!(!removed, "{} was turned down or taken out, so it isn’t let in again. Start again on it, for a new code.", r.name);
     let new_user = match joining {
         Joining::Own { .. } => {
@@ -1563,7 +1563,7 @@ async fn set_app_schedules(m: &impl Me, endpoint: &[u8; 32], app: &str, scope: &
 
 /// Renews this user's app schedules of `app` as they use it: once a day at most, and at once when the scope has
 /// an epoch their keys don't reach; one of theirs that ran out is stopped, as Stop does. Only those the network's
-/// steps hold, never those a node lists: a hacked one could list itself.
+/// steps hold, never those an app runtime lists: a hacked one could list itself.
 pub async fn renew_app_schedules(m: &impl Me, app: &str) {
     let Ok(user) = m.user() else { return };
     let now = m.now();

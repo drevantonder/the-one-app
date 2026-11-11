@@ -103,7 +103,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
 
   const w = where.data
   const nodeName = (n) => (n === "cloudflare" ? "Cloudflare" : n)
-  // A node to run its service on, from `at` (the button pressed).
+  // An app runtime to run its service on, from `at` (the button pressed).
   const move = async (at) => {
     const running = w.runs_on.find((r) => r.name)?.name
     const i = await one.menu(w.nodes.map((n) => ({ title: nodeName(n), checked: n === running })), at)

@@ -1,4 +1,4 @@
-//! A service reached through its device's app runtime, which carries what it's asked unread. A node asking it signs
+//! A service reached through its device's app runtime, which carries what it's asked unread. An app runtime asking it signs
 //! the ask with its own key and seals it to the service's seal key; the runtime hands those bytes to the service's part
 //! over the loopback it long-polls (`Parts`), and the part checks the signature, that it's fresh and taken once, and
 //! that the signer may call it, exactly as it checked the QUIC peer when it was an endpoint of its own; its answer is

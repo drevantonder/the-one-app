@@ -36,7 +36,7 @@ struct Net {
 }
 
 impl Net {
-    /// A network whose first device is `mac`, Andre's client and node.
+    /// A network whose first device is `mac`, Andre's client and app runtime.
     fn new(mac: &Dev) -> Net {
         let start = first("Home", ANDRE, "Andre", &mac.endpoint(), "mac", BOTH, &[7; 32], &"e".repeat(64));
         Net { db: steps::first(Hash::from_bytes([5; 32]), &start, 0).unwrap(), at: 1 }
@@ -56,8 +56,8 @@ impl Net {
     }
 }
 
-/// A service carried by its device's runtime takes only asks sealed to it and signed by a node of the network, each
-/// once, and a node calls it only as its own user: a hacked runtime carrying it can't forge, replay or read an ask,
+/// A service carried by its device's runtime takes only asks sealed to it and signed by an app runtime of the network, each
+/// once, and an app runtime calls it only as its own user: a hacked runtime carrying it can't forge, replay or read an ask,
 /// nor call as anyone else.
 #[test]
 fn a_carried_ask_is_taken_once_from_whoever_signed_it_and_only_as_their_own_user() -> anyhow::Result<()> {
@@ -84,7 +84,7 @@ fn a_carried_ask_is_taken_once_from_whoever_signed_it_and_only_as_their_own_user
     let (elsewhere, _) = carried::ask(&mac.0, &bobs.endpoint(), json!({ "call": call }))?;
     assert!(carried::open_ask(&part.0, &elsewhere, &once).is_err(), "an ask sealed to another was opened");
 
-    // Andre's node calls as Andre; Bob's node, carrying it or not, never as Andre, and Andre's shell serves only him.
+    // Andre's app runtime calls as Andre; Bob's app runtime, carrying it or not, never as Andre, and Andre's shell serves only him.
     may_call(&net.db, &part.id(), &mac.id(), &mac.id(), ANDRE)?;
     assert!(may_call(&net.db, &part.id(), &bobs_linux.id(), &mac.id(), ANDRE).is_err(), "Bob's node called as Andre");
     assert!(may_call(&net.db, &part.id(), &bobs_linux.id(), &bobs_linux.id(), BOB).is_err(), "Andre's own service served Bob");

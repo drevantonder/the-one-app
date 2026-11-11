@@ -1,7 +1,7 @@
 // Every app runs inside this shim, in workerd. The app module (./app.js) is the app's deployed code; this turns it
-// into a Worker that answers the node: tools, widgets, hooks and screens. Its databases, one per scope, are the
-// node's: a query asks the node, and a call's writes are handed to it when the call returns, as one write. A node on a
-// machine asks it over HTTP (`fetch`); the Cloudflare node by RPC (`Call`), handing it what answers for the node. What
+// into a Worker that answers the app runtime: tools, widgets, hooks and screens. Its databases, one per scope, are the
+// app runtime's: a query asks the app runtime, and a call's writes are handed to it when the call returns, as one write. An app runtime on a
+// machine asks it over HTTP (`fetch`); oned on Cloudflare by RPC (`Call`), handing it what answers for the app runtime. What
 // it asks and hands back is api/src/call.rs's (`ASKS`, `READ_ONLY`, `CODE_HEADER`, written before this when it's built).
 import { AsyncLocalStorage } from "node:async_hooks";
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -15,9 +15,9 @@ try {
   broken = `app.js doesn't start: ${String(err?.stack ?? err).split("\n").slice(0, 2).map((l) => l.trim()).join(" ")}`;
 }
 
-// Every request goes out through the node (the Worker's global outbound), carrying the token of the call it's made
-// in, so the node knows whose it is: it fills in that call's secrets, and refuses them to other hosts. On the
-// Cloudflare node, which has no outbound to give, the call hands each request to the node instead (`out`).
+// Every request goes out through the app runtime (the Worker's global outbound), carrying the token of the call it's made
+// in, so the app runtime knows whose it is: it fills in that call's secrets, and refuses them to other hosts. On the
+// oned on Cloudflare, which has no outbound to give, the call hands each request to the app runtime instead (`out`).
 const calls = new AsyncLocalStorage();
 const fetchOut = globalThis.fetch;
 globalThis.fetch = (input, init) => {
@@ -50,8 +50,8 @@ function describe() {
     hooks: Object.keys(app.hooks || {}),
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
     uses: { apps: app.uses?.apps || [], services: app.uses?.services || [] },
-    // Its service's wrapper: the hosts it may reach ("*" for any) and whether it runs as the node's user; and the
-    // platforms it's built for, the nodes the App Store offers to run it; and `ai`, that it answers AI Gateway's
+    // Its service's wrapper: the hosts it may reach ("*" for any) and whether it runs as the app runtime's user; and the
+    // platforms it's built for, the app runtimes the App Store offers to run it; and `ai`, that it answers AI Gateway's
     // `local/<model>` calls (`here`, `chat`, `decide`).
     ...(app.service ? { service: { network: [].concat(app.service.network || []).map(String), user: app.service.user === true, ...(app.service.ai === true ? { ai: true } : {}), ...(app.service.platforms ? { platforms: [].concat(app.service.platforms).map(String) } : {}) } } : {}),
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
@@ -67,14 +67,14 @@ function describe() {
   };
 }
 
-/// The node's answer to the ask `name`, as a Response: its error, with the code the node gave it and which ask it was, thrown.
+/// The app runtime's answer to the ask `name`, as a Response: its error, with the code the app runtime gave it and which ask it was, thrown.
 async function answered(name, r) {
   if (!r.ok) throw Object.assign(new Error(await r.text()), { ask: name }, r.headers.has(CODE_HEADER) ? { code: r.headers.get(CODE_HEADER) } : {});
   return r;
 }
 
-/// How the shim asks the node `name` (an ask of `ASKS`) for a call, with `send(name, body)` the way its node answers:
-/// the same on a machine and on the Cloudflare node.
+/// How the shim asks the app runtime `name` (an ask of `ASKS`) for a call, with `send(name, body)` the way its app runtime answers:
+/// the same on a machine and on oned on Cloudflare.
 const asking = (send, body) => async (name, data) => {
   const ask = ASKS[name];
   if (!ask) throw new Error(`the node has no ask ${name}`);
@@ -82,7 +82,7 @@ const asking = (send, body) => async (name, data) => {
   return answered(name, await send(name, data ?? null));
 };
 
-/// After a call returned: waits for the work it left running (ctx.waitUntil), hands the node what that work wrote,
+/// After a call returned: waits for the work it left running (ctx.waitUntil), hands the app runtime what that work wrote,
 /// and says it's done.
 async function finish(ask, later, appends) {
   let error = null;
@@ -119,7 +119,7 @@ async function widgetOptions(widget, ctx) {
   return out;
 }
 
-/// What a call, widget or hook gets: the caller, and a handle on each scope the node lets it reach.
+/// What a call, widget or hook gets: the caller, and a handle on each scope the app runtime lets it reach.
 function context(ask, body, appends, later, spans) {
   const writing = () => {
     if (body.read_only) throw new Error(READ_ONLY);
@@ -158,7 +158,7 @@ function context(ask, body, appends, later, spans) {
   });
   const scopes = body.scopes.map(handle);
   // `ctx.apps.<name>.<tool>(input, { device })`, for exactly the apps the app says it uses, and `ctx.services.<name>`
-  // for its own service, which only it calls (the node checks both); `device` (a name) runs it there, like a service
+  // for its own service, which only it calls (the app runtime checks both); `device` (a name) runs it there, like a service
   // on the machine that has what it needs.
   const uses = { apps: app.uses?.apps || [], services: app.uses?.services || [] };
   const used = (kind) => new Proxy({}, {
@@ -186,8 +186,8 @@ function context(ask, body, appends, later, spans) {
     labs: Object.fromEntries(Object.keys(app.labs || {}).map((name) => [name, body.labs?.[name] === true])),
     /// The app whose ctx.apps made this call, if one did.
     from: body.from ?? null,
-    /// The port this node's local API answers on at 127.0.0.1, the custom build's (config.toml) unless it was started
-    /// on another: where a sign-in sends the user's browser back. Null on a node with none (the Cloudflare node).
+    /// The port this app runtime's local API answers on at 127.0.0.1, the custom build's (config.toml) unless it was started
+    /// on another: where a sign-in sends the user's browser back. Null on an app runtime with none (oned on Cloudflare).
     port: body.port ?? null,
     /// The network's address (`https://…`, no last `/`), or null in a network with no address yet: a sign-in at
     /// another site sends the user back to `<address>/back?state=<app>/<screen>&…`, which opens that screen of this
@@ -290,7 +290,7 @@ function context(ask, body, appends, later, spans) {
     failing: async () => (await ask("failing")).json(),
     /// The network's devices, as `GET /api/state` gives them to the caller: online or not, and each one's load.
     devices: async () => (await ask("devices")).json(),
-    /// Run priority (scope/src/rank.rs): `{ order, admin }`, every device and the Cloudflare node (key "cloudflare") in the
+    /// Run priority (scope/src/rank.rs): `{ order, admin }`, every device and oned on Cloudflare (key "cloudflare") in the
     /// order things go to them, each with its `kind` and its `priority` (a number from 1, or "last"), and whether the
     /// caller is an admin. Given a device (its name or key, or "cloudflare") and a priority, gives it that one first,
     /// for an admin.
@@ -329,8 +329,8 @@ function context(ask, body, appends, later, spans) {
   };
 }
 
-/// Answers one of the node's requests: `describe`, `screen` (with `name`), or a call, widget, its options, a badge or
-/// a hook, for `body`; `send` is how it asks the node, `waitUntil` how work outlives the reply, and `out`, if given,
+/// Answers one of the app runtime's requests: `describe`, `screen` (with `name`), or a call, widget, its options, a badge or
+/// a hook, for `body`; `send` is how it asks the app runtime, `waitUntil` how work outlives the reply, and `out`, if given,
 /// sends the app's requests out. → what the reply says.
 async function handle(what, name, body, send, waitUntil, out) {
   if (broken) return { error: broken };
@@ -389,7 +389,7 @@ function exception(err) {
     const at = /^\s+at (?:.*\()?([\w./-]+):(\d+):(\d+)\)?$/.exec(line);
     if (at) frames.push({ file: at[1], line: Number(at[2]), col: Number(at[3]) });
   }
-  // An error thrown here for the node's answer was made in this file, so its frames are this file's: its ask says more.
+  // An error thrown here for the app runtime's answer was made in this file, so its frames are this file's: its ask says more.
   return { type: String(err?.name ?? "Error"), frames: frames.slice(0, 8), ...(typeof err?.ask === "string" ? { ask: err.ask } : {}) };
 }
 
@@ -404,8 +404,8 @@ export default {
   },
 };
 
-/// The Cloudflare node runs an app through this: `node.ask(name, body)` answers what the node does for a call with a
-/// Response, as a machine's node answers it over HTTP.
+/// oned on Cloudflare runs an app through this: `node.ask(name, body)` answers what the app runtime does for a call with a
+/// Response, as a computer's app runtime answers it over HTTP.
 export class Call extends WorkerEntrypoint {
   async run(what, name, body, node) {
     const send = (name, data) => node.ask(name, data);
@@ -422,7 +422,7 @@ const b64u = {
   decode: (text) => Uint8Array.from(atob(text.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)),
 };
 
-/// An app's request, made by the Cloudflare node through the vault, which fills in the Vault's items.
+/// An app's request, made by oned on Cloudflare through the vault, which fills in the Vault's items.
 async function sent(ask, req) {
   const body = ["GET", "HEAD"].includes(req.method) ? undefined : b64u.encode(new Uint8Array(await req.arrayBuffer()));
   const r = await ask("fetch", JSON.stringify({ url: req.url, method: req.method, headers: Object.fromEntries(req.headers), body64: body }));

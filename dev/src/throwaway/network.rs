@@ -1,4 +1,4 @@
-//! The throwaway network's life: starting its node and Workers, finding them running, stopping them.
+//! The throwaway network's life: starting its app runtime and Workers, finding them running, stopping them.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -54,16 +54,16 @@ pub(crate) fn program(dir: &Path) -> Result<PathBuf> {
     }
 }
 
-/// The throwaway network's node's address, while its node runs and answers: an answer from the address alone could be
+/// The throwaway network's app runtime's address, while its app runtime runs and answers: an answer from the address alone could be
 /// another checkout's throwaway network, which took the port while this one was stopped.
 pub(crate) fn running(dir: &Path) -> Option<String> {
     let addr = std::fs::read_to_string(dir.join("addr")).ok()?.trim().to_string();
     let node: i32 = std::fs::read_to_string(dir.join("pid")).ok()?.trim().parse().ok()?;
     programs(dir, false).contains(&node).then_some(())?;
-    node_at(dir, &addr).get("/api/state").is_ok().then_some(addr)
+    loopback_at(dir, &addr).get("/api/state").is_ok().then_some(addr)
 }
 
-/// Whether the throwaway network's node started before this build was made: it runs the build it started as, Workers and screens
+/// Whether the throwaway network's app runtime started before this build was made: it runs the build it started as, Workers and screens
 /// included, so a new build (`cargo build`) is picked up by starting it again, which keeps its data.
 pub(crate) fn older_build(dir: &Path) -> bool {
     let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
@@ -88,7 +88,7 @@ pub(crate) fn client_session(dir: &Path) -> Option<std::fs::File> {
     (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) } == 0).then_some(file)
 }
 
-/// Starts the throwaway network's node and Workers: as it was, if it stopped by itself, or a new one. → the node's address.
+/// Starts the throwaway network's app runtime and Workers: as it was, if it stopped by itself, or a new one. → the app runtime's address.
 pub(crate) fn start(dir: &Path) -> Result<String> {
     let kept = dir.join("cloudflare").join("settings.json").exists() && dir.join("addr").exists();
     if !kept {
@@ -98,16 +98,16 @@ pub(crate) fn start(dir: &Path) -> Result<String> {
     stop_some(dir, false, false)?;
     let was = std::fs::read_to_string(dir.join("addr"))?.trim().to_string();
     // Its address, held while its Workers start (seconds), so another checkout's throwaway network starting meanwhile
-    // can't take it: it keeps the one it had, else the system gives a free one, which the node's address file then says.
+    // can't take it: it keeps the one it had, else the system gives a free one, which the app runtime's address file then says.
     let (held, addr) = reserve(&was).or_else(|_| reserve("127.0.0.1:0"))?;
-    // Its Workers first, so its node's relay finds them the first time it asks: found later, it waits out a backoff of
-    // about half a minute, while the Cloudflare node says none of the network's devices is on.
+    // Its Workers first, so its app runtime's relay finds them the first time it asks: found later, it waits out a backoff of
+    // about half a minute, while oned on Cloudflare says none of the network's devices is on.
     spawn_cloudflare(dir, &Settings::load_in(dir)?, &addr)?;
     drop(held);
     spawn_node(dir, Some(&addr))
 }
 
-/// A TCP port held for the node, which isn't started yet: bound, not listening, so what asks for it is refused at once
+/// A TCP port held for the app runtime, which isn't started yet: bound, not listening, so what asks for it is refused at once
 /// where a listener would leave it waiting. → what holds it, until dropped, and its address.
 pub(crate) fn reserve(addr: &str) -> Result<(std::os::fd::OwnedFd, String)> {
     use std::os::fd::{FromRawFd, OwnedFd};
@@ -160,7 +160,7 @@ fn create(dir: &Path) -> Result<String> {
     // A free port the system picks, as for everything else here: never a fixed one every checkout's network would
     // want first, which another's would hold when this one starts again.
     let addr = spawn_node(dir, None)?;
-    let node = node_at(dir, &addr);
+    let node = loopback_at(dir, &addr);
     let created = node.post("/api/create", json!({ "name": "Throwaway", "user_name": me }))?;
     let recovery = created["recovery"].as_str().context("the throwaway network gave no recovery key")?;
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
@@ -174,7 +174,7 @@ fn create(dir: &Path) -> Result<String> {
     // Its sign-in signs its own ID tokens, as a provider would, for this client: the one its users sign in with.
     let clients = format!("{}/api/auth one-throwaway", settings.address);
     node.post("/api/settings", json!({ "name": scope::sign_in_proof::CLIENTS, "value": clients }))?;
-    // Its data moves to the throwaway bucket, which its node reaches only through its URL signer from then on.
+    // Its data moves to the throwaway bucket, which its app runtime reaches only through its URL signer from then on.
     let moved = node.post("/api/storage", json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" }))?;
     anyhow::ensure!(moved["kept"] == true, "the throwaway network's app runtime couldn't reach its bucket through the URL signer: {moved}");
     let started = std::time::Instant::now();
@@ -200,7 +200,7 @@ pub(crate) fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, 
     Ok(child.id())
 }
 
-/// Starts the throwaway network's node, at `addr` if it's given and free, and gives its address once it answers.
+/// Starts the throwaway network's app runtime, at `addr` if it's given and free, and gives its address once it answers.
 pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     std::fs::create_dir_all(dir)?;
     Throwaway::own_release_key(dir)?;
@@ -220,7 +220,7 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     for (name, text) in [("pid", node_program.to_string()), ("addr", addr.clone())] {
         std::fs::write(dir.join(name), text).with_context(|| format!("writing {}", dir.join(name).display()))?;
     }
-    let node = node_at(dir, &addr);
+    let node = loopback_at(dir, &addr);
     wait_for(|| node.get("/api/state").is_ok(), node_program, &dir.join("node.log"))?;
     Ok(addr)
 }
@@ -236,14 +236,14 @@ pub(crate) fn shares_native_build(dir: &Path, cargo: &mut std::process::Command)
     cargo.env("CARGO_BUILD_BUILD_DIR", shared(dir).join("native-build"));
 }
 
-/// The throwaway network's node, asked at `addr` as one of this machine's programs: with the token in its home.
-pub(crate) fn node_at(dir: &Path, addr: &str) -> Client {
+/// The throwaway network's app runtime, asked at `addr` as one of this machine's programs: with the token in its home.
+pub(crate) fn loopback_at(dir: &Path, addr: &str) -> Client {
     Client::new(Direct { dir: dir.to_path_buf(), addr: addr.to_string() }, false, api::Reader::Cli.client())
 }
 
-/// The throwaway network's node, at the address its folder says.
-pub(crate) fn node_in(dir: &Path) -> Result<Client> {
-    Ok(node_at(dir, std::fs::read_to_string(dir.join("addr"))?.trim()))
+/// The throwaway network's app runtime, at the address its folder says.
+pub(crate) fn loopback_in(dir: &Path) -> Result<Client> {
+    Ok(loopback_at(dir, std::fs::read_to_string(dir.join("addr"))?.trim()))
 }
 
 struct Direct {
@@ -271,12 +271,12 @@ impl Via for Direct {
     }
 }
 
-/// Starts the throwaway network's Workers, beside its node at `node`, and waits for its address to answer.
+/// Starts the throwaway network's Workers, beside its app runtime at `node`, and waits for its address to answer.
 pub(crate) fn spawn_cloudflare(dir: &Path, settings: &Settings, node: &str) -> Result<()> {
     for port in settings.ports {
         anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's Workers' port {port} was taken by another program while it was stopped: {CLI}-dev throwaway stop, then {CLI}-dev throwaway for a new one on free ports");
     }
-    // Beside its node, which it asks for the network's devices, for its relay to take only them.
+    // Beside its app runtime, which it asks for the network's devices, for its relay to take only them.
     let mut workers = std::process::Command::new(program(dir)?);
     Throwaway::tell(workers.args(["cloudflare", "serve"]), dir, node);
     let program = spawn(dir, &mut workers, "cloudflare.log", false)?;
@@ -335,7 +335,7 @@ pub(crate) fn stop(dir: &Path, delete: bool) -> Result<()> {
 
 /// `stop`, and with `clients` false, leaving the clients' browsers running, as starting the network again does.
 pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
-    // Its node first, while its Workers run: it sends the telemetry Worker what it hasn't yet as it stops, which a
+    // Its app runtime first, while its Workers run: it sends the telemetry Worker what it hasn't yet as it stops, which a
     // telemetry Worker stopping beside it would lose.
     let all = programs(dir, clients);
     let node = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse::<i32>().ok()).filter(|n| all.contains(n));

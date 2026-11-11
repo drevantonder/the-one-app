@@ -6,8 +6,8 @@
 //!
 //! A program in an agent device reaches nothing of this machine's 127.0.0.1, which is for its own programs: Windows is
 //! on passt, Android on Linux in a network of its own (pasta), and `reach` opens one port the asker chose, never the
-//! node's, adb's or another device's. On a Mac nothing can do that: an Android phone's apps reach the Mac's 127.0.0.1
-//! at 10.0.2.2, adb's server among it, and an iPhone simulator's share the Mac's network and files, its node's token
+//! app runtime's, adb's or another device's. On a Mac nothing can do that: an Android phone's apps reach the Mac's 127.0.0.1
+//! at 10.0.2.2, adb's server among it, and an iPhone simulator's share the Mac's network and files, its app runtime's token
 //! too.
 //!
 //! What it keeps in its folder, in the files the Go service before it kept: devices/ (each device of a kind other than
@@ -132,7 +132,7 @@ impl Devices {
         ds
     }
 
-    /// One in `dir`, with no node and no Linux devices, for tests.
+    /// One in `dir`, with no device and no Linux devices, for tests.
     #[cfg(test)]
     pub(crate) fn for_test(dir: &std::path::Path) -> Devices {
         Devices::new(Host::for_test(dir), None)
@@ -282,7 +282,7 @@ mod time {
     }
 }
 
-/// The content of a tool's answer, as MCP gives it, in the shape the node passes on.
+/// The content of a tool's answer, as MCP gives it, in the shape the app runtime passes on.
 fn contents(items: Vec<Value>) -> Value {
     json!({ "content": items })
 }
@@ -573,7 +573,7 @@ impl Devices {
             refuse!("a borrowed device can't be moved: borrow one on the device you'd move it to");
         }
         self.close_browsers(&d, true);
-        // Backed up through the node, so the entry naming the backup's blob is written before the other device asks
+        // Backed up through the app runtime, so the entry naming the backup's blob is written before the other device asks
         // for it.
         let me = self.hosts()?.0;
         let backed = self.call_node(&me, "backup", &json!({ "device": d.name, "here": true }))?;
@@ -689,7 +689,7 @@ impl Devices {
         bail!("the device sent no picture")
     }
 
-    /// The name of this device, as its node says; "" if it can't say now.
+    /// The name of this device, as its app runtime says; "" if it can't say now.
     fn me(&self) -> String {
         self.hosts().map(|h| h.0).unwrap_or_default()
     }

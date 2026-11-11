@@ -1,5 +1,5 @@
 //! Telling git on this machine to reach the network's apps' git (`<address>/<app>/…`) through this program, as `git-remote-<CLI>`
-//! (cli/src/git_remote.rs), which a node does as it starts, and `one-dev throwaway git` does for its own network only.
+//! (cli/src/git_remote.rs), which an app runtime does as it starts, and `one-dev throwaway git` does for its own network only.
 
 use anyhow::{Context, Result, bail};
 
@@ -11,15 +11,15 @@ pub fn instead_of(address: &str) -> (String, String) {
     (format!("url.{CLI}::{address}/.insteadOf"), format!("{address}/"))
 }
 
-/// What a node's git config (`<home>/git-config`, which the user's includes) says of its home: git runs the remote
-/// helper with the user's environment, not the node's, so on a machine where `<CLI>_HOME` isn't the default the helper
-/// is told here where its node is.
+/// What an app runtime's git config (`<home>/git-config`, which the user's includes) says of its home: git runs the remote
+/// helper with the user's environment, not the app runtime's, so on a machine where `<CLI>_HOME` isn't the default the helper
+/// is told here where its app runtime is.
 pub fn home_config(home: &std::path::Path) -> String {
     let quoted = home.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
     format!("[{CLI}]\n\thome = \"{quoted}\"\n")
 }
 
-/// The home of the node that told git of it (`home_config`), if one did.
+/// The home of the app runtime that told git of it (`home_config`), if one did.
 pub fn node_home() -> Option<std::path::PathBuf> {
     let out = std::process::Command::new("git").args(["config", "--get", &format!("{CLI}.home")]).output().ok().filter(|o| o.status.success())?;
     Some(String::from_utf8_lossy(&out.stdout).trim_end_matches('\n').into()).filter(|p: &std::path::PathBuf| !p.as_os_str().is_empty())

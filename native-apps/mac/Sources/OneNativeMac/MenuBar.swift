@@ -44,7 +44,7 @@ struct MenuState: Decodable, Equatable {
     }
     var name: String
     var signedIn: Bool
-    /// This Mac's node.
+    /// This Mac's onet.
     var here: String?
     var login: Bool
     var computerUse: Bool

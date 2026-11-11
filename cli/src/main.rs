@@ -1,5 +1,5 @@
-//! `one`, what the agents of a network's users and admins run: each feature's commands, asked of this machine's node over
-//! its API. Run as `<cli>d` it's the node (oned/), and as `git-remote-<cli>` git's remote helper (git_remote.rs).
+//! `one`, what the agents of a network's users and admins run: each feature's commands, asked of this computer's app runtime over
+//! its API. Run as `<cli>d` it's the app runtime (oned/), and as `git-remote-<cli>` git's remote helper (git_remote.rs).
 
 
 use anyhow::Result;
@@ -47,8 +47,8 @@ fn commands() -> Vec<Command> {
 }
 
 /// Every built-in command, with what it takes, then the network's own tools as commands: `help all`.
-fn every_command(node: &Client) -> String {
-    let core = core_forms(node);
+fn every_command(api: &Client) -> String {
+    let core = core_forms(api);
     format!(
         "Usage:\n{}\n{NAME}'s own tools, each a command as an app's tools are (--help after one says what it takes):\n{}\n{NAME} holds one network. For another context, run that context's own app.",
         api::cli::help(commands().iter().flat_map(|c| &c.help)),
@@ -56,15 +56,15 @@ fn every_command(node: &Client) -> String {
     )
 }
 
-/// The core's tools as commands' forms, when a node can say what they are.
-fn core_forms(node: &Client) -> Vec<(String, String)> {
-    let core: Vec<Value> = ::mcp::tools::sets(node).unwrap_or_default().into_iter().filter(|s| s["runs"] == "client").collect();
+/// The core's tools as commands' forms, when an app runtime can say what they are.
+fn core_forms(api: &Client) -> Vec<(String, String)> {
+    let core: Vec<Value> = ::mcp::tools::sets(api).unwrap_or_default().into_iter().filter(|s| s["runs"] == "client").collect();
     ::mcp::tools::forms(&core)
 }
 
 /// What `help` and the bare command say: what an agent needs to start, and where the rest is.
-fn help(node: &Client) -> String {
-    let apps = node.apps().unwrap_or_default();
+fn help(api: &Client) -> String {
+    let apps = api.apps().unwrap_or_default();
     let names: Vec<&str> = apps.iter().filter(|a| a["tools"].as_array().is_some_and(|o| !o.is_empty())).filter_map(|a| a["name"].as_str()).collect();
     let yours = match names.is_empty() {
         true => String::new(),
@@ -128,8 +128,8 @@ fn main() {
         }
     }
     if let Err(err) = run(args) {
-        // What the node says names its tools (apps_restore); the command line names them as commands.
-        eprintln!("{CLI}: {}", tools::in_cli_words(&node(Reader::Cli.client()), &format!("{err:#}")));
+        // What the app runtime says names its tools (apps_restore); the command line names them as commands.
+        eprintln!("{CLI}: {}", tools::in_cli_words(&loopback(Reader::Cli.client()), &format!("{err:#}")));
         std::process::exit(api::cli::exit_code(&err));
     }
 }
@@ -150,12 +150,12 @@ fn run(args: Vec<String>) -> Result<()> {
         };
     }
     let client = if positional.first().map(String::as_str) == Some("mcp") { Reader::Mcp } else { Reader::Cli };
-    let (agent, node, forms) = (mcp::agent_from_env(), node(client.client()), commands().into_iter().flat_map(|c| c.help).collect::<Vec<_>>());
-    let given = Given { words: &positional, flags: &flags, args: &args, node: &node, agent: agent.as_deref(), json, trace, commands: &forms };
+    let (agent, api, forms) = (mcp::agent_from_env(), loopback(client.client()), commands().into_iter().flat_map(|c| c.help).collect::<Vec<_>>());
+    let given = Given { words: &positional, flags: &flags, args: &args, api: &api, agent: agent.as_deref(), json, trace, commands: &forms };
     // --help shows help, whatever the command: never runs it. An app's tool's is the app's own, and with no command
     // it's what the bare command says (`own`).
     if !positional.is_empty() && (flags.contains_key("help") || flags.contains_key("h")) {
-        match command_help(&node, &positional) {
+        match command_help(&api, &positional) {
             Some(text) => print!("{text}"),
             None => _ = (tools::commands().run)(&given)?,
         }
@@ -176,13 +176,13 @@ fn own() -> Command {
         run: |g| {
             match g.words().as_slice() {
                 [] | ["help"] => {
-                    println!("{}", help(g.node));
-                    println!("\n{}", connection(g.node));
+                    println!("{}", help(g.api));
+                    println!("\n{}", connection(g.api));
                 }
-                ["help", "all"] => println!("{}", every_command(g.node)),
-                ["help", rest @ ..] => match command_help(g.node, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
+                ["help", "all"] => println!("{}", every_command(g.api)),
+                ["help", rest @ ..] => match command_help(g.api, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
                     Some(text) => print!("{text}"),
-                    None => return Err(api::cli::Failed::Typed(::mcp::tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
+                    None => return Err(api::cli::Failed::Typed(::mcp::tools::unknown(g.api, rest[0], None, Some(g.commands))?).into()),
                 },
                 ["version"] if g.json => println!("{}", oned_update::release::Version::this().json()),
                 ["version"] => println!("{} {} ({})", NAME, ::custom_build::config::BUILD, ::custom_build::config::TARGET),
@@ -195,15 +195,15 @@ fn own() -> Command {
 
 /// A built-in command's help, for --help after it: its forms, as `help all` has them. None for a tool, for an app that
 /// isn't a built-in command too, whose help is their own, and for what's neither, which says what was mistyped.
-fn command_help(node: &Client, words: &[String]) -> Option<String> {
+fn command_help(api: &Client, words: &[String]) -> Option<String> {
     words.first()?;
     let typed: Vec<&str> = words.iter().take_while(|w| !w.starts_with('-')).map(String::as_str).collect();
     if let [set, tool, ..] = typed[..]
-        && ::mcp::tools::find(node, set, tool).is_some()
+        && ::mcp::tools::find(api, set, tool).is_some()
     {
         return None;
     }
-    let (commands, core) = (commands(), core_forms(node));
+    let (commands, core) = (commands(), core_forms(api));
     let forms: Vec<&(String, String)> = commands.iter().flat_map(|c| &c.help).chain(&core).collect();
     // The forms for the most words given that have any: vault answer's, else every vault form.
     let starts = |n: usize| -> Vec<&(String, String)> { forms.iter().copied().filter(|(usage, _)| usage.split_whitespace().take(n).eq(typed[..n].iter().copied())).collect() };
@@ -211,8 +211,8 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
     (!these.is_empty()).then(|| format!("Usage:\n{}", api::cli::help(these)))
 }
 
-fn connection(node: &Client) -> String {
-    let state = match node.state() {
+fn connection(api: &Client) -> String {
+    let state = match api.state() {
         Ok(state) => state,
         Err(err) => return format!("{err:#}"),
     };
@@ -256,8 +256,8 @@ impl api::client::Via for Http {
     }
 }
 
-/// The node, as `client` asks it (`Reader::client`): the CLI, or its MCP server.
-fn node(client: &'static str) -> Client {
+/// This computer's onet, as `client` asks it (`Reader::client`): the CLI, or its MCP server.
+fn loopback(client: &'static str) -> Client {
     Client::new(Http, false, client)
 }
 

@@ -1,25 +1,25 @@
-// The Cloudflare node: a node of the network on Cloudflare Workers, which client devices ask over iroh as they ask
-// any node, last in run priority's order: when none of their user's machines answers. It holds no keys. Each
-// request is from the device its connection proved (or the device that vouched for that session's key, as nodes take
+// oned on Cloudflare: an app runtime of the network on Cloudflare Workers, which client devices ask over iroh as they ask
+// any app runtime, last in run priority's order: when none of their user's machines answers. It holds no keys. Each
+// request is from the device its connection proved (or the device that vouched for that session's key, as app runtimes take
 // one: `x-one-endpoint`), says whose it is (`x-one-user`), which the network must list that device as, and
-// brings the keys of the databases its call reaches, sealed to this node for that device (`x-one-keys`); one that lacks
-// some is answered 428 with what it needs, as a node on a machine answers. Who can do what it reads from the network's
-// steps in the bucket and asks of the scope database it builds from them (src/lib.rs, the machine node's own Rust), and
+// brings the keys of the databases its call reaches, sealed to this app runtime for that device (`x-one-keys`); one that lacks
+// some is answered 428 with what it needs, as an app runtime on a computer answers. Who can do what it reads from the network's
+// steps in the bucket and asks of the scope database it builds from them (src/lib.rs, the computer's app runtime's own Rust), and
 // each app's latest deploy from the bucket too, through the URL signer's URLs, keeping what it read sealed in its
 // Durable Object's storage, so a wake fetches only what's newer; it runs an app in an isolate of its own (Worker Loader, app-runtime/src/app/runtime/shim.js as its `ctx`) and writes
 // what a call wrote as one step (database/src/stored.rs). An app's requests go out from here, filled in with the Vault's items it's
-// switched on for, read as any node reads them: each scope's `vault` database, opened with the keys handed for it.
+// switched on for, read as any app runtime reads them: each scope's `vault` database, opened with the keys handed for it.
 //
 // It answers what it can itself (the network's state, apps, widgets, badges, screens, and the calls of apps that keep
-// to their own data). A call of an app that needs a machine goes on to the network's nodes on machines over iroh, from
-// this node's own endpoint, to a node that runs every scope the call reaches for its user, with only that call's
+// to their own data). A call of an app that needs a machine goes on to the network's computers' app runtimes over iroh, from
+// this app runtime's own endpoint, to an app runtime that runs every scope the call reaches for its user, with only that call's
 // keys, sealed to it; with none answering, and for anything else only a machine has, it says plainly that it needs a
 // device that's off.
 //
 // Its Durable Objects are of one class, `Node`, in two parts. Each user's requests run in an object of their own
 // (`user:<id>`), which alone holds what they handed and what it opened with it: their databases, the steps it read,
 // their apps' isolates and its own copy of what it read from the bucket, so nothing one user's call opened is ever
-// another's. The object `node` is this node as an iroh endpoint (src/net.rs), of its own key, with no socket, which
+// another's. The object `node` is this app runtime as an iroh endpoint (src/net.rs), of its own key, with no socket, which
 // the relay wakes with the datagrams sent to it and which sends its own back through the relay; it passes each request
 // it gets to the asker's user's object, and asks devices for calls for them, its connections living as long as it does.
 // It ends itself once nobody has asked for a while, since iroh's timers would keep it awake, and billed, for good.
@@ -39,10 +39,10 @@ import { AI_GATEWAY, ASKS, BLOBS, CODES, HEADER, LATE_WIDGET, LOG, MOST_URLS, NO
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
 
-/// Whether a call's `device` names the Cloudflare node (this one), as `--device cloudflare` does: it runs here and is passed on to no machine.
+/// Whether a call's `device` names oned on Cloudflare (this one), as `--device cloudflare` does: it runs here and is passed on to no machine.
 const namesThisNode = (device) => String(device || "").toLowerCase() === CONFIG.cloudflare;
 
-/// An answer named by its content, but for a page's nonce, as a node on a machine names it (ui/src/screen.rs's `tag`): to
+/// An answer named by its content, but for a page's nonce, as an app runtime on a computer names it (ui/src/screen.rs's `tag`): to
 /// a client that has it already, only that.
 async function tagged(request, body, type) {
   const nonce = body.split("'nonce-")[1]?.slice(0, 32);
@@ -161,7 +161,7 @@ class Bucket {
     Object.assign(this, { env, sealed, urls: new Map(), fetched: new Map(), wanted: null });
   }
 
-  /// Asks the URL signer, signed by this node's endpoint key: it gives URLs to the network's endpoints alone. With what
+  /// Asks the URL signer, signed by this app runtime's endpoint key: it gives URLs to the network's endpoints alone. With what
   /// this build reads of who's who (`READS`), which a write must.
   async sign(fields) {
     const request = signed(this.env.NODE_KEY, URLS, JSON.stringify({ ...fields, reads: READS }), Date.now());
@@ -213,7 +213,7 @@ class Bucket {
     return got;
   }
 
-  /// A read counted, and what it read said as `bucket.reads` once a minute, as a node says it: telemetry may be lost, so
+  /// A read counted, and what it read said as `bucket.reads` once a minute, as an app runtime says it: telemetry may be lost, so
   /// nothing waits for it.
   counted(name, found) {
     const rows = bucket_read(name, found, JSON.parse(endpoint_of(this.env.NODE_KEY)).key, Date.now());
@@ -333,7 +333,7 @@ class User {
   /// lasts (a session's certificate's). Whether the network lists it as theirs is checked as soon as the network's
   /// steps are read (`networkFor`), before anything else of theirs is: until then the keys it hands only read those
   /// steps, and are kept, and what they open fetched, only once it's checked (`forgetLost`). Keys sealed to another
-  /// node, or for another device, are left.
+  /// app runtime, or for another device, are left.
   whom(request) {
     const from = JSON.parse(request.headers.get(FROM) || "null");
     const user = request.headers.get(USER) || "";
@@ -390,7 +390,7 @@ class User {
   }
 
   /// Says with 428 what a device (`who`) needs, of `wants` (`{ scope, app, database, have, missing? }`), sealed to
-  /// this node: its caller sends the call again with them.
+  /// this app runtime: its caller sends the call again with them.
   async needs(wants, who) {
     const epochs = this.scopesRead.has("global") ? this.epochs([...new Set(wants.map((w) => w.scope))]) : {};
     const need = JSON.parse(await needed(this.bucket, JSON.stringify(wants), JSON.stringify(epochs)));
@@ -399,7 +399,7 @@ class User {
     this.lacking(need, who);
   }
 
-  /// Says with 428 that a device (`who`) lacks `need` (`[{ scope, epoch, app, database }]`), keys sealed to this node,
+  /// Says with 428 that a device (`who`) lacks `need` (`[{ scope, epoch, app, database }]`), keys sealed to this app runtime,
   /// with the logs' keys it handed, which every request here reads: a client hands a kind of request what its last 428
   /// said, and no more.
   lacking(need, who) {
@@ -444,7 +444,7 @@ class User {
     if (removed || !joined || device == null) {
       this.handed.delete(who.hash);
       if (removed) refuse(403, "You were removed: an admin adds you back.");
-      // As a node on a machine says it, so a device let in a moment ago asks again once this node has read that.
+      // As an app runtime on a computer says it, so a device let in a moment ago asks again once this app runtime has read that.
       throw new Refused(403, "this isn't one of your devices: approve it on one that is", { code: CODES.notLetIn });
     }
     if (who.offered) this.take(who, who.offered);
@@ -457,12 +457,12 @@ class User {
   }
 
   /// The network as a request's user sees it (src/lib.rs: `network`): `{ state, apps, me, epochs, runs }`, `runs` the
-  /// scopes of theirs this node runs, from the steps of Everyone's, their own and the groups' they handed the keys of.
+  /// scopes of theirs this app runtime runs, from the steps of Everyone's, their own and the groups' they handed the keys of.
   /// Their device is checked first.
   async networkFor(who) {
     await this.readScopes(who, ["global"]);
     const runs = this.forgetLost(who);
-    // Their own scope database's keys are asked for only if they chose this node to run their own things; it and their groups'
+    // Their own scope database's keys are asked for only if they chose this app runtime to run their own things; it and their groups'
     // are read whenever they're handed.
     const own = `user:${who.user}`;
     if (runs.includes(own) && !this.keysOf(who, own, NODE_APP, LOG)) await this.needs([{ scope: own, app: NODE_APP, database: LOG, have: [] }], who);
@@ -485,7 +485,7 @@ class User {
     return this.modules.get(hash);
   }
 
-  /// An app's latest deploy, in an isolate of its own for this user alone: no network, and the node's answers handed
+  /// An app's latest deploy, in an isolate of its own for this user alone: no network, and the app runtime's answers handed
   /// in with each call. Another user's calls never share its module's state.
   appWorker(who, app) {
     return this.env.LOADER.get(`${this.owner}/${app.name}-${app.bundle}`, async () => ({
@@ -543,7 +543,7 @@ class User {
     return (req.scopes || ["user"]).map((s) => (s === "user" ? `user:${who.user}` : s === "global" || String(s).includes(":") ? String(s) : `group:${s}`));
   }
 
-  /// The keys a device handed this node for `app` in `scopes`, and for any `more` (`{ scope, app, database, epoch }`)
+  /// The keys a device handed this app runtime for `app` in `scopes`, and for any `more` (`{ scope, app, database, epoch }`)
   /// of those scopes: `[{ scope, epoch, app, database, key }]`, what's passed on with a call.
   handedFor(who, scopes, app, more = []) {
     const kept = this.handed.get(who.hash);
@@ -560,11 +560,11 @@ class User {
     return out;
   }
 
-  /// Asks the network's nodes on machines that run every scope `call` reaches for its user (`runners`), in Where
+  /// Asks the network's computers' app runtimes that run every scope `call` reaches for its user (`runners`), in Where
   /// Things Run's order until one is reached, to run it as them, with only the keys of those scopes they handed this
-  /// node, sealed to that node: → its answer, `{ ok }` or what failed as `/api/call` says it; or null
-  /// if none was reached. Keys it says it needs that this node holds go with the call again; the rest are its caller's
-  /// to hand this node, with 428.
+  /// app runtime, sealed to that app runtime: → its answer, `{ ok }` or what failed as `/api/call` says it; or null
+  /// if none was reached. Keys it says it needs that this app runtime holds go with the call again; the rest are its caller's
+  /// to hand this app runtime, with 428.
   async onMachine(who, view, req, wait) {
     const scopes = this.callScopes(who, view, req);
     const order = new Map(view.state.network.devices.map((d) => [d.key, d.order]));
@@ -630,7 +630,7 @@ class Call {
     });
   }
 
-  /// The Vault's items in the scopes the call named: each one's `vault` database (the node's), opened with the keys
+  /// The Vault's items in the scopes the call named: each one's `vault` database (the app runtime's), opened with the keys
   /// handed for it, for this call alone, as `[[scope, handle]]` (JSON); those it lacks are said with 428, all at once.
   vault() {
     const p = this.user;
@@ -643,7 +643,7 @@ class Call {
     return this.items.then((opened) => JSON.stringify(opened));
   }
 
-  /// AI Gateway's rows (the node's `ai-gateway`) of the caller's own scope and Everyone's, opened with the keys handed
+  /// AI Gateway's rows (the app runtime's `ai-gateway`) of the caller's own scope and Everyone's, opened with the keys handed
   /// for them, for this call alone: `[own, everyone]`, handles; those it lacks are said with 428, all at once.
   aiGateway() {
     const p = this.user;
@@ -670,7 +670,7 @@ class Call {
     return types ? this.on(scope, ask) : ask(undefined);
   }
 
-  /// Writes a call's appends: each scope's statements as one step. No device is told, as this node runs only while
+  /// Writes a call's appends: each scope's statements as one step. No device is told, as this app runtime runs only while
   /// no machine's answers: the relay counts each scope written (`moved`), and devices read what moved from the bucket.
   /// → the databases it wrote.
   async write(appends) {
@@ -692,7 +692,7 @@ class Call {
   }
 }
 
-/// A request's work, as each app it runs asks the node things (app-runtime/src/calls/running.rs: `internal`).
+/// A request's work, as each app it runs asks the app runtime things (app-runtime/src/calls/running.rs: `internal`).
 class Run {
   constructor(user, who, view) {
     Object.assign(this, { user, who, view, env: user.env, ctx: user.ctx });
@@ -707,7 +707,7 @@ class Run {
     return ids.map((id) => app.reach.find((h) => h.id === id) || refuse(403, this.notOnPages(app.name, id)));
   }
 
-  /// Why an app reaches nothing here: it isn't added, or it's added only for the user alone, whose own scope this node
+  /// Why an app reaches nothing here: it isn't added, or it's added only for the user alone, whose own scope this app runtime
   /// reads only if they chose it to run their own things.
   notOnPages(name, scope = null) {
     const own = `user:${this.who.user}`;
@@ -777,7 +777,7 @@ class Run {
     }
   }
 
-  /// Says how a call went, as any node does. Telemetry may be lost, so nothing waits for it and a failure is only logged.
+  /// Says how a call went, as any app runtime does. Telemetry may be lost, so nothing waits for it and a failure is only logged.
   tell(app, req, time, err) {
     const failed = err !== undefined;
     const fields = call_span(app, req.tool, this.who.user, JSON.parse(endpoint_of(this.env.NODE_KEY)).key, time, Date.now() - time, failed, err?.said?.code, failed ? String(err.message || err) : undefined, req.traceparent);
@@ -891,7 +891,7 @@ const servedHere = (d) => !d?.uses?.services?.length;
 
 const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and ${OFF}`;
 
-/// What the node does for an app while it runs, as it asks (app-runtime/src/calls/running.rs: `internal`): its databases, other apps'
+/// What the app runtime does for an app while it runs, as it asks (app-runtime/src/calls/running.rs: `internal`): its databases, other apps'
 /// tools, the Vault's items it's switched on for, and its requests out, filled in from them.
 class ForCall extends RpcTarget {
   constructor(run, app, call, done, depth) {
@@ -941,7 +941,7 @@ class ForCall extends RpcTarget {
     return { ok: said.ok };
   }
 
-  /// One of an app's asks (api/src/call.rs: `Ask`), as a machine's node answers it: a Response, an error's code in its header.
+  /// One of an app's asks (api/src/call.rs: `Ask`), as a computer's app runtime answers it: a Response, an error's code in its header.
   async ask(name, body) {
     try {
       const { who, view, user } = this.run;
@@ -959,7 +959,7 @@ class ForCall extends RpcTarget {
           return Response.json({});
         case "call": {
           // Only to the apps it says it uses, and never to a service: a service is its app's alone, and an app with one
-          // runs on a machine, never here. A service, or an app this node can't run, goes to a node on a machine.
+          // runs on a machine, never here. A service, or an app this app runtime can't run, goes to an app runtime on a computer.
           const mine = await user.describe(who, this.app);
           if (q.service || q.device === "all") refuse(403, `${this.app.name} can't call the ${q.app} service: a service is only its own app's, so call the ${q.app} app's tools with ctx.apps`);
           if (!mine?.uses?.apps?.includes(q.app)) refuse(403, `${this.app.name} doesn't use ${q.app}`);
@@ -1017,7 +1017,7 @@ async function aiDevice(run, fn, input) {
   return { unavailable: why.join("; ") };
 }
 
-/// An app's call that needs a node on a machine (a service's, or one of an app that uses one), as this user.
+/// An app's call that needs an app runtime on a computer (a service's, or one of an app that uses one), as this user.
 async function machineCall(run, q, d) {
   const call = { app: q.app, ...(q.service ? { function: q.function } : { tool: q.tool }), input: q.input ?? {}, service: q.service ? q.app : undefined, device: q.device };
   const out = await run.user.onMachine(run.who, run.view, call, 15_000);
@@ -1054,8 +1054,8 @@ async function route(p, request) {
     const named = namesThisNode(req.device);
     const app = !req.service && (!req.device || named) && deployed(run.view, req.app);
     const d = app && (await p.describe(who, app));
-    // An app that keeps to its own data, in scopes this node runs, runs here; the rest on a machine, when one answers,
-    // unless the call names this node.
+    // An app that keeps to its own data, in scopes this app runtime runs, runs here; the rest on a machine, when one answers,
+    // unless the call names this app runtime.
     if (d && plain(d) && p.callScopes(who, run.view, req).every((s) => run.view.runs.includes(s))) return json(await run.call(req));
     const r = named ? null : await p.onMachine(who, run.view, req, 120_000);
     if (r) return json(r, r.ok !== undefined ? 200 : 400);
@@ -1089,7 +1089,7 @@ async function route(p, request) {
     const who = p.whom(request);
     const run = new Run(p, who, await p.networkFor(who));
     // Nothing here changes but what devices write, which they'll say once one is on: no events, so the client asks again
-    // in a while, and this node sleeps meanwhile.
+    // in a while, and this app runtime sleeps meanwhile.
     if (path === "/api/events") return new Response(null, { status: 204 });
     const scope = url.searchParams.get("scope");
     if (path === "/api/state") return json(run.view.state);
@@ -1099,7 +1099,7 @@ async function route(p, request) {
     return json(await run.badges(scope));
   }
   // Anything else only a machine does: to a client that asks one itself (`x-one-elsewhere`), the machines of its
-  // user's that are on, as a node on a machine names those that run a call it can't (421).
+  // user's that are on, as an app runtime on a computer names those that run a call it can't (421).
   if (request.headers.get(HEADER.elsewhere)) {
     const view = await p.networkFor(p.whom(request));
     const theirs = view.state.network.devices.filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
@@ -1110,7 +1110,7 @@ async function route(p, request) {
   refuse(503, `That needs one of your devices, and ${OFF}.`);
 }
 
-/// A scope's keys as a node gives them (app-runtime/src/keys.rs: `sealed_keys`): each epoch sealed to `to` (an endpoint's
+/// A scope's keys as an app runtime gives them (app-runtime/src/keys.rs: `sealed_keys`): each epoch sealed to `to` (an endpoint's
 /// key, or `recovery`) → `{ epoch, sealed }`, or an app's key in each epoch → `{ sealed }`, by epoch, base64url. Its
 /// epochs are those sealed to the recovery key, every one of them, numbered from 1.
 async function sealedKeys(bucket, scope, to, app) {
@@ -1152,7 +1152,7 @@ export default {
   fetch: () => json({ error: "the Cloudflare node is asked over iroh, as any node is" }, 404),
 };
 
-/// A Durable Object of the Cloudflare node: a user's (`user:<id>`), where their requests run, or the node's
+/// A Durable Object of oned on Cloudflare: a user's (`user:<id>`), where their requests run, or the app runtime's
 /// endpoint (`node`), which the relay wakes and which asks devices for calls.
 export class Oned extends DurableObject {
   constructor(ctx, env) {

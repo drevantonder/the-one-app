@@ -9,7 +9,7 @@ use ::scope::scopes::Role;
 use ::api::Client;
 
 /// `settings` with the network's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
-/// node on this machine knows them, for the relay to take only them; none when no node answers here, which `needed`
+/// app runtime on this machine knows them, for the relay to take only them; none when no device answers here, which `needed`
 /// refuses, since that relay would take no one.
 fn devices_here(node: &Client, settings: crate::Settings, needed: bool) -> Result<crate::Settings> {
     let network = node.state().ok().and_then(|s| s.network);
@@ -24,14 +24,14 @@ fn devices_here(node: &Client, settings: crate::Settings, needed: bool) -> Resul
         })
         .collect();
     anyhow::ensure!(!needed || !devices.is_empty(), "no app runtime of {YOURS} answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new network, whose relay takes devices once this runs again beside one");
-    // The network's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes, as
+    // The network's recovery key too, as a client, not an admin's and not an app runtime: what it lets in, the relay takes, as
     // an admin's if its user is one.
     devices.extend(network.as_ref().and_then(|n| n.recovery.as_ref()).map(|k| json!({ "key": k, "role": "client", "admin": false, "recovery": true })));
     let root = network.and_then(|n| n.root).filter(|r| r.len() == 64);
     Ok(crate::Settings { devices, root, ..settings })
 }
 
-/// Puts `newest` on Cloudflare: each Worker, and the Cloudflare node if the network has one. The relay says what they're on
+/// Puts `newest` on Cloudflare: each Worker, and oned on Cloudflare if the network has one. The relay says what they're on
 /// (`Newest::deployed`), for every client to show.
 fn put_up(cf: &crate::Cloudflare, settings: &mut crate::Settings, newest: crate::Newest) -> Result<()> {
     // Setting up Basin needs more of the Cloudflare account than a deploy token has, and is done once: a network whose token
@@ -72,7 +72,7 @@ const WORKERS_AI_PERMISSIONS: [&str; 2] = ["Workers AI Read", "Workers AI Write"
 
 /// Everyone's `AI key: workers-ai`, so every app's `ctx.ai.run` answers with Workers AI from the network's first deploy
 /// (AI Gateway, ai-gateway/): a token that runs the account's models and nothing else, kept in Everyone's Vault through
-/// this machine's node, never anywhere else. Made once, by the first deploy whose token may make tokens.
+/// this computer's app runtime, never anywhere else. Made once, by the first deploy whose token may make tokens.
 fn workers_ai_key(cf: &crate::Cloudflare, node: &Client) -> Result<()> {
     let kind = ::ai_gateway::Company::WorkersAi.key_kind();
     let items = node.get("/api/vault?scope=global")?;
@@ -130,7 +130,7 @@ pub fn commands() -> Command {
             ("cloudflare use <address>".into(), "point this network at its Workers: its devices take sign-ins made at the address".into()),
         ],
         run: |g| {
-            let node = g.node;
+            let node = g.api;
             match g.words().as_slice() {
                 ["cloudflare"] => print!("{}", cloudflare_said(&crate::Settings::load()?)),
                 ["cloudflare", "serve"] => {
@@ -145,7 +145,7 @@ pub fn commands() -> Command {
                         }
                     };
                     print!("{}", cloudflare_said(&settings));
-                    let settings = devices_here(g.node, settings, false)?;
+                    let settings = devices_here(g.api, settings, false)?;
                     crate::serve(&settings)?
                 }
                 ["cloudflare", "deploy"] => {
@@ -198,7 +198,7 @@ pub fn commands() -> Command {
                             if ::custom_build::config::JOIN_DOMAIN.is_empty() { settings } else { crate::Settings::load()? }
                         }
                     };
-                    let settings = devices_here(g.node, settings, !g.has("new"))?;
+                    let settings = devices_here(g.api, settings, !g.has("new"))?;
                     // A first deploy has nothing at its address yet to read.
                     let newest = if first { crate::Newest::built() } else { crate::Newest::read(&settings.address)? };
                     println!("{}", newest.said);
@@ -226,13 +226,13 @@ pub fn commands() -> Command {
                     {
                         return Err(err);
                     }
-                    let mut settings = devices_here(g.node, crate::Settings::load()?, true)?;
+                    let mut settings = devices_here(g.api, crate::Settings::load()?, true)?;
                     let cf = cloudflare(g, Some(&settings))?;
                     if settings.cloudflare_node_endpoint().is_none() {
                         settings.cloudflare_node_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
                         settings.set_secret("CLOUDFLARE_NODE_KEY", &settings.cloudflare_node_key)?;
                     }
-                    // The relay it deploys again binds the Cloudflare node's endpoint only for a network that has one.
+                    // The relay it deploys again binds oned on Cloudflare's endpoint only for a network that has one.
                     let was = std::mem::replace(&mut settings.cloudflare_node, true);
                     let newest = crate::Newest::read(&settings.address)?;
                     put_up(&cf, &mut settings, newest)?;

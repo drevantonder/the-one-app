@@ -10,7 +10,7 @@ use ::mcp::skills::Mode;
 /// onet/worker/, is remote MCP clients' device), or for a program on this machine, as its user. Each POST is
 /// answered with JSON; the server sends nothing unasked, so there's no stream to GET. A tool that needs keys it wasn't
 /// handed is answered 428 with what it needs, as `/api/call` is, for its caller to hand them and ask again. Nothing is
-/// kept between requests, since the next may reach another node: the session id carries only the client's name,
+/// kept between requests, since the next may reach another app runtime: the session id carries only the client's name,
 /// credited on its calls.
 pub async fn http(
     axum::extract::State(host): axum::extract::State<crate::Host>,

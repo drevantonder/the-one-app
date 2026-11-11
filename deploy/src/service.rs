@@ -1,5 +1,5 @@
 //! An app's service built where it's deployed from, for each platform this machine can build it for: in Go for all of
-//! them, in Rust for this machine's own. Nodes never build.
+//! them, in Rust for this machine's own. App runtimes never build.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -31,7 +31,7 @@ pub fn built_from(dir: &Path) -> Result<String> {
 }
 
 /// Builds the service of the app in `app` (its `service/`), saying it was built from `built`, at `out`/<target> for each
-/// of `platforms` this machine can: a service in Go for all of them, one in Rust for this machine's. Nodes never build.
+/// of `platforms` this machine can: a service in Go for all of them, one in Rust for this machine's. App runtimes never build.
 /// None if the app has no service.
 pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item = &'static Platform>, out: &Path) -> Result<Option<Built>> {
     let source = std::fs::canonicalize(app).with_context(|| format!("{} isn't here", app.display()))?.join("service");

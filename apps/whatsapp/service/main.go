@@ -1,6 +1,6 @@
 // The WhatsApp service: links this device to a WhatsApp account, as
 // WhatsApp Desktop is linked, keeps the messages it sees, and offers them to
-// the user's devices through this device's node.
+// the user's devices through this device's app runtime.
 //
 // It never tells WhatsApp the user is online or has read a message, so the
 // phone keeps notifying and senders don't see reads.
@@ -43,8 +43,8 @@ func main() {
 	serve(node, w)
 }
 
-// serve registers with the node and answers its calls, registering again
-// whenever the node forgets (it keeps services in memory) or restarts.
+// serve registers with the app runtime and answers its calls, registering again
+// whenever the app runtime forgets (it keeps services in memory) or restarts.
 func serve(node string, w *whatsapp) {
 	poll := &http.Client{Timeout: 40 * time.Second, Transport: toNode}
 	for {
@@ -102,7 +102,7 @@ func next(client *http.Client, node string) (*call, error) {
 }
 
 // elsewhere is an error saying the call should go to another device, as
-// when WhatsApp isn't linked here; the node then tries the next.
+// when WhatsApp isn't linked here; the app runtime then tries the next.
 type elsewhere string
 
 func (e elsewhere) Error() string { return string(e) }
@@ -162,6 +162,6 @@ func callOn(node, device, function string, input, out any) error {
 	return json.Unmarshal(reply.Ok, out)
 }
 
-// describe is all the node is told of this service: what's about this machine. Its title, instructions and tools are
+// describe is all the app runtime is told of this service: what's about this machine. Its title, instructions and tools are
 // its app's.
 var describe = map[string]any{"version": built}

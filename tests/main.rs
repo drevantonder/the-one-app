@@ -19,7 +19,7 @@ mod update;
 
 use std::path::{Path, PathBuf};
 
-/// A new folder for a test, in one of this run's own: in memory where the system has a place for it, since nodes sync
+/// A new folder for a test, in one of this run's own: in memory where the system has a place for it, since app runtimes sync
 /// each write to disk, which on a busy machine takes seconds. A run leaves its folder; the next removes those of runs
 /// that have ended.
 fn temp(name: &str) -> PathBuf {

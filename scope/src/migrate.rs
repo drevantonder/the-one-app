@@ -3,7 +3,7 @@
 //! turns them into this release's names as it reads them, here and nowhere else; nothing writes the old ones. The network's table and type were `install`; app schedules' tables `keeps` and `keep_keys`, and their
 //! step `grant`; the apps added to a scope, its table `installs` (`installed`, `installed_by`, `installed_at`) and
 //! steps `install` and `uninstall`; the permission to choose which devices keep a scope's apps running, run its calls and open its Vault
-//! was `keep`. The setting that names the Cloudflare node was `serverless`. The Vault's agents, in an item's apps and a
+//! was `keep`. The setting that names oned on Cloudflare was `serverless`. The Vault's agents, in an item's apps and a
 //! request's app, were `agents`, the AGENTS.md app's name, which never used the Vault. A user, as a principal and a
 //! type of object, was a `person`.
 

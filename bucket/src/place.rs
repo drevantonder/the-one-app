@@ -34,7 +34,7 @@ fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
     Failed(Trouble::Disk, said).into()
 }
 
-/// What this program read of the network's bucket since its insights last took them: a node's, or a computer's onet's.
+/// What this program read of the network's bucket since its insights last took them: an app runtime's, or a computer's onet's.
 pub static READS: crate::Reads = crate::Reads::new();
 
 #[derive(Clone, Debug)]
@@ -310,7 +310,7 @@ impl Place {
     }
 }
 
-/// The node's own runtime reaches a place on a thread that may wait.
+/// The app runtime's own runtime reaches a place on a thread that may wait.
 impl Bucket for Place {
     async fn get(&self, name: &str) -> Result<Option<Object>> {
         let (place, name) = (self.clone(), name.to_string());

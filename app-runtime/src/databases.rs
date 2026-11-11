@@ -44,7 +44,7 @@ impl Host {
         Ok(Copied::moving(place, self.network_dir().join("copy"), self.0.moved.clone()))
     }
 
-    /// Whether this node is an admin's, whose endpoint alone the URL signer lets remove from the bucket: a node of
+    /// Whether this app runtime is an admin's, whose endpoint alone the URL signer lets remove from the bucket: an app runtime of
     /// anyone else's leaves what's to go to theirs.
     pub(super) fn removes_from_bucket(&self) -> bool {
         self.with(|i| Ok(i.r.db().machine(&self.0.id)?.is_some_and(|m| i.r.db().may(&m.user, "invite", scopes::NETWORK)))).unwrap_or(false)
@@ -59,7 +59,7 @@ impl Host {
         ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes())
     }
 
-    /// The secret that opens what's sealed to this node's own key: the keys a call is handed.
+    /// The secret that opens what's sealed to this app runtime's own key: the keys a call is handed.
     pub(super) fn seal_secret(&self) -> [u8; 32] {
         key::seal_secret(&self.signing_key())
     }
@@ -361,7 +361,7 @@ impl Host {
     }
 
     /// Deletes from the bucket what no reader of each database open here needs any more (`stored::tidy`), once a day, on
-    /// an admin's node. When it last did is kept in `network/tidied.json`, so starting again doesn't tidy them all again.
+    /// an admin's app runtime. When it last did is kept in `network/tidied.json`, so starting again doesn't tidy them all again.
     pub(super) async fn tidy_databases(&self) {
         if !self.removes_from_bucket() {
             return;

@@ -86,9 +86,9 @@ pub async fn add(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, added: bool
 
 /// The entries that add (or remove) `app` in `scope` for `caller`, with their own rights there. Adding it
 /// also adds each app it uses, and each they use, that isn't added there yet. Each of their services runs for
-/// the scope on one node, a node of the caller's it can run on: `node` (a device's
-/// name) for `app`'s, which is asked for when there's a choice, and added again with another node, they move
-/// there; and for an app it uses, `node` if it can run there, else its one node, if it has one, and it stays where
+/// the scope on one app runtime, an app runtime of the caller's it can run on: `node` (a device's
+/// name) for `app`'s, which is asked for when there's a choice, and added again with another app runtime, they move
+/// there; and for an app it uses, `node` if it can run there, else its one app runtime, if it has one, and it stays where
 /// it runs already. Removing `app` stops its services there.
 pub async fn add_entries(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, added: bool, node: Option<&str>) -> Result<Vec<(Scope, Content)>> {
     let mut wanted = vec![app.to_string()];
@@ -102,7 +102,7 @@ pub async fn add_entries(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, add
         }
         i += 1;
     }
-    // Each one's title, services, and the nodes of the caller's they can run on.
+    // Each one's title, services, and the app runtimes of the caller's they can run on.
     let mut services = Vec::new();
     let mut widget = None;
     for (n, name) in wanted.iter().enumerate() {

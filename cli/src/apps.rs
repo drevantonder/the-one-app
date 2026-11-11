@@ -25,14 +25,14 @@ pub fn commands() -> Command {
         run: |g| {
             match g.words().as_slice() {
                 ["apps"] => {
-                    let groups = g.node.state()?.network.map(|n| n.groups).unwrap_or_default();
+                    let groups = g.api.state()?.network.map(|n| n.groups).unwrap_or_default();
                     // Where it's added, as the App Store says it: you, a group by its name, everyone.
                     let place = |scope: &str| match scope.split_once(':') {
                         Some(("group", id)) => groups.iter().find(|g| g.id == id).map_or(id, |g| g.name.as_str()).to_string(),
                         Some(("user", _)) => "you".to_string(),
                         _ => "everyone".to_string(),
                     };
-                    for app in &g.node.apps()? {
+                    for app in &g.api.apps()? {
                         let from = app["from"].as_str().map(|f| format!(", a fork of {f}")).unwrap_or_default();
                         let added: Vec<String> = app["added"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
                         let added = if added.is_empty() { String::new() } else { format!(", added for {}", added.join(", ")) };
@@ -42,12 +42,12 @@ pub fn commands() -> Command {
                 }
                 ["deploy", app] if g.has("version") => {
                     let version = g.flag("version").context("give --version <hash>")?;
-                    let deployed = g.node.post("/api/deploy", json!({ "app": app, "bundle": version, "wait": true }))?;
-                    deployed_said(g.node, app, &deployed, "")?;
+                    let deployed = g.api.post("/api/deploy", json!({ "app": app, "bundle": version, "wait": true }))?;
+                    deployed_said(g.api, app, &deployed, "")?;
                 }
                 ["deploy", dir] => deploy(g, std::path::Path::new(dir))?,
                 ["deploys", app] => {
-                    let apps = g.node.apps()?;
+                    let apps = g.api.apps()?;
                     let found = apps.iter().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}: {CLI} apps lists them"))?;
                     for d in found["history"].as_array().into_iter().flatten() {
                         let current = if d["bundle"] == found["bundle"] { "  (running)" } else { "" };
@@ -62,7 +62,7 @@ pub fn commands() -> Command {
                     if let [path] = rest {
                         q.push(format!("path={path}"));
                     }
-                    let r = g.node.get(&format!("/api/source/{app}?{}", q.join("&")))?;
+                    let r = g.api.get(&format!("/api/source/{app}?{}", q.join("&")))?;
                     match (&r["text"], &r["files"]) {
                         (Value::String(text), _) => print!("{text}"),
                         (_, Value::Array(files)) => files.iter().for_each(|f| println!("{:>8}  {}", f["size"], f["path"].as_str().unwrap_or(""))),
@@ -71,18 +71,18 @@ pub fn commands() -> Command {
                 }
                 ["remove", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    println!("{}", g.node.post("/api/remove/remove", json!({ "app": app, "scope": scope }))?["said"].as_str().unwrap_or_default());
+                    println!("{}", g.api.post("/api/remove/remove", json!({ "app": app, "scope": scope }))?["said"].as_str().unwrap_or_default());
                 }
                 ["fork", app, name] => {
-                    g.node.post("/api/fork", json!({ "app": app, "name": name, "owner": g.flag("owner") }))?;
+                    g.api.post("/api/fork", json!({ "app": app, "name": name, "owner": g.flag("owner") }))?;
                     println!("Forked {app} as {name}; deploy your changes with {CLI} deploy <dir> --name {name}.");
                 }
                 ["add", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    println!("{}", g.node.post("/api/add/add", json!({ "app": app, "scope": scope, "node": g.flag("node") }))?["said"].as_str().unwrap_or_default());
+                    println!("{}", g.api.post("/api/add/add", json!({ "app": app, "scope": scope, "node": g.flag("node") }))?["said"].as_str().unwrap_or_default());
                 }
                 ["schedules"] => {
-                    for app in &g.node.apps()? {
+                    for app in &g.api.apps()? {
                         for s in app["schedules"].as_array().into_iter().flatten() {
                             let state = match (&s["invalid"], s["removed"] == true, s["on"] == true) {
                                 (Value::String(why), ..) => format!("doesn't make sense: {why}"),
@@ -101,7 +101,7 @@ pub fn commands() -> Command {
                 }
                 ["schedule", on @ ("on" | "off"), app, name] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    g.node.post("/api/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
+                    g.api.post("/api/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
                     println!("{app}'s schedule {name} is {on} in {scope}.");
                 }
                 _ => return Ok(false),
@@ -114,7 +114,7 @@ pub fn commands() -> Command {
 /// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the network hasn't one by that
 /// name, and deploys it, saying whether this device runs it yet.
 fn deploy(g: &Given, dir: &std::path::Path) -> Result<()> {
-    let node = g.node;
+    let node = g.api;
     anyhow::ensure!(dir.is_dir(), "no folder {} in {}: give the app's folder", dir.display(), std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default());
     let name = match g.flag("name") {
         Some(name) => name.to_string(),

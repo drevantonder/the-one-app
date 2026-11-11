@@ -1,4 +1,4 @@
-//! The routes that run a call: `/api/call`, one the Cloudflare node passes on, and an app's own requests.
+//! The routes that run a call: `/api/call`, one oned on Cloudflare passes on, and an app's own requests.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -16,8 +16,8 @@ use ::api::Who;
 use ::api::Me;
 use ::api::reply::{Body, Error, Reply, failed};
 
-/// What a client that picks the node it asks itself says with each request (onet/src/lib.rs): a call this node can't
-/// run is answered 421 with the nodes that can (`api::Elsewhere`), not passed on.
+/// What a client that picks the app runtime it asks itself says with each request (onet/src/lib.rs): a call this app runtime can't
+/// run is answered 421 with the app runtimes that can (`api::Elsewhere`), not passed on.
 
 /// An app's own requests (`app_http`): how stock git reaches Repos.
 pub(super) const APP_ROUTE: &str = "/{app}/{*path}";
@@ -38,9 +38,9 @@ async fn call(State(host): State<Host>, me: Me, headers: axum::http::HeaderMap, 
     Ok(Json(call_for(&host, me, req, headers.contains_key(custom_build::protocol::header::ELSEWHERE)).await?))
 }
 
-/// A call as `/api/call` takes it, for `me`: → `{ ok }`. A client that `picks` its node has it run here, or told where.
+/// A call as `/api/call` takes it, for `me`: → `{ ok }`. A client that `picks` its app runtime has it run here, or told where.
 async fn call_for(host: &Host, me: Me, mut req: CallRequest, picks: bool) -> anyhow::Result<Value> {
-    // Only the node says an app made a call, and how deep it is.
+    // Only the app runtime says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
     if picks {
         return Ok(json!({ "ok": host.call_picked(req, me.caller).await? }));
@@ -48,10 +48,10 @@ async fn call_for(host: &Host, me: Me, mut req: CallRequest, picks: bool) -> any
     Ok(json!({ "ok": host.call_as(req, me.caller).await? }))
 }
 
-/// A call the Cloudflare node passes on over iroh (app-runtime/src/net.rs): its user's, as `me.user` says, run with the keys
-/// of its databases they handed the Cloudflare node, which it hands this device (`keys`, sealed to it for the
-/// Cloudflare node's key, `Credential::Passed`) for the scopes the call names alone, and never this device's own: no
-/// access token comes with it, so none of theirs reaches a node on a machine, whose owner could use it as them.
+/// A call oned on Cloudflare passes on over iroh (app-runtime/src/net.rs): its user's, as `me.user` says, run with the keys
+/// of its databases they handed oned on Cloudflare, which it hands this device (`keys`, sealed to it for the
+/// oned on Cloudflare's key, `Credential::Passed`) for the scopes the call names alone, and never this device's own: no
+/// access token comes with it, so none of theirs reaches an app runtime on a computer, whose owner could use it as them.
 /// → `{ ok }`, or what failed as the API says it.
 pub(crate) async fn call_from_cloudflare_node(host: &Host, remote: key::Key, mut call: Value) -> Value {
     let (me, keys) = match call.as_object_mut() {
@@ -64,7 +64,7 @@ pub(crate) async fn call_from_cloudflare_node(host: &Host, remote: key::Key, mut
         let handed = keys.as_ref().and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("a call passed on brings the keys it was handed"))?;
         let credential = host.take_passed(&remote, &user, &call, handed, false)?;
         let client = me["client"].as_str().unwrap_or_default().to_string();
-        // As the Cloudflare node's, never this device's own: no service counts it as its user's own node.
+        // As oned on Cloudflare's, never this device's own: no service counts it as its user's own app runtime.
         call_for(host, Me { caller: Caller { key: remote, user, agent: None, credential }, client: Some(client) }, serde_json::from_value(call)?, false).await
     };
     ran.await.unwrap_or_else(|err| failed(&err))

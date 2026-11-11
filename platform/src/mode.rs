@@ -42,7 +42,7 @@ pub fn here() -> &'static Mode {
 }
 
 impl Mode {
-    /// Where the programs of services are put that a node fetches: `~/.local/bin`, but a throwaway
+    /// Where the programs of services are put that an app runtime fetches: `~/.local/bin`, but a throwaway
     /// network's in its home, so what it puts there never replaces the real network's program.
     pub fn bin(&self) -> PathBuf {
         match self {
@@ -72,8 +72,8 @@ impl Mode {
 }
 
 impl Throwaway {
-    /// Makes `command` a program of the throwaway network in `home`, whose node is at `addr`: its home and address, which
-    /// it asks its node at as one of this machine's programs, and its mode.
+    /// Makes `command` a program of the throwaway network in `home`, whose app runtime is at `addr`: its home and address, which
+    /// it asks its app runtime at as one of this machine's programs, and its mode.
     pub fn tell(command: &mut std::process::Command, home: &Path, addr: &str) {
         command.env(var(), home).env(custom_build::config::env("HOME"), home).env(custom_build::config::env("ADDR"), addr);
         if let Ok(key) = std::fs::read_to_string(home.join(RELEASE_KEY_PUBLIC)) {
@@ -148,7 +148,7 @@ pub fn programs(dir: &Path, clients: bool) -> Vec<i32> {
         .collect()
 }
 
-/// Stops what the throwaway network in `home` started besides its node, which then stops itself: its Workers and browser.
+/// Stops what the throwaway network in `home` started besides its app runtime, which then stops itself: its Workers and browser.
 pub fn stop_others(home: &Path) {
     let me = std::process::id() as i32;
     for pid in programs(home, true) {

@@ -22,19 +22,19 @@ fn cli(g: &Given) -> Result<bool> {
     use ::custom_build::config::CLI;
     match g.words().as_slice() {
         ["group", "create", name @ ..] if !name.is_empty() => {
-            let r = g.node.post("/api/group", json!({ "name": name.join(" ") }))?;
+            let r = g.api.post("/api/group", json!({ "name": name.join(" ") }))?;
             println!("Created {} ({}).", name.join(" "), r["group"].as_str().unwrap_or(""));
         }
         ["group", "invite", group, user] => {
-            g.node.post("/api/invite", json!({ "group": group, "user": user, "role": if g.has("admin") { "admin" } else { "member" } }))?;
+            g.api.post("/api/invite", json!({ "group": group, "user": user, "role": if g.has("admin") { "admin" } else { "member" } }))?;
             println!("Invited {user}; they join with {CLI} group accept {group}.");
         }
         ["group", "accept", group] => {
-            g.node.post("/api/accept", json!({ "group": group }))?;
+            g.api.post("/api/accept", json!({ "group": group }))?;
             println!("You're in {group}.");
         }
         ["group", "remove", group, user] => {
-            g.node.post("/api/member", json!({ "group": group, "user": user, "role": null }))?;
+            g.api.post("/api/member", json!({ "group": group, "user": user, "role": null }))?;
             println!("{user} is no longer in {group}.");
         }
         _ => return Ok(false),

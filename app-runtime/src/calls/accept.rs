@@ -5,7 +5,7 @@ use super::*;
 
 impl Host {
     /// Runs a call another device, `remote`, asked for. One passed on with keys runs on those keys alone, never this
-    /// device's own, and only in scopes that node runs. Any other runs only from a client device of its caller, as that
+    /// device's own, and only in scopes that app runtime runs. Any other runs only from a client device of its caller, as that
     /// device's own: only then are this device's keys used, and only for its own user, whose device that is.
     pub(in crate) async fn accept_call(&self, remote: Key, request: &Value) -> Reply {
         match self.accept(remote, request) {
@@ -39,7 +39,7 @@ impl Host {
     }
 
     /// What a service may have run, as `service::limited` says: only its own app, in its user's own scope, here on
-    /// a node of that user's own, whose keys it is run with until grants land, calling no other app. A hacked
+    /// an app runtime of that user's own, whose keys it is run with until grants land, calling no other app. A hacked
     /// service gets no more than its own app's tools for its own user.
     pub(super) fn accept_service(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let me = self.check_caller(remote, request)?;
@@ -61,12 +61,12 @@ impl Host {
         }
         let mut req = call_in(request)?;
         let (own, serves) = self.with(|i| Ok((!passed && i.r.db().client(&remote)?.is_some_and(|c| c.user == me.user), i.r.db().serves(&remote, &me.user)?)))?;
-        // Only a node that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
+        // Only an app runtime that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
         if !serves {
             (req.from, req.depth) = (None, 0);
         }
         // A service that runs as this device's own user (Shell, say) runs only for a device of theirs, never for a
-        // call a node passes on.
+        // call an app runtime passes on.
         let resolved = self.resolve(req.clone());
         ensure!(own || resolved.service.is_none(), "{} runs only for its user's own devices", resolved.app);
         if !own && req.service.is_none() {
@@ -85,8 +85,8 @@ impl Host {
         Ok((req, me))
     }
 
-    /// The keys a call `from` another node passed on for `user` was handed (`sealed`): sealed here for
-    /// `from`'s key, of the scopes the call names alone, every one of which `user` may use and, for a node on a machine
+    /// The keys a call `from` another app runtime passed on for `user` was handed (`sealed`): sealed here for
+    /// `from`'s key, of the scopes the call names alone, every one of which `user` may use and, for an app runtime on a computer
     /// (`machine`), `from` runs. → its credential.
     pub(crate) fn take_passed(&self, from: &Key, user: &str, call: &Value, sealed: &str, machine: bool) -> Result<Credential> {
         let service = self.resolve(call_in(call)?).service.is_some();
@@ -102,12 +102,12 @@ impl Host {
     }
 
     /// Who a call another device passed on is for: only the user whose client device `remote` is (or whose client
-    /// device's app runtime it is), asking itself; a node passing on keys it was handed, as itself; a user's service
+    /// device's app runtime it is), asking itself; an app runtime passing on keys it was handed, as itself; a user's service
     /// asks as them, as itself.
     pub(in crate) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
-        // Passed on by another node, the keys it was handed with it, which `take_passed` checks.
+        // Passed on by another app runtime, the keys it was handed with it, which `take_passed` checks.
         let passed = request["keys"].is_string();
         self.with(|i| {
             let m = i.r.db();
@@ -125,7 +125,7 @@ impl Host {
     }
 }
 
-/// The call in a request another node sent: what's left once who asks and the keys and files it brings are taken off.
+/// The call in a request another app runtime sent: what's left once who asks and the keys and files it brings are taken off.
 pub(super) fn call_in(request: &Value) -> Result<CallRequest> {
     let mut call = request.as_object().cloned().unwrap_or_default();
     for envelope in ["me", "keys", "blobs"] {

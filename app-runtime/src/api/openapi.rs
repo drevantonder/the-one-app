@@ -1,4 +1,4 @@
-//! The node's route for its API's document, `/api/openapi.json`, made as every host makes it (`api::openapi`).
+//! The app runtime's route for its API's document, `/api/openapi.json`, made as every host makes it (`api::openapi`).
 
 use axum::extract::State;
 use axum::response::Response;

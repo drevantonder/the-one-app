@@ -30,13 +30,13 @@
 //
 // `POST /relay/computes` answers a request signed by a key on the list, or by a session's key with its certificate
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
-// endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; `online`, those
-// of them with a socket open here now, which a client races first and every node shows as online; `seen`, when each
+// endpoints' keys, oned on Cloudflare's among them, in no order: a new client's first app runtimes to ask; `online`, those
+// of them with a socket open here now, which a client races first and every app runtime shows as online; `seen`, when each
 // key on the list was last seen (ms), by its socket opening or closing or a Worker asking `allowed` of it; and
 // `versions`, each key's that said one, for every client to show; and `workers`, once a deploy has said it, what the
 // Workers are on (`{ from, workers, web, node }`: the device they were last deployed from, which an ask to deploy them
 // again is left for, and each part's version in a version's words). 403 is only for a key that isn't let in; a request
-// that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows. A device's own request
+// that's wrong, or signed by a clock that's off, is 400, so a client keeps the app runtimes it knows. A device's own request
 // that says it reads less of who's who than this build (`reads`, protocol.js's `READS`; an older build's says
 // nothing) is 426, telling it to update. A browser's session runs the code the address serves, the newest, so it isn't
 // asked. A device's own request can carry `version` (`<commit> <committed> <target>`), kept here, and it's answered
@@ -63,12 +63,12 @@
 // - `{ moved: [scope] }`: that the device just wrote to each scope (a scope's name, as `global` or `user:<id>`), by any key
 //   on the list, as it tells the devices that hold them: each scope's count goes up by one. `computes` answers with
 //   `moved`, each scope's count, for a device to read from the bucket only what moved since it last looked. It's only
-//   a hint: the bucket is the truth, and a device reads all of it now and then anyway. The Cloudflare node, which tells
+//   a hint: the bucket is the truth, and a device reads all of it now and then anyway. oned on Cloudflare, which tells
 //   no device, counts its own by its binding (`CloudflareNode.moved`).
 // - `{ cloudflare: true }`: the same, to deploy the Workers again, left for the device they were last deployed from (`workers.from`),
 //   which checks that the asker is an admin.
 //
-// One endpoint isn't a socket: the Cloudflare node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
+// One endpoint isn't a socket: oned on Cloudflare (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
 // comes back by RPC (`fromNode`, on the `CloudflareNode` entrypoint, which only its Worker binds) and goes out as from
 // it. It's one of the network's endpoints, as compute.
@@ -272,7 +272,7 @@ export class CloudflareNode extends WorkerEntrypoint {
     return answer(relay(this.env).fromNode(items));
   }
 
-  /// The Cloudflare node's writes, which it tells no device of: as a device's `{ moved }` tell.
+  /// oned on Cloudflare's writes, which it tells no device of: as a device's `{ moved }` tell.
   moved(scopes) {
     return answer(list(this.env).move(scopes));
   }
@@ -471,7 +471,7 @@ export class Relay extends DurableObject {
     });
   }
 
-  /// Datagrams the Cloudflare node sends, `[dst, segment size, contents]` each, passed on as from it: → the keys of
+  /// Datagrams oned on Cloudflare sends, `[dst, segment size, contents]` each, passed on as from it: → the keys of
   /// those not here, so it stops waiting for them.
   fromNode(items) {
     if (!this.env.BOUND || !Array.isArray(items)) return [];
@@ -1020,7 +1020,7 @@ export class List extends DurableObject {
   }
 
   /// Takes `key` out, with the pairing codes it made, and has the Relay close its sockets and binding. Only a tell naming a
-  /// key takes it out: an admin's node names each device the signed steps removed (`Node::tell_removed`), so the devices
+  /// key takes it out: an admin's app runtime names each device the signed steps removed (`Node::tell_removed`), so the devices
   /// it let in stay.
   remove(key) {
     this.sql.exec("DELETE FROM keys WHERE key = ?", key);
