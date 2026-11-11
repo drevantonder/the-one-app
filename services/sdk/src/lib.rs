@@ -1,8 +1,8 @@
-//! A service in Rust: a program of its own, which its device's oned starts (`oned <name>`, src/services/part.rs) and tells
+//! A service in Rust: a program of its own, which its device's oned starts (`oned <name>`, src/oned/part.rs) and tells
 //! where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`) and where its data goes (`<NAME>_DATA`).
 //! It registers, long-polls for calls and answers each on a thread of its own, registering again whenever it's
-//! forgotten, until oned stops it. What it says to its node, and the node to it, is `service/wire.json`, which WhatsApp's service
-//! in Go and the Mac's in Swift (`service/swift`) say as well; tests/contracts.rs holds them to it.
+//! forgotten, until oned stops it. What it says to its node, and the node to it, is `services/sdk/wire.json`, which WhatsApp's service
+//! in Go and the Mac's in Swift (`services/sdk/swift`) say as well; tests/contracts.rs holds them to it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -59,7 +59,7 @@ impl Answer {
     }
 }
 
-/// `refused`, in `service/wire.json` and custom-build/src/protocol.rs's `code`.
+/// `refused`, in `services/sdk/wire.json` and custom-build/src/protocol.rs's `code`.
 const REFUSED: &str = "refused";
 
 /// A service's answer that it can't serve this call here (a model it lacks), so the call goes on to the next device.

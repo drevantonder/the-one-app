@@ -2,7 +2,7 @@
 # Builds what a Mac takes from the record, signed, in client/native/target/mac/built (`<cli> publish-mac` publishes it):
 # the window, zipped (app.zip), which carries no background program; the program (<cli>, which runs as oned and onet);
 # each service in Rust (<cli>-<name>); and each in Swift, an app of its own holding its own permission, zipped
-# (<cli>-<name>.zip, service/mac-helpers.sh). With --release, the window is notarized too. CONFIG=path/to/config.toml
+# (<cli>-<name>.zip, services/sdk/mac-helpers.sh). With --release, the window is notarized too. CONFIG=path/to/config.toml
 # builds another custom build. Nothing is installed: a Mac takes what's published with `<cli> update`.
 set -euo pipefail
 . "$(dirname "$0")/../apple.sh"
@@ -103,9 +103,9 @@ done
 # to this. It goes once no Mac runs one.
 cp "$out/$CONFIG_CLI" "$app/Contents/MacOS/$CONFIG_CLI"
 keychain "${sign[@]}" "$app" || { echo "couldn't sign the app as ${identity:-ad hoc}"; exit 1; }
-# Its Mac services in Swift, each a helper app of its own holding its own permission (service/mac-helpers.sh), which
+# Its Mac services in Swift, each a helper app of its own holding its own permission (services/sdk/mac-helpers.sh), which
 # oned unpacks and runs where it keeps them (oned::helper).
-keychain env CONFIG="$config" SIGN="$identity" ICON="$app/Contents/Resources/AppIcon.icns" "$root/service/mac-helpers.sh" || { echo "couldn't build the Mac's helper apps"; exit 1; }
+keychain env CONFIG="$config" SIGN="$identity" ICON="$app/Contents/Resources/AppIcon.icns" "$root/services/sdk/mac-helpers.sh" || { echo "couldn't build the Mac's helper apps"; exit 1; }
 for helper in "$root"/target/mac-helpers/*.app; do
 	[ -e "$helper" ] || continue
 	program=$(basename "$(ls -d "$helper/Contents/MacOS/$CONFIG_CLI"-*)")

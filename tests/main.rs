@@ -8,6 +8,7 @@ mod e2e;
 mod map;
 #[path = "../apps/repos/tests/repos.rs"]
 mod repos;
+#[path = "../services/tests/sandbox.rs"]
 mod sandbox;
 mod sealed;
 mod sim;

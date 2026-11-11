@@ -6,7 +6,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-one-service = { path = "../../../service" }
+one-service = { path = "../../../services/sdk" }
 anyhow = "1"
 data-encoding = "2"
 # Providers give reset times as RFC 3339 timestamps.

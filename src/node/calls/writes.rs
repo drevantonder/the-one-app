@@ -150,7 +150,7 @@ pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope
         Append::Service { device, name, on, scope } => {
             let scope = match scope {
                 Some(s) => Some(Scope::parse_for(&s, &me.user)?),
-                None if on => added_scope(i, &me.user, &name)?,
+                None if on => ::services::added_scope(&::scope::read::Read { replica: &i.r, states: &i.views, scopes: &i.scope_dbs }, &me.user, &name)?,
                 None => None,
             };
             (Scope::Global, scope::settings::service(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)

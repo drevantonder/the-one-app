@@ -30,6 +30,7 @@ api = { path = "../api" }
 groups = { path = "../groups" }
 vault = { path = "../vault" }
 devices = { path = "../devices" }
+services = { path = "../services" }
 device-logs = { path = "../device-logs" }
 deploy = { path = "../deploy" }
 notifications = { path = "../notifications" }

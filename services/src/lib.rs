@@ -1,23 +1,27 @@
-//! Device services: native code a device runs beside its node, for what apps can't reach from workerd (a shell, local
-//! models, WhatsApp's linked phone, a Mac's own apps). A service serves whom who's who says; its app, and only its app,
-//! calls it with `ctx.services`. Each is a program that registers over a loopback and long-polls for calls: an app's
-//! own (`apps/<name>/service/`, in Rust on the `service` crate or in Go), or Swift in the Mac app. The core never names
-//! one. Each runs as a part of its device's oned with a key of its own (`part`), in its sandbox (`sandbox`), and is
-//! reached only through its device's app runtime, which carries its asks sealed (`carried`).
+//! Device services: native code a device runs beside its app runtime, for what apps can't reach from workerd (a shell,
+//! local models, WhatsApp's linked phone, a Mac's own apps). A service serves whom who's who says; its app, and only its
+//! app, calls it with `ctx.services`. Each is a program that registers over a loopback and long-polls for calls
+//! (`Registry`): an app's own (`apps/<name>/service/`, in Rust on the SDK, `sdk/`, or in Go), or Swift in the Mac app.
+//! The core never names one. Each runs as a part of its device's oned with a key of its own (oned's `part`), in its
+//! sandbox (`sandbox`), and is reached only through its device's app runtime, which carries its asks sealed
+//! (`carried`); which run where is each device's switches (`Wanted`, runtime/), and `cli` its commands.
 
 pub mod carried;
-pub mod part;
+pub mod cli;
 pub mod sandbox;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
+use ::scope::read::Read;
+use ::scope::scopes::{self, Scope};
 use ::scope::state::Me;
 
 /// What a service's call gives back: its answer, and blobs the caller's scope keeps.
@@ -354,7 +358,76 @@ impl Registry {
     }
 }
 
-pub(crate) fn refused(code: axum::http::StatusCode, why: impl std::fmt::Display) -> axum::response::Response {
+/// The network a service is in, as its device's oned gives it: its address, where its relay and auth are, its root,
+/// which its first freeze names, and the user whose service it is.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Network {
+    pub address: String,
+    pub root: String,
+    pub user: String,
+}
+
+impl Network {
+    /// Where oned keeps it, in the service's folder.
+    pub fn path(dir: &Path) -> PathBuf {
+        dir.join("network.json")
+    }
+
+    /// Gives it to the service kept in `dir`, the first time: a service is another network's or user's only once
+    /// its folder goes.
+    pub fn give(&self, dir: &Path) -> Result<()> {
+        std::fs::create_dir_all(dir)?;
+        match std::fs::read(Self::path(dir)).ok().map(|b| serde_json::from_slice::<Network>(&b)).transpose()? {
+            Some(kept) => ensure!(kept == *self, "{} is someone else's, or in another network ({}): remove it to move it", dir.display(), kept.address),
+            None => write_private(&Self::path(dir), &serde_json::to_vec_pretty(self)?)?,
+        }
+        Ok(())
+    }
+}
+
+/// Where a service keeps its key, its network and what it knows of it.
+pub fn folder(name: &str) -> PathBuf {
+    platform::home().join("services").join(name)
+}
+
+/// Writes a file only this user reads, whole or not at all.
+pub fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, bytes)?;
+    platform::os::set_mode(&tmp, 0o600)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// What a computer's oned keeps its parts by (`keep_parts`), as its device's app runtime answers it (`GET /api/services`,
+/// through its onet): the network they're in, which are switched on there (each with when) and off, and whether to
+/// erase what the device keeps.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Wanted {
+    pub network: Network,
+    /// The device's name, as what a part says of itself names it.
+    pub device: String,
+    pub on: BTreeMap<String, u64>,
+    pub off: BTreeSet<String>,
+    pub erase: bool,
+}
+
+/// The scope whose added app `name` is, as `user` sees it, for a service switched on with none said: their own, if
+/// it's added there, then everyone's, then one of their groups'.
+pub fn added_scope(r: &Read, user: &str, name: &str) -> Result<Option<Scope>> {
+    let added = |s: &Scope| r.state(s).is_some_and(|v| v.added.contains(name));
+    let own = Scope::User(user.to_string());
+    let db = r.db();
+    let mut groups = Vec::new();
+    for g in db.groups()? {
+        if db.group_role(user, &g.id)?.is_some() {
+            groups.push(Scope::Group(g.id));
+        }
+    }
+    Ok([own, Scope::Global].into_iter().chain(groups).find(|s| added(s) && db.may(user, "add-apps", &scopes::object(s))))
+}
+
+pub fn refused(code: axum::http::StatusCode, why: impl std::fmt::Display) -> axum::response::Response {
     use axum::response::IntoResponse;
     (code, axum::Json(json!({ "error": why.to_string() }))).into_response()
 }

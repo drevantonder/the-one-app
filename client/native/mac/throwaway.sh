@@ -63,7 +63,7 @@ PLIST
 keychain codesign --force --sign "${identity:--}" "$app" >/dev/null
 ditto -c -k --keepParent "$app" "$publish/app.zip"
 # Its helper apps, as a real Mac's are, which its oned unpacks and runs as it does a real one's.
-keychain env SIGN="$identity" "$root/service/mac-helpers.sh" >/dev/null
+keychain env SIGN="$identity" "$root/services/sdk/mac-helpers.sh" >/dev/null
 for helper in "$root"/target/mac-helpers/*.app; do
 	[ -e "$helper" ] || continue
 	program=$(basename "$(ls -d "$helper/Contents/MacOS/$CONFIG_CLI"-*)")

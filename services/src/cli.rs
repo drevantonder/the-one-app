@@ -56,7 +56,7 @@ pub fn commands() -> Command {
                     }
                 }
                 // What lets this machine's user start services in their sandbox, for root to run once: `| sudo sh`.
-                ["services", "sandbox"] => print!("{}", crate::services::sandbox::setup_script()?),
+                ["services", "sandbox"] => print!("{}", crate::sandbox::setup_script()?),
                 ["services", how @ ("on" | "off"), name] => {
                     let names = known(g.node)?;
                     if !names.contains(*name) {

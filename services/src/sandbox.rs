@@ -1,6 +1,6 @@
 //! A service's sandbox: what its program may reach, as its app declares (`service: { network, user }` in its
 //! app.js, `Declared`), and how this machine holds it to that (`How`). The service's part (`oned <name>`,
-//! src/services/part.rs) holds its key and starts its program; the program never sees the key.
+//! src/oned/part.rs) holds its key and starts its program; the program never sees the key.
 //!
 //! - **Linux**, a service not run as the user: a unit of the template `<cli>-service@.service`, which `<cli> services
 //!   sandbox` writes once as root (install.sh runs it) with a polkit rule letting the node's user start and stop
@@ -111,7 +111,7 @@ pub fn template() -> PathBuf {
 /// The unit's instance for the service `name`: a name that's also its OS user's, unique to its folder, so a
 /// throwaway network's never shares one with the real one's.
 pub fn instance(name: &str) -> String {
-    let hash = blake3::hash(crate::services::part::folder(name).to_string_lossy().as_bytes()).to_hex();
+    let hash = blake3::hash(crate::folder(name).to_string_lossy().as_bytes()).to_hex();
     let long = format!("{CLI}-{name}-{}", &hash[..8]);
     if long.len() <= 31 { long } else { format!("{CLI}-{}", &hash[..16]) }
 }
@@ -340,7 +340,7 @@ pub fn launch(dir: &Path) -> Result<()> {
     let proxy = format!("http://{at}");
     let mut command = std::process::Command::new(dir.join(PROGRAM));
     command
-        .envs(crate::services::program_env(&spec.name, at, dir, &data))
+        .envs(crate::program_env(&spec.name, at, dir, &data))
         .env("TMPDIR", std::env::temp_dir())
         .current_dir(&data);
     for var in ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {

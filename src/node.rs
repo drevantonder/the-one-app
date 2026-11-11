@@ -58,7 +58,6 @@ pub use calls::Grant;
 use calls::{Granted, Reply};
 use ::deploy::build::built_in_bundle;
 use scheduled::switch_entry;
-use services::added_scope;
 pub use ::api::handed::Needs;
 pub mod services;
 mod app_schedules;
@@ -231,9 +230,9 @@ pub struct Inner {
     /// for a service that's starting.
     heard: tokio::sync::Notify,
     /// This device's parts, registered at its app runtime, which carries their asks to them.
-    sockets: crate::services::carried::Parts,
+    sockets: ::services::carried::Parts,
     /// The asks this device's parts made of it, so none is taken twice.
-    part_asks: crate::services::carried::Once,
+    part_asks: ::services::carried::Once,
     /// What the record at the network's address last said (`crate::latest`), and why it couldn't take it, if so.
     latest: Mutex<crate::latest::Latest>,
     bundles: Mutex<BTreeMap<String, String>>,
@@ -609,7 +608,6 @@ impl Node {
                 self.close_idle();
                 self.renew_app_schedules("");
                 self.start_owed_keys();
-                self.name_services_scopes().await;
                 // The wall clock, which runs on while a machine sleeps, as `Instant` doesn't everywhere.
                 // A runtime its device hasn't listed yet reads who's who each tick, to run things from when it has.
                 let due = |at: Option<SystemTime>, every| at.is_none_or(|at| at.elapsed().unwrap_or_default() >= every) || !self.ready();

@@ -6,7 +6,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-one-service = { path = "../../../service" }
+one-service = { path = "../../../services/sdk" }
 anyhow = "1"
 # A Chrome profile is kept sealed, and Chrome's own cookies are read, with AES (profiles.rs, cookies.rs).
 aes-gcm = "0.10"

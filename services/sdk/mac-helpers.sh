@@ -1,10 +1,10 @@
 #!/bin/bash
-# Builds each Mac service in Swift (the apps/<name>/service/ with an Info.plist, on service/swift) into a helper app of its own,
+# Builds each Mac service in Swift (the apps/<name>/service/ with an Info.plist, on services/sdk/swift) into a helper app of its own,
 # in target/mac-helpers: "<its CFBundleName> — <the app's name>.app", id app.<cli>.mac.<name>, with its own Info.plist
 # and entitlements, signed with the identity SIGN names (ad hoc without), so macOS asks for and records its permission
 # under its own name. client/native/mac/build.sh zips each for the record, and oned unpacks and runs it (oned::helper). CONFIG names another custom build's config.toml; ICON, an .icns for them.
 set -euo pipefail
-root=$(cd "$(dirname "$0")/.." && pwd)
+root=$(cd "$(dirname "$0")/../.." && pwd)
 config=${CONFIG:-$root/config.toml}
 field() { sed -n "/^\[/q; s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
 name=$(field name) cli=$(field cli)
@@ -26,7 +26,7 @@ import PackageDescription
 let package = Package(
     name: "$service",
     platforms: [.macOS("26.0")],
-    dependencies: [.package(path: "../../../service/swift")],
+    dependencies: [.package(path: "../../../services/sdk/swift")],
     targets: [.executableTarget(name: "$service", dependencies: [.product(name: "Helper", package: "swift")], path: ".", exclude: ["Package.swift", "Info.plist", "Helper.entitlements"])]
 )
 PACKAGE

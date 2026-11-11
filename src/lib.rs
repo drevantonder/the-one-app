@@ -46,8 +46,6 @@ pub mod update;
 #[cfg(feature = "node")]
 pub mod schedules;
 #[cfg(feature = "node")]
-pub mod services;
-#[cfg(feature = "node")]
 pub mod mode;
 #[cfg(feature = "node")]
 pub mod oned;

@@ -3186,6 +3186,8 @@ dependencies = [
  "scope",
  "serde",
  "serde_json",
+ "services",
+ "services-runtime",
  "sha2 0.11.1",
  "ssh-key",
  "tokio",
@@ -3296,6 +3298,7 @@ dependencies = [
  "rusqlite",
  "scope",
  "serde_json",
+ "services",
  "sha2 0.11.1",
  "ssh-key",
  "tokio",
@@ -4555,6 +4558,46 @@ checksum = "66cf8fedced2fcf12406bcb34223dffb92eaf34908ede12fed414c82b7f00b3e"
 dependencies = [
  "base16ct 1.0.0",
  "serde",
+]
+
+[[package]]
+name = "services"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "axum",
+ "blake3",
+ "custom-build",
+ "data-encoding",
+ "ed25519-dalek 3.0.0",
+ "hyper",
+ "hyper-util",
+ "key",
+ "libc",
+ "platform",
+ "scope",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "services-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "axum",
+ "custom-build",
+ "devices-runtime",
+ "key",
+ "scope",
+ "serde",
+ "serde_json",
+ "services",
+ "tracing",
 ]
 
 [[package]]

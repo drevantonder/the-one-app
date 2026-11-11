@@ -3,7 +3,7 @@
 //! loopback) and passes back its sealed answer, reading neither; and a part's own asks (a call, what insights keeps)
 //! come to this device's runtime, signed by it.
 
-use crate::services::carried::{self, Carried};
+use ::services::carried::{self, Carried};
 
 use super::*;
 

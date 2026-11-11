@@ -1,5 +1,5 @@
 // swift-tools-version: 6.0
-// What every Mac service in Swift (apps/<name>/service/) is built on, as `service/` is for those in Rust: a helper app
+// What every Mac service in Swift (apps/<name>/service/) is built on, as `services/sdk/` is for those in Rust: a helper app
 // of its own, which holds its own macOS permission, registering with its oned and answering calls.
 import PackageDescription
 

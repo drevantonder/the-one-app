@@ -1350,8 +1350,8 @@ mod tests {
     /// nor call as anyone else.
     #[test]
     fn a_carried_ask_is_taken_once_from_whoever_signed_it_and_only_as_their_own_user() -> anyhow::Result<()> {
-        use one::services::carried;
-        use one::services::part::may_call;
+        use services::carried;
+        use one::oned::part::may_call;
         let (mac, mut net) = setup();
         let (bobs, linux, bobs_linux, part) = (Dev::new(3), Dev::new(4), Dev::new(6), Dev::new(8));
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));

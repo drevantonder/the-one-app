@@ -6,7 +6,7 @@
 //! replaces its program and has it exit, for its supervisor to start it again on the new one.
 //!
 //! It runs the device's services (`keep_parts`), asking its onet what it needs (`/api/services`, which onet passes to its
-//! app runtime): each a process of oned's own (`oned <name>`, `service::run`) with its own key, which it lists as its
+//! app runtime): each a process of oned's own (`oned <name>`, `part::run`) with its own key, which it lists as its
 //! device's, reached only through the device's app runtime, whose loopback address oned gives it. Each is on while the device's latest `service` step for it says so; with none, off; and each is started
 //! again when it stops, the rest left running, whatever onet and the runtime do. Only the device's user writes that step
 //! (its switch in Settings' Devices), and the services start and stop as it changes. Each keeps its own key in its folder
@@ -28,6 +28,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+
+use ::services::Wanted;
+
+pub mod part;
 
 use ::custom_build::config::{CLI, NAME};
 
@@ -60,7 +64,7 @@ pub fn carried(name: &str) -> Option<PathBuf> {
     (path.exists() && path != fetched(name)).then_some(path)
 }
 
-/// Where a Mac service in Swift runs from: an app of its own (`<Title> — <App>.app`, service/mac-helpers.sh), as the
+/// Where a Mac service in Swift runs from: an app of its own (`<Title> — <App>.app`, services/sdk/mac-helpers.sh), as the
 /// record publishes it zipped and oned unpacks it (`put`), in this device's home. macOS asks for and records its
 /// permissions under its own name, and keeps them across builds, since they're the helper's by its id and team, not
 /// where it is. Its program, once it's here.
@@ -90,25 +94,12 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     let files = dirs.iter().flat_map(std::fs::read_dir).flatten().flatten().map(|e| e.file_name().to_string_lossy().to_string());
     for file in files.chain(helpers().iter().filter_map(|p| Some(p.file_name()?.to_string_lossy().to_string()))) {
         let Some(name) = file.strip_suffix(std::env::consts::EXE_SUFFIX).and_then(|f| f.strip_prefix(&prefix)).filter(|n| ::scope::scopes::valid_app_name(n)) else { continue };
-        if on.contains_key(name) || crate::services::part::folder(name).is_dir() {
+        if on.contains_key(name) || ::services::folder(name).is_dir() {
             names.insert(name.to_string());
         }
     }
     names.extend(released.iter().cloned());
     names
-}
-
-/// What a computer's oned keeps its parts by (`keep_parts`), as its device's app runtime answers it (`GET /api/services`,
-/// through its onet): the network they're in, which are switched on there (each with when) and off, and whether to
-/// erase what the device keeps.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Wanted {
-    pub network: crate::services::part::Network,
-    /// The device's name, as what a part says of itself names it.
-    pub device: String,
-    pub on: BTreeMap<String, u64>,
-    pub off: BTreeSet<String>,
-    pub erase: bool,
 }
 
 /// What a device runs of a service on its platform, as its app runtime says (`GET /api/services/builds`).
@@ -215,7 +206,7 @@ impl Onet {
 /// What's put in a service's folder of the build its program is: its blob, and the release's commit time, or none for
 /// the build a deploy named (`deploy <blob>`).
 fn taken(name: &str) -> (Option<u64>, String) {
-    let kept = std::fs::read_to_string(crate::services::part::folder(name).join("release")).unwrap_or_default();
+    let kept = std::fs::read_to_string(::services::folder(name).join("release")).unwrap_or_default();
     let (committed, blob) = kept.trim().split_once(' ').unwrap_or(("0", ""));
     (committed.parse().ok(), blob.to_string())
 }
@@ -239,7 +230,7 @@ fn put(onet: &Onet, address: &str, name: &str, build: &Build) -> anyhow::Result<
         platform::os::set_mode(&new, 0o755)?;
         std::fs::rename(&new, &path)?;
     }
-    let folder = crate::services::part::folder(name);
+    let folder = ::services::folder(name);
     std::fs::create_dir_all(&folder)?;
     std::fs::write(folder.join("release"), &kept)?;
     tracing::info!("oned put {name} {kept} in place");
@@ -303,8 +294,8 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
         // When each part on was switched on: switched on again (Try Again), it starts afresh.
         let mut switched: BTreeMap<String, u64> = BTreeMap::new();
         // What each service's app declares it may reach, looked at with the builds; and what each was started with.
-        let mut declared: BTreeMap<String, Option<crate::services::sandbox::Declared>> = BTreeMap::new();
-        let mut started_with: BTreeMap<String, Option<crate::services::sandbox::Declared>> = BTreeMap::new();
+        let mut declared: BTreeMap<String, Option<::services::sandbox::Declared>> = BTreeMap::new();
+        let mut started_with: BTreeMap<String, Option<::services::sandbox::Declared>> = BTreeMap::new();
         // What onet was last told, and when.
         let mut told: Option<(Value, Instant)> = None;
         let say = |name: &str, now: Now| said.lock().unwrap().say(name, now);
@@ -411,7 +402,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                         declared.insert(name.clone(), d);
                     }
                     let declares = declared.get(name).cloned().flatten();
-                    let resandbox = said.lock().unwrap().held.get(name).is_some_and(|h| h.sandbox.is_some() && crate::services::sandbox::unsandboxed(declares.as_ref(), device).is_none());
+                    let resandbox = said.lock().unwrap().held.get(name).is_some_and(|h| h.sandbox.is_some() && ::services::sandbox::unsandboxed(declares.as_ref(), device).is_none());
                     if running.contains_key(name) && (resandbox || started_with.get(name).is_some_and(|d| *d != declares)) && let Some((child, _)) = running.remove(name) {
                         tracing::info!("{name}'s app declares something else of it, or this machine can sandbox it now: oned starts it again");
                         stop(name, child);
@@ -432,7 +423,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                         match start(&wanted.network, name, declares.as_ref(), &runtime) {
                             Ok(child) => {
                                 tracing::info!("oned started {name}");
-                                let held = Held { sandbox: crate::services::sandbox::unsandboxed(declares.as_ref(), device), user: declares.as_ref().is_some_and(|d| d.user) };
+                                let held = Held { sandbox: ::services::sandbox::unsandboxed(declares.as_ref(), device), user: declares.as_ref().is_some_and(|d| d.user) };
                                 said.lock().unwrap().held.insert(name.clone(), held);
                                 running.insert(name.clone(), (child, Instant::now()));
                                 // It runs now, so that its app said nothing yet no longer holds.
@@ -471,7 +462,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
             // start in its sandbox says why, and one running without one says so.
             for (name, (_, started)) in &running {
                 let now = said.lock().unwrap().now(name);
-                if let Ok(why) = std::fs::read_to_string(crate::services::part::folder(name).join(crate::services::part::PROBLEM)) {
+                if let Ok(why) = std::fs::read_to_string(::services::folder(name).join(part::PROBLEM)) {
                     say(name, Now { doing: None, problem: Some(why) });
                     continue;
                 }
@@ -490,7 +481,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                 }
             }
             for name in running.keys() {
-                let Ok(asked) = std::fs::read_to_string(crate::services::part::folder(name).join("ask")) else { continue };
+                let Ok(asked) = std::fs::read_to_string(::services::folder(name).join("ask")) else { continue };
                 if listed.get(name).is_some_and(|(a, at)| *a == asked && at.elapsed() < Duration::from_secs(60)) {
                     continue;
                 }
@@ -516,13 +507,13 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
 }
 
 /// Starts a part, given the network it's in, what its app declares it may reach, and its device's app runtime's address.
-fn start(network: &crate::services::part::Network, name: &str, declared: Option<&crate::services::sandbox::Declared>, runtime: &str) -> anyhow::Result<std::process::Child> {
-    let folder = crate::services::part::folder(name);
+fn start(network: &::services::Network, name: &str, declared: Option<&::services::sandbox::Declared>, runtime: &str) -> anyhow::Result<std::process::Child> {
+    let folder = ::services::folder(name);
     network.give(&folder)?;
-    let _ = std::fs::remove_file(folder.join(crate::services::part::PROBLEM));
+    let _ = std::fs::remove_file(folder.join(part::PROBLEM));
     match declared {
-        Some(d) => std::fs::write(folder.join(crate::services::part::DECLARED), serde_json::to_vec(d)?)?,
-        None => drop(std::fs::remove_file(folder.join(crate::services::part::DECLARED))),
+        Some(d) => std::fs::write(folder.join(part::DECLARED), serde_json::to_vec(d)?)?,
+        None => drop(std::fs::remove_file(folder.join(part::DECLARED))),
     }
     // Its stdin is a pipe only this keeps the end of: the part ends when this does, however (`part::run`).
     Ok(command(&[name, &format!("--runtime={runtime}")])?.stdin(std::process::Stdio::piped()).spawn()?)
@@ -586,7 +577,7 @@ pub fn run(args: &[String]) -> Result<()> {
         ([], ["--version"]) => println!("{}", crate::release::Version::this().json()),
         ([], ["--help"]) => println!("{}", usage()),
         #[cfg(target_os = "linux")]
-        ([], [_]) if let Some(dir) = flag("--sandboxed=") => return crate::services::sandbox::launch(std::path::Path::new(dir)),
+        ([], [_]) if let Some(dir) = flag("--sandboxed=") => return ::services::sandbox::launch(std::path::Path::new(dir)),
         // A device's node from before oned started onet starts the build it installed to take over from it, so: this
         // exits at once, and that node, which can't hand over, exits for its supervisor to start this build afresh.
         ([], [_]) if flag("--handoff=").is_some() => {}
@@ -595,7 +586,7 @@ pub fn run(args: &[String]) -> Result<()> {
             return serve();
         }
         ([::scope::scopes::APPS_PART], [_]) if let Some(listen) = flag("--listen=") => return crate::node::serve(listen),
-        ([name], [_]) if let Some(runtime) = flag("--runtime=") => return crate::services::part::run(name, runtime),
+        ([name], [_]) if let Some(runtime) = flag("--runtime=") => return part::run(name, runtime),
         _ => bail!("{}", usage()),
     }
     Ok(())

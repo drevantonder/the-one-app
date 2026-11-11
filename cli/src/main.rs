@@ -16,7 +16,7 @@ use api::{Reader, SENDS};
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
 fn commands() -> Vec<Command> {
-    use one::node::{apps, blobs, services, storage};
+    use one::node::{apps, blobs, storage};
     vec![
         // First: it must run with nothing else of this program working.
         one::update::cli::commands(),

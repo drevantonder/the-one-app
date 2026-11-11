@@ -430,18 +430,18 @@ fn insights_on_the_screen_and_for_agents_agree_on_a_p95() {
     assert_eq!(worker, json!(one::insights::BOUNDS), "and in the telemetry Worker");
 }
 
-/// A service answers its node in the words of `service/wire.json`, in whatever language it's written: started as its
+/// A service answers its node in the words of `services/sdk/wire.json`, in whatever language it's written: started as its
 /// endpoint starts it, registering what's about its machine, taking calls and answering with `ok`, `error` or
 /// `elsewhere`, registering again when its endpoint forgets it, always with the token in its home. What it talks to is
-/// the endpoint's own registry and routes (`one::services::Registry`). Rust's Shell and Go's WhatsApp run as programs;
-/// the Swift helpers are held to the same file by `swift test` in `service/swift`, which needs a Mac.
+/// the endpoint's own registry and routes (`services::Registry`). Rust's Shell and Go's WhatsApp run as programs;
+/// the Swift helpers are held to the same file by `swift test` in `services/sdk/swift`, which needs a Mac.
 mod service_protocol {
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
     use std::sync::Arc;
     use std::time::Duration;
 
-    use one::services::{Call, Elsewhere, Registry};
+    use services::{Call, Elsewhere, Registry};
     use ::scope::state::Me;
     use serde_json::{Value, json};
 
@@ -479,7 +479,7 @@ mod service_protocol {
     }
 
     fn wire() -> Value {
-        serde_json::from_slice(&std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../service/wire.json")).unwrap()).unwrap()
+        serde_json::from_slice(&std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../services/sdk/wire.json")).unwrap()).unwrap()
     }
 
     /// A service's program, its way of being asked, and what each answer to the calls below should be.
@@ -546,7 +546,7 @@ mod service_protocol {
             let data = home.join("data");
             let _running = Running(
                 Command::new(&case.program)
-                    .envs(one::services::program_env(name, addr, &home, &data))
+                    .envs(services::program_env(name, addr, &home, &data))
                     .env("HOME", &home)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
@@ -564,7 +564,7 @@ mod service_protocol {
             assert_eq!(said["prefer"], case.prefer, "{name}'s functions about its own machine");
 
             // It answers a call, a refusal and, in Go, one that belongs on another device.
-            async fn ask(registry: &Registry, name: &str, function: &str, input: Value) -> anyhow::Result<one::services::Answer> {
+            async fn ask(registry: &Registry, name: &str, function: &str, input: Value) -> anyhow::Result<services::Answer> {
                 registry.services().call(name, function, input, me(), None, None).await
             }
             let (function, input, field, says) = case.ok.clone();

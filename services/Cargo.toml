@@ -1,0 +1,35 @@
+# Device services, as every computer's programs share them: the loopback a service's program registers on (`Registry`),
+# asks carried sealed between a part and its device's app runtime (`carried`), sandboxes, which run where (`Wanted`)
+# and the `services` commands. A computer's only: a service runs on no phone, browser or Worker.
+[package]
+name = "services"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+# Its tests run in the program's one test binary (tests/main.rs), with the program they start.
+autotests = false
+
+[lib]
+doctest = false
+
+[dependencies]
+api = { path = "../api" }
+scope = { path = "../scope" }
+key = { path = "../key" }
+custom-build = { path = "../custom-build" }
+platform = { path = "../platform", features = ["machine"] }
+anyhow = "1"
+axum = "0.8"
+blake3 = "1"
+data-encoding = "2"
+ed25519-dalek = "3"
+# A service's own sandbox on Unix (`sandbox`): its process group, limits and the Linux namespaces it's started in.
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+# What a sandboxed service's proxy connects with (`sandbox::connect`), as axum's server already builds it.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }

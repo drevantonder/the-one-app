@@ -42,7 +42,7 @@ pub(super) fn load_device(dir: &Path) -> Result<DeviceFile> {
 }
 
 /// The folder of the app runtime of the device whose home is `dir`: its key, and the token its device's own programs
-/// ask it with, as a service's folder holds them (`services::part::folder`).
+/// ask it with, as a service's folder holds them (`services::folder`).
 pub fn runtime_folder(dir: &Path) -> PathBuf {
     dir.join("services").join(scopes::APPS_PART)
 }
