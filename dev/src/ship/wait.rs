@@ -52,7 +52,7 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
     let (macs, wanted): (Vec<Value>, Vec<Value>) =
         all.into_iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).partition(|d| names.is_empty() && oned_update::latest::is_mac(d["target"].as_str().unwrap_or("")));
     for d in macs {
-        println!("  {}: not waited for: a Mac takes the app its agent publishes when Update is pressed for it; --device {} to wait", d["name"].as_str().unwrap_or(""), d["name"].as_str().unwrap_or(""));
+        println!("  {}: not waited for: a Mac takes its published app when Update is pressed for it; --device {} to wait", d["name"].as_str().unwrap_or(""), d["name"].as_str().unwrap_or(""));
     }
     press_update(&wanted)?;
     wait_for(commit, &wanted, !names.is_empty(), limit)
