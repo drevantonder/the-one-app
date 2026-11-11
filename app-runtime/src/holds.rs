@@ -75,7 +75,9 @@ impl Holds {
             Holds::Key(key) => host.write_step_as(key, user, content).await.map(drop),
             Holds::Asks { holder, .. } => {
                 holder.ask("POST", "/api/holds/write", Some(json!({ "user": user, "content": content }))).await?;
-                host.read_steps_now().await.map(drop)
+                host.read_steps_now().await?;
+                host.ping(&Scope::Global, None);
+                Ok(())
             }
         }
     }
