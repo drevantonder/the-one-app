@@ -24,9 +24,9 @@ pub enum Credential {
     /// A client device's calls over iroh, by its key, proven by QUIC: never a token anyone sends, so no request reaches
     /// what a device was handed by naming it.
     Client(Key),
-    /// A call another device (`node`, its endpoint key, proven by QUIC) passed on for `user`: it runs only on the keys
+    /// A call another device's app runtime (`from`, its endpoint key, proven by QUIC) passed on for `user`: it runs only on the keys
     /// it was handed, sealed here for that device's key.
-    Passed { node: Key, user: String },
+    Passed { from: Key, user: String },
     /// App schedules' calls: `app`'s in `scope`, with the keys sealed to this device for them alone. Never passed on.
     AppSchedules { scope: Scope, app: String },
 }

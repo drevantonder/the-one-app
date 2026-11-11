@@ -1,5 +1,5 @@
 # The network's Workers on Cloudflare as devices meet them: building and running them in workerd, deploying them
-# (`one cloudflare`), Basin, and oned on Cloudflare's Worker (node/, which is oned on Cloudflare).
+# (`one cloudflare`), Basin, and oned on Cloudflare's Worker (worker/).
 [package]
 name = "oned-cloudflare"
 version = "0.1.0"

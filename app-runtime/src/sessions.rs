@@ -71,7 +71,7 @@ impl Held {
 fn held(credential: &Credential) -> Option<Held> {
     match credential {
             Credential::Client(key) => Some(Held::Client(*key)),
-            Credential::Passed { node: host, user } => Some(Held::Passed(*host, user.clone())),
+            Credential::Passed { from, user } => Some(Held::Passed(*from, user.clone())),
             Credential::Own | Credential::AppSchedules { .. } => None,
     }
 }
@@ -184,7 +184,7 @@ impl Host {
         ensure!(!service || !handoff.keys.is_empty(), "a service's call passed on comes with the keys its user handed");
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         ensure!(handoff.keys.iter().all(|k| named.contains(&k.scope)), "the keys handed are of a scope the call doesn't name");
-        let credential = Credential::Passed { node: *from, user: user.to_string() };
+        let credential = Credential::Passed { from: *from, user: user.to_string() };
         self.hand(&credential, user, sealed, u64::MAX)?;
         Ok(credential)
     }

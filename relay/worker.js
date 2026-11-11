@@ -60,7 +60,7 @@
 // - `{ remove }`: a key to take out, by an admin, the key that let it in, or itself, with the pairing codes it made; never
 //   the last admin, and never a key it let in, which only a tell naming that key takes out. A pairing code's computer is
 //   taken out the same way, by its code's maker too.
-// - `{ admins: { <key>: bool } }`: whether each key is an admin's now, by an admin's device, as who's who says (`Node::tell_roles`).
+// - `{ admins: { <key>: bool } }`: whether each key is an admin's now, by an admin's device, as who's who says (`Host::tell_roles`).
 // - `{ pairing: { hash, until } }`: the SHA-256 (hex) of a pairing code's ticket and until when it works (ms).
 // - `{ unpair }`: a pairing code's hash, to end it, by its maker or an admin.
 // - `{ update }`: a key on the list, whose device this signed ask is left for, whole, until it next asks for the computes:
@@ -74,7 +74,7 @@
 // - `{ cloudflare: true }`: the same, to deploy the Workers again, left for the device they were last deployed from (`workers.from`),
 //   which checks that the asker is an admin.
 //
-// One endpoint isn't a socket: oned on Cloudflare (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
+// One endpoint isn't a socket: oned on Cloudflare (`BOUND`, its key), a Durable Object of its own Worker (`ONED`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
 // comes back by RPC (`fromNode`, on the `CloudflareNode` entrypoint, which only its Worker binds) and goes out as from
 // it. It's one of the network's endpoints, as compute.
@@ -1092,7 +1092,7 @@ export class List extends DurableObject {
   }
 
   /// Takes `key` out, with the pairing codes it made, and has the Relay close its sockets and binding. Only a tell naming a
-  /// key takes it out: an admin's app runtime names each device the signed steps removed (`Node::tell_removed`), so the devices
+  /// key takes it out: an admin's app runtime names each device the signed steps removed (`Host::tell_removed`), so the devices
   /// it let in stay.
   remove(key) {
     this.sql.exec("DELETE FROM keys WHERE key = ?", key);

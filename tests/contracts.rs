@@ -95,8 +95,8 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     let signer = ed25519_dalek::SigningKey::from_bytes(&seed);
     let fields = json!({ "read": ["user-0123456789abcdef/notes/main/1"], "n": 3, "z": { "b": "é\n\"", "a": [] } });
     let request = ::key::signed_request(&signer, "one/urls", fields.clone(), 1_000_000);
-    let node = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let to = ::key::Endpoint::of(&node).seal;
+    let endpoint = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let to = ::key::Endpoint::of(&endpoint).seal;
     let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
     let device_seal: [u8; 32] = rand::random();
     let out = js(json!({
@@ -112,7 +112,7 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     let asking = ::key::Endpoint { key: device, seal: device_seal };
     assert_eq!(out["nonce"], ::scope::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
     assert_eq!(b(&out["challenge"]), ::scope::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
-    assert_eq!(to, ::key::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
+    assert_eq!(to, ::key::twin_public(&endpoint.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
 
     // A session endpoint's certificate: made the same, and each takes and refuses the same ones.
     let endpoint: [u8; 32] = rand::random();
@@ -299,9 +299,9 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     use ed25519_dalek::SigningKey;
     use notifications::Note;
 
-    let node = SigningKey::from_bytes(&rand::random());
+    let sender = SigningKey::from_bytes(&rand::random());
     let phone = SigningKey::from_bytes(&rand::random());
-    let k = crate::cloudflare::Workers::for_devices([&node, &phone].map(|key| HEXLOWER.encode(key.verifying_key().as_bytes())).to_vec());
+    let k = crate::cloudflare::Workers::for_devices([&sender, &phone].map(|key| HEXLOWER.encode(key.verifying_key().as_bytes())).to_vec());
     let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
     let post = |path: &str, body: serde_json::Value| crate::cloudflare::post(&format!("{}{path}", k.address), &[], body);
 
@@ -318,11 +318,11 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
 
     // The app runtime seals a note to the phone and sends it.
     let note = Note { id: "0123456789abcdef".into(), title: "Tally".into(), body: "Sam counted".into(), app: "tally".into(), screen: "main".into(), ..Default::default() };
-    let sealed = notifications::seal_note(&node, &phone_seal, &note, now()).unwrap();
-    let unregistered = HEXLOWER.encode(node.verifying_key().as_bytes());
+    let sealed = notifications::seal_note(&sender, &phone_seal, &note, now()).unwrap();
+    let unregistered = HEXLOWER.encode(sender.verifying_key().as_bytes());
     let to = HEXLOWER.encode(phone.verifying_key().as_bytes());
     let fields = json!({ "route": "POST /notifications/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }, { "to": unregistered, "note": B64U.encode(&sealed) }] });
-    let (status, said) = post("/notifications/send", ::key::signed_request(&node, ::custom_build::protocol::NOTIFICATIONS, fields, now()));
+    let (status, said) = post("/notifications/send", ::key::signed_request(&sender, ::custom_build::protocol::NOTIFICATIONS, fields, now()));
     assert_eq!((status, &said["to"][&to], &said["to"][&unregistered]), (200, &json!({ "sent": true }), &json!({ "none": true })), "it went to the device that registered: {said}");
 
     // What the browser's push service got: VAPID with the network's key, and the note, encrypted to the subscription.
@@ -337,13 +337,13 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let plain = B64U.decode(&plain).expect("Web Push carries the note as base64url text");
     assert_eq!(plain, sealed, "the Worker carried the sealed note as it was");
     let (opened, by) = notifications::open_note(&::key::seal_secret(&phone), &plain).unwrap();
-    assert_eq!((opened, by), (note, Some(HEXLOWER.encode(node.verifying_key().as_bytes()))), "the phone opens the note, from the node");
-    assert!(notifications::open_note(&::key::seal_secret(&node), &plain).is_err(), "no other device opens it");
+    assert_eq!((opened, by), (note, Some(HEXLOWER.encode(sender.verifying_key().as_bytes()))), "the phone opens the note, from the device that sent it");
+    assert!(notifications::open_note(&::key::seal_secret(&sender), &plain).is_err(), "no other device opens it");
 
     // A device that stops registering gets nothing more.
     assert_eq!(post("/notifications/unregister", notifications::unregister_request(&phone, now())).0, 200);
     let fields = json!({ "route": "POST /notifications/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }] });
-    assert_eq!(post("/notifications/send", ::key::signed_request(&node, ::custom_build::protocol::NOTIFICATIONS, fields, now())).1["to"][&to], json!({ "none": true }));
+    assert_eq!(post("/notifications/send", ::key::signed_request(&sender, ::custom_build::protocol::NOTIFICATIONS, fields, now())).1["to"][&to], json!({ "none": true }));
 }
 
 /// The browser's service worker opens a note as `notifications::open_note` does (`openNote` in `key/crypto.js`): one a
@@ -362,17 +362,17 @@ fn the_service_worker_opens_notes_as_rust_does() {
         formats.js(json!({ "op": "openNote", "secret": B64U.encode(secret), "public": B64U.encode(public), "sealed": B64U.encode(&sealed) }))["note"].clone()
     };
     let (secret, public) = ::key::twin(&rand::random());
-    let node = SigningKey::from_bytes(&rand::random());
-    let by = HEXLOWER.encode(node.verifying_key().as_bytes());
+    let sender = SigningKey::from_bytes(&rand::random());
+    let by = HEXLOWER.encode(sender.verifying_key().as_bytes());
     let note = Note { id: "0123456789abcdef".into(), title: "Café \"Ü\"".into(), body: "é…".into(), app: "tally".into(), screen: "main".into(), params: Some(serde_json::from_value(json!({ "b": 1, "a": ["x"] })).unwrap()), ..Default::default() };
 
-    let sealed = notifications::seal_note(&node, &public, &note, now()).unwrap();
+    let sealed = notifications::seal_note(&sender, &public, &note, now()).unwrap();
     let got = formats.js(json!({ "op": "openNote", "secret": B64U.encode(&secret), "public": B64U.encode(&public), "sealed": B64U.encode(&sealed) }))["note"].clone();
     let (opened, from) = notifications::open_note(&secret, &sealed).unwrap();
     assert_eq!((got["title"].as_str(), got["by"].as_str()), (Some(opened.title.as_str()), from.as_deref()), "a note a device signed: {got}");
     assert_eq!(got["by"], json!(by));
 
-    let signed = ::key::signed_request(&node, ::custom_build::protocol::SIGNED_NOTE, serde_json::to_value(&note).unwrap(), now());
+    let signed = ::key::signed_request(&sender, ::custom_build::protocol::SIGNED_NOTE, serde_json::to_value(&note).unwrap(), now());
     let unsigned = open(&secret, &public, &serde_json::to_vec(&note).unwrap());
     assert_eq!(unsigned["title"], json!(note.title), "a note from the network's Workers is unsigned: {unsigned}");
     let mut forged = signed.clone();
@@ -530,7 +530,7 @@ mod service_protocol {
         let fixture = wire();
         // The app runtime sends a call as the file says, and replies as the file says reach it as what they are.
         let sent = Call { id: 7, function: "events".into(), input: fixture["call"]["input"].clone(), caller: me(), from: Some("calendar".into()), traceparent: fixture["call"]["traceparent"].as_str().map(str::to_string) };
-        assert_eq!(serde_json::to_value(&sent).unwrap(), fixture["call"], "wire.json's call is what the node sends");
+        assert_eq!(serde_json::to_value(&sent).unwrap(), fixture["call"], "wire.json's call is what the app runtime sends");
         let allowed: Vec<&str> = fixture["registers"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
 
         for case in rust_and_go() {
@@ -636,9 +636,9 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
             missing.push(format!("{who} doesn't name `{name}`"));
         }
     };
-    names("the node's widgets", &read("widgets/runtime/src/draw.rs"), &["[\"late\"] = json!(true)"]);
-    names("the node's route", &read("widgets/src/says.rs"), &["kind: Option<String>"]);
-    names("the Cloudflare node", &read("oned/cloudflare/worker/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
+    names("the app runtime's widgets", &read("widgets/runtime/src/draw.rs"), &["[\"late\"] = json!(true)"]);
+    names("the app runtime's route", &read("widgets/src/says.rs"), &["kind: Option<String>"]);
+    names("oned on Cloudflare", &read("oned/cloudflare/worker/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
     names("the pages", &read("ui/home/lib/model.js"), &["w.late", "&kind="]);
     names("the native widgets", &read("native-apps/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
     names("a chat's view", &read("api/mcp/src/mcp/view.html"), &["w.late", "widgets_show"]);
@@ -774,7 +774,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
             }
         }
     }
-    assert!(unknown.is_empty(), "these read what the node's state doesn't say (scope/src/state.rs):\n{}", unknown.join("\n"));
+    assert!(unknown.is_empty(), "these read what the app runtime's state doesn't say (scope/src/state.rs):\n{}", unknown.join("\n"));
 }
 
 /// Every path of the app runtime's API that the Workers, the screens, the web client and the native apps ask is one of its routes
@@ -795,12 +795,12 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
     const UNLISTED: [&str; 10] = ["/api/keys", "/api/steps", "/api/steps/global", "/api/openapi.json", "/api/holds", "/api/holds/shared", "/api/holds/write", "/api/holds/sign", "/api/services", "/api/joined"];
     let document = onet::document(&[], true);
     for (path, who, _) in onet::said() {
-        assert!(app_runtime::api::routes().who().iter().any(|(p, w)| *p == path && *w == who), "onet/src/features.rs says {path} is asked by {who:?}, which no route of the node (app-runtime/src/api.rs) is");
+        assert!(app_runtime::api::routes().who().iter().any(|(p, w)| *p == path && *w == who), "onet/src/features.rs says {path} is asked by {who:?}, which no route of the app runtime (app-runtime/src/api.rs) is");
     }
     let listed: Vec<Vec<String>> = document["paths"].as_object().unwrap().keys().map(|path| path.trim_start_matches('/').split('/').map(str::to_string).collect()).collect();
     for path in document["paths"].as_object().unwrap().keys() {
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-        assert!(matches(&routes, &segments) || ::scope::settings::answered(path), "the OpenAPI document lists {path}, which the node doesn't serve");
+        assert!(matches(&routes, &segments) || ::scope::settings::answered(path), "the OpenAPI document lists {path}, which the app runtime doesn't serve");
     }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut files = Vec::new();
@@ -853,7 +853,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
             }
         }
     }
-    assert!(unserved.is_empty(), "these paths aren't routes of the node (app-runtime/src/api.rs):\n{}", unserved.join("\n"));
+    assert!(unserved.is_empty(), "these paths aren't routes of the app runtime (app-runtime/src/api.rs):\n{}", unserved.join("\n"));
     assert!(unlisted.is_empty(), "these paths aren't in the OpenAPI document (`api::openapi`): add the route to its feature's `says.rs` (onet's `said`):\n{}", unlisted.join("\n"));
 }
 
@@ -865,7 +865,7 @@ fn the_apis_paths_are_never_taken_for_an_apps() {
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
         if segments.len() > 1 && !segments[0].starts_with('{') {
             assert!(::api::path::ROOTS.contains(&segments[0]), "{path} would be an app's: add {} to protocol::path::ROOTS", segments[0]);
-            assert!(segments[..2] != ["api", "auth"], "{path}: /api/auth/ is auth's at the gateway, so no node would ever be asked it");
+            assert!(segments[..2] != ["api", "auth"], "{path}: /api/auth/ is auth's at the gateway, so no app runtime would ever be asked it");
         }
     }
 }
@@ -920,7 +920,7 @@ fn an_app_answers_the_same_on_a_computer_and_in_oned_on_cloudflare() {
           return new Response(`no ask ${{name}}`, {{ status: 400 }});
         }}
         // A computer's app runtime: the app's asks reach it as requests to one.internal.
-        export class Node extends WorkerEntrypoint {{
+        export class Runtime extends WorkerEntrypoint {{
           async fetch(req) {{
             return answer(new URL(req.url).pathname.slice(1), await req.text());
           }}
@@ -933,7 +933,7 @@ fn an_app_answers_the_same_on_a_computer_and_in_oned_on_cloudflare() {
         }}
         export default {{
           async fetch(req, env) {{
-            const app = env.LOADER.get("probe", () => ({{ compatibilityDate: {date}, compatibilityFlags: ["nodejs_als"], mainModule: "shim.js", modules: {{ "shim.js": SHIM, "app.js": APP }}, globalOutbound: env.NODE }}));
+            const app = env.LOADER.get("probe", () => ({{ compatibilityDate: {date}, compatibilityFlags: ["nodejs_als"], mainModule: "shim.js", modules: {{ "shim.js": SHIM, "app.js": APP }}, globalOutbound: env.RUNTIME }}));
             const tool = new URL(req.url).searchParams.get("tool");
             const body = {{ tool, input: {{ text: "hi" }}, me: {{ user: "u1" }}, now: 1, scopes: [{{ id: "user:u1", name: "Ann" }}], read_only: false, token: "t" }};
             const machine = await (await app.getEntrypoint().fetch("http://app/call", {{ method: "POST", body: JSON.stringify(body) }})).json();
@@ -954,7 +954,7 @@ fn an_app_answers_the_same_on_a_computer_and_in_oned_on_cloudflare() {
         modules: vec![],
         classes: vec![],
         listen: Some(at.clone()),
-        bindings: vec![("LOADER".into(), "loader:".into()), ("NODE".into(), "service:runner:Node".into())],
+        bindings: vec![("LOADER".into(), "loader:".into()), ("RUNTIME".into(), "service:runner:Runtime".into())],
         assets: None,
         outbound: None,
     }]);
@@ -973,11 +973,11 @@ fn an_app_answers_the_same_on_a_computer_and_in_oned_on_cloudflare() {
             }
         }
         assert_eq!(both["machine"], expected, "{tool} on a machine");
-        assert_eq!(both["cloudflare"], expected, "{tool} on the Cloudflare node");
+        assert_eq!(both["cloudflare"], expected, "{tool} on oned on Cloudflare");
     }
     let both = ask("writes");
     assert_eq!(both["machine"], both["cloudflare"], "the same writes on both");
-    let appends = ::api::call::appends(&both["machine"]["appends"]).unwrap_or_else(|err| panic!("the node reads what the shim hands it: {err:#}\n{}", both["machine"]["appends"]));
+    let appends = ::api::call::appends(&both["machine"]["appends"]).unwrap_or_else(|err| panic!("the app runtime reads what the shim hands it: {err:#}\n{}", both["machine"]["appends"]));
     assert_eq!(appends.len(), 11, "every write the app made: {appends:?}");
 }
 
@@ -993,10 +993,10 @@ fn oned_on_cloudflare_answers_the_asks_it_says_it_does() {
     let unknown: Vec<&String> = asked.iter().filter(|a| !names.contains_key(a.as_str())).collect();
     assert!(unknown.is_empty(), "the shim asks what api/src/call.rs doesn't name: {unknown:?}");
     let worker = std::fs::read_to_string(root.join("oned/cloudflare/worker/worker.js")).unwrap();
-    let ask = worker.split("  async ask(name, body) {").nth(1).expect("the Cloudflare node's ForCall.ask").split("\n  }\n").next().unwrap();
+    let ask = worker.split("  async ask(name, body) {").nth(1).expect("oned on Cloudflare's ForCall.ask").split("\n  }\n").next().unwrap();
     let answered = quoted(ask, "case \"");
     let said: std::collections::BTreeSet<String> = names.iter().filter(|(_, on)| **on).map(|(n, _)| n.to_string()).collect();
-    assert_eq!(answered, said, "the asks the Cloudflare node answers, and those api/src/call.rs says it does");
+    assert_eq!(answered, said, "the asks oned on Cloudflare answers, and those api/src/call.rs says it does");
 }
 
 /// A web bundle says the shell it needs by a number (`ui::web::SHELL`): what the shell gives the page, its commands and
@@ -1129,7 +1129,7 @@ fn a_workers_logs_keep_only_what_broke_cleaned() {
         of("one-telemetry", vec![record(json!(17), "failed", vec![])]),
     ] });
     let rows: Vec<Value> = serde_json::from_value(formats.js(json!({ "op": "telemetryWorkerLogs", "request": request, "cli": "one" }))).unwrap();
-    assert_eq!(rows.len(), 2, "the relay's error and mcp's exception, not its info line, nor what node or telemetry said: {rows:?}");
+    assert_eq!(rows.len(), 2, "the relay's error and mcp's exception, not its info line, nor what oned or telemetry said: {rows:?}");
     for row in &rows {
         let stored = row.to_string();
         for private in ["anna", "Anna", "example", "sekrit", "hunter", "10.1.2.3", "l1kp", "url.full", "client.address", "cf", "script_name"] {
@@ -1153,9 +1153,9 @@ fn a_workers_cleaner_hides_what_a_nodes_does() {
     let said = ["couldn't mail anna.lee@example.org, try again", "fetching https://x.example/a?token=abc failed", "no file at /home/anna/taxes.pdf", "connecting to 10.0.0.12:8080: refused", "connecting to 2001:db8::1 timed out", "call +61 400 123 456 back", "call (02) 9876 5432 back", "order 123456789 isn't there", "bad key ab12cd34ef56ab12cd34ef56ab12", "(mac: 1fcdd729 isn't connected)", "token=hunter was refused", "token = hunter was refused", "password: hunter was refused", "Authorization: Bearer abcdefgh", "eyJhbGci.eyJzdWIi.c2lnbmF0dXJl expired", "no device deadbeefcafebabedead here"];
     let cleaned: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryPlainWords", "said": said }))).unwrap();
     for (said, worker) in said.iter().zip(&cleaned) {
-        let node = insights::message::cleaned(said);
-        for hidden in said.split_whitespace().filter(|w| !node.contains(w.trim_end_matches([',', '.', ':', ')']))) {
-            assert!(!worker.contains(hidden.trim_end_matches([',', '.', ':', ')'])), "{hidden:?} of {said:?} is in {worker:?}, and the node's hides it: {node:?}");
+        let cleaned = insights::message::cleaned(said);
+        for hidden in said.split_whitespace().filter(|w| !cleaned.contains(w.trim_end_matches([',', '.', ':', ')']))) {
+            assert!(!worker.contains(hidden.trim_end_matches([',', '.', ':', ')'])), "{hidden:?} of {said:?} is in {worker:?}, and the app runtime's hides it: {cleaned:?}");
         }
     }
 }
@@ -1308,11 +1308,11 @@ fn ai_run_ask() {
     let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
     let shim = read("app-runtime/src/app/runtime/shim.js");
     assert!(shim.contains("post(\"ai.run\", { input, retry_key: retryKey ?? null })"), "the shim's ai.run ask changed: change app-runtime/src/calls/running.rs and oned/cloudflare/worker/src/lib.rs (`ai_run`), which read input and retry_key");
-    assert!(::api::call::Ask::names().any(|(name, cloudflare)| name == "ai.run" && cloudflare), "both nodes answer ai.run");
+    assert!(::api::call::Ask::names().any(|(name, cloudflare)| name == "ai.run" && cloudflare), "both app runtimes answer ai.run");
     let machine = read("app-runtime/src/calls/running.rs");
     let cloudflare = read("oned/cloudflare/worker/src/lib.rs");
-    for (node, text) in [("a machine's", &machine), ("the Cloudflare", &cloudflare)] {
-        assert!(text.contains("[\"input\"]") && text.contains("[\"retry_key\"]"), "{node} node reads ai.run's input and retry_key");
+    for (runtime, text) in [("a machine's app runtime", &machine), ("oned on Cloudflare", &cloudflare)] {
+        assert!(text.contains("[\"input\"]") && text.contains("[\"retry_key\"]"), "{runtime} reads ai.run's input and retry_key");
     }
     let thrown = [Failed::Refused(String::new()), Failed::NoKey(String::new()), Failed::Limit { said: String::new(), retry_after: None }, Failed::RetryChanged, Failed::Uncertain, Failed::Unavailable(String::new())];
     for failed in thrown {

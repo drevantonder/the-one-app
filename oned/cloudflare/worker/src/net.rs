@@ -1,4 +1,4 @@
-//! oned on Cloudflare's iroh endpoint (`Node` in worker.js, a Durable Object): the endpoint of its own key, as every
+//! oned on Cloudflare's iroh endpoint (`Oned` in worker.js, a Durable Object): the endpoint of its own key, as every
 //! app runtime is, with no socket. The relay hands it the datagrams sent to its key, by RPC (`deliver`), and passes on what it
 //! sends, so to every other endpoint it's one more behind the relay. It speaks what app runtimes speak (app-runtime/src/net.rs): to
 //! client devices, HTTP/1.1 on a stream of its own per request (`<cli>/http/1`), answered by `worker.js` as an app runtime's

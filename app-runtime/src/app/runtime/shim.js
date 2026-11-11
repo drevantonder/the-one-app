@@ -404,11 +404,11 @@ export default {
   },
 };
 
-/// oned on Cloudflare runs an app through this: `node.ask(name, body)` answers what the app runtime does for a call with a
+/// oned on Cloudflare runs an app through this: `oned.ask(name, body)` answers what the app runtime does for a call with a
 /// Response, as a computer's app runtime answers it over HTTP.
 export class Call extends WorkerEntrypoint {
-  async run(what, name, body, node) {
-    const send = (name, data) => node.ask(name, data);
+  async run(what, name, body, oned) {
+    const send = (name, data) => oned.ask(name, data);
     return handle(what, name, body, send, (p) => this.ctx.waitUntil(p), (req) => sent(asking(send, body), req));
   }
 }

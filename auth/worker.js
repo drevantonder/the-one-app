@@ -107,7 +107,7 @@ const refuse = (status, message) => {
 const INVITE = 30 * 86_400_000;
 /// How long a request waits for someone to answer it: long enough for an admin who is asleep.
 const REQUEST = 3 * 86_400_000;
-/// How long an invited newcomer's first device waits for a device of the network that's online to let it in (`node`'s
+/// How long an invited newcomer's first device waits for a device of the network that's online to let it in (an app runtime's
 /// `invites_loop`, every few seconds) before anyone is notified "wants in".
 const WANTS_IN = 10_000;
 /// The most devices of one user notified, the newest.

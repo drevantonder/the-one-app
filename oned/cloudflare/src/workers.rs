@@ -88,11 +88,11 @@ impl Worker {
     }
 
     /// Its modules besides its own, (name, bytes): its WebAssembly, and, for the remote MCP server, oned on Cloudflare's
-    /// build (`node`), which runs its devices' endpoints. None if it needs that and there's none.
-    pub fn modules(&self, files: &Files, node: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
+    /// build (`oned`), which runs its devices' endpoints. None if it needs that and there's none.
+    pub fn modules(&self, files: &Files, oned: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
         let mut out = wasm(files, self.entry);
         if self.oned_build {
-            out.extend(node?.iter().filter(|(name, _, _)| name.starts_with("oned_cloudflare_worker")).map(|(name, _, bytes)| (name.clone(), bytes.clone())));
+            out.extend(oned?.iter().filter(|(name, _, _)| name.starts_with("oned_cloudflare_worker")).map(|(name, _, bytes)| (name.clone(), bytes.clone())));
         }
         Some(out)
     }
@@ -726,10 +726,10 @@ fn notifications_bindings(settings: &Settings) -> Vec<Binding> {
 /// says to every device.
 fn relay_bindings(settings: &Settings) -> Vec<Binding> {
     let devices = (!settings.devices.is_empty()).then(|| plain("DEVICES", json!(settings.devices).to_string()));
-    let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("ONED", format!("object:{}:{}", ONED.name, ONED.classes[0]))]);
+    let oned = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("ONED", format!("object:{}:{}", ONED.name, ONED.classes[0]))]);
     let onet = plain("ONET", format!("object:onet:{}", Worker::named("onet").classes[0]));
     let deployed = settings.deployed.clone().map(|d| plain("DEPLOYED", d));
-    devices.into_iter().chain(node.into_iter().flatten()).chain([onet, plain("YOURS", custom_build::config::YOURS)]).chain(deployed).chain(location()).collect()
+    devices.into_iter().chain(oned.into_iter().flatten()).chain([onet, plain("YOURS", custom_build::config::YOURS)]).chain(deployed).chain(location()).collect()
 }
 
 /// The remote MCP server: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches the
@@ -846,13 +846,13 @@ pub fn served(settings: &Settings, web: &Path, sources: &Files) -> Result<Vec<Se
     served_with(settings, web, sources, crate::worker::modules().ok())
 }
 
-/// `served`, with oned on Cloudflare's build `cloudflare_node` (this build's, or a test's).
-pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_node: Option<Modules>) -> Result<Vec<Served>> {
-    let node = cloudflare_node.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::worker::served(settings, modules));
+/// `served`, with oned on Cloudflare's build `oned_build` (this build's, or a test's).
+pub fn served_with(settings: &Settings, web: &Path, sources: &Files, oned_build: Option<Modules>) -> Result<Vec<Served>> {
+    let oned = oned_build.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::worker::served(settings, modules));
     // A build without oned on Cloudflare's WebAssembly has no remote MCP server, and nothing binds one.
     let mut served = Vec::new();
     for worker in WORKERS {
-        let Some(modules) = worker.modules(sources, cloudflare_node.as_ref()) else { continue };
+        let Some(modules) = worker.modules(sources, oned_build.as_ref()) else { continue };
         served.push(Served {
             name: worker.name.to_string(),
             module: module_from(sources.clone(), worker.entry)?,
@@ -865,7 +865,7 @@ pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_
             outbound: (worker.reads_bucket && settings.throwaway_user.is_some()).then(|| NEARBY.to_string()),
         });
     }
-    served.extend(node);
+    served.extend(oned);
     if settings.telemetry.is_none() {
         served.push(stand_in(sources)?);
         served.iter_mut().find(|s| s.name == "telemetry").context("no telemetry Worker")?.outbound = Some(STAND_IN.to_string());

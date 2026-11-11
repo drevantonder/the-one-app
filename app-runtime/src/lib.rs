@@ -306,7 +306,7 @@ pub async fn serve(listener: std::net::TcpListener) -> Result<()> {
     // This runtime starting, and why the last one ended: what it said when it stopped, or `abort` if it didn't (panics
     // abort, so a crash can't say), or `first` if there was none before it. An update's new one says so too.
     let last = ::insights::Ended::read(&dir);
-    insights_runtime::device_signal(&host.rt(), "node.start", ::insights::Attrs::default().reason(last.reason()), ::insights::Status::Unset);
+    insights_runtime::device_signal(&host.rt(), "app-runtime.start", ::insights::Attrs::default().reason(last.reason()), ::insights::Status::Unset);
     if last == ::insights::Ended::Update {
         insights_runtime::device_signal(&host.rt(), "update.running", ::insights::Attrs::default().part(&::oned_update::latest::Thing::program_name(custom_build::config::TARGET)), ::insights::Status::Unset);
     }

@@ -736,8 +736,8 @@ mod tests {
 
         // Who's who: the freeze its recovery key signed.
         const ANDRE: &str = "0123456789abcdef";
-        let node = database::keys::app_key(&bucket, &epoch, "global", ::key::APP, 1, true).await.unwrap().unwrap();
-        let step_keys = database::stored::Keys::from([(1, ::key::database_key(&node, ::key::APP, ::key::CoreDb::Scope.name()))]);
+        let core = database::keys::app_key(&bucket, &epoch, "global", ::key::APP, 1, true).await.unwrap().unwrap();
+        let step_keys = database::stored::Keys::from([(1, ::key::database_key(&core, ::key::APP, ::key::CoreDb::Scope.name()))]);
         let start = ::scope::content::first("Home", ANDRE, "Andre", &::key::Endpoint::of(&device), "mac", &[::scope::scopes::Kind::Client], recovery.verifying_key().as_bytes(), &::key::epoch_hash(&epoch));
         let root = ::key::Hash::from_bytes(rand::random());
         let first = ::scope::steps::first_freeze(&recovery, root, &start, ANDRE, 0).unwrap();

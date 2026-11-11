@@ -68,7 +68,7 @@ pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item 
     Ok(Some(done))
 }
 
-/// The app in `dir` built into a bundle, as a blob of `node`'s, with its service built here for each platform this
+/// The app in `dir` built into a bundle, as a blob of the core's (`key::APP`), with its service built here for each platform this
 /// machine can build it for, each build a blob its bundle names: → the bundle, and what was built of its service.
 pub fn built_with_service(api: &::api::Client, dir: &Path) -> Result<(String, String)> {
     let mut builds = std::collections::BTreeMap::new();
@@ -93,7 +93,7 @@ pub fn built_with_service(api: &::api::Client, dir: &Path) -> Result<(String, St
     Ok((api.put_blob(&crate::build::build(dir, &builds)?)?, service))
 }
 
-/// MCP's deploy tool's files built into a bundle on this machine, as a blob of `node`'s: for React screens and a
+/// MCP's deploy tool's files built into a bundle on this machine, as a blob of the core's (`key::APP`): for React screens and a
 /// service in Go, which only the machine that deploys builds. → the bundle, and what was built of its service.
 pub fn built_here(api: &::api::Client, files: &serde_json::Map<String, Value>) -> Result<(String, String)> {
     ensure!(!files.contains_key("service/Cargo.toml"), "its service is in Rust, whose build would run its build scripts here: deploy it with {CLI} deploy <its folder>");

@@ -29,7 +29,7 @@ pub(crate) use calls::call_from_oned_on_cloudflare;
 pub use guard::{FromClient, guarded};
 pub use in_process::InProcess;
 
-/// The API's routes in this program: over the runtime its handlers read (`State<Node>` reads it as this one).
+/// The API's routes in this program: over the runtime its handlers read (`State<Host>` reads it as this one).
 pub type Routes = ::api::Routes<Rt>;
 
 pub fn router(host: Host) -> Router {

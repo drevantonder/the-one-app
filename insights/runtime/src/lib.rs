@@ -332,7 +332,7 @@ async fn tool_named(rt: &Rt, req: &CallRequest) -> String {
 /// what this device read of the bucket.
 fn say_requests(rt: &Rt) {
     for (kind, found, n) in bucket::READS.take() {
-        device_metric(rt, insights::BUCKET_READS, Attrs::default().reached(kind).outcome(if found { "found" } else { "missing" }).client("node"), n);
+        device_metric(rt, insights::BUCKET_READS, Attrs::default().reached(kind).outcome(if found { "found" } else { "missing" }).client("app-runtime"), n);
     }
     let failures = bucket::signed::take_failures();
     if failures > 0 {

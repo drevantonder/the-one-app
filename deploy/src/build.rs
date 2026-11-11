@@ -246,7 +246,7 @@ fn screen_name(file: &str) -> bool {
 
 /// Builds the app's React screens, if it has any: each `screens/<name>.jsx` or `.tsx` into `dist/<name>.html`, the
 /// screen's HTML that app.js imports as text (`with { type: "text" }`), opted in to @one/ui, with its own styles and
-/// module in it and React and @one/ui left to the page (ui/src/screen.rs). Built by this machine's Bun, or else App runtime: the
+/// module in it and React and @one/ui left to the page (ui/src/screen.rs). Built by this machine's Bun, or else Node: the
 /// pinned Bun is only for bundling app.js, not for running build tools.
 pub fn screens(dir: &Path) -> Result<()> {
     let some = std::fs::read_dir(dir.join("screens")).into_iter().flatten().flatten().any(|e| screen_name(&e.file_name().to_string_lossy()));
@@ -259,10 +259,10 @@ pub fn screens(dir: &Path) -> Result<()> {
         let ran = std::process::Command::new(&path).arg("--version").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
         ran.is_ok_and(|s| s.success()).then_some(path)
     };
-    // Bun runs the build and installs its tools; App runtime runs it, and npm, which comes with it, installs them.
+    // Bun runs the build and installs its tools; Node runs it, and npm, which comes with it, installs them.
     let (runtime, install): (PathBuf, (PathBuf, &[&str])) = match (runs("bun"), runs("node"), runs("npm")) {
         (Some(bun), _, _) => (bun.clone(), (bun, &["install", "--frozen-lockfile", "--ignore-scripts"])),
-        (None, Some(api), Some(npm)) => (api, (npm, &["install", "--ignore-scripts", "--no-audit", "--no-fund"])),
+        (None, Some(node), Some(npm)) => (node, (npm, &["install", "--ignore-scripts", "--no-audit", "--no-fund"])),
         _ => bail!(
             "{}'s React screens (screens/*.jsx) are built on the machine that deploys it, which needs Bun (bun.sh, recommended) or Node (nodejs.org): install one and deploy again",
             dir.canonicalize().ok().and_then(|d| Some(d.file_name()?.to_string_lossy().to_string())).unwrap_or_else(|| "this app".into())

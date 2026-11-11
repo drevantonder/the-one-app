@@ -106,7 +106,7 @@ async function signed(request, env, most) {
 
 const STREAMS = { spans: "SPANS", logs: "LOGS", metrics: "METRICS" };
 
-/// The Workers whose own traces and logs are kept: never `node`, which reports its calls as every app runtime does, whatever a
+/// The Workers whose own traces and logs are kept: never `oned`, which reports its calls as every app runtime does, whatever a
 /// request says of itself, and not this one, as an export of what it did would be the next thing it was handed (insights/src/lib.rs).
 export const TRACED = ["gateway", "auth", "relay", "url-signer", "notifications", "onet"];
 const token = (v) => typeof v === "string" && /^[A-Za-z0-9_.+-]{1,72}$/.test(v);

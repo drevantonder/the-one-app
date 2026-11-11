@@ -176,7 +176,7 @@ fn windows_programs(checkout: &Path, version: &Version) -> Result<PathBuf> {
 pub(crate) fn publish_build(dir: &Path, addr: &str, windows: Option<&Path>) -> Result<()> {
     let build = crate::program()?;
     let version = Version::of(&build).context("ask this checkout's build what it is")?;
-    let (node, key) = (loopback_at(dir, addr), Throwaway::own_release_key(dir)?);
+    let (api, key) = (loopback_at(dir, addr), Throwaway::own_release_key(dir)?);
     // With its app runtime, built beside it, and the Workers and the web client, which Cloudflare's Update in Devices
     // takes from the record.
     let bundle = |files| ui::bundle::Bundle { commit: version.commit.clone(), committed: version.committed, shell: ui::web::SHELL, files };
@@ -196,7 +196,7 @@ pub(crate) fn publish_build(dir: &Path, addr: &str, windows: Option<&Path>) -> R
         things.push((Thing::program_name(WINDOWS), Some(windows.join("one.exe")), on.clone(), "-".into()));
         things.push((Thing::service_name(::scope::scopes::APPS_PART, WINDOWS), Some(windows.join("one-apps.exe")), on, "-".into()));
     }
-    oned::publish::publish_latest(&node, &key, &things)
+    oned::publish::publish_latest(&api, &key, &things)
 }
 
 /// `update`, in the throwaway network: nothing supervises its oned, so what systemd or launchd does for a device's, this does
@@ -219,7 +219,7 @@ fn update(dir: &Path, addr: &str) -> Result<()> {
     let started = std::time::Instant::now();
     // It stops onet and its app runtime first, ten seconds each at most; nothing says when it's gone.
     while oned.is_some_and(|pid| unsafe { libc::kill(pid, 0) } == 0) {
-        anyhow::ensure!(started.elapsed() < std::time::Duration::from_secs(30), "the throwaway network's oned didn't stop: node.log says why");
+        anyhow::ensure!(started.elapsed() < std::time::Duration::from_secs(30), "the throwaway network's oned didn't stop: oned.log says why");
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     network::spawn_node(dir, Some(addr)).map(drop)

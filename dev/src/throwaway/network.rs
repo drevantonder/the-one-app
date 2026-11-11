@@ -81,8 +81,8 @@ pub(crate) fn program(dir: &Path) -> Result<PathBuf> {
 /// another checkout's throwaway network, which took the port while this one was stopped.
 pub(crate) fn running(dir: &Path) -> Option<String> {
     let addr = std::fs::read_to_string(dir.join("addr")).ok()?.trim().to_string();
-    let node: i32 = std::fs::read_to_string(dir.join("pid")).ok()?.trim().parse().ok()?;
-    programs(dir, false).contains(&node).then_some(())?;
+    let oned: i32 = std::fs::read_to_string(dir.join("pid")).ok()?.trim().parse().ok()?;
+    programs(dir, false).contains(&oned).then_some(())?;
     loopback_at(dir, &addr).get("/api/state").is_ok().then_some(addr)
 }
 
@@ -183,26 +183,26 @@ fn create(dir: &Path) -> Result<String> {
     // A free port the system picks, as for everything else here: never a fixed one every checkout's network would
     // want first, which another's would hold when this one starts again.
     let addr = spawn_node(dir, None)?;
-    let node = loopback_at(dir, &addr);
-    let created = node.post("/api/create", json!({ "name": "Throwaway", "user_name": me }))?;
+    let api = loopback_at(dir, &addr);
+    let created = api.post("/api/create", json!({ "name": "Throwaway", "user_name": me }))?;
     let recovery = created["recovery"].as_str().context("the throwaway network gave no recovery key")?;
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
-    let user = (node.get("/api/state")?["user"]["id"].as_str().context("the throwaway network has no user")?.to_string(), me);
+    let user = (api.get("/api/state")?["user"]["id"].as_str().context("the throwaway network has no user")?.to_string(), me);
     let settings = Settings::for_throwaway(dir, &bucket, user)?;
     settings.save()?;
     // Read back as `cloudflare deploy` reads it, with its secrets.
     let settings = Settings::load_in(dir)?;
     spawn_cloudflare(dir, &settings, &addr)?;
-    node.post("/api/settings", json!({ "name": "address", "value": &settings.address }))?;
+    api.post("/api/settings", json!({ "name": "address", "value": &settings.address }))?;
     // Its sign-in signs its own ID tokens, as a provider would, for this client: the one its users sign in with.
     let clients = format!("{}/api/auth one-throwaway", settings.address);
-    node.post("/api/settings", json!({ "name": scope::sign_in_proof::CLIENTS, "value": clients }))?;
+    api.post("/api/settings", json!({ "name": scope::sign_in_proof::CLIENTS, "value": clients }))?;
     // Its data moves to the throwaway bucket, which its app runtime reaches only through its URL signer from then on.
-    let moved = node.post("/api/storage", json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" }))?;
+    let moved = api.post("/api/storage", json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" }))?;
     anyhow::ensure!(moved["kept"] == true, "the throwaway network's app runtime couldn't reach its bucket through the URL signer: {moved}");
     let started = std::time::Instant::now();
-    while node.get("/api/storage")?["kind"] != "s3" {
-        anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the throwaway network's app runtime didn't move to its bucket: node.log says why");
+    while api.get("/api/storage")?["kind"] != "s3" {
+        anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the throwaway network's app runtime didn't move to its bucket: oned.log says why");
         std::thread::sleep(Duration::from_millis(200));
     }
     Ok(addr)
@@ -239,12 +239,12 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     let mut command = std::process::Command::new(program(dir)?);
     std::os::unix::process::CommandExt::arg0(&mut command, ::custom_build::programs::oned());
     Throwaway::tell(&mut command, dir, &addr);
-    let node_program = spawn(dir, &mut command, "node.log", false)?;
-    for (name, text) in [("pid", node_program.to_string()), ("addr", addr.clone())] {
+    let oned_program = spawn(dir, &mut command, "oned.log", false)?;
+    for (name, text) in [("pid", oned_program.to_string()), ("addr", addr.clone())] {
         std::fs::write(dir.join(name), text).with_context(|| format!("writing {}", dir.join(name).display()))?;
     }
-    let node = loopback_at(dir, &addr);
-    wait_for(|| node.get("/api/state").is_ok(), node_program, &dir.join("node.log"))?;
+    let api = loopback_at(dir, &addr);
+    wait_for(|| api.get("/api/state").is_ok(), oned_program, &dir.join("oned.log"))?;
     Ok(addr)
 }
 
@@ -313,14 +313,14 @@ impl Via for Direct {
     }
 }
 
-/// Starts the throwaway network's Workers, beside its app runtime at `node`, and waits for its address to answer.
-pub(crate) fn spawn_cloudflare(dir: &Path, settings: &Settings, node: &str) -> Result<()> {
+/// Starts the throwaway network's Workers, beside its app runtime at `at`, and waits for its address to answer.
+pub(crate) fn spawn_cloudflare(dir: &Path, settings: &Settings, at: &str) -> Result<()> {
     for port in settings.ports {
         anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's Workers' port {port} was taken by another program while it was stopped: {CLI}-dev throwaway stop, then {CLI}-dev throwaway for a new one on free ports");
     }
     // Beside its app runtime, which it asks for the network's devices, for its relay to take only them.
     let mut workers = std::process::Command::new(program(dir)?);
-    Throwaway::tell(workers.args(["cloudflare", "serve"]), dir, node);
+    Throwaway::tell(workers.args(["cloudflare", "serve"]), dir, at);
     let program = spawn(dir, &mut workers, "cloudflare.log", false)?;
     let url = format!("{}/.well-known/oauth-authorization-server", settings.address);
     wait_for(|| agent().get(&url).call().is_ok_and(|r| r.status().is_success()), program, &dir.join("cloudflare.log"))
@@ -380,9 +380,9 @@ pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
     // Its app runtime first, while its Workers run: it sends the telemetry Worker what it hasn't yet as it stops, which a
     // telemetry Worker stopping beside it would lose.
     let all = programs(dir, clients);
-    let node = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse::<i32>().ok()).filter(|n| all.contains(n));
-    end(&Vec::from_iter(node));
-    end(&all.into_iter().filter(|p| Some(*p) != node).collect::<Vec<_>>());
+    let oned = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse::<i32>().ok()).filter(|n| all.contains(n));
+    end(&Vec::from_iter(oned));
+    end(&all.into_iter().filter(|p| Some(*p) != oned).collect::<Vec<_>>());
     // What still runs stays listed: its browsers.
     let kept: String = std::fs::read_to_string(dir.join("pids")).unwrap_or_default().lines().filter(|l| !clients && l.ends_with(" client")).map(|l| format!("{l}\n")).collect();
     if kept.is_empty() {

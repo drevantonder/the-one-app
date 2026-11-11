@@ -86,8 +86,8 @@ fn a_carried_ask_is_taken_once_from_whoever_signed_it_and_only_as_their_own_user
 
     // Andre's app runtime calls as Andre; Bob's app runtime, carrying it or not, never as Andre, and Andre's shell serves only him.
     may_call(&net.db, &part.id(), &mac.id(), &mac.id(), ANDRE)?;
-    assert!(may_call(&net.db, &part.id(), &bobs_linux.id(), &mac.id(), ANDRE).is_err(), "Bob's node called as Andre");
+    assert!(may_call(&net.db, &part.id(), &bobs_linux.id(), &mac.id(), ANDRE).is_err(), "Bob's computer called as Andre");
     assert!(may_call(&net.db, &part.id(), &bobs_linux.id(), &bobs_linux.id(), BOB).is_err(), "Andre's own service served Bob");
-    assert!(may_call(&net.db, &part.id(), &bobs.id(), &bobs.id(), BOB).is_err(), "a client that isn't a node was answered");
+    assert!(may_call(&net.db, &part.id(), &bobs.id(), &bobs.id(), BOB).is_err(), "a client that isn't a computer was answered");
     Ok(())
 }

@@ -150,7 +150,7 @@ impl Failure {
 
 
 /// What a client names itself on a call. Anything else is `other`, since a caller says it.
-pub const CLIENTS: &[&str] = &["cli", "mcp", "code", "mac", "phone", "android", "windows", "linux", "browser", "web", "schedule", "app", "node", "api", "onet", "remote-mcp", "cloudflare-node"];
+pub const CLIENTS: &[&str] = &["cli", "mcp", "code", "mac", "phone", "android", "windows", "linux", "browser", "web", "schedule", "app", "app-runtime", "api", "onet", "remote-mcp", "oned-cloudflare"];
 
 /// The JavaScript errors whose name is the engine's, not a program's: anything else is `Error`.
 const EXCEPTIONS: &[&str] = &["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];

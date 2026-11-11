@@ -28,9 +28,9 @@ async fn relay(a: &Host) -> crate::cloudflare::Workers {
     k
 }
 
-/// Waits for what's expected of `node`, checking again at each event it announces: a limit only for what never happens.
-pub(crate) async fn eventually(what: &str, node: &Host, mut check: impl AsyncFnMut() -> bool) {
-    let mut events = node.subscribe();
+/// Waits for what's expected of `host`, checking again at each event it announces: a limit only for what never happens.
+pub(crate) async fn eventually(what: &str, host: &Host, mut check: impl AsyncFnMut() -> bool) {
+    let mut events = host.subscribe();
     let waiting = async {
         while !check().await {
             let _ = events.recv().await;
@@ -85,9 +85,9 @@ async fn add_notes(a: &Host) {
 /// The command that opens a backup, on a machine with only the disk and the recovery key: nothing running or joined
 /// here, and whatever it asked an app runtime at would refuse the connection. The key comes from a file or stdin, and is never
 /// printed.
-fn the_command_checks_it_with_no_node(backup: &std::path::Path, recovery: &str) {
+fn the_command_checks_it_with_no_app_runtime(backup: &std::path::Path, recovery: &str) {
     use std::io::Write;
-    let nothing = temp("no-node");
+    let nothing = temp("no-app-runtime");
     let file = nothing.join("recovery.key");
     std::fs::write(&file, format!("{recovery}\n")).unwrap();
     for (key, stdin) in [(file.to_str().unwrap(), None), ("-", Some(recovery))] {
@@ -185,7 +185,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let mine = format!("user:{}", me.user);
     let items = backed_up(&dir, &network, &::key::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
     assert!(items.iter().any(|i| i.contains("\"Example key\"")), "the Vault's item came back: {items:?}");
-    the_command_checks_it_with_no_node(&dir, &recovery);
+    the_command_checks_it_with_no_app_runtime(&dir, &recovery);
     let restored = backups_runtime::engine::restore(&place, &network, "global", &keys["global"]).unwrap();
     assert_eq!(backed_up_posts(&dir, &network, &::key::unhex(&recovery).unwrap()).await, ["before the backup"]);
     let steps_then = restored.snapshot.databases["notes/main"].0;
@@ -425,8 +425,8 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     assert!(::scope::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.is_err(), "no one is named yet");
     name(true).await;
     assert_eq!(opens(&phone).await, before, "naming a holder rewrites nothing sealed");
-    let sealed_to_node = seal_to(&::key::public_of(&[9; 32]), &secret).unwrap();
-    assert!(::scope::settings::recovery::seal(&a, &hex(&a.id()), &B64U.encode(&::key::held_copy(&recovery, &hex(&a.id()), &sealed_to_node))).await.is_err(), "not a node");
+    let sealed_to_computer = seal_to(&::key::public_of(&[9; 32]), &secret).unwrap();
+    assert!(::scope::settings::recovery::seal(&a, &hex(&a.id()), &B64U.encode(&::key::held_copy(&recovery, &hex(&a.id()), &sealed_to_computer))).await.is_err(), "not a computer");
     assert!(::scope::settings::recovery::seal(&a, &hex(&browser.verifying_key().to_bytes()), &sealed_for(&browser)).await.is_err(), "not a browser");
 
     let bad_key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
@@ -1079,7 +1079,7 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     assert_eq!(ask_runtime(at, &home_token, json!({ "app": "notes", "tool": "read", "input": {} })).await.0, 403);
     let post = json!({ "app": "notes", "tool": "post", "input": { "text": "from the runtime" } });
     polled("the runtime to run a call", log, async || ask_runtime(at, token, post.clone()).await.0 == 200).await;
-    let lines = async |node: &app_runtime::Host| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
+    let lines = async |host: &app_runtime::Host| host.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("from the runtime")).await;
 
     // A call it passes on to another of its user's devices, as its device would.
@@ -1227,7 +1227,7 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
         status == 200 && ran["steps"].as_array().into_iter().flatten().any(|s| s["here"] == true && s["result"] == "ran" && s["device"] == "onet-device")
     })
     .await;
-    let lines = async |node: &app_runtime::Host| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
+    let lines = async |host: &app_runtime::Host| host.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("through onet")).await;
 
     // A deploy made on the computer, whose step onet writes: its bundle is in the bucket by then, so another device runs it.

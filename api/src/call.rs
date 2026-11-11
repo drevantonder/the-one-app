@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// What an app asks the app runtime for the call it runs in, by name: on a machine `POST one.internal/<name>`
-/// (`app-runtime/src/app/outbound.rs`), on oned on Cloudflare `node.ask(name, body)`.
+/// (`app-runtime/src/app/outbound.rs`), on oned on Cloudflare `oned.ask(name, body)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ask {
     /// Runs a tool of an app it uses, or a function of its own service (`ctx.apps`, `ctx.services`).

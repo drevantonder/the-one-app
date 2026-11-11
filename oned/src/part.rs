@@ -504,9 +504,9 @@ impl Service {
 /// own user. An app runtime of someone else's, an admin's too, never calls as them.
 pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str) -> Result<()> {
     let service = m.service(me)?.with_context(|| format!("this service isn't one of {YOURS}'s yet"))?;
-    let node = m.compute(remote)?.with_context(|| format!("only {YOURS}'s devices are answered"))?;
+    let computer = m.compute(remote)?.with_context(|| format!("only {YOURS}'s devices are answered"))?;
     allowed!(m.may(user, "use", &scopes::service(me)), "{} serves only its own user", service.service.as_deref().unwrap_or("this service"));
-    let own = node.user == user && (*key == *remote || m.client(key)?.is_some_and(|c| c.user == user));
+    let own = computer.user == user && (*key == *remote || m.client(key)?.is_some_and(|c| c.user == user));
     ensure!(own, "{} may not call as that user", short(remote));
     Ok(())
 }

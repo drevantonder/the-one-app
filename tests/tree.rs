@@ -102,9 +102,9 @@ fn the_relays_wasm_is_built_from_the_sources_beside_it() {
         let after = lock.split_once(&format!("name = \"{name}\"\nversion = \"")).unwrap_or_else(|| panic!("{name} isn't locked")).1;
         after.split('"').next().unwrap().to_string()
     };
-    let nodes = version(relay.join("../Cargo.lock"), "iroh-relay");
+    let linked = version(relay.join("../Cargo.lock"), "iroh-relay");
     let wasm = version(relay.join("protos/Cargo.lock"), "iroh-base");
-    assert_eq!(nodes, wasm, "the nodes link iroh-relay {nodes}, but relay/protos holds its files at {wasm}: copy them again, then run relay/build.sh");
+    assert_eq!(linked, wasm, "the workspace links iroh-relay {linked}, but relay/protos holds its files at {wasm}: copy them again, then run relay/build.sh");
 }
 
 /// oned on Cloudflare's WebAssembly holds its own exports and onet's (a class `Foo`'s methods are exported as
@@ -158,6 +158,6 @@ fn oned_on_cloudflares_wasm_has_each_export_name_once() {
             }
         }
     }
-    assert!(twice.is_empty(), "exported twice from the Cloudflare node's WebAssembly (rename one):\n{}", twice.join("\n"));
+    assert!(twice.is_empty(), "exported twice from oned on Cloudflare's WebAssembly (rename one):\n{}", twice.join("\n"));
     assert!(seen.contains_key("keyring_fetch") && seen.contains_key("device_fetch"), "the sources' wasm exports weren't found: {:?}", seen.keys().collect::<Vec<_>>());
 }

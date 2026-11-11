@@ -63,7 +63,7 @@ static READS: ::bucket::Reads = ::bucket::Reads::new();
 #[wasm_bindgen]
 pub fn bucket_read(name: &str, found: bool, instance: &str, now: f64) -> Option<String> {
     READS.count(name, found);
-    insights::bucket_reads(&READS, now as u64, instance, "cloudflare-node").map(|rows| rows.to_string())
+    insights::bucket_reads(&READS, now as u64, instance, "oned-cloudflare").map(|rows| rows.to_string())
 }
 
 /// A call this app runtime ran for `user` (their id), as the rows the telemetry Worker takes: one server span, by the same rules as any app runtime's. `code` is

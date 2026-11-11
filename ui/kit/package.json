@@ -1,5 +1,5 @@
 {
-  "description": "@one/ui: the look every screen opts in to, React and shadcn's components in its neutral theme, built into dist/ for every node and client to serve; and the client's own Settings screens, built with it.",
+  "description": "@one/ui: the look every screen opts in to, React and shadcn's components in its neutral theme, built into dist/ for every app runtime and client to serve; and the client's own Settings screens, built with it.",
   "name": "ui",
   "private": true,
   "type": "module",

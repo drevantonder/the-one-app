@@ -1,5 +1,5 @@
 //! What one device holds and knows: `global`'s scope database as its steps leave it, from the freeze the network's
-//! recovery key signed (`database::steps`), which is what everything asks. No clock or I/O: `node.rs` reads and writes
+//! recovery key signed (`database::steps`), which is what everything asks. No clock or I/O: the app runtime (`app-runtime/src/network.rs`) reads and writes
 //! the bucket, and says the time.
 
 use anyhow::{Context, Result, ensure};
