@@ -128,6 +128,8 @@ pub struct Keyring<O = [u8; 32]> {
     learning: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// When it last read who's who to renew app schedules (`settings::renew_app_schedules`).
     renew_checked: Mutex<u64>,
+    /// The nodes a node said that it read who's who again for (`reread_for`): each only once.
+    reread: Mutex<std::collections::HashSet<[u8; 32]>>,
 }
 
 impl<O: Opens> Keyring<O> {
@@ -143,6 +145,7 @@ impl<O: Opens> Keyring<O> {
             needs: Mutex::default(),
             learning: Mutex::default(),
             renew_checked: Mutex::default(),
+            reread: Mutex::default(),
         }
     }
 
@@ -242,10 +245,15 @@ impl<O: Opens> Keyring<O> {
     }
 
 
-    /// Reads who's who again if it's been a while and it doesn't know one of `nodes` (as a node said they are).
+    /// Reads who's who again if a node said of `nodes` one it doesn't know, the first time one's said: one who's who
+    /// still doesn't list after that isn't one to ask.
     pub async fn reread_for(&self, on: &(impl Address + Keep), nodes: &[[u8; 32]]) {
-        let stale = self.known.lock().unwrap().as_ref().is_some_and(|k| nodes.iter().any(|n| !k.nodes.contains_key(n)) && now() > k.at + REREAD);
-        if stale {
+        let Some(known) = self.known.lock().unwrap().as_ref().map(|k| k.nodes.keys().copied().collect::<std::collections::HashSet<_>>()) else { return };
+        let new = {
+            let mut reread = self.reread.lock().unwrap();
+            nodes.iter().filter(|n| !known.contains(*n)).fold(false, |new, n| reread.insert(*n) || new)
+        };
+        if new {
             let _ = self.read(on).await;
         }
     }
