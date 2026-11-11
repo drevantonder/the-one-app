@@ -72,30 +72,30 @@ function Q(e, t) {
 			let n = {
 				user: e,
 				name: P(t),
-				node: null,
+				compute: null,
 				clients: []
 			};
 			return d.push(n), n;
 		}, g = /* @__PURE__ */ new Map(), _ = t.filter((e) => (e.roles || []).includes("compute"));
-		for (let e of _.filter((e) => !e.device)) g.set(e.key, Object.assign(h(e.user, e.name), { node: e }));
-		for (let e of _.filter((e) => e.device)) g.has(e.device) ? g.get(e.device).runtime = e : g.set(e.device, Object.assign(h(e.user, e.name), { node: e }));
+		for (let e of _.filter((e) => !e.device)) g.set(e.key, Object.assign(h(e.user, e.name), { compute: e }));
+		for (let e of _.filter((e) => e.device)) g.has(e.device) ? g.get(e.device).runtime = e : g.set(e.device, Object.assign(h(e.user, e.name), { compute: e }));
 		for (let e of i) e.passkey ? f.push(e) : !e.device && !e.platform && !e.me && o && Date.now() - Math.max(a[e.key] || 0, e.since || 0) > 6048e5 ? m.push(e) : (e.device && !g.has(e.device) && g.set(e.device, h(e.user, e.name)), (g.get(e.device || e.key) || h(e.user, e.name)).clients.push(e));
 		for (let e of d) {
-			e.id = e.node?.key || e.clients[0]?.key;
-			let t = e.node?.device && e.clients.find((t) => t.key === e.node.device);
+			e.id = e.compute?.key || e.clients[0]?.key;
+			let t = e.compute?.device && e.clients.find((t) => t.key === e.compute.device);
 			t && (e.name = P(t.name)), e.keys = [
 				...e.clients,
 				e.runtime,
-				e.node
-			].filter(Boolean).map((e) => e.key).sort((t, n) => (t === e.node?.device) - (n === e.node?.device)), e.removes = e.keys.filter((t) => ![e.runtime, e.node?.device && e.node].some((e) => e?.key === t)), e.me = [e.node, ...e.clients].some((e) => e?.me), e.online = !!e.node?.online, e.runs = !!e.node, e.priority = e.node?.priority ?? null;
+				e.compute
+			].filter(Boolean).map((e) => e.key).sort((t, n) => (t === e.compute?.device) - (n === e.compute?.device)), e.removes = e.keys.filter((t) => ![e.runtime, e.compute?.device && e.compute].some((e) => e?.key === t)), e.me = [e.compute, ...e.clients].some((e) => e?.me), e.online = !!e.compute?.online, e.runs = !!e.compute, e.priority = e.compute?.priority ?? null;
 			let n = [...e.clients].sort((e, t) => t.me - e.me || (a[t.key] || 0) - (a[e.key] || 0) || (t.since || 0) - (e.since || 0));
-			e.signIn = n[0] || null, e.old = n.slice(1), e.seen = Math.max(0, e.node?.seen || 0, e.runtime?.seen || 0, ...e.keys.map((e) => a[e] || 0)) || null, e.letInBy = e.keys.map((e) => i.find((t) => t.key === c[e] && t.platform === "cloudflare")).find(Boolean)?.name || null, e.version = e.node && s[Z(e.node)] || s[e.signIn?.key] || null, e.icon = e.node ? U(e.node.kind === "laptop" ? "laptop" : /apple|windows/.test(e.node.target || "") ? "desktop" : "hard-drives", V(e.node.target, e.name), !e.online) : K({
+			e.signIn = n[0] || null, e.old = n.slice(1), e.seen = Math.max(0, e.compute?.seen || 0, e.runtime?.seen || 0, ...e.keys.map((e) => a[e] || 0)) || null, e.letInBy = e.keys.map((e) => i.find((t) => t.key === c[e] && t.platform === "cloudflare")).find(Boolean)?.name || null, e.version = e.compute && s[Z(e.compute)] || s[e.signIn?.key] || null, e.icon = e.compute ? U(e.compute.kind === "laptop" ? "laptop" : /apple|windows/.test(e.compute.target || "") ? "desktop" : "hard-drives", V(e.compute.target, e.name), !e.online) : K({
 				...e.signIn,
 				name: e.signIn?.name || e.name
 			});
 		}
 		for (let e of d) e.letIn = e.signIn?.platform === "cloudflare" ? d.filter((t) => t !== e && t.keys.some((t) => e.keys.includes(c[t]))) : [];
-		let v = d.filter((e) => e.user === l || e.node && (u || p(e.node)));
+		let v = d.filter((e) => e.user === l || e.compute && (u || p(e.compute)));
 		return v.sort((e, t) => (e.runs ? R(e.priority) : 2e3) - (t.runs ? R(t.priority) : 2e3) || e.name.localeCompare(t.name)), {
 			cards: v,
 			passkeys: f.filter((e) => e.user === l),
@@ -104,7 +104,7 @@ function Q(e, t) {
 	}
 	let g = h();
 	function _(e, t) {
-		let n = `${Z(e.node)} ${t.name}`, r = J[n];
+		let n = `${Z(e.compute)} ${t.name}`, r = J[n];
 		return r ? r.state !== "failed" && t.on === r.on && (!r.again || t.doing || t.problem !== r.again) ? (delete J[n], t) : r.state === "failed" ? t.on === r.on ? (delete J[n], t) : {
 			...t,
 			failed: r.error,
@@ -124,22 +124,22 @@ function Q(e, t) {
 	}
 	let v = (e) => e.name === "apps" ? "Runs apps" : d(e.name)?.title || e.title || e.name;
 	function y(e) {
-		return Array.isArray(e.node?.parts) ? e.node.parts.map((t) => ({
+		return Array.isArray(e.compute?.parts) ? e.compute.parts.map((t) => ({
 			..._(e, t),
 			part: {
-				device: Z(e.node),
+				device: Z(e.compute),
 				name: t.name
 			}
-		})) : [...e.node ? [{
+		})) : [...e.compute ? [{
 			name: "apps",
 			on: !0,
 			fixed: !0
-		}] : [], ...(e.node?.installed_services || []).map((t) => ({
+		}] : [], ...(e.compute?.installed_services || []).map((t) => ({
 			name: t.name,
 			on: !0,
 			part: {
 				service: t.name,
-				device: Z(e.node)
+				device: Z(e.compute)
 			}
 		}))];
 	}
@@ -174,7 +174,7 @@ function Q(e, t) {
 			whose: e.user === l ? "" : `${m(e.user)}’s`,
 			presence: I(e),
 			p: e.priority,
-			keys: [Z(e.node)]
+			keys: [Z(e.compute)]
 		})), t = n.network?.cloudflare_node;
 		return t && e.push({
 			id: "cloudflare",
@@ -408,7 +408,7 @@ function $() {
 		}) : r[a].title === "This Device’s Code" ? G(async () => one.alert({
 			title: "This Device’s Code",
 			text: (await j("GET", "/api/devices/code")).code
-		})) : e.me ? de() : oe(e.name, t ? [e.key] : e.removes, !t && e.node && e.online ? e.node.key : null, t ? [] : e.letIn));
+		})) : e.me ? de() : oe(e.name, t ? [e.key] : e.removes, !t && e.compute && e.online ? e.compute.key : null, t ? [] : e.letIn));
 	}
 	async function oe(e, t, n, r = []) {
 		if (n || r.length) return P({ remove: {
@@ -445,9 +445,9 @@ function $() {
 	async function pe(e) {
 		l(""), one.tap("medium");
 		for (let t of e) {
-			B({ [t.node.key]: !0 });
+			B({ [t.compute.key]: !0 });
 			try {
-				if (await j("POST", "/api/devices/update", { device: Z(t.node) }), !await me(Z(t.node))) {
+				if (await j("POST", "/api/devices/update", { device: Z(t.compute) }), !await me(Z(t.compute))) {
 					l(`${t.name} didn’t come back on the new version.`), one.tap("error");
 					break;
 				}
@@ -921,7 +921,7 @@ function fe(t) {
 		n[29] !== y.keys || n[30] !== S.network?.users ? (L = !!y.keys && !!S.network?.users?.find(ve)?.recovery_holder, n[29] = y.keys, n[30] = S.network?.users, n[31] = L) : L = n[31];
 		let R = L, B = M || w.length > 0 || N.length > 0 || R, V = t.filter(_e).sort(ge), H = i.versions.cloudflare, W = r.admin && H?.behind ? {
 			name: "Cloudflare",
-			node: { key: "cloudflare" }
+			compute: { key: "cloudflare" }
 		} : null, G = W ? [...V, W] : V, K = B && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]", q;
 		n[32] === K ? q = n[33] : (q = E("grid max-w-5xl items-start gap-x-8 gap-y-8", K), n[32] = K, n[33] = q);
 		let J = G.length > 1 && /* @__PURE__ */ k(o, {
@@ -952,7 +952,7 @@ function fe(t) {
 								size: "sm",
 								disabled: Object.keys(_).length > 0,
 								onClick: () => v([e]),
-								children: [_[e.node.key] && /* @__PURE__ */ k(x, {}), "Update"]
+								children: [_[e.compute.key] && /* @__PURE__ */ k(x, {}), "Update"]
 							}),
 							!!d.length && /* @__PURE__ */ k(o, {
 								variant: "ghost",
@@ -1130,7 +1130,7 @@ function ge(e, t) {
 	return t.me - e.me;
 }
 function _e(e) {
-	return e.node && e.online && e.version?.behind;
+	return e.compute && e.online && e.version?.behind;
 }
 function ve(e) {
 	return e.me;
@@ -1506,7 +1506,7 @@ function je(t) {
 }
 function Me(t) {
 	let n = e(33), { card: i, open: a, setOpen: o, done: s } = t, c;
-	n[0] !== i.clients || n[1] !== i.node || n[2] !== i.runs ? (c = i.runs ? [Z(i.node)] : i.clients.map(Ne), n[0] = i.clients, n[1] = i.node, n[2] = i.runs, n[3] = c) : c = n[3];
+	n[0] !== i.clients || n[1] !== i.compute || n[2] !== i.runs ? (c = i.runs ? [Z(i.compute)] : i.clients.map(Ne), n[0] = i.clients, n[1] = i.compute, n[2] = i.runs, n[3] = c) : c = n[3];
 	let l = c, [d, f] = r(i.name), [p, m] = r(!1), [h, g] = r(""), _;
 	n[4] !== i.name || n[5] !== d ? (_ = !!d.trim() && d.trim() !== i.name, n[4] = i.name, n[5] = d, n[6] = _) : _ = n[6];
 	let b = _, x;
