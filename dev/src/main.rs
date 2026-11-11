@@ -31,6 +31,22 @@ pub fn loopback() -> Client {
     throwaway::loopback_at(&platform::home(), &api::local::addr())
 }
 
+/// What one-dev reads of a network's state (`GET /api/state`), field by field: the program answering may be a build
+/// before or after this one (a throwaway started `--build` on an older one, or this computer before it updates).
+pub mod state {
+    use serde_json::Value;
+
+    /// The network's address, once it has one.
+    pub fn address(state: &Value) -> Option<&str> {
+        state["network"]["settings"]["address"].as_str()
+    }
+
+    /// The user looking, by name; with none listed, who the app runtime says is looking.
+    pub fn looking(state: &Value) -> Option<&str> {
+        state["user"]["name"].as_str().or(state["me"]["name"].as_str())
+    }
+}
+
 /// An HTTP client for this machine's programs.
 pub fn agent() -> ureq::Agent {
     api::local::agent()

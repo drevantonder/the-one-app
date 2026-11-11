@@ -46,12 +46,35 @@ pub(crate) fn read_pages_again(dir: &Path) -> Result<()> {
     oned_cloudflare::write_web(&Settings::load_in(dir)?)
 }
 
-/// The program the throwaway network in `dir` runs: the one it was given, else the one beside this.
-pub(crate) fn program(dir: &Path) -> Result<PathBuf> {
+/// The program the throwaway network in `dir` is given: `--build`'s, else the one beside this.
+fn source(dir: &Path) -> Result<PathBuf> {
     match std::fs::read_to_string(dir.join(BUILD)) {
         Ok(build) => Ok(build.trim().into()),
         Err(_) => crate::program(),
     }
+}
+
+/// The program the throwaway network in `dir` runs: its own copy of `source` in its folder, with the app runtime built
+/// beside it, so its `update` replaces only that, never a computer's own (`source` may be the one this computer runs).
+/// Copied again once `source` is newer: a build since, while an update leaves the copy newer.
+pub(crate) fn program(dir: &Path) -> Result<PathBuf> {
+    let source = source(dir)?;
+    let bin = Throwaway::bin_in(dir);
+    let copy = bin.join(CLI);
+    let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
+    if modified(&copy).is_none_or(|copied| modified(&source).is_some_and(|built| built > copied)) {
+        std::fs::create_dir_all(&bin)?;
+        for name in [CLI.to_string(), format!("{CLI}-{}", ::scope::scopes::APPS_PART)] {
+            let from = source.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+            if !from.is_file() {
+                continue;
+            }
+            let copying = bin.join(format!(".{name}.copying"));
+            std::fs::copy(&from, &copying).with_context(|| format!("copying {} for the throwaway network to run", from.display()))?;
+            std::fs::rename(&copying, bin.join(name))?;
+        }
+    }
+    Ok(copy)
 }
 
 /// The throwaway network's app runtime's address, while its app runtime runs and answers: an answer from the address alone could be
@@ -67,7 +90,7 @@ pub(crate) fn running(dir: &Path) -> Option<String> {
 /// included, so a new build (`cargo build`) is picked up by starting it again, which keeps its data.
 pub(crate) fn older_build(dir: &Path) -> bool {
     let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
-    match (program(dir).ok().and_then(|exe| modified(&exe)), modified(&dir.join("pid"))) {
+    match (source(dir).ok().and_then(|exe| modified(&exe)), modified(&dir.join("pid"))) {
         (Some(built), Some(started)) => built > started,
         _ => false,
     }
@@ -151,8 +174,8 @@ pub(crate) fn start_new(dir: &Path) -> Result<String> {
 fn create(dir: &Path) -> Result<String> {
     // Called what the user is called in their own network, if this machine is in one.
     let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(api::local::as_this_machine).build().into();
-    let mine = quick.get(format!("http://{}/api/state", api::local::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<scope::state::State>().ok());
-    let me = mine.map(|s| s.looking().to_string());
+    let mine = quick.get(format!("http://{}/api/state", api::local::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<serde_json::Value>().ok());
+    let me = mine.as_ref().and_then(crate::state::looking).map(str::to_string);
     let me = me.or_else(|| std::env::var("USER").ok()).unwrap_or_else(|| "You".into());
     std::fs::create_dir_all(dir)?;
     let bucket = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
@@ -164,7 +187,7 @@ fn create(dir: &Path) -> Result<String> {
     let created = node.post("/api/create", json!({ "name": "Throwaway", "user_name": me }))?;
     let recovery = created["recovery"].as_str().context("the throwaway network gave no recovery key")?;
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
-    let user = (node.state()?.user.context("the throwaway network has no user")?.id, me);
+    let user = (node.get("/api/state")?["user"]["id"].as_str().context("the throwaway network has no user")?.to_string(), me);
     let settings = Settings::for_throwaway(dir, &bucket, user)?;
     settings.save()?;
     // Read back as `cloudflare deploy` reads it, with its secrets.

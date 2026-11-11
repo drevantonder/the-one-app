@@ -205,8 +205,8 @@ fn update(dir: &Path, addr: &str) -> Result<()> {
 }
 
 fn say_where(dir: &Path, addr: &str) -> Result<()> {
-    let state = loopback_at(dir, addr).state()?;
-    let (me, address) = (state.looking(), state.address().unwrap_or(""));
+    let state = loopback_at(dir, addr).get("/api/state")?;
+    let (me, address) = (crate::state::looking(&state).unwrap_or(""), crate::state::address(&state).unwrap_or(""));
     println!(
         "This checkout's throwaway network is running on this machine: a new network, Throwaway, with only what every new network
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
@@ -223,7 +223,7 @@ recovery key; its Workers' settings are in {}.
 /// git is on a computer with an app runtime: this build's helper is linked in a folder of the throwaway network's, put
 /// first on git's PATH (the one the real network's CLI links is another build, reaching another app runtime).
 fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
-    let address = loopback_at(dir, addr).state()?.address().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
+    let address = crate::state::address(&loopback_at(dir, addr).get("/api/state")?).context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
     let helper = bin.join(::custom_build::programs::git_helper());

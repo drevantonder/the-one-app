@@ -285,7 +285,7 @@ fn version_tag(tag: &str) -> bool {
 }
 
 fn key_address() -> String {
-    crate::loopback().state().ok().and_then(|s| s.address().map(str::to_string)).unwrap_or_default()
+    crate::loopback().get("/api/state").ok().and_then(|s| crate::state::address(&s).map(str::to_string)).unwrap_or_default()
 }
 
 /// Waits for a Mac to publish its app built from `commit`: → it, and where it's read from.

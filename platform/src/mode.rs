@@ -46,7 +46,7 @@ impl Mode {
     /// network's in its home, so what it puts there never replaces the real network's program.
     pub fn bin(&self) -> PathBuf {
         match self {
-            Mode::Throwaway(t) => t.home.join("bin"),
+            Mode::Throwaway(t) => Throwaway::bin_in(&t.home),
             Mode::Own if cfg!(windows) => crate::home().join("bin"),
             Mode::Own => crate::user_home().join(".local/bin"),
         }
@@ -72,6 +72,11 @@ impl Mode {
 }
 
 impl Throwaway {
+    /// Where the throwaway network in `home` keeps its programs: what it runs, and what its oned fetches.
+    pub fn bin_in(home: &Path) -> PathBuf {
+        home.join("bin")
+    }
+
     /// Makes `command` a program of the throwaway network in `home`, whose app runtime is at `addr`: its home and address, which
     /// it asks its app runtime at as one of this machine's programs, and its mode.
     pub fn tell(command: &mut std::process::Command, home: &Path, addr: &str) {
