@@ -1,12 +1,14 @@
 //! The scopes this device holds: reading each from the bucket, and what devices tell each other about them: that one
-//! changed (pings), and who is on (presence), with what their services describe of themselves.
+//! changed (pings), and, asked, what each runs and what its services describe of themselves.
 
 use super::*;
 
 /// The largest step a `changed` carries: a bigger one, the devices it tells read from the bucket.
 const SENT_STEP: usize = 1 << 20;
 /// How often each connection's paths are said in the log (`log_paths`).
-const PATHS_EVERY: Duration = Duration::from_secs(5 * 60);
+pub(super) const PATHS_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How long asking another device what it runs may take.
+const STATE_WAIT: Duration = Duration::from_secs(3);
 
 impl Node {
     /// Reads what each scope this device holds has in the bucket after what it last read, `global` first, until it
@@ -195,81 +197,79 @@ impl Node {
         }
     }
 
-    /// Tells every other device how loaded it is, now and then.
-    pub(super) async fn presence_loop(self) {
-        let mut paths_said = Instant::now();
-        loop {
-            if self.has_network() {
-                if paths_said.elapsed() >= PATHS_EVERY {
-                    paths_said = Instant::now();
-                    self.log_paths();
-                }
-                self.say_hello();
-                self.read_connected();
-                self.check_relay();
-                self.node_says();
-                self.renew_app_schedules("");
-                self.start_owed_keys();
-                self.name_services_scopes().await;
-            }
-            tokio::time::sleep(PRESENCE_EVERY).await;
-        }
+    /// What this device runs, for another that asks (`crate::protocol::message::STATE`, when a screen shows it or a call needs its services):
+    /// what each part registered here describes of itself, by its service's key, and what its oned runs and each one's
+    /// state, as its onet said.
+    pub(super) fn state_asked(&self) -> Value {
+        let device = self.0.holds.device();
+        json!({ "services": self.parts_described(), "parts": self.with_or(Value::Null, |i| Ok(i.parts.get(&device).cloned().unwrap_or_default())) })
     }
 
-    /// Says hello to every other device, now and then: how loaded this one is, and what each of its parts registered
-    /// here describes of itself. How far each is, is the round trip iroh measures to it.
-    pub(super) fn say_hello(&self) {
-        let Ok(devices) = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect::<Vec<Key>>())) else {
+    /// Asks each of `runtimes` this device hasn't asked within `STATE_FRESH`, and that it can reach, what it runs
+    /// (`state_asked`), and keeps it: within `STATE_WAIT` if `wait`, else in the background.
+    pub(super) async fn know_states(&self, runtimes: Vec<Key>, wait: bool) {
+        let due: Vec<Key> = self.with_or(Vec::new(), |i| Ok(runtimes.into_iter().filter(|r| *r != self.0.id && i.reachable(r) && i.stated.get(r).is_none_or(|at| at.elapsed() >= STATE_FRESH)).collect()));
+        if due.is_empty() {
             return;
-        };
-        let hello = json!({ "load": crate::load::current(), "updating": self.updating(), "services": self.parts_described() });
-        for device in devices {
-            let (node, hello) = (self.clone(), hello.clone());
-            tokio::spawn(async move {
-                if node.say_hello_to(&device, &hello).await.is_ok()
-                    && let Some(far) = node.round_trip(&device)
-                {
-                    node.with_or(None, |i| Ok(i.far.insert(device, far)));
+        }
+        self.with_or((), |i| Ok(i.stated.extend(due.iter().map(|r| (*r, Instant::now())))));
+        let node = self.clone();
+        let asking = async move {
+            let asked: Vec<_> = due.into_iter().map(|r| {
+                let node = node.clone();
+                tokio::spawn(async move { (r, node.send(&r, crate::protocol::message::STATE, &json!({}), true, STATE_WAIT).await) })
+            }).collect();
+            let mut changed = Vec::new();
+            for asking in asked {
+                let Ok((runtime, said)) = asking.await else { continue };
+                match said {
+                    Ok(said) => changed.extend(node.state_from(&runtime, &said).unwrap_or_default()),
+                    Err(err) => tracing::debug!("asking {} what it runs: {err:#}", short(&runtime)),
                 }
-            });
+            }
+            if !changed.is_empty() {
+                node.learn_apps(changed);
+            }
+        };
+        match wait {
+            true => drop(tokio::time::timeout(STATE_WAIT, asking).await),
+            false => drop(tokio::spawn(asking)),
         }
     }
 
-    /// Another device's hello: its load, and what the parts its runtime carries describe of themselves, kept for those
-    /// who's who lists as parts of its device.
-    pub(super) fn hello_from(&self, from: &Key, hello: &Value) -> Result<()> {
-        let load = serde_json::from_value(hello["load"].clone()).ok();
-        let changed = self.with(|i| {
-            i.peers.insert(*from, Peer { load, updating: hello["updating"].as_str().map(str::to_string), seen: Instant::now() });
+    /// What another device's runtime said it runs, kept for the services who's who lists as parts of its device. →
+    /// the apps whose services changed.
+    fn state_from(&self, runtime: &Key, said: &Value) -> Result<Vec<String>> {
+        let (changed, parts) = self.with(|i| {
             let m = i.r.db();
-            let device = m.device_of(from);
-            let mut said = HashMap::new();
-            for (key, describe) in hello["services"].as_object().into_iter().flatten() {
+            let device = m.device_of(runtime);
+            let mut now = HashMap::new();
+            for (key, describe) in said["services"].as_object().into_iter().flatten() {
                 if let Ok(key) = crate::keys::unhex(key)
                     && m.service(&key)?.is_some_and(|s| s.device == Some(device))
                 {
-                    said.insert(key, describe.clone());
+                    now.insert(key, describe.clone());
                 }
             }
             let mut changed = Vec::new();
             for key in i.described.keys().copied().collect::<Vec<_>>() {
-                if m.service(&key)?.is_none_or(|s| s.device == Some(device)) && !said.contains_key(&key) {
+                if m.service(&key)?.is_none_or(|s| s.device == Some(device)) && !now.contains_key(&key) {
                     changed.extend(i.described.remove(&key).and_then(|d| d["name"].as_str().map(str::to_string)));
                 }
             }
-            for (key, describe) in said {
+            for (key, describe) in now {
                 if i.described.get(&key) != Some(&describe) {
                     changed.extend(describe["name"].as_str().map(str::to_string));
                     i.described.insert(key, describe);
                 }
             }
-            Ok(changed)
+            Ok((changed, (device, said["parts"].clone())))
         })?;
-        self.0.heard.notify_waiters();
-        if !changed.is_empty() {
-            self.learn_apps(changed);
+        if !parts.1.is_null() {
+            self.parts_from(&parts.0, parts.1);
         }
-        Ok(())
+        self.0.heard.notify_waiters();
+        Ok(changed)
     }
 
     /// What `device`'s oned runs as processes of its own, and each one's state, as its onet said (`oned::keep_parts`):
@@ -283,7 +283,7 @@ impl Node {
 
     /// Each service up as this device knows it, with whom it serves (as its listing says, never what it says of
     /// itself) and what it describes of itself: this device's parts as they registered here, another's as its device's
-    /// runtime said in its last hello, while it's heard.
+    /// runtime last said when asked (`know_states`), while it can be reached.
     pub(super) fn services_up(&self, i: &Network) -> Result<Vec<(scopes::Machine, Service)>> {
         let m = i.r.db();
         let here = self.0.holds.device();
@@ -294,7 +294,7 @@ impl Node {
             let describe = if device == here {
                 registered.get(&name).cloned()
             } else {
-                m.runtime_for(&device)?.filter(|r| i.heard(r)).and_then(|_| i.described.get(&s.key).cloned())
+                m.runtime_for(&device)?.filter(|r| i.reachable(r)).and_then(|_| i.described.get(&s.key).cloned())
             };
             let Some(mut describe) = describe else { continue };
             describe["runs"] = json!("service");

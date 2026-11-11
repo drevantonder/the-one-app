@@ -343,12 +343,13 @@ impl Node {
             if handled.members {
                 let db = i.r.db();
                 let mut listed = BTreeSet::new();
-                for key in i.peers.keys().chain(i.described.keys()) {
+                for key in i.said.keys().chain(i.exchanged.keys()).chain(i.described.keys()) {
                     if db.compute(key)?.is_some() || db.service(key)?.is_some() {
                         listed.insert(*key);
                     }
                 }
-                i.peers.retain(|peer, _| listed.contains(peer));
+                i.said.retain(|k, _| listed.contains(k));
+                i.exchanged.retain(|k, _| listed.contains(k));
                 i.described.retain(|service, _| listed.contains(service));
             }
             for log in &handled.dropped {
@@ -462,7 +463,6 @@ impl Node {
             // Read again, so each is brought to its new deploy's schema.
             self.close_dbs(|_, db| changed.iter().any(|app| db.starts_with(&format!("{app}/"))));
             self.emit(Event::Changed { apps: changed });
-            self.say_hello();
         }
         Ok(())
     }

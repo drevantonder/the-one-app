@@ -43,6 +43,10 @@ impl Node {
     }
 
     pub(super) fn state_as(&self, viewer: &Caller, client: Option<&str>) -> Result<State> {
+        // What each other computer runs, asked as a screen shows it, if this device hasn't lately: shown when it comes.
+        let runtimes = self.with_or(Vec::new(), |i| Ok(i.r.db().computes()?.into_iter().map(|c| c.key).collect()));
+        let node = self.clone();
+        tokio::spawn(async move { node.know_states(runtimes, false).await });
         let ready = self.ready();
         let waiting = self.waiting_requests(viewer).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
@@ -63,7 +67,7 @@ impl Node {
         let device_now = |s: &scopes::Machine| -> Result<DeviceNow> {
             let Some(i) = network.as_ref() else { return Ok(DeviceNow::default()) };
             let m = i.r.db();
-            let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
+            let session = i.said.get(&s.key);
             // The containers on a device are its user's business.
             let mut load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) };
             if let Some(l) = &mut load

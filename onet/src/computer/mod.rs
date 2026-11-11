@@ -95,7 +95,7 @@ pub(crate) struct Onet {
 }
 
 /// How often onet tells the relay what this device is on, hears an ask left for it, and sees to its listings.
-const KEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+const KEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub fn run(args: &[String]) -> Result<()> {
     let flag = |prefix: &str| args.iter().find_map(|a| a.strip_prefix(prefix)).map(str::to_string);

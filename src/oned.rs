@@ -18,8 +18,8 @@
 //! it's switched on and again when another is named or a newer one's published; a Mac service in Swift is an app of its
 //! own (`helper`), unpacked in the home. What the device can run (`parts`) and each one's state (on, off, starting, stopping,
 //! failed and why) and how it runs (in its sandbox as its app declares, told to it in its folder, `declared.json`;
-//! without one and why; or as the user) its onet says to every app runtime of the network in a hello, which is what
-//! Settings' Devices shows. Removing a device removes its services, and can erase what it keeps, which the device does
+//! without one and why; or as the user) its onet gives its own app runtime, which answers another device that asks
+//! as Settings' Devices shows it. Removing a device removes its services, and can erase what it keeps, which the device does
 //! itself, so only while it's reachable. A phone runs none: its app is the device.
 
 use std::collections::{BTreeMap, BTreeSet};

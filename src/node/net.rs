@@ -12,15 +12,13 @@ use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, 
 use super::*;
 
 const CONNECT: Duration = Duration::from_secs(10);
-/// How long a device that hasn't said hello lately (`Network::online`) is waited for: it may have just started, but
-/// mostly it's off, and a call, or a service asking for every device's answer, shouldn't wait out `CONNECT` for it.
+/// How long a device that isn't on the relay and hasn't talked with this one lately (`Network::reachable`) is waited
+/// for: it may have just started, but mostly it's off, and a call shouldn't wait out `CONNECT` for it.
 const UNSEEN_CONNECT: Duration = Duration::from_secs(3);
-/// How long after one like that couldn't be reached it isn't tried again, unless it says hello first.
+/// How long after one like that couldn't be reached it isn't tried again, unless it's on the relay again.
 const DOWN_FOR: Duration = Duration::from_secs(20);
-/// How long this device may hear from no other (a hello, either way) before it binds its endpoint again, and, if that
-/// doesn't help, how much longer each time: up to `QUIET_MAX`.
-const QUIET: Duration = Duration::from_secs(2 * 60);
-const QUIET_MAX: Duration = Duration::from_secs(30 * 60);
+/// How long a request to the relay may take.
+const RELAY_WAIT: Duration = Duration::from_secs(15);
 /// How long a `changed` waits to be taken before it's sent again on a new connection.
 const CHANGED_WAIT: Duration = Duration::from_millis(500);
 /// The byte an ask's answer starts with: the call started on the device asked (past its lease, for one that writes), or
@@ -31,8 +29,6 @@ const NOT_TAKEN: u8 = 0;
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// The most a computer that isn't the network's yet may send: one ask to join.
 const JOIN_LIMIT: usize = 4 << 10;
-/// The most a device's onet may say in a hello: its parts.
-const ONET_LIMIT: usize = 64 << 10;
 /// How many streams another device may have open on a connection at once.
 const STREAMS: u32 = 32;
 /// How many computers that aren't the network's yet may be connected at once, each asking to join.
@@ -48,8 +44,9 @@ const CLIENT_BODY_TIME: Duration = Duration::from_secs(60);
 /// How long a client device is waited for when this node asks it for something, and the most it may answer.
 const CLIENT_ASK: Duration = Duration::from_secs(10);
 const CLIENT_ANSWER: usize = 128 << 10;
-/// How long a client device's connection stays open with nothing asked on it.
-const CLIENT_IDLE: Duration = Duration::from_secs(10 * 60);
+/// How long a connection, a device's or a client's, stays open with nothing asked on it. Nothing keeps one open to say
+/// a device is there: iroh's path pings would keep it up forever, so it's closed here (`close_idle`).
+pub(super) const IDLE: Duration = Duration::from_secs(3 * 60);
 /// How many connections of keys the network doesn't list (a session's endpoint, until its device's certificate is
 /// checked; or a stranger) may be waiting at once, and how long one may take to show that certificate.
 const UNLISTED: usize = 32;
@@ -62,11 +59,11 @@ pub(super) struct Net {
     endpoint: Mutex<Option<(String, Endpoint)>>,
     /// The task binding the endpoint and taking what others open, with the address it's for.
     task: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
-    /// When the endpoint was last bound, and how many times in a row it was bound again for hearing from no device.
-    bound: Mutex<Option<(Instant, u32)>>,
     /// A connection to each device, opened by either end; each held while it's being opened.
     conns: Mutex<HashMap<Key, Arc<tokio::sync::Mutex<Option<Connection>>>>>,
-    /// When each device that hadn't said hello lately couldn't be reached (`DOWN_FOR`).
+    /// How many streams each device's connection has open, and when its last one ended: `close_idle`.
+    streams: Mutex<HashMap<Key, (usize, Instant)>>,
+    /// When each device that wasn't reachable couldn't be reached (`DOWN_FOR`).
     down: Mutex<HashMap<Key, Instant>>,
     /// How many computers that aren't the network's are connected, asking to join.
     joining: std::sync::atomic::AtomicUsize,
@@ -202,10 +199,6 @@ impl Node {
                 wait = (wait * 2).min(Duration::from_secs(60));
             };
             *self.0.net.endpoint.lock().unwrap() = Some((address.clone(), endpoint.clone()));
-            {
-                let mut bound = self.0.net.bound.lock().unwrap();
-                *bound = Some((Instant::now(), bound.map_or(0, |(_, n)| n)));
-            }
             tracing::info!("this device is reached through the relay at {address}");
             while let Some(incoming) = endpoint.accept().await {
                 let node = self.clone();
@@ -224,35 +217,6 @@ impl Node {
             self.0.net.conns.lock().unwrap().clear();
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-    }
-
-    /// Binds this device's endpoint again if it has heard from no other device (no hello either way) for a while, which
-    /// a relay connection that died without the endpoint noticing looks like: nothing reaches it, and it reaches
-    /// nothing, with the process running. Waits longer each time it didn't help, so one whose others are all off
-    /// doesn't keep at it. Asked now and then.
-    pub(super) fn check_relay(&self) {
-        let Some((since, n)) = *self.0.net.bound.lock().unwrap() else { return };
-        let Ok((others, heard)) = self.with(|i| Ok((i.r.db().computes()?.iter().filter(|c| c.key != self.0.id).count(), i.peers.values().map(|p| p.seen).max()))) else { return };
-        if heard.is_some_and(|h| h > since) {
-            if n > 0 {
-                tracing::info!("this device hears from other devices again");
-                *self.0.net.bound.lock().unwrap() = Some((since, 0));
-            }
-            return;
-        }
-        let quiet = since.elapsed();
-        if others == 0 || quiet < (QUIET * 2u32.pow(n.min(5))).min(QUIET_MAX) {
-            return;
-        }
-        tracing::warn!("this device heard from none of {others} other devices in {}s: binding its endpoint again (the {}{} time in a row)", quiet.as_secs(), n + 1, match n + 1 { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" });
-        let Some((address, old)) = self.0.net.task.lock().unwrap().take() else { return };
-        old.abort();
-        if let Some((_, endpoint)) = self.0.net.endpoint.lock().unwrap().take() {
-            tokio::spawn(async move { endpoint.close().await });
-        }
-        self.0.net.conns.lock().unwrap().clear();
-        *self.0.net.bound.lock().unwrap() = Some((Instant::now(), n + 1));
-        *self.0.net.task.lock().unwrap() = Some((address.clone(), tokio::spawn(self.clone().keep_net(address))));
     }
 
     async fn bind(&self, address: &str, ticket: Option<&str>) -> Result<Endpoint> {
@@ -279,9 +243,6 @@ impl Node {
         if !self.is_device(&remote) && self.is_cloudflare_node(&remote) {
             return self.take_cloudflare_node(conn).await;
         }
-        if !self.is_device(&remote) && self.has_runtime(&remote) {
-            return self.take_onet(remote, conn).await;
-        }
         if !self.is_device(&remote) {
             return self.take_joining(conn).await;
         }
@@ -305,12 +266,15 @@ impl Node {
                 return conn.close(1u32.into(), b"not a device of this network");
             }
             let node = self.clone();
+            let streaming = self.streaming(&remote);
             tokio::spawn(async move {
+                let _streaming = streaming;
                 let msg: Value = match recv.read_to_end(MESSAGE_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
                     Ok(msg) => msg,
                     Err(err) => return tracing::debug!("what {} sent: {err:#}", short(&remote)),
                 };
-                let answer = match msg["kind"].as_str() {
+                node.with_or(None, |i| Ok(i.exchanged.insert(remote, Instant::now())));
+                let mut answer = match msg["kind"].as_str() {
                     Some(M::ASK) => {
                         let asked = msg["body"]["trace"] == true;
                         let t = trace::Trace::continuing(asked, msg["body"]["traceparent"].as_str());
@@ -339,7 +303,7 @@ impl Node {
                         }
                         answer
                     }
-                    Some(M::HELLO) => node.hello_from(&remote, &msg["body"]).map(|()| Value::Null).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
+                    Some(M::STATE) => node.state_asked(),
                     Some(M::CHANGED) => {
                         node.changed_from(&msg["body"]);
                         Value::Null
@@ -347,6 +311,11 @@ impl Node {
                     Some(M::SERVICE) => node.carry(&msg["body"]).await,
                     _ => json!({ "error": "that isn't something devices ask each other" }),
                 };
+                // Every answer says how loaded this device is, for the asker's routing: no device says so unasked.
+                if let Value::Object(said) = &mut answer {
+                    said.insert("load".into(), json!(crate::load::current()));
+                    said.insert("updating".into(), json!(node.updating()));
+                }
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
                     tracing::debug!("answering {}: {err:#}", short(&remote));
                 }
@@ -354,32 +323,6 @@ impl Node {
         }
     }
 
-    /// A computer's onet, the device an app runtime names, which only says hello: what its oned runs as processes of
-    /// its own, and each one's state (`oned::keep_parts`).
-    async fn take_onet(&self, remote: Key, conn: Connection) {
-        while let Ok((mut send, mut recv)) = conn.accept_bi().await {
-            if !self.has_runtime(&remote) {
-                return conn.close(1u32.into(), b"not a device with an app runtime of this network");
-            }
-            let msg: Value = match recv.read_to_end(ONET_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
-                Ok(msg) => msg,
-                Err(err) => return tracing::debug!("what {} sent: {err:#}", short(&remote)),
-            };
-            let answer = match msg["kind"].as_str() {
-                Some(M::HELLO) => {
-                    self.parts_from(&remote, msg["body"]["parts"].clone());
-                    Value::Null
-                }
-                _ => json!({ "error": "a device's onet only says hello" }),
-            };
-            if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
-                tracing::debug!("answering {}: {err:#}", short(&remote));
-            }
-        }
-    }
-
-    /// The network's Cloudflare node, which asks only for calls, each its user's, with the keys they handed it for
-    /// them, sealed to this device: as a client device's call over iroh is taken.
     async fn take_cloudflare_node(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
@@ -508,7 +451,7 @@ impl Node {
         let service = hyper_util::service::TowerToHyperService::new(api);
         loop {
             use std::sync::atomic::Ordering::SeqCst;
-            let (send, recv) = match tokio::time::timeout(CLIENT_IDLE, conn.accept_bi()).await {
+            let (send, recv) = match tokio::time::timeout(IDLE, conn.accept_bi()).await {
                 Ok(Ok(stream)) => stream,
                 Ok(Err(_)) => break,
                 // Nothing asked a while, and nothing still answering (events, say): it's let go.
@@ -616,11 +559,6 @@ impl Node {
         self.with_or(false, |i| Ok(i.r.db().compute(key)?.is_some()))
     }
 
-    /// Whether `key` is a device that an app runtime of the network names as its own.
-    fn has_runtime(&self, key: &Key) -> bool {
-        self.with_or(false, |i| Ok(i.r.db().has_runtime(key)?))
-    }
-
     pub(super) fn is_service(&self, key: &Key) -> bool {
         self.with_or(false, |i| Ok(i.r.db().service(key)?.is_some()))
     }
@@ -683,8 +621,8 @@ impl Node {
         if let Some(conn) = held.as_ref().filter(|c| !fresh && c.close_reason().is_none()) {
             return Ok(conn.clone());
         }
-        // One that hasn't said hello lately is mostly off: it isn't waited for as long, nor tried again for a while.
-        let seen = self.with(|i| Ok(i.heard(to))).unwrap_or(true);
+        // One that isn't on the relay, nor talked with this one lately, is mostly off: it isn't waited for as long, nor tried again for a while.
+        let seen = self.with(|i| Ok(i.reachable(to))).unwrap_or(true);
         if !seen && self.0.net.down.lock().unwrap().get(to).is_some_and(|at| at.elapsed() < DOWN_FOR) {
             bail!(NotThere(self.away(to)));
         }
@@ -749,6 +687,27 @@ impl Node {
         }
     }
 
+    /// One more stream on the connection to `to`, until what this gives is dropped.
+    fn streaming(&self, to: &Key) -> Streaming {
+        self.0.net.streams.lock().unwrap().entry(*to).or_insert((0, Instant::now())).0 += 1;
+        Streaming(self.clone(), *to)
+    }
+
+    /// Closes each connection to another device that had no stream open for `IDLE`: a call or a `changed` opens one
+    /// again.
+    pub(super) fn close_idle(&self) {
+        let idle: Vec<Key> = self.0.net.streams.lock().unwrap().iter().filter(|(_, (open, since))| *open == 0 && since.elapsed() >= IDLE).map(|(k, _)| *k).collect();
+        for key in idle {
+            self.0.net.streams.lock().unwrap().remove(&key);
+            if let Some(slot) = self.0.net.conns.lock().unwrap().remove(&key)
+                && let Ok(held) = slot.try_lock()
+                && let Some(conn) = held.as_ref()
+            {
+                conn.close(0u32.into(), b"idle");
+            }
+        }
+    }
+
     fn drop_conn(&self, to: &Key) {
         self.0.net.conns.lock().unwrap().remove(to);
     }
@@ -781,12 +740,29 @@ impl Node {
 
     /// Sends `to` a message of `kind`: → its answer, waiting `limit` for it, if `answered`.
     pub(super) async fn send(&self, to: &Key, kind: &str, body: &Value, answered: bool, limit: Duration) -> Result<Value> {
+        let _streaming = self.streaming(to);
         let (_send, mut recv) = self.stream_to(to, kind, body).await?;
         if !answered {
             return Ok(Value::Null);
         }
         let answer = tokio::time::timeout(limit, recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
-        Ok(serde_json::from_slice(&answer)?)
+        let answer: Value = serde_json::from_slice(&answer)?;
+        self.answered_by(to, &answer);
+        Ok(answer)
+    }
+
+    /// What another device's answer says of it, kept for routing: how loaded it is, how far, and that the two talked.
+    fn answered_by(&self, to: &Key, answer: &Value) {
+        let far = self.round_trip(to);
+        self.with_or(None, |i| {
+            if let Some(far) = far {
+                i.far.insert(*to, far);
+            }
+            if answer.get("load").is_some() {
+                i.said.insert(*to, Said { load: serde_json::from_value(answer["load"].clone()).ok(), updating: answer["updating"].as_str().map(str::to_string) });
+            }
+            Ok(i.exchanged.insert(*to, Instant::now()))
+        });
     }
 
     /// Asks the client device `to` for its log, on a connection it opened to this node (`take_client`), where a client
@@ -813,6 +789,7 @@ impl Node {
         if let Some(parent) = trace::traceparent() {
             body["traceparent"] = json!(parent);
         }
+        let _streaming = self.streaming(&to);
         let answer = tokio::time::timeout(limit, async {
             let (_send, mut recv) = self.stream_to(&to, M::ASK, &body).await?;
             let mut first = [0u8];
@@ -821,16 +798,9 @@ impl Node {
             anyhow::Ok(recv.read_to_end(MESSAGE_LIMIT).await?)
         });
         let answer = answer.await.context("timed out")??;
-        Ok(serde_json::from_slice(&answer)?)
-    }
-
-    /// Says hello to another device: what runs here and its load. → once it's taken.
-    pub(super) async fn say_hello_to(&self, to: &Key, hello: &Value) -> Result<()> {
-        let answer = self.send(to, M::HELLO, hello, true, CONNECT).await?;
-        match answer["error"].as_str() {
-            Some(err) => bail!("{err}"),
-            None => Ok(()),
-        }
+        let answer: Value = serde_json::from_slice(&answer)?;
+        self.answered_by(&to, &answer);
+        Ok(answer)
     }
 
     /// Tells each of `to` that something changed, expecting no answer.
@@ -935,7 +905,7 @@ impl Node {
                 Ok(())
             });
             let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| crate::keys::unhex(k.as_str()?).ok()).collect();
-            let seen = said["seen"].as_object().into_iter().flatten().filter_map(|(k, at)| Some((crate::keys::unhex(k).ok()?, at.as_u64()?))).collect();
+            let seen: HashMap<Key, u64> = said["seen"].as_object().into_iter().flatten().filter_map(|(k, at)| Some((crate::keys::unhex(k).ok()?, at.as_u64()?))).collect();
             let was = node.with_or(None, |i| {
                 i.last_seen = seen;
                 let was = std::mem::replace(&mut i.connected, connected.clone());
@@ -1054,8 +1024,20 @@ impl tokio::io::AsyncWrite for Stream {
 }
 
 /// Posts to the relay: → what it answered. A slow relay gives up before the next ask.
+/// A stream open on the connection to a device, for `close_idle`.
+struct Streaming(Node, Key);
+
+impl Drop for Streaming {
+    fn drop(&mut self) {
+        if let Some((open, since)) = self.0.0.net.streams.lock().unwrap().get_mut(&self.1) {
+            *open = open.saturating_sub(1);
+            *since = Instant::now();
+        }
+    }
+}
+
 async fn post_relay(url: String, body: Value) -> Result<(u16, Value)> {
-    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(PRESENCE_EVERY)).build().into();
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(RELAY_WAIT)).build().into();
     tokio::task::spawn_blocking(move || {
         let request = ureq::http::Request::post(&url).header("content-type", "application/json").body(serde_json::to_vec(&body)?)?;
         let (mut resp, _) = crate::hedge::run(&agent, "relay", request, crate::hedge::Twice::Never)?;

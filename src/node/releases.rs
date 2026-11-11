@@ -49,7 +49,7 @@ impl Node {
         Ok(())
     }
 
-    /// Whether this device couldn't update, and why, as its hello says and `status` shows: what a Mac's app's install
+    /// Whether this device couldn't update, and why, as its answers say and `status` shows: what a Mac's app's install
     /// last said.
     pub fn updating(&self) -> Option<String> {
         crate::update::why(&self.0.dir)

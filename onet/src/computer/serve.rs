@@ -277,29 +277,11 @@ async fn create(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     Ok(made)
 }
 
-/// What this device's oned says its services are doing (`one::oned::keep_parts`): said in a hello to every other app
-/// runtime of the network, over what devices speak to each other, which the relay carries sealed, so it never reads the
-/// services' names or what went wrong; and given to its own runtime by its loopback.
+/// What this device's oned says its services are doing (`one::oned::keep_parts`), given to its own runtime by its
+/// loopback, which another device asks over what devices speak to each other when a screen shows it, so the relay never
+/// reads the services' names or what went wrong.
 async fn services(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     let said = axum::body::to_bytes(req.into_body(), 1 << 20).await?.to_vec();
-    let body: Value = serde_json::from_slice(&said)?;
-    if let Ok(device) = onet.device().await
-        && !device.address().is_empty()
-    {
-        tokio::spawn(async move {
-            let Ok((keyring, client)) = device.reached().await else { return };
-            let own = keyring.own_runtime();
-            let runtimes = keyring.who(|who| who.computes().map(|c| c.into_iter().map(|c| c.key).collect::<Vec<_>>())).and_then(Result::ok).unwrap_or_default();
-            for node in runtimes.into_iter().filter(|k| Some(*k) != own) {
-                let (client, body) = (client.clone(), body.clone());
-                tokio::spawn(async move {
-                    if let Err(err) = client.hello(node, body).await {
-                        tracing::debug!("telling {} what this device's services are doing: {err}", one::keys::short(&node));
-                    }
-                });
-            }
-        });
-    }
     let runtime = onet.runtime.as_ref().context("this computer's own app runtime isn't running here")?;
     let (status, _, answer) = runtime.ask("POST".into(), "/api/services".into(), vec![("content-type".into(), "application/json".into())], said).await?;
     let answer: Value = serde_json::from_slice(&answer).unwrap_or_default();

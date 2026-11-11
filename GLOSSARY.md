@@ -54,10 +54,10 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   not a device; a computer can be both. Avoid "node" for the app runtime. Avoid: serverless node.
 - **Platform**: what a client or oned is built for: Mac, Windows, Linux, iPhone, Android, a browser, Cloudflare.
 - **Endpoint**: an iroh identity, of its own key. Each client and node is one; the relay lets in only the network's.
-- **Network message**: what one node tells another directly over iroh: `hello` (its load, and what its services
-  describe of themselves, every so often; from a computer's onet, what its services are doing), `changed` (that
-  something changed), and an ask of a service, which its device's runtime carries to it sealed. A nudge, never trusted
-  for what's true, which the bucket says.
+- **Network message**: what one node tells another directly over iroh, on a connection opened to say it and closed
+  a few idle minutes later: `changed` (that something changed), and an ask (a call; what a device runs, when a screen
+  shows it; or a service's, which its device's runtime carries to it sealed), whose answer says how loaded the device
+  is. A nudge, never trusted for what's true, which the bucket says.
 - **Agent device**: a machine agents use (Linux with a browser, Windows, Android, an iPhone), which the Agent Devices
   service runs on a user's node. It is not in the network: it has no key there, and is reached only through that
   service.

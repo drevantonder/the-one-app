@@ -717,35 +717,6 @@ impl Client {
         }
     }
 
-    /// Says hello to the app runtime `node` as its user's device, over what devices speak to each other
-    /// (`one::node::alpn`), not this client's HTTP: what a computer's onet tells every runtime of what its device runs
-    /// (`one::oned::keep_parts`), which the relay carries sealed. The connection is closed once it's answered.
-    #[cfg(feature = "computer")]
-    pub async fn hello(&self, node: [u8; 32], body: serde_json::Value) -> Result<(), Error> {
-        let node = PublicKey::from_bytes(&node).map_err(|_| unsent("a node's key isn't a key"))?;
-        let endpoint = self.endpoint().await?;
-        let addr = match &self.0.way {
-            Way::Relay(url, _) => EndpointAddr::new(node).with_relay_url(url.clone()),
-            #[cfg(feature = "relayed")]
-            Way::Custom(_) => EndpointAddr::from_parts(node, [iroh::TransportAddr::Custom(relayed::through_relay(node.as_bytes()))]),
-        };
-        let said = async {
-            let conn = endpoint.connect(addr, &one::node::alpn()).await.map_err(|err| unsent(format!("the node couldn't be reached: {err}")))?;
-            let (mut send, mut recv) = conn.open_bi().await.map_err(unsent)?;
-            let hello = serde_json::json!({ "kind": one::protocol::message::HELLO, "body": body });
-            send.write_all(hello.to_string().as_bytes()).await.map_err(unsent)?;
-            send.finish().map_err(unsent)?;
-            let answer = recv.read_to_end(ASKED_LIMIT).await.map_err(sent)?;
-            conn.close(0u32.into(), b"said");
-            let answer: serde_json::Value = serde_json::from_slice(&answer).unwrap_or_default();
-            match answer["error"].as_str() {
-                Some(err) => Err(sent(err)),
-                None => Ok(()),
-            }
-        };
-        timeout(PATIENT, said).await.map_err(|_| unsent("the node didn't answer"))?
-    }
-
     /// Answers the streams a node opens on `conn` (`Asked`), as long as it's open, with what answers when each comes: this
     /// client's `answer_with` may be called after its connections start.
     fn answering(&self, conn: &Connection) {
@@ -764,7 +735,21 @@ impl Client {
                     let _ = send.finish();
                 });
             }
+            // A node closes a connection idle a few minutes; with none left, this client's relay socket goes too.
+            if let Some(me) = me.upgrade() {
+                Client(me).close_if_unused().await;
+            }
         });
+    }
+
+    /// Closes this client's endpoint, and so its socket at the relay, once no connection is open or being opened on
+    /// it: the next request binds it again.
+    async fn close_if_unused(&self) {
+        let mut held = self.0.endpoint.lock().await;
+        let open = self.0.conns.lock().unwrap().values().any(|slot| slot.try_lock().map_or(true, |c| c.as_ref().is_some_and(|c| c.close_reason().is_none())));
+        if !open && let Some(endpoint) = held.take() {
+            n0_future::task::spawn(async move { endpoint.close().await });
+        }
     }
 
     async fn exchange(&self, node: &PublicKey, conn: &Connection, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {

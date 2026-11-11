@@ -505,8 +505,20 @@ impl Node {
     }
 
     /// The devices that might run a call: `candidates`, or when a service has none but is on a device that's up, those
-    /// that say hello within a restart and the call's `limit`. Before any device has it, so it can't run twice.
+    /// whose part registers within a restart and the call's `limit`. Before any device has it, so it can't run twice.
     async fn candidates_or_starting(&self, req: &CallRequest, me: &Caller, limit: Duration) -> Result<Vec<Key>> {
+        if req.service.is_some() {
+            // What the runtimes carrying the service say of it, if this device hasn't asked lately.
+            let runtimes = self.with_or(Vec::new(), |i| {
+                let m = i.r.db();
+                let mut runtimes = Vec::new();
+                for s in m.offering(&req.app)? {
+                    runtimes.extend(s.device.map(|d| m.runtime_for(&d)).transpose()?.flatten());
+                }
+                Ok(runtimes)
+            });
+            self.know_states(runtimes, true).await;
+        }
         let found = self.candidates(req, me)?;
         let coming = req.service.is_some() && found.is_empty() && self.about(&req.app, me).await.is_some_and(|a| runs_on_online(&a).any(|r| r["problem"].is_null()));
         if !coming {
@@ -515,14 +527,14 @@ impl Node {
         let waiting = Instant::now();
         let heard = async {
             loop {
-                let hello = self.0.heard.notified();
-                tokio::pin!(hello);
-                hello.as_mut().enable();
+                let registered = self.0.heard.notified();
+                tokio::pin!(registered);
+                registered.as_mut().enable();
                 let found = self.candidates(req, me)?;
                 if !found.is_empty() {
                     return Ok(found);
                 }
-                hello.await;
+                registered.await;
             }
         };
         let found = tokio::time::timeout(crate::services::STARTS_WITHIN.min(limit), heard).await.unwrap_or(Ok(Vec::new()));
@@ -630,7 +642,7 @@ impl Node {
             }
             // A client's log is read through a node it's connected to, which only that node knows: each is tried.
             if req.app == scopes::APP && self.with(|i| Ok(i.r.db().find_machine(device).and_then(|k| Ok(i.r.db().client(&k)?.is_some())).unwrap_or(false)))? {
-                let mut nodes = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|m| m.key).filter(|k| *k == self.0.id || i.heard(k)).collect::<Vec<_>>()))?;
+                let mut nodes = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|m| m.key).filter(|k| *k == self.0.id || i.reachable(k)).collect::<Vec<_>>()))?;
                 nodes.sort_by_key(|k| *k != self.0.id);
                 return Ok(nodes);
             }
@@ -642,9 +654,28 @@ impl Node {
         let about_here = |d: &Value| d["prefer"][req.runs()] == "here";
         // This device: its node, or a part of it.
         let ours = |i: &Network, k: &Key| -> Result<bool> { Ok(*k == self.0.id || i.r.db().machine(k)?.is_some_and(|m| m.device == Some(self.0.holds.device()))) };
-        // Each service up that serves the caller, by its key, with whether it's about its own machine.
+        // Each service that serves the caller and may be up, by its key, with whether it's about its own machine: this
+        // device's while its part is registered here; another's while its device's runtime can be reached and the
+        // service isn't switched off there, its runtime waiting for a part that's starting.
         let services: Vec<(Key, bool)> = match req.service {
-            Some(_) => self.with(|i| Ok(self.services_up(i)?.into_iter().filter(|(_, d)| d.0 == req.app && d.1.contains(&me.user)).map(|(s, d)| (s.key, about_here(&d.2))).collect()))?,
+            Some(_) => self.with(|i| {
+                let m = i.r.db();
+                let here = self.0.holds.device();
+                let registered: HashMap<String, Value> = self.0.sockets.described().into_iter().collect();
+                let mut out = Vec::new();
+                for s in m.offering(&req.app)?.into_iter().filter(|s| !s.removed && m.may(&me.user, "use", &scopes::service(&s.key))) {
+                    let Some(device) = s.device else { continue };
+                    let describe = if device == here {
+                        registered.get(&req.app).cloned()
+                    } else if m.runtime_for(&device)?.is_some_and(|r| i.reachable(&r)) && !Self::off(m, &device, &req.app)? {
+                        Some(i.described.get(&s.key).cloned().unwrap_or_default())
+                    } else {
+                        None
+                    };
+                    out.extend(describe.map(|d| (s.key, about_here(&d))));
+                }
+                Ok(out)
+            })?,
             None => Vec::new(),
         };
         let here_first = self.with(|i| {
@@ -678,7 +709,7 @@ impl Node {
                 let runtime = if req.service.is_some() && *k != self.0.id { i.r.db().runtime_for(&at)? } else { None };
                 let via = runtime.unwrap_or(*k);
                 let here = via == self.0.id;
-                let load = if here { Some(&here_load) } else { i.peers.get(&via).and_then(|p| p.load.as_ref()) };
+                let load = if here { Some(&here_load) } else { i.said.get(&via).and_then(|p| p.load.as_ref()) };
                 standing.insert(*k, rank::Standing {
                     here: here || (here_first && ours(i, k)?),
                     online: here || ((i.online(&via) || i.online(&at)) && !self.down(&via)),

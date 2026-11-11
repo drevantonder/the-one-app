@@ -100,12 +100,14 @@ const REFILL: Duration = Duration::from_secs(120);
 /// How often a refill reads every scope from the bucket whatever the relay says moved (`Node::moved`), for a write it
 /// wasn't told of.
 const WHOLE_REFILL: Duration = Duration::from_secs(1800);
-/// How old what the relay said of writes (`moved`) may be for a refill to go by it.
-const MOVED_FRESH: Duration = Duration::from_secs(60);
+/// How old what the relay said of writes (`moved`) may be for a refill to go by it: two of its answers.
+const MOVED_FRESH: Duration = Duration::from_secs(2 * 60);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
-/// How often a device says hello to the others: how loaded it is.
-const PRESENCE_EVERY: Duration = Duration::from_secs(15);
+/// How often this device asks the relay which devices are on and when each was seen.
+const RELAY_EVERY: Duration = Duration::from_secs(60);
+/// How long what another device said of what it runs (`Node::ask_state`) stands before it's asked again.
+const STATE_FRESH: Duration = Duration::from_secs(60);
 const REFETCH_AFTER: Duration = Duration::from_secs(30);
 
 pub fn now_ms() -> u64 {
@@ -115,12 +117,11 @@ pub fn now_ms() -> u64 {
 /// A service serving on a device: its name, the users it serves, and what it describes of itself.
 pub type Service = (String, Vec<String>, Value);
 
-/// Another device, as it last said hello, and how loaded it is.
-struct Peer {
+/// What another device said of itself in its last answer here: how loaded it is, and why it hasn't taken the latest
+/// update, if it says.
+struct Said {
     load: Option<crate::load::Load>,
-    /// Why it hasn't taken the latest update, if it says.
     updating: Option<String>,
-    seen: Instant,
 }
 
 struct Network {
@@ -128,14 +129,21 @@ struct Network {
     user: String,
     /// The network's bucket, and its fields, which a device joining is given.
     bucket: Option<(Place, BTreeMap<String, String>)>,
-    peers: HashMap<Key, Peer>,
-    /// What each service of another device describes of itself, by its key, as that device's runtime said in its hello.
+    /// What each device said of itself in its last answer here.
+    said: HashMap<Key, Said>,
+    /// When this device last asked or answered each other one.
+    exchanged: HashMap<Key, Instant>,
+    /// What each service of another device describes of itself, by its key, as that device's runtime last said when
+    /// asked (`Node::ask_state`).
     described: HashMap<Key, Value>,
-    /// What each computer runs as processes of its oned, and each one's state, as its onet last said (`oned::keep_parts`).
+    /// When each other runtime was last asked what its device runs.
+    stated: HashMap<Key, Instant>,
+    /// What each computer runs as processes of its oned, and each one's state: this one's as its onet said
+    /// (`oned::keep_parts`), another's as its runtime said when asked.
     parts: HashMap<Key, Value>,
     /// The devices connected to the relay, as it last said: `Network::online`.
     connected: std::collections::HashSet<Key>,
-    /// When the relay last saw each key on its list (ms), as it last said: `Network::seen`.
+    /// When the relay last saw each key (ms): its socket opening or closing, or a Worker asked of it.
     last_seen: HashMap<Key, u64>,
     /// What each device told the relay it's on, as it last said: its key → `protocol::version`.
     versions: Value,
@@ -158,7 +166,7 @@ struct Network {
     folders: BTreeMap<String, String>,
     /// How long each device took to answer a call lately.
     nearest: HashMap<Key, Duration>,
-    /// How far each device is: how long it took to answer this device's last hello.
+    /// How far each device is: the round trip iroh measured on the connection of its last answer here.
     far: HashMap<Key, Duration>,
     /// Whether this device has read every scope it holds from the bucket since it woke.
     read: bool,
@@ -176,19 +184,28 @@ impl Network {
         self.connected.contains(device)
     }
 
-    /// When that device was last seen (ms), if it ever was: now while it's online, or the later of when the relay last
-    /// saw it and when it last spoke to this device.
-    fn seen(&self, device: &Key) -> Option<u64> {
-        if self.online(device) {
-            return Some(now_ms());
-        }
-        let spoke = self.peers.get(device).map(|p| now_ms().saturating_sub(p.seen.elapsed().as_millis() as u64));
-        spoke.max(self.last_seen.get(device).copied())
+    /// Whether this device can count on reaching that device: its socket is open at the relay, or the two talked
+    /// within a connection's idle time.
+    fn reachable(&self, device: &Key) -> bool {
+        self.online(device) || self.exchanged.get(device).is_some_and(|at| at.elapsed() < net::IDLE)
     }
 
-    /// Whether this device can count on reaching that device: it said hello here lately.
-    fn heard(&self, device: &Key) -> bool {
-        self.peers.get(device).is_some_and(|p| p.seen.elapsed() < 3 * PRESENCE_EVERY)
+    /// When a device was last seen (ms): now if it's online, else the latest of what the relay saw of it or its
+    /// runtime and when this device last talked to either.
+    fn seen(&self, device: &Key) -> Option<u64> {
+        let m = self.r.db();
+        let device = m.device_of(device);
+        let keys = [Some(device), m.runtime_for(&device).ok().flatten()];
+        let now = now_ms();
+        let mut seen = None;
+        for k in keys.into_iter().flatten() {
+            if self.online(&k) {
+                return Some(now);
+            }
+            let talked = self.exchanged.get(&k).map(|at| now.saturating_sub(at.elapsed().as_millis() as u64));
+            seen = seen.max(self.last_seen.get(&k).copied()).max(talked);
+        }
+        seen
     }
 }
 
@@ -216,7 +233,7 @@ pub struct Inner {
     writes: tokio::sync::Mutex<()>,
     /// Wakes the task that loads deploys and announces this device.
     changed: tokio::sync::Notify,
-    /// Woken by each hello that says what a device's services are, and each part registering here, for a call waiting
+    /// Woken by each answer that says what a device's services are, and each part registering here, for a call waiting
     /// for a service that's starting.
     heard: tokio::sync::Notify,
     /// This device's parts, registered at its app runtime, which carries their asks to them.
@@ -419,7 +436,6 @@ impl Node {
         }
         tokio::spawn(node.clone().pull_loop());
         tokio::spawn(node.clone().invites_loop());
-        tokio::spawn(node.clone().presence_loop());
         tokio::spawn(node.clone().tick_loop());
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
@@ -577,6 +593,7 @@ impl Node {
         let (mut refilled, mut whole): (Option<SystemTime>, Option<SystemTime>) = (None, None);
         // What the relay said of writes at the last refill.
         let mut seen = Value::Null;
+        let (mut relayed, mut paths_said): (Option<Instant>, Instant) = (None, Instant::now());
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
             // A network its device's onet joined since it started, which writes it to their home.
@@ -588,6 +605,18 @@ impl Node {
             }
             let mut read = false;
             if self.has_network() {
+                if relayed.is_none_or(|at| at.elapsed() >= RELAY_EVERY) {
+                    relayed = Some(Instant::now());
+                    self.read_connected();
+                }
+                if paths_said.elapsed() >= sync::PATHS_EVERY {
+                    paths_said = Instant::now();
+                    self.log_paths();
+                }
+                self.close_idle();
+                self.renew_app_schedules("");
+                self.start_owed_keys();
+                self.name_services_scopes().await;
                 // The wall clock, which runs on while a machine sleeps, as `Instant` doesn't everywhere.
                 // A runtime its device hasn't listed yet reads who's who each tick, to run things from when it has.
                 let due = |at: Option<SystemTime>, every| at.is_none_or(|at| at.elapsed().unwrap_or_default() >= every) || !self.ready();

@@ -80,8 +80,9 @@ pub mod path {
 pub mod message {
     /// A call to run (`{ call }`), or a user's request to join a network (`{ join }`).
     pub const ASK: &str = "ask";
-    /// What a device says of itself to another, which answers what it needs to know of it.
-    pub const HELLO: &str = "hello";
+    /// What a device runs (`{}`), asked when a screen shows it or a call needs its services: what its services describe
+    /// of themselves, and its oned's parts and their state.
+    pub const STATE: &str = "state";
     /// An app's data changed, which the other devices pass on to their screens.
     pub const CHANGED: &str = "changed";
     /// An ask of a service of the device's, sealed to it, which its runtime carries to it unread (`services::carried`).

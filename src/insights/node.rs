@@ -29,7 +29,7 @@ const MOST_ARRIVING: usize = 2000;
 /// What this device hasn't sent yet, how its check of telemetry's own path is going, and last the spans it sent lately
 /// (`ARRIVING_FOR`), each with when.
 #[derive(Default)]
-pub(super) struct State(Mutex<Batch>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Option<std::collections::HashSet<Key>>>, Mutex<Canary>, Mutex<HashMap<(String, String), insights::otlp::Point>>, Mutex<std::collections::VecDeque<(u64, Span)>>);
+pub(super) struct State(Mutex<Batch>, Mutex<HashMap<Key, (u64, u32)>>, Mutex<Canary>, Mutex<HashMap<(String, String), insights::otlp::Point>>, Mutex<std::collections::VecDeque<(u64, Span)>>);
 
 /// Telemetry checking itself: what it last sent, and how many checks in a row failed, how and since when.
 #[derive(Default)]
@@ -264,15 +264,6 @@ impl Node {
         }
     }
 
-    /// Whether this node has heard from each other device lately, which may disagree with the relay.
-    pub(super) fn node_says(&self) {
-        let heard: std::collections::HashSet<Key> = self.with_or(Default::default(), |i| Ok(i.r.db().computes()?.into_iter().map(|c| c.key).filter(|k| *k != self.0.id && i.heard(k)).collect()));
-        let was = self.0.insights.2.lock().unwrap().replace(heard.clone());
-        for key in was.iter().flat_map(|was| was.symmetric_difference(&heard)) {
-            self.device_signal(if heard.contains(key) { "device.online" } else { "device.offline" }, Attrs::default().says("node").subject(&hex(key)), Status::Unset);
-        }
-    }
-
     /// This node starting, and why the last one ended: what it said when it stopped, or `abort` if it didn't (panics abort, so
     /// a crash can't say), or `first` if there was none before it. An update's new node says so too.
     pub fn node_started(&self, last: crate::insights::Ended) {
@@ -336,7 +327,7 @@ impl Node {
         }
         {
             let now = now_ms();
-            let mut arriving = self.0.insights.5.lock().unwrap();
+            let mut arriving = self.0.insights.4.lock().unwrap();
             arriving.extend(batch.spans.iter().cloned().map(|span| (now, span)));
             while arriving.len() > MOST_ARRIVING || arriving.front().is_some_and(|(sent, _)| now.saturating_sub(*sent) > ARRIVING_FOR) {
                 arriving.pop_front();
@@ -366,7 +357,7 @@ impl Node {
         if self.address().is_err() {
             return;
         }
-        let sent = self.0.insights.3.lock().unwrap().sent;
+        let sent = self.0.insights.2.lock().unwrap().sent;
         let back = match sent {
             Some(sent) => self.canary_back(sent).await.unwrap_or_else(|err| {
                 tracing::debug!("the canary couldn't be read: {err:#}");
@@ -377,7 +368,7 @@ impl Node {
         let now = now_ms();
         self.send_canary(now);
         let wrote = self.flush_insights().await;
-        let mut canary = self.0.insights.3.lock().unwrap();
+        let mut canary = self.0.insights.2.lock().unwrap();
         canary.sent = wrote.then_some(now);
         let failure = (!wrote).then_some("write").or(back);
         match failure {
@@ -414,7 +405,7 @@ impl Node {
     /// What's wrong with telemetry's own path, once it's more than one check: how it failed and since when. Only an admin's
     /// to see (the network's own program is theirs).
     pub(super) fn telemetry_problem(&self) -> Option<Value> {
-        let canary = self.0.insights.3.lock().unwrap();
+        let canary = self.0.insights.2.lock().unwrap();
         canary.failing.filter(|_| canary.failed >= CANARY_FAILS).map(|(kind, since)| json!({ "kind": kind, "since": since }))
     }
 
@@ -569,7 +560,7 @@ impl Node {
             let new = match point.cumulative {
                 true => {
                     let key = (service.clone(), point.name.clone());
-                    self.0.insights.4.lock().unwrap().insert(key, point.clone()).map(|was| point.since(&was))
+                    self.0.insights.3.lock().unwrap().insert(key, point.clone()).map(|was| point.since(&was))
                 }
                 false => Some(point),
             };
@@ -729,7 +720,7 @@ impl Node {
     /// `ARRIVING_FOR`), of `services`, each marked `arriving`: what other devices recorded of it is still on its way.
     fn add_arriving(&self, read: &mut Vec<Value>, trace: &str, services: &[String]) {
         let mut mine: Vec<Span> = self.0.insights.0.lock().unwrap().spans.iter().filter(|s| s.trace == trace).cloned().collect();
-        mine.extend(self.0.insights.5.lock().unwrap().iter().filter(|(_, s)| s.trace == trace).map(|(_, s)| s.clone()));
+        mine.extend(self.0.insights.4.lock().unwrap().iter().filter(|(_, s)| s.trace == trace).map(|(_, s)| s.clone()));
         let have: std::collections::HashSet<String> = read.iter().filter_map(|row| row["span"].as_str().map(str::to_string)).collect();
         for span in mine.iter().filter(|s| services.contains(&s.service) && !have.contains(&s.span)) {
             let mut row = span.row();

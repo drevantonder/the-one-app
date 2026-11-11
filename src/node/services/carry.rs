@@ -8,7 +8,7 @@ use crate::services::carried::{self, Carried};
 use super::*;
 
 impl Node {
-    /// What each part of this device registered as, by its service's key (hex): what this device's hello says of them.
+    /// What each part of this device registered as, by its service's key (hex): what this device answers another that asks what it runs.
     pub(in crate::node) fn parts_described(&self) -> serde_json::Map<String, Value> {
         let device = self.0.holds.device();
         let registered = self.0.sockets.described();
