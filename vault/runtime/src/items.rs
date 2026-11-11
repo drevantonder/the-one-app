@@ -161,7 +161,7 @@ pub(crate) async fn list(rt: &Rt, viewer: &Caller, scope: Option<&Scope>) -> Res
     })?;
     for item in &mut out {
         if let (Some(domain), Some(app)) = (item["domain"].as_str().map(str::to_string), item["app"].as_str().or(item["apps"][0].as_str()).map(str::to_string)) {
-            if let Some((image, kind)) = rt.logo(&domain, &app) {
+            if let Some((image, kind)) = deploy_runtime::logo(rt, &domain, &app) {
                 (item["image"], item["image_kind"]) = (json!(image), json!(kind));
             }
         }

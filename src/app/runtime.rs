@@ -9,30 +9,19 @@
 //! Every request an app makes (its `fetch`es, and the shim's asks of the node) goes to the node's outbound port,
 //! `src/app/outbound.rs`, carrying the token of the call it's made in.
 
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, Result, anyhow, bail, ensure};
+use anyhow::{Context as _, Result, bail, ensure};
 use serde::Serialize;
 use serde_json::{Value, json};
-use sha2::Digest;
 
 
 use ::api::call::{Append, appends};
+use ::deploy::build::{COMPATIBILITY_DATE, workerd};
 use ::scope::state::{Me, ScopeHandle};
 
-/// The workerd build every node runs, and each platform's npm package of it with its sha512.
-const WORKERD: &str = "1.20261031.1";
-const PACKAGES: &[(&str, &str, &str)] = &[
-    ("x86_64-unknown-linux-gnu", "linux-64", "42mhHUcRRqs0FI3Ej6HybrxuCeOoHiH9A1h8CC341bT/FSNBzJZWNLiiCHaQQH+dpYU+Vz/bC6DurKnuJZTW3Q=="),
-    ("aarch64-unknown-linux-gnu", "linux-arm64", "ZGeXhiFYcUoKvQVLARBowkyjEhymW7VUMk69f4TD2B7UFj4ijq6YEDWcxm0oQLw7uTI9W2915Bnlp8sCixLYag=="),
-    ("aarch64-apple-darwin", "darwin-arm64", "rN2OJjYA9DiHJPub+J1D1TCTw0+g40M+hfMUsD4sPm1qBSWyqG/H9M40ww2IKB16F8m+/0O9GmdlzYI932GduA=="),
-    ("x86_64-apple-darwin", "darwin-64", "qjXbqX7J50hqThWbYzT2c5yxr5Ymq6m6WETgPGqOAbIY+aZ11NQhnEV1Vsd/3Ljt97ctApQ1v8aCwX4Fa16nYQ=="),
-    ("x86_64-pc-windows-gnu", "windows-64", "n936OTt6rPIWrOEZ3LJzaKP3AqTnsf80uiR0Zb664RCSBCYwpWQsuiCtsFRjPDOz43GP2QOLIffrCcV0oJ9wYQ=="),
-];
-pub const COMPATIBILITY_DATE: &str = "2026-10-01";
 /// How long an app may take to answer.
 const TIME_LIMIT: Duration = Duration::from_secs(30);
 /// How long the runtime may take to start before it's given up on: seconds on a quiet machine, a minute or more on
@@ -447,69 +436,6 @@ fn stop_previous(dir: &Path) {
         tracing::info!("stopped the workerd an earlier app runtime left running");
         std::thread::sleep(Duration::from_millis(300));
     }
-}
-
-/// The workerd binary for this platform, downloaded once into the cache and checked against its pinned hash.
-pub fn workerd() -> Result<PathBuf> {
-    let (_, package, integrity) = PACKAGES
-        .iter()
-        .find(|(target, _, _)| *target == custom_build::config::TARGET)
-        .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", custom_build::config::TARGET))?;
-    let url = format!("https://registry.npmjs.org/@cloudflare/workerd-{package}/-/workerd-{package}-{WORKERD}.tgz");
-    let dir = format!("workerd-{WORKERD}");
-    #[cfg(windows)]
-    for dll in VISUAL_C_RUNTIME.dlls {
-        pinned(&dir, dll, &format!("{}/{dll}", VISUAL_C_RUNTIME.folder), VISUAL_C_RUNTIME.url, VISUAL_C_RUNTIME.integrity)?;
-    }
-    let bin = format!("workerd{}", std::env::consts::EXE_SUFFIX);
-    pinned(&dir, &bin, &format!("package/bin/{bin}"), &url, integrity)
-}
-
-/// workerd on Windows needs Visual C++'s runtime, which Windows doesn't come with and only an administrator can install
-/// for the whole computer: these, Microsoft's own, count beside the program, which Microsoft allows for its redistributable files.
-#[cfg(windows)]
-struct VisualCRuntime {
-    dlls: [&'static str; 3],
-    folder: &'static str,
-    url: &'static str,
-    integrity: &'static str,
-}
-
-#[cfg(windows)]
-const VISUAL_C_RUNTIME: VisualCRuntime = VisualCRuntime {
-    dlls: ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"],
-    folder: "Contents/VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT",
-    url: "https://download.visualstudio.microsoft.com/download/pr/45d3b8dd-bced-4b37-9974-142f748d710c/4aaf54db0bfc9435f7c3660e1a00237a4b556042bfeea64bde44c2e0194e6ee5/Microsoft.VC.14.44.17.14.CRT.Redist.X64.base.vsix",
-    integrity: "7WPZeCauExma1IgIWhowo0drr7iQT1u4ZyDByfp+czuJJ8drKHVCu8KkhyypveuIpRhrchMqBtnIXcMctVyujw==",
-};
-
-/// The file at `member` in an archive (an npm package, or a zip on Windows, which its `tar` reads too), downloaded once
-/// into the node's cache as `bin` and checked against the archive's pinned sha512.
-pub fn pinned(dir: &str, bin: &str, member: &str, url: &str, integrity: &str) -> Result<PathBuf> {
-    let dir = platform::cache().join(dir);
-    let path = dir.join(bin);
-    if path.exists() {
-        return Ok(path);
-    }
-    tracing::info!("downloading {url}");
-    let tarball = ureq::get(url).call()?.body_mut().with_config().limit(400 << 20).read_to_vec()?;
-    let digest = data_encoding::BASE64.encode(&sha2::Sha512::digest(&tarball)[..]);
-    ensure!(digest == *integrity, "the download of {bin} doesn't match its pinned hash");
-    // Unpack into a folder of our own and move the binary into place in one step,
-    // so nodes starting at the same time can't see a half-written one.
-    // Several nodes in one process (as in tests) can download at once, so the folder is this call's alone.
-    static CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = dir.with_extension(format!("{}-{call}.part", std::process::id()));
-    std::fs::create_dir_all(&tmp)?;
-    std::fs::File::create(tmp.join("package.tgz"))?.write_all(&tarball)?;
-    let strip = format!("--strip-components={}", member.matches('/').count());
-    let ok = std::process::Command::new("tar").args(["-xf", "package.tgz", &strip, member]).current_dir(&tmp).status()?;
-    ensure!(ok.success(), "couldn't unpack {bin}");
-    std::fs::create_dir_all(&dir)?;
-    std::fs::rename(tmp.join(bin), &path)?;
-    let _ = std::fs::remove_dir_all(&tmp);
-    Ok(path)
 }
 
 /// Makes `command`, a workerd, serve each of `listening`, a socket already listening, as its config's socket of that

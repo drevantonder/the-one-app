@@ -1,25 +1,14 @@
 //! Where a frame of built code came from: the app's `app.js.map`, each screen's `<name>.html.map`. What's kept of a map is
 //! its files and lines, none of the code; and a frame stays only ever a location.
 
-use anyhow::{Context, Result};
-use serde_json::{Value, json};
-
-/// Where a bundle keeps its module's map, beside `app.js`.
-pub const BUILT: &str = "app.js.map";
-
-/// Bun's map as a bundle keeps it: its files, as the folder names them, and its lines. Nothing of what's in them.
-pub fn kept(map: &[u8]) -> Result<Vec<u8>> {
-    let map: Value = serde_json::from_slice(map).context("bun's source map isn't JSON")?;
-    let sources: Vec<String> = map["sources"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|s| s.trim_start_matches("../").to_string()).collect();
-    Ok(serde_json::to_vec(&json!({ "sources": sources, "mappings": map["mappings"] }))?)
-}
+use serde_json::Value;
 
 /// The map of the file a frame is in: an app's module's from its bundle's `files`, or a screen's, an app's own or, with no
 /// bundle, the client's.
 pub fn of(file: &str, files: &[(String, Vec<u8>)]) -> Option<String> {
     let in_bundle = |name: &str| files.iter().find(|(path, _)| path == name).and_then(|(_, bytes)| String::from_utf8(bytes.clone()).ok());
     if file == "app.js" {
-        return in_bundle(BUILT);
+        return in_bundle(::deploy::bundle::BUILT);
     }
     let screen = file.strip_suffix(".screen.js")?;
     if files.is_empty() {
@@ -73,22 +62,14 @@ fn decoded(segment: &str) -> Option<Vec<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_frame_resolves_to_where_it_was_written() {
-        // Bun's own map, as `kept` leaves it, of lib/f.js's `x.length` and app.js's `f(null)`.
+        // Bun's own map, as `deploy::bundle::source_map` leaves it, of lib/f.js's `x.length` and app.js's `f(null)`.
         let map = serde_json::to_string(&json!({ "sources": ["lib/f.js", "app.js"], "mappings": ";AACO,SAAS,CAAC,CAAC,GAAG;AAAA,EACnB,OAAO,EAAE;AAAA;;;ACDX,IAAe,gBAAE,KAAK,GAAE;AAAA,EAAE,OAAO,EAAE,IAAI;AAAA,EAAI;" })).unwrap();
         assert_eq!(located(&map, 3, 12), Some(("lib/f.js".to_string(), 3, 12)), "x.length, on its own line of lib/f.js");
         assert_eq!(located(&map, 8, 3), Some(("app.js".to_string(), 2, 27)));
         assert_eq!(located(&map, 99, 1), None, "past the end nothing says where it came from");
-    }
-
-    /// A map names the files of the app's folder and holds none of what's in them: a bundle of an app is the app's code, but
-    /// nothing else of it should be there to read back.
-    #[test]
-    fn a_map_keeps_only_files_and_lines() {
-        let map = br#"{ "sources": ["../lib/f.js"], "sourcesContent": ["secret"], "names": ["hidden"], "mappings": "AAAA", "debugId": "x" }"#;
-        let kept = String::from_utf8(kept(map).unwrap()).unwrap();
-        assert_eq!(kept, r#"{"mappings":"AAAA","sources":["lib/f.js"]}"#);
     }
 }

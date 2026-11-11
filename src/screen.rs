@@ -19,12 +19,6 @@ fn bridge() -> Cow<'static, str> {
     ui_folder::text("src/screen/bridge.js", include_str!("screen/bridge.js"))
 }
 
-/// What a screen's HTML has in it to use `@one/ui` (`src/screen/ui/`: React, and shadcn's components): its page then
-/// has an import map giving `react`, `react-dom/client`, `@one/ui` and the rest (`ui_imports`), and ui.js, which they
-/// come from. Every page has ui.css, `@one/ui`'s theme (shadcn's neutral, light and dark) and what a page starts with,
-/// so a plain screen, of HTML and JS alone, looks as the rest do.
-pub const UI: &str = r#"<meta name="@one/ui">"#;
-
 /// What a screen that isn't there shows (a body of no text: an old or mistyped link): a grey line and the way home.
 const MISSING: &str = r#"<meta name="@one/ui">
 <div id="root"></div>
@@ -79,7 +73,7 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
     } else {
         (String::new(), "<script>".into(), body.to_string())
     };
-    let ui = body.contains(UI);
+    let ui = body.contains(::deploy::UI);
     let (ui_css, ui_js, ui_imports, bridge) = (ui_css(), ui_js(), ui_imports(), bridge());
     let tag = &script[..script.len() - 1];
     let head = if linked {
@@ -216,7 +210,7 @@ mod tests {
             for entry in std::fs::read_dir(root.join("..").join(folder)).unwrap().flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.ends_with(".jsx") || name.ends_with(".tsx") {
-                    assert!(super::client_screen(name.rsplit_once('.').unwrap().0).starts_with(super::UI), "{name} isn't built in as its screen");
+                    assert!(super::client_screen(name.rsplit_once('.').unwrap().0).starts_with(::deploy::UI), "{name} isn't built in as its screen");
                     if folder == "settings" {
                         files.push(format!("../settings/{name}"));
                     }
@@ -234,7 +228,7 @@ mod tests {
             for entry in std::fs::read_dir(root.join("../../..").join(feature).join("screens")).unwrap().flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.ends_with(".jsx") || name.ends_with(".tsx") {
-                    assert!(super::client_screen(name.rsplit_once('.').unwrap().0).starts_with(super::UI), "{name} isn't built in as its screen");
+                    assert!(super::client_screen(name.rsplit_once('.').unwrap().0).starts_with(::deploy::UI), "{name} isn't built in as its screen");
                     files.push(format!("../../../{feature}/screens/{name}"));
                 }
             }
@@ -269,7 +263,7 @@ mod tests {
         for linked in [false, true] {
             let plain = super::page(&context, "<p>hi</p>", linked);
             assert!(theme(&plain, linked) && !plain.contains("importmap") && !plain.contains("OneUI"));
-            let new = super::page(&context, &format!("{}<div id=root></div>", super::UI), linked);
+            let new = super::page(&context, &format!("{}<div id=root></div>", ::deploy::UI), linked);
             assert!(theme(&new, linked) && new.contains(r#"<script type="importmap">{"imports":{"react":"#));
             assert!(new.find("importmap").unwrap() < new.find("<div id=root>").unwrap());
         }

@@ -714,7 +714,7 @@ pub async fn bundle(bucket: JsValue, keys: String, hash: String) -> Result<Strin
     if blake3::hash(&bytes).to_hex().as_str() != hash {
         return Err(failed(anyhow!("the bundle kept as {hash} isn't it")));
     }
-    one::app::bundle::module(&bytes).map_err(failed)
+    deploy::bundle::module(&bytes).map_err(failed)
 }
 
 /// `node/ai-gateway`'s migrations (JSON), AI Gateway's rows in a scope.

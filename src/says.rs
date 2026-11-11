@@ -20,5 +20,5 @@ pub mod screens;
 
 /// Every route that says what it is.
 pub fn listed() -> Vec<Said> {
-    [api::listed(), apps::listed(), backups::listed(), blobs::listed(), ::devices::says::listed(), insights::listed(), screens::listed(), ::vault::says::listed(), ::widgets::says::listed()].into_iter().flatten().collect()
+    [api::listed(), apps::listed(), ::deploy::says::listed(), backups::listed(), blobs::listed(), ::devices::says::listed(), insights::listed(), screens::listed(), ::vault::says::listed(), ::widgets::says::listed()].into_iter().flatten().collect()
 }

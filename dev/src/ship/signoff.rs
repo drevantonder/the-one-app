@@ -98,7 +98,7 @@ fn check<'a>(here: &Path, files: impl Iterator<Item = &'a str>) -> Result<()> {
         })?;
     }
     for app in Parts::of(files.iter().copied()).apps {
-        one::app::deploy::screens(&here.join("apps").join(app))?;
+        deploy::build::screens(&here.join("apps").join(app))?;
     }
     Ok(())
 }

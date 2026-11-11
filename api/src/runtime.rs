@@ -143,8 +143,6 @@ pub trait Apps: Send + Sync {
     fn describe<'a>(&'a self, app: &'a str) -> Fut<'a, Value>;
     /// The apps as `viewer` lists them (`GET /api/apps`).
     fn apps_for<'a>(&'a self, viewer: &'a Caller) -> Fut<'a, Vec<Value>>;
-    /// The logo of a site an app connects to, as a data URL and its kind.
-    fn logo(&self, domain: &str, app: &str) -> Option<(String, String)>;
     /// Runs a tool for `caller`, whom this device acts for: here, or on the nearest device that can.
     fn call<'a>(&'a self, req: CallRequest, caller: Caller) -> Fut<'a, Value>;
     /// The apps a page shows for `viewer`: with `scope`, those added there, each reaching only it; without, every app,
@@ -163,8 +161,7 @@ pub trait Apps: Send + Sync {
     fn uses<'a>(&'a self, app: &'a str) -> Fut<'a, (Vec<String>, Vec<String>)>;
     /// Whether this device runs `app`'s latest deploy, waiting up to `within` for it.
     fn runs_latest<'a>(&'a self, app: &'a str, within: Duration) -> Fut<'a, bool>;
-    /// Where an app that `described` itself can run its service for `viewer`, if it has one: their own devices'
-    /// names, and `cloudflare` for an admin when it's built for that.
+    /// Where an app that `described` itself can run its service for `viewer`, if it has one: their own devices' names.
     fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>>;
 }
 

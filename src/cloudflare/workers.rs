@@ -1063,7 +1063,7 @@ pub fn precompressed(web: &[(String, Vec<u8>)]) -> Result<Vec<(String, Vec<u8>)>
                 std::fs::write(dir.join("in").join(i.to_string()), &wanted[i].1)?;
             }
             std::fs::write(dir.join("brotli.mjs"), BROTLI)?;
-            let out = std::process::Command::new(crate::build::bun()?).args(["brotli.mjs"]).current_dir(&dir).env("DO_NOT_TRACK", "1").output()?;
+            let out = std::process::Command::new(::deploy::build::bun()?).args(["brotli.mjs"]).current_dir(&dir).env("DO_NOT_TRACK", "1").output()?;
             ensure!(out.status.success(), "couldn't compress the files the address serves:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
             for &i in &missing {
                 let part = names[i].with_extension(format!("{}.part", rand::random::<u64>()));
@@ -1111,7 +1111,7 @@ pub fn parses(web: &[(String, Vec<u8>)]) -> Result<()> {
             std::fs::create_dir_all(file.parent().unwrap())?;
             std::fs::write(file, text)?;
         }
-        let out = std::process::Command::new(crate::build::bun()?)
+        let out = std::process::Command::new(::deploy::build::bun()?)
             .args(["build", "--no-bundle", "--outdir=out"])
             .args(scripts.iter().map(|(path, _)| path))
             .current_dir(&dir)
@@ -1168,7 +1168,7 @@ pub fn module_from(mut files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec
 
 /// Builds `entry` in the Workers' folder `dir` into one ES module.
 pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
-    let bun = crate::build::bun()?;
+    let bun = ::deploy::build::bun()?;
     let cache = bun.parent().unwrap().join("cache");
     let run = |args: &[&str]| -> Result<()> {
         let out = std::process::Command::new(&bun).args(args).current_dir(dir).env("BUN_INSTALL_CACHE_DIR", &cache).env("DO_NOT_TRACK", "1").output()?;
@@ -1267,7 +1267,7 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
         workers.push(format!(
             "const w{i} :Workerd.Worker = (\n  modules = [{}],\n  compatibilityDate = \"{}\",\n  bindings = [{}],\n{objects}{});",
             modules.join(", "),
-            crate::app::runtime::COMPATIBILITY_DATE,
+            ::deploy::build::COMPATIBILITY_DATE,
             bindings.join(", "),
             s.outbound.as_ref().map(|o| format!("  globalOutbound = {},\n", quote(o))).unwrap_or_default(),
         ));
@@ -1292,7 +1292,7 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
 /// service of its name, there in place of the config's address, so no one else can take the port before workerd does,
 /// and what reaches it waits for workerd rather than being refused. Only the process holds them once it's started.
 pub fn start(config: &Path, listening: Vec<(String, std::net::TcpListener)>) -> Result<std::process::Child> {
-    let mut command = std::process::Command::new(crate::app::runtime::workerd()?);
+    let mut command = std::process::Command::new(::deploy::build::workerd()?);
     command.arg("serve").arg(config).arg("--experimental").stdin(std::process::Stdio::null());
     #[cfg(not(unix))]
     ensure!(listening.is_empty(), "workerd takes listening sockets only on Unix");
@@ -1557,7 +1557,7 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
             },
         }
     }
-    let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::app::runtime::COMPATIBILITY_DATE, "bindings": bindings, "observability": { "enabled": true } });
+    let mut meta = json!({ "main_module": "worker.js", "compatibility_date": ::deploy::build::COMPATIBILITY_DATE, "bindings": bindings, "observability": { "enabled": true } });
     // Kept in Cloudflare, sent to the telemetry Worker once a deploy has made where to (`basin::exports`), and never for the
     // Cloudflare node, which reports its calls as every node does, or the telemetry Worker.
     if TRACED.contains(&worker.name) {

@@ -46,6 +46,16 @@ fn walk(dir: &Path, prefix: &str, repo: Option<&Path>, links: usize, out: &mut V
     Ok(())
 }
 
+/// Where a bundle keeps its module's source map, beside `app.js`.
+pub const BUILT: &str = "app.js.map";
+
+/// Bun's source map as a bundle keeps it: its files, as the folder names them, and its lines. Nothing of what's in them.
+pub fn source_map(map: &[u8]) -> Result<Vec<u8>> {
+    let map: serde_json::Value = serde_json::from_slice(map).context("bun's source map isn't JSON")?;
+    let sources: Vec<String> = map["sources"].as_array().into_iter().flatten().filter_map(serde_json::Value::as_str).map(|s| s.trim_start_matches("../").to_string()).collect();
+    Ok(serde_json::to_vec(&serde_json::json!({ "sources": sources, "mappings": map["mappings"] }))?)
+}
+
 pub fn module(bundle: &[u8]) -> Result<String> {
     let (_, bytes) = unpack(bundle)?.into_iter().find(|(path, _)| path == "app.js").context("the bundle has no app.js")?;
     Ok(String::from_utf8(bytes)?)
@@ -115,4 +125,18 @@ pub fn unpack(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
         at = start + size.div_ceil(512) * 512;
     }
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A map names the files of the app's folder and holds none of what's in them: a bundle of an app is the app's code, but
+    /// nothing else of it should be there to read back.
+    #[test]
+    fn a_map_keeps_only_files_and_lines() {
+        let map = br#"{ "sources": ["../lib/f.js"], "sourcesContent": ["secret"], "names": ["hidden"], "mappings": "AAAA", "debugId": "x" }"#;
+        let kept = String::from_utf8(source_map(map).unwrap()).unwrap();
+        assert_eq!(kept, r#"{"mappings":"AAAA","sources":["lib/f.js"]}"#);
+    }
 }

@@ -86,7 +86,7 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut served: std::collections::HashMap<String, (String, std::collections::VecDeque<String>)> = Default::default();
         for feature in all() {
-            let folder = if matches!(feature.name, "add" | "remove") { "app".to_string() } else { feature.name.replace('-', "_") };
+            let folder = if matches!(feature.name, "add" | "remove") { "deploy".to_string() } else { feature.name.replace('-', "_") };
             let (source, queue) = served.entry(folder.clone()).or_insert_with(|| {
                 // A feature's runtime crate (`<feature>/runtime/src/tools.rs`), or one whose runtime half is still this program's.
                 let source = runtime_tools(root, feature.name).unwrap_or_else(|| std::fs::read_to_string(root.join("src").join(&folder).join("tools.rs")).unwrap());

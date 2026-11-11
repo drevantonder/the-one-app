@@ -12,6 +12,8 @@ doctest = false
 
 [dependencies]
 vault = { path = ".." }
+# The logo of the site an item is for (`deploy_runtime::logo`).
+deploy-runtime = { path = "../../deploy/runtime" }
 api = { path = "../../api" }
 scope = { path = "../../scope" }
 database = { path = "../../database" }

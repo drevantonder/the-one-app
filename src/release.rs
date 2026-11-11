@@ -13,24 +13,6 @@ pub fn sign(key: &PrivateKey, bytes: &[u8]) -> Result<String> {
     Ok(key.sign(NAMESPACE, HashAlg::Sha512, bytes)?.to_pem(LineEnding::LF)?)
 }
 
-/// Blobs are files named by their BLAKE3 hash.
-pub fn blob_path(dir: &Path, hash: &str) -> Result<PathBuf> {
-    ensure!(hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()), "not a blob hash");
-    Ok(dir.join("blobs").join(hash))
-}
-
-pub fn put_blob(dir: &Path, bytes: &[u8]) -> Result<String> {
-    let hash = blake3::hash(bytes).to_hex().to_string();
-    let path = blob_path(dir, &hash)?;
-    std::fs::create_dir_all(path.parent().unwrap())?;
-    if !path.exists() {
-        let tmp = path.with_extension("part");
-        std::fs::write(&tmp, bytes)?;
-        std::fs::rename(&tmp, &path)?;
-    }
-    Ok(hash)
-}
-
 /// Whether this program runs from inside an app bundle: the copy of it a Mac's window carries only because builds before
 /// it check it's there as they update (`client/native/mac/build.sh`). Nothing runs it, and nothing updates it.
 pub fn in_app_bundle() -> bool {

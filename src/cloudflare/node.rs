@@ -22,7 +22,7 @@ pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
 /// Its modules, from its WebAssembly's glue and the WebAssembly, as wasm-bindgen makes them.
 pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, Vec<u8>)> {
     let shim = ::api::call::shim();
-    let built_js = format!("export const shim = {};\nexport const compatibilityDate = {};\n", json!(shim), json!(crate::app::runtime::COMPATIBILITY_DATE));
+    let built_js = format!("export const shim = {};\nexport const compatibilityDate = {};\n", json!(shim), json!(::deploy::build::COMPATIBILITY_DATE));
     vec![
         ("worker.js".into(), "application/javascript+module", include_bytes!("../../cloudflare/node/worker.js").to_vec()),
         ("one_cloudflare_node.js".into(), "application/javascript+module", glue),

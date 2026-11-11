@@ -1,10 +1,109 @@
 //! `one deploy <dir>` and the deploy tool: build an app with a pinned Bun, npm packages and all, into a bundle that
 //! holds the built module and the files it was built from, as written. An app with React screens has them built first,
-//! with the deploying machine's own Bun or Node (`screens`).
+//! with the deploying machine's own Bun or Node (`screens`). Bun and workerd, which runs what it builds, are pinned
+//! here, each downloaded once and checked (`pinned`).
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
+use sha2::Digest as _;
+
+use crate::bundle;
+
+/// The Bun every deploy builds with, and each platform's npm package of it with its sha512.
+pub const BUN: &str = "1.4.4";
+const BUN_PACKAGES: &[(&str, &str, &str)] = &[
+    ("x86_64-unknown-linux-gnu", "linux-x64", "CHbbkmHVM28T1GFq+6GL4Ao4ujwwYwj1CxFFwEFzLanPfNsId9AhbIP0Q4reWuWBkGimUkoQygrK7Rgjtj3vog=="),
+    ("aarch64-unknown-linux-gnu", "linux-aarch64", "ZTVtpf9zmHSBVPX1sBwe5agGb/rN34yPGg/Hby8e2Ax2uCUA2URZKlZH7qLntK7qaFJCMXh9v0GWNYN2zINz1w=="),
+    ("aarch64-apple-darwin", "darwin-aarch64", "zW/hxwc8sJAILGwB5eTC4i48ouGXf0V4lrxmEOk3JIE6JkYVW1TZh1E2pIempqsezgW1sckTIIDudFON8bJ2Mw=="),
+    ("x86_64-apple-darwin", "darwin-x64", "oKGcxLsvh4oHjAo28nPm8c/xN0o/OmGyj1IHYc94vprkWsW2hNg2keEZt5f40cI5Hvu4jDlSRTR0UNpv1UIAxw=="),
+    ("x86_64-pc-windows-gnu", "windows-x64", "a3LNctBVO8PjePsFZfwDleF2JXYf2BfQ1u/PLRnBDLnC2Riml+4+LgJpKj4xRGhB92KweGyQI5PXaTkP9qypMQ=="),
+];
+
+/// The pinned Bun, downloaded and checked the first time.
+pub fn bun() -> Result<PathBuf> {
+    let (_, package, integrity) =
+        BUN_PACKAGES.iter().find(|(target, _, _)| *target == ::custom_build::config::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", ::custom_build::config::TARGET))?;
+    let url = format!("https://registry.npmjs.org/@oven/bun-{package}/-/bun-{package}-{BUN}.tgz");
+    let bin = format!("bun{}", std::env::consts::EXE_SUFFIX);
+    pinned(&format!("bun-{BUN}"), &bin, &format!("package/bin/{bin}"), &url, integrity)
+}
+
+/// The workerd build every node runs, and each platform's npm package of it with its sha512.
+const WORKERD: &str = "1.20261031.1";
+const WORKERD_PACKAGES: &[(&str, &str, &str)] = &[
+    ("x86_64-unknown-linux-gnu", "linux-64", "42mhHUcRRqs0FI3Ej6HybrxuCeOoHiH9A1h8CC341bT/FSNBzJZWNLiiCHaQQH+dpYU+Vz/bC6DurKnuJZTW3Q=="),
+    ("aarch64-unknown-linux-gnu", "linux-arm64", "ZGeXhiFYcUoKvQVLARBowkyjEhymW7VUMk69f4TD2B7UFj4ijq6YEDWcxm0oQLw7uTI9W2915Bnlp8sCixLYag=="),
+    ("aarch64-apple-darwin", "darwin-arm64", "rN2OJjYA9DiHJPub+J1D1TCTw0+g40M+hfMUsD4sPm1qBSWyqG/H9M40ww2IKB16F8m+/0O9GmdlzYI932GduA=="),
+    ("x86_64-apple-darwin", "darwin-64", "qjXbqX7J50hqThWbYzT2c5yxr5Ymq6m6WETgPGqOAbIY+aZ11NQhnEV1Vsd/3Ljt97ctApQ1v8aCwX4Fa16nYQ=="),
+    ("x86_64-pc-windows-gnu", "windows-64", "n936OTt6rPIWrOEZ3LJzaKP3AqTnsf80uiR0Zb664RCSBCYwpWQsuiCtsFRjPDOz43GP2QOLIffrCcV0oJ9wYQ=="),
+];
+/// The workerd binary for this platform, downloaded once into the cache and checked against its pinned hash.
+pub fn workerd() -> Result<PathBuf> {
+    let (_, package, integrity) = WORKERD_PACKAGES
+        .iter()
+        .find(|(target, _, _)| *target == custom_build::config::TARGET)
+        .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", custom_build::config::TARGET))?;
+    let url = format!("https://registry.npmjs.org/@cloudflare/workerd-{package}/-/workerd-{package}-{WORKERD}.tgz");
+    let dir = format!("workerd-{WORKERD}");
+    #[cfg(windows)]
+    for dll in VISUAL_C_RUNTIME.dlls {
+        pinned(&dir, dll, &format!("{}/{dll}", VISUAL_C_RUNTIME.folder), VISUAL_C_RUNTIME.url, VISUAL_C_RUNTIME.integrity)?;
+    }
+    let bin = format!("workerd{}", std::env::consts::EXE_SUFFIX);
+    pinned(&dir, &bin, &format!("package/bin/{bin}"), &url, integrity)
+}
+
+/// workerd on Windows needs Visual C++'s runtime, which Windows doesn't come with and only an administrator can install
+/// for the whole computer: these, Microsoft's own, count beside the program, which Microsoft allows for its redistributable files.
+#[cfg(windows)]
+struct VisualCRuntime {
+    dlls: [&'static str; 3],
+    folder: &'static str,
+    url: &'static str,
+    integrity: &'static str,
+}
+
+#[cfg(windows)]
+const VISUAL_C_RUNTIME: VisualCRuntime = VisualCRuntime {
+    dlls: ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"],
+    folder: "Contents/VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT",
+    url: "https://download.visualstudio.microsoft.com/download/pr/45d3b8dd-bced-4b37-9974-142f748d710c/4aaf54db0bfc9435f7c3660e1a00237a4b556042bfeea64bde44c2e0194e6ee5/Microsoft.VC.14.44.17.14.CRT.Redist.X64.base.vsix",
+    integrity: "7WPZeCauExma1IgIWhowo0drr7iQT1u4ZyDByfp+czuJJ8drKHVCu8KkhyypveuIpRhrchMqBtnIXcMctVyujw==",
+};
+
+/// The file at `member` in an archive (an npm package, or a zip on Windows, which its `tar` reads too), downloaded once
+/// into the node's cache as `bin` and checked against the archive's pinned sha512.
+pub fn pinned(dir: &str, bin: &str, member: &str, url: &str, integrity: &str) -> Result<PathBuf> {
+    let dir = platform::cache().join(dir);
+    let path = dir.join(bin);
+    if path.exists() {
+        return Ok(path);
+    }
+    tracing::info!("downloading {url}");
+    let tarball = ureq::get(url).call()?.body_mut().with_config().limit(400 << 20).read_to_vec()?;
+    let digest = data_encoding::BASE64.encode(&sha2::Sha512::digest(&tarball)[..]);
+    ensure!(digest == *integrity, "the download of {bin} doesn't match its pinned hash");
+    // Unpack into a folder of our own and move the binary into place in one step,
+    // so nodes starting at the same time can't see a half-written one.
+    // Several nodes in one process (as in tests) can download at once, so the folder is this call's alone.
+    static CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.with_extension(format!("{}-{call}.part", std::process::id()));
+    std::fs::create_dir_all(&tmp)?;
+    std::fs::File::create(tmp.join("package.tgz"))?.write_all(&tarball)?;
+    let strip = format!("--strip-components={}", member.matches('/').count());
+    let ok = std::process::Command::new("tar").args(["-xf", "package.tgz", &strip, member]).current_dir(&tmp).status()?;
+    ensure!(ok.success(), "couldn't unpack {bin}");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::rename(tmp.join(bin), &path)?;
+    let _ = std::fs::remove_dir_all(&tmp);
+    Ok(path)
+}
+
+/// The Workers' compatibility date that apps, the Cloudflare node and the Workers run at.
+pub const COMPATIBILITY_DATE: &str = "2026-10-01";
 
 /// The files an app's build starts from, in this order.
 const ENTRIES: &[&str] = &["app.ts", "app.js", "index.ts", "index.js"];
@@ -14,12 +113,12 @@ const ENTRIES: &[&str] = &["app.ts", "app.js", "index.ts", "index.js"];
 /// `services`, its service's builds by platform, as blobs (`bundle::SERVICES`).
 pub fn build(dir: &Path, services: &std::collections::BTreeMap<String, String>) -> Result<Vec<u8>> {
     screens(dir)?;
-    let sources = crate::app::bundle::sources(dir)?;
-    let mut files = crate::app::bundle::unpack(&compile(&sources, false)?)?;
+    let sources = bundle::sources(dir)?;
+    let mut files = bundle::unpack(&compile(&sources, false)?)?;
     if !services.is_empty() {
-        files.insert(1, (crate::app::bundle::SERVICES.to_string(), serde_json::to_vec(services)?));
+        files.insert(1, (bundle::SERVICES.to_string(), serde_json::to_vec(services)?));
     }
-    crate::app::bundle::pack(&files)
+    bundle::pack(&files)
 }
 
 /// A folder's files built into a bundle, in a folder of their own: so only the files given are what it's built from,
@@ -35,7 +134,7 @@ fn compile(files: &[(String, Vec<u8>)], build_screens: bool) -> Result<Vec<u8>> 
         // The screens it builds are among its files, as they're built.
         if build_screens {
             screens(&dir)?;
-            return bundle(&dir, &crate::app::bundle::sources(&dir)?);
+            return bundle(&dir, &bundle::sources(&dir)?);
         }
         bundle(&dir, files)
     })();
@@ -45,7 +144,7 @@ fn compile(files: &[(String, Vec<u8>)], build_screens: bool) -> Result<Vec<u8>> 
 
 fn bundle(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
     let entry = ENTRIES.iter().find(|e| dir.join(e).is_file()).with_context(|| format!("{} has none of {}", dir.display(), ENTRIES.join(", ")))?;
-    let bun = crate::build::bun()?;
+    let bun = bun()?;
     let cache = bun.parent().unwrap().join("cache");
     let run = |args: &[&str], what: &str| -> Result<()> {
         let out = std::process::Command::new(&bun).args(args).current_dir(dir).env("BUN_INSTALL_CACHE_DIR", &cache).env("DO_NOT_TRACK", "1").output()?;
@@ -86,12 +185,12 @@ fn bundle(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
             let path = Path::new(input);
             ensure!(path.is_relative() && path.components().all(|c| matches!(c, std::path::Component::Normal(_))), "the app imports {input}, outside its folder: an app is built only from its own files and npm packages");
         }
-        Ok((std::fs::read(&outfile)?, crate::insights::source_map::kept(&std::fs::read(out.join("app.js.map"))?)?))
+        Ok((std::fs::read(&outfile)?, bundle::source_map(&std::fs::read(out.join("app.js.map"))?)?))
     });
     let (module, map) = module?;
-    let mut packed = vec![("app.js".to_string(), module), (crate::insights::source_map::BUILT.to_string(), map)];
+    let mut packed = vec![("app.js".to_string(), module), (bundle::BUILT.to_string(), map)];
     packed.extend(files.iter().map(|(path, bytes)| (format!("src/{path}"), bytes.clone())));
-    crate::app::bundle::pack(&packed)
+    bundle::pack(&packed)
 }
 
 /// The tools of a described app that don't say what they are (`title`) or what they answer (`output`, a JSON Schema),
@@ -170,14 +269,14 @@ pub fn screens(dir: &Path) -> Result<()> {
         ),
     };
     let tools = screen_tools(&install.0, install.1)?;
-    let shared: serde_json::Value = serde_json::from_str(include_str!("../screen/ui/dist/importmap.json"))?;
+    let shared: serde_json::Value = serde_json::from_str(include_str!("../../src/screen/ui/dist/importmap.json"))?;
     let shared: Vec<&String> = shared["imports"].as_object().context("@one/ui's import map has no imports")?.keys().collect();
     let out = std::process::Command::new(&runtime)
         .arg(tools.join("screens.mjs"))
         .arg(dir.canonicalize()?.join("screens"))
         .arg(dir.canonicalize()?.join("dist"))
         .arg(dir.canonicalize()?)
-        .arg(crate::screen::UI)
+        .arg(crate::UI)
         .args(shared)
         .current_dir(&tools)
         .env("DO_NOT_TRACK", "1")
@@ -193,12 +292,11 @@ pub fn screens(dir: &Path) -> Result<()> {
 /// them), installed by `install` once per version of them, beside @one/ui's `screens.mjs`, which builds them, and the
 /// theme's names it imports, where they are in @one/ui.
 fn screen_tools(installer: &Path, install: &[&str]) -> Result<PathBuf> {
-    use sha2::Digest;
     let files: [(&str, &str); 4] = [
-        ("package.json", include_str!("../screen/ui/package.json")),
-        ("bun.lock", include_str!("../screen/ui/bun.lock")),
-        ("src/theme.css", include_str!("../screen/ui/src/theme.css")),
-        ("screens.mjs", include_str!("../screen/ui/screens.mjs")),
+        ("package.json", include_str!("../../src/screen/ui/package.json")),
+        ("bun.lock", include_str!("../../src/screen/ui/bun.lock")),
+        ("src/theme.css", include_str!("../../src/screen/ui/src/theme.css")),
+        ("screens.mjs", include_str!("../../src/screen/ui/screens.mjs")),
     ];
     let mut hash = sha2::Sha256::new();
     for (path, text) in files {
@@ -242,13 +340,12 @@ pub fn build_built_in(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
 }
 
 fn build_kept(files: &[(&str, &[u8])], build_screens: bool) -> Result<Vec<u8>> {
-    use sha2::Digest;
     let mut hash = sha2::Sha256::new();
     for (path, bytes) in files {
         hash.update(format!("{path}\0{}\0", bytes.len()));
         hash.update(bytes);
     }
-    let kept = platform::cache().join("built-in").join(format!("{}-{}{}.tar", data_encoding::HEXLOWER.encode(&hash.finalize()), crate::build::BUN, if build_screens { "" } else { "-prebuilt" }));
+    let kept = platform::cache().join("built-in").join(format!("{}-{}{}.tar", data_encoding::HEXLOWER.encode(&hash.finalize()), BUN, if build_screens { "" } else { "-prebuilt" }));
     if let Ok(bundle) = std::fs::read(&kept) {
         return Ok(bundle);
     }
@@ -302,7 +399,7 @@ fn tempdir() -> Result<PathBuf> {
 /// The files of a bundle, or one of them: `{ files: [{ path, size }] }`, or `{ path, text }` (`{ path, base64 }` if
 /// it isn't text).
 pub fn show(bundle: &[u8], path: Option<&str>) -> Result<serde_json::Value> {
-    let files = crate::app::bundle::unpack(bundle)?;
+    let files = bundle::unpack(bundle)?;
     Ok(match path {
         None => serde_json::json!({ "files": files.iter().map(|(p, b)| serde_json::json!({ "path": p, "size": b.len() })).collect::<Vec<_>>() }),
         Some(path) => {
@@ -313,4 +410,17 @@ pub fn show(bundle: &[u8], path: Option<&str>) -> Result<serde_json::Value> {
             }
         }
     })
+}
+
+/// A built-in app's bundle: its `app.js` as the module, and every file of its folder as its source. One with npm
+/// packages (a `package.json`) or React screens (a `dist/`, built when the app was committed) is built as `<cli> deploy`
+/// builds any app, its screens as they are.
+pub fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    if files.iter().any(|(p, _)| *p == "package.json" || p.starts_with("dist/")) {
+        return build_built_in(files);
+    }
+    let module = files.iter().find(|(p, _)| *p == "app.js").context("a built-in app has no app.js")?.1;
+    let mut packed = vec![("app.js".to_string(), module.to_vec())];
+    packed.extend(files.iter().map(|(p, b)| (format!("src/{p}"), b.to_vec())));
+    bundle::pack(&packed)
 }

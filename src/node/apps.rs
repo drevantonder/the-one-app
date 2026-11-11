@@ -1,4 +1,4 @@
-//! Apps: the network's, every one users may add, and adding, deploying, forking and retiring them.
+//! Apps: the network's, every one users may add, and retiring them. Adding, deploying and forking them is deploy/'s.
 
 use ::custom_build::allowed;
 use super::*;
@@ -63,7 +63,7 @@ impl Node {
                 describe["added"] = json!([Scope::User(viewer.user.clone()).to_string()]);
             }
             if let (Value::Null, Some(domain), Some(name)) = (&describe["image"], describe["domain"].as_str(), describe["name"].as_str()) {
-                if let Some((image, kind)) = self.logo(domain, name) {
+                if let Some((image, kind)) = deploy_runtime::logo(&self.rt(), domain, name) {
                     (describe["image"], describe["image_kind"]) = (json!(image), json!(kind));
                 }
             }
@@ -197,7 +197,7 @@ impl Node {
             if let Some(image) = info["bundle"].as_str().or(info["built_in"].as_str()).and_then(|b| self.image(b)) {
                 (info["image"], info["image_kind"]) = (json!(image), json!("icon"));
             } else if let (Some(domain), Some(name)) = (info["domain"].as_str(), info["name"].as_str()) {
-                if let Some((image, kind)) = self.logo(domain, name) {
+                if let Some((image, kind)) = deploy_runtime::logo(&self.rt(), domain, name) {
                     (info["image"], info["image_kind"]) = (json!(image), json!(kind));
                 }
             }
@@ -233,30 +233,6 @@ impl Node {
         .ok()
     }
 
-    /// The logo of `domain`, the site `app` connects to, as a data URL, once this device has fetched it. Fetches it
-    /// in the background when it hasn't, or did a week ago, then tells shells `app` changed.
-    pub(super) fn logo(&self, domain: &str, app: &str) -> Option<(String, String)> {
-        let (url, due) = self.0.logos.get(&self.0.dir, domain, now_ms());
-        if due && self.0.logos.begin(domain) {
-            let (node, domain, app) = (self.clone(), domain.to_string(), app.to_string());
-            tokio::spawn(async move {
-                let d = domain.clone();
-                let logo = match tokio::task::spawn_blocking(move || crate::logos::fetch(&d)).await {
-                    Ok(Ok(logo)) => Some(logo),
-                    Ok(Err(err)) => {
-                        tracing::warn!("{app}'s logo: {err:#}");
-                        None
-                    }
-                    Err(_) => None,
-                };
-                if node.0.logos.finish(&node.0.dir, &domain, logo, now_ms()) {
-                    node.emit(Event::Changed { apps: vec![app] });
-                }
-            });
-        }
-        url
-    }
-
     /// The picture a bundle's app shows on its tile instead of its symbol: `icon.png` in its folder, a finished app icon
     /// (an external brand's own), as a data URL.
     /// Only from bundles this device has.
@@ -264,8 +240,8 @@ impl Node {
         if let Some(image) = self.0.images.lock().unwrap().get(bundle) {
             return image.clone();
         }
-        let bytes = std::fs::read(release::blob_path(&self.0.dir, bundle).ok()?).ok()?;
-        let files = crate::app::bundle::unpack(&bytes).ok()?;
+        let bytes = std::fs::read(::database::blob_path(&self.0.dir, bundle).ok()?).ok()?;
+        let files = ::deploy::bundle::unpack(&bytes).ok()?;
         let png = files.into_iter().find(|(path, _)| path == "src/icon.png").map(|(_, png)| format!("data:image/png;base64,{}", data_encoding::BASE64.encode(&png)));
         self.0.images.lock().unwrap().insert(bundle.to_string(), png.clone());
         png
@@ -314,215 +290,6 @@ impl Node {
         let list = |k: &str| d["uses"][k].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
         (list("apps"), list("services"))
     }
-
-    /// The entries that add (or remove) `app` in `scope` for `caller`, with their own rights there. Adding it
-    /// also adds each app it uses, and each they use, that isn't added there yet. Each of their services runs for
-    /// the scope on one node, a node of the caller's it can run on: `node` (a device's
-    /// name) for `app`'s, which is asked for when there's a choice, and added again with another node, they move
-    /// there; and for an app it uses, `node` if it can run there, else its one node, if it has one, and it stays where
-    /// it runs already. Removing `app` stops its services there.
-    pub(super) async fn add_entries(&self, caller: &Caller, app: &str, scope: &Scope, added: bool, node: Option<&str>) -> Result<Vec<(Scope, Content)>> {
-        let mut wanted = vec![app.to_string()];
-        let mut i = 0;
-        while added && i < wanted.len() {
-            self.bring_in(caller, &wanted[i]).await?;
-            for used in self.uses(&wanted[i]).await.0 {
-                if !wanted.contains(&used) {
-                    wanted.push(used);
-                }
-            }
-            i += 1;
-        }
-        // Each one's title, services, and the nodes of the caller's they can run on.
-        let mut services = Vec::new();
-        let mut widget = None;
-        for (n, name) in wanted.iter().enumerate() {
-            let nodes = match self.0.apps.describe_any(name).await {
-                Ok(described) => {
-                    if n == 0 {
-                        widget = described["widgets"][0]["name"].as_str().map(str::to_string);
-                    }
-                    self.nodes_for(caller, &described)
-                }
-                Err(_) => None,
-            };
-            services.push((self.title(name).await, self.uses(name).await.1, nodes));
-        }
-        let arranged = self.arrangements(&caller.user);
-        self.with(|i| {
-            let m = i.r.db();
-            let named = scope_name(i, &scope.to_string())?;
-            allowed!(m.may(&caller.user, "add-apps", &scopes::object(scope)), "You can't add apps to {named}.");
-            ensure!(i.r.holds(scope), "This device can't open {named} yet.");
-            let here = i.views.get(&scope.to_string()).map(|s| s.added.clone()).unwrap_or_default();
-            let mut out = Vec::new();
-            for (n, name) in wanted.iter().enumerate().rev() {
-                ensure!(m.app(name)?.is_some(), "no app named {name}{}: apps_list lists them", if n > 0 { format!(", which {app} uses") } else { String::new() });
-                if n == 0 || !here.contains(name) {
-                    out.push((scope.clone(), content::added(name, added)));
-                }
-            }
-            // Where each service runs for this scope now: stopped where it no longer should, started where it should.
-            let ours = |s: &scopes::Switch| s.on && s.scope.as_deref() == Some(scope.to_string().as_str());
-            let switches = m.switches()?;
-            for (n, (title, names, nodes)) in services.iter().enumerate() {
-                let listed = |node: &str| nodes.iter().flatten().find(|l| l.eq_ignore_ascii_case(node)).cloned();
-                let chosen = match (n, nodes) {
-                    (_, _) if !added => None,
-                    (0, Some(nodes)) => match node {
-                        Some(node) => Some(listed(node).with_context(|| format!("{title} can't run on {node}: it can run on {}", if nodes.is_empty() { "none of your nodes".to_string() } else { nodes.join(", ") }))?),
-                        None if nodes.len() > 1 => bail!("Where should {title} run? Give node: {}.", nodes.join(" or ")),
-                        None => nodes.first().cloned(),
-                    },
-                    (_, Some(nodes)) => node.and_then(listed).or_else(|| (nodes.len() == 1).then(|| nodes[0].clone())),
-                    _ => None,
-                };
-                for service in names {
-                    let running: Vec<Key> = switches.iter().filter(|((_, name), s)| name == service && ours(s)).map(|((k, _), _)| *k).collect();
-                    let to = match chosen.as_deref().filter(|_| n == 0 || running.is_empty()) {
-                        Some(node) => Some(scope::settings::service(m, &caller.user, node, service, true, Some(scope))?),
-                        None => None,
-                    };
-                    let to_key = to.as_ref().and_then(|c| c.data["device"].as_str()).and_then(|k| unhex(k).ok());
-                    for k in running.iter().filter(|k| !added || (to_key.is_some() && Some(**k) != to_key)) {
-                        out.push((Scope::Global, scope::settings::service(m, &caller.user, &hex(k), service, false, None)?));
-                    }
-                    if let Some(to) = to.filter(|_| !running.contains(&to_key.unwrap_or_default())) {
-                        out.push((Scope::Global, to));
-                    }
-                }
-            }
-            // Newly added, its first widget goes on that page for whoever added it, unless they have one of it already; and
-            // added by someone who'd taken it off that page, it's back on it.
-            let own = Scope::User(caller.user.clone());
-            if added && i.r.holds(&own) {
-                let page = if *scope == own { "user".to_string() } else { scope.to_string() };
-                let was = arranged.get(&page).cloned().unwrap_or(Value::Null);
-                let mut items = was["items"].as_array().cloned().unwrap_or_default();
-                let hidden = was["hidden"].as_array().cloned().unwrap_or_default();
-                let shown: Vec<Value> = hidden.iter().filter(|n| n.as_str() != Some(app)).cloned().collect();
-                let widget = widget.as_ref().filter(|_| !here.iter().any(|n| n == app) && !items.iter().any(|item| item["app"] == app && item["widget"].is_string()));
-                if let Some(widget) = widget {
-                    items.push(json!({ "app": app, "widget": widget, "id": new_id() }));
-                }
-                if widget.is_some() || shown.len() != hidden.len() {
-                    let hidden = if shown.len() != hidden.len() { json!(shown) } else { was["hidden"].clone() };
-                    out.push((own, content::arrange(&page, json!(items), hidden, was["pages"].clone())));
-                }
-            }
-            Ok(out)
-        })
-    }
-
-    pub async fn add(&self, caller: &Caller, app: &str, scope: &Scope, added: bool, node: Option<&str>) -> Result<()> {
-        self.read_callers_scopes(caller).await?;
-        if added {
-            self.with(|i| {
-                let a = i.r.db().app(app)?;
-                ensure!(a.as_ref().is_none_or(|a| !a.erased), "no app named {app}: its name is free again");
-                ensure!(a.is_none_or(|a| a.deleted.is_none()), "{app} is in Recently Deleted: apps_restore {app} brings it back");
-                Ok(())
-            })?;
-        }
-        let entries = self.add_entries(caller, app, scope, added, node).await?;
-        for (scope, content) in entries {
-            self.append_as(&scope, &caller.user, content).await?;
-        }
-        Ok(())
-    }
-
-    /// Forks `app` as a new app called `name`, owned by `owner` (by default the caller), with data of its own; it
-    /// runs `app`'s latest deploy until it's deployed itself.
-    pub async fn fork(&self, caller: &Caller, app: &str, name: &str, owner: Option<&str>) -> Result<()> {
-        let bundle = self.with(|i| {
-            let m = i.r.db();
-            ensure!(m.app(name)?.is_none(), "there's already an app called {name}");
-            m.app(app)?.with_context(|| format!("no app named {app}"))?.bundle.with_context(|| format!("{app} has no deploy to fork"))
-        })?;
-        let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
-        let builds = crate::app::bundle::services(&self.blob(&bundle).await?).into_values();
-        self.member_content(caller, content::fork(name, &owner, app)).await?;
-        self.member_content(caller, content::deploy(name, &bundle, builds)).await
-    }
-
-    /// Deploys `bundle` as `app`'s code, for someone acting for its owner. Deploying an older bundle again rolls back.
-    /// `bundle` may be the start of an earlier deploy's. With `wait`, → whether this device runs it within a few
-    /// seconds, as its next call here would.
-    pub async fn deploy(&self, caller: &Caller, app: &str, bundle: &str, wait: bool) -> Result<bool> {
-        let bundle = self.with(|i| {
-            let m = i.r.db();
-            let a = m.app(app)?.with_context(|| format!("no app named {app}"))?;
-            allowed!(m.may(&caller.user, "deploy", &scopes::app(app)), "only someone acting for {app}'s owner ({}) deploys it", a.owner);
-            ensure!(a.deleted.is_none(), "{app} is in Recently Deleted: apps_restore {app} brings it back to deploy to, apps_erase {app} frees its name for good, or give this app another name");
-            Ok(match a.history.iter().find(|(h, ..)| bundle.len() >= 8 && h.starts_with(bundle)) {
-                Some((h, ..)) => h.clone(),
-                None => bundle.to_string(),
-            })
-        })?;
-        // From elsewhere, only a bundle they may read: their own, or one an entry names for them; so too its service's
-        // builds, which the deploy names among its blobs.
-        let mine = |blob: &str| -> Result<bool> { Ok(caller.key == self.0.id || self.may_read_blob(&caller.user, blob)?) };
-        ensure!(mine(&bundle)?, "{app} has no deploy {bundle}: its versions are in apps_list's history");
-        let bytes = self.blob(&bundle).await?;
-        crate::app::bundle::module(&bytes)?;
-        let builds: Vec<String> = crate::app::bundle::services(&bytes).into_values().collect();
-        for build in &builds {
-            ensure!(mine(build)?, "{app}'s bundle names a build of its service, {build}, that isn't here: put it first");
-        }
-        self.member_content(caller, content::deploy(app, &bundle, builds)).await?;
-        Ok(wait && self.runs_latest(app, Duration::from_secs(10)).await)
-    }
-
-    /// Deploys `bundle` as `app`, as `deploy` does, making the app first if there's none by that name, owned by
-    /// `owner` (by default the caller). → `{ bundle, made, before, here, tools }`: whether it was made, the deploy it ran
-    /// before, and with `wait`, whether this device runs it now and then its tools (or why it doesn't start).
-    pub async fn deploy_making(&self, caller: &Caller, app: &str, bundle: &str, owner: Option<&str>, wait: bool) -> Result<Value> {
-        let before = self.with(|i| {
-            let m = i.r.db();
-            Ok(match m.app(app)? {
-                Some(a) => {
-                    allowed!(m.may(&caller.user, "deploy", &scopes::app(app)), "there's already an app called {app}, and it isn't yours: give yours another name, or fork it");
-                    Some(a.bundle)
-                }
-                None => None,
-            })
-        })?;
-        if before.is_none() {
-            ensure!(scopes::valid_app_name(app), "{app}: an app's name is lowercase words joined by -, like water-log");
-            let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
-            self.member_content(caller, content::app(app, &owner)).await?;
-        }
-        let here = self.deploy(caller, app, bundle, wait).await?;
-        let bundle = self.with(|i| Ok(i.r.db().app(app)?.and_then(|a| a.bundle.clone())))?;
-        let mut out = json!({ "bundle": bundle, "made": before.is_none(), "before": before.flatten(), "here": here });
-        if here {
-            match self.0.apps.describe(app).await {
-                Ok(d) => {
-                    out["tools"] = json!(d["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).collect::<Vec<_>>());
-                    out["lacking"] = json!(crate::app::deploy::lacking(&d));
-                }
-                Err(e) => out["failed"] = json!(format!("{e:#}")),
-            }
-        }
-        Ok(out)
-    }
-
-    /// An app's code as deployed, its latest or an earlier deploy's: its files, or one of them. A built-in app no one
-    /// has added gives the release's. Everyone may read every app's code.
-    pub async fn source(&self, app: &str, bundle: Option<&str>, path: Option<&str>) -> Result<Value> {
-        let history = self.with(|i| Ok(i.r.db().app(app)?.map(|a| a.history)))?;
-        let built_in = self.0.built_in.get(app);
-        ensure!(history.is_some() || built_in.is_some(), "no app named {app}");
-        let history = history.unwrap_or_default();
-        let bundle = match bundle {
-            Some(b) => history.iter().find(|(h, ..)| h.starts_with(b)).with_context(|| format!("{app} has no deploy {b}"))?.0.clone(),
-            None => history.last().map(|h| &h.0).or(built_in).with_context(|| format!("{app} has no deploy yet"))?.clone(),
-        };
-        let mut out = crate::app::deploy::show(&self.blob(&bundle).await?, path)?;
-        out["app"] = json!(app);
-        out["bundle"] = json!(bundle);
-        Ok(out)
-    }
 }
 
 /// Where a built-in app's code is: its folder of `apps/` in the repo releases come from, at this build's commit when
@@ -563,17 +330,3 @@ fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::
     }
     Ok(out)
 }
-
-/// A built-in app's bundle: its `app.js` as the module, and every file of its folder as its source. One with npm
-/// packages (a `package.json`) or React screens (a `dist/`, built when the app was committed) is built as `<cli> deploy`
-/// builds any app, its screens as they are.
-pub fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
-    if files.iter().any(|(p, _)| *p == "package.json" || p.starts_with("dist/")) {
-        return crate::app::deploy::build_built_in(files);
-    }
-    let module = files.iter().find(|(p, _)| *p == "app.js").context("a built-in app has no app.js")?.1;
-    let mut bundle = vec![("app.js".to_string(), module.to_vec())];
-    bundle.extend(files.iter().map(|(p, b)| (format!("src/{p}"), b.to_vec())));
-    crate::app::bundle::pack(&bundle)
-}
-

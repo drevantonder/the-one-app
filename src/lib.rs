@@ -35,7 +35,6 @@ pub mod insights;
 #[cfg(not(target_family = "wasm"))]
 pub mod loopback;
 #[cfg(feature = "node")]
-pub mod logos;
 #[cfg(feature = "node")]
 pub mod node;
 #[cfg(feature = "node")]

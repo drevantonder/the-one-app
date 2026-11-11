@@ -31,6 +31,7 @@ groups = { path = "../groups" }
 vault = { path = "../vault" }
 devices = { path = "../devices" }
 device-logs = { path = "../device-logs" }
+deploy = { path = "../deploy" }
 one = { path = ".." }
 # `<cli>t`, this computer's onet (onet/src/computer/), is this program run by that name.
 onet = { path = "../onet", features = ["computer"] }
@@ -57,6 +58,8 @@ ai-gateway-runtime = { path = "../ai-gateway/runtime" }
 vault-runtime = { path = "../vault/runtime" }
 # Devices as the tests' devices run them: who holds the recovery key (tests/e2e.rs).
 devices-runtime = { path = "../devices/runtime" }
+# Deploying and adding apps as the tests' devices run it (tests/e2e.rs).
+deploy-runtime = { path = "../deploy/runtime" }
 # What a browser's push service does with a push (RFC 8291's decryption, tests/contracts.rs): the node's own crypto.
 aes-gcm = "0.10"
 hkdf = "0.13"

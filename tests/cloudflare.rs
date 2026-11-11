@@ -103,11 +103,11 @@ fn the_workers_own_tests_pass() {
         dir.join("config.capnp"),
         format!(
             "using Workerd = import \"/workerd/workerd.capnp\";\nconst config :Workerd.Config = (services = [(name = \"tests\", worker = (modules = [(name = \"tests.js\", esModule = embed \"tests.js\")], compatibilityDate = \"{}\"))]);\n",
-            one::app::runtime::COMPATIBILITY_DATE
+            deploy::build::COMPATIBILITY_DATE
         ),
     )
     .unwrap();
-    let out = std::process::Command::new(one::app::runtime::workerd().unwrap()).arg("test").arg(dir.join("config.capnp")).output().unwrap();
+    let out = std::process::Command::new(deploy::build::workerd().unwrap()).arg("test").arg(dir.join("config.capnp")).output().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(out.status.success(), "the Workers' tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
 }

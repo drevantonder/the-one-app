@@ -784,7 +784,7 @@ impl Node {
         let mut out = serde_json::Map::new();
         let mut size = 0;
         for hash in &req.puts {
-            let bytes = std::fs::read(release::blob_path(&self.0.dir, hash)?).with_context(|| format!("the file put for that call isn't on {}", self.device_name()))?;
+            let bytes = std::fs::read(::database::blob_path(&self.0.dir, hash)?).with_context(|| format!("the file put for that call isn't on {}", self.device_name()))?;
             size += bytes.len();
             ensure!(size <= CARRIED, "that's {} MiB, and a call another device runs takes at most {} MiB with it: send it from a device that runs it first in run priority", size >> 20, CARRIED >> 20);
             out.insert(hash.clone(), json!(data_encoding::BASE64.encode(&bytes)));
@@ -850,7 +850,7 @@ impl Node {
     pub(super) async fn limit(&self, req: &CallRequest) -> Duration {
         let (apps, services) = self.uses_here(&req.app).await;
         let limit = if req.service.is_some() || !apps.is_empty() || !services.is_empty() { SERVICE_LIMIT } else { CALL_LIMIT };
-        let put: u64 = req.puts.iter().filter_map(|h| std::fs::metadata(release::blob_path(&self.0.dir, h).ok()?).ok()).map(|m| m.len()).sum();
+        let put: u64 = req.puts.iter().filter_map(|h| std::fs::metadata(::database::blob_path(&self.0.dir, h).ok()?).ok()).map(|m| m.len()).sum();
         limit + PER_MIB * put.div_ceil(1 << 20) as u32
     }
 

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use ::custom_build::config::{CLI, TARGET};
 use crate::release::Version;
 use serde_json::{Value, json};
@@ -280,7 +280,7 @@ mod tests {
     fn mise_installs_the_versions_the_repo_asks_for() {
         let mise = include_str!("../mise.toml");
         let pinned = |tool: &str| mise.lines().find_map(|l| l.strip_prefix(&format!("{tool} = \""))?.strip_suffix('"')).unwrap_or_else(|| panic!("mise.toml pins no {tool}"));
-        assert_eq!(pinned("bun"), BUN);
+        assert_eq!(pinned("bun"), ::deploy::build::BUN);
         let locked = include_str!("../Cargo.lock").split_once("name = \"wasm-bindgen\"\nversion = \"").expect("wasm-bindgen is locked").1.split('"').next().unwrap();
         assert_eq!(pinned("\"github:wasm-bindgen/wasm-bindgen\""), locked, "wasm-bindgen-cli must be the version Cargo.lock locks");
         let go = include_str!("../apps/whatsapp/service/go.mod").lines().find_map(|l| l.strip_prefix("go ")).unwrap();
@@ -340,16 +340,16 @@ pub fn built_with_service(node: &::api::Client, dir: &Path) -> Result<(String, S
             service += &format!(" Not for {}: this machine can't build it for them, so deploy it again from one that can.", said(built.missed));
         }
     }
-    Ok((node.put_blob(&crate::app::deploy::build(dir, &builds)?)?, service))
+    Ok((node.put_blob(&::deploy::build::build(dir, &builds)?)?, service))
 }
 
 /// MCP's deploy tool's files built into a bundle on this machine, as a blob of `node`'s: for React screens and a
 /// service in Go, which only the machine that deploys builds. → the bundle, and what was built of its service.
 pub fn built_here(node: &::api::Client, files: &serde_json::Map<String, Value>) -> Result<(String, String)> {
     ensure!(!files.contains_key("service/Cargo.toml"), "its service is in Rust, whose build would run its build scripts here: deploy it with {CLI} deploy <its folder>");
-    let files = crate::app::deploy::given(files)?;
+    let files = ::deploy::build::given(files)?;
     if !files.iter().any(|(p, _)| p == "service/go.mod") {
-        return Ok((node.put_blob(&crate::app::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>())?)?, String::new()));
+        return Ok((node.put_blob(&::deploy::build::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>())?)?, String::new()));
     }
     let dir = std::env::temp_dir().join(format!("{CLI}-deploy-{}", std::process::id()));
     let built = (|| {
@@ -362,25 +362,6 @@ pub fn built_here(node: &::api::Client, files: &serde_json::Map<String, Value>) 
     })();
     let _ = std::fs::remove_dir_all(&dir);
     built
-}
-
-/// The Bun every deploy builds with, and each platform's npm package of it with its sha512.
-pub(crate) const BUN: &str = "1.4.4";
-const PACKAGES: &[(&str, &str, &str)] = &[
-    ("x86_64-unknown-linux-gnu", "linux-x64", "CHbbkmHVM28T1GFq+6GL4Ao4ujwwYwj1CxFFwEFzLanPfNsId9AhbIP0Q4reWuWBkGimUkoQygrK7Rgjtj3vog=="),
-    ("aarch64-unknown-linux-gnu", "linux-aarch64", "ZTVtpf9zmHSBVPX1sBwe5agGb/rN34yPGg/Hby8e2Ax2uCUA2URZKlZH7qLntK7qaFJCMXh9v0GWNYN2zINz1w=="),
-    ("aarch64-apple-darwin", "darwin-aarch64", "zW/hxwc8sJAILGwB5eTC4i48ouGXf0V4lrxmEOk3JIE6JkYVW1TZh1E2pIempqsezgW1sckTIIDudFON8bJ2Mw=="),
-    ("x86_64-apple-darwin", "darwin-x64", "oKGcxLsvh4oHjAo28nPm8c/xN0o/OmGyj1IHYc94vprkWsW2hNg2keEZt5f40cI5Hvu4jDlSRTR0UNpv1UIAxw=="),
-    ("x86_64-pc-windows-gnu", "windows-x64", "a3LNctBVO8PjePsFZfwDleF2JXYf2BfQ1u/PLRnBDLnC2Riml+4+LgJpKj4xRGhB92KweGyQI5PXaTkP9qypMQ=="),
-];
-
-/// The pinned Bun, downloaded and checked the first time.
-pub fn bun() -> Result<PathBuf> {
-    let (_, package, integrity) =
-        PACKAGES.iter().find(|(target, _, _)| *target == ::custom_build::config::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", ::custom_build::config::TARGET))?;
-    let url = format!("https://registry.npmjs.org/@oven/bun-{package}/-/bun-{package}-{BUN}.tgz");
-    let bin = format!("bun{}", std::env::consts::EXE_SUFFIX);
-    crate::app::runtime::pinned(&format!("bun-{BUN}"), &bin, &format!("package/bin/{bin}"), &url, integrity)
 }
 
 /// A browser with no window on this machine, for drawing screens (one-dev throwaway's web client, the tests), started as lean as

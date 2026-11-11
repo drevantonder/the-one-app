@@ -420,12 +420,12 @@ impl Node {
         let broken = self.0.broken.lock().unwrap().clone();
         let ran = self.0.bundles.lock().unwrap().clone();
         for (app, bundle) in wanted.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
-            let mut fetched = self.blob(bundle).await.and_then(|b| crate::app::bundle::module(&b)).map(|m| (m, bundle));
+            let mut fetched = self.blob(bundle).await.and_then(|b| ::deploy::bundle::module(&b)).map(|m| (m, bundle));
             if let Err(err) = &fetched {
                 tracing::warn!("{app}'s deploy: {err:#}: tried again soon");
                 unfetched = true;
                 if let Some(old) = ran.get(app).filter(|old| *old != bundle)
-                    && let Ok(module) = self.blob(old).await.and_then(|b| crate::app::bundle::module(&b))
+                    && let Ok(module) = self.blob(old).await.and_then(|b| ::deploy::bundle::module(&b))
                 {
                     fetched = Ok((module, old));
                 }
@@ -438,7 +438,7 @@ impl Node {
         // The built-in apps no one has added run no calls: they're there to be described, for the App Store to list.
         let mut waiting = Vec::new();
         for (app, bundle) in unadded.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
-            if let Ok(module) = self.blob(bundle).await.and_then(|b| crate::app::bundle::module(&b)) {
+            if let Ok(module) = self.blob(bundle).await.and_then(|b| ::deploy::bundle::module(&b)) {
                 waiting.push((app.clone(), module));
             }
         }

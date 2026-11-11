@@ -322,7 +322,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             let mut service = String::new();
             let body = match (input.get("files"), input.get("version")) {
                 // React screens and a service are built here, on the machine that deploys, as `deploy <folder>` builds them.
-                (Some(Value::Object(files)), None) if !node.elsewhere() && (crate::app::deploy::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match crate::build::built_here(node, files) {
+                (Some(Value::Object(files)), None) if !node.elsewhere() && (::deploy::build::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match crate::build::built_here(node, files) {
                     Ok((bundle, built)) => {
                         service = built;
                         json!({ "app": app, "bundle": bundle, "wait": true })
@@ -335,7 +335,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             };
             match node.post("/api/deploy", body) {
                 Ok(r) => {
-                    let text = format!("{}{service}", crate::app::deploy::said(node, app, &r, ::api::Reader::Mcp));
+                    let text = format!("{}{service}", ::deploy::build::said(node, app, &r, ::api::Reader::Mcp));
                     json!({ "isError": r["failed"].is_string(), "content": [{ "type": "text", "text": text }] })
                 }
                 Err(e) => failed(format!("{e:#}")),

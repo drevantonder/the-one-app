@@ -930,6 +930,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "deploy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "custom-build",
+ "data-encoding",
+ "platform",
+ "rand 0.8.8",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tracing",
+ "ureq",
+]
+
+[[package]]
+name = "deploy-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "axum",
+ "custom-build",
+ "data-encoding",
+ "database",
+ "deploy",
+ "flate2",
+ "key",
+ "platform",
+ "scope",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "ureq",
+]
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3078,6 +3118,8 @@ dependencies = [
  "custom-build",
  "data-encoding",
  "database",
+ "deploy",
+ "deploy-runtime",
  "device-logs",
  "device-logs-runtime",
  "devices",
@@ -3200,6 +3242,8 @@ dependencies = [
  "custom-build",
  "data-encoding",
  "database",
+ "deploy",
+ "deploy-runtime",
  "device-logs",
  "devices",
  "devices-runtime",
@@ -3242,6 +3286,7 @@ dependencies = [
  "custom-build",
  "data-encoding",
  "database",
+ "deploy",
  "ed25519-dalek 3.0.0",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
@@ -3271,6 +3316,7 @@ dependencies = [
  "api",
  "custom-build",
  "data-encoding",
+ "deploy",
  "key",
  "libc",
  "one",
@@ -5490,6 +5536,7 @@ dependencies = [
  "custom-build",
  "data-encoding",
  "database",
+ "deploy-runtime",
  "jiff",
  "key",
  "platform",

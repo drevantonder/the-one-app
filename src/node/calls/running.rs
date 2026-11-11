@@ -238,7 +238,7 @@ impl Node {
                 let built_in = self.0.built_in.values().any(|h| h == hash);
                 // A call this machine's own programs asked may read what its local API would give them: a file put there to
                 // attach. A sign-in's asks here too, but reads only what its user may.
-                let local = self.this_machine(&grant.caller) && release::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
+                let local = self.this_machine(&grant.caller) && ::database::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
                 ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || self.may_read_blob(&grant.caller.user, hash)?, "no such blob for you");
                 self.blob(hash).await?.into_response()
             }
@@ -262,7 +262,7 @@ impl Node {
             Ask::Catalog => ok(json!(self.catalog(&grant.caller, true).await?)),
             Ask::Code => {
                 let req: Value = serde_json::from_slice(&body)?;
-                ok(self.source(req["app"].as_str().unwrap_or_default(), None, req["path"].as_str()).await?)
+                ok(deploy_runtime::source(&self.rt(), req["app"].as_str().unwrap_or_default(), None, req["path"].as_str()).await?)
             }
             Ask::Failing => ok(json!(self.failing_schedules(&grant.caller).await?)),
             // A push to the caller's devices, from this app, through the network's push Worker.

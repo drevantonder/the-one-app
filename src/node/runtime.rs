@@ -10,8 +10,9 @@ use super::*;
 /// Every feature this runtime runs, a line each.
 pub fn features() -> Vec<Runs> {
     vec![
-        crate::app::tools::add_runs(),
-        crate::app::tools::remove_runs(),
+        deploy_runtime::runs(),
+        deploy_runtime::add_runs(),
+        deploy_runtime::remove_runs(),
         vault_runtime::runs(),
         crate::backups::tools::runs(),
         groups_runtime::runs(),
@@ -256,10 +257,6 @@ impl Apps for Node {
 
     fn apps_for<'a>(&'a self, viewer: &'a Caller) -> Fut<'a, Vec<Value>> {
         Box::pin(self.apps(viewer))
-    }
-
-    fn logo(&self, domain: &str, app: &str) -> Option<(String, String)> {
-        Node::logo(self, domain, app)
     }
 
     fn call<'a>(&'a self, req: CallRequest, caller: Caller) -> Fut<'a, Value> {

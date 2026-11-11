@@ -34,9 +34,9 @@ pub(super) fn deploy_apps(src: &Path) -> Result<()> {
         if !dir.join("app.js").is_file() {
             continue;
         }
-        let files = one::app::bundle::sources(&dir)?;
+        let files = deploy::bundle::sources(&dir)?;
         let files: Vec<(&str, &[u8])> = files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect();
-        let bundle = one::node::apps::built_in_bundle(&files)?;
+        let bundle = deploy::build::built_in_bundle(&files)?;
         let blob = crate::node().put_blob(&bundle)?;
         if app["bundle"].as_str() != Some(blob.as_str()) {
             crate::node().post("/api/deploy", json!({ "app": name, "bundle": blob }))?;

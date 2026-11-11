@@ -29,12 +29,12 @@ pub(super) struct State {
 impl Node {
     /// Keeps `bytes` as a blob.
     pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
-        release::put_blob(&self.0.dir, bytes)
+        ::database::put_blob(&self.0.dir, bytes)
     }
 
     /// A blob from this device, else from the bucket, in a scope whose database names it.
     pub async fn blob(&self, hash: &str) -> Result<Vec<u8>> {
-        if let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) {
+        if let Ok(bytes) = std::fs::read(::database::blob_path(&self.0.dir, hash)?) {
             return Ok(bytes);
         }
         use ::bucket::Bucket;
@@ -47,7 +47,7 @@ impl Node {
             let key = keys.get(&epoch).with_context(|| format!("{} wasn't given {scope}'s epoch {epoch}", self.device_name()))?;
             let bytes = key::open(key, &name, &sealed.bytes)?;
             ensure!(blake3::hash(&bytes).to_hex().as_str() == hash, "the blob kept as {hash} isn't it");
-            release::put_blob(&self.0.dir, &bytes)?;
+            ::database::put_blob(&self.0.dir, &bytes)?;
             return Ok(bytes);
         }
         bail!("no device has put that blob in the bucket")
@@ -62,7 +62,7 @@ impl Node {
         if (noted && self.0.blobs.shared.lock().unwrap().contains(&marker)) || self.0.blobs.put_first.lock().unwrap().contains(&marker) {
             return Ok(());
         }
-        let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) else { return Ok(()) };
+        let Ok(bytes) = std::fs::read(::database::blob_path(&self.0.dir, hash)?) else { return Ok(()) };
         let keys = self.database_keys(scope, key::APP, key::CoreDb::Blobs.name(), false).await?;
         let name = ::bucket::names::blob_name(&scope.to_string(), hash);
         Bucket::create(&self.bucket()?.place, &name, &scope::steps::seal(&keys, &name, &bytes)?).await?;
@@ -154,7 +154,7 @@ impl Node {
                 return Err(err);
             }
         };
-        let path = release::blob_path(&self.0.dir, &hash)?;
+        let path = ::database::blob_path(&self.0.dir, &hash)?;
         match path.exists() {
             true => std::fs::remove_file(&part)?,
             false => std::fs::rename(&part, &path)?,
@@ -189,7 +189,7 @@ impl Node {
         }
         self.0.blobs.remote_puts.lock().unwrap().retain(|p| p.hash != hash);
         self.0.blobs.put_by.lock().unwrap().remove(hash);
-        if let Ok(path) = release::blob_path(&self.0.dir, hash) {
+        if let Ok(path) = ::database::blob_path(&self.0.dir, hash) {
             let _ = std::fs::remove_file(path);
         }
     }
@@ -248,7 +248,7 @@ impl Node {
             if self.blob_named(&hash, |_| true).unwrap_or(true) {
                 continue;
             }
-            if let Ok(path) = release::blob_path(&self.0.dir, &hash) {
+            if let Ok(path) = ::database::blob_path(&self.0.dir, &hash) {
                 if std::fs::remove_file(&path).is_ok() {
                     tracing::info!("deleted blob {} that nothing needs any more", &hash[..12]);
                 }

@@ -392,7 +392,7 @@ fn the_service_worker_opens_notes_as_rust_does() {
 fn auth_pages_drawn_by_hand_name_the_network_as_the_build_does() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let dir = crate::temp("drawn");
-    let out = std::process::Command::new(one::build::bun().unwrap())
+    let out = std::process::Command::new(deploy::build::bun().unwrap())
         .arg(root.join("onboarding/render.js"))
         .arg(root.join(option_env!("CONFIG").unwrap_or("config.toml")))
         .arg(&dir)
@@ -418,7 +418,7 @@ fn insights_on_the_screen_and_for_agents_agree_on_a_p95() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let rows = serde_json::json!([{ "buckets": [0, 20, 20, 10, 10, 5, 5, 10, 10, 0, 5, 5, 3, 0, 0, 2] }, { "buckets": [0, 0, 0, 0, 0, 0, 1, 2, 3] }, {}]);
     let script = format!("const {{ quantile }} = await import({:?}); console.log(JSON.stringify([0, 0.5, 0.95, 1].map((q) => quantile({rows}, q))))", root.join("src/screen/settings/quantile.js").display());
-    let out = std::process::Command::new(one::build::bun().unwrap()).args(["-e", &script]).output().unwrap();
+    let out = std::process::Command::new(deploy::build::bun().unwrap()).args(["-e", &script]).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let screen: Vec<f64> = serde_json::from_slice(&out.stdout).unwrap();
     let rows: Vec<&serde_json::Value> = rows.as_array().unwrap().iter().collect();
@@ -945,7 +945,7 @@ fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
         shim = json!(::api::call::shim()),
         app = json!(APP),
         code = json!(::custom_build::protocol::header::CODE),
-        date = json!(one::app::runtime::COMPATIBILITY_DATE),
+        date = json!(deploy::build::COMPATIBILITY_DATE),
     );
     let at = format!("127.0.0.1:{}", crate::cloudflare::port());
     let _running = crate::cloudflare::run(vec![one::cloudflare::Served {
@@ -1047,7 +1047,7 @@ fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
     let script = format!("{body}\nconsole.log(JSON.stringify({cases}.map((c) => {{ globalThis.__oneScreen = c.screen; return described(Object.assign(new Error(c.message), {{ name: c.name, stack: c.stack }})) }})))");
     let at = std::env::temp_dir().join(format!("bridge-thrown-{}.js", std::process::id()));
     std::fs::write(&at, script).unwrap();
-    let out = std::process::Command::new(one::build::bun().unwrap()).arg(&at).output().unwrap();
+    let out = std::process::Command::new(deploy::build::bun().unwrap()).arg(&at).output().unwrap();
     std::fs::remove_file(&at).unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let said = String::from_utf8(out.stdout).unwrap();

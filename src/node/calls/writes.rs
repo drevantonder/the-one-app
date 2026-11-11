@@ -81,7 +81,7 @@ impl Node {
             for append in adds {
                 if let Append::Add { app, scope, added, node } = append {
                     let scope = Scope::parse_for(&scope, &me.user)?;
-                    writes.extend(self.add_entries(me, &app, &scope, added, node.as_deref()).await?);
+                    writes.extend(deploy_runtime::add_entries(&self.rt(), me, &app, &scope, added, node.as_deref()).await?);
                 }
             }
             for (scope, content) in writes {

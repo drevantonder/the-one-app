@@ -79,7 +79,7 @@ pub(crate) fn approve(dir: &Path, settings: &one::cloudflare::Settings, port: u1
 pub(crate) fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
     let script = dir.join("web.js");
     std::fs::write(&script, include_str!("web.js"))?;
-    let out = std::process::Command::new(one::build::bun()?).arg(&script).args(args).output()?;
+    let out = std::process::Command::new(deploy::build::bun()?).arg(&script).args(args).output()?;
     anyhow::ensure!(out.status.success(), "the web client didn't sign in: {}", String::from_utf8_lossy(&out.stderr).trim());
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }

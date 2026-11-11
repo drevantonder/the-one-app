@@ -29,7 +29,6 @@ use ::scope::content;
 use ::scope::scopes::{Principal, ScopeState};
 use ::custom_build::config::{CLI, YOURS};
 use ::scope::rank;
-use crate::release;
 use crate::schedules::{self, Schedule};
 use ::scope::replica::{Handled, Replica};
 
@@ -58,7 +57,7 @@ use ::api::runtime::NotGiven;
 pub use net::{Endpoints, alpn, relay};
 pub use calls::Grant;
 use calls::{Granted, Reply};
-use apps::built_in_bundle;
+use ::deploy::build::built_in_bundle;
 use scheduled::switch_entry;
 use services::added_scope;
 pub use ::api::handed::Needs;
@@ -243,8 +242,6 @@ pub struct Inner {
     built_in: BTreeMap<String, String>,
     /// Each bundle's `icon.png`, its finished app icon, as a data URL, once read, or none.
     images: Mutex<HashMap<String, Option<String>>>,
-    /// The logos of the sites apps and services connect to.
-    logos: crate::logos::Logos,
     /// The calls, widgets and hooks running now, by the token their requests carry.
     grants: Mutex<HashMap<String, Grant>>,
     /// The port apps' requests go out through.
@@ -371,7 +368,7 @@ impl Node {
         let (events, _) = broadcast::channel(256);
         let mut built_in = BTreeMap::new();
         for (app, files) in crate::carried::BUILT_IN {
-            built_in.insert(app.to_string(), release::put_blob(dir, &built_in_bundle(files)?)?);
+            built_in.insert(app.to_string(), ::database::put_blob(dir, &built_in_bundle(files)?)?);
         }
         let (kept, starts) = runtime::Kept::of(runtime::features());
         let node = Node(Arc::new(Inner {
@@ -394,7 +391,6 @@ impl Node {
             bundles: Mutex::new(BTreeMap::new()),
             built_in,
             images: Mutex::new(HashMap::new()),
-            logos: crate::logos::Logos::open(dir),
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             calls: Default::default(),

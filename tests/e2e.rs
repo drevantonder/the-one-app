@@ -77,9 +77,9 @@ fn notes(tool: &str, input: Value) -> CallRequest {
 /// would add an app, and waits for this device to run it.
 async fn add_notes(a: &Node) {
     let me = api::Caller::own(a.id(), a.user().unwrap());
-    let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
-    a.deploy_making(&me, "notes", &bundle, Some("admins"), true).await.unwrap();
-    a.add(&me, "notes", &::scope::scopes::Scope::Global, true, None).await.unwrap();
+    let bundle = a.put_blob(&deploy::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
+    deploy_runtime::deploy_making(&a.rt(), &me, "notes", &bundle, Some("admins"), true).await.unwrap();
+    deploy_runtime::add(&a.rt(), &me, "notes", &::scope::scopes::Scope::Global, true, None).await.unwrap();
 }
 
 /// The command that opens a backup, on a machine with only the disk and the recovery key: nothing running or joined
@@ -641,9 +641,9 @@ async fn an_app_taken_off_a_page_and_added_back_has_what_it_kept() {
     add_notes(&a).await;
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before it left" }))).await.is_ok()).await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
-    a.add(&me, "notes", &::scope::scopes::Scope::Global, false, None).await.unwrap();
+    deploy_runtime::add(&a.rt(), &me, "notes", &::scope::scopes::Scope::Global, false, None).await.unwrap();
     assert!(a.call(notes("read", json!({}))).await.is_err(), "an app off the page doesn't run there");
-    a.add(&me, "notes", &::scope::scopes::Scope::Global, true, None).await.unwrap();
+    deploy_runtime::add(&a.rt(), &me, "notes", &::scope::scopes::Scope::Global, true, None).await.unwrap();
     let read = a.call(notes("read", json!({}))).await.unwrap();
     assert!(read.to_string().contains("before it left"), "{read}");
 }
@@ -750,31 +750,31 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     let me = api::Caller::own(a.id(), a.user().unwrap());
     let build = a.put_blob(b"a program").unwrap();
     let bundle = |services: Value| {
-        let files = vec![("app.js".to_string(), b"export default { tools: {} }".to_vec()), (one::app::bundle::SERVICES.to_string(), services.to_string().into_bytes())];
-        a.put_blob(&one::app::bundle::pack(&files).unwrap()).unwrap()
+        let files = vec![("app.js".to_string(), b"export default { tools: {} }".to_vec()), (deploy::bundle::SERVICES.to_string(), services.to_string().into_bytes())];
+        a.put_blob(&deploy::bundle::pack(&files).unwrap()).unwrap()
     };
     let named = bundle(json!({ custom_build::config::TARGET: build }));
-    a.deploy_making(&me, "tiny", &named, None, false).await.unwrap();
+    deploy_runtime::deploy_making(&a.rt(), &me, "tiny", &named, None, false).await.unwrap();
     assert_eq!(a.service_builds().await.get("tiny"), Some(&Build::Deployed(build.clone())));
     assert_eq!(a.service_build(&build).await.unwrap(), b"a program");
 
     // One byte changed where it's kept, and it isn't the build its deploy names.
-    let kept = one::release::blob_path(&dir, &build).unwrap();
+    let kept = ::database::blob_path(&dir, &build).unwrap();
     std::fs::write(&kept, b"a progran").unwrap();
     assert!(a.service_build(&build).await.is_err(), "a build whose bytes aren't its hash is refused");
 
     // A deploy naming builds only for other platforms: none runs here.
-    a.deploy(&me, "tiny", &bundle(json!({ "elsewhere": build })), false).await.unwrap();
+    deploy_runtime::deploy(&a.rt(), &me, "tiny", &bundle(json!({ "elsewhere": build })), false).await.unwrap();
     assert_eq!(a.service_builds().await.get("tiny"), Some(&Build::None));
 
     // Sam may not deploy Andre's app, so names no build of its service.
     let sam = api::Caller { key: a.id(), user: "sam".into(), agent: None, credential: api::Credential::Client([8; 32]) };
-    assert!(a.deploy(&sam, "tiny", &named, false).await.is_err());
+    assert!(deploy_runtime::deploy(&a.rt(), &sam, "tiny", &named, false).await.is_err());
     // Nor does Andre, from elsewhere, name a build he can't read: one Sam put, by its hash.
     let away = api::Caller { key: [7; 32], credential: api::Credential::Client([7; 32]), ..me.clone() };
     let (sams, _) = a.put_blob_from(&sam, axum::body::Body::from("Sam's program")).await.unwrap();
-    let (his, _) = a.put_blob_from(&away, axum::body::Body::from(one::app::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (one::app::bundle::SERVICES.to_string(), json!({ custom_build::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
-    let refused = a.deploy(&away, "tiny", &his, false).await.unwrap_err();
+    let (his, _) = a.put_blob_from(&away, axum::body::Body::from(deploy::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (deploy::bundle::SERVICES.to_string(), json!({ custom_build::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
+    let refused = deploy_runtime::deploy(&a.rt(), &away, "tiny", &his, false).await.unwrap_err();
     assert!(format!("{refused:#}").contains("put it first"), "{refused:#}");
 }
 
@@ -911,12 +911,12 @@ async fn a_tool_answers_what_its_output_says() {
     let a = start("answers").await;
     create(&a, "Home", "Andre").await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
-    let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("answers/app.js").to_vec())]).unwrap()).unwrap();
-    let deployed = a.deploy_making(&me, "answers", &bundle, Some("admins"), true).await.unwrap();
+    let bundle = a.put_blob(&deploy::bundle::pack(&[("app.js".to_string(), include_bytes!("answers/app.js").to_vec())]).unwrap()).unwrap();
+    let deployed = deploy_runtime::deploy_making(&a.rt(), &me, "answers", &bundle, Some("admins"), true).await.unwrap();
     assert_eq!(deployed["lacking"], json!(["unsaid"]), "the deploy names the tool that says nothing of its answer: {deployed}");
     let schema = &one::openapi::document(&[], true)["paths"]["/api/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
     api::tools::check(schema, &deployed).unwrap_or_else(|err| panic!("a deploy answers what the document doesn't say: {err:#}\n{deployed}"));
-    a.add(&me, "answers", &::scope::scopes::Scope::Global, true, None).await.unwrap();
+    deploy_runtime::add(&a.rt(), &me, "answers", &::scope::scopes::Scope::Global, true, None).await.unwrap();
     let call = |tool: &str| CallRequest { app: "answers".into(), tool: tool.into(), input: json!({}), ..Default::default() };
     eventually("answers to run", &a, async || a.call(call("keeps")).await.is_ok()).await;
     assert_eq!(a.call(call("keeps")).await.unwrap(), json!({ "n": 1 }));
@@ -941,7 +941,7 @@ async fn every_built_in_apps_tools_say_what_they_answer() {
         let name = app["name"].as_str().unwrap();
         let described = a.described(name).await.unwrap_or_else(|err| panic!("{name}: {err:#}"));
         seen += described["tools"].as_array().map_or(0, Vec::len);
-        lacking.extend(one::app::deploy::lacking(&described).into_iter().map(|tool| format!("{name}_{tool}")));
+        lacking.extend(deploy::build::lacking(&described).into_iter().map(|tool| format!("{name}_{tool}")));
     }
     assert!(seen > 150, "the built-in apps' tools were found: {seen}");
     assert!(lacking.is_empty(), "these tools give no title or no output: {}", lacking.join(", "));

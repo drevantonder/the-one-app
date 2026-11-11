@@ -102,10 +102,10 @@ impl Node {
         let bundles = self.with_or(Default::default(), |i| Ok(i.r.db().apps()?.into_iter().filter(|a| a.deleted.is_none()).filter_map(|a| Some((a.name, a.bundle?))).collect::<Vec<_>>()));
         for (app, bundle) in bundles {
             match self.blob(&bundle).await {
-                Ok(bytes) => match crate::app::bundle::services(&bytes).remove(custom_build::config::TARGET) {
+                Ok(bytes) => match ::deploy::bundle::services(&bytes).remove(custom_build::config::TARGET) {
                     Some(build) => drop(builds.insert(app, Build::Deployed(build))),
                     // A deploy naming builds for other platforms only runs on none here, release or not.
-                    None if !crate::app::bundle::services(&bytes).is_empty() => drop(builds.insert(app, Build::None)),
+                    None if !::deploy::bundle::services(&bytes).is_empty() => drop(builds.insert(app, Build::None)),
                     None => {}
                 },
                 Err(err) => tracing::debug!("reading {app}'s bundle for its service: {err:#}"),

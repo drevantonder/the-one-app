@@ -284,7 +284,7 @@ impl Node {
         let dir = self.0.dir.clone();
         let ran = exception.clone();
         Some(tokio::task::spawn_blocking(move || {
-            let files = bundle.and_then(|bundle| crate::app::bundle::unpack(&std::fs::read(crate::release::blob_path(&dir, &bundle).ok()?).ok()?).ok()).unwrap_or_default();
+            let files = bundle.and_then(|bundle| ::deploy::bundle::unpack(&std::fs::read(::database::blob_path(&dir, &bundle).ok()?).ok()?).ok()).unwrap_or_default();
             exception.located(|file| source_map::of(file, &files))
         }).await.unwrap_or(ran))
     }

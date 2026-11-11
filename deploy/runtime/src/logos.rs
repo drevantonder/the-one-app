@@ -10,7 +10,6 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::release;
 
 /// A logo is fetched again after a week; a site that gave none is asked again after a day.
 const FRESH: u64 = 7 * 86_400_000;
@@ -58,7 +57,7 @@ impl Logos {
         if let Some(url) = self.urls.lock().unwrap().get(domain) {
             return (Some((url.clone(), kind)), due);
         }
-        let Ok(bytes) = release::blob_path(dir, &blob).and_then(|p| Ok(std::fs::read(p)?)) else { return (None, true) };
+        let Ok(bytes) = database::blob_path(dir, &blob).and_then(|p| Ok(std::fs::read(p)?)) else { return (None, true) };
         let url = format!("data:{mime};base64,{}", data_encoding::BASE64.encode(&bytes));
         self.urls.lock().unwrap().insert(domain.to_string(), url.clone());
         (Some((url, kind)), due)
@@ -74,7 +73,7 @@ impl Logos {
         self.fetching.lock().unwrap().remove(domain);
         let mut known = self.known.lock().unwrap();
         let old = known.get(domain).cloned();
-        let new = match logo.and_then(|l| Some((release::put_blob(dir, &l.bytes).ok()?, l.mime, l.kind))) {
+        let new = match logo.and_then(|l| Some((database::put_blob(dir, &l.bytes).ok()?, l.mime, l.kind))) {
             Some((blob, mime, kind)) => Known { blob: Some(blob), mime: Some(mime.to_string()), kind: Some(kind.to_string()), at: now },
             None => match &old {
                 Some(k) if k.blob.is_some() => Known { at: now.saturating_sub(FRESH) + RETRY, ..k.clone() },
