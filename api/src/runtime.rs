@@ -130,6 +130,25 @@ pub trait Apps: Send + Sync {
     fn logo(&self, domain: &str, app: &str) -> Option<(String, String)>;
     /// Runs a tool for `caller`, whom this device acts for: here, or on the nearest device that can.
     fn call<'a>(&'a self, req: CallRequest, caller: Caller) -> Fut<'a, Value>;
+    /// The apps a page shows for `viewer`: with `scope`, those added there, each reaching only it; without, every app,
+    /// reaching all it may.
+    fn page_apps(&self, viewer: &Caller, scope: Option<&str>) -> Result<Vec<PageApp>>;
+}
+
+/// An app a page shows, as it draws for who's looking.
+pub struct PageApp {
+    pub app: String,
+    /// What it reaches for them, that this device holds.
+    pub scopes: Vec<Scope>,
+    pub draws: Arc<dyn Draws>,
+}
+
+/// What an app draws for who's looking: its requests are theirs for as long as this is held.
+pub trait Draws: Send + Sync {
+    fn widget<'a>(&'a self, name: &'a str, size: &'a str, options: &'a Value) -> Fut<'a, Value>;
+    fn widget_options<'a>(&'a self, name: &'a str) -> Fut<'a, Value>;
+    /// The count on its icon.
+    fn badge(&self) -> Fut<'_, Value>;
 }
 
 /// The features it runs.
@@ -188,5 +207,5 @@ impl Runs {
 
 /// What a feature's runtime crate uses to reach its runtime: `use api::runtime::prelude::*;`.
 pub mod prelude {
-    pub use super::{AppRuntime, Apps, Databases, Features, Fut, Here, Holds, ReadExt, Rt, ScopeDatabase, StateExt};
+    pub use super::{AppRuntime, Apps, Databases, Draws, Features, Fut, Here, Holds, PageApp, ReadExt, Rt, ScopeDatabase, StateExt};
 }

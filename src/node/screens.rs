@@ -202,6 +202,6 @@ impl Node {
 
     /// How `user` arranged their pages, by page, as their own scope's `arrange` entries say.
     pub(super) fn arrangements(&self, user: &str) -> BTreeMap<String, Value> {
-        self.with(|i| Ok(i.views.get(&Scope::User(user.to_string()).to_string()).map(|s| s.arrangements.clone()).unwrap_or_default())).unwrap_or_default()
+        self.with(|i| Ok(::scope::read::Read { replica: &i.r, states: &i.views }.arrangements(user))).unwrap_or_default()
     }
 }

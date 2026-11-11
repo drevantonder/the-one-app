@@ -1,9 +1,10 @@
 //! Who's who as a device last read it, for what a feature reads of it: the scope database of `global` and each scope
 //! held (`replica`), and each scope's own state (`states`).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Result;
+use serde_json::Value;
 
 use crate::replica::Replica;
 use crate::scopes::{Scope, ScopeDb, ScopeState};
@@ -30,6 +31,11 @@ impl Read<'_> {
 
     pub fn state(&self, scope: &Scope) -> Option<&ScopeState> {
         self.states.get(&scope.to_string())
+    }
+
+    /// How `user` arranged their pages, by page, as their own scope's `arrange` entries say.
+    pub fn arrangements(&self, user: &str) -> BTreeMap<String, Value> {
+        self.state(&Scope::User(user.to_string())).map(|s| s.arrangements.clone()).unwrap_or_default()
     }
 
     /// A scope as a user calls it: Everyone, a user's name, a group's name.

@@ -2,7 +2,7 @@
 
 use std::any::{Any, TypeId};
 
-use ::api::runtime::{Apps, Databases, Features, Fut, Here, Holds, Rt, Runs, ScopeDatabase};
+use ::api::runtime::{Apps, Databases, Draws, PageApp, Features, Fut, Here, Holds, Rt, Runs, ScopeDatabase};
 use ::scope::read::Read;
 
 use super::*;
@@ -217,6 +217,36 @@ impl Apps for Node {
 
     fn call<'a>(&'a self, req: CallRequest, caller: Caller) -> Fut<'a, Value> {
         Box::pin(self.call_as(req, caller))
+    }
+
+    fn page_apps(&self, viewer: &Caller, scope: Option<&str>) -> Result<Vec<PageApp>> {
+        Ok(self.page_contexts(viewer, scope)?.into_iter().map(|(app, ctx, granted)| PageApp {
+            scopes: ctx.scopes.iter().filter_map(|s| Scope::parse(&s.id).ok()).collect(),
+            draws: Arc::new(Drawn { node: self.clone(), app: app.clone(), ctx, _granted: granted }),
+            app,
+        }).collect())
+    }
+}
+
+/// An app a page shows, drawing in its context.
+struct Drawn {
+    node: Node,
+    app: String,
+    ctx: Context,
+    _granted: Granted,
+}
+
+impl Draws for Drawn {
+    fn widget<'a>(&'a self, name: &'a str, size: &'a str, options: &'a Value) -> Fut<'a, Value> {
+        Box::pin(self.node.0.apps.widget(&self.app, name, size, options, &self.ctx))
+    }
+
+    fn widget_options<'a>(&'a self, name: &'a str) -> Fut<'a, Value> {
+        Box::pin(self.node.0.apps.widget_options(&self.app, name, &self.ctx))
+    }
+
+    fn badge(&self) -> Fut<'_, Value> {
+        Box::pin(self.node.0.apps.badge(&self.app, &self.ctx))
     }
 }
 
