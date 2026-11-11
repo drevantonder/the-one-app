@@ -292,10 +292,13 @@ impl Db {
     /// at a copy or step under an epoch whose key it wasn't given, and with `Ahead` at a step under an epoch above them
     /// all.
     pub async fn open(bucket: &impl Bucket, prefix: &str, keys: Keys) -> Result<Db> {
-        Db::open_passing(bucket, prefix, keys, BTreeSet::new()).await
+        Db::open_passing(bucket, prefix, keys, BTreeSet::new(), None).await
     }
 
-    pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>) -> Result<Db> {
+    /// As `open`, passing over the steps at `junk`, and starting from the copy at `copy`, if it says one, rather than
+    /// the newest hint's: for a bucket that has no hint, as a device's own copy of it hasn't, opened from where a
+    /// database open there started.
+    pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>, copy: Option<u64>) -> Result<Db> {
         let mut db = Db {
             prefix: prefix.into(),
             keys,
@@ -316,9 +319,12 @@ impl Db {
             hint_later: false,
             hint_due: None,
         };
-        // From the hint's copy, if it holds; or, once steps may be deleted and it names one, the newest copy that does;
-        // or from the first step, where `gap` finds any deleted.
-        let hinted = hinted_copy(bucket, prefix).await?;
+        // From the copy it's given or the hint's, if it holds; or, once steps may be deleted and it names one, the newest
+        // copy that does; or from the first step, where `gap` finds any deleted.
+        let hinted = match copy {
+            Some(copy) => copy,
+            None => hinted_copy(bucket, prefix).await?,
+        };
         match holding(bucket, prefix, &db.keys, &db.junk, &mut db.junk_copies, 0, hinted, hinted > 0).await?.0 {
             Some(held) => db.start_from(held)?,
             None => confine(&mut db.conn)?,
@@ -378,6 +384,11 @@ impl Db {
 
     pub fn at(&self) -> u64 {
         self.at
+    }
+
+    /// The newest copy it knows of: the one it started from, or one it wrote since.
+    pub fn copy(&self) -> u64 {
+        self.copy
     }
 
     pub fn epoch(&self) -> u32 {
@@ -1119,6 +1130,27 @@ mod tests {
                 state_hash(&c).unwrap()
             };
             assert_ne!(numbered(1), numbered(2));
+        });
+    }
+
+    #[test]
+    fn a_reader_given_a_copy_needs_no_hint_nor_the_steps_before_it() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = keys(&[(1, rand::random())]);
+            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            for n in 0..COPY_EVERY + 5 {
+                note(&mut a, &bucket, &format!("note {n}")).await;
+            }
+            let copy = a.copy();
+            assert!(copy > 0, "a copy was written");
+            // As a device's own copy of the bucket has it: no hint, and only what a database open there read.
+            bucket.objects.lock().unwrap().retain(|n, _| n != "p/newest" && position(n).is_none_or(|(_, at)| at >= copy));
+            let read = Db::open_passing(&bucket, "p", key, BTreeSet::new(), Some(copy)).await.unwrap();
+            assert_eq!((read.at(), notes(&read)), (a.at(), notes(&a)));
+            assert_eq!(read.checks().wrong, 0);
         });
     }
 
