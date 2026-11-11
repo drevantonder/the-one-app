@@ -669,7 +669,8 @@ impl Host {
                 let load = if here { Some(&here_load) } else { i.said.get(&via).and_then(|p| p.load.as_ref()) };
                 standing.insert(*k, rank::Standing {
                     here: here || (here_first && ours(i, k)?),
-                    online: here || ((i.online(&via) || i.online(&at)) && !self.down(&via)),
+                    online: here || i.online(&via) || i.online(&at),
+                    down: !here && self.down(&via),
                     priority: rank::priority(&set, &hex(&at)),
                     far: !here && i.far.get(&via).is_some_and(|d| *d > FAR),
                     full: load.is_some_and(full),

@@ -131,7 +131,8 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert_eq!(shown["places"][0]["title"], "T7 Shield");
     assert_eq!(shown["places"][0]["last"]["device"], "backup-a", "the folder's own device backs it up: {shown}");
     let first = shown["places"][0]["last"]["time"].clone();
-    eventually("b to see it", &b, async || !backups_runtime::status(&b.rt()).await.unwrap()["places"][0]["last"].is_null()).await;
+    // b reads Backups' rows once it holds global's key.
+    eventually("b to see it", &b, async || backups_runtime::status(&b.rt()).await.is_ok_and(|s| !s["places"][0]["last"].is_null())).await;
 
     // The folder's device restores it into a throwaway copy, against what it holds: who's who, databases and blobs.
     let report = backups_runtime::check_backups(&a.rt()).await.unwrap();
@@ -1020,24 +1021,96 @@ async fn ask_runtime(at: &str, token: &str, body: Value) -> (u16, Value) {
 /// device's app schedules, once the device leaves them to it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
-    use ::scope::content::{self, Change};
-    use ::scope::scopes::Kind;
     let k = start("rt-device").await;
     create(&k, "Home", "Andre").await;
     add_notes(&k).await;
     let _relay = relay(&k).await;
     let b = start("rt-other").await;
     b.join(&onboarding_runtime::pair(&k.rt()).unwrap()).await.unwrap();
-    let me = api::Caller::own(k.id(), k.user().unwrap());
+    // The device runs its user's app schedules of notes, for everyone.
+    let ran = ::scope::settings::answer(&k, "POST", "/api/devices/run_schedules", json!({ "app": "notes", "device": ::key::hex(&k.id()), "scope": "global" }).to_string().as_bytes()).await.unwrap().unwrap();
+    assert!(ran["until"].is_u64(), "{ran}");
+    let rt = own_runtime(&k).await;
+    let (at, token, log) = (&rt.at, &rt.token, &rt.log);
 
-    // The device's own key, held on its loopback, where its own programs ask with the token in its home.
+    // Only the device's own programs ask it, with the token in its folder, never the one in the device's home.
+    let home_token = std::fs::read_to_string(k.dir().join(api::local::LOCAL_TOKEN)).unwrap();
+    assert_eq!(ask_runtime(at, &home_token, json!({ "app": "notes", "tool": "read", "input": {} })).await.0, 403);
+    let post = json!({ "app": "notes", "tool": "post", "input": { "text": "from the runtime" } });
+    polled("the runtime to run a call", log, async || ask_runtime(at, token, post.clone()).await.0 == 200).await;
+    let lines = async |node: &app_runtime::Host| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
+    eventually("its write to reach another device", &b, async || lines(&b).await.contains("from the runtime")).await;
+
+    // A call it passes on to another of its user's devices, as its device would.
+    let there = ask_runtime(at, token, json!({ "app": "notes", "tool": "read", "input": {}, "device": "rt-other" })).await;
+    assert_eq!(there.0, 200, "{}", there.1);
+    assert!(there.1.to_string().contains("from the runtime"), "{}", there.1);
+
+    // The device's schedules, run by its runtime alone, the device no longer listed to run anything.
+    eventually("a scheduled run", &b, async || lines(&b).await.contains("on schedule")).await;
+    let slots = k.dir().join("network/bucket/global").join(::key::APP).join("slots/notes/tick");
+    let taken: Vec<String> = std::fs::read_dir(slots).unwrap().map(|f| std::fs::read_to_string(f.unwrap().path()).unwrap()).collect();
+    assert_eq!(taken, vec![::key::hex(&rt.key.key)], "each slot's lease names who took it");
+}
+
+/// A call to a device that stops answering mid-use costs no more than that device's usual time to start one: the
+/// next device answers it, and goes first while the stalled one stays silent. A write asked of both runs once, where
+/// it started first, however late the stalled one wakes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stalled_devices_call_is_answered_by_the_next_and_a_raced_write_runs_once() {
+    let k = start("stall-device").await;
+    create(&k, "Home", "Andre").await;
+    add_notes(&k).await;
+    let _relay = relay(&k).await;
+    let b = start("stall-other").await;
+    b.join(&onboarding_runtime::pair(&k.rt()).unwrap()).await.unwrap();
+    // What asks: a computer whose user switched its apps off, so it passes their calls on.
+    let c = start("stall-asker").await;
+    c.join(&onboarding_runtime::pair(&k.rt()).unwrap()).await.unwrap();
+    let me = api::Caller::own(k.id(), k.user().unwrap());
+    k.member_content(&me, ::scope::content::service(&c.id(), ::scope::scopes::APPS_PART, false, None)).await.unwrap();
+    let rt = own_runtime(&k).await;
+    // The device's runtime is tried before the other.
+    let first = json!({ ::key::hex(&k.id()): 1, ::key::hex(&b.id()): 2 }).to_string();
+    k.member_content(&me, ::scope::content::setting(::scope::rank::SETTING, Some(&first))).await.unwrap();
+    let posts = |v: &Value| v["posts"].as_array().cloned().unwrap_or_default().iter().filter_map(|p| p["text"].as_str().map(str::to_string)).collect::<Vec<_>>();
+    // Its first calls teach the device how long its runtime takes to start one.
+    polled("the device's call to run on its runtime", &rt.log, async || ask_runtime(&rt.at, &rt.token, json!({ "app": "notes", "tool": "read", "input": {} })).await.0 == 200).await;
+    eventually("its first call", &c, async || c.call(notes("read", json!({}))).await.is_ok()).await;
+    for _ in 0..5 {
+        c.call(notes("read", json!({}))).await.unwrap();
+    }
+
+    rt.signal(libc::SIGSTOP);
+    let asked = std::time::Instant::now();
+    c.call(notes("post", json!({ "text": "while it stalled" }))).await.unwrap();
+    let took = asked.elapsed();
+    assert!(took < Duration::from_secs(5), "the next device answered within the stalled one's limit: {took:?}");
+    let asked = std::time::Instant::now();
+    c.call(notes("read", json!({}))).await.unwrap();
+    // No device's limit is under 250 ms.
+    assert!(asked.elapsed() < Duration::from_millis(250), "the next call went to the next device first: {:?}", asked.elapsed());
+
+    // Woken, it finds the write already taken: it ran once.
+    rt.signal(libc::SIGCONT);
+    polled("the runtime to answer again", &rt.log, async || ask_runtime(&rt.at, &rt.token, json!({ "app": "notes", "tool": "post", "input": { "text": "after" } })).await.0 == 200).await;
+    eventually("the runtime's write to reach the other", &b, async || b.call(notes("read", json!({}))).await.is_ok_and(|v| posts(&v).contains(&"after".to_string()))).await;
+    let all = posts(&b.call(notes("read", json!({}))).await.unwrap());
+    assert_eq!(all.iter().filter(|p| *p == "while it stalled").count(), 1, "{all:?}");
+}
+
+/// A device's own app runtime, as oned starts it: a key of its own in its folder, in a home with the device's network
+/// and token, asking the device's key (held on its loopback) for what it opens; listed by the device as a compute
+/// naming it and let in at the relay; then the device drops its own Compute. Started, with the token in its folder.
+async fn own_runtime(k: &Host) -> OwnRuntime {
+    use ::scope::content::{self, Change};
+    use ::scope::scopes::Kind;
+    let me = api::Caller::own(k.id(), k.user().unwrap());
     let holder = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let holder_at = holder.local_addr().unwrap().to_string();
     tokio::spawn(api::serve(holder, app_runtime::api::router(k.clone())));
 
-    // Its runtime: a key of its own in its folder, in a home with the device's network and token, listed by the
-    // device as a compute naming it, let in at the relay; then the device drops its own Compute.
-    let home = crate::temp("rt-runtime");
+    let home = crate::temp("own-runtime");
     let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let r = ::key::Endpoint::of(&key);
     let folder = api::home::runtime_folder(&home);
@@ -1046,46 +1119,41 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     std::fs::create_dir_all(home.join("network")).unwrap();
     std::fs::copy(k.dir().join("network/network.json"), home.join("network/network.json")).unwrap();
     std::fs::copy(k.dir().join(api::local::LOCAL_TOKEN), home.join(api::local::LOCAL_TOKEN)).unwrap();
-    // The device runs its user's app schedules of notes, for everyone.
-    let ran = ::scope::settings::answer(&k, "POST", "/api/devices/run_schedules", json!({ "app": "notes", "device": ::key::hex(&k.id()), "scope": "global" }).to_string().as_bytes()).await.unwrap().unwrap();
-    assert!(ran["until"].is_u64(), "{ran}");
     let listing = |key: &[u8; 32], seal: &[u8; 32], name: &str, roles: &[Kind], device: Option<&[u8; 32]>| {
         content::core_step(Change::Device, json!({ "key": ::key::hex(key), "seal": ::key::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(::key::hex) }))
     };
-    k.member_content(&me, listing(&r.key, &r.seal, "rt-device's runtime", &[Kind::Compute], Some(&k.id()))).await.unwrap();
-    ::scope::settings::tell(&k, &k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
-    k.member_content(&me, listing(&k.id(), &::scope::settings::Me::seal(&k), "rt-device", &[Kind::Client], None)).await.unwrap();
+    let name = k.device_name();
+    k.member_content(&me, listing(&r.key, &r.seal, &format!("{name}'s runtime"), &[Kind::Compute], Some(&k.id()))).await.unwrap();
+    ::scope::settings::tell(k, k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
+    k.member_content(&me, listing(&k.id(), &::scope::settings::Me::seal(k), &name, &[Kind::Client], None)).await.unwrap();
 
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let at = format!("127.0.0.1:{port}");
-    let log = std::fs::File::create(home.join("runtime.log")).unwrap();
-    let mut oned = std::process::Command::new(env!("CARGO_BIN_EXE_one-apps"));
-    oned.arg(format!("--listen={at}"));
-    oned.env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), &holder_at).stdout(log.try_clone().unwrap()).stderr(log);
-    let _runtime = Runtime(oned.spawn().unwrap());
-
-    // Only the device's own programs ask it, with the token in its folder, never the one in the device's home.
+    let at = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
     let log = home.join("runtime.log");
+    let out = std::fs::File::create(&log).unwrap();
+    let mut program = std::process::Command::new(env!("CARGO_BIN_EXE_one-apps"));
+    program.arg(format!("--listen={at}"));
+    program.env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), &holder_at).stdout(out.try_clone().unwrap()).stderr(out);
+    let process = Runtime(program.spawn().unwrap());
     let started = async || std::fs::exists(folder.join(api::local::LOCAL_TOKEN)).unwrap() && ask_runtime(&at, "", json!({})).await.0 == 403;
     polled("the runtime to start", &log, started).await;
     let token = std::fs::read_to_string(folder.join(api::local::LOCAL_TOKEN)).unwrap();
-    let home_token = std::fs::read_to_string(k.dir().join(api::local::LOCAL_TOKEN)).unwrap();
-    assert_eq!(ask_runtime(&at, &home_token, json!({ "app": "notes", "tool": "read", "input": {} })).await.0, 403);
-    let post = json!({ "app": "notes", "tool": "post", "input": { "text": "from the runtime" } });
-    polled("the runtime to run a call", &log, async || ask_runtime(&at, &token, post.clone()).await.0 == 200).await;
-    let lines = async |node: &app_runtime::Host| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
-    eventually("its write to reach another device", &b, async || lines(&b).await.contains("from the runtime")).await;
+    OwnRuntime { process, at, token, log, key: r }
+}
 
-    // A call it passes on to another of its user's devices, as its device would.
-    let there = ask_runtime(&at, &token, json!({ "app": "notes", "tool": "read", "input": {}, "device": "rt-other" })).await;
-    assert_eq!(there.0, 200, "{}", there.1);
-    assert!(there.1.to_string().contains("from the runtime"), "{}", there.1);
+struct OwnRuntime {
+    process: Runtime,
+    /// Where its device's own programs ask it, with `token`.
+    at: String,
+    token: String,
+    log: std::path::PathBuf,
+    key: ::key::Endpoint,
+}
 
-    // The device's schedules, run by its runtime alone, the device no longer listed to run anything.
-    eventually("a scheduled run", &b, async || lines(&b).await.contains("on schedule")).await;
-    let slots = k.dir().join("network/bucket/global").join(::key::APP).join("slots/notes/tick");
-    let taken: Vec<String> = std::fs::read_dir(slots).unwrap().map(|f| std::fs::read_to_string(f.unwrap().path()).unwrap()).collect();
-    assert_eq!(taken, vec![::key::hex(&r.key)], "each slot's lease names who took it");
+impl OwnRuntime {
+    fn signal(&self, signal: libc::c_int) {
+        // SAFETY: a signal to a child process this test started and still holds.
+        assert_eq!(unsafe { libc::kill(self.process.0.id() as libc::pid_t, signal) }, 0);
+    }
 }
 
 /// A computer's onet holds its device's key for the device's app runtime, an endpoint of its own key: the runtime asks

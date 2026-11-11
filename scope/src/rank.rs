@@ -93,6 +93,8 @@ pub struct Standing {
     pub here: bool,
     /// Its socket is open at the relay.
     pub online: bool,
+    /// It didn't start a call in its usual time lately, and its socket hasn't opened again since.
+    pub down: bool,
     pub priority: Priority,
     pub far: bool,
     /// It has no room: its last answer said so.
@@ -104,10 +106,11 @@ pub struct Standing {
 }
 
 /// The order devices are tried in: this device; then those online; by run priority; the near before the far; those
-/// with room; the most recently seen; the quickest. One that isn't online is still tried, after.
+/// with room; the most recently seen; the quickest. One that isn't online is still tried, after, and one that's down
+/// after every other.
 pub fn order<K>(devices: &mut [K], standing: impl Fn(&K) -> Standing) {
     devices.sort_by_cached_key(|k| {
         let s = standing(k);
-        (!s.here, !s.online, s.priority, s.far, s.full, std::cmp::Reverse(s.seen), s.took)
+        (!s.here, s.down, !s.online, s.priority, s.far, s.full, std::cmp::Reverse(s.seen), s.took)
     });
 }
