@@ -1,4 +1,4 @@
-// Labs: features still being built, which an admin switches on for everyone (src/labs.rs): the core's first, then each
+// Labs: features still being built, which an admin switches on for everyone (labs/): the core's first, then each
 // app's and each service's under its name.
 //
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/labs.html.

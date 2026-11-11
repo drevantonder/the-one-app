@@ -14,7 +14,6 @@ pub mod backups;
 pub mod onboarding;
 #[cfg(feature = "node")]
 pub mod skills;
-pub mod labs;
 #[cfg(feature = "node")]
 pub mod harnesses;
 #[cfg(feature = "node")]

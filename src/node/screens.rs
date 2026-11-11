@@ -17,7 +17,7 @@ impl Node {
         self.with(|i| {
             let reach = reachable(i, app, &viewer.user)?;
             let scopes: Vec<Scope> = reach.into_iter().filter(|s| i.r.holds(s)).collect();
-            Ok(Context { me, now: now_ms(), scopes: handles(i.r.db(), &scopes, &viewer.user)?, read_only: true, token: String::new(), from: None, address: super::calls::address(i.r.db())?, handles: i.r.db().handles()?, labs: crate::labs::on_keys(&i.r.db().settings()?) })
+            Ok(Context { me, now: now_ms(), scopes: handles(i.r.db(), &scopes, &viewer.user)?, read_only: true, token: String::new(), from: None, address: super::calls::address(i.r.db())?, handles: i.r.db().handles()?, labs: ::labs::on_keys(&i.r.db().settings()?) })
         })
     }
 

@@ -2290,6 +2290,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "labs"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2995,6 +3002,7 @@ dependencies = [
  "jiff",
  "jsonc-parser",
  "key",
+ "labs",
  "libc",
  "md-5",
  "opentelemetry-proto",

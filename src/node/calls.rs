@@ -898,7 +898,7 @@ impl Node {
         // A tool of a lab that's off isn't there.
         let described = self.0.apps.describe(&req.app).await?;
         if let Some(lab) = described["tools"].as_array().into_iter().flatten().find(|o| o["name"] == req.tool.as_str()).and_then(|o| o["lab"].as_str())
-            && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings()?, &crate::labs::app_key(&req.app, lab))))?
+            && !self.with(|i| Ok(::labs::on(&i.r.db().settings()?, &::labs::app_key(&req.app, lab))))?
         {
             let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
             return Ok(Reply::Error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs."), Some(custom_build::protocol::code::REFUSED.into())));
@@ -1045,7 +1045,7 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string())?)));
     }
-    let ctx = Context { me: node_me(node, m, me)?, now: now_ms(), scopes: handles(m, &scopes, &me.user)?, read_only: false, token: String::new(), from: None, address: address(m)?, handles: m.handles()?, labs: crate::labs::on_keys(&m.settings()?) };
+    let ctx = Context { me: node_me(node, m, me)?, now: now_ms(), scopes: handles(m, &scopes, &me.user)?, read_only: false, token: String::new(), from: None, address: address(m)?, handles: m.handles()?, labs: ::labs::on_keys(&m.settings()?) };
     Ok(Ok((ctx, scopes)))
 }
 

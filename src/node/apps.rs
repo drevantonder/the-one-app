@@ -84,7 +84,7 @@ impl Node {
     pub async fn labs(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let on = self.with(|i| {
             allowed!(i.r.db().may(&viewer.user, "change-settings", scopes::NETWORK), "Only admins change Labs.");
-            Ok(crate::labs::on_keys(&i.r.db().settings()?))
+            Ok(::labs::on_keys(&i.r.db().settings()?))
         })?;
         let lab = |setting: String, name: &str, l: &Value| json!({ "title": l["title"].as_str().unwrap_or(name), "description": l["description"].as_str().unwrap_or(""), "on": on.contains(&setting), "setting": setting });
         let mut out: Vec<Value> = Vec::new();
@@ -95,7 +95,7 @@ impl Node {
         apps.sort_by_key(|a| a["title"].as_str().unwrap_or("").to_lowercase());
         for a in apps.iter().filter(|a| a["deleted"].is_null()) {
             for (name, l) in a["labs"].as_object().into_iter().flatten() {
-                let mut l = lab(crate::labs::app_key(a["name"].as_str().unwrap_or(""), name), name, l);
+                let mut l = lab(::labs::app_key(a["name"].as_str().unwrap_or(""), name), name, l);
                 from("app", a, &mut l);
                 out.push(l);
             }
@@ -182,8 +182,8 @@ impl Node {
                 }
                 // A tool of a lab that's off isn't there.
                 if let Some(tools) = info["tools"].as_array_mut() {
-                    let on = self.with(|i| Ok(crate::labs::on_keys(&i.r.db().settings()?)))?;
-                    tools.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&crate::labs::app_key(&name, lab))));
+                    let on = self.with(|i| Ok(::labs::on_keys(&i.r.db().settings()?)))?;
+                    tools.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&::labs::app_key(&name, lab))));
                 }
                 if mine {
                     let (list, activity) = self.schedules_of(viewer, &name, &declared)?;
