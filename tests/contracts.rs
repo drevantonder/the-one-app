@@ -280,7 +280,8 @@ fn the_workers_name_the_buckets_objects_as_nodes_do() {
     assert_eq!(out["prefixes"], json!(["user-abc/tally/main", "global/node/scope"]), "where an app's database of a scope is");
     assert_eq!(out["refusal"], json!(::custom_build::protocol::update_refusal("your One App network")), "what a device that reads less is told");
     use ::custom_build::protocol::code;
-    assert_eq!(out["codes"], json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notThisMachine": code::NOT_THIS_MACHINE, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "stopped": code::STOPPED, "notAdded": code::NOT_ADDED, "appDeleted": code::APP_DELETED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED, "pairingUsed": code::PAIRING_USED, "badPairingCode": code::BAD_PAIRING_CODE, "alreadyInNetwork": code::ALREADY_IN_NETWORK, "unreachable": code::UNREACHABLE }), "the codes answers carry");
+    let codes: serde_json::Map<String, Value> = code::ALL.iter().map(|c| (code::camel(c), json!(c))).collect();
+    assert_eq!(out["codes"], Value::Object(codes), "the codes answers carry");
 }
 
 /// The Settings screens say who agents are in an item's apps (`ui/settings/agents.js`) by the name the node

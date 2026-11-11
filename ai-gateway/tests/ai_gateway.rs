@@ -132,21 +132,22 @@ fn chat(model: &str, text: &str) -> Value {
 #[test]
 fn a_key_goes_only_to_its_providers_host() {
     let secret = "sk-not-a-real-key-0123456789";
+    let id = "00000000000000a1";
     for company in ::ai_gateway::route::ALL {
         let item = key_item(company, secret, &[company.host()], &["notes"], 1);
         let model = if company == Company::WorkersAi { format!("{}/@cf/meta/llama-3.1-8b-instruct", company.id()) } else { format!("{}/some-model", company.id()) };
         let asked = ::ai_gateway::ask(chat(&model, "hi"), &Default::default()).unwrap();
-        let out = asked.request("k1").unwrap();
+        let out = asked.request(id).unwrap();
         let host = out.url.split("://").nth(1).and_then(|r| r.split(['/', ':']).next()).unwrap();
         assert_eq!(host, company.host(), "{}'s request goes to its own host", company.title());
-        let lookup = |name: &str| name.strip_prefix("k1:").and_then(|f| vault::filled(&item, f));
+        let lookup = |name: &str| name.strip_prefix(&format!("{id}:")).and_then(|f| vault::filled(&item, f));
         let filled: Vec<String> = out.headers.iter().map(|(_, v)| vault::fill(v, host, lookup).unwrap()).collect();
         assert!(filled.iter().any(|v| v.contains(secret)), "{}'s key is filled into its request", company.title());
         for elsewhere in ["evil.example", "api.openai.com.evil.example", "127.0.0.1"] {
             let anywhere = out.headers.iter().all(|(_, v)| vault::fill(v, elsewhere, lookup).is_err() || !v.contains("{{"));
             assert!(anywhere, "{}'s key is never filled into a request to {elsewhere}", company.title());
         }
-        let shown = vault::Lookup { app: "notes".into(), user: "u1".into(), scopes: vec![(Scope::Global, items(&[("k1", item.clone())]))] }.for_app();
+        let shown = vault::Lookup { app: "notes".into(), user: "u1".into(), scopes: vec![(Scope::Global, items(&[(id, item.clone())]))] }.for_app();
         assert!(!json!(shown).to_string().contains(secret), "an app never reads a key's value");
     }
 }

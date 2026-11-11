@@ -13,7 +13,7 @@ import { pages } from "./pages.js";
 
 const repo = path.join(import.meta.dirname, "..");
 const [config = path.join(repo, "config.toml"), out] = process.argv.slice(2);
-const built = path.join(repo, "src", "screen", "ui", "dist");
+const built = path.join(repo, "ui", "kit", "dist");
 const drawn = JSON.parse(readFileSync(path.join(built, "auth.json"), "utf8"));
 const { page } = pages({ css: readFileSync(path.join(built, "auth.css"), "utf8"), ...drawn });
 
