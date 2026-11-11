@@ -52,6 +52,12 @@ pub trait Here: Any + Send + Sync {
     fn emit(&self, event: Event);
     /// Its own key, never its device's: what signs its asks and the notes it sends.
     fn signing_key(&self) -> key::SigningKey;
+    /// The route of the API's that `path` asks, as its list names it (`/api/apps/{app}`): none for none of them.
+    fn route_of(&self, path: &str) -> Option<&'static str>;
+    /// The names of the client's own screens, as this program carries them.
+    fn client_screens(&self) -> Vec<&'static str>;
+    /// The source map of one of the client's own screens, by its name.
+    fn client_map(&self, screen: &str) -> Option<&'static str>;
 }
 
 /// Who's who: the scope database of each scope it holds, as it last read them; and steps written to it.
@@ -127,6 +133,33 @@ impl std::fmt::Display for NotGiven {
 
 impl std::error::Error for NotGiven {}
 
+/// A device that couldn't be reached to ask it something: what its caller is told.
+#[derive(Debug)]
+pub struct NotThere(pub String);
+
+impl std::fmt::Display for NotThere {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NotThere {}
+
+/// No device asked ran a call: how the last one didn't (an `error.type` of Insights'), and what each said.
+#[derive(Debug)]
+pub struct NoneCould {
+    pub kind: &'static str,
+    pub why: Vec<String>,
+}
+
+impl std::fmt::Display for NoneCould {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "None of your devices can do this now. Try again soon. ({})", self.why.join("; "))
+    }
+}
+
+impl std::error::Error for NoneCould {}
+
 /// What its device's key opens, asked of its holder.
 pub trait Holds: Send + Sync {
     fn device(&self) -> Key;
@@ -159,6 +192,8 @@ pub trait Apps: Send + Sync {
     fn bring_in<'a>(&'a self, caller: &'a Caller, app: &'a str) -> Fut<'a, ()>;
     /// What `app`'s latest deploy says it uses, (apps, services), once this device runs it, or a while.
     fn uses<'a>(&'a self, app: &'a str) -> Fut<'a, (Vec<String>, Vec<String>)>;
+    /// The deploy of `app` this device runs (its bundle), if it runs one.
+    fn bundle_here(&self, app: &str) -> Option<String>;
     /// Whether this device runs `app`'s latest deploy, waiting up to `within` for it.
     fn runs_latest<'a>(&'a self, app: &'a str, within: Duration) -> Fut<'a, bool>;
     /// Where an app that `described` itself can run its service for `viewer`, if it has one: their own devices' names.

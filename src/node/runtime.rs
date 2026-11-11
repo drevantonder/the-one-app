@@ -172,6 +172,18 @@ impl Here for Node {
     fn signing_key(&self) -> ::key::SigningKey {
         Node::signing_key(self)
     }
+
+    fn route_of(&self, path: &str) -> Option<&'static str> {
+        crate::api::route_of(path)
+    }
+
+    fn client_screens(&self) -> Vec<&'static str> {
+        crate::screen::client_screens().collect()
+    }
+
+    fn client_map(&self, screen: &str) -> Option<&'static str> {
+        crate::screen::client_map(screen)
+    }
 }
 
 impl ScopeDatabase for Node {
@@ -289,6 +301,10 @@ impl Apps for Node {
 
     fn uses<'a>(&'a self, app: &'a str) -> Fut<'a, (Vec<String>, Vec<String>)> {
         Box::pin(async move { Ok(Node::uses(self, app).await) })
+    }
+
+    fn bundle_here(&self, app: &str) -> Option<String> {
+        self.0.bundles.lock().unwrap().get(app).cloned()
     }
 
     fn runs_latest<'a>(&'a self, app: &'a str, within: Duration) -> Fut<'a, bool> {

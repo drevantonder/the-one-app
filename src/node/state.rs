@@ -200,16 +200,7 @@ impl Node {
     }
 
     pub(super) fn name_of(&self, key: &Key) -> String {
-        // What's part of a device (a service, a native app's sign-in), by that device.
-        let of = |m: &ScopeDb| -> Result<Option<scopes::Machine>> {
-            if let Some(d) = m.machine_ever(key)?.and_then(|s| s.device)
-                && let Some(machine) = m.machine_ever(&d)?
-            {
-                return Ok(Some(machine));
-            }
-            m.machine_ever(key)
-        };
-        self.with_or(None, |i| Ok(of(i.r.db())?.map(|m| m.name))).unwrap_or_else(|| short(key))
+        ::api::runtime::ReadExt::read_or(self, short(key), |r| Ok(r.name_of(key)))
     }
 
     /// Why a device that won't answer is off, in words for its caller: "mac was last seen 2 min ago".

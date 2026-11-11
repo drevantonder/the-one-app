@@ -108,7 +108,7 @@ impl Host for Gateway<'_> {
                 match self.node.route(call, self.caller.clone()).await {
                     Ok(answer) => return Ok(answer),
                     // No device that's on has it: the next service might.
-                    Err(err) if err.is::<super::calls::NoneCould>() => why.push(format!("{err:#}")),
+                    Err(err) if err.is::<::api::runtime::NoneCould>() => why.push(format!("{err:#}")),
                     Err(err) => return Err(err),
                 }
             }

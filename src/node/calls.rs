@@ -11,6 +11,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use ::api::runtime::NoneCould;
 use super::*;
 
 pub(super) enum Reply {
@@ -193,20 +194,6 @@ fn device_limit(device: &Key) -> String {
     format!("device {}", hex(device))
 }
 
-/// No device asked ran a call: how the last one didn't (an `error.type` of insights'), and what each said.
-#[derive(Debug)]
-pub(super) struct NoneCould {
-    pub kind: &'static str,
-    why: Vec<String>,
-}
-
-impl std::fmt::Display for NoneCould {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "None of your devices can do this now. Try again soon. ({})", self.why.join("; "))
-    }
-}
-
-impl std::error::Error for NoneCould {}
 
 impl Node {
     /// Runs a tool for this device's local user: here, or on the nearest device that can.
@@ -459,7 +446,7 @@ impl Node {
                     tried(result, json!({}));
                     self.with_or(None, |n| Ok(n.nearest.insert(device, Duration::MAX)));
                     // A device that can't be reached says why itself, by its name.
-                    why.push(if err.is::<super::net::NotThere>() { format!("{err:#}") } else { format!("{name}: {err:#}") });
+                    why.push(if err.is::<::api::runtime::NotThere>() { format!("{err:#}") } else { format!("{name}: {err:#}") });
                 }
             }
         }

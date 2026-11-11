@@ -53,6 +53,21 @@ impl Read<'_> {
         Ok(self.db().user_ever(user)?.map(|u| u.name).unwrap_or_default())
     }
 
+    /// A device's name, removed ones' too; what's part of a device (a service, a native app's sign-in) by that device's.
+    /// Its key, shortened, for one it never knew.
+    pub fn name_of(&self, key: &key::Key) -> String {
+        let of = || -> Result<Option<String>> {
+            let m = self.db();
+            if let Some(d) = m.machine_ever(key)?.and_then(|s| s.device)
+                && let Some(machine) = m.machine_ever(&d)?
+            {
+                return Ok(Some(machine.name));
+            }
+            Ok(m.machine_ever(key)?.map(|m| m.name))
+        };
+        of().ok().flatten().unwrap_or_else(|| key::short(key))
+    }
+
     /// A scope as `user` gives it: `user` (their own), `global`, `group:<id>`, or a group's name or id.
     pub fn scope_for(&self, user: &str, scope: &str) -> Result<Scope> {
         Scope::parse_for(scope, user).or_else(|_| self.db().find_group(scope).map(Scope::Group))

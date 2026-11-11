@@ -174,7 +174,7 @@ impl Node {
         trace.stage_is(was);
         trace.leave(parent.clone());
         // A device that ran it says how that went in its own span: trying the devices only failed if none did.
-        let failure = ended.as_ref().err().filter(|_| !run_says).map(|err| match err.downcast_ref::<super::calls::NoneCould>() {
+        let failure = ended.as_ref().err().filter(|_| !run_says).map(|err| match err.downcast_ref::<::api::runtime::NoneCould>() {
             Some(none) => Failure::Broke(none.kind.into()),
             None => Failure::of(custom_build::protocol::Coded::of(err).as_deref(), None, at),
         });
@@ -725,7 +725,7 @@ impl Node {
 
 /// Why a device couldn't be asked, as `error.type` and as a try's result.
 pub(super) fn asking_failed(err: &anyhow::Error) -> (&'static str, &'static str) {
-    if err.is::<net::NotThere>() {
+    if err.is::<::api::runtime::NotThere>() {
         (::api::traceparent::UNREACHABLE, "unreachable")
     } else if err.to_string() == "timed out" {
         (::api::traceparent::TIMEOUT, "no answer")

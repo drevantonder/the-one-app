@@ -9,6 +9,7 @@ use ::custom_build::protocol::message as M;
 use iroh::endpoint::{Connection, QuicTransportConfig, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey};
 
+use ::api::runtime::NotThere;
 use super::*;
 
 const CONNECT: Duration = Duration::from_secs(10);
@@ -99,16 +100,6 @@ impl Drop for Held {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct NotThere(pub(super) String);
-
-impl std::fmt::Display for NotThere {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for NotThere {}
 
 /// What devices of this custom build speak: another's never meet them.
 pub fn alpn() -> Vec<u8> {
