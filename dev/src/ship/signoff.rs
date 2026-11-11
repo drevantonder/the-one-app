@@ -90,7 +90,7 @@ fn check<'a>(here: &Path, files: impl Iterator<Item = &'a str>) -> Result<()> {
     if files.iter().any(|f| f.ends_with(".rs") || f.ends_with("Cargo.toml") || *f == "Cargo.lock") {
         timed("compiled", || quietly(build::nice_cargo().current_dir(here).args(["check", "--all-targets", "-q"])))?;
     }
-    let screen = |f: &&&str| ["src/screen/", "src/onboarding/", "apps/"].iter().any(|top| f.starts_with(top)) && !f.contains("/service/") && !f.contains("/tests/");
+    let screen = |f: &&&str| (["src/screen/", "apps/"].iter().any(|top| f.starts_with(top)) || (f.starts_with("onboarding/") && !f.ends_with(".rs") && !f.ends_with("Cargo.toml"))) && !f.contains("/service/") && !f.contains("/tests/");
     if files.iter().any(|f| screen(&f)) {
         let ui = here.join("src/screen/ui");
         timed("built the screens", || {

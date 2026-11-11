@@ -45,7 +45,7 @@ mod sync;
 mod net;
 mod versions;
 pub use versions::heard;
-#[path = "onboarding/pairing.rs"]
+#[path = "../onboarding/runtime/pairing.rs"]
 mod pairing;
 pub(crate) mod push;
 pub(crate) mod releases;
@@ -223,7 +223,7 @@ pub struct Inner {
     name: Mutex<String>,
     apps: Apps,
     network: Exclusive<Option<Network>>,
-    pairings: Mutex<HashMap<[u8; 16], pairing::Pairing>>,
+    pairings: Mutex<HashMap<[u8; 16], ::onboarding::Pairing>>,
     events: broadcast::Sender<Event>,
     /// Held while writing or replaying, so views replay in order.
     writes: tokio::sync::Mutex<()>,
@@ -383,7 +383,7 @@ impl Node {
             name: Mutex::new(name),
             apps,
             network: Exclusive::new(None),
-            pairings: Mutex::new(pairing::load(dir)),
+            pairings: Mutex::new(::onboarding::pairings(dir)),
             events,
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),

@@ -1,0 +1,21 @@
+# Onboarding's shapes, as every build has them: what a pairing code says, a code that's out, and what a computer joining
+# with one asks and is told. Its screens are the files beside this (pages, Welcome, motion, render.js); what serves a code
+# is the app runtime's (runtime/pairing.rs).
+[package]
+name = "onboarding"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+custom-build = { path = "../custom-build" }
+platform = { path = "../platform" }
+key = { path = "../key" }
+anyhow = "1"
+ciborium = "0.2"
+data-encoding = "2"
+serde = { version = "1", features = ["derive"] }

@@ -31,7 +31,7 @@ for (const name of shared) {
 const map = JSON.stringify({ imports })
 writeFileSync(dist("importmap.json"), map + "\n")
 
-// The auth Worker's pages (../../onboarding/pages.tsx): each drawn from @one/ui's components to HTML here, as
+// The auth Worker's pages (../../../onboarding/pages.tsx): each drawn from @one/ui's components to HTML here, as
 // dist/auth.json, so no React reaches a browser before it's signed in; and this theme with the utilities their class
 // names use, as one stylesheet (src/auth.css, written as dist/auth.css). The Worker imports both.
 const scratch = path.join(here, `run-${process.pid}`)
@@ -39,7 +39,7 @@ mkdirSync(scratch, { recursive: true })
 try {
   const draw = path.join(scratch, "draw.jsx")
   writeFileSync(draw, `import { renderToStaticMarkup } from "react-dom/server"
-import { pages, parts } from ${JSON.stringify(path.join(here, "..", "..", "onboarding", "pages.tsx"))}
+import { pages, parts } from ${JSON.stringify(path.join(here, "..", "..", "..", "onboarding", "pages.tsx"))}
 // React puts a preload of each image ahead of what it draws, for a page it streams; these are whole, the image in them.
 const draw = (all) => Object.fromEntries(Object.entries(all).map(([name, page]) => [name, renderToStaticMarkup(page).replace(/<link rel="preload" as="image"[^>]*>/g, "")]))
 export default { pages: draw(pages), parts: draw(parts) }
@@ -50,7 +50,7 @@ export default { pages: draw(pages), parts: draw(parts) }
     publicDir: false,
     logLevel: "warn",
     plugins: [react()],
-    // pages.tsx and Welcome (../../onboarding) are outside this folder: React is this folder's.
+    // pages.tsx and Welcome (../../../onboarding) are outside this folder: React is this folder's.
     resolve: { alias: { "@": path.join(here, "src") }, dedupe: ["react", "react-dom", "motion"] },
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
     ssr: { noExternal: true },
@@ -65,7 +65,7 @@ export default { pages: draw(pages), parts: draw(parts) }
     logLevel: "warn",
     resolve: { dedupe: ["motion"] },
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
-    build: { write: false, reportCompressedSize: false, minify: true, lib: { entry: path.join(here, "..", "..", "onboarding", "motion.ts"), formats: ["iife"], name: "onboardingMotion", fileName: () => "motion.js" } },
+    build: { write: false, reportCompressedSize: false, minify: true, lib: { entry: path.join(here, "..", "..", "..", "onboarding", "motion.ts"), formats: ["iife"], name: "onboardingMotion", fileName: () => "motion.js" } },
   })
   drawn.motion = (Array.isArray(moved) ? moved : [moved]).flatMap((o) => o.output).find((f) => f.type === "chunk").code
   writeFileSync(dist("auth.json"), JSON.stringify(drawn, null, 1) + "\n")
@@ -113,9 +113,9 @@ const walk = (dir, root = here, prefix = "") => {
 walk(here)
 walk(home, home, "../home/")
 // Onboarding's screens, how they move and their stylesheet, which auth.json and auth.css are made from and Welcome is @one/ui's.
-const onboarding = path.join(here, "..", "..", "onboarding")
+const onboarding = path.join(here, "..", "..", "..", "onboarding")
 for (const folder of features) sources.push(...readdirSync(folder).filter((f) => /\.[jt]sx$/.test(f)).map((f) => path.relative(here, path.join(folder, f)).split(path.sep).join("/")))
-sources.push(...readdirSync(onboarding).filter((f) => /\.(tsx|ts|css)$/.test(f)).map((f) => `../../onboarding/${f}`))
+sources.push(...readdirSync(onboarding).filter((f) => /\.(tsx|ts|css)$/.test(f)).map((f) => `../../../onboarding/${f}`))
 const hash = createHash("sha256")
 for (const file of sources.sort()) hash.update(file).update("\0").update(readFileSync(path.join(here, file))).update("\0")
 writeFileSync(dist("sources.txt"), hash.digest("hex") + "\n")

@@ -5,7 +5,7 @@ description: Looking through what a user sees in The One App, step by step, such
 
 # Look through a journey's screens
 
-Before anyone's signed in: `src/onboarding/` has the script that draws every auth page as a file, in any custom build's look.
+Before anyone's signed in: `onboarding/` has the script that draws every auth page as a file, in any custom build's look.
 
 Signed in: the see-a-ui-change skill's `one-dev throwaway client <kind>`, as a new user would meet it, with `--as sam` for someone invited. Drive it through each step.
 

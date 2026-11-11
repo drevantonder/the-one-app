@@ -1,53 +1,14 @@
-//! Pairing: a code that lets a new device join the network, and admitting it.
+//! Pairing, as the app runtime does it: a code that lets a new device join the network, and admitting it (its shapes are
+//! `onboarding`'s).
 
 use ::custom_build::allowed;
 use ::custom_build::config::YOURS;
 use ::custom_build::protocol::{code, Coded, PAIRING_LIFE};
+use ::onboarding::{JoinReply, JoinRequest, Pairing, PairingCode};
 use super::*;
 
 fn used() -> anyhow::Error {
     Coded::error(code::PAIRING_USED, "this pairing code was already used or has expired")
-}
-
-#[derive(Serialize, Deserialize)]
-pub(super) struct Pairing {
-    pub(super) user: String,
-    /// The client that asked for it, if one did.
-    #[serde(default)]
-    pub(super) by: Option<String>,
-    /// The user the machine joins as, when it isn't the asker's: an admin's code for someone else's machine.
-    #[serde(default)]
-    pub(super) admits: Option<String>,
-    /// Milliseconds since 1970 after which it no longer works.
-    pub(super) until: u64,
-    /// The machine whose join with it didn't finish (hex), which alone may use it again.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) tried: Option<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PairingCode {
-    /// The network's address, whose relay reaches the device that made it.
-    address: String,
-    from: Key,
-    secret: [u8; 16],
-}
-
-#[derive(Serialize, Deserialize)]
-pub(super) struct JoinRequest {
-    secret: [u8; 16],
-    name: String,
-    #[serde(rename = "as")]
-    as_: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub(super) struct JoinReply {
-    root: String,
-    user: String,
-    /// For a device: the network's bucket, as a place's fields.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    bucket: Option<BTreeMap<String, String>>,
 }
 
 /// A computer that joined with a pairing code: the network's address, and the network as its home keeps it.
@@ -59,8 +20,7 @@ pub struct Joined {
 /// Asks the device that made a pairing code, `code`, to let in the computer whose key is `key`, called `name`, over the
 /// relay at the network's address the code names, showing it the code's ticket: → the network, once it's let in.
 pub async fn join_with(key: &SigningKey, name: &str, code: &str) -> Result<Joined> {
-    let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).map_err(|_| Coded::error(code::BAD_PAIRING_CODE, "that isn't a pairing code: copy it again, or ask for a new one"))?;
-    let code: PairingCode = ciborium::from_reader(bytes.as_slice()).map_err(|_| Coded::error(code::BAD_PAIRING_CODE, "that isn't a pairing code: copy it again, or ask for a new one"))?;
+    let code = PairingCode::parse(code)?;
     let request = JoinRequest { secret: code.secret, name: name.to_string(), as_: "device".into() };
     let reply = net::ask_to_join(key, &code.address, &net::pairing_ticket(&code.secret), code.from, serde_json::to_value(&request)?).await.map_err(|err| Coded::error(code::UNREACHABLE, format!("couldn't reach the device that made the pairing code: {err:#}")))?;
     if let Some(err) = reply.get("error") {
@@ -79,13 +39,6 @@ pub async fn join_with(key: &SigningKey, name: &str, code: &str) -> Result<Joine
         tracing::warn!("this device can't reach the network's bucket: it keeps no app's data until the network moves to S3-compatible storage");
     }
     Ok(Joined { address: code.address, network: NetworkFile { root: reply.root, user: reply.user, bucket, folders: BTreeMap::new() } })
-}
-
-pub(super) fn load(dir: &Path) -> HashMap<[u8; 16], Pairing> {
-    let list: Vec<(String, Pairing)> = platform::files::read_json(&dir.join("pairings.json"));
-    list.into_iter()
-        .filter_map(|(k, v)| Some((data_encoding::HEXLOWER.decode(k.as_bytes()).ok()?.try_into().ok()?, v)))
-        .collect()
 }
 
 /// Whether `who` may list a device of `user`'s that does `kinds`, as `rules` counts a `device` step: only of someone in
@@ -129,10 +82,7 @@ impl Node {
                 tracing::warn!("telling {YOURS}'s relay of a pairing code: {err:#}");
             }
         });
-        let code = PairingCode { address, from: self.0.id, secret };
-        let mut bytes = Vec::new();
-        ciborium::into_writer(&code, &mut bytes)?;
-        Ok((data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase(), joins_as))
+        Ok((PairingCode { address, from: self.0.id, secret }.text()?, joins_as))
     }
 
     /// Pairing codes are kept in a file, so one still works after the device that made it restarts.

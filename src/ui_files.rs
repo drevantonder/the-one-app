@@ -41,7 +41,7 @@ pub fn list(root: &Path) -> Vec<(String, PathBuf)> {
         Some((format!("web/screen/{rel}"), abs))
     }));
     // Onboarding's auth pages, which the auth Worker imports as ../onboarding/pages.js.
-    files.push(("onboarding/pages.js".into(), root.join("src/onboarding/pages.js")));
+    files.push(("onboarding/pages.js".into(), root.join("onboarding/pages.js")));
     // And the formats devices hold keys in, which the web client imports as ../shared/crypto.js.
     files.push(("web/shared/crypto.js".into(), cloudflare.join("shared/crypto.js")));
     files

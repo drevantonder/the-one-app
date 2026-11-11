@@ -3043,6 +3043,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "onboarding"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ciborium",
+ "custom-build",
+ "data-encoding",
+ "key",
+ "platform",
+ "serde",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3087,6 +3100,7 @@ dependencies = [
  "labs",
  "libc",
  "md-5",
+ "onboarding",
  "opentelemetry-proto",
  "platform",
  "prost",

@@ -1,9 +1,9 @@
 [workspace]
-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "vault", "vault/runtime", "devices", "devices/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "vault", "vault/runtime", "devices", "devices/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
-default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "vault", "vault/runtime", "devices", "devices/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "vault", "vault/runtime", "devices", "devices/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 
 [package]
 name = "one"
@@ -39,6 +39,8 @@ api = { path = "api" }
 vault = { path = "vault" }
 # Labs (labs/): which of the network's labs are on, every build.
 labs = { path = "labs" }
+# Onboarding (onboarding/): what a pairing code says and what joining with one asks, every build; its screens are the files beside it, and what serves a code the app runtime's (onboarding/runtime/).
+onboarding = { path = "onboarding" }
 # Device logs (device-logs/): what a device's programs and services print, kept and read, every build; what the app runtime does for the tool that reads them, only a node's.
 device-logs = { path = "device-logs" }
 device-logs-runtime = { path = "device-logs/runtime", optional = true }

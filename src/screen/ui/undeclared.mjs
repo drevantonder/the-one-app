@@ -15,7 +15,7 @@ const screens = (dir) =>
     return /\.[jt]sx$/.test(entry.name) ? [at] : []
   })
 
-const program = ts.createProgram(["src/screen/ui/src", "src/screen/home", "src/screen/settings", "src/onboarding", "apps"].flatMap((d) => screens(path.join(root, d))), {
+const program = ts.createProgram(["src/screen/ui/src", "src/screen/home", "src/screen/settings", "onboarding", "apps"].flatMap((d) => screens(path.join(root, d))), {
   allowJs: true,
   checkJs: true,
   noEmit: true,

@@ -11,7 +11,6 @@ pub mod carried {
 // is only theirs (the `node` feature).
 pub mod ai_gateway;
 pub mod backups;
-pub mod onboarding;
 #[cfg(feature = "node")]
 pub mod skills;
 #[cfg(feature = "node")]

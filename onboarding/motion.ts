@@ -1,7 +1,7 @@
 // How what someone sees before they're in moves, with Motion's small animate: Welcome's, and, built alone into
 // dist/auth.json (src/screen/ui/build.js), auth's pages'. The logo never moves; onboarding.css has the browser's half.
 import { animate } from "motion/mini"
-import { moves, still } from "../screen/ui/src/lib/moves"
+import { moves, still } from "../src/screen/ui/src/lib/moves"
 
 /// The screen's parts arrive, each slightly behind the last, as what was there finishes fading (onboarding.css). A
 /// problem only fades in (`appear`), and what's hidden has no turn.

@@ -240,10 +240,10 @@ mod tests {
             }
         }
         // And onboarding's screens, which auth.json is drawn from and Welcome is @one/ui's.
-        for entry in std::fs::read_dir(root.join("../../onboarding")).unwrap().flatten() {
+        for entry in std::fs::read_dir(root.join("../../../onboarding")).unwrap().flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.ends_with(".tsx") || name.ends_with(".ts") || name.ends_with(".css") {
-                files.push(format!("../../onboarding/{name}"));
+                files.push(format!("../../../onboarding/{name}"));
             }
         }
         files.sort();

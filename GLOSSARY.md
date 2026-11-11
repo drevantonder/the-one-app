@@ -37,7 +37,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   computer's. The Cloudflare node is not a device.
 - **Onboarding**: what someone sees on a device before they're in the network, first time or coming back: the first
   screen, proving who they are, waiting for someone to say yes, and starting. Our word for the journey and
-  for its folder (`src/onboarding/`); users see Sign In, Join and Waiting for Approval.
+  for its folder (`onboarding/`); users see Sign In, Join and Waiting for Approval.
 - **Client**: where a user or their agent uses the network, and the only place keys are opened: the native apps (Mac,
   iPhone, Android, Windows), the web client in a browser, the CLI and the local MCP server on a computer, and the remote
   MCP server. A phone's app, a browser's web client and each remote MCP client hold their device's key; on a computer,

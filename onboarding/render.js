@@ -1,7 +1,7 @@
 // Every one of auth's pages (pages.tsx's), as the auth Worker serves them (pages.js) but with no script of their own (only what moves them), in a custom
 // build's look (its config.toml's name and logo), each an HTML file that opens as it is in a browser, to look at:
 //
-//   bun src/onboarding/render.js [config.toml] [folder]
+//   bun onboarding/render.js [config.toml] [folder]
 //
 // This repo's config.toml and a folder in /tmp unless given. It draws what @one/ui's build last drew: after changing
 // pages.tsx or @one/ui, `bun run build` in src/screen/ui first.
@@ -11,7 +11,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { pages } from "./pages.js";
 
-const repo = path.join(import.meta.dirname, "..", "..");
+const repo = path.join(import.meta.dirname, "..");
 const [config = path.join(repo, "config.toml"), out] = process.argv.slice(2);
 const built = path.join(repo, "src", "screen", "ui", "dist");
 const drawn = JSON.parse(readFileSync(path.join(built, "auth.json"), "utf8"));
