@@ -446,7 +446,7 @@ impl Client {
         F: Future<Output = Vec<(String, String)>>,
     {
         let certificate = self.0.certificate.lock().unwrap().clone();
-        let again = matches!(req.method.as_str(), "GET" | "HEAD");
+        let again = matches!(req.method.as_str(), "GET" | "HEAD") || leased_call(&req);
         let mut why = unsent("there's no device to ask");
         let mut tries = Some(Trace { start: Instant::now(), tries: Vec::new() });
         let traces = |tries: &mut Option<Trace>, node: Option<serde_json::Value>| tries.as_mut().map(|t| serde_json::json!({ "tries": std::mem::take(&mut t.tries), "node": node }));
@@ -517,7 +517,7 @@ impl Client {
             headers.extend(node(key.as_bytes()).await);
             let head = head(&req.method, &req.path, &headers, req.body.len()?, certificate.as_deref())?;
             let began = Instant::now();
-            let err = match self.exchange(&key, &conn, &head, &req, last).await {
+            let err = match self.exchange(&key, &conn, opened.is_none(), &head, &req, last).await {
                 Ok(mut response) => {
                     let named = if response.status == 421 && followed < MOST_ELSEWHERE { self.elsewhere(&mut response, &key).await? } else { Vec::new() };
                     if named.is_empty() {
@@ -795,7 +795,9 @@ impl Client {
         }
     }
 
-    async fn exchange(&self, node: &PublicKey, conn: &Connection, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {
+    /// `req` asked on `conn` to `node`, which was open already if `reused`. Unless it's the `last` to ask, a GET or HEAD
+    /// must start to answer within `node`'s usual time.
+    async fn exchange(&self, node: &PublicKey, conn: &Connection, reused: bool, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {
         let usual = format!("device {}", data_encoding::HEXLOWER.encode(node.as_bytes()));
         let limit = platform::hedge::limit(&usual).max(ANSWER_LEAST);
         // A connection gone quiet takes no more streams once its peer's allowance is used: nothing was sent.
@@ -813,6 +815,14 @@ impl Client {
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
         };
         sending.await.map_err(sent)?;
+        // A connection kept from before may be to a device that has since gone (oned on Cloudflare restarts with its
+        // Workers), which only its idle timeout would show: what's asked in memory must reach it within its usual time,
+        // as its receipt says, or the connection is given up and the request asked again on a fresh one (`fetch_with`).
+        // A file sent takes as long as its size needs.
+        if reused && matches!(req.body, Sent::Bytes(_)) && timeout(limit, send.stopped()).await.is_err() {
+            self.give_up(node);
+            return Err(sent("the device's connection had gone"));
+        }
         let head_only = req.method == "HEAD";
         let mut recv = Stream::Iroh(recv);
         let asked = Instant::now();
@@ -883,8 +893,8 @@ fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certif
 
 /// Whether `req` is a call to an app's tool named by its id: wherever it's asked, it runs once, as the first device to
 /// take its lease runs it. A service's function has no lease.
-#[cfg(feature = "computer")]
 fn leased_call(req: &Request) -> bool {
+    #[allow(irrefutable_let_patterns)]
     let Sent::Bytes(bytes) = &req.body else { return false };
     let call = || serde_json::from_slice::<serde_json::Value>(bytes).ok();
     req.method == "POST" && req.path.split('?').next() == Some(::api::path::CALL) && call().is_some_and(|c| c["id"].is_string() && c["service"].is_null())
