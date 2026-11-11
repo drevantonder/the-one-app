@@ -367,10 +367,10 @@ pub fn tools() -> Vec<Value> {
         }),
         json!({
             "name": "models", "title": "List the models you can use", "reads": true,
-            "description": "Every AI model you can use now, by where it runs, with whose key pays for it (or that none does), and each kind's default model: yours if you set one, else Everyone's.",
+            "description": "Every AI model you can use now, by where it runs, with whose key pays for it when no app's own does (yours or Everyone's, or none), and each kind's default model: yours if you set one, else Everyone's.",
             "input": { "type": "object", "properties": {} },
             "output": { "type": "object", "additionalProperties": true, "properties": {
-                "companies": { "type": "array", "items": { "type": "object" }, "description": "each { id, title, kind, paid: network|null, models }" },
+                "companies": { "type": "array", "items": { "type": "object" }, "description": "each { id, title, kind, paid: user|network|null, key_kind, host }" },
                 "defaults": { "type": "object", "description": "{ chat, decide }, each { model, whose: yours|everyone|built_in }" },
             } },
         }),
@@ -388,4 +388,4 @@ pub fn tools() -> Vec<Value> {
 }
 
 /// What `ctx.ai.run`'s caller is told, as the guide every client lists with its tools.
-pub const GUIDE: &str = "Apps call models with ctx.ai.run({ model, ...input }, { retryKey }): chat models take OpenAI's chat completions input and answer its ChatCompletion; decide models (Clef) take state and questions. Keys stay in the Vault, as items of kind \"AI key: <company>\" in Everyone's Vault; Workers AI's has account_id too. Errors carry code: refused, no_key, limit, retry_changed, uncertain.";
+pub const GUIDE: &str = "Apps call models with ctx.ai.run({ model, ...input }, { retryKey }): chat models take OpenAI's chat completions input and answer its ChatCompletion; decide models (Clef) take state and questions. Keys stay in the Vault, as items of kind \"AI key: <company>\" (one field, api_key; Workers AI's has account_id too), and the most specific pays: one switched on for the app (vault_request with app and need AI key: <company>), else the caller's own, else Everyone's. Errors carry code: refused, no_key, limit, retry_changed, uncertain.";

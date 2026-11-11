@@ -1,9 +1,10 @@
-//! What this node gives AI Gateway's runtime (`ai_gateway_runtime::Host`) for a call: Everyone's key, the Vault's fill,
-//! the caller's own `node/ai-gateway` and Everyone's, and Insights. The seam until R4's `api::AppRuntime`.
+//! What this node gives AI Gateway's runtime (`ai_gateway_runtime::Host`) for a call: the key that pays
+//! (`crate::ai_gateway::pays`), the Vault's fill, the caller's own `node/ai-gateway` and Everyone's, and Insights. The
+//! seam until R4's `api::AppRuntime`.
 
 use std::time::Duration;
 
-use ::ai_gateway::{Company, Outgoing, Paid};
+use ::ai_gateway::{Company, Outgoing};
 use ai_gateway_runtime::{Fut, Host, Key, Sent, Span, Whose};
 use serde_json::Map;
 
@@ -11,20 +12,41 @@ use super::*;
 
 const AI_GATEWAY: (&str, &str) = (scopes::APP, scopes::CoreDb::AiGateway.name());
 
-/// A call to AI Gateway, by `caller`, for `app` (the network's own for its tools), in `trace`.
+/// A call to AI Gateway, by `caller`, for `app` (none for the network's own, its tools), reaching `scopes`, in `trace`.
 pub(super) struct Gateway<'a> {
     pub node: &'a Node,
     pub caller: &'a Caller,
-    pub service: &'a str,
+    pub app: Option<&'a str>,
+    pub scopes: Vec<Scope>,
     pub trace: Option<&'a trace::Trace>,
+    /// The Vault's items in `scopes`, read once for the call.
+    items: tokio::sync::OnceCell<Vec<(Scope, crate::vault::Items)>>,
 }
 
-impl Gateway<'_> {
+impl<'a> Gateway<'a> {
+    /// A call's: the scopes it reached, and always its user's own and Everyone's, whose keys pay for any app's call.
+    fn new(node: &'a Node, caller: &'a Caller, app: Option<&'a str>, mut scopes: Vec<Scope>, trace: Option<&'a trace::Trace>) -> Gateway<'a> {
+        for scope in [Scope::User(caller.user.clone()), Scope::Global] {
+            if !scopes.contains(&scope) {
+                scopes.push(scope);
+            }
+        }
+        Gateway { node, caller, app, scopes, trace, items: tokio::sync::OnceCell::new() }
+    }
+
+    fn service(&self) -> &str {
+        self.app.unwrap_or(crate::insights::own())
+    }
+
     fn scope(&self, whose: Whose) -> Scope {
         match whose {
             Whose::Own => Scope::User(self.caller.user.clone()),
             Whose::Everyone => Scope::Global,
         }
+    }
+
+    async fn items(&self) -> Result<&Vec<(Scope, crate::vault::Items)>> {
+        self.items.get_or_try_init(|| self.node.items_of(self.caller, &self.scopes)).await
     }
 
     async fn db(&self, scope: &Scope) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
@@ -33,27 +55,20 @@ impl Gateway<'_> {
         Ok((db, bucket))
     }
 
-    /// Everyone's item of `company`'s key kind, the oldest if there are several.
-    async fn everyones(&self, company: Company) -> Result<Option<(String, crate::vault::Item)>> {
-        let items = self.node.items(self.caller, &Scope::Global).await?;
-        Ok(items.into_iter().filter(|(_, it)| it.kind == company.key_kind()).min_by_key(|(_, it)| it.made))
-    }
 }
 
 impl Host for Gateway<'_> {
-    // Next: an app's own key (its scope's item switched on for it), then the caller's (their own Vault), each looked up
-    // before Everyone's, so the most specific pays.
     fn key(&self, company: Company) -> Fut<'_, Option<Key>> {
-        Box::pin(async move { Ok(self.everyones(company).await?.map(|(item, _)| Key { item, paid: Paid::Network })) })
+        Box::pin(async move { Ok(crate::ai_gateway::pays(self.items().await?, self.app, &self.caller.user, company).map(|(item, paid)| Key { item, paid })) })
     }
 
     fn send<'a>(&'a self, key: &'a Key, out: Outgoing) -> Fut<'a, Sent> {
         Box::pin(async move {
-            let (_, item) = self.everyones_item(&key.item).await?;
+            let item = self.items().await?.iter().find_map(|(_, items)| items.get(&key.item)).context("that AI key left the Vault as the call began: ask again")?;
             let uri: ureq::http::Uri = out.url.parse().context("an AI request's address isn't a web address")?;
             let host = uri.host().unwrap_or_default().to_string();
-            ensure!(!item.fields.values().any(|f| f.secret) || item.opened, "Everyone's {} is opened only by the devices its admins grant its Vault, and this one isn't: grant it with one vault grant <this device>", item.kind);
-            let fill = |text: &str| crate::vault::fill(text, &host, |name| name.strip_prefix(&format!("{}:", key.item)).and_then(|field| crate::vault::filled(&item, field)));
+            ensure!(!item.fields.values().any(|f| f.secret) || item.opened, "the {} that pays is opened only by the devices its Vault's admins grant, and this one isn't: grant it with one vault grant <this device>", item.kind);
+            let fill = |text: &str| crate::vault::fill(text, &host, |name| name.strip_prefix(&format!("{}:", key.item)).and_then(|field| crate::vault::filled(item, field)));
             let url = fill(&out.url)?;
             let headers = out.headers.iter().map(|(n, v)| Ok((n.clone(), fill(v)?))).collect::<Result<Vec<_>>>()?;
             let ports = self.node.own_ports();
@@ -81,14 +96,7 @@ impl Host for Gateway<'_> {
     }
 
     fn record(&self, span: Span) {
-        self.node.record_gen_ai(self.trace, self.service, &self.caller.user, span);
-    }
-}
-
-impl Gateway<'_> {
-    async fn everyones_item(&self, id: &str) -> Result<(String, crate::vault::Item)> {
-        let items = self.node.items(self.caller, &Scope::Global).await?;
-        items.into_iter().find(|(i, _)| i == id).context("that AI key left Everyone's Vault as the call began: ask again")
+        self.node.record_gen_ai(self.trace, self.service(), &self.caller.user, span);
     }
 }
 
@@ -125,15 +133,15 @@ fn coded(err: anyhow::Error) -> anyhow::Error {
 
 impl Node {
     /// `ctx.ai.run(input, { retryKey })` for a call of `app`'s.
-    pub(super) async fn ai_run(&self, caller: &Caller, app: &str, trace: Option<&trace::Trace>, input: Value, retry_key: Option<&str>) -> Result<Value> {
-        let gateway = Gateway { node: self, caller, service: app, trace };
+    pub(super) async fn ai_run(&self, caller: &Caller, app: &str, scopes: &[Scope], trace: Option<&trace::Trace>, input: Value, retry_key: Option<&str>) -> Result<Value> {
+        let gateway = Gateway::new(self, caller, Some(app), scopes.to_vec(), trace);
         ai_gateway_runtime::run(&gateway, app, input, retry_key).await.map_err(coded)
     }
 
     /// AI Gateway's tools, as `caller`: the network's own calls, from no app.
     pub(crate) async fn ai_tool(&self, caller: &Caller, tool: &str, mut input: Map<String, Value>) -> Result<Value> {
         let current = trace::current();
-        let gateway = Gateway { node: self, caller, service: crate::insights::own(), trace: current.as_ref() };
+        let gateway = Gateway::new(self, caller, None, Vec::new(), current.as_ref());
         let answer = match tool {
             "run" => {
                 let retry_key = input.remove("retry_key").and_then(|k| k.as_str().map(str::to_string));

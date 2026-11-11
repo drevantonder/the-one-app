@@ -1,5 +1,6 @@
 // Settings › AI Gateway: the default models, whose key pays for each company's, and where to see what calls spent.
-// One page of Lists (DESIGN.md's Settings shape). Everyone's keys are an admin's to add, in Everyone's Vault.
+// One page of Lists (DESIGN.md's Settings shape). Everyone's keys are an admin's to add, in Everyone's Vault; anyone
+// adds their own, in their own Vault, which pays for their calls over Everyone's.
 //
 // A Settings screen written in React: built by @one/ui's build into dist/ai-gateway.html.
 import { useEffect, useState } from "react"
@@ -44,13 +45,14 @@ function AiGateway() {
     load()
   }, [])
 
-  // An admin adds Everyone's key: a request in Everyone's Vault, answered in the Vault's own sheet, so the key is
-  // typed there and never passes through this screen.
+  // An admin adds Everyone's key, anyone else their own: a request in that Vault, answered in the Vault's own sheet,
+  // so the key is typed there and never passes through this screen.
   async function addKey(c) {
+    const scope = admin ? "global" : "user"
     setError("")
     const fields = c.id === "workers-ai" ? { account_id: { secret: false }, api_key: { secret: true } } : { api_key: { secret: true } }
     try {
-      const asked = await api("POST", "/api/vault/request", { scope: "global", app: "node", need: c.key_kind, title: `${c.title} Key`, fields, hosts: [c.host], why: `Pays for everyone's calls to ${c.title}'s models.` })
+      const asked = await api("POST", "/api/vault/request", { scope, app: "node", need: c.key_kind, title: `${c.title} Key`, fields, hosts: [c.host], why: admin ? `Pays for everyone's calls to ${c.title}'s models.` : `Pays for your calls to ${c.title}'s models.` })
       one.open("request", { id: asked.id, scope: asked.scope })
     } catch (e) {
       setError(said(e))
@@ -87,8 +89,8 @@ function AiGateway() {
               key={c.id}
               leading={<AppIcon app={tile(c)} size={30} />}
               title={c.title}
-              sub={c.paid === "network" ? (c.id === "workers-ai" ? "Everyone's · your Cloudflare account" : "Everyone's") : "No key"}
-              trailing={!c.paid && admin && <Button size="sm" variant="outline" onClick={() => addKey(c)}>Add Key</Button>}
+              sub={{ network: c.id === "workers-ai" ? "Everyone's · your Cloudflare account" : "Everyone's", user: "Yours" }[c.paid] || "No key"}
+              trailing={(c.paid === null || (!admin && c.paid === "network")) && <Button size="sm" variant="outline" onClick={() => addKey(c)}>{admin ? "Add Key" : "Add Mine"}</Button>}
             />
           ))}
         </List>

@@ -95,7 +95,7 @@ impl Node {
 
     /// `scopes`' items for `me`. A sign-in lacking any of their keys is told them all at once (428); this device's own
     /// user passes over a scope it wasn't given the key of yet.
-    async fn items_of(&self, me: &Caller, scopes: &[Scope]) -> Result<Vec<(Scope, Items)>> {
+    pub(super) async fn items_of(&self, me: &Caller, scopes: &[Scope]) -> Result<Vec<(Scope, Items)>> {
         let want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), VAULT.0, VAULT.1)).collect();
         self.needs(me, &want).await?;
         let mut out = Vec::new();

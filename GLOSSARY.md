@@ -97,7 +97,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   hosts.
 - **AI Gateway**: how apps use AI models (`ctx.ai.run`): hosted ones with keys in the Vault, Workers AI on the
   network's Cloudflare account, or a model on one of the network's devices. It picks where a call runs and whose key
-  pays, and records what each call spent in Insights. Core, like the Vault: not an app. Settings › AI Gateway.
+  pays (the most specific: the app's own, then the user's, then the network's), and records what each call spent in Insights. Core, like the Vault: not an app. Settings › AI Gateway.
   Avoid: AI app, LLM proxy.
 - **Widget**: what an app shows on a home page, drawn by the screens and the native apps from the app runtime's routes.
 - **Notification**: a note sealed to one device: what to show, the screen a tap opens, and maybe an action that device

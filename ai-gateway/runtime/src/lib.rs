@@ -52,8 +52,8 @@ pub struct Span {
 
 /// What AI Gateway needs of the app runtime that runs a call.
 pub trait Host: Send + Sync {
-    /// The key that pays for `company`'s models for this caller, the most specific there is. Only the network's
-    /// (Everyone's Vault) for now; an app's own and the caller's come next, looked up first, in that order.
+    /// The key that pays for `company`'s models for this caller, the most specific there is: the app's own, then the
+    /// caller's, then the network's (Everyone's).
     fn key(&self, company: Company) -> Fut<'_, Option<Key>>;
     /// Sends `out` with `key`'s fields filled in by the Vault, which sends a secret only to its item's hosts.
     fn send<'a>(&'a self, key: &'a Key, out: Outgoing) -> Fut<'a, Sent>;
@@ -127,7 +127,7 @@ async fn send(host: &dyn Host, asked: &Asked, app: &str, retry_key: Option<&str>
     let company = asked.route.company;
     let key = match host.key(company).await {
         Ok(Some(key)) => key,
-        Ok(None) => return Err((Failed::NoKey(format!("No key pays for {}: add an {} item to Everyone's Vault in Settings › AI Gateway", asked.route.id(), company.key_kind())).into(), None)),
+        Ok(None) => return Err((Failed::NoKey(format!("No key pays for {}: add an {} item in Settings › AI Gateway (Everyone's), to your own Vault, or switched on for the app", asked.route.id(), company.key_kind())).into(), None)),
         Err(err) => return Err((err, None)),
     };
     let paid = Some(key.paid);
