@@ -92,9 +92,9 @@ impl Host {
             if make && *scope != Scope::Global {
                 return Box::pin(self.make_first_epoch(scope)).await;
             }
-            bail!(NotGiven(scope.clone(), self.device_name()));
+            bail!(self.not_given(scope));
         }
-        ensure!(keys.contains_key(&newest), NotGiven(scope.clone(), self.device_name()));
+        ensure!(keys.contains_key(&newest), self.not_given(scope));
         self.0.databases.epochs.lock().unwrap().insert(scope.clone(), keys.clone());
         Ok(keys)
     }
@@ -128,13 +128,18 @@ impl Host {
         self.0.databases.database_keys.lock().unwrap().retain(|(s, _), _| s != scope);
     }
 
+    /// That this device wasn't given `scope`'s newest key, naming the scope as its users read it.
+    pub(super) fn not_given(&self, scope: &Scope) -> NotGiven {
+        NotGiven(scope.clone(), self.device_name(), ::api::runtime::ReadExt::read_or(self, scope.to_string(), |r| r.scope_name(scope)))
+    }
+
     /// `global`'s epochs, for a device that has read nothing of who's who yet, so knows no epoch's hash: those sealed
     /// to it in the bucket, each kept only once who's who, from the network's first freeze, says it's theirs
     /// (`steps::read_sealed_to`).
     pub(super) async fn first_global_read(&self) -> Result<database::stored::Keys> {
         let mut reader = scope::steps::Reader::new(self.with(|i| Ok(i.r.root()))?);
         let (epochs, _) = scope::steps::read_sealed_to(&self.bucket()?, &mut reader, &hex(&self.0.holds.device()), &self.0.holds, &mut None, now_ms()).await?;
-        ensure!(!epochs.is_empty(), NotGiven(Scope::Global, self.device_name()));
+        ensure!(!epochs.is_empty(), self.not_given(&Scope::Global));
         self.0.databases.epochs.lock().unwrap().insert(Scope::Global, epochs.clone());
         Ok(epochs)
     }
@@ -150,7 +155,7 @@ impl Host {
         }
         // A scope's first keys are its admins' to make, as they choose where its apps' schedules run.
         let (may, recovery) = self.with(|i| Ok((i.r.db().may(&i.user, "choose-devices", &scopes::object(scope)), i.r.db().recovery()?)))?;
-        ensure!(may, NotGiven(scope.clone(), self.device_name()));
+        ensure!(may, self.not_given(scope));
         let recovery = recovery.context("the network has no recovery key to seal its keys to")?;
         let key: [u8; 32] = rand::random();
         let (bucket, name) = (self.bucket()?, scope.to_string());

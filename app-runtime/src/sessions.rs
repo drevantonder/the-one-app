@@ -244,7 +244,7 @@ impl Host {
                 keys.insert(n, key);
             }
         }
-        ::database::stored::handed(keys, newest).map_err(|_| NotGiven(scope.clone(), self.device_name()).into())
+        ::database::stored::handed(keys, newest).map_err(|_| self.not_given(scope).into())
     }
 
     /// Which of the keys `offered` for epoch `n` of a scope's database's steps opens what the bucket holds under that

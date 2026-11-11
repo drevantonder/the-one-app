@@ -16,7 +16,7 @@ use scope::scopes::{self, Scope};
 
 use crate::engine::{self as b, Snapshot};
 use crate::places::{PINNED, PlaceItem, Problem, item_hash, line, machine_name, pinned, place_hash, places, problems, release_blobs, scope_named, takes_over};
-use crate::rows::{BackedUp, BackupRun, CheckRun, Said};
+use crate::rows::{BackedUp, BackupRun, CheckRun, Missed, Said};
 use crate::{State, keep_folder, rows, seen};
 
 /// How often a device prunes each place it backs up to: after its first run, then daily.
@@ -184,7 +184,7 @@ async fn back_up(rt: &Rt, force: bool) -> Result<()> {
             Err(err) => {
                 if !due.is_empty() {
                     state.failed.lock().unwrap().insert(p.id.clone(), now);
-                    backed_up(rt, &p.id, now, Some(err), Vec::new()).await?;
+                    backed_up(rt, &p.id, now, Some(err), Vec::new(), Vec::new()).await?;
                 }
                 continue;
             }
@@ -192,7 +192,7 @@ async fn back_up(rt: &Rt, force: bool) -> Result<()> {
         if !place.present() {
             continue;
         }
-        let mut snapshots = Vec::new();
+        let (mut snapshots, mut missed) = (Vec::new(), Vec::new());
         let mut error = None;
         for d in due {
             match back_up_scope(rt, &place, &p.id, &network, &d, now, force).await {
@@ -200,17 +200,22 @@ async fn back_up(rt: &Rt, force: bool) -> Result<()> {
                 Ok(None) => {}
                 Err(err) => {
                     tracing::warn!("backing up {} to {}: {err:#}", d.scope, p.title);
-                    error.get_or_insert(err);
+                    // Trouble with the place stops the run; what's wrong with one scope (one this device can't open
+                    // yet) is that scope's, and the rest are backed up.
+                    match ::bucket::Trouble::of(&err) {
+                        Some(_) => drop(error.get_or_insert(err)),
+                        None => missed.push(Missed { scope: d.scope.clone(), error: format!("{err:#}").chars().take(500).collect() }),
+                    }
                 }
             }
         }
-        match &error {
-            Some(_) => state.failed.lock().unwrap().insert(p.id.clone(), now),
-            None => state.failed.lock().unwrap().remove(&p.id),
+        match error.is_some() || !missed.is_empty() {
+            true => state.failed.lock().unwrap().insert(p.id.clone(), now),
+            false => state.failed.lock().unwrap().remove(&p.id),
         };
         let failed = error.is_some();
-        if error.is_some() || !snapshots.is_empty() {
-            backed_up(rt, &p.id, now, error, snapshots).await?;
+        if error.is_some() || !snapshots.is_empty() || !missed.is_empty() {
+            backed_up(rt, &p.id, now, error, snapshots, missed).await?;
         }
         if let (Some((scopes, fetchable)), false) = (prune, failed) {
             state.pruned.lock().unwrap().insert(p.id.clone(), now);
@@ -295,11 +300,11 @@ async fn back_up_scope(rt: &Rt, place: &Place, place_id: &str, network: &str, d:
 }
 
 /// Says how a run to a place went, in `global`.
-async fn backed_up(rt: &Rt, place: &str, now: u64, error: Option<anyhow::Error>, snapshots: Vec<Snapshot>) -> Result<()> {
+async fn backed_up(rt: &Rt, place: &str, now: u64, error: Option<anyhow::Error>, snapshots: Vec<Snapshot>, missed: Vec<Missed>) -> Result<()> {
     let snapshots = snapshots.iter().map(|s| BackedUp { scope: s.scope.clone(), upto: s.upto, blobs: s.blobs.len() as u64, bytes: s.bytes }).collect();
     let trouble = error.as_ref().and_then(::bucket::Trouble::of).map(|t| t.name().to_string());
     let error = error.map(|e| format!("{e:#}").chars().take(500).collect::<String>());
-    rows::say(rt, Said::BackedUp(BackupRun { place: place.into(), device: rt.id(), time: now, error, trouble, snapshots })).await
+    rows::say(rt, Said::BackedUp(BackupRun { place: place.into(), device: rt.id(), time: now, error, trouble, snapshots, missed })).await
 }
 
 /// Backups as a user sees them: each place, how its last run went, the recent snapshots, and the disks here.

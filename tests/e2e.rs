@@ -107,6 +107,39 @@ fn the_command_checks_it_with_no_node(backup: &std::path::Path, recovery: &str) 
     }
 }
 
+/// A backup that can't open one scope (this device wasn't given its newest key) backs up the rest and says that scope
+/// alone couldn't be, by whose it is, never the run as failed; and what it did back up restores and checks whole.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backup_that_cant_open_one_scope_backs_up_the_rest_and_names_it() {
+    let a = start("missed-a").await;
+    let recovery = create(&a, "Home", "Andre").await;
+    add_notes(&a).await;
+    let me = api::Caller::own(a.id(), a.user().unwrap());
+    eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "kept" }))).await.is_ok()).await;
+    // Andre's own things get keys no device was given: only the recovery key opens their newest.
+    let mine = ::scope::scopes::Scope::User(me.user.clone());
+    let n = ::api::runtime::ReadExt::read_or(&a, 0, |r| Ok(r.db().epoch(&mine)?));
+    ::scope::settings::new_epoch(&a, &mine, n + 1, &[a.id()]).await.unwrap();
+
+    let dir = temp("missed-disk").join("One Backups");
+    backups_runtime::add_place(&a.rt(), &me, &json!({ "path": dir, "title": "T7 Shield" })).await.unwrap();
+    eventually("the first backup", &a, async || !backups_runtime::status(&a.rt()).await.unwrap()["places"][0]["last"].is_null()).await;
+    let shown = backups_runtime::status(&a.rt()).await.unwrap();
+    let problem = &shown["places"][0]["problem"];
+    assert_eq!((&problem["title"], &problem["status"]), (&json!("Couldn't back up Andre's things to T7 Shield"), &json!("Partly backed up")), "{shown}");
+    assert!(!shown.to_string().contains(&mine.to_string()), "it says whose, never the scope's id: {shown}");
+
+    // What it backed up is whole: Everyone's, which the device's own check and the recovery key alone restore.
+    let report = backups_runtime::check_backups(&a.rt()).await.unwrap();
+    assert!(report[0]["error"].is_null() && !report[0]["scopes"].as_array().unwrap().is_empty(), "{report}");
+    let place = bucket::Place::Folder(dir.clone());
+    let network = backups_runtime::engine::networks(&place).unwrap().remove(0);
+    let keys = backups_runtime::engine::open_keys(&place, &network, &::key::unhex(&recovery).unwrap()).unwrap();
+    assert!(keys.contains_key("global") && !keys.contains_key(&mine.to_string()), "{:?}", keys.keys());
+    let checked = backups_runtime::engine::check(&backups_runtime::engine::Check { place: &place, network: &network, keys: &keys, root: None }).unwrap().0;
+    assert_eq!(checked["problems"], json!([]), "{checked}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alone() {
     let a = start("backup-a").await;

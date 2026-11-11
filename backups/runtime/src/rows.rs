@@ -24,6 +24,8 @@ create table backups (place text, device text, time integer, error text, trouble
                       primary key (place, device, time));
 create table alerts (place text primary key, time integer not null);
 create table checks (place text, device text, time integer, error text, report text not null, primary key (place, device, time));
+", "
+alter table backups add column missed text;
 "];
 
 /// How many backup runs to each place it keeps, besides each scope's last that backed it up.
@@ -43,7 +45,8 @@ pub(crate) struct Rows {
     pub checks: Vec<CheckRun>,
 }
 
-/// One device's backup run to one place: the snapshots it wrote, or what went wrong.
+/// One device's backup run to one place: the snapshots it wrote, or what went wrong with the place; and each scope it
+/// couldn't back up while it backed up the rest (`missed`).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct BackupRun {
     /// The place's Vault item.
@@ -54,6 +57,14 @@ pub(crate) struct BackupRun {
     /// What kind of trouble the error is, for its fix: `bucket::Trouble`'s name.
     pub trouble: Option<String>,
     pub snapshots: Vec<BackedUp>,
+    pub missed: Vec<Missed>,
+}
+
+/// A scope a run couldn't back up, and why: one this device couldn't open (it wasn't given its newest key), say.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Missed {
+    pub scope: String,
+    pub error: String,
 }
 
 /// A scope's snapshot in a run: when it holds the scope as of, and what it added.
@@ -88,7 +99,8 @@ pub(crate) async fn say(rt: &Rt, said: Said) -> Result<()> {
     let mut change = |c: &rusqlite::Connection| -> Result<()> {
         match &said {
             Said::BackedUp(r) => {
-                ex(c, "insert or replace into backups values (?, ?, ?, ?, ?, ?)", &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.trouble), json!(serde_json::to_string(&r.snapshots)?)])?;
+                let missed = (!r.missed.is_empty()).then(|| serde_json::to_string(&r.missed)).transpose()?;
+                ex(c, "insert or replace into backups values (?, ?, ?, ?, ?, ?, ?)", &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.trouble), json!(serde_json::to_string(&r.snapshots)?), json!(missed)])?;
                 // Beyond the newest, each scope's last run that backed it up stays, as what's covered is read from
                 // them: a scope that hasn't changed would otherwise look a day late once busier ones fill these.
                 ex(
@@ -125,6 +137,7 @@ pub(crate) async fn read(rt: &Rt) -> Result<()> {
                 error: r["error"].as_str().map(str::to_string),
                 trouble: r["trouble"].as_str().map(str::to_string),
                 snapshots: stored(&r["snapshots"], "[]")?,
+                missed: stored(&r["missed"], "[]")?,
             };
             if run.error.is_none() {
                 for b in &run.snapshots {

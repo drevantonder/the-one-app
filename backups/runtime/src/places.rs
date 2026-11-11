@@ -93,6 +93,16 @@ pub(crate) fn problems(r: &Read, seen: &Seen, now: u64) -> Result<Vec<Problem>> 
             out.push(Problem { place: p.id.clone(), title: format!("Couldn't back up to {}", p.title), check: false, text, status, fix, since, notify: failing.iter().rev().nth(1).map(|r| r.time) });
             continue;
         }
+        // Scopes the last runs couldn't back up while they backed up the rest: theirs alone, worth a notification from the
+        // second run in a row.
+        let missing: Vec<&&BackupRun> = runs.iter().rev().take_while(|r| !r.missed.is_empty()).collect();
+        if let Some(last) = missing.first() {
+            let whose = last.missed.iter().map(|m| Ok(format!("{}'s", scope_named(r, &m.scope)?))).collect::<Result<Vec<_>>>()?.join(" and ");
+            let since = missing.last().map_or(last.time, |r| r.time);
+            let text = format!("{}.", last.missed[0].error.trim_end_matches('.'));
+            out.push(Problem { place: p.id.clone(), title: format!("Couldn't back up {whose} things to {}", p.title), check: false, text, status: "Partly backed up", fix: "Everything else is backed up. It tries again every hour.".to_string(), since, notify: missing.get(1).map(|r| r.time) });
+            continue;
+        }
         // A restore check that failed, worth a notification at once: what's there can't be counted on.
         let checks: Vec<&CheckRun> = rows.checks.iter().filter(|c| c.place == p.id).collect();
         let failed: Vec<&&CheckRun> = checks.iter().rev().take_while(|c| c.error.is_some()).collect();

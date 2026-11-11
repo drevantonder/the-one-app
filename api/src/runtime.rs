@@ -127,13 +127,14 @@ pub trait Databases: Send + Sync {
     fn keep_in<'a>(&'a self, to: bucket::Place, fields: BTreeMap<String, String>, copy: Fut<'a, ()>) -> Fut<'a, ()>;
 }
 
-/// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
+/// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one. Its
+/// device's name, and whose the scope is as its users read it (`Read::scope_name`: a user's or group's name, or Everyone).
 #[derive(Debug)]
-pub struct NotGiven(pub Scope, pub String);
+pub struct NotGiven(pub Scope, pub String, pub String);
 
 impl std::fmt::Display for NotGiven {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} wasn't given {}'s newest key: a device of someone who opens it gives it when it's next on", self.1, self.0)
+        write!(f, "{} wasn't given the newest key to {}'s things yet: a device of someone who opens them gives it when it's next on", self.1, self.2)
     }
 }
 
