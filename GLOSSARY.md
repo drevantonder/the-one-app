@@ -54,6 +54,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   and the Vault, where a user chose that node, and a computer's node that is also its user's device, whose app runtime opens
   that user's scopes with what the device's key opens. A phone is a device and not a node; the Cloudflare node is a node and
   not a device; a computer can be both. Avoid "node" for the app runtime. Avoid: serverless node.
+- **Device logs**: what a device's programs and services print, kept on that device and read with `one logs <device>`.
+  Not Insights: they stay on the device until asked for, and only the device's user and the network's admins read them.
 - **Platform**: what a client or oned is built for: Mac, Windows, Linux, iPhone, Android, a browser, Cloudflare.
 - **Endpoint**: an iroh identity, of its own key. Each client and node is one; the relay lets in only the network's.
 - **Network message**: what one node tells another directly over iroh, on a connection opened to say it and closed
@@ -69,7 +71,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **App**: code deployed into a scope, run in the app runtime. It publishes any of four things: **screens** (pages
   users open), **widgets** (what it shows on a home page), **tools** (what agents use, through MCP and the CLI), and
   **services**. An app with only tools is still an app (Gmail, Shell). The core's own features (the Vault, Backups,
-  Groups, Devices, Widgets, Notifications, logs, Insights) have tools too, named the same way (`vault_list`), but are not apps: no list of
+  Groups, Devices, Widgets, Notifications, Device logs, Insights) have tools too, named the same way (`vault_list`), but are not apps: no list of
   apps has them. Avoid: worker, connector, operation (for a tool).
 - **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
   linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,

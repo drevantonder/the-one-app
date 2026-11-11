@@ -14,7 +14,7 @@ pub fn commands() -> Command {
             let schema = super::tools::feature().tools.remove(0)["input"].clone();
             let mut input = ::api::tools::input(&schema, &[], vec![], g.flags.clone(), &[]).map_err(|e| ::api::cli::Failed::Typed(format!("{e:#}")))?;
             input.insert("device".into(), json!(device));
-            let said = g.node.post_for(g.agent, "/api/logs/logs", Value::Object(input)).map_err(|e| crate::tools::in_cli_error(g.node, e))?;
+            let said = g.node.post_for(g.agent, "/api/logs/logs", Value::Object(input))?;
             println!("{}", said["said"].as_str().unwrap_or(""));
             Ok(true)
         },

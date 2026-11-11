@@ -980,6 +980,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "device-logs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "platform",
+ "serde_json",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "device-logs-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "device-logs",
+ "key",
+ "serde_json",
+]
+
+[[package]]
 name = "diatomic-waker"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3011,6 +3033,8 @@ dependencies = [
  "custom-build",
  "data-encoding",
  "database",
+ "device-logs",
+ "device-logs-runtime",
  "ed25519-dalek 3.0.0",
  "flate2",
  "futures-util",
@@ -3126,6 +3150,7 @@ dependencies = [
  "custom-build",
  "data-encoding",
  "database",
+ "device-logs",
  "ed25519-dalek 3.0.0",
  "groups",
  "hkdf",
@@ -3247,6 +3272,7 @@ dependencies = [
  "custom-build",
  "data-encoding",
  "database",
+ "device-logs",
  "ed25519-dalek 3.0.0",
  "getrandom 0.2.17",
  "getrandom 0.4.3",

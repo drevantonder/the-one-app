@@ -175,7 +175,7 @@ impl SignIn {
         let client = self.kept().map(|k| k.1).unwrap_or_default();
         let tokens = self.auth()?.refresh(&client, &refresh).inspect_err(|e| {
             if e.signed_out {
-                one::logs::record(&format!("auth refused the refresh token: {}", e.message));
+                device_logs::record(&format!("auth refused the refresh token: {}", e.message));
                 secrets::forget_refresh();
             }
         })?;

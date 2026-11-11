@@ -183,6 +183,6 @@ fn tray_menu(app: &AppHandle) {
     };
     match made() {
         Ok(menu) => drop(tray.set_menu(Some(menu))),
-        Err(e) => one::logs::say(&format!("the tray's menu: {e}")),
+        Err(e) => device_logs::say(&format!("the tray's menu: {e}")),
     }
 }

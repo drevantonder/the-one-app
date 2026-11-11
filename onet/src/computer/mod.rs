@@ -103,8 +103,8 @@ pub fn run(args: &[String]) -> Result<()> {
         bail!("{}", usage());
     }
     tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(async {
-        one::logs::keep(LOG);
-        tracing_subscriber::fmt().with_writer(one::logs::Tee).with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "onet=info,one=info,warn".into())).init();
+        device_logs::keep(LOG);
+        tracing_subscriber::fmt().with_writer(device_logs::Tee).with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "onet=info,one=info,warn".into())).init();
         let onet = Arc::new(Onet::open(&platform::home(), flag("--listen=").unwrap_or_else(api::local::addr), flag("--runtime="))?);
         let keeping = onet.clone();
         tokio::spawn(async move {
@@ -119,7 +119,7 @@ pub fn run(args: &[String]) -> Result<()> {
     })
 }
 
-/// The name of onet's log on a computer (`one::logs`), which `<cli> logs <device> --service onet` reads.
+/// The name of onet's log on a computer (`device_logs`), which `<cli> logs <device> --service onet` reads.
 const LOG: &str = "onet";
 
 impl Onet {

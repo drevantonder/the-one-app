@@ -31,7 +31,7 @@ pub async fn ask_off(method: &'static str, args: Value) -> Result<Value, String>
 pub fn tell(method: &'static str, args: Value) {
     std::thread::spawn(move || {
         if let Err(e) = ask(method, args) {
-            one::logs::say(&format!("{method}: {e}"));
+            device_logs::say(&format!("{method}: {e}"));
         }
     });
 }
@@ -49,11 +49,11 @@ pub fn push(device: Arc<onet::Device>, address: impl FnOnce(String) -> one::push
     tauri::async_runtime::spawn(async move {
         let token = match ask_off("push", json!({})).await {
             Ok(out) => out["token"].as_str().map(str::to_string),
-            Err(e) => return one::logs::say(&format!("push: no token: {e}")),
+            Err(e) => return device_logs::say(&format!("push: no token: {e}")),
         };
         let Some(token) = token else { return };
         if let Err(e) = device.register_push(&address(token)).await {
-            one::logs::say(&format!("push: can't register: {e}"));
+            device_logs::say(&format!("push: can't register: {e}"));
         }
     });
 }

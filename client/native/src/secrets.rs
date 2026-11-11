@@ -126,7 +126,7 @@ fn service(name: &str) -> String {
 
 /// What's kept, if it can be read: a store that can't answer now says nothing is there, and says so in the log.
 fn get(name: &str, account: &str) -> Option<Vec<u8>> {
-    store::get(&service(name), account).inspect_err(|e| one::logs::record(&format!("reading {name}: {e}"))).ok().flatten()
+    store::get(&service(name), account).inspect_err(|e| device_logs::record(&format!("reading {name}: {e}"))).ok().flatten()
 }
 
 fn set(name: &str, account: &str, value: &[u8]) -> Result<(), String> {

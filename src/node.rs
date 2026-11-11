@@ -313,9 +313,9 @@ const LAST_SAY: Duration = Duration::from_secs(3);
 /// computer's onet at the API's address, for what that opens and signs. It runs its own watchdog.
 #[tokio::main]
 pub async fn serve(listen: &str) -> Result<()> {
-    crate::logs::keep(crate::logs::NODE);
+    ::device_logs::keep(::device_logs::NODE);
     tracing_subscriber::fmt()
-        .with_writer(crate::logs::Tee)
+        .with_writer(::device_logs::Tee)
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
     crate::watchdog::started();

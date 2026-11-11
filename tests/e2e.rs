@@ -726,7 +726,7 @@ async fn only_a_devices_user_or_an_admin_reads_its_logs() {
     let read = a.call_as(logs(json!({ "grep": "line 29" })), andre.clone()).await.unwrap();
     assert_eq!(read["matched"], 111, "{read}");
     let all = a.call_as(logs(json!({ "lines": 100000 })), andre.clone()).await.unwrap();
-    assert!(all["shown"].as_u64().unwrap() <= one::logs::MOST_LINES as u64, "a read is capped");
+    assert!(all["shown"].as_u64().unwrap() <= device_logs::MOST_LINES as u64, "a read is capped");
 
     // Sam, invited as a member, may not; once an admin, may.
     let sam = let_sam_in(&a, &ed25519_dalek::SigningKey::from_bytes(&rand::random())).await;

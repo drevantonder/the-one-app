@@ -40,7 +40,7 @@ impl Node {
         allowed!(self.may_read_logs_of(&me.user, &target)?, "only {name}'s user, or an admin of {}, reads its logs", ::custom_build::config::YOURS);
         // A device whose app runtime this is keeps its logs here: its onet's and oned's beside the runtime's own.
         if target == self.0.id || target == self.0.holds.device() {
-            return Ok(Reply::Ok(crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)?));
+            return Ok(Reply::Ok(::device_logs::read(&self.0.dir, &::device_logs::Ask::from_json(input)?)?));
         }
         ensure!(self.with(|i| Ok(i.r.db().client(&target)?.is_some()))?, "{name} isn't a client, and a node reads its own log");
         match self.ask_client(&target, input).await? {

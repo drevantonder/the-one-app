@@ -110,7 +110,7 @@ pub unsafe extern "C" fn one_menu_chose(json: *const c_char) {
         // What a widget's button or toggle does; its tool's run draws the widgets again.
         "run" => drop(tauri::async_runtime::spawn(async move {
             if let Some(error) = crate::headless::run_here("call", &chose).await["error"].as_str() {
-                one::logs::say(&format!("a menu bar widget's button: {error}"));
+                device_logs::say(&format!("a menu bar widget's button: {error}"));
             }
         })),
         // Its devices and widgets as they are now, drawn in as they come.

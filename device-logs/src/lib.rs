@@ -282,10 +282,10 @@ mod tests {
 
 pub mod tools;
 
-#[cfg(feature = "node")]
+#[cfg(not(target_family = "wasm"))]
 pub mod cli;
 
-#[cfg(feature = "node")]
+#[cfg(not(target_family = "wasm"))]
 mod tee;
-#[cfg(feature = "node")]
+#[cfg(not(target_family = "wasm"))]
 pub use tee::*;

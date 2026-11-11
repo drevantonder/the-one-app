@@ -29,6 +29,7 @@ scope = { path = "../scope" }
 api = { path = "../api" }
 groups = { path = "../groups" }
 vault = { path = "../vault" }
+device-logs = { path = "../device-logs" }
 one = { path = ".." }
 # `<cli>t`, this computer's onet (onet/src/computer/), is this program run by that name.
 onet = { path = "../onet", features = ["computer"] }

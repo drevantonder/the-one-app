@@ -29,7 +29,7 @@ fn commands() -> Vec<Command> {
         one::cloudflare::cli::commands(),
         storage::cli::commands(),
         services::cli::commands(),
-        one::logs::cli::commands(),
+        device_logs::cli::commands(),
         one::insights::cli::commands(),
         one::build::commands(),
         blobs::cli::commands(),

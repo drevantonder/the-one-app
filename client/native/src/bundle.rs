@@ -77,7 +77,7 @@ fn kept(data: &Path) -> Vec<Bundle> {
             match checked(&bytes) {
                 Ok(b) => Some(b),
                 Err(e) => {
-                    one::logs::say(&format!("web bundle {}: {e}; removing it", path.display()));
+                    device_logs::say(&format!("web bundle {}: {e}; removing it", path.display()));
                     let _ = std::fs::remove_file(&path);
                     None
                 }
@@ -118,8 +118,8 @@ fn best(data: &Path) -> (Option<Bundle>, Option<u32>) {
 pub fn start(data: &Path) {
     let (b, behind) = best(data);
     match &b {
-        Some(b) => one::logs::say(&format!("web: serving the bundle of {}", b.commit)),
-        None => one::logs::say("web: serving the built-in bundle"),
+        Some(b) => device_logs::say(&format!("web: serving the bundle of {}", b.commit)),
+        None => device_logs::say("web: serving the built-in bundle"),
     }
     keep_behind(data, behind);
     *SERVED.write().unwrap() = b.map(|b| Arc::new(Served::from(b)));
@@ -221,7 +221,7 @@ fn keep(data: &Path, file: &[u8], b: &Bundle) -> Result<(), String> {
 pub fn update(data: PathBuf, address: String) {
     tauri::async_runtime::spawn_blocking(move || {
         if let Err(e) = fetched(&data, &address) {
-            one::logs::say(&format!("web: no new bundle: {e}"));
+            device_logs::say(&format!("web: no new bundle: {e}"));
         }
     });
 }
@@ -242,12 +242,12 @@ fn fetched(data: &Path, address: &str) -> Result<(), String> {
     }
     keep(data, &bytes, &b)?;
     if b.shell > one::web::SHELL {
-        one::logs::say(&format!("web: bundle {} needs a newer app (shell {})", b.commit, b.shell));
+        device_logs::say(&format!("web: bundle {} needs a newer app (shell {})", b.commit, b.shell));
         keep_behind(data, Some(b.shell));
         return Ok(());
     }
     keep_behind(data, None);
-    one::logs::say(&format!("web: bundle {} kept for the next time the window opens", b.commit));
+    device_logs::say(&format!("web: bundle {} kept for the next time the window opens", b.commit));
     *WAITING.lock().unwrap() = Some(Arc::new(Served::from(b)));
     Ok(())
 }
@@ -266,7 +266,7 @@ pub fn reopened(app: &tauri::AppHandle) {
         }
     }
     let Some(next) = WAITING.lock().unwrap().take() else { return };
-    one::logs::say(&format!("web: serving the bundle of {}", next.commit));
+    device_logs::say(&format!("web: serving the bundle of {}", next.commit));
     *SERVED.write().unwrap() = Some(next);
     STARTED.store(false, Ordering::Relaxed);
     crate::app().page.store(false, Ordering::Relaxed);
@@ -293,7 +293,7 @@ pub fn watch(app: tauri::AppHandle) {
             return;
         }
         let Some(failed) = SERVED.read().unwrap().clone() else { return };
-        one::logs::say(&format!("web: the page of bundle {} didn't start; going back", failed.commit));
+        device_logs::say(&format!("web: the page of bundle {} didn't start; going back", failed.commit));
         let _ = std::fs::write(folder(&data).join(format!("{}.bad", failed.commit)), "");
         let _ = std::fs::remove_file(folder(&data).join(format!("{}.bundle", failed.commit)));
         let (b, _) = best(&data);

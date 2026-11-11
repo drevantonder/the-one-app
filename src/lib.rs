@@ -36,7 +36,6 @@ pub mod git_wire;
 pub mod watchdog;
 pub mod load;
 pub mod insights;
-pub mod logs;
 #[cfg(not(target_family = "wasm"))]
 pub mod loopback;
 #[cfg(feature = "node")]

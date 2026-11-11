@@ -86,13 +86,13 @@ pub fn start(app: &tauri::App) {
         // Off the main thread: a download, and launchctl, take seconds.
         std::thread::spawn(move || {
             if let Err(e) = set_up(&address) {
-                one::logs::say(&format!("setting up {}: {e}", custom_build::config::CLI));
+                device_logs::say(&format!("setting up {}: {e}", custom_build::config::CLI));
             }
         });
     }
     match app_menu(app.handle()) {
         Ok(menu) => drop(app.set_menu(menu)),
-        Err(e) => one::logs::say(&format!("the app's menu: {e}")),
+        Err(e) => device_logs::say(&format!("the app's menu: {e}")),
     }
     app.on_menu_event(|_, e| match e.id().as_ref() {
         "sidebar" | "join" => {
@@ -192,7 +192,7 @@ pub fn set_up(address: &str) -> Result<(), String> {
             let _ = std::fs::remove_file(bin.join(&name));
             std::os::unix::fs::symlink(cli, bin.join(name)).map_err(|e| e.to_string())?;
         }
-        one::logs::say(&format!("set up {} from {address}", program.display()));
+        device_logs::say(&format!("set up {} from {address}", program.display()));
     }
     let uid = unsafe { getuid() };
     // The launch agent the app carried before, by its id: its job and its record in Login Items go.

@@ -220,7 +220,7 @@ impl Service {
                         let mut said = tokio::io::BufReader::new(&mut said);
                         while tokio::io::AsyncBufReadExt::read_line(&mut said, &mut line).await.is_ok_and(|n| n > 0) {
                             eprint!("{line}");
-                            crate::logs::record(&line);
+                            ::device_logs::record(&line);
                             line.clear();
                         }
                     });
@@ -746,8 +746,8 @@ fn die_with_oned() -> Result<()> {
 pub fn run(name: &str, runtime: &str) -> Result<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into());
     // What it and its program say is kept too, for `one logs --service <name>`.
-    crate::logs::keep(name);
-    let _ = tracing_subscriber::fmt().with_writer(crate::logs::Tee).with_env_filter(filter).try_init();
+    ::device_logs::keep(name);
+    let _ = tracing_subscriber::fmt().with_writer(::device_logs::Tee).with_env_filter(filter).try_init();
     let dir = folder(name);
     std::fs::create_dir_all(&dir)?;
     die_with_oned()?;
@@ -943,10 +943,10 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
     command.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     let mut child = command.spawn().with_context(|| format!("starting {}", program.display()))?;
     if let Some(out) = child.stdout.take() {
-        crate::logs::tee(out);
+        ::device_logs::tee(out);
     }
     if let Some(err) = child.stderr.take() {
-        crate::logs::tee(err);
+        ::device_logs::tee(err);
     }
     Ok(Running::Child(child))
 }

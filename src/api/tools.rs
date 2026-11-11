@@ -89,8 +89,7 @@ mod tests {
             let folder = if matches!(feature.name, "add" | "remove") { "app".to_string() } else { feature.name.replace('-', "_") };
             let (source, queue) = served.entry(folder.clone()).or_insert_with(|| {
                 // A feature's runtime crate (`<feature>/runtime/src/tools.rs`), or one whose runtime half is still this program's.
-                let own = root.join(feature.name).join("runtime/src/tools.rs");
-                let source = std::fs::read_to_string(&own).or_else(|_| std::fs::read_to_string(root.join("src").join(&folder).join("tools.rs"))).unwrap();
+                let source = runtime_tools(root, feature.name).unwrap_or_else(|| std::fs::read_to_string(root.join("src").join(&folder).join("tools.rs")).unwrap());
                 let queue = source.split("serves!(").skip(1).map(|s| s.split(')').next().unwrap().rsplit("::").next().unwrap().to_string()).collect();
                 (source, queue)
             });
@@ -105,6 +104,14 @@ mod tests {
             }
         }
         assert!(served.values().all(|(_, queue)| queue.is_empty()), "a tool for each serves!");
+    }
+
+    /// The `runtime/src/tools.rs` of the folder whose runtime registers `feature` (`Runs::named`), whatever the folder is called.
+    fn runtime_tools(root: &std::path::Path, feature: &str) -> Option<String> {
+        std::fs::read_dir(root).ok()?.flatten().find_map(|folder| {
+            let runs = std::fs::read_to_string(folder.path().join("runtime/src/lib.rs")).ok()?;
+            runs.contains(&format!("Runs::named(\"{feature}\")")).then(|| std::fs::read_to_string(folder.path().join("runtime/src/tools.rs")).ok())?
+        })
     }
 
     /// The inputs `f` reads in `source`, and the functions of `source` it hands its input to read.

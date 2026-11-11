@@ -44,7 +44,7 @@ pub fn set_up(address: &str) -> Result<(), String> {
             let _ = std::fs::remove_file(bin.join(&name));
             std::os::unix::fs::symlink(cli, bin.join(name)).map_err(|e| e.to_string())?;
         }
-        one::logs::say(&format!("set up {} from {address}", program.display()));
+        device_logs::say(&format!("set up {} from {address}", program.display()));
     }
     // A throwaway network's oned is a unit of its own beside the user's real one, named for its home.
     let unit = match throwaway {
@@ -99,7 +99,7 @@ pub fn set_login(on: bool) {
 pub fn start(app: &tauri::App) {
     super::desktop::start(app);
     if let Err(e) = launcher(app) {
-        one::logs::say(&format!("the launcher's entry: {e}"));
+        device_logs::say(&format!("the launcher's entry: {e}"));
     }
 }
 

@@ -17,7 +17,6 @@ use ::scope::rank::CLOUDFLARE;
 use ::scope::scopes;
 use ::key::hex;
 use crate::latest::{Latest, Thing, wanted};
-use crate::logs;
 
 use super::Node;
 use ::custom_build::now_ms;
@@ -68,8 +67,8 @@ impl Node {
 /// if who signed it may ask it, said in this program's log either way. A computer's onet hears its device's.
 pub fn heard(who: &scopes::ScopeDb, me: &::key::Key, asked: &Value) {
     match who_asked(who, me, asked).and_then(|(by, ask)| Ok((by, ask.start()?, ask))) {
-        Ok((by, (), ask)) => logs::say(&format!("asked by {by}: starting {CLI} {}", ask.command().join(" "))),
-        Err(err) => logs::say(&format!("an ask to update wasn't taken: {err:#}")),
+        Ok((by, (), ask)) => ::device_logs::say(&format!("asked by {by}: starting {CLI} {}", ask.command().join(" "))),
+        Err(err) => ::device_logs::say(&format!("an ask to update wasn't taken: {err:#}")),
     }
 }
 
@@ -112,8 +111,8 @@ impl Ask {
         let words = self.command();
         let started = platform::os::named(CLI)?.args(words).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
         std::thread::spawn(move || match started.wait_with_output() {
-            Ok(out) => logs::say(&format!("{CLI} {}: {}{}", words.join(" "), String::from_utf8_lossy(&out.stdout).trim(), String::from_utf8_lossy(&out.stderr).trim())),
-            Err(err) => logs::say(&format!("{CLI} {}: {err}", words.join(" "))),
+            Ok(out) => ::device_logs::say(&format!("{CLI} {}: {}{}", words.join(" "), String::from_utf8_lossy(&out.stdout).trim(), String::from_utf8_lossy(&out.stderr).trim())),
+            Err(err) => ::device_logs::say(&format!("{CLI} {}: {err}", words.join(" "))),
         });
         Ok(())
     }

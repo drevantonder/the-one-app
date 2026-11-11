@@ -1,0 +1,17 @@
+# What the app runtime does for Device logs: reads a device's log for whoever asked, on that device.
+[package]
+name = "device-logs-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+device-logs = { path = ".." }
+api = { path = "../../api" }
+key = { path = "../../key" }
+anyhow = "1"
+serde_json = "1"

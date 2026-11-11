@@ -645,7 +645,7 @@ impl Kept {
         }
     }
 
-    /// How its log is read: onet's is its own, and the app runtime's the node's (`logs::NODE`).
+    /// How its log is read: onet's is its own, and the app runtime's the node's (`device_logs::NODE`).
     fn log(&self) -> &str {
         if self.name == ::custom_build::programs::onet() { " --service onet" } else { "" }
     }
@@ -666,9 +666,9 @@ async fn serve() -> Result<()> {
         platform::os::children_end_with_me()?;
         platform::os::remove_replaced(&platform::this_program()?);
     }
-    crate::logs::keep("oned");
+    ::device_logs::keep("oned");
     tracing_subscriber::fmt()
-        .with_writer(crate::logs::Tee)
+        .with_writer(::device_logs::Tee)
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
     let dir = platform::home();

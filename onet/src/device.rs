@@ -89,7 +89,7 @@ pub struct Device {
     /// The last answer of each call that only reads, for its app's screens (`kept`): a phone's and a computer's onet
     /// keep them (`keeping`).
     answers: Option<Answers<Files>>,
-    /// Where it keeps its log (`one::logs`), which a node asking for it is answered from.
+    /// Where it keeps its log (`device_logs`), which a node asking for it is answered from.
     logs: Option<PathBuf>,
 }
 
@@ -160,7 +160,7 @@ impl Device {
         }
     }
 
-    /// Answers a node that asks for its log, from the log kept in `dir` (`one::logs::keep_in`).
+    /// Answers a node that asks for its log, from the log kept in `dir` (`device_logs::keep_in`).
     pub fn logging(mut self, dir: &std::path::Path) -> Device {
         self.logs = Some(dir.to_path_buf());
         self
@@ -265,7 +265,7 @@ impl Device {
             _ => Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?,
         };
         if let Some(dir) = self.logs.clone() {
-            client.answer_with(std::sync::Arc::new(move |ask| one::logs::answer(&dir, &ask)));
+            client.answer_with(std::sync::Arc::new(move |ask| device_logs::answer(&dir, &ask)));
         }
         client.set_ranks(&self.keyring.ranks())?;
         client.set_wakes(self.keyring.cloudflare_node())?;

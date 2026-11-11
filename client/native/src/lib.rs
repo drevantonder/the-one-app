@@ -245,7 +245,7 @@ async fn node(reach: &Reach, method: &str, path: &str, body: Option<Value>) -> R
 async fn widgets_changed(reach: &Reach) {
     let said = widgets::refresh(reach, &platform::widgets_dir()).await;
     if let Err(e) = &said {
-        one::logs::say(&format!("widgets: {e}"));
+        device_logs::say(&format!("widgets: {e}"));
     }
     if let Some(a) = APP.get() {
         bundle::own_client_behind(&a.data, said.as_ref().err().map(String::as_str));
@@ -311,7 +311,7 @@ async fn leave_own_key() {
         let device = client(&a.data, &address, &id, secret);
         let _ = tokio::time::timeout(Duration::from_secs(30), device.sign_out()).await;
         secrets::forget_device(&id);
-        one::logs::say("this window's own key left: the computer's is its only one");
+        device_logs::say("this window's own key left: the computer's is its only one");
     }
     if let Ok(signing) = a.sign_in() {
         let _ = tauri::async_runtime::spawn_blocking(move || signing.sign_out()).await;
@@ -701,7 +701,7 @@ fn joined() {
                 redraw_panel();
             }
             Err(e) => {
-                one::logs::say(&format!("this app's own client didn't start: {e}"));
+                device_logs::say(&format!("this app's own client didn't start: {e}"));
                 bundle::own_client_behind(&a.data, Some(&e.to_string()));
             }
         }
@@ -896,7 +896,7 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
 /// agent reads through a node (`one logs <device>`). The log's own caps and filters keep it small and free of what's secret.
 #[tauri::command]
 fn log(text: String) {
-    one::logs::record(&format!("page: {text}"));
+    device_logs::record(&format!("page: {text}"));
 }
 
 /// A phone's haptic: "selection" (a press), "medium" (a long press), "success" or "error"; elsewhere, nothing.
@@ -1108,13 +1108,13 @@ pub fn run() {
         })
         .setup(|app| {
             let data = platform::data(app)?;
-            one::logs::keep_in(&data, one::logs::CLIENT);
+            device_logs::keep_in(&data, device_logs::CLIENT);
             let earlier = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |info| {
-                one::logs::say(&format!("panic: {info}"));
+                device_logs::say(&format!("panic: {info}"));
                 earlier(info)
             }));
-            one::logs::say(&format!("{} {} started on {}", ::custom_build::config::NAME, env!("CARGO_PKG_VERSION"), device_name()));
+            device_logs::say(&format!("{} {} started on {}", ::custom_build::config::NAME, env!("CARGO_PKG_VERSION"), device_name()));
             #[cfg(debug_assertions)]
             if let Some(port) = env("CONTROL").and_then(|p| p.parse().ok()) {
                 control(port);
@@ -1164,7 +1164,7 @@ pub fn run() {
                         tauri::webview::PageLoadEvent::Started => "started",
                         tauri::webview::PageLoadEvent::Finished => "finished",
                     };
-                    one::logs::record(&format!("page {event} loading {}", load.url()));
+                    device_logs::record(&format!("page {event} loading {}", load.url()));
                 })
                 // Anything that would take the page away goes to the browser.
                 .on_navigation(|u| {
