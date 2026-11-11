@@ -456,7 +456,9 @@ impl Device {
     }
 
     /// Never answers while the relay lets this device in; once it doesn't, it's `refused`. A request that's slow may be
-    /// one a device taken out can't be answered, which would otherwise wait out every node's time.
+    /// one a device taken out can't be answered, which would otherwise wait out every node's time: asked once it's slow,
+    /// then only now and then, as an agent's tool call can run for minutes and each ask is a request to the network's
+    /// address.
     async fn watch(&self) -> Result<Response, Error> {
         let mut wait = 3;
         loop {
@@ -464,7 +466,7 @@ impl Device {
             if !self.let_in().await {
                 return Err(refused());
             }
-            wait = 5;
+            wait = 60;
         }
     }
 
