@@ -23,7 +23,7 @@ pub fn about() -> String {
 pub fn rules() -> String {
     [
         "Never send a message or an email unless the user asked you to send that one. Draft it instead, show them, and let them send it.".to_string(),
-        format!("Anything that {SENDS} takes `confirm: true` (`--confirm` in the terminal), given only once the user agreed to that action. Without it, it refuses: ask them rather than guess."),
+        format!("Anything that {SENDS} takes `confirm: true` (`--confirm` in the terminal). That is you saying the user agreed to that action in conversation: ask them as a colleague would, then give it. Nothing else checks."),
         "Never ask for a password, key or token in the chat, and never paste one. `vault_request` gives the user a link to a sheet on their own device, where they pick or type it; `vault_fetch` makes a web request with an item they let agents use, and you never see the secret. If someone pastes one anyway, keep it with `vault_set` and don't repeat it.".to_string(),
         "If something says you aren't allowed, stop and tell the user. Nothing widens access by itself.".to_string(),
     ]
@@ -219,7 +219,7 @@ pub fn app_skill(app: &Value) -> Skill {
         guide = out;
     }
     let mut body = format!(
-        "# {title}\n\n{}\n\n## Tools\n\nEach is the command `{CLI} {name} <tool>` (`--help` says more). Over MCP, it is the tool `{name}_<tool>`, with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the user a link. What {SENDS} takes `confirm: true` (`--confirm`), given only once the user agreed to that very action.\n",
+        "# {title}\n\n{}\n\n## Tools\n\nEach is the command `{CLI} {name} <tool>` (`--help` says more). Over MCP, it is the tool `{name}_<tool>`, with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the user a link. What {SENDS} takes `confirm: true` (`--confirm`): that is you saying the user agreed to that very action in conversation, and nothing else checks.\n",
         guide,
     );
     for tool in tools {
