@@ -40,4 +40,4 @@ export function useAddress() {
   return { address: (repo) => `${base}${repo}.git`, mine }
 }
 
-export const where = `On any computer where you’ve run ${one.config?.cli || "one"} sign-in`
+export const where = "On any of your computers"

@@ -23,7 +23,7 @@ function D(t) {
 	}), n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 }
 var O = (e) => one.ago(Date.parse(e), { long: !0 }), k = (e) => String(e || "").slice(0, 7), A = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, re = (e, t) => one.open(e, t), j = "<address>/repos/", M = "<you>";
-one.call("_address").then((e) => (j = e?.base || j, M = e?.handle || M), () => {}), `${one.config?.cli || "one"}`;
+one.call("_address").then((e) => (j = e?.base || j, M = e?.handle || M), () => {});
 function ie(t) {
 	let n = e(14), { add: r, del: i, className: a } = t, o;
 	n[0] === a ? o = n[1] : (o = y("whitespace-nowrap tabular-nums", a), n[0] = a, n[1] = o);

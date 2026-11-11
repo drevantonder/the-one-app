@@ -53,16 +53,19 @@ impl Runtime {
     }
 
     /// `method` of `path` asked of the runtime, as this computer's own program, with `body`: → its status, headers and
-    /// body. What it answers before this computer's onet reaches its network (`Onet::device`).
+    /// body; again while it starts again (`one::loopback`). What it answers before this computer's onet reaches its
+    /// network (`Onet::device`).
     async fn ask(&self, method: String, path: String, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<(u16, Vec<(String, String)>, Vec<u8>)> {
         let (url, token) = (format!("http://{}{path}", self.at), one::api::local_token(&self.folder).context("this computer's own app runtime hasn't started yet")?);
         tokio::task::spawn_blocking(move || {
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-            let mut request = ureq::http::Request::builder().method(method.as_str()).uri(&url).header(one::protocol::header::LOCAL_TOKEN, token);
-            for (name, value) in &headers {
-                request = request.header(name, value);
-            }
-            let mut answer = agent.run(request.body(body)?)?;
+            let mut answer = one::loopback::while_refused(|| {
+                let mut request = ureq::http::Request::builder().method(method.as_str()).uri(&url).header(one::protocol::header::LOCAL_TOKEN, &token);
+                for (name, value) in &headers {
+                    request = request.header(name, value);
+                }
+                agent.run(request.body(body.clone())?)
+            })?;
             let headers = answer.headers().iter().filter_map(|(n, v)| Some((n.to_string(), v.to_str().ok()?.to_string()))).collect();
             Ok((answer.status().as_u16(), headers, answer.body_mut().with_config().limit(64 << 20).read_to_vec()?))
         })

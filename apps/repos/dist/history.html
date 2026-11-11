@@ -23,7 +23,7 @@ function F(t) {
 	}), n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 }
 var I = () => n(P) >= 640, L = 1100, R = () => n(P) >= L, z = (e) => one.ago(Date.parse(e), { long: !0 }), B = (e) => String(e || "").slice(0, 7), ee = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, V = (e) => e.branch || e.sha, H = (e, t) => one.open(e, t), U = "<address>/repos/", W = "<you>";
-one.call("_address").then((e) => (U = e?.base || U, W = e?.handle || W), () => {}), `${one.config?.cli || "one"}`;
+one.call("_address").then((e) => (U = e?.base || U, W = e?.handle || W), () => {});
 function te(t) {
 	let n = e(14), { add: r, del: i, className: a } = t, o;
 	n[0] === a ? o = n[1] : (o = D("whitespace-nowrap tabular-nums", a), n[0] = a, n[1] = o);

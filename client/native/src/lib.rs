@@ -386,8 +386,8 @@ fn signed_in(stands: Option<&Value>) -> Option<String> {
 }
 
 /// Who and where this is: the custom build's name and CLI, the address (if one's given), whether someone's signed in
-/// here and who.
-#[tauri::command]
+/// here and who. Off the main thread, as a computer's onet starting again is waited for.
+#[tauri::command(async)]
 fn native() -> Value {
     let a = app();
     #[cfg(desktop)]
@@ -767,8 +767,8 @@ fn cancel(id: u64) {
     }
 }
 
-/// What `app`'s `tool` answered last for `input` here, if it only reads (`Device::kept`): `{ answer, at }`, or null.
-/// A computer's window keeps none: its onet answers at once, on the computer itself.
+/// What `app`'s `tool` answered last for `input` here, if it only reads (`Device::kept`): `{ answer, at }`, or null. A
+/// computer's onet keeps them, for every window of it (`/api/kept`).
 #[tauri::command]
 async fn kept(app: String, tool: String, input: Value) -> Option<Value> {
     #[cfg(mobile)]
@@ -777,13 +777,11 @@ async fn kept(app: String, tool: String, input: Value) -> Option<Value> {
         Some(json!({ "answer": serde_json::from_slice::<Value>(&answer).ok()?, "at": at }))
     }
     #[cfg(desktop)]
-    {
-        let _ = (app, tool, input);
-        None
-    }
+    here::asked("/api/kept", Some(json!({ "app": app, "tool": tool, "input": input })), 5).await.ok().filter(|kept| !kept.is_null())
 }
 
-/// Renews its user's app schedules of `app`, which they just used (`Device::renew_app_schedules`).
+/// Renews its user's app schedules of `app`, which they just used (`Device::renew_app_schedules`). A computer's onet
+/// renews them itself, as any of its programs calls the app.
 #[tauri::command]
 async fn renew(app: String) {
     #[cfg(mobile)]

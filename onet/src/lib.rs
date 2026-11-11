@@ -437,7 +437,7 @@ impl Client {
         let mut why = unsent("there's no node to ask");
         let mut tries = Some(Trace { start: Instant::now(), tries: Vec::new() });
         let traces = |tries: &mut Option<Trace>, node: Option<serde_json::Value>| tries.as_mut().map(|t| serde_json::json!({ "tries": std::mem::take(&mut t.tries), "node": node }));
-        let (mut skipped, mut fresh, mut only, mut followed, mut reconnected) = (Vec::new(), Vec::new(), None::<Vec<PublicKey>>, 0, false);
+        let (mut skipped, mut fresh, mut only, mut followed, mut reconnected, mut asked_local_again) = (Vec::new(), Vec::new(), None::<Vec<PublicKey>>, 0, false, false);
         loop {
             let nodes: Vec<PublicKey> = only.clone().unwrap_or_else(|| self.0.nodes.lock().unwrap().clone()).into_iter().filter(|n| !skipped.contains(n)).collect();
             if nodes.is_empty() {
@@ -454,13 +454,19 @@ impl Client {
                         return Ok(response);
                     }
                     Err(err) => {
-                        if let Ok(key) = PublicKey::from_bytes(&local.key) {
-                            tried(&mut tries, &key, began, failure(&err), None);
-                            skipped.push(key);
+                        let key = PublicKey::from_bytes(&local.key).ok();
+                        if let Some(key) = &key {
+                            tried(&mut tries, key, began, failure(&err), None);
                         }
-                        if err.sent {
+                        if err.sent && !again {
                             return Err(Error { trace: traces(&mut tries, None), ..err });
                         }
+                        // A GET lost as it stopped is asked of it once more, as it starts again.
+                        if err.sent && !asked_local_again {
+                            (asked_local_again, why) = (true, err);
+                            continue;
+                        }
+                        skipped.extend(key);
                         why = err;
                         continue;
                     }
@@ -543,7 +549,14 @@ impl Client {
         let token = (local.token)().ok_or_else(|| unsent("this device's own runtime hasn't started here yet"))?;
         headers.push((header::LOCAL_TOKEN.into(), token));
         let head = local_head(&req.method, &req.path, &headers, req.body.len()?)?;
-        let mut stream = tokio::net::TcpStream::connect(&local.addr).await.map_err(|err| unsent(format!("this device's own runtime didn't answer: {err}")))?;
+        // Waited for while it starts again (`one::loopback`): nothing is sent until it's connected.
+        let until = Instant::now() + one::loopback::BACK_WITHIN;
+        let mut stream = loop {
+            match tokio::net::TcpStream::connect(&local.addr).await {
+                Err(err) if one::loopback::refused(&err) && Instant::now() < until => tokio::time::sleep(one::loopback::EVERY).await,
+                connected => break connected.map_err(|err| unsent(format!("this device's own runtime didn't answer: {err}")))?,
+            }
+        };
         let sending = async {
             stream.write_all(&head).await?;
             match &req.body {

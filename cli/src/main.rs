@@ -215,18 +215,32 @@ fn connection(node: &Client) -> String {
     format!("You're {} in {network}, on {device}{ready}.", state.looking())
 }
 
-/// How the CLI asks this machine's node, as one of its own programs.
+/// How the CLI asks this machine's onet, as one of its own programs: again while it starts again (`one::loopback`),
+/// once it has run here, which made its token.
 struct Http;
 
 impl one::api::client::Via for Http {
     fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<std::time::Duration>) -> Result<one::api::client::Answer> {
-        let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", api::addr()));
-        for (name, value) in headers {
-            req = req.header(*name, *value);
-        }
-        let agent = api::agent();
-        let req = agent.configure_request(req.body(body.unwrap_or_default())?).timeout_global(wait).build();
-        let resp = agent.run(req).map_err(unreached)?;
+        let body = body.unwrap_or_default();
+        let ask = || {
+            let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", api::addr()));
+            for (name, value) in headers {
+                req = req.header(*name, *value);
+            }
+            let agent = api::agent();
+            let req = agent.configure_request(req.body(body.clone())?).timeout_global(wait).build();
+            agent.run(req)
+        };
+        let asked = || if api::local_token(&one::home()).is_some() { one::loopback::while_refused(&ask) } else { ask() };
+        let resp = match asked() {
+            Ok(resp) => resp,
+            Err(err) if one::loopback::lost(&err) => {
+                let apps = || self.send("GET", one::protocol::path::APPS, &[], None, None).ok().and_then(|a| serde_json::from_reader(a.body).ok());
+                anyhow::ensure!(one::loopback::reads(method, path, &body, apps), "{}", one::loopback::lost_write());
+                asked().map_err(unreached)?
+            }
+            Err(err) => return Err(unreached(err)),
+        };
         let trace = resp.headers().get(one::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
         Ok(one::api::client::Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
     }

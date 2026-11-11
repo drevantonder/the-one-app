@@ -112,11 +112,14 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
             }
             r.send(ureq::SendBody::from_owned_reader(Fed { sent, part: Bytes::new() }))
         } else {
-            let mut r = one::api::agent().get(&url);
-            for (n, v) in &headers {
-                r = r.header(n, v);
-            }
-            r.call()
+            // What git asks first: again while onet starts again (`one::loopback`).
+            one::loopback::while_refused(|| {
+                let mut r = one::api::agent().get(&url);
+                for (n, v) in &headers {
+                    r = r.header(n, v);
+                }
+                r.call()
+            })
         };
         let mut resp = match asked {
             Ok(resp) => resp,

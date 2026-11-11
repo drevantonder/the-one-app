@@ -1,8 +1,8 @@
 //! The last answer of each call an app's screens make that only reads (`reads: true`), for bridge.js's `kept`: a page
 //! opened before shows at once while it asks again. Each client keeps them sealed where it keeps things (`Shelf`), for
-//! its user alone, and forgets them as it signs out or is taken out: a native app as files in its folder, sealed under
-//! a key from the device's own (`keys::answers_key`); a browser in IndexedDB, under a WebCrypto key of its own that
-//! can't be read (cloudflare/web/net-worker.js).
+//! its user alone, and forgets them as it signs out or is taken out: a phone's app and a computer's onet (for its
+//! windows, `/api/kept`) as files in its folder, sealed under a key from the device's own (`keys::answers_key`); a
+//! browser in IndexedDB, under a WebCrypto key of its own that can't be read (cloudflare/web/net-worker.js).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -179,10 +179,10 @@ mod tests {
         }
 
         assert!(Answers::new(Files::new(&dir, &SigningKey::from_bytes(&sam))).kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).await.is_none());
-        // Only a native app's device keeps them; once it starts again, before it's read the apps, it finds them, and once
-        // it signs out, they're gone.
-        let cli = Device::new(andre, "https://one.invalid", dir.to_str().unwrap());
-        assert!(cli.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).await.is_none());
+        // Only a device that keeps them (a phone's, a computer's onet) has them; once it starts again, before it's read the
+        // apps, it finds them, and once it signs out, they're gone.
+        let keeps_none = Device::new(andre, "https://one.invalid", dir.to_str().unwrap());
+        assert!(keeps_none.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).await.is_none());
         let app = Device::new(andre, "https://one.invalid", dir.to_str().unwrap()).keeping();
         assert!(app.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).await.is_some());
         app.sign_out().await;

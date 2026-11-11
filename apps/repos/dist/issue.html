@@ -23,7 +23,7 @@ function D(t) {
 	}), n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 }
 var O = (e) => one.ago(Date.parse(e), { long: !0 }), k = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, A = (e, t) => one.open(e, t), j = "<address>/repos/", M = "<you>";
-one.call("_address").then((e) => (j = e?.base || j, M = e?.handle || M), () => {}), `${one.config?.cli || "one"}`;
+one.call("_address").then((e) => (j = e?.base || j, M = e?.handle || M), () => {});
 function N(t) {
 	let n = e(9), { l: r, className: i } = t, a = /^[0-9a-f]{6}$/i.test(r.color) ? r.color : "ededed", [o, s, c] = [
 		0,

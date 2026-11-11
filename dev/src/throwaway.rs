@@ -171,7 +171,8 @@ pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
 }
 
 /// `update`, in the throwaway network: nothing supervises its oned, so what systemd or launchd does for a device's, this does
-/// here, starting it again unless it runs the program's build already: its oned may have taken it by itself first.
+/// here, starting it again unless it runs the program's build already (its oned may have taken it by itself first): once
+/// the oned asked to stop has stopped its onet and app runtime and gone, on the same address, its Workers left running.
 fn update(dir: &Path, addr: &str) -> Result<()> {
     let program = network::program(dir)?;
     let mut command = std::process::Command::new(&program);
@@ -182,10 +183,17 @@ fn update(dir: &Path, addr: &str) -> Result<()> {
     }
     let now = Version::of(&program).context("ask the throwaway network's program what it is")?;
     let runs = std::fs::read_to_string(dir.join(one::update::RUNNING)).unwrap_or_default();
-    if runs.trim() != now.commit || running(dir).is_none() {
-        start(dir)?;
+    if runs.trim() == now.commit && running(dir).is_some() {
+        return Ok(());
     }
-    Ok(())
+    let oned = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse::<i32>().ok());
+    let started = std::time::Instant::now();
+    // It stops onet and its app runtime first, ten seconds each at most; nothing says when it's gone.
+    while oned.is_some_and(|pid| unsafe { libc::kill(pid, 0) } == 0) {
+        anyhow::ensure!(started.elapsed() < std::time::Duration::from_secs(30), "the throwaway network's oned didn't stop: node.log says why");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    network::spawn_node(dir, Some(addr)).map(drop)
 }
 
 fn say_where(dir: &Path, addr: &str) -> Result<()> {

@@ -282,14 +282,15 @@ pub async fn serve(listen: &str) -> Result<()> {
         .init();
     crate::watchdog::started();
     // Asked to stop, even while it starts: its workerd first, then at once, rather than once every blocking task
-    // ends, which a stuck request would hold up.
+    // ends, which a stuck request would hold up. Its endpoint is closed, so other devices connect at once to the one
+    // oned starts next.
     let stop = crate::os::stop_asked()?;
     let (ready_node, node_ready) = tokio::sync::oneshot::channel::<Node>();
     tokio::spawn(async move {
         stop.await;
         crate::insights::Ended::Signal.write(&crate::home());
         if let Ok(Ok(node)) = tokio::time::timeout(LAST_SAY, node_ready).await {
-            let _ = tokio::time::timeout(LAST_SAY, node.flush_insights()).await;
+            let _ = tokio::time::timeout(LAST_SAY, async { tokio::join!(node.close_net(), node.flush_insights()) }).await;
         }
         crate::app::runtime::stop_all();
         std::process::exit(0)

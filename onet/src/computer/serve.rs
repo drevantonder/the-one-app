@@ -72,13 +72,14 @@ fn refused(status: StatusCode, error: String, code: Option<&str>) -> Response {
 }
 
 /// The routes a computer's onet answers itself, which `answer` takes before passing anything on: all but those of the
-/// window's joining and pushes are its app runtime's routes too, for a node that's its own device.
+/// window's joining, pushes and kept answers are its app runtime's routes too, for a node that's its own device.
 pub const OWN: &[&str] = &[
     "/api/join",
     "/api/join/ask",
     "/api/join/wait",
     "/api/push/register",
     "/api/push/open",
+    "/api/kept",
     "/api/create",
     "/api/devices/approve-with-recovery",
     "/api/devices/recovery-key/replace",
@@ -101,6 +102,7 @@ async fn answer(State((onet, routes)): State<(Arc<Onet>, Arc<Routes>)>, req: Req
         ("POST", "/api/join/wait") => wait(&onet, req).await,
         ("POST", "/api/push/register") => register_push(&onet, req).await,
         ("POST", "/api/push/open") => open_note(&onet, req).await,
+        ("POST", "/api/kept") => kept(&onet, req).await,
         ("POST", "/api/create") => create(&onet, req).await,
         ("POST", "/api/devices/approve-with-recovery" | "/api/devices/recovery-key/replace" | "/api/devices/recovery-holders/seal") => recovery(&onet, &path, req).await,
         ("GET", "/api/holds") => Ok(held(&onet)),
@@ -243,6 +245,25 @@ async fn open_note(onet: &Onet, req: Request) -> Result<Value> {
     Ok(json!({ "note": note, "from": from }))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Kept {
+    app: String,
+    tool: String,
+    input: Value,
+}
+
+/// What a call of an app's that only reads answered last as it passed (`Device::kept`), for the window's screens to show
+/// at once while they ask again: `{ answer, at }`, or null.
+async fn kept(onet: &Onet, req: Request) -> Result<Value> {
+    let asked: Kept = body(req).await?;
+    let device = onet.device().await?;
+    Ok(match device.kept(&asked.app, &asked.tool, asked.input.to_string().as_bytes()).await {
+        Some((answer, at)) => json!({ "answer": serde_json::from_slice::<Value>(&answer)?, "at": at }),
+        None => Value::Null,
+    })
+}
+
 /// A new network, made by this device's own app runtime, which deploys its first apps: then this computer is its first
 /// device, and the runtime its.
 async fn create(onet: &Arc<Onet>, req: Request) -> Result<Value> {
@@ -373,15 +394,25 @@ async fn pass_on(onet: &Arc<Onet>, routes: &Routes, req: Request) -> Response {
     if routes.who(&path) == Who::ThisMachine && !device.local().is_some() {
         return refused(StatusCode::FORBIDDEN, format!("only this computer's own app runtime answers {path}, and it isn't running here"), None);
     }
-    let asked = req.uri().path_and_query().map_or(path, |p| p.as_str().to_string());
+    let asked = req.uri().path_and_query().map_or_else(|| path.clone(), |p| p.as_str().to_string());
     let headers: Vec<(String, String)> = req.headers().iter().filter(|(n, _)| !OWN_HEADERS.contains(&n.as_str())).filter_map(|(n, v)| Some((n.to_string(), v.to_str().ok()?.to_string()))).collect();
     let spooled = match Spooled::read(req.into_body()).await {
         Ok(spooled) => spooled,
         Err(err) => return said(StatusCode::BAD_REQUEST, &err.into()),
     };
+    let called = match &spooled {
+        Spooled::Bytes(sent) if path == one::protocol::path::CALL => serde_json::from_slice::<Value>(sent).ok().and_then(|c| c["app"].as_str().map(str::to_string)),
+        _ => None,
+    };
     let fetched = device.fetch(&method, &asked, headers, spooled.sent()).await;
     drop(spooled);
     let response = match fetched {
+        // An app called is its user using it: their app schedules of it are renewed, as a screen's call does elsewhere.
+        Ok(response) if response.status == 200 && let Some(app) = called => {
+            let device = device.clone();
+            tokio::spawn(async move { device.renew_app_schedules(&app).await });
+            response
+        }
         Ok(response) => response,
         Err(err) if err.not_let_in => return refused(StatusCode::FORBIDDEN, format!("{err}"), Some(code::NOT_LET_IN)),
         Err(err) => return refused(StatusCode::BAD_GATEWAY, format!("couldn't reach {YOURS}'s devices: {err}"), err.code.as_deref()),

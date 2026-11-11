@@ -23,7 +23,7 @@ function I(t) {
 	}), n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 }
 var L = () => n(F) >= 640, ee = 1100, te = () => n(F) >= ee, R = (e) => one.ago(Date.parse(e), { long: !0 }), ne = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, z = (e) => String(e || "").startsWith("github.com/"), re = (e, t) => one.open(e, t), B = "<address>/repos/", V = "<you>";
-one.call("_address").then((e) => (B = e?.base || B, V = e?.handle || V), () => {}), `${one.config?.cli || "one"}`;
+one.call("_address").then((e) => (B = e?.base || B, V = e?.handle || V), () => {});
 function H(t) {
 	let n = e(5), { className: r } = t, i;
 	n[0] === r ? i = n[1] : (i = O("size-4 shrink-0", r), n[0] = r, n[1] = i);

@@ -2,7 +2,8 @@
 //! its own: the device is the computer, and onet holds its one key. The window asks onet as one of the computer's own
 //! programs, on its loopback with the token in its home, as the CLI does: every request of the page, where the computer
 //! stands with a network, and asking to be let in with a sign-in made here, which names the computer's key. On a
-//! computer with no `one`, the window sets it up first (`platform::set_up`), from the network's signed record.
+//! computer with no `one`, the window sets it up first (`platform::set_up`), from the network's signed record. While
+//! oned starts onet again (an update), the window waits for it, and asks again what only reads (`one::loopback`).
 
 use std::time::Duration;
 
@@ -31,10 +32,10 @@ pub fn ask(path: &str, body: Option<Value>, secs: u64) -> Result<(u16, Value), S
     let token = token()?;
     let url = format!("http://{}{path}", addr());
     let agent = agent(secs);
-    let mut r = match body {
-        Some(body) => agent.post(url).header(one::protocol::header::LOCAL_TOKEN, token).send_json(body),
-        None => agent.get(url).header(one::protocol::header::LOCAL_TOKEN, token).call(),
-    }
+    let mut r = one::loopback::while_refused(|| match &body {
+        Some(body) => agent.post(&url).header(one::protocol::header::LOCAL_TOKEN, &token).send_json(body),
+        None => agent.get(&url).header(one::protocol::header::LOCAL_TOKEN, &token).call(),
+    })
     .map_err(|_| format!("This computer's {} isn't answering.", onet()))?;
     Ok((r.status().as_u16(), r.body_mut().read_json().unwrap_or_default()))
 }
@@ -50,7 +51,7 @@ pub async fn asked(path: &'static str, body: Option<Value>, secs: u64) -> Result
 }
 
 /// Where this computer stands with a network, as its onet says (`{ in, address, user, join, code }`); none if onet
-/// isn't answering. Blocks, for at most 2 s.
+/// isn't answering. Blocks, for at most 2 s once it answers (`one::loopback::BACK_WITHIN` while it starts again).
 pub fn stands() -> Option<Value> {
     ask("/api/join", None, 2).ok().filter(|(status, _)| *status == 200).map(|(_, out)| out)
 }
@@ -80,22 +81,32 @@ pub struct Answer {
     pub body: tokio::sync::mpsc::Receiver<Result<Vec<u8>, String>>,
 }
 
-/// A request of the page's, to onet, which answers it or passes it on as this device.
+/// A request of the page's, to onet, which answers it or passes it on as this device. One lost as onet stopped is asked
+/// again if it only reads, and else answered as failed, which the page says and never sends again.
 pub async fn fetch(method: String, path: String, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<Answer, String> {
     let (answered, answer) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
-        let sent = (|| {
-            let mut request = ureq::http::Request::builder().method(method.as_str()).uri(format!("http://{}{path}", addr())).header(one::protocol::header::LOCAL_TOKEN, token()?);
+        let token = match token() {
+            Ok(token) => token,
+            Err(e) => return drop(answered.send(Err(e))),
+        };
+        let send = || {
+            let mut request = ureq::http::Request::builder().method(method.as_str()).uri(format!("http://{}{path}", addr())).header(one::protocol::header::LOCAL_TOKEN, &token);
             for (name, value) in &headers {
                 request = request.header(name, value);
             }
-            let request = request.body(body).map_err(|e| e.to_string())?;
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-            agent.run(request).map_err(|_| format!("This computer's {} isn't answering.", onet()))
-        })();
+            agent.run(request.body(body.clone())?)
+        };
+        let apps = || ask(one::protocol::path::APPS, None, 30).ok().map(|(_, apps)| apps);
+        let sent = match one::loopback::while_refused(&send) {
+            Err(err) if one::loopback::lost(&err) && one::loopback::reads(&method, &path, &body, apps) => one::loopback::while_refused(&send),
+            Err(err) if one::loopback::lost(&err) => return drop(answered.send(Ok(failed(one::loopback::lost_write())))),
+            sent => sent,
+        };
         let response = match sent {
             Ok(response) => response,
-            Err(e) => return drop(answered.send(Err(e))),
+            Err(_) => return drop(answered.send(Err(format!("This computer's {} isn't answering.", onet())))),
         };
         let headers = response.headers().iter().filter_map(|(n, v)| Some((n.to_string(), v.to_str().ok()?.to_string()))).collect();
         let (parts, body) = tokio::sync::mpsc::channel(4);
@@ -119,4 +130,11 @@ pub async fn fetch(method: String, path: String, headers: Vec<(String, String)>,
         }
     });
     answer.await.map_err(|e| e.to_string())?
+}
+
+/// What onet would have answered had it not stopped: that it failed, saying `error`.
+fn failed(error: String) -> Answer {
+    let (part, body) = tokio::sync::mpsc::channel(1);
+    let _ = part.try_send(Ok(serde_json::json!({ "error": error }).to_string().into_bytes()));
+    Answer { status: 502, headers: vec![("content-type".into(), "application/json".into())], body }
 }

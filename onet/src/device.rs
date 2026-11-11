@@ -86,8 +86,8 @@ pub struct Device {
     order: Mutex<Vec<[u8; 32]>>,
     /// The device it's on, as its app says (`on`): signing in there again replaces this sign-in.
     on: Mutex<Option<String>>,
-    /// The last answer of each call that only reads, for its app's screens (`kept`): a native app's keeps them
-    /// (`keeping`), the CLI's doesn't.
+    /// The last answer of each call that only reads, for its app's screens (`kept`): a phone's and a computer's onet
+    /// keep them (`keeping`).
     answers: Option<Answers<Files>>,
     /// Where it keeps its log (`one::logs`), which a node asking for it is answered from.
     logs: Option<PathBuf>,
@@ -104,7 +104,7 @@ impl Device {
     /// its own app runtime at `runtime` (where it answers, and its token), which it asks before any other node.
     #[cfg(feature = "computer")]
     pub async fn on_computer(secret: [u8; 32], dir: &str, place: one::bucket::Place, address: Option<String>, runtime: Option<crate::computer::Runtime>) -> Result<Device, Error> {
-        let mut device = Device::with(secret, String::new(), dir, Reached::place(place, secret, address));
+        let mut device = Device::with(secret, String::new(), dir, Reached::place(place, secret, address)).keeping();
         device.runtime = runtime;
         device.keyring.read(&device).await?;
         let address = device.keyring.who(|db| db.setting("address")).and_then(Result::ok).flatten();

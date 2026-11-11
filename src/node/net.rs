@@ -158,6 +158,18 @@ impl Node {
         }
     }
 
+    /// Closes this device's endpoint as it stops, telling every device connected to it, which then connects to whatever
+    /// starts in its place at once, rather than waiting out this one's silence.
+    pub(super) async fn close_net(&self) {
+        if let Some((_, task)) = self.0.net.task.lock().unwrap().take() {
+            task.abort();
+        }
+        let endpoint = self.0.net.endpoint.lock().unwrap().take();
+        if let Some((_, endpoint)) = endpoint {
+            endpoint.close().await;
+        }
+    }
+
     /// Where this device's endpoint is reached now: its key, its relay and the addresses it's bound to, once it has one.
     pub fn endpoint_addr(&self) -> Option<EndpointAddr> {
         self.0.net.endpoint.lock().unwrap().as_ref().map(|(_, e)| e.addr())
