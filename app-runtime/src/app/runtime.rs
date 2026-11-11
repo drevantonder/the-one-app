@@ -1,5 +1,5 @@
 //! Apps run in workerd, Cloudflare's open-source Workers runtime. The app runtime is our wrapper around it, a program of
-//! its own (`oned apps`, `run`) that oned starts while the device's `apps` part is switched on and again if it stops: it
+//! its own (`<cli>-apps`, `run`) that oned starts while the device's `apps` part is switched on and again if it stops: it
 //! holds no key and no endpoint, and only keeps a workerd serving the config the node writes, on a port the node holds,
 //! so a call waits there while it starts again rather than being refused. Outside oned (tests), the node keeps one in a
 //! thread of its own.

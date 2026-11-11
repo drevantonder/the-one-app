@@ -142,7 +142,12 @@ pub fn is_mac(target: &str) -> bool {
 /// Whether a device running `build`, committed at `committed`, takes `thing`: a different build, and never going
 /// backwards.
 pub fn wanted(thing: &Thing, build: &str, committed: u64) -> bool {
-    thing.commit != build && !build.starts_with(&thing.commit) && !thing.commit.starts_with(build) && thing.committed >= committed
+    !same_build(&thing.commit, build) && thing.committed >= committed
+}
+
+/// Whether a commit the record names is the build `build`, which may be a shorter or longer name of it.
+pub fn same_build(commit: &str, build: &str) -> bool {
+    commit == build || build.starts_with(commit) || commit.starts_with(build)
 }
 
 fn agent(limit: Duration) -> ureq::Agent {

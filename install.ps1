@@ -17,21 +17,25 @@ $tmp = Join-Path $env:TEMP "$cli-install-$PID"
 New-Item -ItemType Directory -Force $bin, $tmp | Out-Null
 
 try {
+    # The program, and its app runtime (<cli>-apps), which <cli>d starts beside it.
     if ($Binary) {
         $program = $Binary
+        $runtime = Join-Path (Split-Path $Binary) "$cli-apps.exe"
     } else {
         # Windows' OpenSSH client checks the signature, as macOS's and Linux's do for install.sh.
         if (-not (Get-Command ssh-keygen -ErrorAction SilentlyContinue)) {
             throw "checking the download needs ssh-keygen: add Windows' OpenSSH Client, in Settings > Optional Features"
         }
-        $asset = "$cli-x86_64-pc-windows-gnu.exe"
-        $program = Join-Path $tmp $asset
-        Write-Host "Downloading $asset"
-        Invoke-WebRequest -UseBasicParsing "$url/$asset" -OutFile $program
-        Invoke-WebRequest -UseBasicParsing "$url/$asset.sig" -OutFile "$program.sig"
         Set-Content -NoNewline -Encoding ascii (Join-Path $tmp 'signers') "release namespaces=`"release`" $key"
-        cmd /c "ssh-keygen -Y verify -f `"$tmp\signers`" -I release -n release -s `"$program.sig`" < `"$program`" 2>nul" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "$asset isn't signed with the release key, so it isn't installed" }
+        $program, $runtime = foreach ($asset in "$cli-x86_64-pc-windows-gnu.exe", "$cli-apps-x86_64-pc-windows-gnu.exe") {
+            $file = Join-Path $tmp $asset
+            Write-Host "Downloading $asset"
+            Invoke-WebRequest -UseBasicParsing "$url/$asset" -OutFile $file
+            Invoke-WebRequest -UseBasicParsing "$url/$asset.sig" -OutFile "$file.sig"
+            cmd /c "ssh-keygen -Y verify -f `"$tmp\signers`" -I release -n release -s `"$file.sig`" < `"$file`" 2>nul" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "$asset isn't signed with the release key, so it isn't installed" }
+            $file
+        }
     }
 
     # A running program can't be overwritten, only renamed: what's renamed goes once nothing runs it, the next time
@@ -39,12 +43,13 @@ try {
     Stop-ScheduledTask -TaskName $oned -ErrorAction SilentlyContinue
     Get-Process -Name $oned -ErrorAction SilentlyContinue | Stop-Process -Force
     $stamp = [DateTime]::UtcNow.Ticks
-    $names = $cli, $oned, "git-remote-$cli"
+    $names = $cli, $oned, "git-remote-$cli", "$cli-apps"
     foreach ($name in $names) {
         $file = Join-Path $bin "$name.exe"
         if (Test-Path $file) { Move-Item -Force $file "$file.$stamp.old" }
     }
     Copy-Item $program (Join-Path $bin "$cli.exe")
+    if (Test-Path $runtime) { Copy-Item $runtime (Join-Path $bin "$cli-apps.exe") }
     foreach ($name in $oned, "git-remote-$cli") {
         New-Item -ItemType HardLink -Path (Join-Path $bin "$name.exe") -Target (Join-Path $bin "$cli.exe") | Out-Null
     }

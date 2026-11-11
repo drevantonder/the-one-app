@@ -101,8 +101,8 @@ fn build_release(at: &At) -> Result<PathBuf> {
     let binary = src.join("target/release/one");
     let version = Version::of(&binary).context("ask the new build what it is")?;
     // Windows' too, cross-built here. A device that can't only leaves Windows behind: Linux and Macs go out regardless.
-    let windows = timed("built Windows' program", || quietly(release().args(["--target", WINDOWS, "--bin", "one"])))
-        .map(|()| src.join("target").join(WINDOWS).join("release/one.exe"))
+    let windows = timed("built Windows' programs", || quietly(release().args(["--target", WINDOWS, "--bin", "one", "--bin", "one-apps"])))
+        .map(|()| src.join("target").join(WINDOWS).join("release"))
         .inspect_err(|err| println!("  couldn't build for Windows (rustup target add {}, and mingw-w64): {err:#}", WINDOWS))
         .ok();
     let builds = cache().join("builds");
@@ -115,7 +115,8 @@ fn build_release(at: &At) -> Result<PathBuf> {
     let out = builds.join(&version.commit);
     std::fs::create_dir_all(&out)?;
     // Beside it and moved into place, so a program running from this folder isn't written over.
-    for (made, name) in [(binary, "one"), (src.join("target/release/one-dev"), "one-dev")].into_iter().chain(windows.map(|w| (w, "one.exe"))) {
+    let windows = windows.into_iter().flat_map(|w| [(w.join("one.exe"), "one.exe"), (w.join("one-apps.exe"), "one-apps.exe")]);
+    for (made, name) in [(binary, "one"), (src.join("target/release/one-apps"), "one-apps"), (src.join("target/release/one-dev"), "one-dev")].into_iter().chain(windows) {
         std::fs::copy(&made, out.join(format!("{name}.new")))?;
         std::fs::rename(out.join(format!("{name}.new")), out.join(name))?;
     }
@@ -179,6 +180,10 @@ fn github_release(tag: &str) -> Result<()> {
     let name = format!("{CLI}-{TARGET}");
     std::fs::copy(&binary, dir.join(&name))?;
     assets.push(name);
+    // The app runtime beside it, which install.sh and install.ps1 put beside the program.
+    let runtime = format!("{CLI}-apps-{TARGET}");
+    std::fs::copy(folder.join("one-apps"), dir.join(&runtime))?;
+    assets.push(runtime);
     // state::install_line() fetches it from the latest release.
     std::fs::write(dir.join("install.sh"), include_str!("../../install.sh"))?;
     assets.push("install.sh".into());
@@ -189,6 +194,9 @@ fn github_release(tag: &str) -> Result<()> {
     {
         std::fs::copy(folder.join("one.exe"), dir.join(windows.asset()))?;
         assets.push(windows.asset());
+        let runtime = format!("{CLI}-apps-{}.exe", WINDOWS);
+        std::fs::copy(folder.join("one-apps.exe"), dir.join(&runtime))?;
+        assets.push(runtime);
     }
     // The native app for this platform (native-apps, its own workspace), which install.sh puts on a desktop.
     if cfg!(target_os = "linux") {

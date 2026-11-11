@@ -42,11 +42,15 @@ if [ "$(uname -s)" = Darwin ]; then
 	open "$HOME/Applications/$app"
 	echo "Installed ~/Applications/$app. Signing in there sets up $cli and ${cli}d, this device."
 else
+	# The program, and its app runtime (<cli>-apps), which ${cli}d starts beside it.
 	if [ $# -gt 0 ]; then
 		bin=$1 cli=$(basename "$1")
+		runtime=$(dirname "$1")/$cli-apps
 	else
 		fetch "$cli-$arch-unknown-linux-gnu"
+		fetch "$cli-apps-$arch-unknown-linux-gnu"
 		bin=$tmp/$cli-$arch-unknown-linux-gnu
+		runtime=$tmp/$cli-apps-$arch-unknown-linux-gnu
 		chmod +x "$bin"
 	fi
 	name=$("$bin" help | head -1 | cut -d: -f1)
@@ -54,6 +58,7 @@ else
 	units=/etc/systemd/system
 	if [ -d /run/systemd/system ]; then $sudo systemctl stop "${cli}d" 2>/dev/null || true; fi
 	install -m 755 "$bin" "$HOME/.local/bin/$cli"
+	if [ -e "$runtime" ]; then install -m 755 "$runtime" "$HOME/.local/bin/$cli-apps"; fi
 	ln -sf "$cli" "$HOME/.local/bin/git-remote-$cli"
 	ln -sf "$cli" "$HOME/.local/bin/${cli}d"
 	# On a desktop, the app too, started once: it puts itself in the launcher and opens at login.

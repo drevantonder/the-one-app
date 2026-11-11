@@ -33,7 +33,7 @@ pub(super) fn publish_services(src: &Path, names: &[String], key: &ssh_key::Priv
             let built = build::build_service(&src.join("apps").join(name), &commit[..12], PLATFORMS.iter(), &out)?.context("it has no service")?;
             for (platform, program) in built.made {
                 let version = Version { commit: commit.into(), target: platform.target.into(), committed };
-                build::publish(&crate::node(), &program, key, &version, Some(name)).with_context(|| format!("publish it for {}", platform.target))?;
+                build::publish_latest(&crate::node(), key, &[(oned_update::latest::Thing::service_name(name, &version.target), Some(program), version, "-".into())]).with_context(|| format!("publish it for {}", platform.target))?;
             }
             Ok(())
         };

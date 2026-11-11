@@ -7,6 +7,8 @@ edition = "2024"
 license = "MIT"
 publish = false
 autotests = false
+# Its program, src/main.rs, is cli's package's (`one-apps`), where the tests run it.
+autobins = false
 
 [lib]
 doctest = false

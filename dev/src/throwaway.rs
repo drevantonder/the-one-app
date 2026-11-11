@@ -161,13 +161,21 @@ pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
     let build = crate::program()?;
     let version = Version::of(&build).context("ask this checkout's build what it is")?;
     let (node, key) = (node_at(dir, addr), Throwaway::own_release_key(dir)?);
-    one::build::publish(&node, &build, &key, &version, None)?;
-    // The Workers and the web client too, which Cloudflare's Update in Devices takes from the record.
+    // With its app runtime, built beside it, and the Workers and the web client, which Cloudflare's Update in Devices
+    // takes from the record.
     let bundle = |files| ui::bundle::Bundle { commit: version.commit.clone(), committed: version.committed, shell: ui::web::SHELL, files };
     let (workers, web) = (dir.join("workers.bundle"), dir.join("web.bundle"));
     std::fs::write(&workers, bundle(ui::ui_folder::cloudflare()).packed()?)?;
     std::fs::write(&web, ui::bundle::signed(&key, &bundle(ui::web::with_client()).packed()?)?)?;
-    one::build::publish_latest(&node, &key, &[(oned_update::latest::Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()), (oned_update::latest::Thing::WEB.into(), Some(web), version.clone(), "-".into())])
+    use oned_update::latest::Thing;
+    let runtime = build.with_file_name(format!("one-apps{}", std::env::consts::EXE_SUFFIX));
+    let things = [
+        (Thing::node_name(&version.target), Some(build.clone()), version.clone(), "-".into()),
+        (Thing::service_name(::scope::scopes::APPS_PART, &version.target), Some(runtime), version.clone(), "-".into()),
+        (Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()),
+        (Thing::WEB.into(), Some(web), version.clone(), "-".into()),
+    ];
+    one::build::publish_latest(&node, &key, &things)
 }
 
 /// `update`, in the throwaway network: nothing supervises its oned, so what systemd or launchd does for a device's, this does

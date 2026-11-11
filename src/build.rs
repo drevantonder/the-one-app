@@ -68,23 +68,12 @@ pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item 
     Ok(Some(done))
 }
 
-/// Has the node publish the program at `path` as this node's build (`service` none) or that service's, in the record
-/// at the network's address. → what it said.
-pub fn publish(node: &::api::Client, path: &Path, key: &ssh_key::PrivateKey, version: &Version, service: Option<&str>) -> Result<Value> {
-    if version.commit.ends_with("+dirty") {
-        bail!("that build has uncommitted changes; commit, build again, then publish");
-    }
-    let name = match service {
-        Some(service) => ::oned_update::latest::Thing::service_name(service, &version.target),
-        None => ::oned_update::latest::Thing::node_name(&version.target),
-    };
-    publish_latest(node, key, &[(name, Some(path.to_path_buf()), version.clone(), "-".to_string())])?;
-    Ok(json!({ "commit": version.commit, "target": version.target }))
-}
-
 /// Puts `things`' files where devices take them, and adds them to the record at the network's address, signed with the
 /// release key: each `(name, file, version, config commit)`, with no file for what's built, not fetched (`source`).
 pub fn publish_latest(node: &::api::Client, key: &ssh_key::PrivateKey, things: &[(String, Option<PathBuf>, Version, String)]) -> Result<()> {
+    if let Some((_, _, version, _)) = things.iter().find(|(_, _, v, _)| v.commit.ends_with("+dirty")) {
+        bail!("{} has uncommitted changes; commit, build again, then publish", version.commit);
+    }
     use ::oned_update::latest::{Latest, Thing};
     let mut made = Vec::new();
     for (name, path, version, config) in things {
@@ -107,14 +96,6 @@ pub fn publish_latest(node: &::api::Client, key: &ssh_key::PrivateKey, things: &
         }
     }
     bail!("couldn't update the record: another publisher kept changing it")
-}
-
-pub fn published_said(published: &Value, service: Option<&str>) -> String {
-    let (commit, target) = (published["commit"].as_str().unwrap_or(""), published["target"].as_str().unwrap_or(""));
-    match service {
-        Some(service) => format!("Published {service} {commit} for {target}. Every device on that platform that runs it takes it."),
-        None => format!("Published {commit} for {target}. Each device on that platform takes it when Update is pressed for it."),
-    }
 }
 
 /// WebAssembly built by cargo, and the JavaScript glue `wasm-bindgen` makes for it.

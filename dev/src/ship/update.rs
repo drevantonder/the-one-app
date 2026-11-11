@@ -230,10 +230,17 @@ fn send_node(at: &At) -> Result<()> {
     };
     let binary = folder.join("one");
     let version = Version::of(&binary).context("ask the new build what it is")?;
-    println!("{}", build::published_said(&build::publish(&crate::node(), &binary, &key, &version, None)?, None));
-    if folder.join("one.exe").is_file() {
-        let windows = Version { target: oned_update::platform::WINDOWS.into(), ..version.clone() };
-        println!("{}", build::published_said(&build::publish(&crate::node(), &folder.join("one.exe"), &key, &windows, None)?, None));
+    // The program and its app runtime in one record, so a device never reads one of this build beside the other's older.
+    let mut things = Vec::new();
+    for (version, program, runtime) in [(version.clone(), "one", "one-apps"), (Version { target: oned_update::platform::WINDOWS.into(), ..version.clone() }, "one.exe", "one-apps.exe")] {
+        if folder.join(program).is_file() {
+            things.push((Thing::node_name(&version.target), Some(folder.join(program)), version.clone(), "-".to_string()));
+            things.push((Thing::service_name(::scope::scopes::APPS_PART, &version.target), Some(folder.join(runtime)), version, "-".to_string()));
+        }
+    }
+    build::publish_latest(&crate::node(), &key, &things)?;
+    for (name, _, version, _) in &things {
+        println!("Published {name} {}.", version.commit);
     }
     let here = devices().into_iter().find(|d| d["here"] == true).and_then(|d| d["name"].as_str().map(str::to_string)).context("this device isn't listed")?;
     update_here()?;

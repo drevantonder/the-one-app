@@ -14,6 +14,13 @@ name = "one"
 path = "src/main.rs"
 doctest = false
 
+# The app runtime's program (its source is app-runtime's), which oned starts as `<cli>-apps`: a program of this package
+# so the tests run it, as they run `one`. Cargo names it so whatever the custom build; publishing names it for the record.
+[[bin]]
+name = "one-apps"
+path = "../app-runtime/src/main.rs"
+doctest = false
+
 # The tests are one binary, here so they can run the program (CARGO_BIN_EXE_one) and `cargo test` builds it.
 [[test]]
 name = "main"
@@ -45,7 +52,7 @@ backups = { path = "../backups" }
 backups-runtime = { path = "../backups/runtime" }
 ui = { path = "../ui", features = ["web-bundle"] }
 one = { path = ".." }
-# The app runtime, which oned starts as this program (`oned apps --listen=`).
+# The app runtime's words for a device not in a network (`not_joined`), and which paths are an app's (git's helper).
 app-runtime = { path = "../app-runtime" }
 # `<cli>t`, this computer's onet (onet/src/computer/), is this program run by that name.
 onet = { path = "../onet", features = ["computer"] }

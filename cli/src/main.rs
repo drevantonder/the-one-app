@@ -103,18 +103,6 @@ fn main() {
     {
         ui::ui_folder::read_from(&folder);
     }
-    // `oned apps --listen=`: this device's app runtime, as oned starts it.
-    if oned::invoked()
-        && let [part, listen] = args.as_slice()
-        && part == ::scope::scopes::APPS_PART
-        && let Some(listen) = listen.strip_prefix("--listen=")
-    {
-        if let Err(err) = app_runtime::serve(listen) {
-            eprintln!("{}: {err:#}", ::custom_build::programs::oned());
-            std::process::exit(1);
-        }
-        return;
-    }
     if oned::invoked() {
         if let Err(err) = oned::run(&args) {
             eprintln!("{}: {err:#}", ::custom_build::programs::oned());

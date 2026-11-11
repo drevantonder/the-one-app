@@ -1,7 +1,7 @@
 //! oned (`<cli>d`): a computer's always-on program, this program run by that name; the `<cli>` command line runs, answers
 //! and exits. It holds no key, and is a user of its onet like any other program. It keeps two programs of its own
 //! running, starting each again when it stops: the computer's onet (`<cli>t`), which holds the device's key and answers
-//! its programs, and its app runtime (`oned apps --listen=`, `node::serve`), an endpoint of its own key that onet asks on
+//! its programs, and its app runtime (`<cli>-apps --listen=`, app-runtime/), an endpoint of its own key that onet asks on
 //! a loopback address oned gives both. It never takes a build by itself: `one update`, which Update asks of the device,
 //! replaces its program and has it exit, for its supervisor to start it again on the new one.
 //!
@@ -554,8 +554,7 @@ fn usage() -> String {
     format!("{} runs this device, or with a service's name, that service, as its oned starts it; --version says which build", ::custom_build::programs::oned())
 }
 
-/// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`, or `apps
-/// --listen=`, its app runtime). It takes only the arguments its own starts give it: any other (`--version` typed to see
+/// oned: with no part named, this device, for good (`serve`); with one, that service (`part::run`). It takes only the arguments its own starts give it: any other (`--version` typed to see
 /// the build) never starts it, which would replace the one running.
 pub fn run(args: &[String]) -> Result<()> {
     let flags: Vec<&str> = args.iter().filter(|a| a.starts_with('-')).map(String::as_str).collect();
@@ -584,17 +583,19 @@ const UNDECLARED: &str = "Its app doesnâ€™t say what it may reach, so it doesnâ€
 
 /// One of the programs oned keeps running (onet and the app runtime): started again whenever it stops.
 struct Kept {
-    /// The name it runs by, and what it is, as oned's log says it.
-    name: String,
+    /// What it is, as oned's log says it, and how `<cli> logs` reads its log.
     what: &'static str,
+    log: &'static str,
+    /// What starts it, given its arguments.
+    program: fn() -> Result<std::process::Command>,
     args: Vec<String>,
     child: Option<std::process::Child>,
     stops: Vec<Instant>,
 }
 
 impl Kept {
-    fn new(name: String, what: &'static str, args: Vec<String>) -> Kept {
-        Kept { name, what, args, child: None, stops: Vec::new() }
+    fn new(what: &'static str, log: &'static str, program: fn() -> Result<std::process::Command>, args: Vec<String>) -> Kept {
+        Kept { what, log, program, args, child: None, stops: Vec::new() }
     }
 
     /// Started if it isn't running; one that stopped is said in oned's log, and once it keeps stopping, said so.
@@ -607,25 +608,20 @@ impl Kept {
             self.stops.retain(|t| t.elapsed() < Duration::from_secs(300));
             self.stops.push(Instant::now());
             if self.stops.len() == 3 {
-                tracing::error!("{} keeps stopping: its log says why ({CLI} logs <this device>{})", self.what, self.log());
+                tracing::error!("{} keeps stopping: its log says why ({CLI} logs <this device>{})", self.what, self.log);
             }
         }
         if self.child.is_none() {
             // On Windows, closing its stdin is how it's asked to stop (`os::ask_to_stop`).
             let stdin = if cfg!(windows) { std::process::Stdio::piped() } else { std::process::Stdio::null() };
-            match platform::os::named(&self.name).and_then(|mut c| c.args(&self.args).stdin(stdin).spawn()) {
+            match (self.program)().and_then(|mut c| Ok(c.args(&self.args).stdin(stdin).spawn()?)) {
                 Ok(child) => {
                     tracing::info!("oned started {}", self.what);
                     self.child = Some(child);
                 }
-                Err(err) => tracing::warn!("couldn't start {}: {err}", self.what),
+                Err(err) => tracing::warn!("couldn't start {}: {err:#}", self.what),
             }
         }
-    }
-
-    /// How its log is read: onet's is its own, and the app runtime's the node's (`device_logs::NODE`).
-    fn log(&self) -> &str {
-        if self.name == ::custom_build::programs::onet() { " --service onet" } else { "" }
     }
 
     fn stop(&mut self) {
@@ -633,6 +629,30 @@ impl Kept {
             stop(self.what, child);
         }
     }
+}
+
+/// The app runtime's program (`<cli>-apps`, app-runtime/) of this build: the one built beside this program (`program`),
+/// else the one the record at the network's address publishes with this build (`service/apps/<target>`), fetched.
+fn runtime() -> Result<std::process::Command> {
+    use ::scope::scopes::APPS_PART;
+    let program = program(APPS_PART);
+    let this = |commit: &str| ::oned_update::latest::same_build(commit, ::custom_build::config::BUILD);
+    if !::oned_update::release::Version::of(&program).is_some_and(|v| this(&v.commit)) {
+        // Asked at most once a minute: oned starts it again every few seconds, and the address may be out of reach.
+        static ASKED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+        if ASKED.lock().unwrap().replace(Instant::now()).is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
+            bail!("no app runtime of this build ({}) is here yet", ::custom_build::config::BUILD);
+        }
+        let home = platform::home();
+        let address = ::oned_update::update::address(&home).context("this device doesn't know its network's address yet, to fetch its app runtime from")?;
+        let text = ::oned_update::latest::fetch(&address)?.with_context(|| format!("nothing has been published at {address} yet"))?;
+        let record = ::oned_update::latest::Latest::read(platform::mode::here().release_key(), &text).with_context(|| format!("the record at {address}"))?;
+        let name = ::oned_update::latest::Thing::service_name(APPS_PART, ::custom_build::config::TARGET);
+        let thing = record.get(&name).with_context(|| format!("the record at {address} has no {name}"))?;
+        anyhow::ensure!(this(&thing.commit), "the app runtime published at {address} is {}, not this build's ({}): {CLI} update takes the newest build, and its app runtime with it", thing.commit, ::custom_build::config::BUILD);
+        put(&Onet::new(home), &address, APPS_PART, &Build::Released(thing.clone()))?;
+    }
+    Ok(std::process::Command::new(program))
 }
 
 /// oned on a computer: keeps the computer's onet running, which holds its key and answers its programs, and its app
@@ -656,8 +676,8 @@ async fn serve() -> Result<()> {
     with_bucket_address(&dir)?;
     let at = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
     let kept = std::sync::Arc::new(std::sync::Mutex::new([
-        Kept::new(::custom_build::programs::onet(), "onet", vec![format!("--listen={}", ::api::local::addr()), format!("--runtime={at}")]),
-        Kept::new(::custom_build::programs::oned(), "the app runtime", vec![::scope::scopes::APPS_PART.into(), format!("--listen={at}")]),
+        Kept::new("onet", " --service onet", || Ok(platform::os::named(&::custom_build::programs::onet())?), vec![format!("--listen={}", ::api::local::addr()), format!("--runtime={at}")]),
+        Kept::new("the app runtime", "", runtime, vec![format!("--listen={at}")]),
     ]));
     keep_parts(kept.clone(), at.clone());
     let stop = platform::os::stop_asked()?;

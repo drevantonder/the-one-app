@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds what a Mac takes from the record, signed, in native-apps/target/mac/built (`<cli> publish-mac` publishes it):
 # the window, zipped (app.zip), which carries no background program; the program (<cli>, which runs as oned and onet);
+# its app runtime (<cli>-apps, published as the service `apps`);
 # each service in Rust (<cli>-<name>); and each in Swift, an app of its own holding its own permission, zipped
 # (<cli>-<name>.zip, services/sdk/mac-helpers.sh). With --release, the window is notarized too. CONFIG=path/to/config.toml
 # builds another custom build. Nothing is installed: a Mac takes what's published with `<cli> update`.
@@ -23,6 +24,8 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp target/release/one-native "$app/Contents/MacOS/$CONFIG_NAME"
 # Cargo names the program after the package, whatever the custom build.
 cp "$root/target/release/one" "$out/$CONFIG_CLI"
+# Its app runtime (app-runtime/), which oned starts beside it, published as the service `apps`.
+cp "$root/target/release/one-apps" "$out/$CONFIG_CLI-apps"
 # Its apps' services in Rust (apps/<name>/service/), which Cargo built with it.
 for m in "$root"/apps/*/service/Cargo.toml; do
 	[ -e "$m" ] || continue

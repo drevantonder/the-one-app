@@ -284,7 +284,7 @@ impl std::fmt::Debug for Node {
 /// What a node stopping waits at most for its last insights to be written: they may be lost, and stopping may not wait.
 const LAST_SAY: Duration = Duration::from_secs(3);
 
-/// `oned apps --listen=<address>`: this device's app runtime, an endpoint of its own key (`Node::runtime`), answering on
+/// `<cli>-apps --listen=<address>`: this device's app runtime, an endpoint of its own key (`Node::runtime`), answering on
 /// `address` only its device's own programs, with the token in its folder, and asking its device's key, held by the
 /// computer's onet at the API's address, for what that opens and signs. It runs its own watchdog.
 #[tokio::main]

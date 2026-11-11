@@ -991,7 +991,7 @@ async fn a_routes_answer_is_what_the_document_says() {
     assert_eq!(asked, 8);
 }
 
-/// `oned apps` as a device's app runtime, a process of its own key, its own home's.
+/// `<cli>-apps` as a device's app runtime, a process of its own key, its own home's.
 struct Runtime(std::process::Child);
 
 impl Drop for Runtime {
@@ -1060,9 +1060,8 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let at = format!("127.0.0.1:{port}");
     let log = std::fs::File::create(home.join("runtime.log")).unwrap();
-    let mut oned = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
-    std::os::unix::process::CommandExt::arg0(&mut oned, custom_build::programs::oned());
-    oned.args([::scope::scopes::APPS_PART, &format!("--listen={at}")]);
+    let mut oned = std::process::Command::new(env!("CARGO_BIN_EXE_one-apps"));
+    oned.arg(format!("--listen={at}"));
     oned.env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), &holder_at).stdout(log.try_clone().unwrap()).stderr(log);
     let _runtime = Runtime(oned.spawn().unwrap());
 
@@ -1126,19 +1125,19 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
 
     let free = || format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
     let (onet_at, runtime_at) = (free(), free());
-    let started = |name: String, args: Vec<String>, addr: &str, log: &str| {
+    let started = |mut program: std::process::Command, args: Vec<String>, addr: &str, log: &str| {
         let log = std::fs::File::create(home.join(log)).unwrap();
-        let mut program = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
-        std::os::unix::process::CommandExt::arg0(&mut program, name);
         program.args(args).env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), addr).stdout(log.try_clone().unwrap()).stderr(log);
         Runtime(program.spawn().unwrap())
     };
-    let _onet = started(onet::computer::name(), vec![format!("--listen={onet_at}"), format!("--runtime={runtime_at}")], &onet_at, "onet.log");
+    let mut onet = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
+    std::os::unix::process::CommandExt::arg0(&mut onet, onet::computer::name());
+    let _onet = started(onet, vec![format!("--listen={onet_at}"), format!("--runtime={runtime_at}")], &onet_at, "onet.log");
     let home_token = std::fs::read_to_string(home.join(api::local::LOCAL_TOKEN)).unwrap();
     let held = async || ask(&onet_at, "GET", "/api/holds", &home_token, None).await;
     polled("onet to answer", &home.join("onet.log"), async || held().await.0 == 200).await;
     assert_eq!(held().await.1["key"], ::key::hex(&k.id()), "it holds the device's key");
-    let _runtime = started(custom_build::programs::oned(), vec![::scope::scopes::APPS_PART.into(), format!("--listen={runtime_at}")], &onet_at, "runtime.log");
+    let _runtime = started(std::process::Command::new(env!("CARGO_BIN_EXE_one-apps")), vec![format!("--listen={runtime_at}")], &onet_at, "runtime.log");
     polled("the runtime to start", &home.join("runtime.log"), async || ask(&runtime_at, "GET", "/api/state", "", None).await.0 == 403).await;
     assert_eq!(ask(&runtime_at, "GET", "/api/state", &home_token, None).await.0, 403, "the runtime takes only its own token");
 
