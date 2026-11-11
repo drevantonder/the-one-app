@@ -172,9 +172,8 @@ pub(crate) async fn list(rt: &Rt, viewer: &Caller, scope: Option<&Scope>) -> Res
 /// Changes an item in `scope` for `me`: `change` gives the change (`vault::apply`) from the scope's items as they are
 /// inside the write, so two devices changing one at once lose nothing (Null: none). → the item's id. Anyone who may use
 /// the scope adds an item, sealing its secrets to the scope's Vault key, and changes those they set last; only someone
-/// who manages the scope's Vault changes another's, and never to switch on an erased app. What watches items of its
-/// kind there follows it (`watch`).
-pub(crate) async fn write_item(rt: &Rt, me: &Caller, scope: &Scope, mut change: impl FnMut(&Items) -> Result<Value> + Send) -> Result<String> {
+/// who manages the scope's Vault changes another's, and never to switch on an erased app. → the item's id and kind.
+pub(crate) async fn write_item(rt: &Rt, me: &Caller, scope: &Scope, mut change: impl FnMut(&Items) -> Result<Value> + Send) -> Result<(String, String)> {
     let (erased, manages, public, machines, scope_said) = rt.read(|r| {
         let m = r.db();
         allowed!(m.may(&me.user, "use", &scopes::object(scope)), "You don’t use {}.", r.scope_name(scope)?);
@@ -217,17 +216,18 @@ pub(crate) async fn write_item(rt: &Rt, me: &Caller, scope: &Scope, mut change: 
         tracing::debug!("global's Vault: {err:#}");
     }
     rt.emit(Event::Changed { apps: Vec::new() });
-    if !id.is_empty() {
-        saved(rt, me, scope, &kind, &id).await;
-    }
-    Ok(id)
+    Ok((id, kind))
 }
 
-/// Tells what watches items of `kind` in `scope` that `me` saved item `id` there.
-async fn saved(rt: &Rt, me: &Caller, scope: &Scope, kind: &str, id: &str) {
+/// Tells what watches items of `kind` in `scope` that `me` saved item `id` there, and whether that answered the
+/// runtime's own request for one (`answered`).
+pub(crate) async fn saved(rt: &Rt, me: &Caller, scope: &Scope, (id, kind): &(String, String), answered: bool) {
+    if id.is_empty() {
+        return;
+    }
     let watching: Vec<Watch> = rt.state::<State>().watchers.lock().unwrap().iter().filter(|w| w.scope == *scope && w.kind == kind).cloned().collect();
     for w in watching {
-        if let Err(err) = (w.saved)(rt.clone(), me.clone(), id.to_string()).await {
+        if let Err(err) = (w.saved)(rt.clone(), me.clone(), id.to_string(), answered).await {
             tracing::warn!("following an item saved in {scope}'s Vault: {err:#}");
         }
     }
@@ -241,13 +241,14 @@ pub async fn set_item(rt: &Rt, caller: &Caller, scope: &Scope, mut data: Value) 
     // Only the runtime says which app's call made an item.
     data.as_object_mut().context("an item is an object")?.remove("app");
     let wants = data["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == scopes::AGENTS));
-    write_item(rt, caller, scope, |items| {
+    let saved_as = write_item(rt, caller, scope, |items| {
         // Agents use an item (vault_fetch) only once its user lets agents use it, never by themselves.
         let had = items.get(&id).is_some_and(|it| it.apps.contains(scopes::AGENTS));
         ensure!(caller.agent.is_none() || had || !wants, "only the user lets agents use an item: ask them with {ASK_FOR_AGENTS} and they pick or make it");
         Ok(data.clone())
     })
     .await?;
+    saved(rt, caller, scope, &saved_as, false).await;
     Ok(id)
 }
 

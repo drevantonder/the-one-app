@@ -34,7 +34,7 @@ pub fn runs() -> Runs {
         tools: tools::served(),
         routes: routes::routes(),
         state: Box::new(State::default()),
-        start: Some(|rt| vault_runtime::watch(rt, vault_runtime::Watch { scope: Scope::Global, kind: backups::KIND, saved: |rt, caller, id| Box::pin(async move { run::saved_place(&rt, &caller, &id).await }) })),
+        start: Some(|rt| vault_runtime::watch(rt, vault_runtime::Watch { scope: Scope::Global, kind: backups::KIND, saved: |rt, caller, id, answered| Box::pin(async move { run::saved_place(&rt, &caller, &id, answered).await }) })),
         every: Some((TICK, |rt| Box::pin(run::tick(rt)))),
         problem: Some(places::problem),
         on: Some(|rt, happened| match happened {

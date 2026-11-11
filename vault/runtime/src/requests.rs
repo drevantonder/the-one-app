@@ -8,7 +8,7 @@ use scope::content;
 use scope::scopes::{self, Scope};
 use serde_json::{Value, json};
 
-use crate::items::{items_of, managed_scopes, write_item};
+use crate::items::{items_of, managed_scopes, saved, write_item};
 
 /// Whether an app added can declare what it needs: the agents and the Vault itself are not apps.
 fn declares_needs(app: &str) -> bool {
@@ -164,7 +164,7 @@ pub async fn answer_request(rt: &Rt, caller: &Caller, scope: &Scope, id: &str, a
     // Named by the request it answers, so answering again (its `set` step failed, or two devices answered at once)
     // changes that item rather than making another.
     let made = id.to_string();
-    write_item(rt, caller, scope, |items| {
+    let saved_as = write_item(rt, caller, scope, |items| {
         Ok(match answer["item"].as_str() {
             Some(item) => {
                 let it = items.get(item).context("no such item there")?;
@@ -194,7 +194,9 @@ pub async fn answer_request(rt: &Rt, caller: &Caller, scope: &Scope, id: &str, a
         })
     })
     .await?;
-    rt.append(scope, &caller.user, content::vault_answer(id, false)).await
+    rt.append(scope, &caller.user, content::vault_answer(id, false)).await?;
+    saved(rt, caller, scope, &saved_as, r.app == key::APP).await;
+    Ok(())
 }
 
 /// The requests `viewer` may answer (here, or in `scope`, or just `id`), newest first, with their state: `waiting`,

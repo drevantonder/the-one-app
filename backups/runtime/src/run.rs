@@ -439,14 +439,14 @@ pub(crate) async fn remove_place(rt: &Rt, caller: &Caller, id: &str) -> Result<(
 }
 
 /// A place's item in Everyone just saved by `caller` (`vault_runtime::watch`): when they're an admin and it's an S3
-/// place, its details as they are now are the ones the network backs up to, so changing its key in the Vault keeps
-/// backups going, and answering a request for one names it.
-pub(crate) async fn saved_place(rt: &Rt, caller: &Caller, id: &str) -> Result<()> {
+/// place the network backs up to, or one that `answered` Backups' request, its details as they are now are the ones the
+/// network backs up to, so changing its key in the Vault keeps backups going. Any other item is no place.
+pub(crate) async fn saved_place(rt: &Rt, caller: &Caller, id: &str, answered: bool) -> Result<()> {
     let own = vault_runtime::own_items(rt);
     let fields = rt.read(|r| {
         let m = r.db();
         let pinned = pinned(m)?;
-        let changed = own.get(id).filter(|it| m.may(&caller.user, "change-settings", scopes::NETWORK) && it.apps.contains(key::APP) && !it.fields.contains_key("device") && pinned.get(id) != Some(&item_hash(it)));
+        let changed = own.get(id).filter(|it| m.may(&caller.user, "change-settings", scopes::NETWORK) && it.apps.contains(key::APP) && !it.fields.contains_key("device") && pinned.get(id) != Some(&item_hash(it)) && (answered || pinned.contains_key(id)));
         Ok(changed.map(|it| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect::<BTreeMap<_, _>>()))
     })?;
     match fields {

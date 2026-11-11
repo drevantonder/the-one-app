@@ -56,12 +56,13 @@ pub struct State {
 }
 
 /// What another feature follows of the Vault: each item of `kind` saved in `scope` on this device, by `saved`, with
-/// who saved it and the item's id. The Vault names no feature that watches it.
+/// who saved it, the item's id, and whether it answered the runtime's own request for one. The Vault names no feature
+/// that watches it.
 #[derive(Clone)]
 pub struct Watch {
     pub scope: Scope,
     pub kind: &'static str,
-    pub saved: fn(Rt, Caller, String) -> Fut<'static, ()>,
+    pub saved: fn(Rt, Caller, String, bool) -> Fut<'static, ()>,
 }
 
 /// Follows items saved here, from as the runtime starts (`Runs.start`).
