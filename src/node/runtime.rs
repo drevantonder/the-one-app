@@ -214,6 +214,10 @@ impl Apps for Node {
     fn logo(&self, domain: &str, app: &str) -> Option<(String, String)> {
         Node::logo(self, domain, app)
     }
+
+    fn call<'a>(&'a self, req: CallRequest, caller: Caller) -> Fut<'a, Value> {
+        Box::pin(self.call_as(req, caller))
+    }
 }
 
 impl Features for Node {

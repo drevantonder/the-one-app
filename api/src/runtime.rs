@@ -19,7 +19,7 @@ use scope::content::Content;
 use scope::read::Read;
 use scope::scopes::Scope;
 
-use crate::call::Event;
+use crate::call::{CallRequest, Event};
 use crate::{Caller, Routes};
 
 /// What a method that waits answers with.
@@ -128,6 +128,8 @@ pub trait Apps: Send + Sync {
     fn apps_for<'a>(&'a self, viewer: &'a Caller) -> Fut<'a, Vec<Value>>;
     /// The logo of a site an app connects to, as a data URL and its kind.
     fn logo(&self, domain: &str, app: &str) -> Option<(String, String)>;
+    /// Runs a tool for `caller`, whom this device acts for: here, or on the nearest device that can.
+    fn call<'a>(&'a self, req: CallRequest, caller: Caller) -> Fut<'a, Value>;
 }
 
 /// The features it runs.
