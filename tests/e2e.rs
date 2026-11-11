@@ -1060,6 +1060,15 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     let _relay = relay(&k).await;
     let b = start("rt-other").await;
     b.join(&onboarding_runtime::pair(&k.rt()).unwrap()).await.unwrap();
+    // The device stands in for onet, which gives its runtime what the relay says each time it hears more; the device
+    // answers only the runtime's one ask as it starts, so it has heard the other on the relay by then, or the runtime
+    // takes it for off.
+    let home_token = std::fs::read_to_string(k.dir().join(api::local::LOCAL_TOKEN)).unwrap();
+    let holder = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let holder_at = holder.local_addr().unwrap().to_string();
+    tokio::spawn(api::serve(holder, app_runtime::api::router(k.clone())));
+    let on = async || ask(&holder_at, "GET", "/api/relay", &home_token, None).await.1["online"].as_array().is_some_and(|on| on.contains(&json!(::key::hex(&b.id()))));
+    polled("the device to hear the other on the relay", &k.dir().join("no log"), on).await;
     // The device runs its user's app schedules of notes, for everyone.
     let ran = ::scope::settings::answer(&k, "POST", "/api/devices/run_schedules", json!({ "app": "notes", "device": ::key::hex(&k.id()), "scope": "global" }).to_string().as_bytes()).await.unwrap().unwrap();
     assert!(ran["until"].is_u64(), "{ran}");
@@ -1067,7 +1076,6 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     let (at, token, log) = (&rt.at, &rt.token, &rt.log);
 
     // Only the device's own programs ask it, with the token in its folder, never the one in the device's home.
-    let home_token = std::fs::read_to_string(k.dir().join(api::local::LOCAL_TOKEN)).unwrap();
     assert_eq!(ask_runtime(at, &home_token, json!({ "app": "notes", "tool": "read", "input": {} })).await.0, 403);
     let post = json!({ "app": "notes", "tool": "post", "input": { "text": "from the runtime" } });
     polled("the runtime to run a call", log, async || ask_runtime(at, token, post.clone()).await.0 == 200).await;
