@@ -79,7 +79,7 @@ Recorded by the network itself, in OpenTelemetry's data model and names, with no
 - A user key, so a new device needs one handover and not a seal per scope: it's random, its secret sealed to each of its user's devices, and each scope's keys sealed to it beside today's seals. Nothing can hold one yet without widening what it could lose: a browser's code comes from a Worker; a phone app's window gets only what its shell hands it; a computer's onet hands its app runtime what its key opens; a remote MCP client and an app schedules machine hold only what they were approved for. It waits for a native shell that keeps one itself.
 - One key per scope at a time, changed only when a user or a lost device is removed, every database copied under the new key and the old one dropped. Today a scope has numbered epochs, and a new one is made when someone loses the right to open it.
 - Services each running as their own OS user per scope.
-- What's left of the storage move: `docs/plan-storage-and-permissions.md`.
+- What's left of the storage move: `dev/plans/plan-storage-and-permissions.md`.
 - Native apps keeping their own sealed copy, for reads with no network; writes while offline, replayed like a rebase, never repeating what went outside.
 
 ## Decided

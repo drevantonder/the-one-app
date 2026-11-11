@@ -1,5 +1,5 @@
-# Makes the ring art: icons/AppIcon.png, icons/MenuBarIcon.png, icons/MenuBarIcon@2x.png and docs/ring.png.
-# Run: uv run --with numpy --with pillow tools/ring/ring.py <folder to write the four files to>
+# Makes the ring art: icons/AppIcon.png, icons/MenuBarIcon.png, icons/MenuBarIcon@2x.png and icons/ring.png.
+# Run: uv run --with numpy --with pillow dev/tools/ring/ring.py <folder to write the four files to>
 # (about three minutes: it raymarches the ring at 2800 px and shrinks it).
 import os, sys
 import numpy as np

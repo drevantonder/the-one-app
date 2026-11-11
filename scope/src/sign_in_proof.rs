@@ -1,5 +1,5 @@
 //! A sign-in a device checks itself, without trusting the network's Workers. Signing in only lets a device ask: someone
-//! already in the network says yes, at the time or in advance with an invite (docs/plan-auth.md). The new device's sign-in
+//! already in the network says yes, at the time or in advance with an invite (dev/plans/plan-auth.md). The new device's sign-in
 //! names it: an OIDC provider's ID token carries `nonce(device)`, which auth puts in the request it sends the provider,
 //! and a passkey's assertion signs `challenge(device, time)`, which auth makes the passkey prompt's challenge. Auth passes
 //! the token or the assertion on with the device's request to join, unchanged (`Proof`), and whoever answers it checks it:

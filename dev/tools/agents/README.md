@@ -3,9 +3,9 @@
 Whether a fresh agent, prompted the way a user types, finds its way with the MCP server only, the CLI only, or both:
 
 ```sh
-python3 tools/agents/run.py                      # every prompt, all three setups, local Gemma 4 12B: about 40 minutes
-python3 tools/agents/run.py --prompts token,mac --setups mcp --repeat 3
-python3 tools/agents/run.py --model opencode/deepseek-v4.1-flash-free --prompts memory-latest,disk
+python3 dev/tools/agents/run.py                      # every prompt, all three setups, local Gemma 4 12B: about 40 minutes
+python3 dev/tools/agents/run.py --prompts token,mac --setups mcp --repeat 3
+python3 dev/tools/agents/run.py --model opencode/deepseek-v4.1-flash-free --prompts memory-latest,disk
 ```
 
 It needs OpenCode (`opencode upgrade`), `pasta` (passt) and Ollama with the model pulled; it makes a 64k-context variant of an Ollama model itself. OpenCode's free hosted models share a daily limit that runs out after about a dozen runs (the run stops every setup at the same prompt when it does); never point `--model` at one that bills.

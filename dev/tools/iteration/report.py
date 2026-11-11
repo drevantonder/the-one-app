@@ -5,13 +5,13 @@ Reads this machine's Claude Code sessions in the repo and its worktrees, Agent M
 to ~/one-export/iteration/<date>.md. Sessions on other machines and other harnesses aren't in it, and the report says
 so; Agent Memory and git are everyone's. Memories have a date and no time, so it reads whole days.
 
-    python3 -I tools/iteration/report.py [--days 1]
+    python3 -I dev/tools/iteration/report.py [--days 1]
 """
 
 import argparse, datetime as dt, glob, json, os, re, subprocess, sys
 from collections import Counter, defaultdict
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 SESSIONS = os.path.expanduser("~/.claude/projects/*the-one-app*/*.jsonl")
 OUT = os.path.expanduser("~/one-export/iteration")
 

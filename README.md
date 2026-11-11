@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/ring.png" width="200" alt="">
+  <img src="icons/ring.png" width="200" alt="">
 </p>
 
 <h1 align="center">The One App</h1>

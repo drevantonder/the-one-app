@@ -108,7 +108,8 @@ impl Parts {
                 Some("services") if file.starts_with("services/sdk/") => (parts.service, parts.mac) = (true, true),
                 // Services' tests stay in the repo.
                 Some("services") if file.starts_with("services/tests/") => {}
-                Some("dev") if file.starts_with("dev/skills/") => {}
+                // What only whoever builds this repo reads or runs by hand.
+                Some("dev") if file.starts_with("dev/skills/") || file.starts_with("dev/tools/") || file.starts_with("dev/plans/") => {}
                 Some("dev") => parts.dev = true,
                 // The Workers' sources but for the web client's: the Workers alone. The relay's protos only make its
                 // WebAssembly by hand, and the Workers' tests stay in the repo.
@@ -144,7 +145,7 @@ impl Parts {
                 Some("onet") if file.starts_with("onet/worker/") => parts.workers = true,
                 // onet is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
                 Some("onet") => (parts.node, parts.mac, parts.web, parts.dev) = (true, true, true, true),
-                Some("docs" | "tests" | "tools") => {}
+                Some("tests") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
                 _ => parts.add_rust(),
             }
@@ -163,7 +164,7 @@ mod tests {
 
     #[test]
     fn a_change_sends_out_what_is_made_of_it() {
-        assert_eq!(of(&["docs/x.md", "README.md", "tests/e2e.rs", "tools/iteration/report.py", "apps/repos/tests/repos.rs", ".gitignore", "cloudflare/test/x.js", "relay/protos/a.proto"]), Parts::default());
+        assert_eq!(of(&["dev/plans/x.md", "README.md", "tests/e2e.rs", "dev/tools/iteration/report.py", "apps/repos/tests/repos.rs", ".gitignore", "cloudflare/test/x.js", "relay/protos/a.proto"]), Parts::default());
         assert_eq!(of(&["apps/board/app.js", "apps/board/screen.js"]), Parts { apps: vec!["board".into()], ..Default::default() });
         assert_eq!(of(&["apps/whatsapp/service/main.go"]), Parts { services: vec!["whatsapp".into()], ..Default::default() });
         assert!(of(&["services/sdk/src/lib.rs"]).service && of(&["services/sdk/src/lib.rs"]).mac);

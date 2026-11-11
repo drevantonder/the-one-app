@@ -1391,7 +1391,7 @@ pub async fn approve(m: &impl Me, r: &Asked, joining: &Joining) -> Result<Value>
         m.read().await?;
     }
     // Someone new's own scope is theirs: their device makes its first epoch. Someone with no device left opens theirs
-    // again only with what restores them (docs/plan-auth.md, step 6): an admin holds no key to it.
+    // again only with what restores them (dev/plans/plan-auth.md, step 6): an admin holds no key to it.
     let own_too = matches!(joining, Joining::Own { .. });
     let (scopes, admin, before) = m.who(|who| {
         let own = Scope::User(r.user.clone());
