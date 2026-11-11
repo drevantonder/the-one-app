@@ -135,6 +135,8 @@ struct Network {
     parts: HashMap<Key, Value>,
     /// The devices connected to the relay, as it last said: `Network::online`.
     connected: std::collections::HashSet<Key>,
+    /// When the relay last saw each key on its list (ms), as it last said: `Network::seen`.
+    last_seen: HashMap<Key, u64>,
     /// What each device told the relay it's on, as it last said: its key → `protocol::version`.
     versions: Value,
     /// What the relay says the Workers are on, and the device they're deployed from (`workers` in its answer).
@@ -172,6 +174,16 @@ impl Network {
     /// Whether a device is on, the same answer every node gives: what the relay says.
     fn online(&self, device: &Key) -> bool {
         self.connected.contains(device)
+    }
+
+    /// When that device was last seen (ms), if it ever was: now while it's online, or the later of when the relay last
+    /// saw it and when it last spoke to this device.
+    fn seen(&self, device: &Key) -> Option<u64> {
+        if self.online(device) {
+            return Some(now_ms());
+        }
+        let spoke = self.peers.get(device).map(|p| now_ms().saturating_sub(p.seen.elapsed().as_millis() as u64));
+        spoke.max(self.last_seen.get(device).copied())
     }
 
     /// Whether this device can count on reaching that device: it said hello here lately.

@@ -330,8 +330,7 @@ export class Client extends DurableObject {
         this.isApproved = false;
         return say(err.notLetIn || err.code === CODES.notLetIn ? 403 : 503, err.notLetIn || err.code === CODES.notLetIn ? approve : `${device.name} couldn't start: ${err.message}`);
       }
-      if (!nodes.length) nodes = await this.reorder(me);
-      if (!nodes.length) return say(503, "None of your devices is on right now.");
+      if (!nodes.length && !(await this.reorder(me))) return say(503, "None of your devices is on right now.");
       this.ctx.waitUntil(this.removeReplaced(me));
       return await this.forward(me, asking, say);
     } finally {
@@ -441,13 +440,18 @@ export class Client extends DurableObject {
     await this.reorder(me);
   }
 
+  /// The nodes in the order they're tried: those online (in run priority's order), then the rest, the most recently
+  /// seen first. → how many are online.
   async reorder(me) {
     const nodes = this.view?.nodes || new Map();
     const online = new Set(await answer(this.relay().connected([...nodes.keys()])));
+    const off = [...nodes.keys()].filter((k) => !online.has(k));
+    const seen = off.length ? ((await answer(this.relay().seen()).catch(() => null)) ?? {}) : {};
     const kept = ((await this.ctx.storage.get("order")) || []).filter((k) => nodes.has(k));
-    this.order = [...kept.filter((k) => online.has(k)), ...[...online].filter((k) => !kept.includes(k))];
+    off.sort((a, b) => (seen[b] ?? 0) - (seen[a] ?? 0));
+    this.order = [...kept.filter((k) => online.has(k)), ...[...online].filter((k) => !kept.includes(k)), ...off];
     if (this.run?.endpoint && this.run.key === me.key) device_nodes(me.key, this.order);
-    return this.order;
+    return online.size;
   }
 
   /// Reads run priority's order from the network's state, for the nodes it asks: only nodes the network lists are
@@ -462,9 +466,7 @@ export class Client extends DurableObject {
       const listed = this.view.nodes;
       const order = (state.network?.devices || []).filter((d) => listed.has(d.key) && Number.isFinite(d.order)).sort((a, b) => a.order - b.order).map((d) => d.key).slice(0, 64);
       await this.ctx.storage.put("order", order);
-      const online = new Set(this.order);
-      this.order = [...order.filter((k) => online.has(k)), ...this.order.filter((k) => !order.includes(k))];
-      device_nodes(me.key, this.order);
+      await this.reorder(me);
     } catch {}
   }
 
@@ -504,8 +506,8 @@ export class Client extends DurableObject {
         r = await device_fetch(me.key, method, path, Object.entries(headers).flat(), body, me.until, this.on(me));
       } catch (err) {
         if (err.sent) return say(502, `Your device stopped answering: ${err.message}`);
-        if (tries === 0 && (await this.reorder(me)).length) continue;
-        return say(503, this.order.length ? err.message : "None of your devices is on right now.");
+        if (tries === 0 && (await this.reorder(me))) continue;
+        return say(503, err.message);
       }
       this.ctx.waitUntil(this.learnOrder(me));
       if (r.status === 428) {

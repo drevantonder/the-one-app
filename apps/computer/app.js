@@ -30,7 +30,7 @@ async function devices(ctx) {
     const d = (s.installed_services || []).find((d) => d.name === "computer");
     return d ? !d.users || d.users.includes(ctx.me.user_name) : (s.services || []).includes("computer");
   };
-  const theirs = (await ctx.devices()).filter((s) => s.online && mine(s));
+  const theirs = (await ctx.devices()).filter(mine);
   return Promise.all(theirs.map(async (s) => {
     try {
       return { device: s.name, ...(await ctx.services.computer._status({}, { device: s.name })) };

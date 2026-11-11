@@ -90,6 +90,21 @@ pub struct Grant {
     pub trace: Option<trace::Trace>,
 }
 
+tokio::task_local! {
+    /// Told once a call another device asked for has started here: past its lease, for one that writes.
+    static TAKEN: std::cell::Cell<Option<tokio::sync::oneshot::Sender<()>>>;
+}
+
+/// Runs `work`, a call another device asked for, telling `taken` once it has started (`started`).
+pub(super) async fn telling<T>(taken: tokio::sync::oneshot::Sender<()>, work: impl Future<Output = T>) -> T {
+    TAKEN.scope(std::cell::Cell::new(Some(taken)), work).await
+}
+
+/// Says the call another device asked for has started here, if one did: from now on it isn't run elsewhere.
+fn started() {
+    let _ = TAKEN.try_with(|t| t.take().map(|taken| taken.send(())));
+}
+
 /// Holds a grant for as long as its call runs.
 pub(super) struct Granted(Node, String);
 
@@ -197,6 +212,17 @@ impl std::fmt::Display for Elsewhere {
 
 impl std::error::Error for Elsewhere {}
 
+/// How a device asked for a call didn't answer: it lacked keys its caller hands (this device), or never answered.
+enum Asked {
+    Needs(crate::keys::Needs),
+    Failed(anyhow::Error),
+}
+
+/// What a device's usual time to start a call it's asked for is learned by (`hedge`).
+fn device_limit(device: &Key) -> String {
+    format!("device {}", hex(device))
+}
+
 /// No device asked ran a call: how the last one didn't (an `error.type` of insights'), and what each said.
 #[derive(Debug)]
 pub(super) struct NoneCould {
@@ -303,8 +329,8 @@ impl Node {
         Ok(req)
     }
 
-    /// Tries the devices that might run a call, nearest first, one at a time, the next only if one can't be reached
-    /// or says to go elsewhere.
+    /// Tries the devices that might run a call in `candidates`' order: the next once one can't be reached, says to go
+    /// elsewhere, or (an app's call) hasn't started it in its usual time.
     pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let req = self.identified(req)?;
         let span = self.begin_call();
@@ -330,11 +356,88 @@ impl Node {
         trace::stage(crate::insights::stage::ROUTE);
         // A device that stalls costs a call's whole limit, so no call waits on more than one more after that.
         let most = limit * 2;
-        for device in candidates {
-            if !why.is_empty() && began.elapsed() >= most {
+        // Devices are asked in turn; an app's call that one hasn't started within its usual time (`taken`) is asked of
+        // the next too, and runs where it starts first: one that writes takes its lease first, so it runs once. A
+        // service's function has no lease, so it goes to the next only once one can't be reached.
+        let races = req.service.is_none();
+        let (said, mut taken) = tokio::sync::mpsc::unbounded_channel::<(usize, bool)>();
+        let mut asked = futures_util::stream::FuturesUnordered::new();
+        let mut stops: Vec<futures_util::future::AbortHandle> = Vec::new();
+        let mut started: Vec<Instant> = Vec::new();
+        // Whether each device asked said if it started the call: one that didn't, and was given up on, is down.
+        let mut answered: Vec<bool> = Vec::new();
+        let (mut next, mut winner, mut hedge_at) = (0, None::<usize>, None::<tokio::time::Instant>);
+        loop {
+            // The next device, once none is still asked or the last one asked passed its usual time.
+            let due = hedge_at.is_some_and(|at| at <= tokio::time::Instant::now());
+            if due {
+                hedge_at = None;
+            }
+            if (asked.is_empty() || due) && next < candidates.len() && (why.is_empty() || began.elapsed() < most) {
+                let (i, device) = (next, candidates[next]);
+                next += 1;
+                let here = device == self.0.id;
+                let (req, me, said) = (&req, &me, said.clone());
+                let first = why.is_empty() && i == 0;
+                let work = async move {
+                    if here {
+                        let _ = said.send((i, true));
+                        // Keys it lacks are its caller's to hand this device, which they were sealed to: no other runs it.
+                        // A call this node named, that no device has tried before, has no other to take its lease first: none is.
+                        return match self.run_or_need(&CallRequest { unleased: req.named_here && first, ..req.clone() }, me).await {
+                            Ok(reply) => Ok((reply, None)),
+                            Err(need) => Err(Asked::Needs(need)),
+                        };
+                    }
+                    self.ask_device(device, req, me, left, |took| _ = said.send((i, took))).await.map_err(Asked::Failed)
+                };
+                let (work, stop) = futures_util::future::abortable(work);
+                asked.push(Box::pin(async move { (i, work.await) }));
+                stops.push(stop);
+                started.push(Instant::now());
+                answered.push(here);
+                hedge_at = (races && !here && next < candidates.len()).then(|| tokio::time::Instant::now() + crate::hedge::limit(&device_limit(&device)));
+                continue;
+            }
+            if asked.is_empty() {
                 break;
             }
-            let started = Instant::now();
+            let hedge = async move {
+                match hedge_at {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            };
+            let (i, ended) = tokio::select! {
+                Some((i, took)) = taken.recv() => {
+                    let device = candidates[i];
+                    answered[i] = true;
+                    if device != self.0.id {
+                        crate::hedge::learn(&device_limit(&device), started[i].elapsed());
+                        self.set_down(device, false);
+                    }
+                    if took && winner.is_none() {
+                        // It started there: no other is asked, and those asked are let go.
+                        winner = Some(i);
+                        hedge_at = None;
+                        for (j, stop) in stops.iter().enumerate() {
+                            if j != i {
+                                stop.abort();
+                            }
+                        }
+                    }
+                    continue;
+                }
+                Some(done) = futures_util::StreamExt::next(&mut asked) => done,
+                () = hedge => {
+                    // The last asked hasn't started it in its usual time: down until it answers, or its socket opens again.
+                    self.set_down(candidates[next - 1], true);
+                    continue;
+                }
+            };
+            let Ok(reply) = ended else { continue };
+            let device = candidates[i];
+            let here = device == self.0.id;
             let name = self.name_of(&device);
             // Each device tried, for a trace: how long it took, and why the next was tried.
             let tried = |result: &str, more: Value| {
@@ -342,31 +445,25 @@ impl Node {
                 if let (Value::Object(step), Value::Object(more)) = (&mut step, more) {
                     step.extend(more);
                 }
-                trace::note(step, started.elapsed());
+                trace::note(step, started[i].elapsed());
             };
-            let reply = match device == self.0.id {
-                // Keys it lacks are its caller's to hand this device, which they were sealed to: no other runs it.
-                // A call this node named, that no device has tried before, has no other to take its lease first: none is.
-                true => match self.run_or_need(&CallRequest { unleased: req.named_here && why.is_empty(), ..req.clone() }, &me).await {
-                    Ok(reply) => Ok((reply, None)),
-                    Err(need) => {
-                        tried("needs keys", json!({ "here": true }));
-                        return Err(need.into());
-                    }
-                },
-                false => self.ask_device(device, &req, &me, left).await,
-            };
-            let here = device == self.0.id;
             *run_says = matches!(reply, Ok((Reply::Ok(_) | Reply::Error(..), _))) && (here || !self.is_service(&device));
+            if winner == Some(i) {
+                winner = None;
+            }
             match reply {
                 Ok((Reply::Ok(v), theirs)) => {
                     tried("ran", json!({ "here": here, "trace": theirs }));
-                    self.with_or(None, |i| Ok(i.nearest.insert(device, started.elapsed())));
+                    self.with_or(None, |n| Ok(n.nearest.insert(device, started[i].elapsed())));
                     return Ok(v);
+                }
+                // Another device asked took its lease first: that one's answer is the call's.
+                Ok((Reply::Error(e, Some(code)), theirs)) if code == crate::protocol::code::ALREADY && !asked.is_empty() => {
+                    tried("elsewhere", json!({ "here": here, "why": e, "trace": theirs }));
                 }
                 Ok((Reply::Error(e, code), theirs)) => {
                     tried("failed", json!({ "here": here, "trace": theirs }));
-                    return Err(crate::protocol::Coded::or_plain(code, e))
+                    return Err(crate::protocol::Coded::or_plain(code, e));
                 }
                 Ok((Reply::Elsewhere(w), theirs)) => {
                     tried("elsewhere", json!({ "here": here, "why": w, "trace": theirs }));
@@ -379,11 +476,18 @@ impl Node {
                     tried("needs keys", json!({ "here": here, "trace": theirs }));
                     return Err(self.need(need.need).into());
                 }
-                Err(err) => {
+                Err(Asked::Needs(need)) => {
+                    tried("needs keys", json!({ "here": true }));
+                    return Err(need.into());
+                }
+                Err(Asked::Failed(err)) => {
+                    if races && !answered[i] {
+                        self.set_down(device, true);
+                    }
                     let result;
                     (kind, result) = super::insights::asking_failed(&err);
                     tried(result, json!({}));
-                    self.with_or(None, |i| Ok(i.nearest.insert(device, Duration::MAX)));
+                    self.with_or(None, |n| Ok(n.nearest.insert(device, Duration::MAX)));
                     why.push(format!("{name}: {err:#}"));
                 }
             }
@@ -480,7 +584,7 @@ impl Node {
             async move {
                 let reply = match *device == self.0.id {
                     true => Ok(self.run(req, me).await),
-                    false => self.ask_device(*device, req, me, limit).await.map(|(reply, _)| reply),
+                    false => self.ask_device(*device, req, me, limit, |_| {}).await.map(|(reply, _)| reply),
                 };
                 let answer = match reply {
                     Ok(Reply::Ok(v)) => v,
@@ -508,9 +612,8 @@ impl Node {
         format!("{} is asked by a device of yours itself, not through {}, which runs a node: from the web app, a phone, or the command line of a computer that runs no node of its own (one <command> --device {}). From this one, leave --device off and the nearest device that can runs it", crate::rank::CLOUDFLARE, self.device_name(), crate::rank::CLOUDFLARE)
     }
 
-    /// The devices that might run a call, in the order it tries them: those that are up with room first; then the
-    /// near before the far (FAR); then by the network's order (src/rank.rs); this device before another as good; then
-    /// the nearest. A service about its own machine runs here first.
+    /// The devices that might run a call, in the order it tries them (`rank::order`). A service about its own machine
+    /// counts as this device.
     pub(super) fn candidates(&self, req: &CallRequest, me: &Caller) -> Result<Vec<Key>> {
         let passed = passed(me);
         if let Some(device) = &req.device {
@@ -566,29 +669,26 @@ impl Node {
             };
             let set = rank::set(&i.r.db().settings()?);
             let here_load = crate::load::current();
-            // A service is where its device is.
-            let mut at = BTreeMap::new();
+            let mut standing = BTreeMap::new();
             for k in &devices {
-                at.insert(*k, i.r.db().service(k)?.and_then(|s| s.device).unwrap_or_else(|| i.r.db().device_of(k)));
-            }
-            let mut ours_now = BTreeMap::new();
-            for k in &devices {
-                ours_now.insert(*k, ours(i, k)?);
-            }
-            // A service's load and distance are its device's runtime's, which carries its asks.
-            let mut via = BTreeMap::new();
-            for k in &devices {
-                let runtime = if req.service.is_some() && *k != self.0.id { i.r.db().runtime_for(&at[k])? } else { None };
-                via.insert(*k, runtime.unwrap_or(*k));
-            }
-            let rank = |k: &Key| {
-                let via = via[k];
+                // A service is where its device is, and its load and distance are its device's runtime's, which carries
+                // its asks.
+                let at = i.r.db().service(k)?.and_then(|s| s.device).unwrap_or_else(|| i.r.db().device_of(k));
+                let runtime = if req.service.is_some() && *k != self.0.id { i.r.db().runtime_for(&at)? } else { None };
+                let via = runtime.unwrap_or(*k);
                 let here = via == self.0.id;
                 let load = if here { Some(&here_load) } else { i.peers.get(&via).and_then(|p| p.load.as_ref()) };
-                let far = !here && i.far.get(&via).is_some_and(|d| *d > FAR);
-                (!here && !i.heard(&via), here_first && !ours_now[k], load.is_some_and(full), far, rank::priority(&set, &hex(&at[k])), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
-            };
-            devices.sort_by_cached_key(rank);
+                standing.insert(*k, rank::Standing {
+                    here: here || (here_first && ours(i, k)?),
+                    online: here || ((i.online(&via) || i.online(&at)) && !self.down(&via)),
+                    priority: rank::priority(&set, &hex(&at)),
+                    far: !here && i.far.get(&via).is_some_and(|d| *d > FAR),
+                    full: load.is_some_and(full),
+                    seen: i.seen(&via).max(i.seen(&at)),
+                    took: i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)),
+                });
+            }
+            rank::order(&mut devices, |k| standing[k]);
             Ok(devices)
         })
     }
@@ -607,8 +707,9 @@ impl Node {
         req
     }
 
-    /// Asks another device to run a call, within `limit`. → its reply, and what it did, if this request is being traced.
-    pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller, limit: Duration) -> Result<(Reply, Option<Value>)> {
+    /// Asks another device to run a call, within `limit`, telling `taken` whether it started there as soon as it says.
+    /// → its reply, and what it did, if this request is being traced.
+    pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller, limit: Duration, taken: impl FnOnce(bool)) -> Result<(Reply, Option<Value>)> {
         // A call handed keys passes on its keys alone (below), and app schedules' calls pass on none.
         let service = self.is_service(&device);
         // A node of the caller's own client device (the device's own, or its app runtime) asks as itself: always for a
@@ -652,7 +753,7 @@ impl Node {
         let hop = Instant::now();
         let asked = match service {
             true => self.ask_service(device, request, limit + Duration::from_secs(5)).await,
-            false => self.ask(device, request, limit + Duration::from_secs(5)).await,
+            false => self.ask(device, request, limit + Duration::from_secs(5), taken).await,
         };
         if service {
             self.finish_hop(&resolved, me, device, hop.elapsed(), &asked);
@@ -825,6 +926,7 @@ impl Node {
                 lease = Some(taken);
             }
         }
+        started();
         let mut ctx = ctx;
         ctx.from = req.from.clone();
         let granted = self.grant(&req.app, me, &mut ctx, req.depth);

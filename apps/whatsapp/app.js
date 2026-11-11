@@ -25,8 +25,10 @@ const DEVICE = { type: "string", description: "which of your devices that run Wh
 const LIMIT = { type: "integer", description: "at most this many; default 30" };
 const LINES = "one a line, \"[3 Nov 2026 09:00] Sam: text\", times in the time zone of the device it's linked on, and You for the user";
 
+/// The devices that run it, those online first: one that's off says so when it's asked.
 async function running(ctx) {
-  return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("whatsapp")).map((s) => s.name);
+  const all = (await ctx.devices()).filter((s) => (s.services || []).includes("whatsapp"));
+  return [...all.filter((s) => s.online), ...all.filter((s) => !s.online)].map((s) => s.name);
 }
 
 // Each account is a Vault item too, so the user's Vault lists it: its number and the device it's linked on, plain,
@@ -230,7 +232,7 @@ export default {
       output: {
         type: "object",
         required: ["devices"],
-        properties: { devices: { type: "array", items: { type: "string" }, description: "the online devices that run it" } },
+        properties: { devices: { type: "array", items: { type: "string" }, description: "the devices that run it, those online first" } },
       },
       run: async (ctx) => ({ devices: await running(ctx) }),
     },

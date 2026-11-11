@@ -54,8 +54,9 @@ export default {
       input: { type: "object", required: ["on"], properties: { on: { type: "boolean" }, device: DEVICE } },
       output: STATUS,
       async run(ctx, input) {
-        const device = input.device || (await macs(ctx)).find((d) => d.online)?.name;
-        if (!device) throw refusal("No Mac of yours that's online has Stay Awake switched on: one services on awake --device <mac>");
+        const all = await macs(ctx);
+        const device = input.device || (all.find((d) => d.online) || all[0])?.name;
+        if (!device) throw refusal("No Mac of yours has Stay Awake switched on: one services on awake --device <mac>");
         const s = await service(ctx, "set", { ...input, device });
         ctx.user.exec("insert into macs (device, awake, at) values (?, ?, ?) on conflict (device) do update set awake = excluded.awake, at = excluded.at", [device, s.on ? 1 : 0, ctx.now()]);
         return s;

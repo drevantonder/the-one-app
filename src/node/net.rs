@@ -23,6 +23,10 @@ const QUIET: Duration = Duration::from_secs(2 * 60);
 const QUIET_MAX: Duration = Duration::from_secs(30 * 60);
 /// How long a `changed` waits to be taken before it's sent again on a new connection.
 const CHANGED_WAIT: Duration = Duration::from_millis(500);
+/// The byte an ask's answer starts with: the call started on the device asked (past its lease, for one that writes), or
+/// it didn't, and its answer follows.
+const TAKEN: u8 = 1;
+const NOT_TAKEN: u8 = 0;
 /// The most an ask or its answer may carry: an email of a claim's receipts, base64, fits.
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// The most a computer that isn't the network's yet may send: one ask to join.
@@ -310,7 +314,26 @@ impl Node {
                     Some(M::ASK) => {
                         let asked = msg["body"]["trace"] == true;
                         let t = trace::Trace::continuing(asked, msg["body"]["traceparent"].as_str());
-                        let mut answer = trace::within(Some(t.clone()), node.accept_call(remote, &msg["body"]["call"])).await.json();
+                        let (taken, mut told) = tokio::sync::oneshot::channel();
+                        let call = super::calls::telling(taken, trace::within(Some(t.clone()), node.accept_call(remote, &msg["body"]["call"])));
+                        tokio::pin!(call);
+                        // The answer starts with whether the call started here (`TAKEN`), as soon as it has.
+                        let (reply, said) = tokio::select! {
+                            reply = &mut call => (reply, false),
+                            Ok(()) = &mut told => {
+                                if let Err(err) = send.write_all(&[TAKEN]).await {
+                                    return tracing::debug!("answering {}: {err:#}", short(&remote));
+                                }
+                                (call.await, true)
+                            }
+                        };
+                        if !said {
+                            let byte = if told.try_recv().is_ok() { TAKEN } else { NOT_TAKEN };
+                            if let Err(err) = send.write_all(&[byte]).await {
+                                return tracing::debug!("answering {}: {err:#}", short(&remote));
+                            }
+                        }
+                        let mut answer = reply.json();
                         if asked {
                             answer["trace"] = t.done(&node.device_name());
                         }
@@ -737,13 +760,13 @@ impl Node {
         tokio::spawn(async move { node.fill_copies(None).await });
     }
 
-    /// Sends `to` a message of `kind` on a stream of its own, on the connection open or, if that one's gone, a new
-    /// one: → its answer, waiting `limit` for it, if `answered`.
-    pub(super) async fn send(&self, to: &Key, kind: &str, body: &Value, answered: bool, limit: Duration) -> Result<Value> {
+    /// A stream of its own to `to`, on the connection open or, if that one's gone, a new one, with `kind`'s message
+    /// sent on it.
+    async fn stream_to(&self, to: &Key, kind: &str, body: &Value) -> Result<(iroh::endpoint::SendStream, iroh::endpoint::RecvStream)> {
         let msg = json!({ "kind": kind, "body": body }).to_string();
         ensure!(msg.len() <= MESSAGE_LIMIT, "it's {} MB, more than another device is sent at once ({} MB)", msg.len() >> 20, MESSAGE_LIMIT >> 20);
         let mut fresh = false;
-        let (mut send, mut recv) = loop {
+        let (mut send, recv) = loop {
             let conn = self.conn(to, fresh).await?;
             match conn.open_bi().await {
                 Ok(stream) => break stream,
@@ -753,6 +776,12 @@ impl Node {
         };
         send.write_all(msg.as_bytes()).await?;
         send.finish()?;
+        Ok((send, recv))
+    }
+
+    /// Sends `to` a message of `kind`: → its answer, waiting `limit` for it, if `answered`.
+    pub(super) async fn send(&self, to: &Key, kind: &str, body: &Value, answered: bool, limit: Duration) -> Result<Value> {
+        let (_send, mut recv) = self.stream_to(to, kind, body).await?;
         if !answered {
             return Ok(Value::Null);
         }
@@ -772,9 +801,10 @@ impl Node {
         Ok(Some(serde_json::from_slice(&answer)?))
     }
 
-    /// Asks another device to run a call, waiting `limit` for its answer. An error that's a `NotThere` means it never
-    /// reached that device.
-    pub(super) async fn ask(&self, to: Key, call: Value, limit: Duration) -> Result<Value> {
+    /// Asks another device to run a call, waiting `limit` for its answer, and tells `taken` whether it started there as
+    /// soon as that device says. An error that's a `NotThere` means it never reached
+    /// that device.
+    pub(super) async fn ask(&self, to: Key, call: Value, limit: Duration, taken: impl FnOnce(bool)) -> Result<Value> {
         // A traced request asks that device for its own part too, and any call says whose span it's under.
         let mut body = json!({ "call": call });
         if trace::on() {
@@ -783,7 +813,15 @@ impl Node {
         if let Some(parent) = trace::traceparent() {
             body["traceparent"] = json!(parent);
         }
-        self.send(&to, M::ASK, &body, true, limit).await
+        let answer = tokio::time::timeout(limit, async {
+            let (_send, mut recv) = self.stream_to(&to, M::ASK, &body).await?;
+            let mut first = [0u8];
+            recv.read_exact(&mut first).await?;
+            taken(first[0] == TAKEN);
+            anyhow::Ok(recv.read_to_end(MESSAGE_LIMIT).await?)
+        });
+        let answer = answer.await.context("timed out")??;
+        Ok(serde_json::from_slice(&answer)?)
     }
 
     /// Says hello to another device: what runs here and its load. → once it's taken.
@@ -850,6 +888,25 @@ impl Node {
         *told = wanted;
     }
 
+    /// Whether that device didn't answer lately, so it's tried after those that may.
+    pub(super) fn down(&self, device: &Key) -> bool {
+        self.0.net.down.lock().unwrap().get(device).is_some_and(|at| at.elapsed() < DOWN_FOR)
+    }
+
+    /// Whether that device can be reached now: what a guard tries before it says the device is off.
+    pub(super) async fn reaches(&self, device: &Key) -> bool {
+        self.conn(device, false).await.is_ok()
+    }
+
+    /// That device didn't answer in its usual time (`down`), or did.
+    pub(super) fn set_down(&self, device: Key, down: bool) {
+        let mut all = self.0.net.down.lock().unwrap();
+        match down {
+            true => all.insert(device, Instant::now()),
+            false => all.remove(&device),
+        };
+    }
+
     /// Reads which of the network's devices are connected to the relay. What it last said stands until it answers.
     pub(super) fn read_connected(&self) {
         let Some(address) = self.with_or(None, |i| Ok(i.r.db().setting("address")?)) else { return };
@@ -878,11 +935,15 @@ impl Node {
                 Ok(())
             });
             let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| crate::keys::unhex(k.as_str()?).ok()).collect();
+            let seen = said["seen"].as_object().into_iter().flatten().filter_map(|(k, at)| Some((crate::keys::unhex(k).ok()?, at.as_u64()?))).collect();
             let was = node.with_or(None, |i| {
+                i.last_seen = seen;
                 let was = std::mem::replace(&mut i.connected, connected.clone());
                 Ok((was != connected).then_some(was))
             });
             if let Some(was) = was {
+                // One whose socket opened again since is tried again at once.
+                node.0.net.down.lock().unwrap().retain(|k, _| was.contains(k) || !connected.contains(k));
                 node.relay_says(&was, &connected);
                 node.emit(Event::Devices);
             }

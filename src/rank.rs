@@ -3,9 +3,11 @@
 //! or by default 1, and the Cloudflare node always last. Calls, services' functions and new agent devices go to the
 //! lowest number that can run them, is up and has room; devices on the same number are equal, and the quickest
 //! runs it; a nearer one only when every one before it is far. Pure: settings in, priorities out; `src/node/calls.rs`,
-//! `cloudflare/node/` and every client (`onet/src/device.rs`, `cloudflare/web/browser.js`) order by it.
+//! `cloudflare/node/` and every client (`onet/src/device.rs`, `cloudflare/web/browser.js`) order by it, and the app
+//! runtime and onet try devices in `order`'s.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -82,4 +84,30 @@ pub fn with(settings: &BTreeMap<String, String>, ids: &[String], to: Priority) -
         out.insert(id.clone(), to.to_value());
     }
     serde_json::to_string(&out).unwrap()
+}
+
+/// What's known of a device something might run on, for `order`.
+#[derive(Clone, Copy, Debug)]
+pub struct Standing {
+    /// It's this device, or the part of it a call is about.
+    pub here: bool,
+    /// Its socket is open at the relay.
+    pub online: bool,
+    pub priority: Priority,
+    pub far: bool,
+    /// It has no room: its last answer said so.
+    pub full: bool,
+    /// When it was last seen (ms), if it ever was.
+    pub seen: Option<u64>,
+    /// How long it took to answer lately.
+    pub took: Duration,
+}
+
+/// The order devices are tried in: this device; then those online; by run priority; the near before the far; those
+/// with room; the most recently seen; the quickest. One that isn't online is still tried, after.
+pub fn order<K>(devices: &mut [K], standing: impl Fn(&K) -> Standing) {
+    devices.sort_by_cached_key(|k| {
+        let s = standing(k);
+        (!s.here, !s.online, s.priority, s.far, s.full, std::cmp::Reverse(s.seen), s.took)
+    });
 }

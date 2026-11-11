@@ -270,14 +270,14 @@ impl Node {
     }
 
     /// Erases what this device keeps (by name or key), for its user or an admin asking from one of their own devices,
-    /// directly: asked of another device, it says to ask that one, if it's on. Once it has answered, its oned stops its
+    /// directly: asked of another device, it says to ask that one, once it's reached it. Once it has answered, its oned stops its
     /// parts and deletes its home (its copies of the network's data, the pages it kept, and each service's folder and
     /// data, WhatsApp's link among them), then stops. Removing it next takes it out. → what's erasing.
     pub async fn erase(&self, caller: &Caller, device: &str) -> Result<Value> {
         let key = self.find_machine(device)?;
         let name = self.with(|i| Ok(i.r.db().machine(&key)?.map(|d| d.name).unwrap_or_default()))?;
         if key != self.0.id {
-            ensure!(self.with(|i| Ok(i.online(&key)))?, "{name} isn't on, so it can't erase what it keeps");
+            ensure!(self.reaches(&key).await, "{name} is off, so it can't erase what it keeps. Turn it on and try again.");
             return Err(super::calls::Elsewhere { why: format!("only {name} erases what it keeps"), nodes: vec![hex(&key)] }.into());
         }
         self.with(|i| {

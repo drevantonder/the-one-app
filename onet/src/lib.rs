@@ -61,9 +61,10 @@ const STAGGER: Duration = Duration::from_millis(250);
 /// asked, and any that may have come on since) are raced too.
 const FALLBACK: Duration = Duration::from_secs(1);
 const PATIENT: Duration = Duration::from_secs(10);
-/// How long a connected node has to start answering a GET or HEAD, before its connection is taken as gone quiet. (Other
+/// The least a connected node is given to start answering a GET or HEAD before its connection is taken as gone quiet:
+/// its usual time to answer is learned (`one::hedge`), but a GET's first byte comes only after its work. (Other
 /// requests may run as long as they need: that one is for the connection's own idle timeout.)
-const ANSWER: Duration = Duration::from_secs(5);
+const ANSWER_LEAST: Duration = Duration::from_secs(1);
 const SKIP: Duration = Duration::from_secs(10);
 const HEAD_LIMIT: usize = 64 << 10;
 const READ: usize = 64 << 10;
@@ -767,8 +768,10 @@ impl Client {
     }
 
     async fn exchange(&self, node: &PublicKey, conn: &Connection, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {
+        let usual = format!("node {}", data_encoding::HEXLOWER.encode(node.as_bytes()));
+        let limit = one::hedge::limit(&usual).max(ANSWER_LEAST);
         // A connection gone quiet takes no more streams once its peer's allowance is used: nothing was sent.
-        let (mut send, recv) = match timeout(ANSWER, conn.open_bi()).await {
+        let (mut send, recv) = match timeout(limit, conn.open_bi()).await {
             Ok(opened) => opened.map_err(unsent)?,
             Err(_) => {
                 self.give_up(node);
@@ -784,9 +787,13 @@ impl Client {
         sending.await.map_err(sent)?;
         let head_only = req.method == "HEAD";
         let mut recv = Stream::Iroh(recv);
+        let asked = Instant::now();
         let (status, headers, body) = if !last && matches!(req.method.as_str(), "GET" | "HEAD") {
-            match timeout(ANSWER, read_response(&mut recv, head_only)).await {
-                Ok(read) => read,
+            match timeout(limit, read_response(&mut recv, head_only)).await {
+                Ok(read) => {
+                    one::hedge::learn(&usual, asked.elapsed());
+                    read
+                }
                 Err(_) => {
                     self.give_up(node);
                     Err(sent("the node didn't answer"))

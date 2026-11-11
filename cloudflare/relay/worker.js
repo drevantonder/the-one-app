@@ -256,6 +256,11 @@ export class McpDevices extends WorkerEntrypoint {
     return Array.isArray(keys) ? answer(relay(this.env).connected(keys.filter(isKey))) : [];
   }
 
+  /// When each key on the list was last seen (ms), as the computes carry it: the order those not online are tried in.
+  seen() {
+    return answer(list(this.env).seenAll());
+  }
+
   /// Each scope's count of writes, as the computes carry it: for a device to read who's who again only once it moved.
   writes() {
     return answer(list(this.env).writes());

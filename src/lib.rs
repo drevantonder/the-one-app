@@ -84,7 +84,6 @@ pub mod tools;
 pub mod core_tools;
 pub mod devices;
 pub mod groups;
-#[cfg(not(target_family = "wasm"))]
 pub mod hedge;
 pub mod widgets;
 pub mod app;

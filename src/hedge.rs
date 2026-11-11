@@ -5,19 +5,29 @@
 //! learned as TCP learns its retransmission timeout (RFC 6298). Past it, a request that comes to the same if the server
 //! gets it twice is sent again on a new connection and whichever answers first is taken; one that mustn't fails then,
 //! and its connection is dropped. How often a limit passes, and which side won, is counted for insights (`take_late`).
+//! The same limit is learned of anything else a first byte is waited for by name (`limit`, `learn`): another device's
+//! "taken" (src/node/calls.rs), and a node's first answer to a client (onet).
 
 use std::collections::BTreeMap;
-use std::io::Read;
-use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::time::Duration;
+#[cfg(not(target_family = "wasm"))]
+use std::{
+    io::Read,
+    sync::{Arc, mpsc},
+    time::Instant,
+};
 
+#[cfg(not(target_family = "wasm"))]
 use ureq::http::{Request, Response, request::Parts};
+#[cfg(not(target_family = "wasm"))]
 use ureq::{Agent, Body, SendBody};
 
 /// A limit is never under this, so jitter alone doesn't send a healthy request twice, nor over this, so a dead
 /// connection never holds a request long.
 const LEAST: Duration = Duration::from_millis(250);
 const MOST: Duration = Duration::from_secs(5);
+#[cfg(not(target_family = "wasm"))]
 /// The least a request never sent twice waits: failing a healthy write costs far more than sending a read twice.
 const NEVER_LEAST: Duration = Duration::from_secs(2);
 /// A host's limit before any answer of its has been timed.
@@ -57,11 +67,23 @@ impl Estimate {
     }
 }
 
-/// Each host's estimate, by `<host> <reached> <method>`: a write's answer comes later than a read's.
+/// Each name's estimate: a host's by `<host> <reached> <method>`, as a write's answer comes later than a read's.
 static ESTIMATES: Mutex<BTreeMap<String, Estimate>> = Mutex::new(BTreeMap::new());
+
+/// How long the first byte of what `name` answers is waited for before it's taken as stalled.
+pub fn limit(name: &str) -> Duration {
+    ESTIMATES.lock().unwrap().get(name).copied().unwrap_or_default().limit()
+}
+
+/// Learns how long the first byte of what `name` answered took.
+pub fn learn(name: &str, took: Duration) {
+    ESTIMATES.lock().unwrap().entry(name.to_string()).or_default().learn(took);
+}
+#[cfg(not(target_family = "wasm"))]
 /// How many requests passed their limit since `take_late` last read them, by what they reached and how each ended.
 static LATE: Mutex<BTreeMap<(&'static str, &'static str), u64>> = Mutex::new(BTreeMap::new());
 
+#[cfg(not(target_family = "wasm"))]
 /// Requests that passed their limit since this last asked, for insights: what each reached, how it ended (`original`,
 /// the first connection answered after all; `hedge`, the new one did; `neither`; or `failed`, one never sent twice),
 /// and how many.
@@ -69,23 +91,26 @@ pub fn take_late() -> Vec<(&'static str, &'static str, u64)> {
     std::mem::take(&mut *LATE.lock().unwrap()).into_iter().map(|((reached, ended), n)| (reached, ended, n)).collect()
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn late(reached: &'static str, ended: &'static str) {
     *LATE.lock().unwrap().entry((reached, ended)).or_default() += 1;
 }
 
+#[cfg(not(target_family = "wasm"))]
 /// Sends `request` with `agent`, as `reached` says what it reaches for insights (`bucket`, or a Worker's name): → its
 /// answer, once its first byte came, and whether it was sent twice.
 pub fn run(agent: &Agent, reached: &'static str, request: Request<Vec<u8>>, twice: Twice) -> Result<(Response<Body>, bool), ureq::Error> {
     let (parts, body) = request.into_parts();
     let key = format!("{} {reached} {}", parts.uri.authority().map(|a| a.as_str()).unwrap_or_default(), parts.method);
-    let limit = ESTIMATES.lock().unwrap().get(&key).copied().unwrap_or_default().limit();
-    let learn = |took| ESTIMATES.lock().unwrap().entry(key.clone()).or_default().learn(took);
+    let limit = limit(&key);
+    let learn = |took| learn(&key, took);
     match twice {
         Twice::Never => never(agent, reached, parts, body, limit.max(NEVER_LEAST), learn).map(|r| (r, false)),
         Twice::Safe => safe(agent, reached, parts, Arc::new(body), limit, learn),
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 /// One that mustn't reach the server twice: its connection is dropped once its limit passes, and the next request
 /// takes a new one.
 fn never(agent: &Agent, reached: &'static str, parts: Parts, body: Vec<u8>, limit: Duration, learn: impl Fn(Duration)) -> Result<Response<Body>, ureq::Error> {
@@ -108,12 +133,14 @@ fn never(agent: &Agent, reached: &'static str, parts: Parts, body: Vec<u8>, limi
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 enum Event {
     /// A side's request moved on: it started, or more of its body went.
     Moved(usize),
     Answered(usize, Result<Response<Body>, ureq::Error>),
 }
 
+#[cfg(not(target_family = "wasm"))]
 /// One that may reach the server twice: sent again on a new connection once its limit passes after it last moved,
 /// and whichever answers first taken. The other is left to end by its agent's own timeout.
 fn safe(agent: &Agent, reached: &'static str, parts: Parts, body: Arc<Vec<u8>>, limit: Duration, learn: impl Fn(Duration)) -> Result<(Response<Body>, bool), ureq::Error> {
@@ -165,6 +192,7 @@ fn safe(agent: &Agent, reached: &'static str, parts: Parts, body: Arc<Vec<u8>>, 
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 /// `parts` with `body`, calling `moved` as it starts and as its body goes: a GET or HEAD has none, anything else says
 /// its length, as S3 wants.
 fn build(parts: &Parts, body: Arc<Vec<u8>>, mut moved: impl FnMut() + Send + 'static) -> Request<SendBody<'static>> {
@@ -180,6 +208,7 @@ fn build(parts: &Parts, body: Arc<Vec<u8>>, mut moved: impl FnMut() + Send + 'st
     request.map(|()| sent)
 }
 
+#[cfg(not(target_family = "wasm"))]
 /// A body as it's read to be sent, saying each time more goes.
 struct Watched {
     body: Arc<Vec<u8>>,
@@ -187,6 +216,7 @@ struct Watched {
     moved: Box<dyn FnMut() + Send>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Read for Watched {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = (&self.body[self.at..]).read(buf)?;
