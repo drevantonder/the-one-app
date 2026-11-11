@@ -15,6 +15,9 @@ import { $, h, reveal, ui } from "./view.js";
 let frames = [];
 /// How long a screen has to draw before it counts as never having drawn.
 const NEVER_DREW = 5000;
+/// The Settings screens any app's screen may send its user to, each with the only params it may give: no code to approve.
+/// Devices, to choose the device that runs its schedules; Insights, at a service, which shows only what its user may see.
+const OPENED_BY_APPS = { devices: ["schedules", "scope"], insights: ["service"] };
 
 /// What's beside the sidebar, which this page keeps (the screen's frame) while the window draws around it.
 export const detail = Object.assign(document.createElement("div"), { className: "detail" });
@@ -559,9 +562,8 @@ addEventListener("message", async (e) => {
   /// Where this screen's `one.open` goes.
   const opensTo = (m) => {
     const params = JSON.stringify(m.params || {});
-    // Any screen may send its user to choose the device that runs its app's schedules, in Settings › Devices.
-    // An app's says only which app's schedules, and where: no code to approve.
-    return m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params: mine ? params : JSON.stringify({ schedules: m.params?.schedules, scope: m.params?.scope }) }
+    const opens = m.app === "settings" && Object.hasOwn(OPENED_BY_APPS, m.screen) && OPENED_BY_APPS[m.screen];
+    return opens ? { kind: "own", name: m.screen, params: mine ? params : JSON.stringify(Object.fromEntries(opens.map((k) => [k, m.params?.[k]]))) }
       : typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }
       : mine ? { kind: "own", name: String(m.screen || ""), params }
       : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };
