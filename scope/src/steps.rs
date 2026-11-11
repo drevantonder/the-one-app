@@ -1147,15 +1147,20 @@ const RELEASES_KEPT: i64 = 5;
 /// (`Host::take_forgotten`). As each step of `global` is applied, so a database whose release steps came before this
 /// rule forgets them at its next step, where an app runtime notes what it forgot.
 fn forget_old_releases(db: &Connection) -> Result<()> {
-    let old = format!(
-        "WITH ranked AS (
-            SELECT content, row_number() OVER (PARTITION BY json_extract(content, '$.data.target'), json_extract(content, '$.data.service') ORDER BY at DESC) AS n
-            FROM releases),
-        old AS (
-            SELECT b.value AS blob FROM ranked, json_each(ranked.content, '$.blobs') b GROUP BY b.value HAVING min(n) > {RELEASES_KEPT}
-            EXCEPT SELECT bundle FROM deploys)"
-    );
-    db.execute_batch(&format!("{old} UPDATE blobs SET pinned = 0 WHERE blob IN old; {old} INSERT OR IGNORE INTO forgotten SELECT blob FROM old;"))?;
+    let old: Vec<String> = db
+        .prepare_cached(&format!(
+            "WITH ranked AS (
+                SELECT content, row_number() OVER (PARTITION BY json_extract(content, '$.data.target'), json_extract(content, '$.data.service') ORDER BY at DESC) AS n
+                FROM releases)
+            SELECT b.value FROM ranked, json_each(ranked.content, '$.blobs') b GROUP BY b.value HAVING min(n) > {RELEASES_KEPT}
+            EXCEPT SELECT bundle FROM deploys"
+        ))?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for blob in &old {
+        db.execute("UPDATE blobs SET pinned = 0 WHERE blob = ?1", [blob])?;
+        db.execute("INSERT OR IGNORE INTO forgotten (blob) VALUES (?1)", [blob])?;
+    }
     Ok(())
 }
 
