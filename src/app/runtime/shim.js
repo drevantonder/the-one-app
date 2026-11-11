@@ -197,12 +197,6 @@ function context(ask, body, appends, later, spans) {
     /// group's and Everyone's with members: { <user id>: "admin" | "member" }. Everyone's has automatic: true, as being in
     /// the network isn't being given anything on purpose. `me.handle` is the caller's.
     handles: body.handles,
-    /// Says what this call spent on AI, { model, usd, input, output, ms }: it shows in the insights of the app that
-    /// called it (ctx.from), or else of this one; `ms`, how long the model took, is optional.
-    cost: (spent) => {
-      if (body.read_only) return;
-      appends.push({ kind: "cost", model: String(spent?.model ?? "?"), usd: Number(spent?.usd) || 0, input: Math.round(Number(spent?.input) || 0), output: Math.round(Number(spent?.output) || 0), ms: spent?.ms == null ? null : Math.round(Number(spent.ms) || 0) });
-    },
     /// Keeps work going after the call returns (an AI read, a copy to Drive), up to 10 minutes: its requests and
     /// calls still go out as this call's, and what it writes is written when it's done.
     waitUntil: (promise) => {
@@ -277,8 +271,6 @@ function context(ask, body, appends, later, spans) {
     /// The schedules the caller may switch, of the apps they may use, that are on and failed their last run, each as
     /// `catalog` gives an app's `schedules`, with its `app`.
     failing: async () => (await ask("failing")).json(),
-    /// What's broken most lately in `app`, if the caller may deploy it: each { tool, error, build, count, first, last }.
-    errors: async (app) => post("errors", { app }),
     /// The network's devices, as `GET /api/state` gives them to the caller: online or not, and each one's load.
     devices: async () => (await ask("devices")).json(),
     /// Run priority (src/rank.rs): `{ order, admin }`, every device and the Cloudflare node (key "cloudflare") in the

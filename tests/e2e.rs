@@ -703,7 +703,9 @@ async fn a_refusals_words_never_reach_what_insights_keeps_and_a_failures_are_cle
     assert!(of("refuse")["attrs"].as_str().unwrap().contains("one.fingerprint"), "and it's in the list of what was refused: {said}");
     assert_eq!(of("refuse")["message"], Value::Null, "a refusal's words go nowhere: {said}");
     assert!(of("post")["kind"] == "server", "every request is sent, for its rates: {said}");
-    assert!(!said.contains("private thought") && !said.contains("anna") && !said.contains(&a.user().unwrap()), "only names, numbers and a failure's cleaned words: {said}");
+    assert!(!said.contains("private thought") && !said.contains("anna"), "only names, numbers and a failure's cleaned words: {said}");
+    let attrs: Value = serde_json::from_str(of("post")["attrs"].as_str().unwrap()).unwrap();
+    assert_eq!(attrs["enduser.id"], a.user().unwrap(), "a call says who made it, by their id: {said}");
 }
 
 /// A device's log is read over the network by whoever may remove the device (its user, and the network's admins), never

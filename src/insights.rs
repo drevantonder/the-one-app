@@ -8,8 +8,9 @@
 //! Telemetry may be lost.
 //!
 //! A signal's attributes hold closed-set values only (`Attrs`): never a call's arguments or answer, a URL, a file, repo or
-//! account's name, an email, an IP, a prompt or anything key-shaped, and never names a user or a group. The one free text is
-//! `exception.message`, what a real failure said, cleaned first (`message`); a refusal's is never kept.
+//! account's name, an email, an IP, a prompt or anything key-shaped, and never names a group. A call's user is said by their
+//! id alone (`enduser.id`), which is operational. The one free text is `exception.message`, what a real failure said, cleaned
+//! first (`message`); a refusal's is never kept.
 
 use std::collections::BTreeMap;
 
@@ -332,15 +333,11 @@ impl Attrs {
         self
     }
 
-    /// `gen_ai.request.model`.
-    pub fn model(mut self, model: &str) -> Attrs {
-        self.token("gen_ai.request.model", model);
-        self
-    }
-
-    /// `gen_ai.token.type`.
-    pub fn tokens(mut self, kind: &'static str) -> Attrs {
-        self.0.insert("gen_ai.token.type", json!(kind));
+    /// Who made a call, as OTEL's `enduser.id`: a user's id, never their name.
+    pub fn user(mut self, id: &str) -> Attrs {
+        if crate::database::scopes::is_id(id) {
+            self.0.insert("enduser.id", json!(id));
+        }
         self
     }
 
@@ -584,8 +581,6 @@ pub const OPEN_FRESH: Metric = Metric { name: "client.open.fresh", histogram: tr
 pub const LATE: Metric = Metric { name: "http.client.late", histogram: false, unit: "{request}" };
 pub const SIGNER_FAILURES: Metric = Metric { name: "signer.failures", histogram: false, unit: "{failure}" };
 pub const CANARY: Metric = Metric { name: "telemetry.canary", histogram: false, unit: "{check}" };
-pub const TOKEN_USAGE: Metric = Metric { name: "gen_ai.client.token.usage", histogram: true, unit: "{token}" };
-pub const OPERATION_DURATION: Metric = Metric { name: "gen_ai.client.operation.duration", histogram: true, unit: "ms" };
 
 /// One span, as a device says it. `service` is an app, or the network's own program (`own`).
 #[derive(Clone, Debug)]
@@ -743,10 +738,11 @@ mod tests {
         let steps = step_spans(&parent, &[json!({ "step": "device", "at": 1, "ms": 2, "why": secret, "device": secret, "result": secret, "trace": { "secret": secret } }), json!({ "step": secret })]);
         assert_eq!(steps.len(), 1, "a step of no known name isn't one");
         assert_eq!((steps[0].time, steps[0].duration, steps[0].parent.as_deref()), (6, 2, Some(parent.span.as_str())));
-        let attrs = Attrs::default().rpc(secret, "t").client(secret).build(secret).stage(secret).error(secret).fingerprint(secret, "stage:run", "b1");
+        let attrs = Attrs::default().rpc(secret, "t").client(secret).user(secret).build(secret).stage(secret).error(secret).fingerprint(secret, "stage:run", "b1");
         let stored = format!("{} {}", attrs.json(), steps[0].attrs.json());
         assert!(!stored.contains("anna") && !stored.contains("example"), "{stored}");
         assert_eq!(attrs.json()["one.client"], "other");
+        assert_eq!(attrs.json().get("enduser.id"), None, "only a user's id says who");
         assert_eq!(attrs.json()["error.type"], OTHER);
         assert_eq!(attrs.json()["one.fingerprint"], format!("{OTHER}|stage:run|b1"));
         let e = Exception::from_json(&json!({ "type": secret, "frames": [{ "file": "app.js", "line": 3, "col": 9 }, { "file": "a/b@c", "line": 1, "col": 1 }, { "file": "lib/a.js", "line": 2, "col": 1 }] })).unwrap();

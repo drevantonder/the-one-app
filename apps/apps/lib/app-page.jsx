@@ -1,6 +1,6 @@
 // An app's page, in the App Store's list beside it where there's room (main.jsx) and as a screen of its own where there
-// isn't (app.jsx): its icon and name, where it runs, its schedules, what it works with, its source, and, for its owners,
-// its activity and deleting it.
+// isn't (app.jsx): its icon and name, where it runs, its schedules and their last runs, what it works with, its source,
+// and, for its owners, its insights and deleting it.
 import { useEffect, useRef, useState } from "react"
 import { AppIcon, Button, Empty, Grid, Hint, Icon, List, ListRow, ListSkeleton, Problem, Section, Switch, useCall } from "@one/ui"
 import { PagesButton } from "./pages.jsx"
@@ -82,9 +82,13 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
   const schedules = (health.data?.schedules || []).filter((s) => !s.removed)
   const unrun = schedules.find((s) => !s.invalid && s.on && s.runs_as && !(s.run_by || []).length && s.may_set_app_schedules)
   const manyPlaces = new Set(schedules.map((s) => s.scope)).size > 1
+  // Each schedule's last runs there, newest first: when, as whom, and what failed.
+  const runsOf = (s) => (health.data?.activity || []).filter((r) => r.schedule === s.name && r.scope === s.scope).slice(0, 3)
+  const ran = (r) => r.ok
+    ? <span key={r.time} className="block truncate">Ran {ago(r.time)} as {r.user}</span>
+    : <span key={r.time} className="block truncate text-destructive">Failed {ago(r.time)} as {r.user}: {said(r.error).title}</span>
   const line = (s) => {
     if (s.invalid) return <span className="text-destructive">{s.invalid}</span>
-    if (s.last && !s.last.ok) return <span className="text-destructive">Failed {ago(s.last.time)}: {said(s.last.error).title}</span>
     if (s.on && s.runs_as) {
       return cap(s.when) + (manyPlaces ? " · " + s.scope_name : "") + (s.next ? " · next " + soon(s.next) : "") + ((s.run_by || []).length ? " · on " + s.run_by.join(", ") : "")
     }
@@ -106,7 +110,6 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
     if (i != null && w.nodes[i] !== running) run("move", () => one.call("move", { app: name, node: w.nodes[i] }))
   }
   const owner = a.mine && a.deployed && !a.deleted
-  const busyAny = !!health.data && !!(health.data.activity?.length || health.data.insights?.errors?.length || health.data.insights?.usage?.length || health.data.insights?.cost?.length)
   const repo = a.source && /^http:[/][/](localhost|127[.]0[.]0[.]1):[0-9]+[/]repos[/]([a-z0-9][a-z0-9._-]*?)([.]git)?[/]?$/.exec(a.source)?.[2]
 
   const on = onAPage(a, places)
@@ -184,7 +187,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
                   <ListRow
                     key={key}
                     title={s.description || s.name}
-                    sub={line(s)}
+                    sub={<><span className="block truncate">{line(s)}</span>{runsOf(s).map(ran)}</>}
                     trailing={!s.invalid && <Switch checked={on} disabled={!s.may_switch || busy === "switch"} aria-label={s.description || s.name} onCheckedChange={(v) => switchIt(s, v)} />}
                   />
                 )
@@ -210,12 +213,11 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
         </Section>
       )}
 
-      {(a.source || code.data || busyAny || owner) && (
+      {(a.source || code.data || owner) && (
         <List>
           {/* Where its code is kept: a repo in Repos or a page in the browser. */}
           {a.source && <ListRow title="Source" onClick={() => (repo ? one.open("repo", { repo }, "repos") : one.link(a.source))} />}
           {code.data && <ListRow title="Code" onClick={() => one.open("code", { app: a.name, dir: "" })} />}
-          {busyAny && <ListRow title="Activity" onClick={() => one.open("activity", { app: a.name })} />}
           {owner && <ListRow title="Insights" onClick={() => one.open("insights", { service: a.name }, "settings")} />}
         </List>
       )}

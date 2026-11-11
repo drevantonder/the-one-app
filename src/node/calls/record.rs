@@ -1,90 +1,22 @@
-//! How each app's calls went here: loop guards that stop an app, who used it, and what its users see of that.
+//! How each app's calls went here: loop guards that stop an app, and what telemetry says of the app.
 
 use super::*;
 
 impl Node {
-    /// Records, for an app's owners, who used it: the first call each day by each user from each client (`used`).
-    pub(in crate::node) fn record(&self, app: &str, req: &CallRequest, me: &Caller) {
-        let client = req.client.clone().unwrap_or_else(|| "api".into());
-        let day = now_ms() / 86_400_000;
-        if !self.0.calls.seen.lock().unwrap().insert((app.to_string(), me.user.clone(), client.clone(), day)) {
-            return;
-        }
-        self.write_insight(app, me, status::Said::Used { app: app.into(), user: me.user.clone(), client, agent: me.agent.clone(), day });
-    }
-
-    /// Where what's said of `me`'s call of `app` goes: the owner's scope when `me` may use it and this device holds it, else
-    /// `global`. `None` for no such app, as what a caller typed is theirs and may be anything.
-    pub(in crate::node) fn destination(&self, app: &str, me: &Caller) -> Option<Destination> {
+    /// What a call's telemetry says of `app`: that it's an app, and its owner's kind of scope. `None` for no such app, as
+    /// what a caller typed is theirs and may be anything.
+    pub(in crate::node) fn destination(&self, app: &str) -> Option<Destination> {
         self.with(|i| {
-            let m = i.r.db();
-            let Some(owner) = m.app(app)?.map(|a| a.owner) else { return Ok(None) };
-            let own = match owner {
-                Principal::User(u) => Scope::User(u),
-                Principal::Group(g) => Scope::Group(g),
-                _ => Scope::Global,
+            let Some(owner) = i.r.db().app(app)?.map(|a| a.owner) else { return Ok(None) };
+            let kind = match owner {
+                Principal::User(_) => "user",
+                Principal::Group(_) => "group",
+                _ => "everyone",
             };
-            let kind = trace::kind(&own);
-            Ok(Some(if m.may(&me.user, "use", &scopes::object(&own)) && i.r.holds(&own) {
-                Destination { scope: own, named: true, kind }
-            } else {
-                Destination { named: true, scope: Scope::Global, kind }
-            }))
+            Ok(Some(Destination { named: true, kind }))
         })
         .ok()
         .flatten()
-    }
-
-    /// Writes an insight about `app` for `me`'s call, where `destination` says, in the background.
-    pub(in crate::node) fn write_insight(&self, app: &str, me: &Caller, said: status::Said) {
-        let Some(Destination { scope, .. }) = self.destination(app, me) else { return };
-        let node = self.clone();
-        tokio::spawn(async move {
-            if let Err(err) = node.say(&scope, said).await {
-                tracing::debug!("insights: {err:#}");
-            }
-        });
-    }
-
-    /// What an app's owners see of it, from every scope `viewer` may use here: who used it, when and from what, and what it
-    /// spent on AI, by model. Only for someone acting for its owner.
-    pub(in crate::node) fn insights_of(&self, viewer: &Caller, app: &str) -> Result<Option<Value>> {
-        self.with(|i| {
-            let m = i.r.db();
-            let Some(a) = m.app(app)? else { return Ok(None) };
-            if !m.may(&viewer.user, "deploy", &scopes::app(&a.name)) {
-                return Ok(None);
-            }
-            let name = |u: &str| user_name(m, u);
-            let mut users: BTreeMap<(String, String), (u64, u64, Option<String>)> = BTreeMap::new();
-            let mut cost: BTreeMap<String, (f64, u64, u64, u64)> = BTreeMap::new();
-            for (log, status) in &i.status {
-                let Ok(scope) = Scope::parse(log) else { continue };
-                let Some(ins) = status.insights.get(app).filter(|_| m.may(&viewer.user, "use", &scopes::object(&scope))) else { continue };
-                for ((user, client), u) in &ins.used {
-                    let p = users.entry((user.clone(), client.clone())).or_default();
-                    p.0 += u.days;
-                    p.1 = p.1.max(u.last);
-                    if u.agent.is_some() {
-                        p.2 = u.agent.clone();
-                    }
-                }
-                for (model, c) in &ins.cost {
-                    let x = cost.entry(model.clone()).or_default();
-                    x.0 += c.usd;
-                    x.1 += c.input;
-                    x.2 += c.output;
-                    x.3 += c.calls;
-                }
-            }
-            let mut usage: Vec<Value> = Vec::new();
-            for ((u, client), (days, last, agent)) in users {
-                usage.push(json!({ "user": name(&u)?, "client": client, "agent": agent, "days": days, "last": last }));
-            }
-            usage.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
-            let cost: Vec<Value> = cost.into_iter().map(|(model, (usd, input, output, calls))| json!({ "model": model, "usd": usd, "input": input, "output": output, "calls": calls })).collect();
-            Ok(Some(json!({ "usage": usage, "cost": cost })))
-        })
     }
 
     /// Counts one of `app`'s calls of other apps, or one run of its schedules (`kind`). Past `RATE_LIMIT` this minute,
@@ -126,9 +58,8 @@ impl Node {
     }
 }
 
-/// Where what's said of a call goes.
+/// What a call's telemetry says of its app.
 pub(in crate::node) struct Destination {
-    pub scope: Scope,
     /// Whether there's an app to name: every member can list every app's name, so only a call of no such app has none.
     pub named: bool,
     /// The kind of the app's owner's scope.

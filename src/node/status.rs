@@ -1,5 +1,4 @@
-//! How things went, as devices say it: who used each app and its AI cost; schedules'
-//! runs; the build each device runs; backups' runs. Rows each scope's node database changes in place, not steps of their own: written often, and
+//! How things went, as devices say it: schedules' runs; the build each device runs; backups' runs. Rows each scope's node database changes in place, not steps of their own: written often, and
 //! needed only as they are now. Each device reads them back into `Status`, which the rest of the node looks at.
 
 use super::*;
@@ -77,6 +76,9 @@ alter table rollups_merged rename to rollups;
 drop table signals;
 drop table rollups;
 drop table fingerprints;
+", "
+drop table used;
+drop table cost;
 "];
 
 pub const RUNS_KEPT: usize = 20;
@@ -87,8 +89,6 @@ pub const CHECKS_KEPT: usize = 20;
 /// A scope's rows, as this device last read them.
 #[derive(Clone, Debug, Default)]
 pub struct Status {
-    /// What each app's owners see of it here: who used it, its AI cost.
-    pub insights: BTreeMap<String, Insights>,
     /// Each schedule's latest runs here, oldest first, by (app, schedule).
     pub runs: BTreeMap<(String, String), Vec<Run>>,
     /// When a schedule's runs first followed a different definition, by (app, schedule): (was, is, when).
@@ -103,30 +103,6 @@ pub struct Status {
     pub alerted: BTreeMap<String, u64>,
     /// In `global`: the latest restore checks, oldest first.
     pub checks: Vec<CheckRun>,
-}
-
-/// An app's insights in one scope.
-#[derive(Clone, Debug, Default)]
-pub struct Insights {
-    /// By (user, client): the days they used it, when last, and the agent last named.
-    pub used: BTreeMap<(String, String), Used>,
-    /// By model: dollars, tokens in and out, and calls.
-    pub cost: BTreeMap<String, Cost>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Used {
-    pub days: u64,
-    pub last: u64,
-    pub agent: Option<String>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Cost {
-    pub usd: f64,
-    pub input: u64,
-    pub output: u64,
-    pub calls: u64,
 }
 
 /// One run of a schedule: the slot it ran for, when, on which device, as whom, how it went, and the definition it
@@ -176,9 +152,6 @@ pub struct CheckRun {
 }
 
 pub enum Said {
-    /// A call of `app` by `user` from `client` (`agent` naming who asked through it), on `day`.
-    Used { app: String, user: String, client: String, agent: Option<String>, day: u64 },
-    Cost { app: String, model: String, usd: f64, input: u64, output: u64 },
     Ran { app: String, schedule: String, run: Run },
     Build { device: Key, build: String, target: String },
     BackedUp(BackupRun),
@@ -197,16 +170,6 @@ impl Node {
         self.write_in(scope, &mut db, &self.bucket()?, |c| {
             let ex = |sql: &str, params: &[Value]| crate::database::stored::execute(c, sql, params).map(|_| ());
             match &said {
-                Said::Used { app, user, client, agent, day } => ex(
-                    "insert into used values (?, ?, ?, 1, ?, ?, ?) on conflict (app, user, client) do update set
-                       days = days + (excluded.day > day), day = max(day, excluded.day), last = max(last, excluded.last), agent = coalesce(excluded.agent, agent)",
-                    &[json!(app), json!(user), json!(client), json!(day), json!(now), json!(agent)],
-                ),
-                Said::Cost { app, model, usd, input, output } => ex(
-                    "insert into cost values (?, ?, ?, ?, ?, 1) on conflict (app, model) do update set
-                       usd = usd + excluded.usd, input = input + excluded.input, output = output + excluded.output, calls = calls + 1",
-                    &[json!(app), json!(model), json!(usd.max(0.0)), json!(input), json!(output)],
-                ),
                 Said::Ran { app, schedule, run } => {
                     ex(
                         "insert or replace into runs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -266,14 +229,6 @@ impl Node {
         let n = |v: &Value| v.as_u64().unwrap_or(0);
         let device = |v: &Value| unhex(v.as_str().unwrap_or("")).context("a device in this status isn't a key: the status can't be read");
         let mut s = Status::default();
-        for r in rows("select * from used")? {
-            let used = Used { days: n(&r["days"]), last: n(&r["last"]), agent: r["agent"].as_str().map(str::to_string) };
-            s.insights.entry(text(&r["app"])).or_default().used.insert((text(&r["user"]), text(&r["client"])), used);
-        }
-        for r in rows("select * from cost")? {
-            let cost = Cost { usd: r["usd"].as_f64().unwrap_or(0.0), input: n(&r["input"]), output: n(&r["output"]), calls: n(&r["calls"]) };
-            s.insights.entry(text(&r["app"])).or_default().cost.insert(text(&r["model"]), cost);
-        }
         for r in rows("select * from runs order by slot")? {
             let key = (text(&r["app"]), text(&r["schedule"]));
             let run = Run {
@@ -423,6 +378,19 @@ mod tests {
         assert_eq!(of("v").0, "unset");
         let statuses: Vec<String> = db.prepare("select status from fingerprints order by fingerprint").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
         assert_eq!(statuses, ["unset", "error"], "and the migrated row is gone");
+    }
+
+    /// Who used each app and its AI cost go, and a schedule's runs stay.
+    #[test]
+    fn who_used_an_app_goes_and_runs_stay() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let before = SCHEMA.iter().position(|s| s.contains("drop table used")).unwrap();
+        db.execute_batch(&SCHEMA[..before].concat()).unwrap();
+        db.execute_batch("insert into used values ('a', 'u1', 'cli', 1, 1, 1, null); insert into cost values ('a', 'm', 1.0, 1, 1, 1); insert into runs values ('a', 's', 1, 5, 'd', 'u1', 1, null, 3, null);").unwrap();
+        db.execute_batch(SCHEMA[before]).unwrap();
+        assert!(db.prepare("select * from used").is_err() && db.prepare("select * from cost").is_err());
+        let runs: i64 = db.query_row("select count(*) from runs", [], |r| r.get(0)).unwrap();
+        assert_eq!(runs, 1);
     }
 
     /// A failure kept before fingerprints keeps its app, tool, count and times, and never what it said.

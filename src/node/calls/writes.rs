@@ -5,24 +5,14 @@ use crate::protocol::allowed;
 use super::*;
 
 impl Node {
-    pub(in crate::node) async fn write_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller, from: Option<&str>) -> Result<()> {
-        let prepared = self.prepare_appends(app, appends, scopes, me, from).await?;
+    pub(in crate::node) async fn write_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller) -> Result<()> {
+        let prepared = self.prepare_appends(appends, scopes, me).await?;
         self.write_prepared(app, prepared, scopes, me).await
     }
 
     /// A call's appends, checked, before any is written: a call that fails writes nothing. The blobs its steps keep go
     /// in the bucket now, so what's slow and may fail comes before it writes.
-    pub(in crate::node) async fn prepare_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller, from: Option<&str>) -> Result<Prepared> {
-        // What it spent on AI counts against the app that called it, if one did.
-        let (costs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Cost { .. }));
-        for cost in costs {
-            if let Append::Cost { model, usd, input, output, ms } = cost {
-                let to = from.unwrap_or(app);
-                self.record_ai(to, me, &model, input, output, ms);
-                let said = status::Said::Cost { app: to.into(), model, usd, input, output };
-                self.write_insight(to, me, said);
-            }
-        }
+    pub(in crate::node) async fn prepare_appends(&self, appends: Vec<Append>, scopes: &[Scope], me: &Caller) -> Result<Prepared> {
         let (adds, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Add { .. }));
         let (execs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Exec { .. }));
         let (items, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Vault { .. }));
@@ -165,6 +155,6 @@ pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope
             };
             (Scope::Global, crate::settings::service(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)
         }
-        Append::Add { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("apps added, costs, statements and items are written on their own"),
+        Append::Add { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("apps added, statements and items are written on their own"),
     })
 }

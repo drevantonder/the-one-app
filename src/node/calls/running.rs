@@ -246,7 +246,7 @@ impl Node {
                 ensure!(self.0.calls.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");
                 let req: Value = serde_json::from_slice(&body)?;
                 let appends = crate::call::appends(&req["appends"])?;
-                self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller, grant.from.as_deref()).await?;
+                self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller).await?;
                 ok(json!({}))
             }
             Ask::Done => {
@@ -265,10 +265,6 @@ impl Node {
                 ok(self.source(req["app"].as_str().unwrap_or_default(), None, req["path"].as_str()).await?)
             }
             Ask::Failing => ok(json!(self.failing_schedules(&grant.caller).await?)),
-            Ask::Errors => {
-                let req: Value = serde_json::from_slice(&body)?;
-                ok(json!(self.errors_of(&grant.caller, req["app"].as_str().unwrap_or_default()).await))
-            }
             // A push to the caller's devices, from this app, through the network's push Worker.
             Ask::Notify => {
                 let send: crate::push::Send = serde_json::from_slice(&body)?;

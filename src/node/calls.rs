@@ -138,8 +138,6 @@ pub(super) struct State {
     guard: Mutex<Guard>,
     /// The calls that returned with work still running (`ctx.waitUntil`), by token: told when it's done.
     later: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
-    /// Who used which app today from which client, as recorded here: (app, user, client, day).
-    seen: Mutex<std::collections::HashSet<(String, String, String, u64)>>,
 }
 
 /// How long an app's prompt hook may take before it's left out: the agent's harness waits for them all.
@@ -830,7 +828,7 @@ impl Node {
             trace::note(req.named(json!({ "step": "run" })), running.elapsed());
             let preparing = Instant::now();
             trace::stage(crate::insights::stage::PREPARE);
-            let prepared = self.prepare_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
+            let prepared = self.prepare_appends(std::mem::take(&mut outcome.appends), &scopes, me).await?;
             trace::note(json!({ "step": "prepare" }), preparing.elapsed());
             writing.store(true, Ordering::Relaxed);
             trace::stage(crate::insights::stage::WRITE);
@@ -856,7 +854,6 @@ impl Node {
                 return Err(err);
             }
         };
-        self.record(&req.app, req, me);
         // Its user using it here renews the app schedules that run it for them, as their other devices do themselves.
         if self.this_machine(me) {
             self.renew_app_schedules(&req.app);

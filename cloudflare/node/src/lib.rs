@@ -66,14 +66,14 @@ pub fn bucket_read(name: &str, found: bool, instance: &str, now: f64) -> Option<
     READS.due(now as u64, instance, "cloudflare-node").map(|rows| rows.to_string())
 }
 
-/// A call this node ran, as the rows the telemetry Worker takes: one server span, by the same rules as any node's. `code` is
+/// A call this node ran for `user` (their id), as the rows the telemetry Worker takes: one server span, by the same rules as any node's. `code` is
 /// what it failed with, and `said` what it said; a refusal keeps none of that.
 #[wasm_bindgen]
-pub fn call_span(app: &str, tool: &str, instance: &str, time: f64, ms: f64, failed: bool, code: Option<String>, said: Option<String>, traceparent: Option<String>) -> String {
+pub fn call_span(app: &str, tool: &str, user: &str, instance: &str, time: f64, ms: f64, failed: bool, code: Option<String>, said: Option<String>, traceparent: Option<String>) -> String {
     use one::insights::{Attrs, Batch, Failure, Span, SpanKind, Status, message, own, token};
     let failure = failed.then(|| Failure::of(code.as_deref(), None, one::insights::stage::RUN));
     let name = if token(tool) { tool } else { "_unknown" };
-    let mut attrs = Attrs::default().client("api").rpc(app, name).build(one::config::BUILD);
+    let mut attrs = Attrs::default().client("api").user(user).rpc(app, name).build(one::config::BUILD);
     let mut text = None;
     if let Some(failure) = &failure {
         attrs = attrs.failed(failure).stage(one::insights::stage::RUN).fingerprint(failure.kind(), "stage:run", one::config::BUILD);
@@ -342,8 +342,6 @@ pub fn statements(appends: &str, scopes: &str) -> Result<String, JsError> {
                 }
                 out.entry(scope).or_insert_with(|| json!([])).as_array_mut().unwrap().push(json!([sql, params, check]));
             }
-            // What it spent on AI shows in insights, which this node doesn't keep yet: nothing is lost by not counting it.
-            Append::Cost { .. } => {}
             _ => return Err(JsError::new("a Cloudflare node writes only an app's own data yet: use a node on one of your machines")),
         }
     }

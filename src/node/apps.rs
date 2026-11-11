@@ -163,7 +163,6 @@ impl Node {
         };
         let mut out = Vec::new();
         for (name, mut info, mine) in listed.into_iter().chain(missing.into_iter().map(|info| (info["name"].as_str().unwrap_or_default().to_string(), info, false))) {
-            let here = self.0.apps.has(&name);
             let described = self.0.apps.describe_any(&name).await;
             if let Ok(Value::Object(d)) = described {
                 let described = Value::Object(d.clone());
@@ -190,9 +189,6 @@ impl Node {
                     let (list, activity) = self.schedules_of(viewer, &name, &declared)?;
                     info["schedules"] = json!(list);
                     info["activity"] = json!(activity);
-                }
-                if let Some(insights) = self.insights_of(viewer, &name)?.filter(|_| here) {
-                    info["insights"] = insights;
                 }
             }
             out.push(info);

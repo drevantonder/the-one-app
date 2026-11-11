@@ -7,7 +7,6 @@
 import mainHtml from "./dist/main.html" with { type: "text" };
 import appHtml from "./dist/app.html" with { type: "text" };
 import sourceHtml from "./dist/source.html" with { type: "text" };
-import activityHtml from "./dist/activity.html" with { type: "text" };
 import codeHtml from "./dist/code.html" with { type: "text" };
 import fileHtml from "./dist/file.html" with { type: "text" };
 
@@ -86,10 +85,6 @@ function nodeFor(a, node) {
 }
 
 /// What an app's owners see: its catalog entry says who used it and what it cost, and what broke is read separately.
-async function insightsOf(ctx, a) {
-  return a.insights ? { ...a.insights, errors: await ctx.errors(a.name).catch(() => []) } : null;
-}
-
 async function find(ctx, name) {
   const all = await ctx.catalog();
   const app = all.find((a) => a.name === name);
@@ -129,14 +124,13 @@ function iso(v) {
   return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === "number" && x > 1e12 && ["time", "first", "last", "next", "since"].includes(k) ? new Date(x).toISOString() : iso(x)]));
 }
 
-// What apps_health gives: its schedules, recent runs and, for its owners, who used it and what it cost.
+// What apps_health gives: its schedules and their recent runs.
 const HEALTH = {
   type: "object",
   required: ["schedules", "activity"],
   properties: {
     schedules: { type: "array", items: { type: "object", additionalProperties: true } },
-    activity: { type: "array", items: { type: "object", additionalProperties: true } },
-    insights: { type: ["object", "null"], description: "for its owners only", additionalProperties: true },
+    activity: { type: "array", description: "its schedules' recent runs, newest first: when, as whom, on which device, and what failed", items: { type: "object", additionalProperties: true } },
   },
 };
 
@@ -266,12 +260,12 @@ export default {
     health: {
       title: "How an app is doing",
       reads: true,
-      description: "How an app is doing where it's added for you: its schedules (when each runs, on or off, as whom) and their recent runs and failures; for its owners, who used it, when and from what, its errors grouped with counts, and its AI cost. Times are ISO 8601.",
+      description: "How an app's schedules are doing where it's added for you: when each runs, on or off, as whom, and their recent runs and failures. Times are ISO 8601. Who calls it, from what, and what fails is in insights, for its owners.",
       input: { type: "object", required: ["app"], properties: { app: APP } },
       output: HEALTH,
       async run(ctx, { app }) {
         const a = await find(ctx, app);
-        return iso({ schedules: a.schedules || [], activity: a.activity || [], insights: await insightsOf(ctx, a) });
+        return iso({ schedules: a.schedules || [], activity: a.activity || [] });
       },
     },
     _list: {
@@ -303,7 +297,7 @@ export default {
       output: HEALTH,
       async run(ctx, { app }) {
         const a = await find(ctx, app);
-        return { schedules: a.schedules || [], activity: a.activity || [], insights: await insightsOf(ctx, a) };
+        return { schedules: a.schedules || [], activity: a.activity || [] };
       },
     },
     switch: {
@@ -362,7 +356,6 @@ export default {
     main: { title: "App Store", html: mainHtml },
     app: { title: "App", html: appHtml },
     source: { title: "Source Link", html: sourceHtml },
-    activity: { title: "Activity", html: activityHtml },
     code: { title: "Code", html: codeHtml },
     file: { title: "Code", html: fileHtml },
   },

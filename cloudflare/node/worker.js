@@ -764,7 +764,7 @@ class Run {
   /// Says how a call went, as any node does. Telemetry may be lost, so nothing waits for it and a failure is only logged.
   tell(app, req, time, err) {
     const failed = err !== undefined;
-    const fields = call_span(app, req.tool, JSON.parse(endpoint_of(this.env.NODE_KEY)).key, time, Date.now() - time, failed, err?.said?.code, failed ? String(err.message || err) : undefined, req.traceparent);
+    const fields = call_span(app, req.tool, this.who.user, JSON.parse(endpoint_of(this.env.NODE_KEY)).key, time, Date.now() - time, failed, err?.said?.code, failed ? String(err.message || err) : undefined, req.traceparent);
     const body = signed(this.env.NODE_KEY, TELEMETRY, fields, Date.now());
     this.ctx.waitUntil(this.env.TELEMETRY.fetch("https://telemetry/telemetry/write", { method: "POST", body }).then((r) => r.body?.cancel()).catch((e) => console.log(`telemetry: ${e}`)));
   }

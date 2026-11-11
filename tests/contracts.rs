@@ -884,7 +884,6 @@ fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
               ctx.user.exec("INSERT INTO notes (text) VALUES (?)", [input.text]);
               ctx.user.check("SELECT 1", [], "changed");
               ctx.user.forget("ab".repeat(32));
-              ctx.cost({ model: "m", usd: 0.5, input: 3, output: 4 });
               await ctx.vault.create({ title: "T", fields: { user: { value: "ann" } }, hosts: ["x.com"], same: "user" });
               ctx.vault.update("v1", { title: "U" });
               ctx.vault.release("v1");
@@ -978,7 +977,7 @@ fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
     let both = ask("writes");
     assert_eq!(both["machine"], both["cloudflare"], "the same writes on both");
     let appends = one::call::appends(&both["machine"]["appends"]).unwrap_or_else(|err| panic!("the node reads what the shim hands it: {err:#}\n{}", both["machine"]["appends"]));
-    assert_eq!(appends.len(), 12, "every write the app made: {appends:?}");
+    assert_eq!(appends.len(), 11, "every write the app made: {appends:?}");
 }
 
 /// What the shim asks the node is what `one::call::Ask` names, and the Cloudflare node answers exactly those it says it

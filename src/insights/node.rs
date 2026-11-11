@@ -15,8 +15,6 @@ const CANARY_EVERY: Duration = Duration::from_secs(15 * 60);
 const CANARY_FAILS: u32 = 2;
 /// What the known signal is named, in each of the three tables.
 const CANARY: &str = "telemetry.canary";
-/// How far back an app's own screens look for what broke.
-const ERRORS_SHOWN: u64 = 7 * 86_400_000;
 /// The most reports a client's device may make a minute, and events a report may hold.
 const REPORTS_A_MINUTE: u32 = 10;
 const MOST_REPORTED: usize = 300;
@@ -100,7 +98,7 @@ impl Node {
         let failure = code.map(|code| Failure::of(code.as_deref(), exception.as_ref(), at));
         let status = failure.as_ref().map_or(Status::Unset, Failure::status);
         let kept = failure.is_some() || ms >= insights::SLOW_MS || insights::sampled(&trace.trace_id());
-        let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let destination = self.destination(&req.app).unwrap_or(Destination { named: false, kind: "everyone" });
         let build = crate::config::BUILD;
         let bundle = self.0.bundles.lock().unwrap().get(&req.app).cloned().filter(|_| destination.named);
         let exception = self.located(exception, bundle.clone()).await;
@@ -108,7 +106,7 @@ impl Node {
             true => (req.app.as_str(), self.tool_named(req).await),
             false => (insights::own(), "call".to_string()),
         };
-        let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(build);
+        let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).user(&me.user).scope(destination.kind).build(build);
         if destination.named {
             attrs = attrs.rpc(service, &tool);
         }
@@ -177,7 +175,7 @@ impl Node {
         let ms = started.elapsed().as_millis() as u64;
         let kept = ended.is_err() || ms >= insights::SLOW_MS || insights::sampled(&trace.trace_id());
         let answers = req.from.is_none() && !run_says;
-        let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let destination = self.destination(&req.app).unwrap_or(Destination { named: false, kind: "everyone" });
         let build = crate::config::BUILD;
         let service = if destination.named { req.app.as_str() } else { insights::own() };
         let name = match (answers, destination.named) {
@@ -185,7 +183,7 @@ impl Node {
             (true, false) => "call".to_string(),
             (false, _) => "route".to_string(),
         };
-        let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(build);
+        let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).user(&me.user).scope(destination.kind).build(build);
         if destination.named {
             attrs = attrs.rpc(service, &name);
         }
@@ -200,22 +198,6 @@ impl Node {
         }
         let traced = Span { time, trace: trace.trace_id(), span, parent, name, service: service.to_string(), version: None, instance: hex(&self.0.id), kind: if answers { SpanKind::Server } else { SpanKind::Internal }, status, duration: ms, message, attrs };
         self.0.insights.0.lock().unwrap().span(traced, kept, &tried);
-    }
-
-    /// What a call of `app` spent on a model, in tokens and time: OTEL's `gen_ai.client.*` metrics. Dollars stay in `cost`.
-    /// Only a call that finished says what it spent, so its outcome is `ok`; one that failed is the call's own span.
-    pub(super) fn record_ai(&self, app: &str, me: &Caller, model: &str, input: u64, output: u64, ms: Option<u64>) {
-        let destination = self.destination(app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
-        let service = if destination.named { app } else { insights::own() };
-        let time = now_ms();
-        let about = || Attrs::default().scope(destination.kind).model(model).outcome("ok");
-        let instance = hex(&self.0.id);
-        let mut batch = self.0.insights.0.lock().unwrap();
-        batch.metric(time, insights::TOKEN_USAGE, service, &instance, &about().tokens("input"), input);
-        batch.metric(time, insights::TOKEN_USAGE, service, &instance, &about().tokens("output"), output);
-        if let Some(ms) = ms {
-            batch.metric(time, insights::OPERATION_DURATION, service, &instance, &about(), ms);
-        }
     }
 
     /// A log record that's only this device's own, named `name`: an error if it says so.
@@ -443,11 +425,11 @@ impl Node {
         let (destination, app, screen) = match name {
             "screen.exception" | "screen.undrawn" => {
                 let Some(app) = e["app"].as_str() else { return };
-                let Some(destination) = self.destination(app, me) else { return };
+                let Some(destination) = self.destination(app) else { return };
                 let screen = self.screen_named(app, e["screen"].as_str().unwrap_or("")).await;
                 (destination, app, Some(screen))
             }
-            "page.exception" => (Destination { scope: Scope::Global, named: false, kind: "everyone" }, "", None),
+            "page.exception" => (Destination { named: false, kind: "everyone" }, "", None),
             _ => return,
         };
         let bundle = self.0.bundles.lock().unwrap().get(app).cloned().filter(|_| destination.named);
@@ -479,7 +461,7 @@ impl Node {
     /// A service's program going through a hop's worth of a call: one child span, with its status and bytes. A hop that
     /// failed doesn't fail the call, which can go on to the next device: the call's own span says how that ended.
     pub(super) fn finish_hop(&self, req: &CallRequest, me: &Caller, device: Key, took: Duration, asked: &Result<Value>) {
-        let destination = self.destination(&req.app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let destination = self.destination(&req.app).unwrap_or(Destination { named: false, kind: "everyone" });
         let ms = took.as_millis() as u64;
         let answer = asked.as_ref().ok();
         let ok = answer.is_some_and(|a| a.get("error").is_none());
@@ -495,7 +477,7 @@ impl Node {
         let (parent_trace, parent) = trace::parent_now();
         let trace = parent_trace.unwrap_or_else(trace::ids::trace);
         let kept = !ok || ms >= insights::SLOW_MS || insights::sampled(&trace);
-        let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).scope(destination.kind).build(crate::config::BUILD).tried(&hex(&device), result);
+        let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).user(&me.user).scope(destination.kind).build(crate::config::BUILD).tried(&hex(&device), result);
         if kept {
             attrs = attrs.bytes(req.input.to_string().len() as u64 + answer.map_or(0, |a| a.to_string().len() as u64));
         }
@@ -510,13 +492,13 @@ impl Node {
     /// A schedule's run: one span, with the call it made under it (`finish_call`). The run stays in `runs` for its own
     /// screens; this is for what reads every kind of failure the same.
     pub(super) fn finish_schedule(&self, app: &str, schedule: &str, user: &str, took: Duration, traced: &trace::Trace, err: Option<&anyhow::Error>) {
-        let destination = self.destination(app, &Caller::own(self.0.id, user)).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let destination = self.destination(app).unwrap_or(Destination { named: false, kind: "everyone" });
         let ms = took.as_millis() as u64;
         let steps = traced.since(0);
         let exception = steps.iter().rev().find(|s| s["step"] == "exception").and_then(|s| Exception::from_json(&s["exception"]));
         let failure = err.map(|err| Failure::of(crate::protocol::Coded::of(err).as_deref(), exception.as_ref(), traced.stage()));
         let status = failure.as_ref().map_or(Status::Unset, Failure::status);
-        let mut attrs = Attrs::default().client("schedule").scope(destination.kind).build(crate::config::BUILD);
+        let mut attrs = Attrs::default().client("schedule").user(user).scope(destination.kind).build(crate::config::BUILD);
         if destination.named {
             attrs = attrs.schedule(schedule);
         }
@@ -536,9 +518,8 @@ impl Node {
     /// What a service's endpoint says for insights: its program starting and ending, and OTLP. Only one of the network's
     /// services, about itself: which app is what its key is listed as, never what it says.
     pub(super) async fn service_said(&self, remote: &Key, body: &Value) {
-        let Ok(Some((app, user))) = self.with(|i| Ok(i.r.db().service(remote)?.map(|s| (s.service.clone().unwrap_or_default(), s.user.clone())))) else { return };
-        let me = Caller::own(*remote, user);
-        let destination = self.destination(&app, &me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+        let Ok(Some(app)) = self.with(|i| Ok(i.r.db().service(remote)?.map(|s| s.service.clone().unwrap_or_default()))) else { return };
+        let destination = self.destination(&app).unwrap_or(Destination { named: false, kind: "everyone" });
         let base = || Attrs::default().scope(destination.kind).build(crate::config::BUILD);
         let service = if destination.named { app.clone() } else { insights::own().to_string() };
         let instance = hex(&self.0.id);
@@ -590,9 +571,10 @@ impl Node {
     /// node's span to be found by, so it's in the Errors list itself.
     async fn client_called(&self, me: &Caller, e: &Value, time: u64, ms: u64, attrs: Attrs) {
         let Some((trace, span)) = e["traceparent"].as_str().and_then(insights::parent_of) else { return };
+        let attrs = attrs.user(&me.user);
         let (service, name, mut attrs) = match (e["app"].as_str(), e["tool"].as_str(), e["path"].as_str().and_then(crate::api::route_of)) {
             (Some(app), Some(tool), _) => {
-                let destination = self.destination(app, me).unwrap_or(Destination { scope: Scope::Global, named: false, kind: "everyone" });
+                let destination = self.destination(app).unwrap_or(Destination { named: false, kind: "everyone" });
                 let req = CallRequest { app: app.into(), tool: tool.into(), ..Default::default() };
                 match destination.named {
                     true => {
@@ -633,7 +615,7 @@ impl Node {
     async fn opened(&self, me: &Caller, e: &Value, time: u64, attrs: Attrs) {
         let (service, attrs) = match e["app"].as_str() {
             Some(app) => {
-                let Some(destination) = self.destination(app, me) else { return };
+                let Some(destination) = self.destination(app) else { return };
                 (app.to_string(), attrs.scope(destination.kind).screen(&self.screen_named(app, e["screen"].as_str().unwrap_or("")).await))
             }
             None => {
@@ -726,19 +708,6 @@ impl Node {
         if let Some(device) = row["instance"].as_str().and_then(|k| unhex(k).ok()).filter(|k| k.iter().any(|b| *b != 0)) {
             row["device"] = json!(self.name_of(&device));
         }
-    }
-
-    /// What's broken most lately in `app`, for someone who may deploy it, as an app's screens show it: empty if it can't be read.
-    pub(super) async fn errors_of(&self, viewer: &Caller, app: &str) -> Vec<Value> {
-        let ask = Ask { queries: vec!["errors"], service: Some(app.to_string()), status: Some("error".into()), since: Some(now_ms().saturating_sub(ERRORS_SHOWN)), limit: 50, ..Default::default() };
-        let rows = match self.insights(viewer, &ask).await {
-            Ok(rows) => rows,
-            Err(err) => {
-                tracing::debug!("{app}'s errors couldn't be read: {err:#}");
-                return Vec::new();
-            }
-        };
-        rows["errors"].as_array().into_iter().flatten().map(|e| json!({ "tool": e["name"], "error": format!("{} at {}", e["type"].as_str().unwrap_or(""), e["frame"].as_str().unwrap_or("")), "build": e["build"], "count": e["count"], "first": e["first"], "last": e["last"] })).collect()
     }
 
     /// A row as a reader gets it: its attributes as JSON, and its device and the devices it names by name.

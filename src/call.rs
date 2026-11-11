@@ -35,7 +35,6 @@ pub enum Ask {
     Code,
     /// The caller's failing schedules (`ctx.failing`).
     Failing,
-    Errors,
     /// A push to the caller's devices (`ctx.notify`).
     Notify,
     /// The network's devices (`ctx.devices`).
@@ -51,7 +50,7 @@ pub enum Ask {
 
 /// Each ask: its name, whether a call that only reads (a widget's, badge's or hook's) is refused it, and whether the
 /// Cloudflare node answers it yet (an app that asks one there is told to use a machine).
-const ASKS: [(Ask, &str, bool, bool); 18] = [
+const ASKS: [(Ask, &str, bool, bool); 17] = [
     (Ask::Call, "call", true, true),
     (Ask::Query, "query", false, true),
     (Ask::May, "may", false, true),
@@ -64,7 +63,6 @@ const ASKS: [(Ask, &str, bool, bool); 18] = [
     (Ask::Catalog, "catalog", false, true),
     (Ask::Code, "code", false, false),
     (Ask::Failing, "failing", false, false),
-    (Ask::Errors, "errors", false, false),
     (Ask::Notify, "notify", true, false),
     (Ask::Devices, "devices", false, true),
     (Ask::Order, "order", false, false),
@@ -128,16 +126,6 @@ pub enum Append {
     /// Runs an app's service on a device (or stops it there), for the app added in `scope` (by default where the caller
     /// sees it added): for the device's user, or to stop it, for who may add apps where it ran.
     Service { name: String, device: String, on: bool, scope: Option<String> },
-    /// What the call spent on AI, for the insights of the app that called it.
-    Cost {
-        model: String,
-        usd: f64,
-        input: u64,
-        output: u64,
-        /// How long the model took, if the app timed it.
-        #[serde(default)]
-        ms: Option<u64>,
-    },
     /// Makes, changes or lets go of (`release`) a Vault item: `scope` for one it makes, `same` a plain field by
     /// which it changes an item of that type instead.
     Vault {

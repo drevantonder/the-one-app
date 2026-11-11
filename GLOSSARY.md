@@ -109,7 +109,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   who can read everything and restore anyone; it's sealed to their devices that are only clients, never a node or a browser.
 - **Database**: one SQLite database, kept sealed in the bucket as steps at numbered positions, the bucket deciding their
   order. A scope has three kinds: **an app's database**, its data and the truth; **the node's database**, how things
-  went (usage, runs); and **the scope database**, who's who, permissions and keys.
+  went (schedules' runs, builds, backups); and **the scope database**, who's who, permissions and keys.
 - **Blob**: bytes a database's step names, kept in the bucket sealed with their scope's key.
 - **Backup**: an encrypted copy of everything in the bucket, kept on a disk or in S3-compatible storage, which a network
   is restored from.
