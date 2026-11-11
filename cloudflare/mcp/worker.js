@@ -356,7 +356,7 @@ export class Client extends DurableObject {
       run.ready = this.begin(run, me);
       run.ready.catch(() => this.run === run && this.end());
     } else if (run.phase === "running" && Date.now() - (this.view?.at || 0) > VIEW_EVERY) {
-      this.ctx.waitUntil(this.see(me).catch((err) => console.log(JSON.stringify({ view: "unread", why: String(err?.message ?? err) }))));
+      this.ctx.waitUntil(this.seeIfMoved(me).catch((err) => console.log(JSON.stringify({ view: "unread", why: String(err?.message ?? err) }))));
     }
     await run.ready;
     if (this.run !== run) throw new Error("it was signed in again meanwhile: ask again");
@@ -392,7 +392,7 @@ export class Client extends DurableObject {
     await device_start(me.seed, [], send);
     run.endpoint = true;
     ended();
-    await this.see(me);
+    await this.see(me, await this.writes());
     ended();
     run.phase = "running";
     console.log(JSON.stringify({ started: me.key.slice(0, 8), ms: Date.now() - began, listed: this.view.nodes.size, on: this.order.length }));
@@ -416,15 +416,29 @@ export class Client extends DurableObject {
   /// Reads who's who from the bucket (what's new, after the first time), one reading at a time, and the nodes it asks
   /// with it: those who's who lists as running its user's calls, that are on the relay now, in run priority's
   /// order as it last read it.
-  see(me) {
+  see(me, writes = null) {
     const reading = this.viewing.then(async () => {
       const said = JSON.parse(await device_view(me.key, me.seal.secret, this.on(me)));
       if (said.user !== me.user) throw Object.assign(new Error(`this device is not listed as one of ${this.env.YOURS}'s`), { notLetIn: true });
-      this.view = { nodes: new Map(said.nodes.map((n) => [n.key, n.seal])), at: Date.now() };
+      this.view = { nodes: new Map(said.nodes.map((n) => [n.key, n.seal])), at: Date.now(), writes };
       await this.reorder(me);
     });
     this.viewing = reading.catch(() => {});
     return reading;
+  }
+
+  /// The relay's count of writes to who's who, if it said.
+  async writes() {
+    return (await answer(this.relay().writes()).catch(() => null))?.global ?? null;
+  }
+
+  /// Reads who's who again only if the relay counted a write to it since it last did (`writes`, as nodes go by), and
+  /// the nodes' order again either way.
+  async seeIfMoved(me) {
+    const writes = await this.writes();
+    if (writes === null || writes !== this.view?.writes) return this.see(me, writes);
+    this.view.at = Date.now();
+    await this.reorder(me);
   }
 
   async reorder(me) {

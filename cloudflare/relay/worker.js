@@ -245,6 +245,11 @@ export class McpDevices extends WorkerEntrypoint {
   connected(keys) {
     return Array.isArray(keys) ? answer(relay(this.env).connected(keys.filter(isKey))) : [];
   }
+
+  /// Each scope's count of writes, as the computes carry it: for a device to read who's who again only once it moved.
+  writes() {
+    return answer(list(this.env).writes());
+  }
 }
 
 export class CloudflareNode extends WorkerEntrypoint {
@@ -774,7 +779,7 @@ export class List extends DurableObject {
     if (asked && !asked.session && behind(asked.reads)) return { update: true, ...heard };
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
     const versions = Object.fromEntries(this.sql.exec("SELECT key, version FROM keys WHERE version IS NOT NULL").toArray().map((r) => [r.key, r.version]));
-    const moved = Object.fromEntries(this.sql.exec("SELECT scope, n FROM moved").toArray().map((r) => [r.scope, r.n]));
+    const moved = this.writes();
     return { computes: this.env.BOUND ? [...keys, this.env.BOUND] : keys, versions, moved, ...(this.env.DEPLOYED && { workers: JSON.parse(this.env.DEPLOYED) }), ...heard };
   }
 
@@ -802,6 +807,11 @@ export class List extends DurableObject {
   }
 
   /// Counts a write to each of `scopes`, as their writer says: → why not, if they aren't scopes' names.
+  /// Each scope's count of writes (`move`).
+  writes() {
+    return Object.fromEntries(this.sql.exec("SELECT scope, n FROM moved").toArray().map((r) => [r.scope, r.n]));
+  }
+
   move(scopes) {
     if (!Array.isArray(scopes) || !scopes.length || scopes.length > MOST_MOVED || !scopes.every((s) => typeof s === "string" && SCOPE.test(s))) return "moved is the names of the scopes written to";
     for (const scope of new Set(scopes)) this.sql.exec("INSERT INTO moved VALUES (?, 1) ON CONFLICT (scope) DO UPDATE SET n = n + 1", scope);
