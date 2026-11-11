@@ -124,6 +124,19 @@ pub fn service_alpn() -> Vec<u8> {
     format!("{}/service/1", crate::config::CLI).into_bytes()
 }
 
+/// iroh's minimal endpoint without its captive portal check, a request to the relay's address on each full net report
+/// that tells a device nothing it acts on. Every endpoint of a node and its services binds with it; onet's own is the
+/// same (onet/src/lib.rs, `Endpoints`).
+pub struct Endpoints;
+
+impl presets::Preset for Endpoints {
+    fn apply(self, builder: iroh::endpoint::Builder) -> iroh::endpoint::Builder {
+        let mut report = iroh::NetReportConfig::default();
+        report.captive_portal_check = false;
+        presets::Minimal.apply(builder).net_report_config(report)
+    }
+}
+
 /// The relay at the network's address, which serves no QUIC address discovery, a Worker having no UDP; with `ticket`,
 /// a pairing code's, which lets a computer joining in.
 pub fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)> {
@@ -245,7 +258,7 @@ impl Node {
     async fn bind(&self, address: &str, ticket: Option<&str>) -> Result<Endpoint> {
         let (_, map) = relay(address, ticket)?;
         let transport = QuicTransportConfig::builder().max_concurrent_bidi_streams(STREAMS.into()).max_concurrent_uni_streams(0u32.into()).build();
-        let endpoint = Endpoint::builder(presets::Minimal)
+        let endpoint = Endpoint::builder(Endpoints)
             .secret_key(SecretKey::from_bytes(self.0.key.as_bytes()))
             .alpns(vec![alpn(), http_alpn()])
             .transport_config(transport)
@@ -981,7 +994,7 @@ impl Node {
 /// relay of it yet: it's tried for a few seconds.
 pub(super) async fn ask_to_join(key: &SigningKey, address: &str, ticket: &str, to: Key, join: Value) -> Result<Value> {
     let (url, map) = relay(address, Some(ticket))?;
-    let endpoint = Endpoint::builder(presets::Minimal).secret_key(SecretKey::from_bytes(key.as_bytes())).relay_mode(RelayMode::Custom(map)).bind().await?;
+    let endpoint = Endpoint::builder(Endpoints).secret_key(SecretKey::from_bytes(key.as_bytes())).relay_mode(RelayMode::Custom(map)).bind().await?;
     let addr = EndpointAddr::new(PublicKey::from_bytes(&to)?).with_relay_url(url);
     let mut tried = 0;
     let conn = loop {

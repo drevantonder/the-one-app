@@ -42,6 +42,18 @@ pub mod sign_in;
 #[cfg(feature = "computer")]
 pub mod computer;
 
+/// iroh's minimal endpoint without its captive portal check, a request to the relay's address on each full net report
+/// that tells a device nothing it acts on: the same as a node's (src/node/net.rs, `Endpoints`).
+struct Endpoints;
+
+impl presets::Preset for Endpoints {
+    fn apply(self, builder: iroh::endpoint::Builder) -> iroh::endpoint::Builder {
+        let mut report = iroh::NetReportConfig::default();
+        report.captive_portal_check = false;
+        presets::Minimal.apply(builder).net_report_config(report)
+    }
+}
+
 /// How long a connection to a node may take before the next is started alongside it: the first up is asked, and the
 /// rest are kept for later. A connection carries nothing but itself, so racing them hands no node anything.
 const STAGGER: Duration = Duration::from_millis(250);
@@ -649,7 +661,7 @@ impl Client {
         if let Some(endpoint) = held.as_ref().filter(|e| !e.is_closed()) {
             return Ok(endpoint.clone());
         }
-        let builder = Endpoint::builder(presets::Minimal).secret_key(self.0.secret.clone());
+        let builder = Endpoint::builder(Endpoints).secret_key(self.0.secret.clone());
         let builder = match &self.0.way {
             Way::Relay(_, config) => {
                 let mut config = config.clone();

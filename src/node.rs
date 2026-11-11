@@ -51,7 +51,7 @@ mod sessions;
 #[path = "insights/node.rs"]
 mod insights;
 pub use databases::NotGiven;
-pub use net::{alpn, relay, service_alpn};
+pub use net::{Endpoints, alpn, relay, service_alpn};
 pub use calls::{Elsewhere, Grant};
 use calls::{Granted, Reply};
 use apps::built_in_bundle;

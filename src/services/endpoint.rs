@@ -22,7 +22,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use ed25519_dalek::SigningKey;
-use iroh::endpoint::{Connection, QuicTransportConfig, presets};
+use iroh::endpoint::{Connection, QuicTransportConfig};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayMode, SecretKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -280,7 +280,7 @@ impl Service {
     async fn bind(&self) -> Result<Endpoint> {
         let (_, map) = crate::node::relay(&self.0.network.address, None)?;
         let transport = QuicTransportConfig::builder().max_concurrent_bidi_streams(STREAMS.into()).max_concurrent_uni_streams(0u32.into()).build();
-        Ok(Endpoint::builder(presets::Minimal)
+        Ok(Endpoint::builder(crate::node::Endpoints)
             .secret_key(SecretKey::from_bytes(&self.0.key.to_bytes()))
             .alpns(vec![crate::node::service_alpn()])
             .transport_config(transport)
