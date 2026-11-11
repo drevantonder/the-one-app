@@ -1139,6 +1139,7 @@ dependencies = [
  "custom-build",
  "data-encoding",
  "key",
+ "libc",
  "platform",
  "schemars",
  "scope",
