@@ -210,12 +210,13 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
         </Section>
       )}
 
-      {(a.source || code.data || busyAny) && (
+      {(a.source || code.data || busyAny || owner) && (
         <List>
           {/* Where its code is kept: a repo in Repos or a page in the browser. */}
           {a.source && <ListRow title="Source" onClick={() => (repo ? one.open("repo", { repo }, "repos") : one.link(a.source))} />}
           {code.data && <ListRow title="Code" onClick={() => one.open("code", { app: a.name, dir: "" })} />}
           {busyAny && <ListRow title="Activity" onClick={() => one.open("activity", { app: a.name })} />}
+          {owner && <ListRow title="Insights" onClick={() => one.open("insights", { service: a.name }, "settings")} />}
         </List>
       )}
       </Grid>

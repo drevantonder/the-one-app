@@ -448,7 +448,7 @@ function oe(i) {
 									onOpen: v
 								}, e)) })
 							}),
-							(M.source || L.data || oe) && /* @__PURE__ */ O(f, { children: [
+							(M.source || L.data || oe || j) && /* @__PURE__ */ O(f, { children: [
 								M.source && /* @__PURE__ */ D(p, {
 									title: "Source",
 									onClick: () => R ? one.open("repo", { repo: R }, "repos") : one.link(M.source)
@@ -463,6 +463,10 @@ function oe(i) {
 								oe && /* @__PURE__ */ D(p, {
 									title: "Activity",
 									onClick: () => one.open("activity", { app: M.name })
+								}),
+								j && /* @__PURE__ */ D(p, {
+									title: "Insights",
+									onClick: () => one.open("insights", { service: M.name }, "settings")
 								})
 							] })
 						]

@@ -763,7 +763,8 @@ function Insights() {
   // The trace open: its id, and the trace itself if a list showed it.
   const [opened, setOpened] = useState(null)
   const showTrace = (id, trace) => setOpened({ id, trace })
-  const service = useState(null)
+  // An app's page opens this at its app (`service`).
+  const service = useState(one.params?.service || null)
   const filters = useState({ service: ALL, operation: ALL })
   const failure = useState(null)
   const queries = { Traces: useState(""), Logs: useState(""), Metrics: useState(""), Errors: useState("") }
