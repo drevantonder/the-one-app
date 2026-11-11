@@ -4,14 +4,14 @@ setups (mcp: the MCP server only; cli: the CLI only; both), against throwaway ne
 
     python3 dev/tools/agents/run.py [--setups mcp,cli,both] [--prompts id,...] [--repeat N] [--model M] [--one PATH] [--out DIR]
 
-Each setup gets its own network: a node run with HOME set to a sandbox and its own port (ONE_ADDR), and the node itself
-writes the harness's AGENTS.md, skills, prompt hooks and MCP entry there, exactly as on a real device (src/agents.rs).
+Each setup gets its own network: oned run with HOME set to a sandbox and its own port (ONE_ADDR), and its onet itself
+writes the harness's AGENTS.md, skills, prompt hooks and MCP entry there, exactly as on a real device (onet/src/computer/harnesses.rs).
 The setups differ only in what the agent can reach: mcp takes the CLI off PATH, cli switches the MCP entry off. Seeded
 with the real network's AGENTS.md and skills (read only), made-up memories, two repos and a group; no Google,
 WhatsApp or Messenger account, so nothing reaches a real person.
 
 It all runs inside a network and mount namespace of its own (pasta, unshare): the internet and Ollama, but not the
-tailnet, the LAN or the real node, and the real home read-only. Agents asked about "my servers" otherwise go and ssh
+tailnet, the LAN or the real computers, and the real home read-only. Agents asked about "my servers" otherwise go and ssh
 into them, through the test network's shell or their own. Everything is deleted at the end but the transcripts.
 
 Writes <out>/<setup>/<prompt>.jsonl (OpenCode's events), .md (readable) and <out>/summary.json (metrics and checks).
@@ -47,7 +47,7 @@ def now_ms():
 
 
 class Network:
-    """A throwaway node and its sandbox: HOME, the agent's harness folders, a port of its own."""
+    """A throwaway network's oned and its sandbox: HOME, the agent's harness folders, a port of its own."""
 
     def __init__(self, setup, port, root, one):
         self.setup, self.port, self.one = setup, port, one
@@ -79,7 +79,7 @@ class Network:
         if self.home.exists():
             shutil.rmtree(self.home)
         self.home.mkdir(parents=True)
-        # The harness folders a device of Andre's has, so the node's agents sync finds and fills them.
+        # The harness folders a device of Andre's has, so onet's agents sync finds and fills them.
         for d in [".config/opencode", ".claude", ".agents"]:
             (self.home / d).mkdir(parents=True)
         (self.home / ".gitconfig").write_text("[user]\n\tname = Andre van Tonder\n\temail = andre@example.com\n[init]\n\tdefaultBranch = main\n")
@@ -145,21 +145,21 @@ class Network:
                 git("init", "-q")
                 git("add", "-A")
                 git("commit", "-qm", "First version")
-                # As this machine's own program, with the node's token, before the node includes it in git's config.
+                # As this machine's own program, with onet's token, before onet includes it in git's config.
                 token = (self.home / ".local/share" / CLI / "local-token").read_text().strip()
                 git("-c", f"http.extraHeader=x-one-local-token: {token}", "push", "-q", f"http://{self.addr}/repos/{repo}.git", "main")
-        # Wait for the node to write the harness, as it does on every device.
+        # Wait for onet to write the harness, as it does on every device.
         agents = self.home / ".config/opencode/AGENTS.md"
         for _ in range(150):
             if agents.exists() and (self.home / ".config/opencode/opencode.json").exists():
                 break
             time.sleep(1)
         else:
-            raise RuntimeError(f"{self.setup}: the node didn't write the harness")
+            raise RuntimeError(f"{self.setup}: onet didn't write the harness")
         cfg = self.home / ".config/opencode/opencode.json"
         data = json.loads(cfg.read_text())
         if self.setup == "cli":
-            # Switched off rather than removed: the node adds it again if it's missing.
+            # Switched off rather than removed: onet adds it again if it's missing.
             data["mcp"][SERVER]["enabled"] = False
         if model.startswith("ollama/"):
             # A local model: Ollama's OpenAI-compatible API, the model made with a context of 64k (see README.md).

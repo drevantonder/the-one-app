@@ -23,8 +23,8 @@ What the window shows comes from `src/bundle.rs`: the release-key-signed web bun
 `<CLI>_WEB_KEY`, to test with another key.
 
 Its log (`<data>/logs/client.log`, capped, `device_logs`) holds the page's uncaught errors and failed loads, page loads, panics
-and what the platform code says. `one logs <device>` reads it through a node the app is connected to, which asks the app on
-that connection (so only while it's open); the node checks who may, as for its own log. It keeps no keys or page content.
+and what the platform code says. `one logs <device>` reads it through an app runtime the app is connected to, which asks the app on
+that connection (so only while it's open); the app runtime checks who may, as for its own log. It keeps no keys or page content.
 
 ## Each platform
 

@@ -11,7 +11,7 @@ Only UI files changed? No Rust build:
 
 1. `bun run build` in `ui/kit` if you changed what it builds.
 2. From your checkout: `one-dev throwaway --ui .` runs the installed build with your checkout's UI.
-3. After each change, any `one-dev throwaway` command (step 4's, or plain `one-dev throwaway`) has its pages and screens read again, and the next load of the page shows it: no restart. `one-dev throwaway restart` only after a change to a Worker's own code (`cloudflare/*/worker.js`). A node reads app screens fresh each time.
+3. After each change, any `one-dev throwaway` command (step 4's, or plain `one-dev throwaway`) has its pages and screens read again, and the next load of the page shows it: no restart. `one-dev throwaway restart` only after a change to a Worker's own code (its `worker.js`, such as `relay/worker.js`). An app runtime reads app screens fresh each time.
 4. `one-dev throwaway client web` gives you a browser and a picture. Look at the picture.
 5. `one-dev throwaway stop` when you're done.
 
