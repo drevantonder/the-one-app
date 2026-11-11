@@ -15,6 +15,7 @@ use crate::api::Routes;
 use ::api::Body;
 use ::api::Reply;
 use ::api::Who;
+use ::api::holds::{HeldShare, HeldSign, HeldWrite, sign_request};
 use ::database::stored::Keys;
 
 pub(super) enum Holds {
@@ -170,16 +171,6 @@ impl key::Signs for Holds {
     }
 }
 
-/// Signs `bytes` with the device's `key`, for its app runtime, if they're a request to the relay or auth
-/// (`keys::signed_request_by`): never a step, which only `/api/holds/write` writes, nor anything else.
-pub fn sign_request(key: &SigningKey, bytes: &[u8]) -> Result<[u8; 64]> {
-    let (domain, fields) = bytes.split_at(bytes.iter().position(|b| *b == 0).context("that isn't a signed request")?);
-    let domain = std::str::from_utf8(domain)?;
-    ensure!([custom_build::protocol::RELAY, custom_build::protocol::AUTH_DOMAIN].contains(&domain), "the device signs only its requests to the relay and auth for its app runtime, not {domain}");
-    serde_json::from_slice::<Value>(&fields[1..]).context("that isn't a signed request")?;
-    Ok(ed25519_dalek::Signer::sign(key, bytes).to_bytes())
-}
-
 pub(crate) fn routes() -> Routes {
     Routes::default()
         .route("/api/holds", Who::ThisMachine, get(held))
@@ -194,27 +185,11 @@ async fn held(State(host): State<Host>) -> Reply {
     Ok(axum::Json(json!({ "key": hex(&holds.device()), "seal": hex(&key::Opens::public(holds)) })))
 }
 
-/// What `/api/holds/shared` takes: answered by whatever holds the device's key, its node or its onet.
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct HeldShare {
-    /// An X25519 public key, base64url.
-    pub share: String,
-}
-
 /// The X25519 secret the device's seal key shares with `share`: what opens something sealed to the device.
 async fn shared(State(host): State<Host>, Body(body): Body<HeldShare>) -> Reply {
     let share = <[u8; 32]>::try_from(B64U.decode(body.share.as_bytes()).map_err(anyhow::Error::from)?).map_err(|_| anyhow!("a share is 32 bytes"))?;
     let shared = key::Opens::shared(&host.0.holds, &share).await?;
     Ok(axum::Json(json!({ "shared": B64U.encode(&shared) })))
-}
-
-/// What `/api/holds/write` takes: answered by whatever holds the device's key, its node or its onet.
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct HeldWrite {
-    pub user: String,
-    pub content: Content,
 }
 
 /// Writes a step of `global` as the device, for its user alone.
@@ -224,14 +199,6 @@ async fn write(State(host): State<Host>, Body(body): Body<HeldWrite>) -> Reply {
     }
     host.write_step(&body.user, body.content).await?;
     Ok(axum::Json(json!({})))
-}
-
-/// What `/api/holds/sign` takes: answered by whatever holds the device's key, its node or its onet.
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct HeldSign {
-    /// What a request to the relay or auth signs (`keys::signed_request_by`), base64url.
-    pub bytes: String,
 }
 
 /// Signs a request to the relay or auth as the device (`sign_request`).

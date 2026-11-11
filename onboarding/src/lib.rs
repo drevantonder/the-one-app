@@ -7,3 +7,10 @@
 mod pairing;
 
 pub use pairing::{JoinReply, JoinRequest, Pairing, PairingCode, pairings};
+
+/// What a computer says while it isn't in a network yet, whatever else is signed in on it (the Mac app's own sign-in is
+/// a client's): what the command line, `status` and a call that needs one all tell to do.
+pub fn not_joined(device: &str) -> String {
+    use custom_build::config::{CLI, YOURS};
+    format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it with a pairing code, or {CLI} create <name> --as <your name> starts a new one")
+}

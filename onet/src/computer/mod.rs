@@ -175,7 +175,7 @@ impl Onet {
         device.connect().await.map_err(|err| anyhow::anyhow!("reaching {}'s devices: {err}", ::custom_build::config::YOURS))?;
         let asked = device.told().await.map_err(|err| anyhow::anyhow!("telling {}'s relay what this device is on: {err}", ::custom_build::config::YOURS))?;
         if !asked.is_null() {
-            device.keyring().who(|who| app_runtime::heard(who, &self.key.verifying_key().to_bytes(), &asked));
+            device.keyring().who(|who| ::devices::asked::heard(who, &self.key.verifying_key().to_bytes(), &asked));
         }
         Ok(())
     }

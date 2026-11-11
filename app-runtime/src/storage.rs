@@ -7,11 +7,10 @@
 use ::custom_build::allowed;
 use ::custom_build::config::YOURS;
 use super::*;
+use ::bucket::STORAGE;
 
 pub(crate) mod routes;
 
-/// The setting that says where the network keeps its data: S3's `endpoint`, `bucket` and `region`, as JSON.
-pub const STORAGE: &str = "storage";
 
 /// The network's bucket as its `storage` setting says, if it has one: S3's address alone, never a folder's path.
 fn storage_setting(m: &ScopeDb) -> Result<Option<BTreeMap<String, String>>> {

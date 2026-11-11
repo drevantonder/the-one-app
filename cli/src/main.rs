@@ -218,7 +218,7 @@ fn connection(node: &Client) -> String {
     };
     let device = &state.device.name;
     let Some(network) = &state.network else {
-        return format!("{}.", app_runtime::not_joined(device));
+        return format!("{}.", ::onboarding::not_joined(device));
     };
     let network = if network.name.is_empty() { format!("{YOURS} (still joining)") } else { network.name.clone() };
     let ready = if state.device.ready { "" } else { ", catching up" };

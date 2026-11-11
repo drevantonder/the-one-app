@@ -70,8 +70,6 @@ pub(crate) async fn call_from_cloudflare_node(host: &Host, remote: key::Key, mut
     ran.await.unwrap_or_else(|err| failed(&err))
 }
 
-/// The header carrying a line an app's `_http` wants git to show.
-pub const APP_SAYS: &str = "x-app-says";
 
 /// A request to `/<app>/<path>`, answered by the app's `_http` tool, run as whoever asked (this machine's user,
 /// or a client device's), whose checks are the app's own: the body reaches it as a blob, read as it comes
@@ -101,7 +99,7 @@ async fn app_http(State(host): State<Host>, me: Me, Path((app, path)): Path<(Str
     };
     let mut reply = (status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response();
     if let Some(said) = out["say"].as_str() {
-        reply.headers_mut().insert(APP_SAYS, axum::http::HeaderValue::from_str(said)?);
+        reply.headers_mut().insert(custom_build::protocol::header::APP_SAYS, axum::http::HeaderValue::from_str(said)?);
     }
     Ok(reply)
 }

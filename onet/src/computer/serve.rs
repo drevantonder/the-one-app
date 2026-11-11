@@ -8,7 +8,6 @@ use axum::body::Bytes;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use api::Who;
 use ::custom_build::config::{CLI, YOURS};
 use api::home::NetworkFile;
 use ::custom_build::protocol::{Coded, code};
@@ -25,30 +24,9 @@ const IN_MEMORY: usize = 4 << 20;
 /// The headers a request is passed on without: how it was framed and who it's from are said again where it goes.
 const OWN_HEADERS: &[&str] = &["host", "content-length", "transfer-encoding", "connection", ::custom_build::protocol::header::LOCAL_TOKEN, "authorization"];
 
-/// Each route of the API with who may ask it, to tell what only this computer's own runtime answers.
-struct Routes(Vec<(Vec<String>, Who)>);
-
-impl Routes {
-    fn new() -> Routes {
-        Routes(app_runtime::api::routes().who().iter().map(|(path, who)| (path.split('/').map(str::to_string).collect(), *who)).collect())
-    }
-
-    /// Who may ask `path`, by the route that takes it, as the API's router picks it, the one with most of its parts
-    /// written out: a route this API doesn't have is for whoever answers it to refuse.
-    fn who(&self, path: &str) -> Who {
-        let parts: Vec<&str> = path.split('/').collect();
-        let fits = |route: &[String]| match route.last().is_some_and(|l| l.starts_with("{*")) {
-            true => parts.len() >= route.len() && route.iter().zip(&parts).all(|(r, p)| r.starts_with('{') || r == p),
-            false => parts.len() == route.len() && route.iter().zip(&parts).all(|(r, p)| r.starts_with('{') || r == p),
-        };
-        let written = |route: &[String]| route.iter().filter(|r| !r.starts_with('{')).count();
-        self.0.iter().filter(|(route, _)| fits(route)).max_by_key(|(route, _)| written(route)).map_or(Who::Clients, |(_, who)| *who)
-    }
-}
-
 pub(super) async fn serve(onet: Arc<Onet>) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&onet.listen).await.with_context(|| format!("listen on {}", onet.listen))?;
-    let mut router = axum::Router::new().fallback(answer).with_state((onet, Arc::new(Routes::new())));
+    let mut router = axum::Router::new().fallback(answer).with_state(onet);
     if let platform::mode::Mode::Throwaway(network) = platform::mode::here() {
         router = super::throwaway::serve_beside(network, router);
     }
@@ -90,7 +68,7 @@ pub const OWN: &[&str] = &[
     "/api/holds/sign",
 ];
 
-async fn answer(State((onet, routes)): State<(Arc<Onet>, Arc<Routes>)>, req: Request) -> Response {
+async fn answer(State(onet): State<Arc<Onet>>, req: Request) -> Response {
     if !api::local::from_this_machine(&onet.token, &req) {
         return refused(StatusCode::FORBIDDEN, api::local::not_this_machine(), Some(code::NOT_THIS_MACHINE));
     }
@@ -110,7 +88,7 @@ async fn answer(State((onet, routes)): State<(Arc<Onet>, Arc<Routes>)>, req: Req
         ("POST", "/api/holds/write") => write(&onet, req).await,
         ("POST", "/api/holds/sign") => sign(&onet, req).await,
         ("POST", "/api/services") => services(&onet, req).await,
-        _ => return pass_on(&onet, &routes, req).await,
+        _ => return pass_on(&onet, req).await,
     };
     match done {
         Ok(out) => axum::Json(out).into_response(),
@@ -123,7 +101,6 @@ async fn body<T: serde::de::DeserializeOwned>(req: Request) -> Result<T> {
     let bytes = axum::body::to_bytes(req.into_body(), 1 << 20).await?;
     serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("the body isn't what this takes: {e}"))
 }
-
 
 /// Joins the network a pairing code is from, as this computer (`app_runtime::join_with`), and reaches it.
 async fn join(onet: &Arc<Onet>, req: Request) -> Result<Value> {
@@ -203,7 +180,7 @@ async fn wait(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     let keyring = device.keyring();
     let user = keyring.user().context("let in, but who's who names no user for this device yet")?;
     let root = std::fs::read_to_string(onet.home.join("onet").join("root")).context("let in, but the network's root wasn't kept")?;
-    let storage = keyring.who(|db| db.setting(app_runtime::storage::STORAGE)).and_then(Result::ok).flatten();
+    let storage = keyring.who(|db| db.setting(::bucket::STORAGE)).and_then(Result::ok).flatten();
     let bucket = match storage {
         Some(fields) => {
             let mut fields: std::collections::BTreeMap<String, String> = serde_json::from_str(&fields).context("the storage setting isn't an S3 address")?;
@@ -299,14 +276,14 @@ fn held(onet: &Onet) -> Value {
 /// The secret the device's seal key shares with the key given: what opens something sealed to the device.
 async fn shared(onet: &Onet, req: Request) -> Result<Value> {
     use data_encoding::BASE64URL_NOPAD as B64U;
-    let asked: app_runtime::HeldShare = body(req).await?;
+    let asked: api::holds::HeldShare = body(req).await?;
     let share = <[u8; 32]>::try_from(B64U.decode(asked.share.as_bytes())?).map_err(|_| anyhow::anyhow!("a share is 32 bytes"))?;
     Ok(json!({ "shared": B64U.encode(&key::agree(&key::seal_secret(&onet.key), &share)) }))
 }
 
 /// A step of `global` written as the device, for its user alone, to the bucket itself.
 async fn write(onet: &Onet, req: Request) -> Result<Value> {
-    let asked: app_runtime::HeldWrite = body(req).await?;
+    let asked: api::holds::HeldWrite = body(req).await?;
     let device = onet.device().await?;
     let keyring = device.keyring();
     anyhow::ensure!(keyring.user().as_deref() == Some(asked.user.as_str()), "the device writes in global only as its own user");
@@ -314,11 +291,11 @@ async fn write(onet: &Onet, req: Request) -> Result<Value> {
     Ok(json!({}))
 }
 
-/// A request to the relay or auth signed as the device (`app_runtime::sign_request`).
+/// A request to the relay or auth signed as the device (`api::holds::sign_request`).
 async fn sign(onet: &Onet, req: Request) -> Result<Value> {
     use data_encoding::BASE64URL_NOPAD as B64U;
-    let asked: app_runtime::HeldSign = body(req).await?;
-    let signature = app_runtime::sign_request(&onet.key, &B64U.decode(asked.bytes.as_bytes())?)?;
+    let asked: api::holds::HeldSign = body(req).await?;
+    let signature = api::holds::sign_request(&onet.key, &B64U.decode(asked.bytes.as_bytes())?)?;
     Ok(json!({ "signature": B64U.encode(&signature) }))
 }
 
@@ -346,9 +323,9 @@ async fn recovery(onet: &Onet, path: &str, req: Request) -> Result<Value> {
 }
 
 /// A request passed on as this device (`Device::fetch`): answered by its keyring if it signs it, else asked of the best
-/// machine for it, its own app runtime first, as this computer's own program. A route only this computer's own programs
-/// may ask goes nowhere else.
-async fn pass_on(onet: &Arc<Onet>, routes: &Routes, req: Request) -> Response {
+/// machine for it, its own app runtime first, as this computer's own program. A route only a computer's own programs may
+/// ask is refused by any other machine it reaches.
+async fn pass_on(onet: &Arc<Onet>, req: Request) -> Response {
     let device = match (onet.device().await, &onet.runtime) {
         (Ok(device), _) if !device.address().is_empty() => device,
         (_, Some(runtime)) => {
@@ -372,9 +349,6 @@ async fn pass_on(onet: &Arc<Onet>, routes: &Routes, req: Request) -> Response {
         && !::scope::settings::on_a_node().any(|(m, p)| m == method && p == path)
     {
         return to_runtime(runtime, req).await;
-    }
-    if routes.who(&path) == Who::ThisMachine && !device.local().is_some() {
-        return refused(StatusCode::FORBIDDEN, format!("only this computer's own app runtime answers {path}, and it isn't running here"), None);
     }
     let asked = req.uri().path_and_query().map_or_else(|| path.clone(), |p| p.as_str().to_string());
     let headers: Vec<(String, String)> = req.headers().iter().filter(|(n, _)| !OWN_HEADERS.contains(&n.as_str())).filter_map(|(n, v)| Some((n.to_string(), v.to_str().ok()?.to_string()))).collect();

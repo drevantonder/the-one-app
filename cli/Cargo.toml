@@ -41,6 +41,8 @@ api = { path = "../api" }
 groups = { path = "../groups" }
 vault = { path = "../vault" }
 devices = { path = "../devices" }
+# What a computer says while it isn't in a network yet (`not_joined`).
+onboarding = { path = "../onboarding" }
 services = { path = "../services" }
 device-logs = { path = "../device-logs" }
 deploy = { path = "../deploy" }

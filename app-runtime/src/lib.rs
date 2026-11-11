@@ -9,7 +9,6 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use ed25519_dalek::SigningKey;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
@@ -27,7 +26,7 @@ use ::scope::scopes::{Scope, new_id};
 use ::scope::scopes::{self, ScopeDb};
 use ::scope::content;
 use ::scope::scopes::{Principal, ScopeState};
-use ::custom_build::config::{CLI, YOURS};
+use ::custom_build::config::YOURS;
 use ::scope::rank;
 use ::app_schedules::Schedule;
 use ::scope::replica::{Handled, Replica};
@@ -48,7 +47,6 @@ mod keys;
 mod sync;
 mod net;
 mod versions;
-pub use versions::heard;
 #[path = "../../onboarding/runtime/pairing.rs"]
 mod pairing;
 pub(crate) mod releases;
@@ -77,7 +75,7 @@ mod holds;
 mod network;
 
 use ::api::{Caller, Credential};
-pub use holds::{HeldShare, HeldSign, HeldWrite, Holder, sign_request};
+pub use holds::Holder;
 use exclusive::*;
 use ::api::home::*;
 use network::*;
@@ -197,7 +195,6 @@ impl Network {
 /// What a machine's node is: the device its user's CLI, MCP and Mac app sign with, and compute.
 pub const MACHINE: &[scopes::Kind] = &[scopes::Kind::Client, scopes::Kind::Compute];
 
-
 thread_local!(static HOLDING: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) });
 
 pub struct Inner {
@@ -285,7 +282,6 @@ impl std::fmt::Debug for Host {
         write!(f, "Node({})", short(&self.0.id))
     }
 }
-
 
 /// What a node stopping waits at most for its last insights to be written: they may be lost, and stopping may not wait.
 const LAST_SAY: Duration = Duration::from_secs(3);
@@ -470,7 +466,7 @@ impl Host {
     fn with<R>(&self, f: impl FnOnce(&mut Network) -> Result<R>) -> Result<R> {
         let mut network = self.0.network.lock()?;
         let _held = crate::watchdog::Held::new();
-        f(network.as_mut().with_context(|| not_joined(&self.device_name()))?)
+        f(network.as_mut().with_context(|| ::onboarding::not_joined(&self.device_name()))?)
     }
 
     /// `with`, for what answers a plain yes or no, or a list, and can't fail: `default` when it's in no network yet, or
@@ -650,13 +646,11 @@ fn update_views(i: &mut Network) -> Result<()> {
     Ok(())
 }
 
-
 /// The scopes a call of `app` as `user` reaches (`state::reachable`), as this device can tell: of each scope it holds,
 /// by what it read.
 fn reachable(i: &Network, app: &str, user: &str) -> Result<Vec<Scope>> {
     ::scope::state::reachable(i.r.db(), user, |s| i.r.holds(s).then(|| i.views.get(&s.to_string()).is_some_and(|st| st.added.contains(app))))
 }
-
 
 fn host_me(host: &Host, db: &ScopeDb, caller: &Caller) -> Result<Me> {
     let name = if caller.key == host.0.id { host.device_name() } else { db.machine(&caller.key)?.map(|k| k.name).unwrap_or_default() };
@@ -670,10 +664,4 @@ fn scope_name(i: &Network, scope: &str) -> Result<String> {
         Scope::User(u) => db.user(&u)?.map(|u| u.name).unwrap_or(u),
         Scope::Group(g) => db.group(&g)?.map(|g| g.name).unwrap_or(g),
     })
-}
-
-/// What a computer says when its node isn't in a network yet, whatever else is signed in on it (the Mac app's own
-/// sign-in is a client's): what the command line, `status` and a call that needs one all tell to do.
-pub fn not_joined(device: &str) -> String {
-    format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it with a pairing code, or {CLI} create <name> --as <your name> starts a new one")
 }

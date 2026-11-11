@@ -47,6 +47,8 @@ pub const READS: u32 = 16;
 
 /// The headers of requests between machines, which every language that sends or reads one names by these.
 pub mod header {
+    /// A line an app's `_http` wants git to show whoever asked.
+    pub const APP_SAYS: &str = "x-app-says";
     /// The database keys a caller hands a node with a request, sealed to it (`keys::Handoff`).
     pub const KEYS: &str = "x-one-keys";
     /// A session's endpoint, certified by its device, so the node takes it as that device.

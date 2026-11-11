@@ -27,7 +27,7 @@ pub fn run(args: &[String]) -> Result<i32> {
     let (scheme, rest) = url.split_once("://").with_context(bad)?;
     let (host, path) = rest.split_once('/').with_context(bad)?;
     let (address, path) = (format!("{scheme}://{host}"), format!("/{path}"));
-    anyhow::ensure!(app_runtime::api::app_route(&path), bad());
+    anyhow::ensure!(api::path::app_request(&path).is_some(), bad());
     let ours = here()?;
     if ours != address {
         bail!("this computer is in {YOURS} at {ours}, not at {address}");
@@ -81,7 +81,7 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
         return (StatusCode::PROXY_AUTHENTICATION_REQUIRED, [(header::PROXY_AUTHENTICATE, "Basic realm=\"git\"")]).into_response();
     }
     let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
-    if !app_runtime::api::app_route(&path) || !matches!(*req.method(), Method::GET | Method::POST) {
+    if !api::path::app_request(&path).is_some() || !matches!(*req.method(), Method::GET | Method::POST) {
         return (StatusCode::NOT_FOUND, "not an app's").into_response();
     }
     let post = req.method() == Method::POST;
@@ -125,7 +125,7 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
             Err(err) => return drop(head.send((502, "text/plain".into(), Some(format!("{err}"))))),
         };
         let status = resp.status().as_u16();
-        if let Some(said) = resp.headers().get(app_runtime::api::APP_SAYS).and_then(|v| v.to_str().ok()) {
+        if let Some(said) = resp.headers().get(::custom_build::protocol::header::APP_SAYS).and_then(|v| v.to_str().ok()) {
             eprintln!("remote: {said}");
         }
         let kind = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();

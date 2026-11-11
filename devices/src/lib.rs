@@ -6,6 +6,8 @@ pub mod says;
 pub mod tools;
 
 #[cfg(not(target_family = "wasm"))]
+pub mod asked;
+#[cfg(not(target_family = "wasm"))]
 pub mod cli;
 #[cfg(not(target_family = "wasm"))]
 pub mod load;

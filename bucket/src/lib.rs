@@ -7,6 +7,9 @@ use anyhow::Result;
 
 pub mod names;
 
+/// The setting that says where the network keeps its data: S3's `endpoint`, `bucket` and `region`, as JSON.
+pub const STORAGE: &str = "storage";
+
 /// An object as it was read: its bytes, and the tag `replace` names it by.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Object {

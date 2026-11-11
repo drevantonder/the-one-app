@@ -23,6 +23,8 @@ serde_json = "1"
 
 # How loaded a computer is (`load`): its disks, read the way each OS says.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+# What an ask to update started says, in the device's log (`asked`).
+device-logs = { path = "../device-logs" }
 platform = { path = "../platform", features = ["machine"] }
 
 # A Mac's CPU load (`load`), read from the Mach host.
