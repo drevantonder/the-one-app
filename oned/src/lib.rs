@@ -641,13 +641,14 @@ fn runtime() -> Result<std::process::Command> {
     let program = program(APPS_PART);
     let this = |commit: &str| ::oned_update::latest::same_build(commit, ::custom_build::config::BUILD);
     if !::oned_update::release::Version::of(&program).is_some_and(|v| this(&v.commit)) {
-        // Asked at most once a minute: oned starts it again every few seconds, and the address may be out of reach.
-        static ASKED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
-        if ASKED.lock().unwrap().replace(Instant::now()).is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
-            bail!("no app runtime of this build ({}) is here yet", ::custom_build::config::BUILD);
-        }
         let home = platform::home();
         let address = ::oned_update::update::address(&home).context("this device doesn't know its network's address yet, to fetch its app runtime from")?;
+        // Asked at most once a minute: oned starts it again every few seconds, and the address may be out of reach.
+        static ASKED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+        if ASKED.lock().unwrap().is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
+            bail!("no app runtime of this build ({}) is here yet", ::custom_build::config::BUILD);
+        }
+        *ASKED.lock().unwrap() = Some(Instant::now());
         let text = ::oned_update::latest::fetch(&address)?.with_context(|| format!("nothing has been published at {address} yet"))?;
         let record = ::oned_update::latest::Latest::read(platform::mode::here().release_key(), &text).with_context(|| format!("the record at {address}"))?;
         let name = ::oned_update::latest::Thing::service_name(APPS_PART, ::custom_build::config::TARGET);
