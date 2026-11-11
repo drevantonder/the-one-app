@@ -457,20 +457,23 @@ impl Client {
                 return Err(Error { trace: traces(&mut tries, None), ..why });
             }
             if let Some(local) = self.local_among(&nodes) {
+                let key = PublicKey::from_bytes(&local.key).map_err(|_| unsent("a device's key isn't a key"))?;
+                // One that stalled lately is asked again only after the rest, as any device that didn't answer is.
+                if nodes.len() > 1 && self.0.down.lock().unwrap().get(&key).is_some_and(|d| d.since.elapsed() < SKIP) {
+                    skipped.push(key);
+                    continue;
+                }
                 let began = Instant::now();
-                match self.ask_local(&local, &req).await {
+                match self.ask_local(&local, &req, nodes.len() == 1).await {
                     Ok(mut response) => {
-                        let key = PublicKey::from_bytes(&local.key).map_err(|_| unsent("a device's key isn't a key"))?;
+                        self.0.down.lock().unwrap().remove(&key);
                         tried(&mut tries, &key, began, "answered", None);
                         let theirs = response.headers.iter().find(|h| h.0 == header::TRACE).and_then(|h| data_encoding::BASE64.decode(h.1.as_bytes()).ok()).and_then(|b| serde_json::from_slice(&b).ok());
                         response.trace = traces(&mut tries, theirs);
                         return Ok(response);
                     }
                     Err(err) => {
-                        let key = PublicKey::from_bytes(&local.key).ok();
-                        if let Some(key) = &key {
-                            tried(&mut tries, key, began, failure(&err), None);
-                        }
+                        tried(&mut tries, &key, began, failure(&err), None);
                         if err.sent && !again {
                             return Err(Error { trace: traces(&mut tries, None), ..err });
                         }
@@ -479,7 +482,7 @@ impl Client {
                             (asked_local_again, why) = (true, err);
                             continue;
                         }
-                        skipped.extend(key);
+                        skipped.push(key);
                         why = err;
                         continue;
                     }
@@ -554,13 +557,21 @@ impl Client {
     }
 
     /// `req` of this device's own runtime, over its loopback, as one of this machine's own programs: with its token, and
-    /// none of what a client says over iroh, so it answers as this device and passes a call on itself.
+    /// none of what a client says over iroh, so it answers as this device and passes a call on itself. Unless it's the
+    /// `last` to ask, one that's safe to ask elsewhere (a GET or HEAD, or a call named by its id, which its lease runs
+    /// once) must start within the runtime's usual time, as any device's must: a GET's answer, or for a call, the runtime
+    /// taking it (`100 Continue`, as it reads the call). Past that, it's taken as stalled and not sent: the next device
+    /// is asked.
     #[cfg(feature = "computer")]
-    async fn ask_local(&self, local: &Local, req: &Request) -> Result<Response, Error> {
+    async fn ask_local(&self, local: &Local, req: &Request, last: bool) -> Result<Response, Error> {
         use tokio::io::AsyncWriteExt;
+        let leased = leased_call(req);
         let mut headers: Vec<(String, String)> = req.headers.iter().filter(|(n, _)| !n.eq_ignore_ascii_case(header::USER) && !n.eq_ignore_ascii_case(header::KEYS)).cloned().collect();
         let token = (local.token)().ok_or_else(|| unsent("this device's own runtime hasn't started here yet"))?;
         headers.push((header::LOCAL_TOKEN.into(), token));
+        if leased {
+            headers.push(("expect".into(), "100-continue".into()));
+        }
         let head = local_head(&req.method, &req.path, &headers, req.body.len()?)?;
         // Waited for while it starts again (`api::loopback`): nothing is sent until it's connected.
         let until = Instant::now() + ::api::loopback::BACK_WITHIN;
@@ -583,12 +594,29 @@ impl Client {
         };
         sending.await.map_err(sent)?;
         let mut from = Stream::Tcp(stream);
-        let (status, headers, body) = read_response(&mut from, req.method == "HEAD").await?;
+        let mut first = Vec::new();
+        if !last && (matches!(req.method.as_str(), "GET" | "HEAD") || leased) {
+            let usual = format!("device {}", data_encoding::HEXLOWER.encode(&local.key));
+            let asked = Instant::now();
+            match timeout(platform::hedge::limit(&usual).max(ANSWER_LEAST), more(&mut from, &mut first)).await {
+                Ok(read) => {
+                    read?;
+                    platform::hedge::learn(&usual, asked.elapsed());
+                }
+                Err(_) => {
+                    if let Ok(key) = PublicKey::from_bytes(&local.key) {
+                        self.give_up(&key);
+                    }
+                    return Err(unsent("this device's own runtime isn't answering"));
+                }
+            }
+        }
+        let (status, headers, body) = read_response_after(&mut from, req.method == "HEAD", first).await?;
         Ok(Response { node: local.key, status, headers, body: Body { recv: Some(from), ..body }, trace: None })
     }
 
     #[cfg(not(feature = "computer"))]
-    async fn ask_local(&self, _: &Local, _: &Request) -> Result<Response, Error> {
+    async fn ask_local(&self, _: &Local, _: &Request, _: bool) -> Result<Response, Error> {
         Err(unsent("no runtime of this device's is on this machine"))
     }
 
@@ -838,6 +866,15 @@ fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certif
     Ok(head.into_bytes())
 }
 
+/// Whether `req` is a call to an app's tool named by its id: wherever it's asked, it runs once, as the first device to
+/// take its lease runs it. A service's function has no lease.
+#[cfg(feature = "computer")]
+fn leased_call(req: &Request) -> bool {
+    let Sent::Bytes(bytes) = &req.body else { return false };
+    let call = || serde_json::from_slice::<serde_json::Value>(bytes).ok();
+    req.method == "POST" && req.path.split('?').next() == Some(::api::path::CALL) && call().is_some_and(|c| c["id"].is_string() && c["service"].is_null())
+}
+
 /// A request's head for this device's own runtime: checked as `head`'s is, closed once it's answered, and saying
 /// nothing of who it's from but what `headers` carry (its token), so the runtime passes it on itself.
 #[cfg(feature = "computer")]
@@ -898,11 +935,16 @@ impl Stream {
 }
 
 async fn read_response(recv: &mut Stream, head_only: bool) -> Result<(u16, Vec<(String, String)>, Body), Error> {
-    let mut buf = Vec::new();
+    read_response_after(recv, head_only, Vec::new()).await
+}
+
+/// `read_response`, of what `buf` holds and then `recv`: an interim answer (`100 Continue`) is passed over.
+async fn read_response_after(recv: &mut Stream, head_only: bool, mut buf: Vec<u8>) -> Result<(u16, Vec<(String, String)>, Body), Error> {
     loop {
         let mut list = [httparse::EMPTY_HEADER; 100];
         let mut parsed = httparse::Response::new(&mut list);
         match parsed.parse(&buf).map_err(|e| sent(format!("the device's response: {e}")))? {
+            httparse::Status::Complete(len) if parsed.code.is_some_and(|c| (100..200).contains(&c) && c != 101) => drop(buf.drain(..len)),
             httparse::Status::Complete(len) => {
                 let status = parsed.code.unwrap_or(0);
                 let headers: Vec<(String, String)> = parsed.headers.iter().map(|h| (h.name.to_ascii_lowercase(), String::from_utf8_lossy(h.value).into_owned())).collect();

@@ -352,14 +352,23 @@ async fn pass_on(onet: &Arc<Onet>, req: Request) -> Response {
     }
     let asked = req.uri().path_and_query().map_or_else(|| path.clone(), |p| p.as_str().to_string());
     let headers: Vec<(String, String)> = req.headers().iter().filter(|(n, _)| !OWN_HEADERS.contains(&n.as_str())).filter_map(|(n, v)| Some((n.to_string(), v.to_str().ok()?.to_string()))).collect();
-    let spooled = match Spooled::read(req.into_body()).await {
+    let mut spooled = match Spooled::read(req.into_body()).await {
         Ok(spooled) => spooled,
         Err(err) => return said(StatusCode::BAD_REQUEST, &err.into()),
     };
-    let called = match &spooled {
-        Spooled::Bytes(sent) if path == api::path::CALL => serde_json::from_slice::<Value>(sent).ok().and_then(|c| c["app"].as_str().map(str::to_string)),
-        _ => None,
-    };
+    // A call is named here, so whichever device it's asked of (another, once this computer's own app runtime stalls) it
+    // runs once: the first to take its lease runs it.
+    let mut called = None;
+    if let Spooled::Bytes(sent) = &mut spooled
+        && path == api::path::CALL
+        && let Ok(mut call) = serde_json::from_slice::<Value>(sent)
+    {
+        called = call["app"].as_str().map(str::to_string);
+        if call.is_object() && call.get("id").is_none() {
+            call["id"] = json!(::scope::scopes::new_id());
+            *sent = serde_json::to_vec(&call).unwrap_or_else(|_| sent.clone());
+        }
+    }
     let fetched = device.fetch(&method, &asked, headers, spooled.sent()).await;
     drop(spooled);
     let response = match fetched {

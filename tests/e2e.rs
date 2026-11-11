@@ -1161,63 +1161,123 @@ impl OwnRuntime {
 /// home's token isn't. A call made on onet runs there, and reaches the user's other devices.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
-    use ::scope::content::{self, Change};
-    use ::scope::scopes::Kind;
     let k = start("onet-device").await;
     create(&k, "Home", "Andre").await;
     add_notes(&k).await;
     let _relay = relay(&k).await;
     let b = start("onet-other").await;
     b.join(&onboarding_runtime::pair(&k.rt()).unwrap()).await.unwrap();
-    let me = api::Caller::own(k.id(), k.user().unwrap());
-
-    // The device's home as onet and its runtime share it: its key, network and token; the runtime's key in its folder,
-    // listed by the device as a compute naming it, let in at the relay; then the device drops its own Compute.
-    let home = crate::temp("onet-home");
-    for file in ["device.json", api::local::LOCAL_TOKEN, "network/network.json"] {
-        std::fs::create_dir_all(home.join(file).parent().unwrap()).unwrap();
-        std::fs::copy(k.dir().join(file), home.join(file)).unwrap();
-    }
-    let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let r = ::key::Endpoint::of(&key);
-    let folder = api::home::runtime_folder(&home);
-    std::fs::create_dir_all(&folder).unwrap();
-    std::fs::write(folder.join("key"), ::key::hex(&key.to_bytes())).unwrap();
-    let listing = |key: &[u8; 32], seal: &[u8; 32], name: &str, roles: &[Kind], device: Option<&[u8; 32]>| {
-        content::core_step(Change::Device, json!({ "key": ::key::hex(key), "seal": ::key::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(::key::hex) }))
-    };
-    k.member_content(&me, listing(&r.key, &r.seal, "onet-device's runtime", &[Kind::Compute], Some(&k.id()))).await.unwrap();
-    ::scope::settings::tell(&k, &k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
-    k.member_content(&me, listing(&k.id(), &::scope::settings::Me::seal(&k), "onet-device", &[Kind::Client], None)).await.unwrap();
-
-    let free = || format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
-    let (onet_at, runtime_at) = (free(), free());
-    let started = |mut program: std::process::Command, args: Vec<String>, addr: &str, log: &str| {
-        let log = std::fs::File::create(home.join(log)).unwrap();
-        program.args(args).env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), addr).stdout(log.try_clone().unwrap()).stderr(log);
-        Runtime(program.spawn().unwrap())
-    };
-    let mut onet = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
-    std::os::unix::process::CommandExt::arg0(&mut onet, onet::computer::name());
-    let _onet = started(onet, vec![format!("--listen={onet_at}"), format!("--runtime={runtime_at}")], &onet_at, "onet.log");
-    let home_token = std::fs::read_to_string(home.join(api::local::LOCAL_TOKEN)).unwrap();
-    let held = async || ask(&onet_at, "GET", "/api/holds", &home_token, None).await;
-    polled("onet to answer", &home.join("onet.log"), async || held().await.0 == 200).await;
-    assert_eq!(held().await.1["key"], ::key::hex(&k.id()), "it holds the device's key");
-    let _runtime = started(std::process::Command::new(env!("CARGO_BIN_EXE_one-apps")), vec![format!("--listen={runtime_at}")], &onet_at, "runtime.log");
-    polled("the runtime to start", &home.join("runtime.log"), async || ask(&runtime_at, "GET", "/api/state", "", None).await.0 == 403).await;
-    assert_eq!(ask(&runtime_at, "GET", "/api/state", &home_token, None).await.0, 403, "the runtime takes only its own token");
+    let c = Computer::of(&k, "onet-device").await;
+    assert_eq!(ask(&c.runtime.at, "GET", "/api/state", &c.token, None).await.0, 403, "the runtime takes only its own token");
 
     let post = json!({ "app": "notes", "tool": "post", "input": { "text": "through onet" } });
     // Its own runtime takes it, asked on its loopback, named by its device, once it has read what it holds: till then it
     // passes it on.
-    polled("a call through onet that its own runtime runs", &home.join("runtime.log"), async || {
-        let (status, _, ran) = ask(&onet_at, "POST", "/api/call", &home_token, Some(post.clone())).await;
+    polled("a call through onet that its own runtime runs", &c.home.join("runtime.log"), async || {
+        let (status, _, ran) = ask(&c.onet_at, "POST", "/api/call", &c.token, Some(post.clone())).await;
         status == 200 && ran["steps"].as_array().into_iter().flatten().any(|s| s["here"] == true && s["result"] == "ran" && s["device"] == "onet-device")
     })
     .await;
     let lines = async |node: &app_runtime::Host| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("through onet")).await;
+}
+
+/// A computer whose own app runtime stalls answers its programs from another device within the runtime's usual time,
+/// as a browser does: a read, and a call that writes, which runs once, however late the stalled runtime wakes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_whose_own_runtime_stalls_is_answered_by_another_and_a_write_runs_once() {
+    let k = start("stall-own").await;
+    create(&k, "Home", "Andre").await;
+    add_notes(&k).await;
+    let _relay = relay(&k).await;
+    let b = start("stall-own-other").await;
+    b.join(&onboarding_runtime::pair(&k.rt()).unwrap()).await.unwrap();
+    let c = Computer::of(&k, "stall-own").await;
+    let read = json!({ "app": "notes", "tool": "read", "input": {} });
+    let ran_here = |ran: &Value| ran["steps"].as_array().into_iter().flatten().any(|s| s["here"] == true && s["result"] == "ran" && s["device"] == "stall-own");
+    polled("a call its own runtime runs", &c.home.join("runtime.log"), async || {
+        let (status, _, ran) = ask(&c.onet_at, "POST", "/api/call", &c.token, Some(read.clone())).await;
+        status == 200 && ran_here(&ran)
+    })
+    .await;
+    // Its first answers teach onet how long its runtime takes to start one.
+    for _ in 0..5 {
+        assert_eq!(ask(&c.onet_at, "GET", "/api/state", &c.token, None).await.0, 200);
+        assert_eq!(ask(&c.onet_at, "POST", "/api/call", &c.token, Some(read.clone())).await.0, 200);
+    }
+
+    c.runtime.signal(libc::SIGSTOP);
+    let within = Duration::from_secs(5);
+    let (status, said, _) = tokio::time::timeout(within, ask(&c.onet_at, "GET", "/api/state", &c.token, None)).await.expect("a read went to another device within the runtime's limit");
+    assert_eq!(status, 200, "{said}");
+    let post = json!({ "app": "notes", "tool": "post", "input": { "text": "while it stalled" } });
+    let (status, said, _) = tokio::time::timeout(within, ask(&c.onet_at, "POST", "/api/call", &c.token, Some(post))).await.expect("a write went to another device within the runtime's limit");
+    assert_eq!(status, 200, "{said}");
+
+    // Woken, it finds the write's lease taken: it ran once.
+    c.runtime.signal(libc::SIGCONT);
+    let after = json!({ "app": "notes", "tool": "post", "input": { "text": "after" } });
+    polled("its own runtime to answer again", &c.runtime.log, async || ask_runtime(&c.runtime.at, &c.runtime.token, after.clone()).await.0 == 200).await;
+    let posts = |v: &Value| v["posts"].as_array().cloned().unwrap_or_default().iter().filter_map(|p| p["text"].as_str().map(str::to_string)).collect::<Vec<_>>();
+    eventually("its runtime's write to reach the other device", &b, async || b.call(notes("read", json!({}))).await.is_ok_and(|v| posts(&v).contains(&"after".to_string()))).await;
+    let all = posts(&b.call(notes("read", json!({}))).await.unwrap());
+    assert_eq!(all.iter().filter(|p| *p == "while it stalled").count(), 1, "{all:?}");
+}
+
+/// A computer of its own beside `k`'s device, as its oned starts it: its onet holding the device's key, and its app
+/// runtime an endpoint of its own key, listed by the device as a compute naming it and let in at the relay; then the
+/// device drops its own Compute.
+struct Computer {
+    home: std::path::PathBuf,
+    onet_at: String,
+    /// The home's token, which its own programs ask onet with.
+    token: String,
+    _onet: Runtime,
+    runtime: OwnRuntime,
+}
+
+impl Computer {
+    async fn of(k: &Host, name: &str) -> Computer {
+        use ::scope::content::{self, Change};
+        use ::scope::scopes::Kind;
+        let me = api::Caller::own(k.id(), k.user().unwrap());
+        let home = crate::temp(&format!("{name}-home"));
+        for file in ["device.json", api::local::LOCAL_TOKEN, "network/network.json"] {
+            std::fs::create_dir_all(home.join(file).parent().unwrap()).unwrap();
+            std::fs::copy(k.dir().join(file), home.join(file)).unwrap();
+        }
+        let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+        let r = ::key::Endpoint::of(&key);
+        let folder = api::home::runtime_folder(&home);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("key"), ::key::hex(&key.to_bytes())).unwrap();
+        let listing = |key: &[u8; 32], seal: &[u8; 32], name: &str, roles: &[Kind], device: Option<&[u8; 32]>| {
+            content::core_step(Change::Device, json!({ "key": ::key::hex(key), "seal": ::key::hex(seal), "user": me.user, "name": name, "roles": roles, "device": device.map(::key::hex) }))
+        };
+        k.member_content(&me, listing(&r.key, &r.seal, &format!("{name}'s runtime"), &[Kind::Compute], Some(&k.id()))).await.unwrap();
+        ::scope::settings::tell(k, k, json!({ "add": ::key::hex(&r.key), "admin": false, "role": "compute" })).await.unwrap();
+        k.member_content(&me, listing(&k.id(), &::scope::settings::Me::seal(k), name, &[Kind::Client], None)).await.unwrap();
+
+        let free = || format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
+        let (onet_at, runtime_at) = (free(), free());
+        let started = |mut program: std::process::Command, args: Vec<String>, addr: &str, log: &str| {
+            let log = std::fs::File::create(home.join(log)).unwrap();
+            program.args(args).env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), addr).stdout(log.try_clone().unwrap()).stderr(log);
+            Runtime(program.spawn().unwrap())
+        };
+        let mut onet = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
+        std::os::unix::process::CommandExt::arg0(&mut onet, onet::computer::name());
+        let onet = started(onet, vec![format!("--listen={onet_at}"), format!("--runtime={runtime_at}")], &onet_at, "onet.log");
+        let token = std::fs::read_to_string(home.join(api::local::LOCAL_TOKEN)).unwrap();
+        let held = async || ask(&onet_at, "GET", "/api/holds", &token, None).await;
+        polled("onet to answer", &home.join("onet.log"), async || held().await.0 == 200).await;
+        assert_eq!(held().await.1["key"], ::key::hex(&k.id()), "it holds the device's key");
+        let runtime = started(std::process::Command::new(env!("CARGO_BIN_EXE_one-apps")), vec![format!("--listen={runtime_at}")], &onet_at, "runtime.log");
+        polled("the runtime to start", &home.join("runtime.log"), async || ask(&runtime_at, "GET", "/api/state", "", None).await.0 == 403).await;
+        let runtime_token = std::fs::read_to_string(folder.join(api::local::LOCAL_TOKEN)).unwrap();
+        let runtime = OwnRuntime { process: runtime, at: runtime_at, token: runtime_token, log: home.join("runtime.log"), key: r };
+        Computer { home, onet_at, token, _onet: onet, runtime }
+    }
 }
 
 /// oned, started by a test as a computer's supervisor would: asked to stop as it is (SIGTERM), so it stops what it started.
