@@ -250,10 +250,23 @@ impl Onet {
         let joined = fields.get("address").cloned();
         anyhow::ensure!(joined.is_some() || !fields.contains_key("endpoint"), "this computer's network file doesn't say where {}'s bucket is asked for: its oned writes it there as it starts", ::custom_build::config::YOURS);
         let at = joined.clone().map(|a| a.trim_end_matches('/').to_string());
-        let address: bucket::Address = Arc::new(move || joined.clone().context("a folder is reached without the network's address"));
-        let place = bucket::Place::network(&fields, address, self.key.clone())?;
+        let place = self.place(&fields, joined)?;
         let runtime = self.runtime.as_ref().map(|r| Runtime { at: r.at.clone(), folder: r.folder.clone() });
         Device::on_computer(self.key.to_bytes(), &kept.to_string_lossy(), place, at, runtime).await.map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
+    /// The network's bucket its `fields` name, reached at `address` if it's S3.
+    fn place(&self, fields: &std::collections::BTreeMap<String, String>, address: Option<String>) -> Result<bucket::Place> {
+        let address: bucket::Address = Arc::new(move || address.clone().context("a folder is reached without the network's address"));
+        bucket::Place::network(fields, address, self.key.clone())
+    }
+
+    /// Its device reads and writes the network's data where its app runtime keeps it from now on: the bucket `fields`
+    /// name.
+    async fn moved(&self, fields: &std::collections::BTreeMap<String, String>) -> Result<()> {
+        let device = self.device().await?;
+        let place = self.place(fields, Some(device.address().to_string()).filter(|a| !a.is_empty()))?;
+        device.moved(place).map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     /// Lists this device's app runtime, an endpoint of its own key in its folder, as a compute naming this device, which

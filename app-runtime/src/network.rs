@@ -52,6 +52,8 @@ impl Host {
     pub(super) async fn keep_in(&self, to: Place, fields: BTreeMap<String, String>, copy: ::api::runtime::Fut<'_, ()>) -> Result<()> {
         let mut moved = self.0.moved.write().await;
         copy.await?;
+        // Its device writes its steps in `global` too, on a computer.
+        self.0.holds.moved(&fields).await?;
         let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(self.network_dir().join(NETWORK_FILE))?)?;
         file.bucket = Some(fields.clone());
         self.save_network(&file)?;

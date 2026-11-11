@@ -118,6 +118,12 @@ impl Device {
         &self.keyring
     }
 
+    /// Reads and writes the network's data in `place` from now on, where its app runtime keeps it now.
+    #[cfg(feature = "computer")]
+    pub(crate) fn moved(&self, place: bucket::Place) -> Result<(), Error> {
+        self.bucket.moved(place).map_err(|e| failed(format!("{e:#}")))
+    }
+
     /// Reads who's who again, and asks its own app runtime first as who's who lists it now, and the rest in its order.
     #[cfg(feature = "computer")]
     pub(crate) async fn refresh(&self) -> Result<(), Error> {

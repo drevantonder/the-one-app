@@ -92,6 +92,14 @@ impl Holds {
         }
     }
 
+    /// Its holder reads and writes the network's data in the bucket `fields` name from now on, as its app runtime is about to.
+    pub(super) async fn moved(&self, fields: &BTreeMap<String, String>) -> Result<()> {
+        match self {
+            Holds::Key(_) => Ok(()),
+            Holds::Asks { holder, .. } => holder.ask("POST", "/api/holds/moved", Some(json!(::api::holds::HeldMoved { bucket: fields.clone() }))).await.map(drop),
+        }
+    }
+
     /// The epochs of `scope` sealed to the device in the bucket, of those `hashes` names by number, each kept only if
     /// it's the key its entry made: one that isn't is someone's junk, passed over.
     pub(super) async fn epochs(&self, bucket: &Copied, scope: &Scope, hashes: &BTreeMap<u32, String>) -> Result<Keys> {

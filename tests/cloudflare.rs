@@ -271,8 +271,8 @@ impl Workers {
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).chain(recovery.map(|key| json!({ "key": key, "role": "client", "admin": false, "recovery": true }))).collect();
         settings.root = Some(data_encoding::HEXLOWER.encode(&ROOT));
         let sites = port();
-        // A device reads the bucket itself, at the URLs the URL signer signs: with oned, at the stand-in's own address.
-        let endpoint = if oned.is_some() { format!("http://127.0.0.1:{sites}") } else { "https://s3.test".into() };
+        // A device reads the bucket itself, at the URLs the URL signer signs: at the stand-in's own address.
+        let endpoint = format!("http://127.0.0.1:{sites}");
         settings.bucket = Some(json!({ "endpoint": endpoint, "bucket": "network", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let modules = oned.map(|oned| {
             (settings.cloudflare_node, settings.cloudflare_node_key, settings.root, settings.welcome) = (true, oned.key, Some(oned.root), oned.welcome);

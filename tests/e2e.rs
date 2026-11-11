@@ -1238,6 +1238,31 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
     eventually("the deploy's bundle to reach another device", &b, async || database_runtime::blob(&b.rt(), &bundle).await.is_ok()).await;
 }
 
+/// A computer whose network moves from a folder to S3 keeps writing there: the steps its onet writes in `global` once
+/// it has moved are in the new bucket, where every device reads, and none in the folder it left.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computers_steps_after_a_move_to_s3_are_written_there() {
+    let k = start("move-s3").await;
+    create(&k, "Home", "Andre").await;
+    let w = relay(&k).await;
+    let c = Computer::of(&k, "move-s3").await;
+    let s3 = json!({ "endpoint": w.sites, "bucket": "network" });
+    // Once its own runtime has read who's who, which says who's an admin.
+    polled("an admin's move to S3", &c.home.join("runtime.log"), async || ask(&c.onet_at, "POST", "/api/storage", &c.token, Some(s3.clone())).await.1["kept"] == true).await;
+    polled("the computer to keep its data in S3", &c.home.join("runtime.log"), async || ask(&c.onet_at, "GET", "/api/storage", &c.token, None).await.1["kind"] == "s3").await;
+
+    let (folder, prefix) = (k.dir().join("network/bucket"), ::scope::steps::prefix("global"));
+    let step = |n: u64| ::bucket::names::step_name(&prefix, n);
+    let last = (1..).take_while(|n| folder.join(step(*n)).exists()).last().unwrap();
+    let deploy = json!({ "app": "answers", "files": { "app.js": include_str!("answers/app.js") } });
+    let (status, deployed, _) = ask(&c.onet_at, "POST", "/api/deploy", &c.token, Some(deploy)).await;
+    assert_eq!(status, 200, "{deployed}");
+    assert!(!folder.join(step(last + 1)).exists(), "a step written after the move went to the folder it left");
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    let there = tokio::task::block_in_place(|| agent.get(&format!("{}/network/{}", w.sites, step(last + 1))).call().unwrap().status().as_u16());
+    assert_eq!(there, 200, "the step written after the move is in S3");
+}
+
 /// A computer whose own app runtime stalls answers its programs from another device within the runtime's usual time,
 /// as a browser does: a read, and a call that writes, which runs once, however late the stalled runtime wakes.
 #[tokio::test(flavor = "multi_thread")]

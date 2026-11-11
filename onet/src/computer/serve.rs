@@ -50,7 +50,7 @@ fn refused(status: StatusCode, error: String, code: Option<&str>) -> Response {
 }
 
 /// The routes a computer's onet answers itself, which `answer` takes before passing anything on: all but those of the
-/// window's joining, notifications and kept answers are its app runtime's routes too, for an app runtime that's its own device.
+/// window's joining, notifications, kept answers and the bucket's move are its app runtime's routes too, for an app runtime that's its own device.
 pub const OWN: &[&str] = &[
     "/api/join",
     "/api/join/ask",
@@ -66,6 +66,7 @@ pub const OWN: &[&str] = &[
     "/api/holds/shared",
     "/api/holds/write",
     "/api/holds/sign",
+    "/api/holds/moved",
     "/api/relay",
 ];
 
@@ -88,6 +89,7 @@ async fn answer(State(onet): State<Arc<Onet>>, req: Request) -> Response {
         ("POST", "/api/holds/shared") => shared(&onet, req).await,
         ("POST", "/api/holds/write") => write(&onet, req).await,
         ("POST", "/api/holds/sign") => sign(&onet, req).await,
+        ("POST", "/api/holds/moved") => moved(&onet, req).await,
         ("GET", "/api/relay") => Ok(onet.relay()),
         ("POST", "/api/services") => services(&onet, req).await,
         _ => return pass_on(&onet, req).await,
@@ -290,6 +292,13 @@ async fn write(onet: &Onet, req: Request) -> Result<Value> {
     let keyring = device.keyring();
     anyhow::ensure!(keyring.user().as_deref() == Some(asked.user.as_str()), "the device writes in global only as its own user");
     keyring.write_to_bucket(&*device, &*device, &asked.user, asked.contents).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(json!({}))
+}
+
+/// Its app runtime keeps the network's data elsewhere from now on: the device reads and writes it there too.
+async fn moved(onet: &Onet, req: Request) -> Result<Value> {
+    let asked: api::holds::HeldMoved = body(req).await?;
+    onet.moved(&asked.bucket).await?;
     Ok(json!({}))
 }
 

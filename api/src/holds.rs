@@ -34,6 +34,14 @@ pub struct HeldWrite {
     pub contents: Vec<Content>,
 }
 
+/// What `/api/holds/moved` takes: the fields of the network's bucket its app runtime keeps the network's data in from
+/// now on (`::bucket::Place::network`), which the device's holder then reads and writes too.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeldMoved {
+    pub bucket: std::collections::BTreeMap<String, String>,
+}
+
 /// What `/api/holds/sign` takes: answered by whatever holds the device's key, its app runtime or its onet.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

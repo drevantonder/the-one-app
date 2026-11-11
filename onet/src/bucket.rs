@@ -114,7 +114,7 @@ pub struct Reached {
 enum Reach {
     Signed(Signed),
     #[cfg(feature = "computer")]
-    Place(::bucket::Place),
+    Place(std::sync::RwLock<::bucket::Place>),
 }
 
 impl Reached {
@@ -126,7 +126,15 @@ impl Reached {
     /// A computer's onet's: `place`, of the network at `address` if it has one yet.
     #[cfg(feature = "computer")]
     pub fn place(place: ::bucket::Place, secret: [u8; 32], address: Option<String>) -> Reached {
-        Reached { at: Reach::Place(place), reads: &::bucket::READS, key: ed25519_dalek::SigningKey::from_bytes(&secret), address, client: "onet" }
+        Reached { at: Reach::Place(std::sync::RwLock::new(place)), reads: &::bucket::READS, key: ed25519_dalek::SigningKey::from_bytes(&secret), address, client: "onet" }
+    }
+
+    /// A computer's onet's, once its app runtime keeps the network's data in `place` (`::api::holds::HeldMoved`).
+    #[cfg(feature = "computer")]
+    pub fn moved(&self, place: ::bucket::Place) -> Result<()> {
+        let Reach::Place(at) = &self.at else { bail!("only a computer's device keeps the network's data somewhere") };
+        *at.write().unwrap() = place;
+        Ok(())
     }
 
     /// What it read, if it's been a minute: sent on a thread of its own, as telemetry may be lost and nothing waits for it.
@@ -143,12 +151,18 @@ impl Reached {
     }
 }
 
+/// Where a computer's device keeps the network's data now, never held while it's asked.
+#[cfg(feature = "computer")]
+fn now_at(at: &std::sync::RwLock<::bucket::Place>) -> ::bucket::Place {
+    at.read().unwrap().clone()
+}
+
 impl Bucket for Reached {
     async fn get(&self, name: &str) -> Result<Option<Object>> {
         let got = match &self.at {
             Reach::Signed(b) => b.get(name).await,
             #[cfg(feature = "computer")]
-            Reach::Place(b) => Bucket::get(b, name).await,
+            Reach::Place(b) => Bucket::get(&now_at(b), name).await,
         }?;
         self.say();
         Ok(got)
@@ -158,7 +172,7 @@ impl Bucket for Reached {
         match &self.at {
             Reach::Signed(b) => b.create(name, bytes).await,
             #[cfg(feature = "computer")]
-            Reach::Place(b) => Bucket::create(b, name, bytes).await,
+            Reach::Place(b) => Bucket::create(&now_at(b), name, bytes).await,
         }
     }
 
@@ -166,7 +180,7 @@ impl Bucket for Reached {
         match &self.at {
             Reach::Signed(b) => b.replace(name, bytes, tag).await,
             #[cfg(feature = "computer")]
-            Reach::Place(b) => Bucket::replace(b, name, bytes, tag).await,
+            Reach::Place(b) => Bucket::replace(&now_at(b), name, bytes, tag).await,
         }
     }
 
@@ -178,7 +192,7 @@ impl Bucket for Reached {
         match &self.at {
             Reach::Signed(b) => b.now(),
             #[cfg(feature = "computer")]
-            Reach::Place(b) => Bucket::now(b),
+            Reach::Place(b) => Bucket::now(&now_at(b)),
         }
     }
 
@@ -186,7 +200,7 @@ impl Bucket for Reached {
         match &self.at {
             Reach::Signed(b) => b.delete(name).await,
             #[cfg(feature = "computer")]
-            Reach::Place(b) => Bucket::delete(b, name).await,
+            Reach::Place(b) => Bucket::delete(&now_at(b), name).await,
         }
     }
 }
