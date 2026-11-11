@@ -104,7 +104,7 @@ class Network:
                 os.killpg(self.proc.pid, signal.SIGKILL)
 
     def seed(self, agents_md, skills, model):
-        for app in ["agents", "ai", "computer", "agent-devices", "gmail", "google-calendar", "drive", "docs", "sheets", "whatsapp",
+        for app in ["agents", "computer", "agent-devices", "gmail", "google-calendar", "drive", "docs", "sheets", "whatsapp",
                     "messenger", "models", "shell", "imessage", "reminders", "calendar", "contacts"]:
             self.run("add", app, "--scope", "global")
         self.run("group", "create", "Family")

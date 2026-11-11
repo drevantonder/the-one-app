@@ -26,7 +26,7 @@
 //
 // Bindings: SIGNER (the URL signer), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its endpoint's
 // key, a secret), RELAY (the relay's `CloudflareNode` entrypoint), LOCATION (where objects are made), ADDRESS (the
-// network's), NAME (its name) and AI (Workers AI). `built.js`, made when it's deployed, is the shim, and the services built
+// network's), NAME (its name) and AI (Workers AI, for AI Gateway's calls: `aiRun`). `built.js`, made when it's deployed, is the shim, and the services built
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
@@ -897,8 +897,8 @@ const servedHere = (view, d) => (d?.uses?.services || []).every((s) => onHere(vi
 /// nothing, as for a model it doesn't have), for a device to.
 async function hereCall(env, name, functionName, input) {
   const fn = services[name]?.[functionName];
-  if (typeof fn !== "function" || !env.AI) return null;
-  const ok = await fn(input ?? {}, { ai: env.AI });
+  if (typeof fn !== "function") return null;
+  const ok = await fn(input ?? {}, {});
   return ok === undefined ? null : { ok };
 }
 
