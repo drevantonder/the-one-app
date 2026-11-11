@@ -112,7 +112,9 @@ impl Parts {
                 // WebAssembly by hand, and the Workers' tests stay in the repo.
                 Some("cloudflare") if file.starts_with("cloudflare/test/") => {}
                 Some("relay") if file.starts_with("relay/protos/") || file == "relay/build.sh" => {}
-                Some("relay" | "auth") => parts.workers = true,
+                // What every Worker answers HTTP with, which the Cloudflare node carries too.
+                Some("gateway") if file == "gateway/http.js" => (parts.node, parts.workers) = (true, true),
+                Some("relay" | "auth" | "gateway") => parts.workers = true,
                 // The Cloudflare node is Rust, built with the node; the remote MCP server runs that build, so the Workers
                 // go out with it.
                 Some("cloudflare") if file.starts_with("cloudflare/node/") => (parts.node, parts.workers) = (true, true),
@@ -164,6 +166,8 @@ mod tests {
         assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
         assert!(of(&["src/node.rs"]).is_built_in() && of(&["onet/src/lib.rs"]).is_built_in());
         assert_eq!(of(&["auth/worker.js", "relay/worker.js", "auth/package.json"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
+        let http = of(&["gateway/http.js"]);
+        assert!(http.node && http.workers && !http.web, "the Cloudflare node carries what every Worker answers HTTP with");
         for file in ["cloudflare/web/web.js", "cloudflare/shared/crypto.js", "src/screen/ui/dist/ui.js", "src/screen/settings/dist/vault.html", "src/screen/bridge.js", "src/onboarding/pages.js", "src/onboarding/pages.tsx"] {
             assert_eq!(of(&[file]), Parts { web: true, workers: true, ..Default::default() }, "{file}: the web client and the Workers that serve it, with no node");
         }

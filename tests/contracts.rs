@@ -16,7 +16,7 @@ impl Formats {
     fn start() -> Self {
         let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
         // Each as the Workers are built from them: its name there, and where it is in the repo.
-        let sources = [("shared/crypto.js", "cloudflare/shared/crypto.js"), ("shared/token.js", "auth/token.js"), ("shared/http.js", "cloudflare/shared/http.js"), ("gateway/worker.js", "cloudflare/gateway/worker.js"), ("telemetry/worker.js", "cloudflare/telemetry/worker.js"), ("telemetry/usage.js", "cloudflare/telemetry/usage.js"), ("test/formats.js", "cloudflare/test/formats.js")];
+        let sources = [("shared/crypto.js", "cloudflare/shared/crypto.js"), ("shared/token.js", "auth/token.js"), ("shared/http.js", "gateway/http.js"), ("gateway/worker.js", "gateway/worker.js"), ("telemetry/worker.js", "cloudflare/telemetry/worker.js"), ("telemetry/usage.js", "cloudflare/telemetry/usage.js"), ("test/formats.js", "cloudflare/test/formats.js")];
         let mut files: Vec<(String, Vec<u8>)> = sources.map(|(name, path)| (name.to_string(), std::fs::read(root.join(path)).unwrap())).to_vec();
         files.push(("screen/agents.js".into(), std::fs::read(root.join("src/screen/settings/agents.js")).unwrap()));
         let dir = crate::temp("formats");
@@ -805,7 +805,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
     }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut files = Vec::new();
-    for dir in ["cloudflare", "auth", "src/screen", "onet/src", "client/native/src", "apps"] {
+    for dir in ["cloudflare", "auth", "gateway", "src/screen", "onet/src", "client/native/src", "apps"] {
         let mut stack = vec![root.join(dir)];
         while let Some(dir) = stack.pop() {
             let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();

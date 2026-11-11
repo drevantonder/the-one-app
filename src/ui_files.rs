@@ -4,11 +4,11 @@
 use std::path::{Path, PathBuf};
 
 /// The folders of the Workers that have one of their own, and their names in the source tree they're built from.
-const WORKERS: [(&str, &str); 2] = [("relay", "relay"), ("auth", "auth")];
+const WORKERS: [(&str, &str); 3] = [("relay", "relay"), ("auth", "auth"), ("gateway", "gateway")];
 
 /// The files of those folders that are among the others of the source tree they're built from: what other Workers import
 /// (`../shared/token.js`), and the one package the Workers are installed with (`package.json`, `bun.lock`).
-const BESIDE_OTHERS: [(&str, &str); 3] = [("auth/token.js", "shared/token.js"), ("auth/package.json", "package.json"), ("auth/bun.lock", "bun.lock")];
+const BESIDE_OTHERS: [(&str, &str); 4] = [("auth/token.js", "shared/token.js"), ("auth/package.json", "package.json"), ("auth/bun.lock", "bun.lock"), ("gateway/http.js", "shared/http.js")];
 
 /// What stays in the repo: the relay's WebAssembly is built from `relay/protos/` by hand (`relay/build.sh`), so only what it
 /// built ships.
