@@ -22,11 +22,12 @@ So:
 - What's made is open to everyone inside unless whoever it belongs to keeps it private: anyone can see how it's made and how it's doing, and take their own copy. What people put in it is not open. What's mine and not shared is mine alone, and a group's is its members'.
 - All of it belongs to our family or organisation. Whoever looks after the whole thing can get into anything when it's needed, such as for support, moving it or an audit, and only on purpose.
 - Our own devices do the work when they're on: we already have them, and some things only exist there. A small piece running on a device reaches those. When no device is on, whatever doesn't need one still works in the cloud, on something we pay for only while it's used, including work on a schedule and a screen for my AI. What lives only on a device, like reminders on a Mac, waits until it's back.
+- Devices on the same network reach each other directly, and keep working with the internet down.
 - That place is worth stealing, so a break-in should get as little as possible. My things open only on my own devices, while one of my AIs is asking, or for software doing its own work. What stores or carries them can't read them, and whatever helps sees only what it's asked to do.
 
 Everything above this line is the thing. None of it is left out.
 
 Would be nice:
 
-- Devices reach each other directly when they can, without going through the cloud.
+- Devices in different places reach each other directly, without going through the cloud.
 - A record I can read of what my AIs did as me.
