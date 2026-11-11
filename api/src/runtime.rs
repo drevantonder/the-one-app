@@ -172,6 +172,9 @@ pub trait Holds: Send + Sync {
     /// A request of who can do what (`settings::answered`), asked by this machine's own programs and answered as its
     /// device, which signs what it changes.
     fn answer_as_device<'a>(&'a self, method: &'a str, path: &'a str, body: &'a [u8]) -> Fut<'a, Value>;
+    /// The app schedules in force for this device to run `app`'s schedules in `scope`, their keys opened: → until when
+    /// they last. Fails when this device doesn't run them.
+    fn app_schedules_keys<'a>(&'a self, scope: &'a Scope, app: &'a str) -> Fut<'a, u64>;
 }
 
 /// The apps it runs.
@@ -202,6 +205,11 @@ pub trait Apps: Send + Sync {
     fn runs_latest<'a>(&'a self, app: &'a str, within: Duration) -> Fut<'a, bool>;
     /// Where an app that `described` itself can run its service for `viewer`, if it has one: their own devices' names.
     fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>>;
+    /// The apps it runs, but those in Recently Deleted.
+    fn names(&self) -> Vec<String>;
+    /// Runs one of `app`'s tools here in `scope`, as `user`, with the keys of the app schedules this device holds there
+    /// and no others, counted as a schedule's call.
+    fn call_scheduled<'a>(&'a self, scope: &'a Scope, app: &'a str, user: &'a str, tool: &'a str, input: Value) -> Fut<'a, Value>;
 }
 
 /// An app a page shows, as it draws for who's looking.

@@ -271,6 +271,10 @@ impl Holds for Node {
     fn answer_as_device<'a>(&'a self, method: &'a str, path: &'a str, body: &'a [u8]) -> Fut<'a, Value> {
         Box::pin(async move { Ok(self.answer_as_mine(method, path, body).await.map_err(|e| e.0)?.0) })
     }
+
+    fn app_schedules_keys<'a>(&'a self, scope: &'a Scope, app: &'a str) -> Fut<'a, u64> {
+        Box::pin(Node::app_schedules_keys(self, scope, app))
+    }
 }
 
 impl Apps for Node {
@@ -324,6 +328,17 @@ impl Apps for Node {
 
     fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
         Node::nodes_for(self, viewer, described)
+    }
+
+    fn names(&self) -> Vec<String> {
+        self.0.apps.names().into_iter().filter(|a| !self.deleted(a)).collect()
+    }
+
+    fn call_scheduled<'a>(&'a self, scope: &'a Scope, app: &'a str, user: &'a str, tool: &'a str, input: Value) -> Fut<'a, Value> {
+        Box::pin(async move {
+            self.count(app, "schedule").await?;
+            self.app_schedules_call(scope, app, user, tool, input, "schedule").await
+        })
     }
 }
 
