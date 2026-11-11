@@ -182,7 +182,7 @@ mod place;
 #[cfg(not(target_family = "wasm"))]
 pub mod signed;
 #[cfg(feature = "node")]
-pub use copied::{Copied, READS};
+pub use copied::Copied;
 #[cfg(not(target_family = "wasm"))]
 pub use signed::{Address, Ask, Signer, signer_requests};
 #[cfg(feature = "node")]

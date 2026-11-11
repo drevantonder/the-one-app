@@ -34,6 +34,9 @@ fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
     Failed(Trouble::Disk, said).into()
 }
 
+/// What this program read of the network's bucket since its insights last took them: a node's, or a computer's onet's.
+pub static READS: super::Reads = super::Reads::new();
+
 #[derive(Clone, Debug)]
 pub enum Place {
     /// A folder on this device's disk, like a USB disk's.
@@ -498,7 +501,8 @@ impl S3 {
         }
     }
 
-    /// A request by presigned URL: → its status, ETag and body. A create may be sent twice, as its name is bound to its
+    /// A request by presigned URL: → its status, ETag and body. A read of the network's bucket is counted, each time
+    /// it's sent (`READS`). A create may be sent twice, as its name is bound to its
     /// bytes: one the bucket refused as taken, after a hedge, is ours if it holds our bytes.
     fn request(&self, method: &str, name: &str, query: &[(&str, &str)], headers: &[(&str, &str)], body: &[u8]) -> Result<(u16, Option<String>, Vec<u8>)> {
         let url = self.url(&Ask { method, name, query, headers })?;
@@ -520,6 +524,11 @@ impl S3 {
         })?;
         if asked.elapsed() >= SLOW_ASK {
             tracing::warn!("{method} {name}: {host} took {} ms", asked.elapsed().as_millis());
+        }
+        if matches!(self.auth, Auth::Signed(_)) && matches!(method, "GET" | "HEAD") && !name.is_empty() {
+            for _ in 0..=hedged as u8 {
+                READS.count(name, resp.status().is_success());
+            }
         }
         let tag = resp.headers().get("etag").and_then(|t| t.to_str().ok()).map(str::to_string);
         // An answer cut short says nothing of what the request did.

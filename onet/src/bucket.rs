@@ -17,17 +17,18 @@ use one::bucket::{Bucket, Object, Signer, signer_requests};
 /// One agent for everything this device asks over HTTP, so connections are kept for the next request.
 pub(crate) static AGENT: LazyLock<ureq::Agent> = LazyLock::new(signer_requests);
 
+/// What a native app downloaded of the bucket, counted as it was.
+static READS: one::bucket::Reads = one::bucket::Reads::new();
+
 pub struct Signed {
     signer: Arc<Signer>,
-    /// What it downloaded, counted as it was.
-    reads: Arc<one::bucket::Reads>,
     /// The steps read ahead and not yet asked for, by name: dropped once a read finds no step, the end of a log.
     ahead: Mutex<HashMap<String, Option<Object>>>,
 }
 
 impl Signed {
-    fn new(address: String, secret: [u8; 32], reads: Arc<one::bucket::Reads>) -> Signed {
-        Signed { signer: Arc::new(Signer::reading(address, ed25519_dalek::SigningKey::from_bytes(&secret))), reads, ahead: Mutex::default() }
+    fn new(address: String, secret: [u8; 32]) -> Signed {
+        Signed { signer: Arc::new(Signer::reading(address, ed25519_dalek::SigningKey::from_bytes(&secret))), ahead: Mutex::default() }
     }
 }
 
@@ -57,7 +58,7 @@ impl Bucket for Signed {
                 return Ok(found);
             }
         }
-        let (signer, asked, reads) = (self.signer.clone(), name.to_string(), self.reads.clone());
+        let (signer, asked, reads) = (self.signer.clone(), name.to_string(), &READS);
         let (found, next) = tokio::task::spawn_blocking(move || -> Result<_> {
             let (url, urls) = signer.reads_from(&asked).map_err(|e| anyhow::anyhow!("Couldn't read from {YOURS}: {e:#}"))?;
             // The ones after it, once it's there, side by side; what they come to is for later, and a failure of theirs
@@ -104,7 +105,7 @@ impl Bucket for Signed {
 /// and says itself as `bucket.reads` once a minute, to the telemetry Worker at the network's address, if it has one.
 pub struct Reached {
     at: Reach,
-    reads: Arc<one::bucket::Reads>,
+    reads: &'static one::bucket::Reads,
     key: ed25519_dalek::SigningKey,
     address: Option<String>,
     client: &'static str,
@@ -119,14 +120,13 @@ enum Reach {
 impl Reached {
     /// A native app's: through the URL signer at `address`.
     pub fn signed(address: String, secret: [u8; 32]) -> Reached {
-        let reads = Arc::new(one::bucket::Reads::new());
-        Reached { at: Reach::Signed(Signed::new(address.clone(), secret, reads.clone())), reads, key: ed25519_dalek::SigningKey::from_bytes(&secret), address: Some(address), client: "app" }
+        Reached { at: Reach::Signed(Signed::new(address.clone(), secret)), reads: &READS, key: ed25519_dalek::SigningKey::from_bytes(&secret), address: Some(address), client: "app" }
     }
 
     /// A computer's onet's: `place`, of the network at `address` if it has one yet.
     #[cfg(feature = "computer")]
     pub fn place(place: one::bucket::Place, secret: [u8; 32], address: Option<String>) -> Reached {
-        Reached { at: Reach::Place(place), reads: Arc::default(), key: ed25519_dalek::SigningKey::from_bytes(&secret), address, client: "onet" }
+        Reached { at: Reach::Place(place), reads: &one::bucket::READS, key: ed25519_dalek::SigningKey::from_bytes(&secret), address, client: "onet" }
     }
 
     /// What it read, if it's been a minute: sent on a thread of its own, as telemetry may be lost and nothing waits for it.
@@ -148,7 +148,7 @@ impl Bucket for Reached {
         let got = match &self.at {
             Reach::Signed(b) => b.get(name).await,
             #[cfg(feature = "computer")]
-            Reach::Place(b) => Bucket::get(b, name).await.inspect(|got| self.reads.count(name, got.is_some())),
+            Reach::Place(b) => Bucket::get(b, name).await,
         }?;
         self.say();
         Ok(got)

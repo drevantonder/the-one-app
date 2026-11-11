@@ -130,9 +130,6 @@ fn kept(name: &str) -> bool {
         }
 }
 
-/// This node's reads of the bucket since its insights last took them.
-pub static READS: super::Reads = super::Reads::new();
-
 /// A name's part that's safe as a file's.
 fn segment(s: &str) -> bool {
     !s.is_empty() && s != "." && s != ".." && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_:.".contains(&b))
@@ -154,7 +151,6 @@ impl<B: Bucket> Bucket for Copied<B> {
         let asking = std::time::Instant::now();
         let got = Bucket::get(moved.as_deref().and_then(Option::as_ref).unwrap_or(&self.place), name).await?;
         crate::node::trace::bucket("read", asking.elapsed(), got.is_some());
-        READS.count(name, got.is_some());
         if let Some(o) = got.as_ref().filter(|_| kept(name)) {
             if let Err(err) = self.here.create(name, &o.bytes) {
                 tracing::debug!("keeping {name}: {err:#}");
