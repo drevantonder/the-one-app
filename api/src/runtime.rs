@@ -50,6 +50,8 @@ pub trait Here: Any + Send + Sync {
     fn address(&self) -> Result<String>;
     /// Tells whoever watches (`/api/events`).
     fn emit(&self, event: Event);
+    /// Its own key, never its device's: what signs its asks and the notes it sends.
+    fn signing_key(&self) -> key::SigningKey;
 }
 
 /// Who's who: the scope database of each scope it holds, as it last read them; and steps written to it.

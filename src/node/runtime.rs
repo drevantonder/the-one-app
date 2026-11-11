@@ -167,6 +167,10 @@ impl Here for Node {
     fn emit(&self, event: Event) {
         Node::emit(self, event)
     }
+
+    fn signing_key(&self) -> ::key::SigningKey {
+        Node::signing_key(self)
+    }
 }
 
 impl ScopeDatabase for Node {
