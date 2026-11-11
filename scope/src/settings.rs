@@ -672,7 +672,7 @@ pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, sco
         allowed!(db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what Cloudflare runs");
         return Ok(content::service(&k, name, on, scope));
     }
-    let mut found: Vec<scopes::Machine> = db.machines()?.into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
+    let mut found: Vec<scopes::Machine> = db.machines()?.into_iter().filter(|s| !s.removed).filter(|s| db.device_name(s).is_ok_and(|n| n.eq_ignore_ascii_case(device)) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
     // A machine's services are named for it: by its name, it's its app runtime.
     if found.len() > 1 {
         found.retain(|s| s.is(scopes::Kind::Compute));

@@ -343,7 +343,7 @@ impl ScopeDb {
     /// A device as someone gives it, by its name or the start of its key: the device, not the parts of it named for it.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         let listed: Vec<Machine> = self.machines()?.into_iter().filter(|m| !m.removed).collect();
-        let named: Vec<&Machine> = listed.iter().filter(|m| !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).collect();
+        let named: Vec<&Machine> = listed.iter().filter(|m| !name.is_empty() && (self.device_name(m).is_ok_and(|n| n.eq_ignore_ascii_case(name)) || hex(&m.key).starts_with(name))).collect();
         let part = |d: &Machine| d.device.is_some_and(|of| named.iter().any(|n| n.key == of));
         match named.iter().filter(|d| !part(d)).collect::<Vec<_>>().as_slice() {
             [one] => Ok(one.key),
