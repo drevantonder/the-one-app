@@ -269,6 +269,11 @@ fn front(at: &At, workers: bool, web: bool) -> Result<()> {
     match at.build().filter(|_| program.as_deref() == Some(at.marked().as_str())) {
         Some(folder) => {
             let version = Version::of(&folder.join("one")).context("ask the build what it is")?;
+            // Every client shows the record's Workers line as the newest beside what runs.
+            if w {
+                ui::ui_folder::read_from(&at.src);
+                publish_workers(at, &key)?;
+            }
             deploy_cloudflare(Some(&version.commit))?;
             if b {
                 publish_web(&folder, &key)?;
