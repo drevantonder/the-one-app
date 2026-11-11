@@ -24,6 +24,10 @@ struct Held {
     app: crate::database::stored::Keys,
     /// The Vault's database's key, kept under the app's.
     vault: crate::database::stored::Keys,
+    /// The epochs the bucket had no Vault key under the app's for, as of the app schedules lasting `until`: one is
+    /// written as they're set or renewed, which moves that on.
+    no_vault: std::collections::BTreeSet<u32>,
+    until: u64,
 }
 
 impl Node {
@@ -50,7 +54,7 @@ impl Node {
         let (until, hashes) = found.with_context(|| format!("{} doesn't run {app}'s schedules in {scope}", self.device_name()))?;
         let id = (scope.clone(), app.to_string());
         let had = self.0.app_schedules.keys.lock().unwrap().get(&id).cloned().unwrap_or_default();
-        let mut held = Held::default();
+        let mut held = Held { until, ..Held::default() };
         let mut missing = BTreeMap::new();
         for (n, hash) in hashes {
             match had.app.get(&n).filter(|k| crate::keys::epoch_hash(k) == hash) {
@@ -65,8 +69,15 @@ impl Node {
                 held.vault.insert(*n, *vault);
                 continue;
             }
+            if had.until == until && had.no_vault.contains(n) && !missing.contains_key(n) {
+                held.no_vault.insert(*n);
+                continue;
+            }
             let name = crate::keys::app_schedules_vault_name(&scope.to_string(), app, *n);
-            let Some(o) = crate::bucket::Bucket::get(&bucket, &name).await? else { continue };
+            let Some(o) = crate::bucket::Bucket::get(&bucket, &name).await? else {
+                held.no_vault.insert(*n);
+                continue;
+            };
             match crate::keys::open(key, &name, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
                 Some(vault) => drop(held.vault.insert(*n, vault)),
                 None => tracing::warn!("{name} doesn't open with {app}'s key: passed over"),
