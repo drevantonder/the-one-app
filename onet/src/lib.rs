@@ -467,6 +467,15 @@ impl Client {
                 match self.ask_local(&local, &req, nodes.len() == 1).await {
                     Ok(mut response) => {
                         self.0.down.lock().unwrap().remove(&key);
+                        if response.status == 421 && followed < MOST_ELSEWHERE {
+                            let named = self.elsewhere(&mut response, &key).await?;
+                            if !named.is_empty() {
+                                tried(&mut tries, &key, began, "elsewhere", None);
+                                (only, followed) = (Some(named), followed + 1);
+                                skipped.push(key);
+                                continue;
+                            }
+                        }
                         tried(&mut tries, &key, began, "answered", None);
                         let theirs = response.headers.iter().find(|h| h.0 == header::TRACE).and_then(|h| data_encoding::BASE64.decode(h.1.as_bytes()).ok()).and_then(|b| serde_json::from_slice(&b).ok());
                         response.trace = traces(&mut tries, theirs);
@@ -509,22 +518,14 @@ impl Client {
             let began = Instant::now();
             let err = match self.exchange(&key, &conn, &head, &req, last).await {
                 Ok(mut response) => {
-                    if response.status != 421 || followed >= MOST_ELSEWHERE {
+                    let named = if response.status == 421 && followed < MOST_ELSEWHERE { self.elsewhere(&mut response, &key).await? } else { Vec::new() };
+                    if named.is_empty() {
                         tried(&mut tries, &key, began, "answered", opened);
                         let theirs = response.headers.iter().find(|h| h.0 == header::TRACE).and_then(|h| data_encoding::BASE64.decode(h.1.as_bytes()).ok()).and_then(|b| serde_json::from_slice(&b).ok());
                         response.trace = traces(&mut tries, theirs);
                         return Ok(response);
                     }
-                    let bytes = std::mem::replace(&mut response.body, Body::whole(Vec::new())).bytes_within(HEAD_LIMIT).await?;
-                    let known = self.0.nodes.lock().unwrap().clone();
-                    let said: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
-                    let named: Vec<PublicKey> = said["elsewhere"].as_array().into_iter().flatten().filter_map(|k| data_encoding::HEXLOWER_PERMISSIVE.decode(k.as_str()?.as_bytes()).ok()).filter_map(|k| PublicKey::try_from(&k[..]).ok()).filter(|k| known.contains(k) && *k != key).collect();
                     tried(&mut tries, &key, began, "elsewhere", opened);
-                    if named.is_empty() {
-                        response.body = Body::whole(bytes);
-                        response.trace = traces(&mut tries, None);
-                        return Ok(response);
-                    }
                     (only, followed) = (Some(named), followed + 1);
                     skipped.push(key);
                     continue;
@@ -544,6 +545,17 @@ impl Client {
                 skipped.push(key);
             }
         }
+    }
+
+    /// The app runtimes an answer that it can't run a request (421, `{ elsewhere }`) names that this client knows, but
+    /// `key`, which gave it: none leaves the answer as it came.
+    async fn elsewhere(&self, response: &mut Response, key: &PublicKey) -> Result<Vec<PublicKey>, Error> {
+        let bytes = std::mem::replace(&mut response.body, Body::whole(Vec::new())).bytes_within(HEAD_LIMIT).await?;
+        let known = self.0.nodes.lock().unwrap().clone();
+        let said: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+        let named: Vec<PublicKey> = said["elsewhere"].as_array().into_iter().flatten().filter_map(|k| data_encoding::HEXLOWER_PERMISSIVE.decode(k.as_str()?.as_bytes()).ok()).filter_map(|k| PublicKey::try_from(&k[..]).ok()).filter(|k| known.contains(k) && k != key).collect();
+        response.body = Body::whole(bytes);
+        Ok(named)
     }
 
     /// This device's own runtime, if it has one and it's among `nodes`.
