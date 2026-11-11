@@ -67,6 +67,28 @@ fn put_up(cf: &crate::cloudflare::Cloudflare, settings: &mut crate::cloudflare::
     Ok(())
 }
 
+/// Cloudflare's permission groups a Workers AI key has: running its models over the REST API.
+const WORKERS_AI_PERMISSIONS: [&str; 2] = ["Workers AI Read", "Workers AI Write"];
+
+/// Everyone's `AI key: workers-ai`, so every app's `ctx.ai.run` answers with Workers AI from the network's first deploy
+/// (AI Gateway, ai-gateway/): a token that runs the account's models and nothing else, kept in Everyone's Vault through
+/// this machine's node, never anywhere else. Made once, by the first deploy whose token may make tokens.
+fn workers_ai_key(cf: &crate::cloudflare::Cloudflare, node: &Client) -> Result<()> {
+    let kind = ::ai_gateway::Company::WorkersAi.key_kind();
+    let items = node.get("/api/vault?scope=global")?;
+    if items.as_array().into_iter().flatten().any(|it| it["type"] == kind.as_str()) {
+        return Ok(());
+    }
+    let groups = cf.list(&format!("/accounts/{}/tokens/permission_groups", cf.account))?;
+    let ids: Vec<Value> = WORKERS_AI_PERMISSIONS.iter().map(|name| groups.iter().find(|g| g["name"] == *name).and_then(|g| g["id"].as_str()).map(|id| json!({ "id": id })).with_context(|| format!("Cloudflare has no permission group {name}"))).collect::<Result<_>>()?;
+    let policies = json!([{ "effect": "allow", "resources": { format!("com.cloudflare.api.account.{}", cf.account): "*" }, "permission_groups": ids }]);
+    let made = cf.post(&format!("/accounts/{}/tokens", cf.account), json!({ "name": format!("{CLI}-workers-ai"), "policies": policies })).context("making the token apps run Workers AI's models with, which needs a Cloudflare API token with Account API Tokens Write")?;
+    let token = made["value"].as_str().context("Cloudflare made the token and didn't give its value")?;
+    let host = ::ai_gateway::Company::WorkersAi.host();
+    node.post("/api/vault", json!({ "scope": "global", "title": "Workers AI Key", "type": kind, "domain": "cloudflare.com", "fields": { "account_id": { "value": cf.account, "secret": false }, "api_key": { "value": token, "secret": true } }, "hosts": [host], "apps": [::key::APP] }))?;
+    Ok(())
+}
+
 /// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, or else the Workers' own (their .env.local's), for the account
 /// `--account` names or the token's only one.
 fn cloudflare(g: &Given, settings: Option<&crate::cloudflare::Settings>) -> Result<crate::cloudflare::Cloudflare> {
@@ -183,6 +205,9 @@ pub fn commands() -> Command {
                     let mut settings = settings;
                     put_up(&cf, &mut settings, newest)?;
                     settings.save()?;
+                    if let Err(err) = workers_ai_key(&cf, node) {
+                        eprintln!("Apps' AI won't answer with Workers AI until a deploy makes its key, with a token that may make tokens, beside a node of the network: {err:#}");
+                    }
                     // The clients its users sign in with, signed by this admin's device: a new device's sign-in counts
                     // only for one of them (`sign_in_proof::CLIENTS`), whatever auth says.
                     if let Some(clients) = settings.sign_in_clients() {
