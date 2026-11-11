@@ -1393,11 +1393,9 @@ mod relay {
             assert!(reaches(&address, &brief, &a).await, "a session's endpoint doesn't reach the network's devices");
             assert!(!cut_off(&k, &d).await && !cut_off(&k, &brief).await);
 
-            assert_eq!(testing(&k, json!({ "online": [id_of(&a)] })).await, json!([id_of(&a)]));
             testing(&k, json!({ "advance": 600_001 })).await;
-            // A socket nothing's come from for that long, as a laptop whose lid closed leaves, isn't online.
-            assert_eq!(testing(&k, json!({ "online": [id_of(&a)] })).await, json!([]));
-            assert!(!cut_off(&k, &a).await, "a quiet socket was closed");
+            // Online is a socket open, however quiet it's been.
+            assert!(!cut_off(&k, &a).await, "a quiet socket was closed, or isn't online");
             assert!(cut_off(&k, &d).await, "an expired pairing code's computer is still let in");
             assert!(cut_off(&k, &brief).await, "an ended session is still let in");
             assert_eq!(upgrade_status(&address, &code), 403, "an expired pairing code let its computer in again");
@@ -1534,6 +1532,11 @@ mod relay {
             // And which of them are on the relay's network now, which a client races first.
             for body in [by_session.clone(), asked.clone()] {
                 let (status, said) = computes(body);
+                let mut said = said;
+                let seen = said.as_object_mut().unwrap().remove("seen").unwrap_or_default();
+                for key in [&first, &phone] {
+                    assert!(seen[hex(key)].as_u64().is_some_and(|t| t <= super::now()), "{} wasn't seen: {seen}", hex(key));
+                }
                 assert_eq!((status, said), (200, json!({ "computes": [hex(&first)], "moved": {}, "online": [hex(&first)], "versions": {}, "workers": { "from": hex(&first), "workers": super::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null } })));
             }
             // Each request is taken once; a certificate alone, or one signed by a key it doesn't name, gets nothing; a
@@ -1589,7 +1592,12 @@ mod relay {
             let shown = format!("{}.{}", certify(&phone, &fresh, super::now() + 60_000), proof(&fresh, super::now()));
             let proved = online(&address, &fresh, Some(&shown)).await.expect("a session with its proof isn't let in");
             assert!(reaches(&address, &proved, &a).await, "a session taken in with its proof doesn't reach the network's devices");
+            // Its socket closing is when its device was last seen.
+            let closing = super::now();
             proved.close().await;
+            says(&k, &hex(&fresh), "left", 0).await;
+            let (_, said) = seen(&phone);
+            assert!(said["seen"][hex(&phone)].as_u64().is_some_and(|t| t >= closing), "a socket closing wasn't seen: {said}");
 
             // Nothing for another endpoint, by a key not on the list, or once it has ended.
             assert!(shut_out(&k, &SecretKey::generate(), Some(&cert)).await, "a certificate let in an endpoint it doesn't name");

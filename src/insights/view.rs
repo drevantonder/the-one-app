@@ -180,11 +180,12 @@ pub fn overview(rows: &Value, status: &str, since: u64, now: u64, limit: usize) 
     out
 }
 
-/// One service: its operations, and its failing and slow traces.
+/// One service: its operations, its failing and slow traces, and its readings.
 pub fn service(rows: &Value, service: &str, status: &str, since: u64, now: u64, limit: usize) -> String {
     let operations = lines(requests(rows), |r| r["name"].as_str().unwrap_or("").to_string());
+    let readings = readings(rows, limit);
     if operations.is_empty() {
-        return format!("{service} answered no requests in {}.", since_said(since, now));
+        return format!("{service} answered no requests in {}.{readings}", since_said(since, now));
     }
     let mut out = format!("{service}, {}:\n\n{}", since_said(since, now), table(&operations, limit, "operation"));
     if let Some(errors) = errors(rows, status, since, now, limit) {
@@ -196,7 +197,32 @@ pub fn service(rows: &Value, service: &str, status: &str, since: u64, now: u64, 
         let shown = listed(&worth, limit, |s| format!("{}  {}  {}  {}  {}", s["trace"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), took(s["duration"].as_f64()), s["attrs"]["error.type"].as_str().unwrap_or(s["status"].as_str().unwrap_or("")), ago(now, s["time"].as_u64().unwrap_or(0))));
         out.push_str(&format!("\n\nFailing or slow:\n{shown}"));
     }
-    out
+    out + &readings
+}
+
+/// A service's gauges at the newest hour they were read and its counters added up, each by its attributes: nothing for
+/// histograms, which its operations already show.
+fn readings(rows: &Value, limit: usize) -> String {
+    let mut read: BTreeMap<String, (u64, f64)> = BTreeMap::new();
+    for row in rows["metrics"].as_array().into_iter().flatten().filter(|r| r["type"] == "counter" || r["type"] == "gauge") {
+        let attrs = row["attrs"].as_object().into_iter().flatten().map(|(_, v)| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).collect::<Vec<_>>().join(" ");
+        let name = format!("{} {attrs}", row["name"].as_str().unwrap_or("")).trim_end().to_string();
+        let (hour, sum) = (row["hour"].as_u64().unwrap_or(0), row["sum"].as_f64().unwrap_or(0.0));
+        let it = read.entry(name).or_insert((hour, 0.0));
+        if row["type"] == "counter" {
+            it.1 += sum;
+        } else if hour >= it.0 {
+            // The newest hour's, each device's averaged over its readings that hour and added up over the devices.
+            let value = sum / row["count"].as_f64().unwrap_or(1.0).max(1.0);
+            *it = (hour, if hour == it.0 { it.1 + value } else { value });
+        }
+    }
+    let read: Vec<_> = read.into_iter().collect();
+    if read.is_empty() {
+        return String::new();
+    }
+    let width = read.iter().take(limit).map(|(n, _)| n.len()).max().unwrap_or(0);
+    format!("\n\nReadings (a gauge's newest, a counter's total):\n{}", listed(&read, limit, |(n, (_, v))| format!("{n:<width$}  {v}")))
 }
 
 /// `text`, after a line saying telemetry itself is failing if it is: only an admin's answer says so.

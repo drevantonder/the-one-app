@@ -13,7 +13,7 @@ pub fn feature() -> Feature {
         tools: vec![Tool::route(
             json!({
                 "name": "insights", "title": "Read how things went", "reads": true,
-                "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations and its failing and slow traces, then trace_id for one trace's spans. For an admin, the overview also says what the network's use of Cloudflare cost in that time, estimated at list prices. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: requests by the hour, spans, logs, metrics and errors as JSON, each up to limit, and traces, the newest traces with a span of service, name, status and min_ms over the whole range, each with all its spans. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset. What's newest takes up to a minute or two to show.",
+                "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations, its failing and slow traces and its readings (a gauge's newest, a counter's total), then trace_id for one trace's spans. For an admin, the overview also says what the network's use of Cloudflare cost in that time, estimated at list prices. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: requests by the hour, spans, logs, metrics and errors as JSON, each up to limit, and traces, the newest traces with a span of service, name, status and min_ms over the whole range, each with all its spans. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset. What's newest takes up to a minute or two to show.",
                 "input": { "type": "object", "properties": {
                     "service": { "type": "string", "description": "only this service: an app's name, or the network's own program" },
                     "trace_id": { "type": "string", "description": "one trace by its id, as its spans: a failure says its trace-id" },
@@ -53,7 +53,7 @@ mod serve {
             (true, ..) => parts.into_iter().flatten().filter_map(|p| ALL_PARTS.iter().copied().find(|q| p == q)).collect(),
             (_, _, _, true) => vec!["builds", "build_errors"],
             (_, true, ..) => vec!["spans"],
-            (_, _, true, _) => vec!["requests", "errors", "spans"],
+            (_, _, true, _) => vec!["requests", "errors", "spans", "metrics"],
             _ => vec!["requests", "errors"],
         }
     }

@@ -20,7 +20,8 @@
 // certificate's `until` or that key is taken out or made something else. With the certificate, `.`, and a request that
 // key signed just now (`proveSocket`: within ten seconds, its nonce taken once), it's taken in at once, with no
 // challenge's round trip; without one, or with one that's stale or taken, it answers the challenge as any key does. The
-// URL signer, auth and the push Worker ask it, by `allowed(key)`: `{ admin, role }`, or null.
+// URL signer, auth and the push Worker ask it, by `allowed(key)`: `{ admin, role }`, or null. The telemetry Worker asks
+// it `stats()` every hour: its sockets, and what it refused and ended since it was last asked.
 //
 // A browser's WebSocket can't set a header, so its certificate is `?token=` in the relay's URL, where logs may keep
 // it. iroh shows the same token at every reconnect, so its proof is used once, by the socket the web client opens
@@ -30,7 +31,8 @@
 // `POST /relay/computes` answers a request signed by a key on the list, or by a session's key with its certificate
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
 // endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; `online`, those
-// of them connected here now and heard from lately, which a client races first and every node shows as online; and
+// of them with a socket open here now, which a client races first and every node shows as online; `seen`, when each
+// key on the list was last seen (ms), by its socket opening or closing or a Worker asking `allowed` of it; and
 // `versions`, each key's that said one, for every client to show; and `workers`, once a deploy has said it, what the
 // Workers are on (`{ from, workers, web, node }`: the device they were last deployed from, which an ask to deploy them
 // again is left for, and each part's version in a version's words). 403 is only for a key that isn't let in; a request
@@ -97,17 +99,20 @@ const PROVE_WITHIN = 30_000;
 const UNPROVEN_PER_PLACE = 8;
 const UNPROVEN_PER_SITE = 32;
 const UNPROVEN = 256;
-const HOUR = 3_600_000;
 const PAIRINGS_PER_DEVICE = 8;
 const is = (it, role) => !!it && rolesOf(it.role).includes(role);
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
 const FOR_NODE_MOST = 1024;
-// Every iroh endpoint pings the relay each 15 seconds, and a laptop whose lid closes ends no socket.
-const SILENT_AFTER = 45_000;
-const HEARD_EVERY = 5_000;
+/// How often a Worker's `allowed(key)` writes that it saw `key`, at most.
+const SEEN_EVERY = 300_000;
 /// The tables the Relay kept the list in before the List did.
 const HANDED = ["keys", "pairings", "tells", "asks", "seen", "objects"];
+
+/// What the Relay counts for `stats`: sockets it refused (`denied` at proof, `crowded` with too many unproven, `forbidden`
+/// a pairing code's packet to a device it doesn't reach, `malformed` frames) and ended (`unanswered` challenges,
+/// `replaced` by the same key again, `ended` by the list or by time, `failed` with an error).
+const STATS = ["denied", "crowded", "forbidden", "malformed", "unanswered", "replaced", "ended", "failed"];
 
 const replayed = (what) => ({ error: `that ${what} was taken already`, code: CODES.replayed });
 
@@ -180,6 +185,11 @@ export default class extends WorkerEntrypoint {
 
   async allowed(key) {
     return isKey(key) ? answer(this.list().allowed(key)) : null;
+  }
+
+  /// The relay's sockets now, and what it refused and ended since it was last asked: for the telemetry Worker, hourly.
+  stats() {
+    return answer(this.relay().stats());
   }
 
   /// The keys of the network's admins' devices, for auth to push to.
@@ -272,7 +282,8 @@ export class Relay extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS proofs (nonce TEXT PRIMARY KEY, at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');`);
+      CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');
+      CREATE TABLE IF NOT EXISTS counted (what TEXT PRIMARY KEY, n INTEGER NOT NULL);`);
     // Rebuilt from the sockets' attachments, which Hibernation keeps.
     this.sockets = new Map();
     for (const ws of ctx.getWebSockets()) {
@@ -295,9 +306,10 @@ export class Relay extends DurableObject {
     return Date.now() + this.skew;
   }
 
-  /// What the relay did to `key`: `"denied"` at its socket's proof, `"ended"` once let in, or `"forbidden"` as it sent
-  /// to a device its pairing code doesn't reach.
+  /// What the relay did to `key`: one of `STATS`, counted for `stats`, or `"left"` once its socket closed and the list
+  /// saw it go.
   note(key, what) {
+    if (STATS.includes(what)) this.sql.exec("INSERT INTO counted VALUES (?, 1) ON CONFLICT (what) DO UPDATE SET n = n + 1", what);
     if (!this.env.TEST) return;
     this.log.push([key, what]);
     const heard = this.waiting.filter((w) => w.key === key && w.what === what && this.count(key, what) > w.after);
@@ -311,7 +323,7 @@ export class Relay extends DurableObject {
 
   /// A test's way in (`/relay/test`): `{ advance: ms }` moves the clock on and ends what it ended; `{ count: [key, what] }`
   /// is how often `note` said it; `{ wait: [key, what, after] }` answers once it has said it more than `after` times;
-  /// `{ connected: [key] }` is which of those still have a socket; `{ online: [key] }`, which count as online.
+  /// `{ connected: [key] }` is which of those are online, with a socket here.
   async testing(told) {
     if (told.advance !== undefined) {
       this.skew += told.advance;
@@ -319,8 +331,7 @@ export class Relay extends DurableObject {
       await this.alarm();
     }
     if (told.count) return this.count(...told.count);
-    if (told.connected) return told.connected.filter((k) => this.sockets.has(k));
-    if (told.online) return this.connected(told.online);
+    if (told.connected) return this.connected(told.connected);
     if (told.wait) {
       const [key, what, after] = told.wait;
       if (this.count(key, what) <= after) await new Promise((resolve) => this.waiting.push({ key, what, after, resolve }));
@@ -372,6 +383,7 @@ export class Relay extends DurableObject {
       const said = ws.deserializeAttachment();
       if (!said?.challenge) continue;
       if (now - said.at > PROVE_WITHIN) {
+        this.note(null, "unanswered");
         ws.serializeAttachment({});
         ws.close(1008, "it never answered its challenge");
         continue;
@@ -380,7 +392,10 @@ export class Relay extends DurableObject {
       if (said.from === from) here++;
       if (said.site === site) near++;
     }
-    if (here >= UNPROVEN_PER_PLACE || near >= UNPROVEN_PER_SITE || unproven >= UNPROVEN) return refusal(429, "too many sockets that haven't proved their key");
+    if (here >= UNPROVEN_PER_PLACE || near >= UNPROVEN_PER_SITE || unproven >= UNPROVEN) {
+      this.note(null, "crowded");
+      return refusal(429, "too many sockets that haven't proved their key");
+    }
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     const made = challenge();
@@ -396,7 +411,6 @@ export class Relay extends DurableObject {
     if (said?.challenge) return this.prove(ws, said, bytes);
     if (!said?.id) return;
     const now = this.now();
-    if (!(now - said.heard < HEARD_EVERY)) ws.serializeAttachment({ ...said, heard: now });
     // A pairing code's computer, until it's added: only while its code works, and only to the device that made it. A
     // session's endpoint, only until its certificate's `until`.
     if (said.pairing && now > said.until) return this.end(said.id, "its pairing code expired");
@@ -405,6 +419,7 @@ export class Relay extends DurableObject {
     try {
       out = from_client(hex.decode(said.id), bytes);
     } catch (e) {
+      this.note(said.id, "malformed");
       return ws.close(1002, String(e.message || e).slice(0, 100));
     }
     if (out[0] === 1) return ws.send(out.subarray(1));
@@ -467,10 +482,27 @@ export class Relay extends DurableObject {
     return [...gone];
   }
 
-  /// Which of `keys` are connected: a socket that has said something lately. The network's one answer to who's online.
+  /// Which of `keys` have a socket open here: the network's one answer to who's online.
   connected(keys) {
-    const now = this.now();
-    return keys.filter((k) => now - this.sockets.get(k)?.deserializeAttachment().heard < SILENT_AFTER);
+    return keys.filter((k) => this.sockets.has(k));
+  }
+
+  /// The sockets open now, by what they are (`unproven`, `session`, `pairing`, or each role the list gives a key), and
+  /// how often each of `STATS` happened since the last time this was asked.
+  async stats() {
+    const open = { unproven: 0, session: 0, pairing: 0 };
+    const keys = [];
+    for (const ws of this.ctx.getWebSockets()) {
+      const said = ws.deserializeAttachment();
+      if (said?.challenge) open.unproven++;
+      else if (said?.by) open.session++;
+      else if (said?.pairing) open.pairing++;
+      else if (said?.id) keys.push(said.id);
+    }
+    for (const role of await answer(this.list().roles(keys))) open[role] = (open[role] || 0) + 1;
+    const counted = Object.fromEntries(STATS.map((what) => [what, 0]));
+    for (const { what, n } of this.sql.exec("DELETE FROM counted RETURNING what, n").toArray()) if (what in counted) counted[what] = n;
+    return { open, counted };
   }
 
   boundTo(key) {
@@ -585,16 +617,24 @@ export class Relay extends DurableObject {
     if (attachment.until) await this.wake(attachment.until);
     for (const other of this.ctx.getWebSockets()) {
       if (other !== ws && other.deserializeAttachment()?.id === id) {
+        this.note(id, "replaced");
         other.serializeAttachment({});
         try {
           other.close(1000, "the endpoint connected again");
         } catch {} // already closed
       }
     }
-    ws.serializeAttachment({ ...attachment, heard: this.now() });
+    ws.serializeAttachment(attachment);
     this.sockets.set(id, ws);
     ws.send(confirm());
-    this.ctx.waitUntil(this.list().saw(attachment.by || id).catch((err) => console.log(JSON.stringify({ seen: "unsaid", why: String(err?.message ?? err) }))));
+    this.saw(attachment.by || id);
+  }
+
+  /// Tells the list it saw `key` now, without waiting on it.
+  saw(key) {
+    const told = this.list().saw(key).catch((err) => console.log(JSON.stringify({ seen: "unsaid", why: String(err?.message ?? err) })));
+    this.ctx.waitUntil(told);
+    return told;
   }
 
   end(key, why) {
@@ -672,12 +712,15 @@ export class Relay extends DurableObject {
   }
 
   webSocketError(ws) {
+    this.note(null, "failed");
     this.gone(ws);
   }
 
   gone(ws) {
     const said = ws.deserializeAttachment();
-    if (said?.id && this.sockets.get(said.id) === ws) this.sockets.delete(said.id);
+    if (!said?.id || this.sockets.get(said.id) !== ws) return;
+    this.sockets.delete(said.id);
+    this.saw(said.by || said.id).then(() => this.note(said.id, "left"));
   }
 }
 
@@ -695,6 +738,8 @@ export class List extends DurableObject {
       CREATE TABLE IF NOT EXISTS moved (scope TEXT PRIMARY KEY, n INTEGER NOT NULL);`);
     /// A test's clock, as the Relay's (`Relay.testing`).
     this.skew = 0;
+    /// When `saw` last wrote each key, so a Worker asking `allowed` writes it at most every `SEEN_EVERY`; lost on eviction, which is fine.
+    this.lastSaw = new Map();
     ctx.blockConcurrencyWhile(() => this.start());
   }
 
@@ -759,7 +804,14 @@ export class List extends DurableObject {
   allowed(key) {
     if (key === this.env.BOUND) return { admin: false, role: "compute" };
     const it = this.key(key);
-    return it ? { admin: it.admin === 1, role: it.role } : null;
+    if (!it) return null;
+    if (!(this.now() - (this.lastSaw.get(key) ?? 0) < SEEN_EVERY)) this.saw(key);
+    return { admin: it.admin === 1, role: it.role };
+  }
+
+  /// Each of `keys`' roles, for the Relay's `stats`: a machine's several count as each.
+  roles(keys) {
+    return keys.flatMap((k) => rolesOf(this.key(k)?.role ?? ""));
   }
 
   /// Whether `by` may be told what the network's endpoints are told: it's on the list, or is a session's a client on it
@@ -780,7 +832,7 @@ export class List extends DurableObject {
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
     const versions = Object.fromEntries(this.sql.exec("SELECT key, version FROM keys WHERE version IS NOT NULL").toArray().map((r) => [r.key, r.version]));
     const moved = this.writes();
-    return { computes: this.env.BOUND ? [...keys, this.env.BOUND] : keys, versions, moved, ...(this.env.DEPLOYED && { workers: JSON.parse(this.env.DEPLOYED) }), ...heard };
+    return { computes: this.env.BOUND ? [...keys, this.env.BOUND] : keys, seen: this.seenAll(), versions, moved, ...(this.env.DEPLOYED && { workers: JSON.parse(this.env.DEPLOYED) }), ...heard };
   }
 
   /// Keeps what `by` says it's on, and gives it what was left for it, once: → `{ asked }`, or nothing.
@@ -795,7 +847,7 @@ export class List extends DurableObject {
   seen(by, asked) {
     const may = this.asks(by, asked);
     if (may !== true) return may;
-    return Object.fromEntries(this.sql.exec("SELECT seen.key, seen.at FROM seen JOIN keys ON keys.key = seen.key").toArray().map((r) => [r.key, r.at]));
+    return this.seenAll();
   }
 
   take(by, at) {
@@ -843,10 +895,18 @@ export class List extends DurableObject {
     return null;
   }
 
-  /// When a device on the list was last let in, at most hourly.
+  /// That a device on the list was seen now: its socket opened or closed, or a Worker asked `allowed` of it.
   saw(key) {
-    const now = Date.now();
-    if (this.key(key)) this.sql.exec("INSERT INTO seen VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET at = excluded.at WHERE at < ?", key, now, now - HOUR);
+    const now = this.now();
+    if (!this.key(key)) return;
+    this.sql.exec("INSERT INTO seen VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET at = excluded.at", key, now);
+    if (this.lastSaw.size >= GONE_KEPT) this.lastSaw.clear();
+    this.lastSaw.set(key, now);
+  }
+
+  /// When each key on the list was last seen (ms).
+  seenAll() {
+    return Object.fromEntries(this.sql.exec("SELECT seen.key, seen.at FROM seen JOIN keys ON keys.key = seen.key").toArray().map((r) => [r.key, r.at]));
   }
 
   /// Whether `by` may bind its key to the remote MCP server's object `name`, its request's `at` taken once: → why not, or

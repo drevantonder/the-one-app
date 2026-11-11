@@ -10,7 +10,7 @@
 //   POST /telemetry/otlp  Cloudflare's export of the Workers' own traces and logs (`otlp`), gzipped or not → 204
 //   POST /telemetry/read  { queries: [name], since, services, service?, name?, status?, trace?, least?, limit?, at, by, sig }
 //                         → { <name>: [row] }
-//   hourly                each of `SOURCES`' metric rows of the hour before
+//   hourly                each of `SOURCES`' metric rows: Cloudflare's use the hour before, the relay's sockets now
 //
 // Each is a request signed by a key on the relay's list (`one/telemetry`). A row that isn't what its table holds is left
 // out here, as Basin would take it and drop it in silence. A read runs only `QUERIES`, each value a number or a token
@@ -519,8 +519,19 @@ async function read(request, env) {
   return Response.json(Object.fromEntries(results.flatMap((r) => (typeof r[0] === "string" ? [r] : r))));
 }
 
+/// The relay's sockets as it's asked and what it refused and ended since it was last asked, as `worker.relay`'s readings:
+/// how near it is to what one object holds shows before it's reached.
+async function relayStats(env, at, instance) {
+  const { open, counted } = await answer(env.RELAY.stats());
+  const row = (name, type, unit, sum, attrs) => ({ time: at, name, type, unit, service: "worker.relay", instance, count: 1, sum, attrs: JSON.stringify(attrs) });
+  return [
+    ...Object.entries(open).map(([kind, n]) => row("relay.sockets", "gauge", "{socket}", n, { "relay.socket": kind })),
+    ...Object.entries(counted).map(([what, n]) => row("relay.events", "counter", "{event}", n, { "relay.event": what })),
+  ];
+}
+
 /// What's recorded of the world outside the network, each a function of the hour it's run in that gives metric rows.
-const SOURCES = { cloudflare: cloudflareUsage };
+const SOURCES = { cloudflare: cloudflareUsage, relay: relayStats };
 
 /// Each source's rows, and a log of how many each gave or that it failed, which is how it's seen to run.
 async function hourly(env, at) {
