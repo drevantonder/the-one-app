@@ -470,6 +470,7 @@ impl Client {
                         if response.status == 421 && followed < MOST_ELSEWHERE {
                             let named = self.elsewhere(&mut response, &key).await?;
                             if !named.is_empty() {
+                                skipped.retain(|k| !named.contains(k));
                                 tried(&mut tries, &key, began, "elsewhere", None);
                                 (only, followed) = (Some(named), followed + 1);
                                 skipped.push(key);
@@ -526,6 +527,8 @@ impl Client {
                         return Ok(response);
                     }
                     tried(&mut tries, &key, began, "elsewhere", opened);
+                    // One skipped as slow is asked again when it's what's named: it may be the only one that can.
+                    skipped.retain(|k| !named.contains(k));
                     (only, followed) = (Some(named), followed + 1);
                     skipped.push(key);
                     continue;

@@ -78,7 +78,15 @@ async fn only_this_machine(State((host, routes)): State<(Host, std::sync::Arc<st
 /// `until`.
 async fn from_client(host: &Host, key: key::Key, until: u64, who: Who, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     if who != Who::Clients {
-        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
+        // A computer's own programs ask through its onet, which asks another device when its own app runtime is slow:
+        // named here, its onet asks its own instead, however long that takes.
+        let why = "only this machine's own programs may use this".to_string();
+        let own = host.with_or(None, |i| Ok(i.r.db().computes()?.into_iter().find(|m| !m.removed && m.runtime_of() == Some(key)).map(|m| key::hex(&m.key))));
+        let answer = match own {
+            Some(own) => ::api::Error(::api::Elsewhere { why, nodes: vec![own] }.into()).into_response(),
+            None => (StatusCode::FORBIDDEN, Json(json!({ "error": why }))).into_response(),
+        };
+        return refuse(req, answer).await;
     }
     let Some((user, name)) = host.client_now(&key).await else {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is", "code": ::custom_build::protocol::code::NOT_LET_IN }))).into_response()).await;
