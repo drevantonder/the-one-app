@@ -4,7 +4,7 @@ use super::*;
 use ::custom_build::config::YOURS;
 use ::scope::state::{Answering, ClientHere, DeviceNow, InstalledService, State, Viewer};
 
-impl Node {
+impl Host {
     pub fn is_user(&self, user: &str) -> bool {
         self.with_or(false, |i| Ok(i.r.db().user(user)?.is_some()))
     }
@@ -46,8 +46,8 @@ impl Node {
     pub(super) fn state_as(&self, viewer: &Caller, client: Option<&str>) -> Result<State> {
         // What each other computer runs, asked as a screen shows it, if this device hasn't lately: shown when it comes.
         let runtimes = self.with_or(Vec::new(), |i| Ok(i.r.db().computes()?.into_iter().map(|c| c.key).collect()));
-        let node = self.clone();
-        tokio::spawn(async move { node.know_states(runtimes, false).await });
+        let host = self.clone();
+        tokio::spawn(async move { host.know_states(runtimes, false).await });
         let ready = self.ready();
         let features = self.features_for(viewer);
         let arrangements = self.arrangements(&viewer.user);

@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl Node {
+impl Host {
     /// Counts one of `app`'s calls of other apps, or one run of its schedules (`kind`). Past `RATE_LIMIT` this minute,
     /// the app is stopped here: it's looping.
     pub(in crate) async fn count(&self, app: &str, kind: &'static str) -> Result<()> {

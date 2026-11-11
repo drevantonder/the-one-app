@@ -6,15 +6,15 @@ use super::*;
 mod carry;
 pub(crate) mod routes;
 
-impl Node {
+impl Host {
     /// Asks each of `apps` what it is, so its service is listed as that and not as itself, then says they changed.
     pub(super) fn learn_apps(&self, apps: Vec<String>) {
-        let node = self.clone();
+        let host = self.clone();
         tokio::spawn(async move {
             for app in &apps {
-                let _ = node.0.apps.describe_any(app).await;
+                let _ = host.0.apps.describe_any(app).await;
             }
-            node.emit(Event::Changed { apps });
+            host.emit(Event::Changed { apps });
         });
     }
 

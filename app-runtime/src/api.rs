@@ -12,7 +12,7 @@ use axum::routing::post;
 
 use ::api::Who;
 use ::api::runtime::Rt;
-use crate::Node;
+use crate::Host;
 
 mod agents;
 mod calls;
@@ -32,8 +32,8 @@ pub use in_process::InProcess;
 /// The API's routes in this program: over the runtime its handlers read (`State<Node>` reads it as this one).
 pub type Routes = ::api::Routes<Rt>;
 
-pub fn router(node: Node) -> Router {
-    guarded(routes(), node)
+pub fn router(host: Host) -> Router {
+    guarded(routes(), host)
 }
 
 /// The route `path` is asked by, as the API names it (`/api/blobs/{id}`), if it's one of its: a literal route before one
@@ -90,11 +90,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn each_route_refuses_whom_its_who_says() {
         let dir = std::env::temp_dir().join(format!("one-routes-{}", rand::random::<u64>()));
-        let node = crate::Node::start(&dir).await.unwrap();
+        let host = crate::Host::start(&dir).await.unwrap();
         let routes = super::routes();
         let who: Vec<(String, Who)> = routes.who().to_vec();
         // Only a client device's requests over iroh carry `FromClient`, which the node puts on them: here, a header.
-        let router = super::guarded(routes, node.clone()).layer(axum::middleware::from_fn(|mut req: axum::extract::Request, next: axum::middleware::Next| async move {
+        let router = super::guarded(routes, host.clone()).layer(axum::middleware::from_fn(|mut req: axum::extract::Request, next: axum::middleware::Next| async move {
             if req.headers().contains_key("x-test-client") {
                 req.extensions_mut().insert(super::FromClient([7; 32], u64::MAX));
             }

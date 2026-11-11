@@ -19,7 +19,7 @@ pub(super) fn bucket_root(place: &Place) -> Result<Option<Vec<u8>>> {
     Ok(old)
 }
 
-impl Node {
+impl Host {
     pub(super) fn network_dir(&self) -> PathBuf {
         self.0.dir.join(NETWORK_DIR)
     }

@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl Node {
+impl Host {
     /// This device's own user, as its own programs ask.
     pub fn caller(&self) -> Result<Caller> {
         Ok(Caller::own(self.0.id, self.user()?))

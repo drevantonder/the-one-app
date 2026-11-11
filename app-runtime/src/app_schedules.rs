@@ -31,7 +31,7 @@ struct Held {
     until: u64,
 }
 
-impl Node {
+impl Host {
     /// Renews, in the background, each of this machine's user's app schedules of `app` that's due, and stops each of
     /// theirs that ran out (`settings::renew_app_schedules`): as they use it here, and now and then. One renewal at a
     /// time; one asked meanwhile is passed over.
@@ -40,10 +40,10 @@ impl Node {
         if !mine.unwrap_or(false) {
             return;
         }
-        let (node, app) = (self.clone(), app.to_string());
+        let (host, app) = (self.clone(), app.to_string());
         tokio::spawn(async move {
-            let Ok(_renewing) = node.0.app_schedules.renewing.try_lock() else { return };
-            scope::settings::renew_app_schedules(&node, &app).await;
+            let Ok(_renewing) = host.0.app_schedules.renewing.try_lock() else { return };
+            scope::settings::renew_app_schedules(&host, &app).await;
         });
     }
 

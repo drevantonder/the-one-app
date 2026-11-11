@@ -25,7 +25,7 @@ pub(super) struct State {
     pub(super) put_first: Mutex<std::collections::HashSet<String>>,
 }
 
-impl Node {
+impl Host {
     /// Keeps `bytes` as a blob.
     pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
         ::database::put_blob(&self.0.dir, bytes)
@@ -54,7 +54,7 @@ impl Node {
 
     /// Puts a blob this device has in the bucket, in `scope`, sealed under that scope's newest epoch, where it isn't: for a new
     /// step, always, since another device may have taken it out after a scope forgot it, unless a call just put it
-    /// there before writing (`Node::prepare_appends`); else (`noted`) unless this device notes it put it there.
+    /// there before writing (`Host::prepare_appends`); else (`noted`) unless this device notes it put it there.
     pub(super) async fn share_blob(&self, scope: &Scope, hash: &str, noted: bool) -> Result<()> {
         use ::bucket::Bucket;
         let marker = format!("{scope} {hash}");

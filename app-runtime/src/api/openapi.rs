@@ -3,7 +3,7 @@
 use axum::extract::State;
 use axum::response::Response;
 use axum::routing::get;
-use crate::Node;
+use crate::Host;
 use ::api::path;
 
 use ::api::reply::{Error, tagged};
@@ -15,8 +15,8 @@ pub(super) fn routes() -> Routes {
     Routes::default().route(path::OPENAPI, Who::Clients, get(document_for))
 }
 
-async fn document_for(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
-    let apps = node.apps(&me.caller).await?;
+async fn document_for(State(host): State<Host>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
+    let apps = host.apps(&me.caller).await?;
     let body = serde_json::to_string(&api_features::openapi::document(&apps, me.client.is_none()))?;
     let tag = ::ui::screen::tag(&body);
     Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))

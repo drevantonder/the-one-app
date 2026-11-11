@@ -206,10 +206,10 @@ pub struct CallRequest {
     #[serde(default)]
     pub client: Option<String>,
     /// Files put on this device for this call alone (an app's `_http` body), which go with it to the device that runs
-    /// it (`Node::carried`): never a client's to name.
+    /// it (`Host::carried`): never a client's to name.
     #[serde(skip)]
     pub puts: Vec<String>,
-    /// This node named the call (`Node::identified`), no client did.
+    /// This node named the call (`Host::identified`), no client did.
     #[serde(skip)]
     pub named_here: bool,
     /// It runs where it was named, first, so no other device has it or the id: it takes no lease.

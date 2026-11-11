@@ -29,7 +29,7 @@ fn unit() -> Option<String> {
     (unit.ends_with(".service") && std::env::var_os("INVOCATION_ID").is_some()).then_some(unit)
 }
 
-/// What's held the node's who's who since when (`Node::with`), which a stuck runtime is usually waiting for: what says why
+/// What's held the node's who's who since when (`Host::with`), which a stuck runtime is usually waiting for: what says why
 /// when it can't be seen from outside.
 static HELD_AT: AtomicPtr<Location<'static>> = AtomicPtr::new(std::ptr::null_mut());
 static HELD_SINCE: AtomicU64 = AtomicU64::new(0);

@@ -37,7 +37,7 @@ pub(super) struct Given<'a> {
     pub app_schedules: bool,
 }
 
-impl Node {
+impl Host {
     /// The network's bucket, as this device reaches it, with its copy of the databases' steps.
     pub(super) fn bucket(&self) -> Result<Copied> {
         let place = self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this device can't reach the network's bucket, where apps keep their data: use another device"))?;
@@ -198,11 +198,11 @@ impl Node {
     /// Seals each epoch this device opens of each scope to each client device of someone who uses the scope that
     /// lacks it: a device added since it was made. Compute is never sealed one: it's handed what a call needs.
     pub(super) fn seal_epochs(&self) {
-        let node = self.clone();
+        let host = self.clone();
         tokio::spawn(async move {
-            let known: Vec<(Scope, database::stored::Keys)> = node.0.databases.epochs.lock().unwrap().iter().map(|(s, k)| (s.clone(), k.clone())).collect();
+            let known: Vec<(Scope, database::stored::Keys)> = host.0.databases.epochs.lock().unwrap().iter().map(|(s, k)| (s.clone(), k.clone())).collect();
             for (scope, keys) in known {
-                if let Err(err) = node.seal_epoch(&scope, &keys).await {
+                if let Err(err) = host.seal_epoch(&scope, &keys).await {
                     tracing::warn!("sealing {scope}'s epochs: {err:#}");
                 }
             }
@@ -302,14 +302,14 @@ impl Node {
         if waiting {
             return;
         }
-        let node = self.clone();
+        let host = self.clone();
         tokio::spawn(async move {
             loop {
-                let Some((at, copy, epoch)) = node.0.databases.hints.lock().unwrap().get(&prefix).copied() else { return };
+                let Some((at, copy, epoch)) = host.0.databases.hints.lock().unwrap().get(&prefix).copied() else { return };
                 if let Err(err) = database::stored::hint(&bucket, &prefix, at, copy, epoch).await {
                     tracing::debug!("{prefix}'s hint: {err:#}");
                 }
-                let mut hints = node.0.databases.hints.lock().unwrap();
+                let mut hints = host.0.databases.hints.lock().unwrap();
                 if hints.get(&prefix) == Some(&(at, copy, epoch)) {
                     hints.remove(&prefix);
                     return;

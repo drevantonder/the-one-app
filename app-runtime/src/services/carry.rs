@@ -7,7 +7,7 @@ use ::services::carried::{self, Carried};
 
 use super::*;
 
-impl Node {
+impl Host {
     /// What each part of this device registered as, by its service's key (hex): what this device answers another that asks what it runs.
     pub(in crate) fn parts_described(&self) -> serde_json::Map<String, Value> {
         let device = self.0.holds.device();

@@ -6,7 +6,7 @@ use axum::extract::{Query, State};
 use serde_json::json;
 
 
-use crate::Node;
+use crate::Host;
 use api_features::says::api::{Create, Join};
 
 use ::api::Me;
@@ -26,13 +26,13 @@ pub(super) fn routes() -> Routes {
         .route("/api/steps/global", Clients, get(global_steps))
 }
 
-/// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
-async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
+/// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Host::sealed_keys`).
+async fn keys_get(State(host): State<Host>, me: Me, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
     let scope = scope::scopes::Scope::parse(q.get("scope").map(String::as_str).unwrap_or(""))?;
-    Ok(Json(node.sealed_keys(&me.caller, &scope, q.get("to").map(String::as_str), q.get("app").map(String::as_str)).await?))
+    Ok(Json(host.sealed_keys(&me.caller, &scope, q.get("to").map(String::as_str), q.get("app").map(String::as_str)).await?))
 }
 
-/// A key sealed by the caller's device, for a device (`to`), an app, or an app's key for a device (`Node::seal_key`).
+/// A key sealed by the caller's device, for a device (`to`), an app, or an app's key for a device (`Host::seal_key`).
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SealedKey {
@@ -47,30 +47,30 @@ struct SealedKey {
     sealed: String,
 }
 
-async fn keys_post(State(node): State<Node>, me: Me, Body(body): Body<SealedKey>) -> Reply {
+async fn keys_post(State(host): State<Host>, me: Me, Body(body): Body<SealedKey>) -> Reply {
     let scope = scope::scopes::Scope::parse(given(&body.scope, "scope")?)?;
-    Ok(Json(node.seal_key(&me.caller, &scope, body.n, body.to.as_deref(), body.app.as_deref(), body.vault, given(&body.sealed, "sealed")?).await?))
+    Ok(Json(host.seal_key(&me.caller, &scope, body.n, body.to.as_deref(), body.app.as_deref(), body.vault, given(&body.sealed, "sealed")?).await?))
 }
 
-async fn state(State(node): State<Node>, client: Option<axum::Extension<Me>>) -> Reply {
+async fn state(State(host): State<Host>, client: Option<axum::Extension<Me>>) -> Reply {
     Ok(Json(json!(match client {
-        Some(me) => node.state_for_client(&me.caller, me.client.as_deref().unwrap_or_default())?,
-        None => node.state()?,
+        Some(me) => host.state_for_client(&me.caller, me.client.as_deref().unwrap_or_default())?,
+        None => host.state()?,
     })))
 }
 
-async fn create(State(node): State<Node>, Body(body): Body<Create>) -> Reply {
-    let recovery = node.create_with(given(&body.name, "name")?, given(&body.user_name, "user_name")?, body.user.as_deref(), crate::built_in::STARTERS).await?;
+async fn create(State(host): State<Host>, Body(body): Body<Create>) -> Reply {
+    let recovery = host.create_with(given(&body.name, "name")?, given(&body.user_name, "user_name")?, body.user.as_deref(), crate::built_in::STARTERS).await?;
     Ok(Json(json!({ "recovery": recovery })))
 }
 
-async fn joined(State(node): State<Node>) -> Reply {
-    node.joined()?;
+async fn joined(State(host): State<Host>) -> Reply {
+    host.joined()?;
     done()
 }
 
-async fn join(State(node): State<Node>, Body(body): Body<Join>) -> Reply {
-    ::api::git_wire::wire_here(node.join(given(&body.code, "code")?).await?);
+async fn join(State(host): State<Host>, Body(body): Body<Join>) -> Reply {
+    ::api::git_wire::wire_here(host.join(given(&body.code, "code")?).await?);
     done()
 }
 
@@ -85,16 +85,16 @@ struct SignedStep {
 
 /// Steps of `global`'s scope database the caller's own device signed, each for the next position, which this device
 /// checks count and writes (`database::steps`).
-async fn steps(State(node): State<Node>, me: Me, Body(list): Body<Vec<SignedStep>>) -> Reply {
+async fn steps(State(host): State<Host>, me: Me, Body(list): Body<Vec<SignedStep>>) -> Reply {
     let b = |v: &str, k: &str| data_encoding::BASE64URL_NOPAD.decode(v.as_bytes()).map_err(|_| anyhow::anyhow!("{k} isn't base64url"));
     let list = list.iter().map(|s| scope::steps::Step::decode(&b(&s.header, "header")?, &b(&s.signature, "signature")?, &b(&s.body, "body")?)).collect::<anyhow::Result<Vec<_>>>()?;
-    node.put_signed_steps(&me.caller, list).await?;
+    host.put_signed_steps(&me.caller, list).await?;
     done()
 }
 
-/// `?from=<n>`: `global`'s scope database's steps after position n (`Node::global_steps`).
-async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Reply {
+/// `?from=<n>`: `global`'s scope database's steps after position n (`Host::global_steps`).
+async fn global_steps(State(host): State<Host>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Reply {
     let from = q.get("from").map(|f| f.parse()).transpose()?.unwrap_or(0);
     let welcome = q.get("welcome").and_then(|w| scope::steps::Welcome::parse(w));
-    Ok(Json(node.global_steps(&me.caller, from, welcome).await?))
+    Ok(Json(host.global_steps(&me.caller, from, welcome).await?))
 }

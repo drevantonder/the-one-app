@@ -16,7 +16,7 @@ use ::api::Error;
 use ::api::Me;
 use ::api::Who;
 use ::api::tagged;
-use crate::Node;
+use crate::Host;
 use api_features::says::screens::ScreenQuery;
 
 pub fn routes() -> Routes {
@@ -26,9 +26,9 @@ pub fn routes() -> Routes {
 }
 
 /// An app screen as a page, for shells' web views and the web client's frames.
-async fn screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+async fn screen(State(host): State<Host>, me: Me, headers: axum::http::HeaderMap, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref(), q.linked == Some(true)).await?;
+    let html = host.screen(me.caller, &app, &name, params, q.scope.as_deref(), q.linked == Some(true)).await?;
     Ok(page(&headers, html))
 }
 
@@ -38,11 +38,11 @@ fn page(headers: &axum::http::HeaderMap, html: String) -> Response {
     tagged(headers, tag, axum::response::Html(html))
 }
 
-async fn events(State(node): State<Node>, me: Me) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
+async fn events(State(host): State<Host>, me: Me) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
     // Someone other than this machine's user hears only of the apps they reach.
-    let user = (node.user().ok().as_deref() != Some(me.caller.user.as_str())).then_some(me.caller.user);
-    let events = node.clone();
-    let stream = BroadcastStream::new(node.subscribe())
+    let user = (host.user().ok().as_deref() != Some(me.caller.user.as_str())).then_some(me.caller.user);
+    let events = host.clone();
+    let stream = BroadcastStream::new(host.subscribe())
         .filter_map(|e| e.ok())
         .map(move |e| match &user {
             Some(user) => events.event_for(e, user),

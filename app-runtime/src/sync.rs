@@ -10,7 +10,7 @@ pub(super) const PATHS_EVERY: Duration = Duration::from_secs(5 * 60);
 /// How long asking another device what it runs may take.
 const STATE_WAIT: Duration = Duration::from_secs(3);
 
-impl Node {
+impl Host {
     /// Reads what each scope this device holds has in the bucket after what it last read, `global` first, until it
     /// holds no scope it didn't: of `only`, if given, those, and any it hasn't read yet.
     pub(super) async fn read_scopes(&self, only: Option<&HashSet<Scope>>) -> Result<()> {
@@ -95,7 +95,7 @@ impl Node {
             }
         }
         self.notify(&devices, &input);
-        // And the relay, which counts each scope's writes for a device whose notice was lost (`Node::moved`).
+        // And the relay, which counts each scope's writes for a device whose notice was lost (`Host::moved`).
         self.tell_relay(json!({ "moved": [scope.to_string()] }));
     }
 
@@ -106,10 +106,10 @@ impl Node {
         if !self.with(|i| Ok(i.r.holds(scope))).unwrap_or(false) {
             return;
         }
-        let (node, scope) = (self.clone(), scope.clone());
+        let (host, scope) = (self.clone(), scope.clone());
         let Some((app, database, at)) = wrote.map(|(a, d, at)| (a.to_string(), d.to_string(), at)) else {
             tokio::spawn(async move {
-                if let Err(err) = node.read_scope(&scope).await {
+                if let Err(err) = host.read_scope(&scope).await {
                     tracing::warn!("reading {scope}, which another device said changed: {err:#}");
                 }
             });
@@ -121,7 +121,7 @@ impl Node {
         let open = self.open_dbs().iter().any(|(open, _)| *open == id);
         match step.filter(|_| open) {
             Some(step) => self.confirm_sent(Sent { name: bucket::names::step_name(&bucket::names::database_prefix(&id.0.to_string(), &app, &database), at), step, sig, id, at }),
-            None => drop(tokio::spawn(async move { node.fill_to(&[(id, at)]).await })),
+            None => drop(tokio::spawn(async move { host.fill_to(&[(id, at)]).await })),
         }
     }
 
@@ -137,11 +137,11 @@ impl Node {
         if !first {
             return;
         }
-        let node = self.clone();
+        let host = self.clone();
         tokio::spawn(async move {
             loop {
                 let lot = {
-                    let mut waiting = node.0.sent.lock().unwrap();
+                    let mut waiting = host.0.sent.lock().unwrap();
                     let lot = std::mem::take(waiting.as_mut().expect("asking"));
                     if lot.is_empty() {
                         *waiting = None;
@@ -153,7 +153,7 @@ impl Node {
                 // The signatures sent beside them after them, so what's taken of the steps comes first.
                 steps.extend(lot.iter().filter_map(|s| Some((format!("{}.sig", s.name), s.sig.clone()?))));
                 // A bucket slow to answer holds up no other: what it doesn't confirm in time is read from it.
-                let took = match node.bucket() {
+                let took = match host.bucket() {
                     Ok(bucket) => tokio::time::timeout(BUCKET_WAIT, bucket.take_sent(&steps)).await.unwrap_or_else(|_| Err(anyhow!("the bucket didn't answer"))),
                     Err(err) => Err(err),
                 };
@@ -165,7 +165,7 @@ impl Node {
                     }
                     Err(err) => tracing::debug!("confirming steps other devices sent: {err:#}"),
                 }
-                node.fill_to(&lot.into_iter().map(|s| (s.id, s.at)).collect::<Vec<_>>()).await;
+                host.fill_to(&lot.into_iter().map(|s| (s.id, s.at)).collect::<Vec<_>>()).await;
             }
         });
     }
@@ -213,22 +213,22 @@ impl Node {
             return;
         }
         self.with_or((), |i| Ok(i.stated.extend(due.iter().map(|r| (*r, Instant::now())))));
-        let node = self.clone();
+        let host = self.clone();
         let asking = async move {
             let asked: Vec<_> = due.into_iter().map(|r| {
-                let node = node.clone();
-                tokio::spawn(async move { (r, node.send(&r, custom_build::protocol::message::STATE, &json!({}), true, STATE_WAIT).await) })
+                let host = host.clone();
+                tokio::spawn(async move { (r, host.send(&r, custom_build::protocol::message::STATE, &json!({}), true, STATE_WAIT).await) })
             }).collect();
             let mut changed = Vec::new();
             for asking in asked {
                 let Ok((runtime, said)) = asking.await else { continue };
                 match said {
-                    Ok(said) => changed.extend(node.state_from(&runtime, &said).unwrap_or_default()),
+                    Ok(said) => changed.extend(host.state_from(&runtime, &said).unwrap_or_default()),
                     Err(err) => tracing::debug!("asking {} what it runs: {err:#}", short(&runtime)),
                 }
             }
             if !changed.is_empty() {
-                node.learn_apps(changed);
+                host.learn_apps(changed);
             }
         };
         match wait {

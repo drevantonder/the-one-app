@@ -9,14 +9,14 @@ use crate::api::Routes;
 use ::api::Body;
 use ::api::Reply;
 use ::api::Who;
-use crate::Node;
+use crate::Host;
 
 pub fn routes() -> Routes {
     Routes::default().route("/api/storage", Who::ThisMachine, get(storage).post(set))
 }
 
-async fn storage(State(node): State<Node>) -> Reply {
-    Ok(Json(node.storage()?))
+async fn storage(State(host): State<Host>) -> Reply {
+    Ok(Json(host.storage()?))
 }
 
 /// S3-compatible storage to move the network's data to.
@@ -29,6 +29,6 @@ struct Storage {
     region: Option<String>,
 }
 
-async fn set(State(node): State<Node>, Body(body): Body<Storage>) -> Reply {
-    Ok(Json(node.set_storage(&node.caller()?, &serde_json::to_value(body)?).await?))
+async fn set(State(host): State<Host>, Body(body): Body<Storage>) -> Reply {
+    Ok(Json(host.set_storage(&host.caller()?, &serde_json::to_value(body)?).await?))
 }

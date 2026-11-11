@@ -70,15 +70,15 @@ impl Kept {
     }
 }
 
-impl Node {
+impl Host {
     /// This runtime, as its features reach it.
     pub fn rt(&self) -> Rt {
         Arc::new(self.clone())
     }
 
-    /// The runtime a feature was given, which in this program is always a `Node`.
-    pub fn of(rt: &Rt) -> Node {
-        (&**rt as &dyn Any).downcast_ref::<Node>().expect("this program's features run in a Node").clone()
+    /// The runtime a feature was given, which in this program is always a `Host`.
+    pub fn of(rt: &Rt) -> Host {
+        (&**rt as &dyn Any).downcast_ref::<Host>().expect("this program's features run in its Host").clone()
     }
 
     /// Starts each feature: what it does once, then its loop, at once, then every so often, or when it's woken.
@@ -88,10 +88,10 @@ impl Node {
             start(&rt);
         }
         for (feature, every, f) in loops {
-            let (node, wake) = (self.clone(), self.0.kept.wakes[feature].clone());
+            let (host, wake) = (self.clone(), self.0.kept.wakes[feature].clone());
             tokio::spawn(async move {
                 loop {
-                    if let Err(err) = f(node.rt()).await {
+                    if let Err(err) = f(host.rt()).await {
                         tracing::debug!("{feature}: {err:#}");
                     }
                     let _ = tokio::time::timeout(every, wake.notified()).await;
@@ -130,19 +130,19 @@ impl Node {
     }
 }
 
-impl axum::extract::FromRef<Rt> for Node {
-    fn from_ref(rt: &Rt) -> Node {
-        Node::of(rt)
+impl axum::extract::FromRef<Rt> for Host {
+    fn from_ref(rt: &Rt) -> Host {
+        Host::of(rt)
     }
 }
 
-impl Here for Node {
+impl Here for Host {
     fn id(&self) -> Key {
         self.0.id
     }
 
     fn device_name(&self) -> String {
-        Node::device_name(self)
+        Host::device_name(self)
     }
 
     fn home(&self) -> &Path {
@@ -150,11 +150,11 @@ impl Here for Node {
     }
 
     fn ready(&self) -> bool {
-        Node::ready(self)
+        Host::ready(self)
     }
 
     fn caller(&self) -> Result<Caller> {
-        Node::caller(self)
+        Host::caller(self)
     }
 
     fn is_this_machine(&self, caller: &Caller) -> bool {
@@ -162,19 +162,19 @@ impl Here for Node {
     }
 
     fn own_ports(&self) -> Vec<u16> {
-        Node::own_ports(self)
+        Host::own_ports(self)
     }
 
     fn address(&self) -> Result<String> {
-        Node::address(self)
+        Host::address(self)
     }
 
     fn emit(&self, event: Event) {
-        Node::emit(self, event)
+        Host::emit(self, event)
     }
 
     fn signing_key(&self) -> ::key::SigningKey {
-        Node::signing_key(self)
+        Host::signing_key(self)
     }
 
     fn route_of(&self, path: &str) -> Option<&'static str> {
@@ -190,7 +190,7 @@ impl Here for Node {
     }
 }
 
-impl ScopeDatabase for Node {
+impl ScopeDatabase for Host {
     fn read_dyn(&self, f: &mut dyn FnMut(&Read<'_>) -> Result<()>) -> Result<()> {
         self.with(|i| f(&Read { replica: &i.r, states: &i.views, scopes: &i.scope_dbs }))
     }
@@ -204,11 +204,11 @@ impl ScopeDatabase for Node {
     }
 
     fn read_callers_scopes<'a>(&'a self, caller: &'a Caller) -> Fut<'a, ()> {
-        Box::pin(Node::read_callers_scopes(self, caller))
+        Box::pin(Host::read_callers_scopes(self, caller))
     }
 }
 
-impl Databases for Node {
+impl Databases for Host {
     fn open<'a>(&'a self, caller: &'a Caller, scope: &'a Scope, app: &'a str, database: &'a str, schema: &'a [&'a str]) -> Fut<'a, Arc<tokio::sync::Mutex<Db>>> {
         Box::pin(async move {
             let (db, bucket) = self.call_database(caller, scope, app, database, Some(schema.iter().map(|s| s.to_string()).collect())).await?;
@@ -232,11 +232,11 @@ impl Databases for Node {
     }
 
     fn needs<'a>(&'a self, caller: &'a Caller, wants: &'a [(Scope, &'a str, &'a str)]) -> Fut<'a, ()> {
-        Box::pin(Node::needs(self, caller, wants))
+        Box::pin(Host::needs(self, caller, wants))
     }
 
     fn bucket(&self) -> Result<::bucket::Place> {
-        Ok(Node::bucket(self)?.place)
+        Ok(Host::bucket(self)?.place)
     }
 
     fn object<'a>(&'a self, name: &'a str) -> Fut<'a, Option<Vec<u8>>> {
@@ -244,19 +244,19 @@ impl Databases for Node {
     }
 
     fn blob<'a>(&'a self, hash: &'a str) -> Fut<'a, Vec<u8>> {
-        Box::pin(Node::blob(self, hash))
+        Box::pin(Host::blob(self, hash))
     }
 
     fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String> {
-        Node::put_blob_for(self, caller, bytes)
+        Host::put_blob_for(self, caller, bytes)
     }
 
     fn may_read_blob(&self, caller: &Caller, hash: &str) -> Result<bool> {
-        Ok(self.this_machine(caller) || Node::may_read_blob(self, &caller.user, hash)?)
+        Ok(self.this_machine(caller) || Host::may_read_blob(self, &caller.user, hash)?)
     }
 }
 
-impl Holds for Node {
+impl Holds for Host {
     fn device(&self) -> Key {
         self.0.holds.device()
     }
@@ -274,11 +274,11 @@ impl Holds for Node {
     }
 
     fn app_schedules_keys<'a>(&'a self, scope: &'a Scope, app: &'a str) -> Fut<'a, u64> {
-        Box::pin(Node::app_schedules_keys(self, scope, app))
+        Box::pin(Host::app_schedules_keys(self, scope, app))
     }
 }
 
-impl Apps for Node {
+impl Apps for Host {
     fn describe<'a>(&'a self, app: &'a str) -> Fut<'a, Value> {
         Box::pin(self.0.apps.describe(app))
     }
@@ -294,7 +294,7 @@ impl Apps for Node {
     fn page_apps(&self, viewer: &Caller, scope: Option<&str>) -> Result<Vec<PageApp>> {
         Ok(self.page_contexts(viewer, scope)?.into_iter().map(|(app, ctx, granted)| PageApp {
             scopes: ctx.scopes.iter().filter_map(|s| Scope::parse(&s.id).ok()).collect(),
-            draws: Arc::new(Drawn { node: self.clone(), app: app.clone(), ctx, _granted: granted }),
+            draws: Arc::new(Drawn { host: self.clone(), app: app.clone(), ctx, _granted: granted }),
             app,
         }).collect())
     }
@@ -304,7 +304,7 @@ impl Apps for Node {
     }
 
     fn title<'a>(&'a self, app: &'a str) -> Fut<'a, String> {
-        Box::pin(async move { Ok(Node::title(self, app).await) })
+        Box::pin(async move { Ok(Host::title(self, app).await) })
     }
 
     fn built_in(&self, app: &str) -> Option<String> {
@@ -312,11 +312,11 @@ impl Apps for Node {
     }
 
     fn bring_in<'a>(&'a self, caller: &'a Caller, app: &'a str) -> Fut<'a, ()> {
-        Box::pin(Node::bring_in(self, caller, app))
+        Box::pin(Host::bring_in(self, caller, app))
     }
 
     fn uses<'a>(&'a self, app: &'a str) -> Fut<'a, (Vec<String>, Vec<String>)> {
-        Box::pin(async move { Ok(Node::uses(self, app).await) })
+        Box::pin(async move { Ok(Host::uses(self, app).await) })
     }
 
     fn bundle_here(&self, app: &str) -> Option<String> {
@@ -324,11 +324,11 @@ impl Apps for Node {
     }
 
     fn runs_latest<'a>(&'a self, app: &'a str, within: Duration) -> Fut<'a, bool> {
-        Box::pin(async move { Ok(Node::runs_latest(self, app, within).await) })
+        Box::pin(async move { Ok(Host::runs_latest(self, app, within).await) })
     }
 
     fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
-        Node::nodes_for(self, viewer, described)
+        Host::nodes_for(self, viewer, described)
     }
 
     fn names(&self) -> Vec<String> {
@@ -345,7 +345,7 @@ impl Apps for Node {
 
 /// An app a page shows, drawing in its context.
 struct Drawn {
-    node: Node,
+    host: Host,
     app: String,
     ctx: Context,
     _granted: Granted,
@@ -353,33 +353,33 @@ struct Drawn {
 
 impl Draws for Drawn {
     fn widget<'a>(&'a self, name: &'a str, size: &'a str, options: &'a Value) -> Fut<'a, Value> {
-        Box::pin(self.node.0.apps.widget(&self.app, name, size, options, &self.ctx))
+        Box::pin(self.host.0.apps.widget(&self.app, name, size, options, &self.ctx))
     }
 
     fn widget_options<'a>(&'a self, name: &'a str) -> Fut<'a, Value> {
-        Box::pin(self.node.0.apps.widget_options(&self.app, name, &self.ctx))
+        Box::pin(self.host.0.apps.widget_options(&self.app, name, &self.ctx))
     }
 
     fn badge(&self) -> Fut<'_, Value> {
-        Box::pin(self.node.0.apps.badge(&self.app, &self.ctx))
+        Box::pin(self.host.0.apps.badge(&self.app, &self.ctx))
     }
 }
 
-impl Peers for Node {
+impl Peers for Host {
     fn reaches<'a>(&'a self, device: &'a Key) -> futures_util::future::BoxFuture<'a, bool> {
-        Box::pin(Node::reaches(self, device))
+        Box::pin(Host::reaches(self, device))
     }
 
     fn away(&self, device: &Key) -> String {
-        Node::away(self, device)
+        Host::away(self, device)
     }
 
     fn versions(&self) -> Fut<'_, Value> {
-        Box::pin(Node::versions(self))
+        Box::pin(Host::versions(self))
     }
 }
 
-impl Features for Node {
+impl Features for Host {
     fn state_dyn(&self, of: TypeId) -> Option<&(dyn Any + Send + Sync)> {
         self.0.kept.states.get(&of).map(|s| &**s)
     }

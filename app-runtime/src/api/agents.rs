@@ -8,16 +8,16 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde_json::{Value, json};
 
-use crate::Node;
+use crate::Host;
 
 use super::Routes;
 use ::api::Who;
 use ::api::local::port;
 
 /// The skills for this machine's user (api/features/src/skills.rs).
-async fn skills(node: &Node) -> Vec<api_features::skills::Skill> {
-    let apps = match node.caller() {
-        Ok(me) => node.apps(&me).await.map(|a| json!(a)).unwrap_or_else(|err| {
+async fn skills(host: &Host) -> Vec<api_features::skills::Skill> {
+    let apps = match host.caller() {
+        Ok(me) => host.apps(&me).await.map(|a| json!(a)).unwrap_or_else(|err| {
             tracing::warn!("the skills leave out apps' own: {err:#}");
             json!([])
         }),
@@ -36,14 +36,14 @@ pub(super) fn routes() -> Routes {
     Routes::default().route("/llms.txt", Who::ThisMachine, get(llms)).route("/skills/{name}/{*path}", Who::ThisMachine, get(skill_file)).route(::api::path::HOOKS_PROMPT, Who::ThisMachine, post(prompt))
 }
 
-async fn llms(State(node): State<Node>, headers: axum::http::HeaderMap) -> Response {
-    let host = headers.get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("127.0.0.1").to_string();
-    let deeper = skills(&node).await.split_off(1);
-    markdown(api_features::skills::root(&deeper, |s| format!("[{}](http://{host}/skills/{}/SKILL.md)", s.name, s.name)).body)
+async fn llms(State(host): State<Host>, headers: axum::http::HeaderMap) -> Response {
+    let authority = headers.get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("127.0.0.1").to_string();
+    let deeper = skills(&host).await.split_off(1);
+    markdown(api_features::skills::root(&deeper, |s| format!("[{}](http://{authority}/skills/{}/SKILL.md)", s.name, s.name)).body)
 }
 
-async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, String)>) -> Response {
-    match skills(&node).await.into_iter().find(|s| s.name == name).and_then(|s| s.file(&path)) {
+async fn skill_file(State(host): State<Host>, Path((name, path)): Path<(String, String)>) -> Response {
+    match skills(&host).await.into_iter().find(|s| s.name == name).and_then(|s| s.file(&path)) {
         Some(text) => markdown(text),
         None => (StatusCode::NOT_FOUND, "no such skill or file").into_response(),
     }
@@ -52,7 +52,7 @@ async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, 
 /// Serves the skills, and nothing else, on this machine's Tailscale address and the local API's port, so an agent on
 /// any of the user's devices can read them, starting at /llms.txt. Looks again every minute: Tailscale may come up
 /// later, or move.
-pub async fn serve_guide(node: Node) {
+pub async fn serve_guide(host: Host) {
     let port = port();
     let mut serving: Option<(std::net::Ipv4Addr, tokio::task::JoinHandle<()>)> = None;
     loop {
@@ -61,12 +61,12 @@ pub async fn serve_guide(node: Node) {
             if let Some((_, task)) = serving.take() {
                 task.abort();
             }
-            node.set_guide(None);
+            host.set_guide(None);
             if let Some(ip) = ip {
                 match tokio::net::TcpListener::bind((ip, port)).await {
                     Ok(listener) => {
-                        node.set_guide(Some(format!("http://{ip}:{port}/llms.txt")));
-                        let app = Router::new().route("/llms.txt", get(llms)).route("/skills/{name}/{*path}", get(skill_file)).with_state(node.clone());
+                        host.set_guide(Some(format!("http://{ip}:{port}/llms.txt")));
+                        let app = Router::new().route("/llms.txt", get(llms)).route("/skills/{name}/{*path}", get(skill_file)).with_state(host.clone());
                         serving = Some((ip, tokio::spawn(async move {
                             if let Err(err) = axum::serve(listener, app).await {
                                 tracing::warn!("serving the skills: {err}");
@@ -114,9 +114,9 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
 }
 
 /// For agent harnesses' prompt hooks: the body is the hook's JSON, the reply is plain text to show the agent.
-async fn prompt(State(node): State<Node>, body: String) -> Response {
+async fn prompt(State(host): State<Host>, body: String) -> Response {
     let event: Value = serde_json::from_str(&body).unwrap_or_default();
-    match node.prompt(event).await {
+    match host.prompt(event).await {
         Ok(text) => text.into_response(),
         Err(err) => (StatusCode::BAD_REQUEST, format!("{err:#}")).into_response(),
     }

@@ -1252,7 +1252,7 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
 }
 
 /// A device tells the relay each scope it writes to by its name as Rust says it (`Scope`'s), and every device hears each
-/// one's count of writes with the computes, to read from the bucket only what moved (`Node::moved`).
+/// one's count of writes with the computes, to read from the bucket only what moved (`Host::moved`).
 #[test]
 fn the_relay_counts_writes_to_scopes_by_their_names() {
     use iroh::SecretKey;

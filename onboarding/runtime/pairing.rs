@@ -51,7 +51,7 @@ pub(super) fn may_list(db: &ScopeDb, who: &str, user: &str, kinds: &[scopes::Kin
     Ok(db.user(user)?.is_some() && db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::user_principal(user)))
 }
 
-impl Node {
+impl Host {
     /// Makes a one-time pairing code for another of the local user's machines, which joins as a device.
     pub fn pair(&self) -> Result<String> {
         Ok(self.pair_as(&self.caller()?, None)?.0)
@@ -76,9 +76,9 @@ impl Node {
         self.add_pairing(secret, Pairing { user: asker.user.clone(), by, admits: user, until: now_ms() + PAIRING_LIFE, tried: None })?;
         // Told with the key the code names, which answers the computer joining with it: the relay lets that computer
         // reach only the key that told it of the code.
-        let (node, fields) = (self.clone(), json!({ "pairing": { "hash": net::ticket_hash(&net::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE } }));
+        let (host, fields) = (self.clone(), json!({ "pairing": { "hash": net::ticket_hash(&net::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE } }));
         tokio::spawn(async move {
-            if let Err(err) = scope::settings::tell(&node, &node.0.key, fields).await {
+            if let Err(err) = scope::settings::tell(&host, &host.0.key, fields).await {
                 tracing::warn!("telling {YOURS}'s relay of a pairing code: {err:#}");
             }
         });
@@ -124,9 +124,9 @@ impl Node {
             return Ok(());
         }
         self.open_network()?;
-        let node = self.clone();
+        let host = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = node.read_scopes(None).await {
+            if let Err(err) = host.read_scopes(None).await {
                 tracing::debug!("reading the bucket after joining: {err:#}");
             }
         });

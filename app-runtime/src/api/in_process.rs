@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Result;
 use ::api::client::{Answer, Via};
 
-use crate::Node;
+use crate::Host;
 
 /// The node's own routes, asked in the node itself as the request its MCP answers asked them: with that request's proof
 /// of who asks (the client device its connection proved, or this machine's own program), which
@@ -21,10 +21,10 @@ pub struct InProcess {
 
 impl InProcess {
     /// As a request that came with `client` (over iroh), from `peer` (over TCP), and `headers`. Called in the runtime.
-    pub fn new(node: Node, client: Option<super::FromClient>, peer: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>, headers: &axum::http::HeaderMap) -> InProcess {
+    pub fn new(host: Host, client: Option<super::FromClient>, peer: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>, headers: &axum::http::HeaderMap) -> InProcess {
         let proof = [axum::http::header::AUTHORIZATION.as_str(), custom_build::protocol::header::LOCAL_TOKEN, custom_build::protocol::header::READS];
         let headers = headers.iter().filter(|(n, _)| proof.contains(&n.as_str())).map(|(n, v)| (n.clone(), v.clone())).collect();
-        InProcess { router: super::guarded(super::routes(), node), client, peer, headers, runtime: tokio::runtime::Handle::current() }
+        InProcess { router: super::guarded(super::routes(), host), client, peer, headers, runtime: tokio::runtime::Handle::current() }
     }
 }
 

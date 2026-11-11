@@ -2,26 +2,26 @@
 
 use std::time::Duration;
 
-use app_runtime::Node;
+use app_runtime::Host;
 use ::api::call::CallRequest;
 use serde_json::{Value, json};
 
 use crate::temp;
 
-pub(crate) async fn start(name: &str) -> Node {
+pub(crate) async fn start(name: &str) -> Host {
     let dir = temp(name);
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": name }).to_string()).unwrap();
-    Node::start(&dir).await.unwrap()
+    Host::start(&dir).await.unwrap()
 }
 
 /// A new network on `a`: its recovery key's secret.
-pub(crate) async fn create(a: &Node, name: &str, user_name: &str) -> String {
+pub(crate) async fn create(a: &Host, name: &str, user_name: &str) -> String {
     a.create_with(name, user_name, None, app_runtime::built_in::STARTERS).await.unwrap()
 }
 
 /// Workers whose relay the devices of `a`'s network reach each other through, taking only `a` and those it
 /// admits: `a` says it's the network's.
-async fn relay(a: &Node) -> crate::cloudflare::Workers {
+async fn relay(a: &Host) -> crate::cloudflare::Workers {
     let k = tokio::task::block_in_place(|| crate::cloudflare::Workers::for_devices(vec![::key::hex(&a.id())]));
     let me = api::Caller::own(a.id(), a.user().unwrap());
     a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
@@ -29,7 +29,7 @@ async fn relay(a: &Node) -> crate::cloudflare::Workers {
 }
 
 /// Waits for what's expected of `node`, checking again at each event it announces: a limit only for what never happens.
-pub(crate) async fn eventually(what: &str, node: &Node, mut check: impl AsyncFnMut() -> bool) {
+pub(crate) async fn eventually(what: &str, node: &Host, mut check: impl AsyncFnMut() -> bool) {
     let mut events = node.subscribe();
     let waiting = async {
         while !check().await {
@@ -42,7 +42,7 @@ pub(crate) async fn eventually(what: &str, node: &Node, mut check: impl AsyncFnM
 }
 
 /// `content` written to `global`'s scope database as a step `caller`'s own device (`key`) signs, as a client does.
-pub(crate) async fn signed_by(a: &Node, caller: &api::Caller, key: &ed25519_dalek::SigningKey, content: ::scope::content::Content) {
+pub(crate) async fn signed_by(a: &Host, caller: &api::Caller, key: &ed25519_dalek::SigningKey, content: ::scope::content::Content) {
     let global = ::scope::scopes::Scope::Global;
     let next = a.global_steps(caller, ::scope::steps::NUMBER_MAX, None).await.unwrap();
     let (at, epoch) = (next["at"].as_u64().unwrap(), next["epoch"].as_u64().unwrap() as u32);
@@ -63,7 +63,7 @@ fn invited(secret: &str) -> ::scope::settings::Invited {
 }
 
 /// Sam, invited by `a`'s user as a member, let in with his first device, `key`, as `a` approves it: → his id.
-pub(crate) async fn let_sam_in(a: &Node, key: &ed25519_dalek::SigningKey) -> String {
+pub(crate) async fn let_sam_in(a: &Host, key: &ed25519_dalek::SigningKey) -> String {
     let sam = ::scope::scopes::new_id();
     ::scope::settings::approve(a, &asks(key, &sam, Some(b"the-invites-secret")), &::scope::settings::Joining::Link(invited("the-invites-secret"))).await.unwrap();
     sam
@@ -75,7 +75,7 @@ fn notes(tool: &str, input: Value) -> CallRequest {
 
 /// Deploys the tests' own app, `tests/notes/app.js` (lines of text in `global`'s database), for everyone, as an admin
 /// would add an app, and waits for this device to run it.
-async fn add_notes(a: &Node) {
+async fn add_notes(a: &Host) {
     let me = api::Caller::own(a.id(), a.user().unwrap());
     let bundle = a.put_blob(&deploy::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
     deploy_runtime::deploy_making(&a.rt(), &me, "notes", &bundle, Some("admins"), true).await.unwrap();
@@ -260,7 +260,7 @@ async fn only_someone_who_may_remove_a_device_can_ask_it_to_update() {
     let secret: [u8; 32] = rand::random();
     let dir = temp("update-asked");
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&secret), "name": "a" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     create(&a, "n", "Ann").await;
     let me = ed25519_dalek::SigningKey::from_bytes(&secret);
     let sam = ed25519_dalek::SigningKey::from_bytes(&rand::random());
@@ -286,7 +286,7 @@ async fn only_someone_who_may_remove_a_device_can_ask_it_to_update() {
 async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     let dir = temp("approve");
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
@@ -367,7 +367,7 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     use ::key::{Endpoint, hex, open_sealed, seal_secret, seal_to, unhex};
     let dir = temp("holders");
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
     let me = api::Caller::own(a.id(), a.user().unwrap());
     let global = ::scope::scopes::Scope::Global;
@@ -436,7 +436,7 @@ async fn a_holder_restores_someone_and_no_one_else_can() {
     use ::key::{Endpoint, hex, join_code, seal_to, unhex};
     let dir = temp("restore");
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
     let me = api::Caller::own(a.id(), a.user().unwrap());
     let own = Scope::User(me.user.clone());
@@ -479,7 +479,7 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     use data_encoding::BASE64URL_NOPAD as B64U;
     let dir = temp("replace");
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     let old_secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
     let me = api::Caller::own(a.id(), a.user().unwrap());
     let global = ::scope::scopes::Scope::Global;
@@ -570,7 +570,7 @@ async fn a_backup_keeps_a_holders_copy_of_the_recovery_key() {
 async fn a_settings_change_that_doesnt_read_is_refused() {
     let dir = temp("bodies");
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = a.user().unwrap();
     let ask = async |path: &str, body: Value| ::scope::settings::answer(&a, "POST", path, body.to_string().as_bytes()).await.unwrap();
@@ -594,7 +594,7 @@ async fn a_settings_change_that_doesnt_read_is_refused() {
 async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
     let dir = temp("kept-before");
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = a.user().unwrap();
     let kept = std::path::Path::new("network/scope-kept").join(data_encoding::HEXLOWER.encode(b"global"));
@@ -611,7 +611,7 @@ async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
     before.as_object_mut().unwrap().remove("sealed").expect("what's kept says what it read");
     std::fs::write(copy.join(&kept), before.to_string()).unwrap();
 
-    let b = Node::start(&copy).await.unwrap();
+    let b = Host::start(&copy).await.unwrap();
     let is_admin = async || ::scope::settings::Me::who(&b, |db| db.role_in(&me, &group)).ok().flatten() == Some(::scope::scopes::Role::Admin);
     eventually("the step it passed over", &b, is_admin).await;
 }
@@ -621,7 +621,7 @@ async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
 async fn erasing_an_app_deletes_its_keys_whoever_erases_it() {
     let dir = temp("erase");
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
@@ -714,7 +714,7 @@ async fn a_refusals_words_never_reach_what_insights_keeps_and_a_failures_are_cle
 async fn only_a_devices_user_or_an_admin_reads_its_logs() {
     let dir = temp("logs");
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let andre = api::Caller::own(a.id(), a.user().unwrap());
     let now = custom_build::now_ms();
@@ -745,7 +745,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     use services::Build;
     let dir = temp("service-build");
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Host::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
     let build = a.put_blob(b"a program").unwrap();
@@ -1074,7 +1074,7 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     assert_eq!(ask_runtime(&at, &home_token, json!({ "app": "notes", "tool": "read", "input": {} })).await.0, 403);
     let post = json!({ "app": "notes", "tool": "post", "input": { "text": "from the runtime" } });
     polled("the runtime to run a call", &log, async || ask_runtime(&at, &token, post.clone()).await.0 == 200).await;
-    let lines = async |node: &app_runtime::Node| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
+    let lines = async |node: &app_runtime::Host| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("from the runtime")).await;
 
     // A call it passes on to another of its user's devices, as its device would.
@@ -1149,7 +1149,7 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
         status == 200 && ran["steps"].as_array().into_iter().flatten().any(|s| s["here"] == true && s["result"] == "ran" && s["device"] == "onet-device")
     })
     .await;
-    let lines = async |node: &app_runtime::Node| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
+    let lines = async |node: &app_runtime::Host| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("through onet")).await;
 }
 

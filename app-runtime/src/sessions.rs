@@ -71,7 +71,7 @@ impl Held {
 fn held(credential: &Credential) -> Option<Held> {
     match credential {
             Credential::Client(key) => Some(Held::Client(*key)),
-            Credential::Passed { node, user } => Some(Held::Passed(*node, user.clone())),
+            Credential::Passed { node: host, user } => Some(Held::Passed(*host, user.clone())),
             Credential::Own | Credential::AppSchedules { .. } => None,
     }
 }
@@ -93,7 +93,7 @@ const CLIENT_KEYS: u64 = 3_600_000;
 /// How often, at most, `global` is read for a client device this device doesn't list.
 const CATCH_UP_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
 
-impl Node {
+impl Host {
     /// Whose client device `key` is, and its name: none if it isn't a device of the network, or was removed.
     pub fn client(&self, key: &Key) -> Option<(String, String)> {
         self.with_or(None, |i| Ok(i.r.db().client(key)?.map(|m| (m.user.clone(), m.name.clone()))))

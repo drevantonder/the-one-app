@@ -4,7 +4,7 @@
 use ::custom_build::allowed;
 use super::*;
 
-impl Node {
+impl Host {
     pub(in crate) async fn write_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller) -> Result<()> {
         let prepared = self.prepare_appends(appends, scopes, me).await?;
         self.write_prepared(app, prepared, scopes, me).await
@@ -79,9 +79,9 @@ impl Node {
                 }
             }
             for append in adds {
-                if let Append::Add { app, scope, added, node } = append {
+                if let Append::Add { app, scope, added, node: host } = append {
                     let scope = Scope::parse_for(&scope, &me.user)?;
-                    writes.extend(deploy_runtime::add_entries(&self.rt(), me, &app, &scope, added, node.as_deref()).await?);
+                    writes.extend(deploy_runtime::add_entries(&self.rt(), me, &app, &scope, added, host.as_deref()).await?);
                 }
             }
             for (scope, content) in writes {
@@ -103,10 +103,10 @@ impl Node {
     pub(in crate) fn keep_for_later(&self, granted: Granted) {
         let done = Arc::new(tokio::sync::Notify::new());
         self.0.calls.later.lock().unwrap().insert(granted.1.clone(), done.clone());
-        let node = self.clone();
+        let host = self.clone();
         tokio::spawn(async move {
             let _ = tokio::time::timeout(LATER_LIMIT, done.notified()).await;
-            node.0.calls.later.lock().unwrap().remove(&granted.1);
+            host.0.calls.later.lock().unwrap().remove(&granted.1);
             drop(granted);
         });
     }

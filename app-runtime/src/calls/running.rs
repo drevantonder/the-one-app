@@ -4,7 +4,7 @@
 use ::custom_build::allowed;
 use super::*;
 
-impl Node {
+impl Host {
     /// Fills in an app's call of `app`'s service (`from` the app that made it): the fields of the items it's switched on
     /// for, a secret one only for a service named among its item's hosts. → the secrets it filled, to blot out of the
     /// answer. The node that runs the call fills it: a service endpoint fills nothing itself.
@@ -95,14 +95,14 @@ impl Node {
         for (app, ctx, granted) in self.page_contexts(&caller, None)? {
             let key = format!("{app}/{session}");
             let since = seen.get(&key).cloned().unwrap_or(Value::Null);
-            let (node, event) = (self.clone(), event.clone());
+            let (host, event) = (self.clone(), event.clone());
             asked.spawn(async move {
                 let _granted = granted;
-                let has = node.0.apps.describe(&app).await.is_ok_and(|d| d["hooks"].as_array().is_some_and(|h| h.iter().any(|n| n == "prompt")));
+                let has = host.0.apps.describe(&app).await.is_ok_and(|d| d["hooks"].as_array().is_some_and(|h| h.iter().any(|n| n == "prompt")));
                 if !has {
                     return None;
                 }
-                let said = node.0.apps.hook(&app, "prompt", json!({ "event": event, "since": since }), &ctx);
+                let said = host.0.apps.hook(&app, "prompt", json!({ "event": event, "since": since }), &ctx);
                 let text = match tokio::time::timeout(PROMPT_LIMIT, said).await {
                     Ok(Ok(Value::String(text))) => text.trim().to_string(),
                     Ok(Ok(_)) => String::new(),

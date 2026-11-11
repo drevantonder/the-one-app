@@ -649,7 +649,7 @@ pub async fn new_vault_key(m: &impl Me, scope: &Scope, n: u32, to: &[[u8; 32]]) 
 /// The step that deletes `app` (`deleted`), restores it (`restored`) or erases it for good (`erased`), as `user`, who
 /// acts for its owner, says it: whoever writes it, from any device or an app's call. `title` is what users call it.
 /// A deleted app stops running and leaves every page, but keeps its data until it's erased, which deletes its keys in
-/// the bucket as each node reads the step (`Node::follow_erased`).
+/// the bucket as each node reads the step (`Host::follow_erased`).
 pub fn retire(who: &ScopeDb, user: &str, app: &str, how: &str, title: &str) -> Result<Content> {
     let a = who.app(app)?.ok_or_else(|| anyhow!("no app named {app}"))?;
     allowed!(who.may(user, "delete", &scopes::app(app)), "Only {title}'s owners can delete, restore or erase it.");

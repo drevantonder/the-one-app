@@ -15,7 +15,7 @@ use ::api::Who;
 use ::api::done;
 use ::api::given;
 use ::api::tagged;
-use crate::Node;
+use crate::Host;
 use api_features::says::apps::Arrange;
 
 pub fn routes() -> Routes {
@@ -25,19 +25,19 @@ pub fn routes() -> Routes {
         .route("/api/arrange", Who::Clients, post(arrange))
 }
 
-async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
-    let apps = node.apps(&me.caller).await?;
+async fn apps(State(host): State<Host>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
+    let apps = host.apps(&me.caller).await?;
     let body = serde_json::to_string(&apps)?;
     let tag = ::ui::screen::tag(&body);
     Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
 }
 
-/// Every lab, for an admin's Settings › Labs (`Node::labs`).
-async fn labs(State(node): State<Node>, me: Me) -> Reply {
-    Ok(Json(json!(node.labs(&me.caller).await?)))
+/// Every lab, for an admin's Settings › Labs (`Host::labs`).
+async fn labs(State(host): State<Host>, me: Me) -> Reply {
+    Ok(Json(json!(host.labs(&me.caller).await?)))
 }
 
-async fn arrange(State(node): State<Node>, me: Me, Body(body): Body<Arrange>) -> Reply {
-    node.arrange(&me.caller, given(&body.page, "page")?, body.items, body.hidden, body.pages).await?;
+async fn arrange(State(host): State<Host>, me: Me, Body(body): Body<Arrange>) -> Reply {
+    host.arrange(&me.caller, given(&body.page, "page")?, body.items, body.hidden, body.pages).await?;
     done()
 }

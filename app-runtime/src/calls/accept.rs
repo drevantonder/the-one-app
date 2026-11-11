@@ -3,7 +3,7 @@
 use ::custom_build::allowed;
 use super::*;
 
-impl Node {
+impl Host {
     /// Runs a call another device, `remote`, asked for. One passed on with keys runs on those keys alone, never this
     /// device's own, and only in scopes that node runs. Any other runs only from a client device of its caller, as that
     /// device's own: only then are this device's keys used, and only for its own user, whose device that is.

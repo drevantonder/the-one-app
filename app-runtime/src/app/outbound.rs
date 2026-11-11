@@ -10,16 +10,16 @@ use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
-use crate::Node;
+use crate::Host;
 
 use platform::reach::LIMIT;
 
-pub fn router(node: Node) -> axum::Router {
-    axum::Router::new().fallback(handle).with_state(node)
+pub fn router(host: Host) -> axum::Router {
+    axum::Router::new().fallback(handle).with_state(host)
 }
 
-async fn handle(State(node): State<Node>, req: Request) -> Response {
-    match out(node, req).await {
+async fn handle(State(host): State<Host>, req: Request) -> Response {
+    match out(host, req).await {
         Ok(resp) => resp,
         // A kind of error callers act on (`protocol::code`) goes on in a header, which an app's ctx.apps and ctx.services
         // calls throw with.
@@ -33,36 +33,36 @@ async fn handle(State(node): State<Node>, req: Request) -> Response {
     }
 }
 
-async fn out(node: Node, req: Request) -> Result<Response> {
+async fn out(host: Host, req: Request) -> Result<Response> {
     let (parts, body) = req.into_parts();
     let header = |name: &str| parts.headers.get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
-    let grant = header("x-one-call").and_then(|t| node.grant_of(&t));
+    let grant = header("x-one-call").and_then(|t| host.grant_of(&t));
     let authority = header("host").context("the request names no host")?;
-    let host = match authority.strip_prefix('[') {
+    let site = match authority.strip_prefix('[') {
         Some(v6) => v6.split(']').next().unwrap_or("").to_string(),
         None => authority.split(':').next().unwrap_or("").to_lowercase(),
     };
-    if host == "one.internal" {
+    if site == "one.internal" {
         let body = axum::body::to_bytes(body, LIMIT).await?;
-        return node.internal(&header("x-one-call").unwrap_or_default(), parts.uri.path(), body.to_vec()).await;
+        return host.internal(&header("x-one-call").unwrap_or_default(), parts.uri.path(), body.to_vec()).await;
     }
     let scheme = header("x-forwarded-proto").filter(|p| p == "https").unwrap_or_else(|| "http".into());
-    if vault_runtime::names_app(&node.rt(), &host) {
-        return Ok((StatusCode::FORBIDDEN, format!("{host} is an app's name, not a site's: an app reaches its own service with ctx.services, and other apps with ctx.apps")).into_response());
+    if vault_runtime::names_app(&host.rt(), &site) {
+        return Ok((StatusCode::FORBIDDEN, format!("{site} is an app's name, not a site's: an app reaches its own service with ctx.services, and other apps with ctx.apps")).into_response());
     }
     let target = written(parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
     let body = axum::body::to_bytes(body, LIMIT).await?.to_vec();
     // The call's items, opened only if the request has a placeholder, from the scopes it named, with their keys.
     let placed = target.contains("{{") || parts.headers.values().any(|v| v.as_bytes().windows(2).any(|w| w == b"{{")) || body.windows(2).any(|w| w == b"{{");
     let lookup = match &grant {
-        Some(g) if placed => Some(vault_runtime::lookup(&node.rt(), &g.caller, &g.app, &g.scopes).await?),
+        Some(g) if placed => Some(vault_runtime::lookup(&host.rt(), &g.caller, &g.app, &g.scopes).await?),
         _ => None,
     };
     let fill = |text: &str| -> Result<String> {
         match &lookup {
             Some(l) => {
                 l.refuse_shut(text)?;
-                ::vault::fill(text, &host, |name| l.get(name))
+                ::vault::fill(text, &site, |name| l.get(name))
             }
             None => Ok(text.to_string()),
         }
@@ -86,7 +86,7 @@ async fn out(node: Node, req: Request) -> Result<Response> {
         Err(e) => e.into_bytes(),
     };
     let method = parts.method.as_str().to_string();
-    let ports = node.own_ports();
+    let ports = host.own_ports();
     let (status, headers, bytes) = tokio::task::spawn_blocking(move || platform::reach::send(&method, &url, headers, body, ports)).await??;
     let mut out = Response::builder().status(status);
     for (name, value) in headers {

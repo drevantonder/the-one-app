@@ -13,7 +13,7 @@ use api_features::skills::Mode;
 /// kept between requests, since the next may reach another node: the session id carries only the client's name,
 /// credited on its calls.
 pub async fn http(
-    axum::extract::State(node): axum::extract::State<crate::Node>,
+    axum::extract::State(host): axum::extract::State<crate::Host>,
     client: Option<axum::Extension<crate::api::FromClient>>,
     peer: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
     headers: axum::http::HeaderMap,
@@ -22,7 +22,7 @@ pub async fn http(
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     let elsewhere = client.is_some() || headers.contains_key(axum::http::header::AUTHORIZATION);
-    let asks = Client::new(crate::api::InProcess::new(node, client.map(|c| c.0), peer.map(|p| p.0), &headers), elsewhere, ::api::Reader::Mcp.client());
+    let asks = Client::new(crate::api::InProcess::new(host, client.map(|c| c.0), peer.map(|p| p.0), &headers), elsewhere, ::api::Reader::Mcp.client());
     let agent = headers.get("mcp-session-id").and_then(|s| s.to_str().ok()).and_then(|s| s.split_once('.')).and_then(|(_, name)| data_encoding::BASE64URL_NOPAD.decode(name.as_bytes()).ok()).and_then(|n| String::from_utf8(n).ok());
     let Ok(msg) = serde_json::from_str::<Value>(&body) else {
         let error = json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "the body isn't JSON" } });

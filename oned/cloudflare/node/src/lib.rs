@@ -518,7 +518,7 @@ pub fn pin_root(root: &str) -> Result<(), JsError> {
 }
 
 /// `global`'s scope database's steps after `from` as the bucket holds them, sealed, for `user`, as a node on a machine
-/// gives them (`Node::global_steps`): `{ at, epoch, steps: [{ at, sealed }] }` (base64url), and for a device that starts
+/// gives them (`Host::global_steps`): `{ at, epoch, steps: [{ at, sealed }] }` (base64url), and for a device that starts
 /// from its `welcome` (`steps::Welcome`), its freeze's step and the copy before its step, `{ welcome, freeze, start }`.
 /// Fails before the log is frozen. The caller opens and checks them all itself: this trusts the node with nothing.
 #[wasm_bindgen]

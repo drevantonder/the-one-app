@@ -12,7 +12,7 @@ use tokio_stream::StreamExt;
 use ::custom_build::config::YOURS;
 use ::api::local::{from_this_machine, not_this_machine};
 use ::api::{Caller, Credential, Me, Who};
-use crate::Node;
+use crate::Host;
 
 use super::Routes;
 
@@ -23,20 +23,20 @@ use super::Routes;
 pub struct FromClient(pub key::Key, pub u64);
 
 /// `routes` as `Who` says each may be asked, with this machine's own programs asking any.
-pub fn guarded(routes: Routes, node: Node) -> Router {
+pub fn guarded(routes: Routes, host: Host) -> Router {
     let who: std::sync::Arc<std::collections::HashMap<String, Who>> = std::sync::Arc::new(routes.who.into_iter().collect());
     routes
         .router
-        .route_layer(axum::middleware::from_fn_with_state((node.clone(), who), only_this_machine))
+        .route_layer(axum::middleware::from_fn_with_state((host.clone(), who), only_this_machine))
         .layer(axum::middleware::map_response(sandboxed))
-        .layer(axum::middleware::from_fn_with_state(node.clone(), traced))
-        .with_state(node.rt())
+        .layer(axum::middleware::from_fn_with_state(host.clone(), traced))
+        .with_state(host.rt())
 }
 
 /// Every request is a trace, which a failure names to its caller. One that names the trace it's part of (W3C's
 /// `traceparent`) continues it. One that asks for a trace (`x-one-trace`, as `--trace` does) gets what it did
 /// here in the same header of its answer, as base64 of its JSON (`api::trace`).
-async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+async fn traced(State(host): State<Host>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     use ::api::trace;
     let asked = req.headers().contains_key(::custom_build::protocol::header::TRACE);
     let parent = req.headers().get(::custom_build::protocol::header::TRACEPARENT).and_then(|h| h.to_str().ok()).map(str::to_string);
@@ -45,13 +45,13 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
     let began = std::time::Instant::now();
     let mut resp = trace::within(Some(t.clone()), next.run(req)).await;
     if let (Some(failed), Some(route)) = (resp.extensions_mut().remove::<::api::RouteFailed>(), route) {
-        insights_runtime::finish_route_request(&node.rt(), &t, &route, began.elapsed(), &failed);
+        insights_runtime::finish_route_request(&host.rt(), &t, &route, began.elapsed(), &failed);
     }
     if !asked {
         return resp;
     }
-    let mut done = t.done(&node.device_name());
-    done["names"] = node.compute_names();
+    let mut done = t.done(&host.device_name());
+    done["names"] = host.compute_names();
     let done = data_encoding::BASE64.encode(done.to_string().as_bytes());
     if let Ok(value) = done.parse() {
         resp.headers_mut().insert(::custom_build::protocol::header::TRACE, value);
@@ -62,13 +62,13 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
 /// Only this machine's own programs (`from_this_machine`) drive its node: no web page, an app's screen this node served
 /// included, and no program in a VM or emulator here. A client device's request is someone's instead, for what its
 /// route's `Who` lets them ask.
-async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<std::collections::HashMap<String, Who>>)>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+async fn only_this_machine(State((host, routes)): State<(Host, std::sync::Arc<std::collections::HashMap<String, Who>>)>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
     let who = routes.get(path.as_str()).copied().unwrap_or(Who::ThisMachine);
     if let Some(FromClient(key, until)) = req.extensions().get::<FromClient>().copied() {
-        return from_client(&node, key, until, who, req, next).await;
+        return from_client(&host, key, until, who, req, next).await;
     }
-    if !from_this_machine(node.local_token(), &req) {
+    if !from_this_machine(host.local_token(), &req) {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine(), "code": ::custom_build::protocol::code::NOT_THIS_MACHINE }))).into_response()).await;
     }
     next.run(req).await
@@ -76,16 +76,16 @@ async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<st
 
 /// A client device's request over iroh is its user's, for what `Who::Clients` lets in: the device must still be one of the network's, and the keys it hands are for its key, kept no longer than
 /// `until`.
-async fn from_client(node: &Node, key: key::Key, until: u64, who: Who, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+async fn from_client(host: &Host, key: key::Key, until: u64, who: Who, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     if who != Who::Clients {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
-    let Some((user, name)) = node.client_now(&key).await else {
+    let Some((user, name)) = host.client_now(&key).await else {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is", "code": ::custom_build::protocol::code::NOT_LET_IN }))).into_response()).await;
     };
     let credential = Credential::Client(key);
     if let Some(handed) = req.headers().get(::custom_build::protocol::header::KEYS).and_then(|h| h.to_str().ok())
-        && let Err(err) = node.hand(&credential, &user, handed, until)
+        && let Err(err) = host.hand(&credential, &user, handed, until)
     {
         return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
     }

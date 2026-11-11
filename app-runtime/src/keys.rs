@@ -24,7 +24,7 @@ pub(super) enum Owing {
     Vault(Scope),
 }
 
-/// What `Node::start_owed_keys` knows between its looks.
+/// What `Host::start_owed_keys` knows between its looks.
 #[derive(Default)]
 pub(super) struct Owed {
     /// What owed new keys at the last look.
@@ -37,7 +37,7 @@ pub(super) struct Owed {
     unsealed: BTreeSet<(Owing, u32)>,
 }
 
-impl Node {
+impl Host {
     /// What's sealed of a scope's keys, for any user of the network, since it opens only with keys they may hold:
     /// with `to`, each of its epochs sealed to that endpoint, `{ epoch, sealed: { n: base64url } }`, `epoch` the newest
     /// made; with `app`, the app's key in each epoch, sealed under that epoch's, `{ sealed: { n: base64url } }`.
@@ -182,7 +182,7 @@ impl Node {
     }
 }
 
-impl Node {
+impl Host {
     /// Once the network's recovery key changed, an admin's device tells the relay to let the old one in no more and the
     /// new one in as a client: once each since this device started.
     pub(super) fn follow_recovery(&self) {
@@ -249,34 +249,34 @@ impl Node {
             (due, unsure)
         };
         if !unsure.is_empty() {
-            let node = self.clone();
+            let host = self.clone();
             tokio::spawn(async move {
-                let Ok(bucket) = node.bucket() else { return };
+                let Ok(bucket) = host.bucket() else { return };
                 let mut unsealed = BTreeSet::new();
                 for (owing, n) in unsure {
                     let name = match &owing {
-                        Owing::Epoch(s) => database::keys::epoch_name(&s.to_string(), n, &hex(&node.0.holds.device())),
-                        Owing::Vault(s) => database::keys::vault_key_name(&s.to_string(), n, &hex(&node.0.holds.device())),
+                        Owing::Epoch(s) => database::keys::epoch_name(&s.to_string(), n, &hex(&host.0.holds.device())),
+                        Owing::Vault(s) => database::keys::vault_key_name(&s.to_string(), n, &hex(&host.0.holds.device())),
                     };
                     match Bucket::get(&bucket, &name).await {
-                        Ok(Some(_)) => drop(node.0.owed.lock().unwrap().sealed.insert((owing, n))),
+                        Ok(Some(_)) => drop(host.0.owed.lock().unwrap().sealed.insert((owing, n))),
                         Ok(None) => drop(unsealed.insert((owing, n))),
                         Err(err) => tracing::debug!("looking in the bucket for {name}: {err:#}"),
                     }
                 }
-                node.0.owed.lock().unwrap().unsealed = unsealed;
+                host.0.owed.lock().unwrap().unsealed = unsealed;
             });
         }
         for owing in due {
-            let (node, vaults) = (self.clone(), vaults.clone());
+            let (host, vaults) = (self.clone(), vaults.clone());
             tokio::spawn(async move {
                 let made = match &owing {
-                    Owing::Epoch(scope) => match node.newest_epoch(scope).await {
-                        Ok(newest) => scope::settings::new_epoch(&node, scope, newest + 1, &[]).await,
+                    Owing::Epoch(scope) => match host.newest_epoch(scope).await {
+                        Ok(newest) => scope::settings::new_epoch(&host, scope, newest + 1, &[]).await,
                         Err(err) => Err(err),
                     },
                     Owing::Vault(scope) => match vaults.get(scope) {
-                        Some((n, to)) => scope::settings::new_vault_key(&node, scope, n + 1, to).await,
+                        Some((n, to)) => scope::settings::new_vault_key(&host, scope, n + 1, to).await,
                         None => Ok(()),
                     },
                 };
@@ -284,7 +284,7 @@ impl Node {
                     Ok(()) => tracing::info!("made {owing:?}'s new keys, which it owed"),
                     Err(err) => tracing::warn!("making {owing:?}'s new keys, which it owed: {err:#}"),
                 }
-                node.0.owed.lock().unwrap().starting.remove(&owing);
+                host.0.owed.lock().unwrap().starting.remove(&owing);
             });
         }
     }

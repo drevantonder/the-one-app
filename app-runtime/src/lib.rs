@@ -1,5 +1,5 @@
-//! A node: this device's network (a custom build holds one), its replica and views, its socket to the relay, and where
-//! calls run.
+//! The app runtime (`Host`): this device's network (a custom build holds one), its replica and views, its socket to the
+//! relay, and where calls run. What a feature's runtime half reaches of it is `api::AppRuntime` (`runtime.rs`).
 
 use custom_build::now_ms;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -94,7 +94,7 @@ const TICK: Duration = Duration::from_secs(10);
 /// How often a device reads what other devices wrote that no notice told it of, for a notice that was lost; and as it
 /// wakes from sleep, when it may have missed many.
 const REFILL: Duration = Duration::from_secs(120);
-/// How often a refill reads every scope from the bucket whatever the relay says moved (`Node::moved`), for a write it
+/// How often a refill reads every scope from the bucket whatever the relay says moved (`Host::moved`), for a write it
 /// wasn't told of.
 const WHOLE_REFILL: Duration = Duration::from_secs(1800);
 /// How old what the relay said of writes (`moved`) may be for a refill to go by it: two of its answers.
@@ -103,7 +103,7 @@ const MOVED_FRESH: Duration = Duration::from_secs(2 * 60);
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
 /// How often this device asks the relay which devices are on and when each was seen.
 const RELAY_EVERY: Duration = Duration::from_secs(60);
-/// How long what another device said of what it runs (`Node::ask_state`) stands before it's asked again.
+/// How long what another device said of what it runs (`Host::ask_state`) stands before it's asked again.
 const STATE_FRESH: Duration = Duration::from_secs(60);
 const REFETCH_AFTER: Duration = Duration::from_secs(30);
 
@@ -127,7 +127,7 @@ struct Network {
     /// When this device last asked or answered each other one.
     exchanged: HashMap<Key, Instant>,
     /// What each service of another device describes of itself, by its key, as that device's runtime last said when
-    /// asked (`Node::ask_state`).
+    /// asked (`Host::ask_state`).
     described: HashMap<Key, Value>,
     /// When each other runtime was last asked what its device runs.
     stated: HashMap<Key, Instant>,
@@ -246,7 +246,7 @@ pub struct Inner {
     /// The network's recovery keys this device told the relay about since it started: the old ones taken out, the
     /// current one let in as a client (`follow_recovery`).
     recovery_told: Mutex<std::collections::BTreeSet<Key>>,
-    /// When it last read `global` for a client device it didn't list (`Node::catch_up`).
+    /// When it last read `global` for a client device it didn't list (`Host::catch_up`).
     caught_up: tokio::sync::Mutex<Option<std::time::Instant>>,
     /// Where the network's data went: every bucket this device has used writes there, after a move (`Copied`).
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
@@ -259,7 +259,7 @@ pub struct Inner {
     /// The keys of the apps whose schedules this device runs for their users.
     app_schedules: app_schedules::State,
     owed: Mutex<keys::Owed>,
-    /// Apps' keys the bucket hadn't, by scope, app and epoch, as of who's who at that position (`Node::sealed_keys`).
+    /// Apps' keys the bucket hadn't, by scope, app and epoch, as of who's who at that position (`Host::sealed_keys`).
     no_app_keys: Mutex<HashMap<(Scope, String, u32), Option<u64>>>,
     issuer_keys: Mutex<settings::IssuerKeys>,
     net: net::Net,
@@ -278,9 +278,9 @@ pub struct Inner {
 }
 
 #[derive(Clone)]
-pub struct Node(Arc<Inner>);
+pub struct Host(Arc<Inner>);
 
-impl std::fmt::Debug for Node {
+impl std::fmt::Debug for Host {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Node({})", short(&self.0.id))
     }
@@ -290,7 +290,7 @@ impl std::fmt::Debug for Node {
 /// What a node stopping waits at most for its last insights to be written: they may be lost, and stopping may not wait.
 const LAST_SAY: Duration = Duration::from_secs(3);
 
-/// `<cli>-apps --listen=<address>`: this device's app runtime, an endpoint of its own key (`Node::runtime`), answering on
+/// `<cli>-apps --listen=<address>`: this device's app runtime, an endpoint of its own key (`Host::runtime`), answering on
 /// `address` only its device's own programs, with the token in its folder, and asking its device's key, held by the
 /// computer's onet at the API's address, for what that opens and signs. It runs its own watchdog.
 #[tokio::main]
@@ -305,58 +305,58 @@ pub async fn serve(listen: &str) -> Result<()> {
     // ends, which a stuck request would hold up. Its endpoint is closed, so other devices connect at once to the one
     // oned starts next.
     let stop = platform::os::stop_asked()?;
-    let (ready_node, node_ready) = tokio::sync::oneshot::channel::<Node>();
+    let (ready_host, host_ready) = tokio::sync::oneshot::channel::<Host>();
     tokio::spawn(async move {
         stop.await;
         ::insights::Ended::Signal.write(&platform::home());
-        if let Ok(Ok(node)) = tokio::time::timeout(LAST_SAY, node_ready).await {
-            let rt = node.rt();
-            let _ = tokio::time::timeout(LAST_SAY, async { tokio::join!(node.close_net(), insights_runtime::flush(&rt)) }).await;
+        if let Ok(Ok(host)) = tokio::time::timeout(LAST_SAY, host_ready).await {
+            let rt = host.rt();
+            let _ = tokio::time::timeout(LAST_SAY, async { tokio::join!(host.close_net(), insights_runtime::flush(&rt)) }).await;
         }
         crate::app::runtime::stop_all();
         std::process::exit(0)
     });
     let dir = platform::home();
     let token = ::api::local::local_token(&dir).with_context(|| format!("{} has no token for this device's own programs: its onet makes it as it starts", dir.display()))?;
-    let node = Node::runtime(&dir, Holder { at: ::api::local::addr(), token }).await?;
-    let _ = ready_node.send(node.clone());
+    let host = Host::runtime(&dir, Holder { at: ::api::local::addr(), token }).await?;
+    let _ = ready_host.send(host.clone());
     // This runtime starting, and why the last one ended: what it said when it stopped, or `abort` if it didn't (panics
     // abort, so a crash can't say), or `first` if there was none before it. An update's new one says so too.
     let last = ::insights::Ended::read(&dir);
-    insights_runtime::device_signal(&node.rt(), "node.start", ::insights::Attrs::default().reason(last.reason()), ::insights::Status::Unset);
+    insights_runtime::device_signal(&host.rt(), "node.start", ::insights::Attrs::default().reason(last.reason()), ::insights::Status::Unset);
     if last == ::insights::Ended::Update {
-        insights_runtime::device_signal(&node.rt(), "update.running", ::insights::Attrs::default().part(&::oned_update::latest::Thing::node_name(custom_build::config::TARGET)), ::insights::Status::Unset);
+        insights_runtime::device_signal(&host.rt(), "update.running", ::insights::Attrs::default().part(&::oned_update::latest::Thing::node_name(custom_build::config::TARGET)), ::insights::Status::Unset);
     }
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
-    tracing::info!("{} app runtime {} answering {listen} from {}", ::custom_build::config::NAME, ::key::short(&node.id()), dir.display());
-    tokio::spawn(crate::api::serve_guide(node.clone()));
+    tracing::info!("{} app runtime {} answering {listen} from {}", ::custom_build::config::NAME, ::key::short(&host.id()), dir.display());
+    tokio::spawn(crate::api::serve_guide(host.clone()));
     crate::watchdog::watch();
-    let served = ::api::serve(listener, crate::api::guarded(crate::api::routes(), node)).await;
+    let served = ::api::serve(listener, crate::api::guarded(crate::api::routes(), host)).await;
     crate::app::runtime::stop_all();
     Ok(served?)
 }
 
-impl Node {
+impl Host {
     /// Starts a node of the home `dir` that is its own device, holding the device's key: the tests' devices. A
     /// computer's is its app runtime (`runtime`), whose device is its onet.
-    pub async fn start(dir: &Path) -> Result<Node> {
+    pub async fn start(dir: &Path) -> Result<Host> {
         std::fs::create_dir_all(dir)?;
         let device = load_device(dir)?;
         let key = SigningKey::from(unhex(&device.secret)?);
-        Node::open(dir, key.clone(), device.name, load_local_token(dir)?, holds::Holds::Key(key)).await
+        Host::open(dir, key.clone(), device.name, load_local_token(dir)?, holds::Holds::Key(key)).await
     }
 
     /// Starts the app runtime of the device whose home is `dir`, an endpoint of its own key, listed as a compute
     /// naming the device: its key, and the token only its device's own programs ask it with, are in its folder
     /// (`runtime_folder`); what the device's key opens and signs, it asks `holder`. Its data is the device's home's.
-    pub async fn runtime(dir: &Path, holder: holds::Holder) -> Result<Node> {
+    pub async fn runtime(dir: &Path, holder: holds::Holder) -> Result<Host> {
         let folder = runtime_folder(dir);
         std::fs::create_dir_all(&folder)?;
         let holds = holds::Holds::asking(holder).await?;
-        Node::open(dir, load_runtime_key(&folder)?, hostname(), load_local_token(&folder)?, holds).await
+        Host::open(dir, load_runtime_key(&folder)?, hostname(), load_local_token(&folder)?, holds).await
     }
 
-    async fn open(dir: &Path, key: SigningKey, name: String, local_token: String, holds: holds::Holds) -> Result<Node> {
+    async fn open(dir: &Path, key: SigningKey, name: String, local_token: String, holds: holds::Holds) -> Result<Host> {
         let id = *key.verifying_key().as_bytes();
         let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let apps = Apps::start(dir.join(RUNTIME_DIR), outbound.local_addr()?.port()).await?;
@@ -366,7 +366,7 @@ impl Node {
             built_in.insert(app.to_string(), ::database::put_blob(dir, &built_in_bundle(files)?)?);
         }
         let (kept, starts) = runtime::Kept::of(runtime::features());
-        let node = Node(Arc::new(Inner {
+        let host = Host(Arc::new(Inner {
             dir: dir.to_path_buf(),
             local_token,
             holds,
@@ -411,20 +411,20 @@ impl Node {
             guide: Default::default(),
             kept,
         }));
-        let outbound_router = crate::app::outbound::router(node.clone());
+        let outbound_router = crate::app::outbound::router(host.clone());
         tokio::spawn(async move {
             if let Err(err) = axum::serve(outbound, outbound_router).await {
                 tracing::warn!("apps' outbound requests stopped: {err:#}");
             }
         });
         if dir.join(NETWORK_DIR).join(NETWORK_FILE).exists() {
-            node.take_network()?;
+            host.take_network()?;
         }
-        tokio::spawn(node.clone().pull_loop());
-        tokio::spawn(node.clone().invites_loop());
-        tokio::spawn(node.clone().tick_loop());
-        node.start_features(starts);
-        let worker = node.clone();
+        tokio::spawn(host.clone().pull_loop());
+        tokio::spawn(host.clone().invites_loop());
+        tokio::spawn(host.clone().tick_loop());
+        host.start_features(starts);
+        let worker = host.clone();
         tokio::spawn(async move {
             loop {
                 if let Err(err) = worker.settle().await {
@@ -437,7 +437,7 @@ impl Node {
                 }
             }
         });
-        Ok(node)
+        Ok(host)
     }
 
     pub fn id(&self) -> Key {
@@ -642,7 +642,7 @@ fn moved_since(was: &Value, now: &Value) -> HashSet<Scope> {
 }
 
 /// `global`'s state, as its scope database says it: each other scope's is its own database's
-/// (`Node::read_scope_steps_now`).
+/// (`Host::read_scope_steps_now`).
 fn update_views(i: &mut Network) -> Result<()> {
     if i.r.freeze().is_some() {
         i.views.insert("global".to_string(), i.r.db().state()?);
@@ -658,8 +658,8 @@ fn reachable(i: &Network, app: &str, user: &str) -> Result<Vec<Scope>> {
 }
 
 
-fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Result<Me> {
-    let name = if caller.key == node.0.id { node.device_name() } else { db.machine(&caller.key)?.map(|k| k.name).unwrap_or_default() };
+fn host_me(host: &Host, db: &ScopeDb, caller: &Caller) -> Result<Me> {
+    let name = if caller.key == host.0.id { host.device_name() } else { db.machine(&caller.key)?.map(|k| k.name).unwrap_or_default() };
     ::scope::state::me(db, &caller.user, hex(&caller.key), name, caller.agent.clone())
 }
 

@@ -1144,7 +1144,7 @@ const RELEASES_KEPT: i64 = 5;
 
 /// Forgets the builds that only releases older than their platform's (and service's) last `RELEASES_KEPT` name: no
 /// newer release names them, and no deploy's bundle is one. A forgotten blob goes from the bucket as any other does
-/// (`Node::take_forgotten`). As each step of `global` is applied, so a database whose release steps came before this
+/// (`Host::take_forgotten`). As each step of `global` is applied, so a database whose release steps came before this
 /// rule forgets them at its next step, where a node notes what it forgot.
 fn forget_old_releases(db: &Connection) -> Result<()> {
     let old = format!(

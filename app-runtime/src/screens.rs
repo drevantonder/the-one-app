@@ -4,9 +4,9 @@ use super::*;
 
 pub(crate) mod routes;
 
-impl Node {
+impl Host {
     pub(super) fn me_for(&self, caller: &Caller) -> Result<Me> {
-        self.with(|i| node_me(self, i.r.db(), caller))
+        self.with(|i| host_me(self, i.r.db(), caller))
     }
 
     /// The context a widget, hook or screen of `app` gets for `viewer`: every scope it may reach that's here.

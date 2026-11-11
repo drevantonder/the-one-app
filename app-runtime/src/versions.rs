@@ -18,13 +18,13 @@ use ::scope::scopes;
 use ::key::hex;
 use ::oned_update::latest::{Latest, Thing, wanted};
 
-use super::Node;
+use super::Host;
 use ::custom_build::now_ms;
 
 /// How the record names what a version is on.
 type Find = for<'a> fn(&'a Latest, &'a str) -> Option<&'a Thing>;
 
-impl Node {
+impl Host {
     /// What each device told the relay it's on: `{ key: { version, newest, behind } }`, and the Workers as `cloudflare`, with
     /// the version of the Cloudflare node (`node`) if there is one, and the name of the device they were last deployed from (`from`). `newest` is the build published for what it runs on,
     /// from the signed record, which a browser can't read for itself (a redirect to the bucket). The Workers are behind

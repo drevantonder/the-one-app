@@ -22,7 +22,7 @@ fn storage_setting(m: &ScopeDb) -> Result<Option<BTreeMap<String, String>>> {
     Ok(Some(fields))
 }
 
-impl Node {
+impl Host {
     /// Where this device keeps the network's data, as a user sees it.
     pub fn storage(&self) -> Result<Value> {
         self.with(|i| {
@@ -38,11 +38,11 @@ impl Node {
     /// network's address, signing with this device's key.
     /// A device that joined keeps the address it joined at with them (`address`), until it has read the network's.
     pub(super) fn network_place(&self, fields: &BTreeMap<String, String>) -> Result<Place> {
-        let node = Arc::downgrade(&self.0);
+        let host = Arc::downgrade(&self.0);
         let joined = fields.get("address").cloned();
         let address: bucket::Address = Arc::new(move || {
-            let node = Node(node.upgrade().context("this device stopped")?);
-            node.with(|i| Ok(i.r.db().setting("address")?))?.or_else(|| joined.clone()).with_context(|| format!("{YOURS} has no address yet, where its bucket is reached: an admin sets one with cloudflare use"))
+            let host = Host(host.upgrade().context("this device stopped")?);
+            host.with(|i| Ok(i.r.db().setting("address")?))?.or_else(|| joined.clone()).with_context(|| format!("{YOURS} has no address yet, where its bucket is reached: an admin sets one with cloudflare use"))
         });
         Place::network(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
     }
@@ -86,12 +86,12 @@ impl Node {
         if std::mem::replace(&mut *self.0.moving.lock().unwrap(), true) {
             return;
         }
-        let node = self.clone();
+        let host = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = node.move_to(fields).await {
+            if let Err(err) = host.move_to(fields).await {
                 tracing::warn!("moving the network's data: {err:#}");
             }
-            *node.0.moving.lock().unwrap() = false;
+            *host.0.moving.lock().unwrap() = false;
         });
     }
 

@@ -8,7 +8,7 @@ use ::scope::steps;
 use ::custom_build::protocol::{Coded, code};
 use ::api::runtime::Happened;
 
-impl Node {
+impl Host {
     /// Whether this device has read who's who: `global`'s freeze, and the steps after it.
     pub fn frozen(&self) -> bool {
         self.with(|i| Ok(i.r.freeze().is_some())).unwrap_or(false)
@@ -308,7 +308,7 @@ impl Node {
     }
 }
 
-impl Node {
+impl Host {
     pub async fn append(&self, scope: &Scope, content: Content) -> Result<()> {
         let user = self.user()?;
         self.append_as(scope, &user, content).await

@@ -92,7 +92,7 @@ fn started() {
 }
 
 /// Holds a grant for as long as its call runs.
-pub(super) struct Granted(Node, String);
+pub(super) struct Granted(Host, String);
 
 impl Drop for Granted {
     fn drop(&mut self) {
@@ -195,7 +195,7 @@ fn device_limit(device: &Key) -> String {
 }
 
 
-impl Node {
+impl Host {
     /// Runs a tool for this device's local user: here, or on the nearest device that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
         self.call_as(req, self.caller()?).await
@@ -536,8 +536,8 @@ impl Node {
         let why = match (r["name"].as_str(), r["online"] == true, r["problem"].as_str()) {
             _ if runs.is_empty() => "it runs on none".to_string(),
             (None, ..) => "its device was removed".to_string(),
-            (Some(node), false, _) => ::api::cli::off(node, r["seen"].as_u64()),
-            (Some(node), true, problem) => format!("on {node}, {}", problem.unwrap_or("it isn't running")),
+            (Some(host), false, _) => ::api::cli::off(host, r["seen"].as_u64()),
+            (Some(host), true, problem) => format!("on {host}, {}", problem.unwrap_or("it isn't running")),
         };
         Some(format!("{title} needs a device that's on: {why}. Turn it on, or move it with apps_move {app} <node> (apps_devices {app} lists them)."))
     }
@@ -940,9 +940,9 @@ impl Node {
             writing.store(true, Ordering::Relaxed);
             trace::stage(::api::traceparent::stage::WRITE);
             let writing_at = Instant::now();
-            let (node, app, scopes, me) = (self.clone(), req.app.clone(), scopes.clone(), me.clone());
+            let (host, app, scopes, me) = (self.clone(), req.app.clone(), scopes.clone(), me.clone());
             let traced = trace::current();
-            tokio::spawn(trace::within(traced, async move { node.write_prepared(&app, prepared, &scopes, &me).await })).await??;
+            tokio::spawn(trace::within(traced, async move { host.write_prepared(&app, prepared, &scopes, &me).await })).await??;
             trace::note(json!({ "step": "write" }), writing_at.elapsed());
             anyhow::Ok(outcome)
         })
@@ -1011,11 +1011,11 @@ fn call_scopes(i: &Network, req: &CallRequest, user: &str) -> Result<Vec<Scope>>
 }
 
 /// Checks a call may run here, and makes its context; or says why it should run elsewhere.
-fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
+fn prepare(host: &Host, i: &Network, req: &CallRequest, me: &Caller, title: &str) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
     let m = i.r.db();
-    let here = node.0.id;
+    let here = host.0.id;
     if !m.serves(&here, &me.user)? {
-        return Ok(Err(format!("{} doesn't serve you", node.device_name())));
+        return Ok(Err(format!("{} doesn't serve you", host.device_name())));
     }
     let reach = reachable(i, &req.app, &me.user)?;
     let scopes: Vec<Scope> = match &req.scopes {
@@ -1036,7 +1036,7 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string())?)));
     }
-    let ctx = Context { me: node_me(node, m, me)?, now: now_ms(), scopes: handles(m, &scopes, &me.user)?, read_only: false, token: String::new(), from: None, address: address(m)?, handles: m.handles()?, labs: ::labs::on_keys(&m.settings()?) };
+    let ctx = Context { me: host_me(host, m, me)?, now: now_ms(), scopes: handles(m, &scopes, &me.user)?, read_only: false, token: String::new(), from: None, address: address(m)?, handles: m.handles()?, labs: ::labs::on_keys(&m.settings()?) };
     Ok(Ok((ctx, scopes)))
 }
 

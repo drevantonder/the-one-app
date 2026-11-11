@@ -10,7 +10,7 @@ use crate::api::Routes;
 use ::api::Body;
 use ::api::Reply;
 use ::api::Who;
-use crate::Node;
+use crate::Host;
 
 pub fn routes() -> Routes {
     Routes::default()
@@ -24,13 +24,13 @@ struct PutRequest {
     path: String,
 }
 
-async fn put(State(node): State<Node>, Body(req): Body<PutRequest>) -> Reply {
-    let (sha256, size) = node.publish_file(std::path::Path::new(&req.path)).await?;
+async fn put(State(host): State<Host>, Body(req): Body<PutRequest>) -> Reply {
+    let (sha256, size) = host.publish_file(std::path::Path::new(&req.path)).await?;
     Ok(Json(json!({ "sha256": sha256, "size": size })))
 }
 
-async fn latest(State(node): State<Node>) -> Reply {
-    let record = node.latest_record().await?;
+async fn latest(State(host): State<Host>) -> Reply {
+    let record = host.latest_record().await?;
     Ok(Json(json!({ "text": record.as_ref().map(|(t, _)| t), "tag": record.as_ref().map(|(_, t)| t) })))
 }
 
@@ -42,6 +42,6 @@ struct ReplaceRequest {
     tag: Option<String>,
 }
 
-async fn replace(State(node): State<Node>, Body(req): Body<ReplaceRequest>) -> Reply {
-    Ok(Json(json!({ "replaced": node.replace_latest(&req.text, req.tag.as_deref()).await? })))
+async fn replace(State(host): State<Host>, Body(req): Body<ReplaceRequest>) -> Reply {
+    Ok(Json(json!({ "replaced": host.replace_latest(&req.text, req.tag.as_deref()).await? })))
 }

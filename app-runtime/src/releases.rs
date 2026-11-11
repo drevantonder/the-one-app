@@ -19,7 +19,7 @@ const KEPT_PUBLISHES: usize = 5;
 /// them, and another may publish meanwhile.
 const UPLOADING: u64 = 60 * 60 * 1000;
 
-impl Node {
+impl Host {
     /// Reads the record at the network's address now and then, for what's published for this platform and its
     /// services, and keeps the network's address in its home for `one update`, which can read nothing else.
     pub(super) async fn pull_loop(self) {

@@ -15,7 +15,7 @@ const ISSUER_KEYS_FOR: Duration = Duration::from_secs(3600);
 /// Each issuer's keys, by where they're published, and when they were fetched.
 pub(super) type IssuerKeys = HashMap<String, (Value, Instant)>;
 
-impl key::Signs for Node {
+impl key::Signs for Host {
     fn public(&self) -> [u8; 32] {
         key::Signs::public(&self.0.holds)
     }
@@ -25,13 +25,13 @@ impl key::Signs for Node {
     }
 }
 
-impl Me for Node {
+impl Me for Host {
     fn who<R>(&self, f: impl FnOnce(&ScopeDb) -> Result<R>) -> Result<R> {
         self.with(|i| f(i.r.db()))
     }
 
     fn user(&self) -> Result<String> {
-        Node::user(self)
+        Host::user(self)
     }
 
     fn seal(&self) -> [u8; 32] {
@@ -73,7 +73,7 @@ impl Me for Node {
     }
 
     fn address(&self) -> Option<String> {
-        Node::address(self).ok()
+        Host::address(self).ok()
     }
 
     async fn ask(&self, method: &str, url: &str, header: Option<(&str, String)>, body: Option<Value>) -> Result<(u16, Value)> {
@@ -154,7 +154,7 @@ pub(crate) fn routes() -> crate::api::Routes {
     let mut routes = crate::api::Routes::default();
     for (method, path) in ::scope::settings::on_a_node() {
         let filter = axum::routing::MethodFilter::try_from(axum::http::Method::from_bytes(method.as_bytes()).expect("a method")).expect("a method");
-        let answer = move |axum::extract::State(node): axum::extract::State<Node>, body: axum::body::Bytes| async move { node.answer_as_mine(method, path, &body).await };
+        let answer = move |axum::extract::State(host): axum::extract::State<Host>, body: axum::body::Bytes| async move { host.answer_as_mine(method, path, &body).await };
         routes = routes.route(path, ::api::Who::ThisMachine, axum::routing::on(filter, answer));
     }
     use ::api::Who;
@@ -178,10 +178,10 @@ mod own {
     use ::api::{Body, Me, Reply, done, given};
     use ::devices::says::{ApproveWithRecovery, Pair, ReplaceRecovery, SealRecovery, recovery_key};
 
-    use crate::Node;
+    use crate::Host;
 
-    pub async fn pair(State(node): State<Node>, me: Me, Body(body): Body<Pair>) -> Reply {
-        let (code, user) = node.pair_as(&me.caller, body.user.as_deref())?;
+    pub async fn pair(State(host): State<Host>, me: Me, Body(body): Body<Pair>) -> Reply {
+        let (code, user) = host.pair_as(&me.caller, body.user.as_deref())?;
         Ok(Json(json!({ "code": code, "user": user })))
     }
 
@@ -193,27 +193,27 @@ mod own {
         name: String,
     }
 
-    pub async fn name(State(node): State<Node>, Body(body): Body<Name>) -> Reply {
-        node.rename_device(given(&body.name, "name")?).await?;
+    pub async fn name(State(host): State<Host>, Body(body): Body<Name>) -> Reply {
+        host.rename_device(given(&body.name, "name")?).await?;
         done()
     }
 
-    pub async fn approve_with_recovery(State(node): State<Node>, Body(body): Body<ApproveWithRecovery>) -> Reply {
+    pub async fn approve_with_recovery(State(host): State<Host>, Body(body): Body<ApproveWithRecovery>) -> Reply {
         let key = recovery_key(&body.recovery, "a recovery key")?;
-        Ok(Json(::scope::settings::recovery::approve(&node, given(&body.code, "code")?, &key, body.confirm).await?))
+        Ok(Json(::scope::settings::recovery::approve(&host, given(&body.code, "code")?, &key, body.confirm).await?))
     }
 
-    pub async fn replace_recovery(State(node): State<Node>, Body(body): Body<ReplaceRecovery>) -> Reply {
-        Ok(Json(::scope::settings::recovery::replace(&node, &recovery_key(&body.recovery, "a recovery key")?, &recovery_key(&body.next, "the next recovery key")?, body.confirm).await?))
+    pub async fn replace_recovery(State(host): State<Host>, Body(body): Body<ReplaceRecovery>) -> Reply {
+        Ok(Json(::scope::settings::recovery::replace(&host, &recovery_key(&body.recovery, "a recovery key")?, &recovery_key(&body.next, "the next recovery key")?, body.confirm).await?))
     }
 
-    pub async fn seal_recovery(State(node): State<Node>, Body(body): Body<SealRecovery>) -> Reply {
-        ::scope::settings::recovery::seal(&node, given(&body.to, "to")?, given(&body.copy, "copy")?).await?;
+    pub async fn seal_recovery(State(host): State<Host>, Body(body): Body<SealRecovery>) -> Reply {
+        ::scope::settings::recovery::seal(&host, given(&body.to, "to")?, given(&body.copy, "copy")?).await?;
         done()
     }
 }
 
-impl Node {
+impl Host {
     /// What this machine's own programs ask of who can do what, answered as its own device (`settings::answer`).
     pub(crate) async fn answer_as_mine(&self, method: &str, path: &str, body: &[u8]) -> ::api::Reply {
         let answered = ::scope::settings::answer(self, method, path, body).await.with_context(|| format!("{path} isn't one this device answers"))?;
@@ -225,14 +225,14 @@ impl Node {
     pub(super) fn settle_own(&self) {
         let Ok(me) = self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.filter(|c| c.user == i.user).map(|c| c.user))) else { return };
         let Some(me) = me else { return };
-        let node = self.clone();
+        let host = self.clone();
         tokio::spawn(async move {
             let settled = async {
                 let own = Scope::User(me);
-                if node.with(|i| i.r.db().epoch(&own))? == 0 {
-                    node.epoch_keys(&own, true).await?;
+                if host.with(|i| i.r.db().epoch(&own))? == 0 {
+                    host.epoch_keys(&own, true).await?;
                 }
-                ::scope::settings::settle_own(&node, None, None).await
+                ::scope::settings::settle_own(&host, None, None).await
             };
             if let Err(err) = settled.await {
                 tracing::warn!("settling this user's own things: {err:#}");
@@ -246,7 +246,7 @@ impl Node {
         loop {
             tokio::time::sleep(INVITES_EVERY).await;
             let client = self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.is_some_and(|c| c.user == i.user)));
-            if !client.unwrap_or(false) || Node::address(&self).is_err() || !::scope::settings::invite_open(&self).await {
+            if !client.unwrap_or(false) || Host::address(&self).is_err() || !::scope::settings::invite_open(&self).await {
                 continue;
             }
             if let Err(err) = ::scope::settings::requests(&self).await {

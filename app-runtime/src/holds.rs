@@ -69,12 +69,12 @@ impl Holds {
 
     /// Writes `content` as the device's next step in `global`, as `user`, its user: signed by its key, by `node` or
     /// by its holder, which writes it there and from which `node` then reads it.
-    pub(super) async fn write_global(&self, node: &Node, user: &str, content: Content) -> Result<()> {
+    pub(super) async fn write_global(&self, host: &Host, user: &str, content: Content) -> Result<()> {
         match self {
-            Holds::Key(key) => node.write_step_as(key, user, content).await.map(drop),
+            Holds::Key(key) => host.write_step_as(key, user, content).await.map(drop),
             Holds::Asks { holder, .. } => {
                 holder.ask("POST", "/api/holds/write", Some(json!({ "user": user, "content": content }))).await?;
-                node.read_steps_now().await.map(drop)
+                host.read_steps_now().await.map(drop)
             }
         }
     }
@@ -189,8 +189,8 @@ pub(crate) fn routes() -> Routes {
 }
 
 /// The device's key and seal key.
-async fn held(State(node): State<Node>) -> Reply {
-    let holds = &node.0.holds;
+async fn held(State(host): State<Host>) -> Reply {
+    let holds = &host.0.holds;
     Ok(axum::Json(json!({ "key": hex(&holds.device()), "seal": hex(&key::Opens::public(holds)) })))
 }
 
@@ -203,9 +203,9 @@ pub struct HeldShare {
 }
 
 /// The X25519 secret the device's seal key shares with `share`: what opens something sealed to the device.
-async fn shared(State(node): State<Node>, Body(body): Body<HeldShare>) -> Reply {
+async fn shared(State(host): State<Host>, Body(body): Body<HeldShare>) -> Reply {
     let share = <[u8; 32]>::try_from(B64U.decode(body.share.as_bytes()).map_err(anyhow::Error::from)?).map_err(|_| anyhow!("a share is 32 bytes"))?;
-    let shared = key::Opens::shared(&node.0.holds, &share).await?;
+    let shared = key::Opens::shared(&host.0.holds, &share).await?;
     Ok(axum::Json(json!({ "shared": B64U.encode(&shared) })))
 }
 
@@ -218,11 +218,11 @@ pub struct HeldWrite {
 }
 
 /// Writes a step of `global` as the device, for its user alone.
-async fn write(State(node): State<Node>, Body(body): Body<HeldWrite>) -> Reply {
-    if body.user != node.user()? {
+async fn write(State(host): State<Host>, Body(body): Body<HeldWrite>) -> Reply {
+    if body.user != host.user()? {
         return Err(anyhow!("the device writes in global only as its own user").into());
     }
-    node.write_step(&body.user, body.content).await?;
+    host.write_step(&body.user, body.content).await?;
     Ok(axum::Json(json!({})))
 }
 
@@ -235,8 +235,8 @@ pub struct HeldSign {
 }
 
 /// Signs a request to the relay or auth as the device (`sign_request`).
-async fn sign(State(node): State<Node>, Body(body): Body<HeldSign>) -> Reply {
-    let Holds::Key(key) = &node.0.holds else { return Err(anyhow!("this node doesn't hold its device's key").into()) };
+async fn sign(State(host): State<Host>, Body(body): Body<HeldSign>) -> Reply {
+    let Holds::Key(key) = &host.0.holds else { return Err(anyhow!("this node doesn't hold its device's key").into()) };
     let signature = sign_request(key, &B64U.decode(body.bytes.as_bytes()).map_err(anyhow::Error::from)?)?;
     Ok(axum::Json(json!({ "signature": B64U.encode(&signature) })))
 }

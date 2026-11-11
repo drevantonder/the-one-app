@@ -86,7 +86,7 @@ fn oldest_idle(busy: impl Iterator<Item = usize>) -> Option<usize> {
 }
 
 /// A client's connection in `Net::clients`, taken out once it's done with.
-struct Held(Node, Key, Connection);
+struct Held(Host, Key, Connection);
 
 impl Drop for Held {
     fn drop(&mut self) {
@@ -137,7 +137,7 @@ pub fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)
     Ok((url, config.into()))
 }
 
-impl Node {
+impl Host {
     /// Keeps this device's endpoint, once it's a device of a network with an address.
     pub(super) fn follow_net(&self) {
         self.tell_removed();
@@ -192,14 +192,14 @@ impl Node {
             *self.0.net.endpoint.lock().unwrap() = Some((address.clone(), endpoint.clone()));
             tracing::info!("this device is reached through the relay at {address}");
             while let Some(incoming) = endpoint.accept().await {
-                let node = self.clone();
+                let host = self.clone();
                 tokio::spawn(async move {
                     let conn = match incoming.accept() {
                         Ok(accepting) => accepting.await,
                         Err(err) => return tracing::debug!("a connection that didn't open: {err:#}"),
                     };
                     match conn {
-                        Ok(conn) => node.take_conn(conn).await,
+                        Ok(conn) => host.take_conn(conn).await,
                         Err(err) => tracing::debug!("a connection that didn't open: {err:#}"),
                     }
                 });
@@ -256,7 +256,7 @@ impl Node {
             if !self.is_device(&remote) {
                 return conn.close(1u32.into(), b"not a device of this network");
             }
-            let node = self.clone();
+            let host = self.clone();
             let streaming = self.streaming(&remote);
             tokio::spawn(async move {
                 let _streaming = streaming;
@@ -264,13 +264,13 @@ impl Node {
                     Ok(msg) => msg,
                     Err(err) => return tracing::debug!("what {} sent: {err:#}", short(&remote)),
                 };
-                node.with_or(None, |i| Ok(i.exchanged.insert(remote, Instant::now())));
+                host.with_or(None, |i| Ok(i.exchanged.insert(remote, Instant::now())));
                 let mut answer = match msg["kind"].as_str() {
                     Some(M::ASK) => {
                         let asked = msg["body"]["trace"] == true;
                         let t = trace::Trace::continuing(asked, msg["body"]["traceparent"].as_str());
                         let (taken, mut told) = tokio::sync::oneshot::channel();
-                        let call = super::calls::telling(taken, trace::within(Some(t.clone()), node.accept_call(remote, &msg["body"]["call"])));
+                        let call = super::calls::telling(taken, trace::within(Some(t.clone()), host.accept_call(remote, &msg["body"]["call"])));
                         tokio::pin!(call);
                         // The answer starts with whether the call started here (`TAKEN`), as soon as it has.
                         let (reply, said) = tokio::select! {
@@ -290,22 +290,22 @@ impl Node {
                         }
                         let mut answer = reply.json();
                         if asked {
-                            answer["trace"] = t.done(&node.device_name());
+                            answer["trace"] = t.done(&host.device_name());
                         }
                         answer
                     }
-                    Some(M::STATE) => node.state_asked(),
+                    Some(M::STATE) => host.state_asked(),
                     Some(M::CHANGED) => {
-                        node.changed_from(&msg["body"]);
+                        host.changed_from(&msg["body"]);
                         Value::Null
                     }
-                    Some(M::SERVICE) => node.carry(&msg["body"]).await,
+                    Some(M::SERVICE) => host.carry(&msg["body"]).await,
                     _ => json!({ "error": "that isn't something devices ask each other" }),
                 };
                 // Every answer says how loaded this device is, for the asker's routing: no device says so unasked.
                 if let Value::Object(said) = &mut answer {
                     said.insert("load".into(), json!(::devices::load::current()));
-                    said.insert("updating".into(), json!(node.updating()));
+                    said.insert("updating".into(), json!(host.updating()));
                 }
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
                     tracing::debug!("answering {}: {err:#}", short(&remote));
@@ -320,14 +320,14 @@ impl Node {
             if !self.is_cloudflare_node(&remote) {
                 return conn.close(1u32.into(), b"not this network's Cloudflare node");
             }
-            let node = self.clone();
+            let host = self.clone();
             tokio::spawn(async move {
                 let msg: Value = match recv.read_to_end(MESSAGE_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
                     Ok(msg) => msg,
                     Err(err) => return tracing::debug!("what the Cloudflare node sent: {err:#}"),
                 };
                 let answer = match msg["kind"].as_str() {
-                    Some(M::ASK) => crate::api::call_from_cloudflare_node(&node, remote, msg["body"]["call"].clone()).await,
+                    Some(M::ASK) => crate::api::call_from_cloudflare_node(&host, remote, msg["body"]["call"].clone()).await,
                     _ => json!({ "error": "the Cloudflare node only asks for calls" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
@@ -380,18 +380,18 @@ impl Node {
         // The certificate checked last, and the session it vouched for: one check a connection, unless it's renewed.
         let vouched: Arc<Mutex<Option<(String, key::Session)>>> = Arc::default();
         if !listed {
-            let (node, waiting, shown, found) = (self.clone(), conn.clone(), vouched.clone(), found.clone());
+            let (host, waiting, shown, found) = (self.clone(), conn.clone(), vouched.clone(), found.clone());
             tokio::spawn(async move {
                 tokio::time::sleep(UNLISTED_WITHIN).await;
-                node.0.net.unlisted.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                host.0.net.unlisted.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 if shown.lock().unwrap().is_none() && !found.load(std::sync::atomic::Ordering::SeqCst) {
                     waiting.close(1u32.into(), b"not a device of this network");
                 }
             });
         }
-        let (node, closing) = (self.clone(), conn.clone());
+        let (host, closing) = (self.clone(), conn.clone());
         let api = crate::api::router(self.clone()).layer(axum::middleware::from_fn(move |mut req: axum::extract::Request, next: axum::middleware::Next| {
-            let (node, closing, vouched, found) = (node.clone(), closing.clone(), vouched.clone(), found.clone());
+            let (host, closing, vouched, found) = (host.clone(), closing.clone(), vouched.clone(), found.clone());
             async move {
                 // Who asks is the key the connection proved, or the device that vouched for it, and nothing it says of itself.
                 for header in [axum::http::header::AUTHORIZATION.as_str(), ::custom_build::protocol::header::LOCAL_TOKEN] {
@@ -400,17 +400,17 @@ impl Node {
                 let certificate = req.headers_mut().remove(::custom_build::protocol::header::ENDPOINT);
                 let who = if listed || found.load(std::sync::atomic::Ordering::SeqCst) {
                     Ok((remote, u64::MAX))
-                } else if certificate.is_none() && node.client_now(&remote).await.is_some() {
+                } else if certificate.is_none() && host.client_now(&remote).await.is_some() {
                     // A device approved on another, which this one hadn't read yet: it's who its connection proves.
                     found.store(true, std::sync::atomic::Ordering::SeqCst);
                     Ok((remote, u64::MAX))
                 } else {
                     let shown = certificate.as_ref().and_then(|c| c.to_str().ok());
                     // Its device may be one approved on another, which this one hadn't read yet.
-                    match node.vouched(&remote, shown, &vouched) {
+                    match host.vouched(&remote, shown, &vouched) {
                         Err(_) if shown.is_some() => {
-                            node.catch_up().await;
-                            node.vouched(&remote, shown, &vouched)
+                            host.catch_up().await;
+                            host.vouched(&remote, shown, &vouched)
                         }
                         who => who,
                     }
@@ -419,7 +419,7 @@ impl Node {
                     Ok((key, until)) => {
                         req.extensions_mut().insert(crate::api::FromClient(key, until));
                         // What it sends is read in a while and up to a size, but a file's and an app's own requests',
-                        // which stream to disk within their user's room (`Node::put_blob_from`).
+                        // which stream to disk within their user's room (`Host::put_blob_from`).
                         let path = req.uri().path();
                         if !(path == "/api/blobs" || path.starts_with("/api/blobs/") || crate::api::app_route(path)) {
                             let (parts, body) = req.into_parts();
@@ -642,8 +642,8 @@ impl Node {
         trace::note(json!({ "step": "connect", "to": short(to) }), connecting.elapsed());
         *held = Some(conn.clone());
         // The other end asks on it too, once it keeps it for its asks (take_conn).
-        let (node, to, serving) = (self.clone(), *to, conn.clone());
-        tokio::spawn(async move { node.serve_device(to, serving).await });
+        let (host, to, serving) = (self.clone(), *to, conn.clone());
+        tokio::spawn(async move { host.serve_device(to, serving).await });
         self.caught_up();
         Ok(conn)
     }
@@ -706,8 +706,8 @@ impl Node {
     /// Fills this device's copy of each database it has open from the bucket now: a connection to another device just
     /// opened, and what it said while there was none was lost.
     fn caught_up(&self) {
-        let node = self.clone();
-        tokio::spawn(async move { node.fill_copies(None).await });
+        let host = self.clone();
+        tokio::spawn(async move { host.fill_copies(None).await });
     }
 
     /// A stream of its own to `to`, on the connection open or, if that one's gone, a new one, with `kind`'s message
@@ -799,12 +799,12 @@ impl Node {
         let mut changed = changed.clone();
         changed["sent"] = json!(now_ms());
         for device in to.iter().copied() {
-            let (node, body) = (self.clone(), changed.clone());
+            let (host, body) = (self.clone(), changed.clone());
             tokio::spawn(async move {
                 // Answered, so one lost on a connection that died unseen is sent again on a new one.
-                if let Err(err) = node.send(&device, M::CHANGED, &body, true, CHANGED_WAIT).await {
-                    node.drop_conn(&device);
-                    if let Err(err) = node.send(&device, M::CHANGED, &body, true, CHANGED_WAIT).await {
+                if let Err(err) = host.send(&device, M::CHANGED, &body, true, CHANGED_WAIT).await {
+                    host.drop_conn(&device);
+                    if let Err(err) = host.send(&device, M::CHANGED, &body, true, CHANGED_WAIT).await {
                         tracing::debug!("telling {}: {err:#}", short(&device));
                     }
                     tracing::debug!("telling {}, tried again: {err:#}", short(&device));
@@ -873,7 +873,7 @@ impl Node {
         let Some(address) = self.with_or(None, |i| Ok(i.r.db().setting("address")?)) else { return };
         let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());
         let url = format!("{}/relay/computes", address.trim_end_matches('/'));
-        let node = self.clone();
+        let host = self.clone();
         // What a device is on is its device's to say: an app runtime of its own key is on its device's build.
         let mut asked = json!({ "computes": true, "reads": ::custom_build::protocol::READS });
         if matches!(self.0.holds, holds::Holds::Key(_)) {
@@ -884,12 +884,12 @@ impl Node {
             let said = match post_relay(url, body).await {
                 Ok((200, said)) => said,
                 // Too old to be told anything else, it can still be asked to update.
-                Ok((426, said)) => return node.heard_ask(&said["asked"]),
+                Ok((426, said)) => return host.heard_ask(&said["asked"]),
                 Ok((code, _)) => return tracing::debug!("reading who's connected: the relay answered {code}"),
                 Err(err) => return tracing::debug!("reading who's connected: {err:#}"),
             };
-            node.heard_ask(&said["asked"]);
-            node.with_or((), |i| {
+            host.heard_ask(&said["asked"]);
+            host.with_or((), |i| {
                 i.versions = said["versions"].clone();
                 i.workers = said["workers"].clone();
                 i.moved = said["moved"].is_object().then(|| (Instant::now(), said["moved"].clone()));
@@ -897,16 +897,16 @@ impl Node {
             });
             let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| key::unhex(k.as_str()?).ok()).collect();
             let seen: HashMap<Key, u64> = said["seen"].as_object().into_iter().flatten().filter_map(|(k, at)| Some((key::unhex(k).ok()?, at.as_u64()?))).collect();
-            let was = node.with_or(None, |i| {
+            let was = host.with_or(None, |i| {
                 i.last_seen = seen;
                 let was = std::mem::replace(&mut i.connected, connected.clone());
                 Ok((was != connected).then_some(was))
             });
             if let Some(was) = was {
                 // One whose socket opened again since is tried again at once.
-                node.0.net.down.lock().unwrap().retain(|k, _| was.contains(k) || !connected.contains(k));
-                insights_runtime::relay_says(&node.rt(), &was, &connected);
-                node.emit(Event::Devices);
+                host.0.net.down.lock().unwrap().retain(|k, _| was.contains(k) || !connected.contains(k));
+                insights_runtime::relay_says(&host.rt(), &was, &connected);
+                host.emit(Event::Devices);
             }
         });
     }
@@ -918,13 +918,13 @@ impl Node {
         let Some(address) = self.with_or(None, |i| Ok(i.r.db().setting("address")?)) else {
             return tracing::debug!("telling the relay: {YOURS} has no address yet");
         };
-        let node = self.clone();
+        let host = self.clone();
         let url = format!("{}/relay/tell", address.trim_end_matches('/'));
         tokio::spawn(async move {
             let mut wait = Duration::from_secs(1);
             for _ in 0..5 {
                 let at = key::next_at(now_ms());
-                let body = match key::signed_request_by(&node.0.holds, ::custom_build::protocol::RELAY, fields.clone(), at).await {
+                let body = match key::signed_request_by(&host.0.holds, ::custom_build::protocol::RELAY, fields.clone(), at).await {
                     Ok(body) => body,
                     Err(err) => return tracing::debug!("telling the relay: {err:#}"),
                 };
@@ -1016,7 +1016,7 @@ impl tokio::io::AsyncWrite for Stream {
 
 /// Posts to the relay: → what it answered. A slow relay gives up before the next ask.
 /// A stream open on the connection to a device, for `close_idle`.
-struct Streaming(Node, Key);
+struct Streaming(Host, Key);
 
 impl Drop for Streaming {
     fn drop(&mut self) {
