@@ -414,7 +414,9 @@ export default {
           const reads = await latest(b, id);
           for (const p of reads) {
             if (p.session_used == null && p.weekly_used == null) continue;
-            const account = reads.length > 1 && p.account ? p.account.split(" · ")[0] : "";
+            // Several accounts: each by its organisation, or by its email where another shares that organisation.
+            const org = (r) => (r.account || "").split(" · ")[0];
+            const account = reads.length < 2 || !p.account ? "" : reads.filter((r) => org(r) === org(p)).length > 1 ? p.account.split(" · ").at(-1) : org(p);
             plans.push({ name: [PROVIDERS[id].title, account].filter(Boolean).join(" · "), mark: markOf(id).image, session: p.session_used, week: p.weekly_used, sessionResets: p.session_resets, weekResets: p.weekly_resets });
           }
         }
