@@ -322,17 +322,8 @@ fn vapid_key() -> String {
 /// Keeps `value` in a new item of 1Password's `vault`, titled `title`, handed to `op` on its standard input so no
 /// command line shows it: → the item's id.
 fn in_1password(vault: &str, title: &str, value: &str) -> Result<String> {
-    use std::io::Write;
     let template = json!({ "title": title, "category": "PASSWORD", "fields": [{ "id": "password", "type": "CONCEALED", "purpose": "PASSWORD", "label": "password", "value": value }] });
-    let mut op = std::process::Command::new("op")
-        .args(["item", "create", "--vault", vault, "--format", "json", "-"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .context("the Workers' other secrets are in 1Password, and op (1Password's CLI) isn't here to keep this one there")?;
-    op.stdin.take().unwrap().write_all(template.to_string().as_bytes())?;
-    let out = op.wait_with_output()?;
+    let out = op(&["item", "create", "--vault", vault, "--format", "json", "-"], Some(&template.to_string()))?;
     ensure!(out.status.success(), "1Password didn't keep it: {}", String::from_utf8_lossy(&out.stderr).trim());
     let item: Value = serde_json::from_slice(&out.stdout).context("op said something other than the item it made")?;
     Ok(item["id"].as_str().context("op didn't say the item's id")?.to_string())
@@ -414,10 +405,30 @@ fn item_title() -> String {
     format!("{} Cloudflare settings", custom_build::config::NAME)
 }
 
+/// The name 1Password's CLI, and Varlock through it, read a service account's token from.
+const SIGN_IN: &str = "OP_SERVICE_ACCOUNT_TOKEN";
+
+/// Where this device keeps the 1Password service account it last deployed with.
+fn kept_sign_in(home: &Path) -> PathBuf {
+    Settings::path_in(home).with_file_name(".1password")
+}
+
+/// `command` signed in to 1Password as this device deploys: with the service account this process was given, else the
+/// one this device kept from its last deploy, so a deploy an admin asks of it (`devices::asked`), which this device's
+/// One App starts with no person's sign-in, reads the Workers' settings as that deploy did.
+fn signed_in(mut command: std::process::Command) -> std::process::Command {
+    if std::env::var_os(SIGN_IN).is_none()
+        && let Ok(token) = std::fs::read_to_string(kept_sign_in(&platform::home()))
+    {
+        command.env(SIGN_IN, token.trim());
+    }
+    command
+}
+
 /// `op` with `args`, and `input` on its standard input.
 fn op(args: &[&str], input: Option<&str>) -> Result<std::process::Output> {
     use std::io::Write;
-    let mut child = std::process::Command::new("op")
+    let mut child = signed_in(std::process::Command::new("op"))
         .args(args)
         .stdin(if input.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stdout(std::process::Stdio::piped())
@@ -467,7 +478,7 @@ impl Settings {
         settings.dir = home.to_path_buf();
         let dir = path.parent().unwrap();
         std::fs::write(dir.join(".env.schema"), schema(&settings))?;
-        let out = std::process::Command::new(varlock()?)
+        let out = signed_in(std::process::Command::new(varlock()?))
             .args(["load", "--format", "json"])
             .current_dir(dir)
             .env("VARLOCK_TELEMETRY_DISABLED", "true")
@@ -518,7 +529,8 @@ impl Settings {
 
     /// Writes this machine's `settings.json` and `.env.local` from the 1Password item they're kept in, where a real
     /// network's are: unless the settings here are ones that aren't (a throwaway network's, or Workers tried here), or
-    /// `new` ones are to be made. A failure says why, and leaves the files here as they were.
+    /// `new` ones are to be made. A failure says why, and leaves the files here as they were. The service account this
+    /// process was given that reads them is kept, for this device to deploy with when asked (`signed_in`).
     pub fn from_1password(new: bool) -> Result<()> {
         let path = Settings::path();
         let env = std::fs::read_to_string(local(&platform::home())).unwrap_or_default();
@@ -528,10 +540,13 @@ impl Settings {
         let title = item_title();
         // A service account finds an item only in a vault it's told, so each it may read is asked.
         let vaults = op(&["vault", "list", "--format", "json"], None)?;
-        ensure!(vaults.status.success(), "op can't list 1Password's vaults ({}): sign this device in to 1Password with the service account that holds {title} (OP_SERVICE_ACCOUNT_TOKEN)", String::from_utf8_lossy(&vaults.stderr).trim());
+        ensure!(vaults.status.success(), "op can't list 1Password's vaults ({}): deploy once on this device with {SIGN_IN} set to the service account that holds {title}, which it keeps to deploy with when an admin presses Update", String::from_utf8_lossy(&vaults.stderr).trim());
         let vaults: Vec<Value> = serde_json::from_slice(&vaults.stdout).context("op said something other than its vaults")?;
         let found = vaults.iter().filter_map(|v| v["id"].as_str()).find_map(|vault| op(&["item", "get", &title, "--vault", vault, "--format", "json"], None).ok().filter(|o| o.status.success()));
-        let out = found.with_context(|| format!("1Password has no item {title} in a vault this device's sign-in reads: sign it in with the service account that holds it (OP_SERVICE_ACCOUNT_TOKEN), or deploy once from a device whose Cloudflare settings are here, which keeps them there"))?;
+        let out = found.with_context(|| format!("1Password has no item {title} in a vault this device's sign-in reads: deploy with {SIGN_IN} set to the service account that holds it, or once from a device whose Cloudflare settings are here, which keeps them there"))?;
+        if let Ok(token) = std::env::var(SIGN_IN) {
+            write_private(&kept_sign_in(&platform::home()), &token)?;
+        }
         let item: Value = serde_json::from_slice(&out.stdout).context("op said something other than the item")?;
         let (settings, env) = files_of(&item).with_context(|| format!("{title} in 1Password isn't the Workers' settings: it needs its fields settings and env, as a deploy keeps them"))?;
         write_private(&path, &settings)?;
