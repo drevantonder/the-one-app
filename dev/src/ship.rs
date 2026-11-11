@@ -46,6 +46,7 @@ pub fn commands() -> api::cli::Command {
             form("ship [<commit>] [--timeout <9m>]", "send out what's tested, as a plain update does, press Update for every device online that's behind but the Macs, and return when every one runs it, or say which doesn't and why; run again to wait on".into()),
             form("unfinished [--here]", "the changes from the last day that aren't yet tested, sent, running everywhere and seen, or with --here only those this checkout made, and what each needs next".into()),
             form("release <vX.Y.Z>", "publish main's tip's build on GitHub for the installer, with the Linux app and the app a Mac published for it".into()),
+            form("publish-mac <host>:<folder> [--config <commit>]", format!("publish from here, with the release key, what native-apps/mac/build.sh made on the Mac <host> (ssh) in <folder>, as {CLI} publish-mac there does: for a Mac whose own app runtime the network no longer answers, being behind what it reads")),
             form("web bundle [--out <folder>]", "write this build's web client as a bundle for the native apps, ready to sign".into()),
             form("status --until <commit> [--device <name>[,<name>…]] [--timeout <9m>]", "press Update for every device online now but the Macs, or those named, that's behind what's published for it, and wait until each runs that commit, or a later build, and its services answer, or a build fails; names offline devices and how far behind they are without waiting for them, and fails unless all it waited for made it".into()),
         ],
@@ -76,12 +77,26 @@ pub fn commands() -> api::cli::Command {
                 }
                 ["release", tag] => github_release(tag)?,
                 ["status"] if g.has("until") => wait(g)?,
+                ["publish-mac", from] => {
+                    g.takes_only(&["config"])?;
+                    publish_mac_from(from, g.flag("config").unwrap_or("-"))?
+                }
                 ["web", "bundle"] => println!("{}", web_bundle(Path::new(g.flag("out").unwrap_or(".")))?.display()),
                 _ => return Ok(false),
             }
             Ok(true)
         },
     }
+}
+
+/// `publish-mac <host>:<folder>`: what a Mac built, published from this device.
+fn publish_mac_from(from: &str, config: &str) -> Result<()> {
+    let (host, folder) = from.split_once(':').with_context(|| format!("give the Mac and the folder its build is in, as <host>:<folder>, not {from}"))?;
+    let here = cache().join("mac-publish");
+    let version = build::mac_build_from(host, folder, &here)?;
+    publish::publish_latest(&crate::loopback(), &release_key()?, &publish::mac_things(&here, &version, config)?)?;
+    println!("Published {} for {}: every Mac takes it with {CLI} update.", version.commit, version.target);
+    Ok(())
 }
 
 /// Builds `at` in this device's own clean checkout: → the folder keeping what it made, which `update` and `release`

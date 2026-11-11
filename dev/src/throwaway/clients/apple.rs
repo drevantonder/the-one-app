@@ -136,12 +136,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Set
 /// sets up its computer from, the helper apps its oned runs, and the window, which `update` takes.
 fn publish_mac(dir: &Path, host: &str, folder: &str) -> Result<()> {
     let here = dir.join("mac-publish");
-    let _ = std::fs::remove_dir_all(&here);
-    std::fs::create_dir_all(&here)?;
-    let copied = std::process::Command::new("sh").arg("-c").arg(format!("ssh -o BatchMode=yes {host} 'tar -c -C {} .' | tar -x -C {}", shell_quote(folder), shell_quote(&here.to_string_lossy()))).status()?;
-    anyhow::ensure!(copied.success(), "couldn't copy what {host} built for the throwaway network to publish");
-    let said = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", host, &format!("{}/{CLI} version --json", shell_quote(folder))]).output()?;
-    let version: oned_update::release::Version = serde_json::from_slice(&said.stdout).with_context(|| format!("ask what {host} built what it is"))?;
+    let version = crate::build::mac_build_from(host, folder, &here)?;
     let addr = std::fs::read_to_string(dir.join("addr"))?;
     let things = oned::publish::mac_things(&here, &version, "-")?;
     oned::publish::publish_latest(&crate::throwaway::loopback_at(dir, addr.trim()), &platform::mode::Throwaway::own_release_key(dir)?, &things)?;

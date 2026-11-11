@@ -26,6 +26,7 @@ pub(crate) mod sign_in;
 
 pub use network::loopback;
 pub(crate) use network::loopback_at;
+pub(crate) use devices::shell_quote;
 use network::{older_build, no_client_running, running, start, stop, stop_some};
 
 fn is_checkout(top: &Path) -> bool {

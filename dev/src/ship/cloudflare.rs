@@ -12,7 +12,7 @@ pub(super) fn deploy_cloudflare(build: Option<&str>) -> Result<()> {
         wait_until(build, &[here], Duration::from_secs(600))?;
     }
     println!("  deploying to Cloudflare from this device");
-    let program = platform::mode::here().bin().join(CLI);
+    let program = crate::program()?;
     let out = Command::new(&program).args(["cloudflare", "deploy"]).output().with_context(|| format!("run {}", program.display()))?;
     let (said, err) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     ensure!(out.status.success(), "it isn't deployed to Cloudflare:\n{said}{}", err.trim());

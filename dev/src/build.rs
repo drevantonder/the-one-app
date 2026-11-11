@@ -142,3 +142,15 @@ mod tests {
         }
     }
 }
+
+/// What `native-apps/mac/build.sh` made on the Mac `host` in `folder`, copied into `here` (emptied first), and what it is,
+/// as its program says: for publishing from this device what a Mac built.
+pub fn mac_build_from(host: &str, folder: &str, here: &Path) -> Result<oned_update::release::Version> {
+    use crate::throwaway::shell_quote;
+    let _ = std::fs::remove_dir_all(here);
+    std::fs::create_dir_all(here)?;
+    let copied = Command::new("sh").arg("-c").arg(format!("ssh -o BatchMode=yes {host} 'tar -c -C {} .' | tar -x -C {}", shell_quote(folder), shell_quote(&here.to_string_lossy()))).status()?;
+    anyhow::ensure!(copied.success(), "couldn't copy what {host} built from {folder}");
+    let said = Command::new("ssh").args(["-o", "BatchMode=yes", host, &format!("{}/{} version --json", shell_quote(folder), ::custom_build::config::CLI)]).output()?;
+    serde_json::from_slice(&said.stdout).with_context(|| format!("ask what {host} built what it is"))
+}

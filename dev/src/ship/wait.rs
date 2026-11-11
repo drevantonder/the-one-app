@@ -214,7 +214,7 @@ pub(super) fn wait_for(commit: &str, wanted: &[Value], named: bool, limit: Durat
 
 /// Has this device take the newest build published for it: `{CLI} update`, as Update does. Nothing takes one by itself.
 pub(super) fn update_here() -> Result<()> {
-    show(Command::new(CLI).arg("update"))
+    show(Command::new(crate::program()?).arg("update"))
 }
 
 /// Presses Update, as Settings › Devices does, for each of `devices` online that's behind what's published for it, but
