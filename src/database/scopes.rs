@@ -199,6 +199,11 @@ impl ScopeDb {
         self.machine(key).ok().flatten().and_then(|m| m.runtime_of()).unwrap_or(*key)
     }
 
+    /// `device`'s own app runtime, if one is listed.
+    pub fn runtime_for(&self, device: &Key) -> Result<Option<Key>> {
+        Ok(self.computes()?.into_iter().find(|c| c.runtime_of() == Some(*device)).map(|c| c.key))
+    }
+
     /// The devices with an app runtime of their own listed.
     fn with_runtimes(&self) -> Result<BTreeSet<Key>> {
         Ok(self.machines()?.into_iter().filter(|m| !m.removed).filter_map(|m| m.runtime_of()).collect())
@@ -647,7 +652,7 @@ impl ScopeDb {
         self.listed(Kind::Compute)
     }
 
-    /// The service endpoints offering `name`.
+    /// The services offering `name`.
     pub fn offering(&self, name: &str) -> Result<Vec<Machine>> {
         Ok(self.listed(Kind::Service)?.into_iter().filter(|m| m.service.as_deref() == Some(name)).collect())
     }
@@ -1012,8 +1017,8 @@ pub struct User {
     pub removed: bool,
 }
 
-/// What an endpoint does: a client is what a user and their agents use, and signs for them; compute runs apps'
-/// calls; a service offers a device's abilities.
+/// What a key who's who lists does: a client is what a user and their agents use, and signs for them; compute runs
+/// apps' calls; a service offers a device's abilities.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -1023,8 +1028,9 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// Every role, as the relay lists them (`protocol::javascript`'s `ROLES`).
-    pub const ALL: [Kind; 3] = [Kind::Client, Kind::Compute, Kind::Service];
+    /// The roles the relay lets in (`protocol::javascript`'s `ROLES`): a service isn't on it, as its device's runtime
+    /// carries its asks.
+    pub const ON_THE_RELAY: [Kind; 2] = [Kind::Client, Kind::Compute];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -1061,9 +1067,9 @@ pub struct Machine {
     pub passkey: Option<String>,
     /// What a client said it's built for (GLOSSARY's platform), once it has: `rules::PLATFORMS`.
     pub platform: Option<String>,
-    /// For a service endpoint, the service it offers (`whatsapp`): what calls naming it reach.
+    /// For a service, the service it offers (`whatsapp`): what calls naming it reach.
     pub service: Option<String>,
-    /// For a service endpoint, whether it serves everyone its user's listing lets it (a push sender, say), not only
+    /// For a service, whether it serves everyone its user's listing lets it (a push sender, say), not only
     /// its own user.
     pub shared: bool,
     /// The device it's part of, when it's one's: for a service, its device's oned; for a native app's sign-in, the

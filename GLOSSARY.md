@@ -53,11 +53,11 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   that user's scopes with what the device's key opens. A phone is a device and not a node; the Cloudflare node is a node and
   not a device; a computer can be both. Avoid "node" for the app runtime. Avoid: serverless node.
 - **Platform**: what a client or oned is built for: Mac, Windows, Linux, iPhone, Android, a browser, Cloudflare.
-- **Endpoint**: an iroh identity, of its own key. Each client, node and service is one; the relay lets in only the
-  network's.
-- **Network message**: what one node tells another directly over iroh: `hello` (its load, every so often; from a
-  computer's onet, what its services are doing) and `changed` (that something changed). A nudge, never trusted for
-  what's true, which the bucket says.
+- **Endpoint**: an iroh identity, of its own key. Each client and node is one; the relay lets in only the network's.
+- **Network message**: what one node tells another directly over iroh: `hello` (its load, and what its services
+  describe of themselves, every so often; from a computer's onet, what its services are doing), `changed` (that
+  something changed), and an ask of a service, which its device's runtime carries to it sealed. A nudge, never trusted
+  for what's true, which the bucket says.
 - **Agent device**: a machine agents use (Linux with a browser, Windows, Android, an iPhone), which the Agent Devices
   service runs on a user's node. It is not in the network: it has no key there, and is reached only through that
   service.
@@ -71,7 +71,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   apps has them. Avoid: worker, connector, operation (for a tool).
 - **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
   linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,
-  as its own process, an endpoint of its own key. Adding WhatsApp asks which of your nodes runs its service. A service
+  as its own process, of its own key, reached only through its device's app runtime, which carries its calls sealed and
+  signed and can't read them. Adding WhatsApp asks which of your nodes runs its service. A service
   exposes **functions** (`ctx.services.whatsapp.send(…)`), and is its app's alone: only that app calls them, and other
   apps call that app's tools. Built-in apps' services ship with each release. Avoid: part, native component, device
   service; operation, for a function.

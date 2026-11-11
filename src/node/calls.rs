@@ -536,18 +536,20 @@ impl Node {
         // A function of a service that's about its own machine (`prefer: { run: "here" }`: Shell's run, Models' here) runs on
         // the caller's first.
         let about_here = |d: &Value| d["prefer"][req.runs()] == "here";
-        // This device: its node, or a part of it (a service endpoint of oned's own).
+        // This device: its node, or a part of it.
         let ours = |i: &Network, k: &Key| -> Result<bool> { Ok(*k == self.0.id || i.r.db().machine(k)?.is_some_and(|m| m.device == Some(self.0.holds.device()))) };
-        let here_first = req.service.is_some()
-            && self.with(|i| {
-                let mut part = false;
-                for (k, p) in i.peers.iter() {
-                    if ours(i, k)? && i.heard(k) && p.services.iter().any(|d| d.0 == req.app && about_here(&d.2)) {
-                        part = true;
-                    }
-                }
-                Ok(part)
-            })?;
+        // Each service up that serves the caller, by its key, with whether it's about its own machine.
+        let services: Vec<(Key, bool)> = match req.service {
+            Some(_) => self.with(|i| Ok(self.services_up(i)?.into_iter().filter(|(_, d)| d.0 == req.app && d.1.contains(&me.user)).map(|(s, d)| (s.key, about_here(&d.2))).collect()))?,
+            None => Vec::new(),
+        };
+        let here_first = self.with(|i| {
+            let mut part = false;
+            for (k, about) in &services {
+                part |= *about && ours(i, k)?;
+            }
+            Ok(part)
+        })?;
         self.with(|i| {
             let m = i.r.db();
             let mut devices: Vec<Key> = if req.service.is_none() {
@@ -560,11 +562,11 @@ impl Node {
                 }
                 on
             } else {
-                i.peers.iter().filter(|(k, _)| i.heard(k)).filter(|(_, s)| s.services.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect()
+                services.iter().map(|(k, _)| *k).collect()
             };
             let set = rank::set(&i.r.db().settings()?);
             let here_load = crate::load::current();
-            // A service with an endpoint of its own is where its device is.
+            // A service is where its device is.
             let mut at = BTreeMap::new();
             for k in &devices {
                 at.insert(*k, i.r.db().service(k)?.and_then(|s| s.device).unwrap_or_else(|| i.r.db().device_of(k)));
@@ -573,11 +575,18 @@ impl Node {
             for k in &devices {
                 ours_now.insert(*k, ours(i, k)?);
             }
+            // A service's load and distance are its device's runtime's, which carries its asks.
+            let mut via = BTreeMap::new();
+            for k in &devices {
+                let runtime = if req.service.is_some() && *k != self.0.id { i.r.db().runtime_for(&at[k])? } else { None };
+                via.insert(*k, runtime.unwrap_or(*k));
+            }
             let rank = |k: &Key| {
-                let here = *k == self.0.id;
-                let load = if here { Some(&here_load) } else { i.peers.get(k).and_then(|p| p.load.as_ref()) };
-                let far = !here && i.far.get(k).is_some_and(|d| *d > FAR);
-                (!here && !i.heard(k), here_first && !ours_now[k], load.is_some_and(full), far, rank::priority(&set, &hex(&at[k])), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
+                let via = via[k];
+                let here = via == self.0.id;
+                let load = if here { Some(&here_load) } else { i.peers.get(&via).and_then(|p| p.load.as_ref()) };
+                let far = !here && i.far.get(&via).is_some_and(|d| *d > FAR);
+                (!here && !i.heard(&via), here_first && !ours_now[k], load.is_some_and(full), far, rank::priority(&set, &hex(&at[k])), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
             };
             devices.sort_by_cached_key(rank);
             Ok(devices)
@@ -635,13 +644,16 @@ impl Node {
         if !carried.is_empty() {
             request["blobs"] = Value::Object(carried);
         }
-        // A service endpoint fills in nothing itself: an app's call to it is filled here, as one run here is.
+        // A service fills in nothing itself: an app's call to it is filled here, as one run here is.
         let used = match service {
             true => self.fill_for_service(&resolved.app, &mut request["input"], me, req.from.as_deref()).await?,
             false => Vec::new(),
         };
         let hop = Instant::now();
-        let asked = self.ask(device, request, limit + Duration::from_secs(5)).await;
+        let asked = match service {
+            true => self.ask_service(device, request, limit + Duration::from_secs(5)).await,
+            false => self.ask(device, request, limit + Duration::from_secs(5)).await,
+        };
         if service {
             self.finish_hop(&resolved, me, device, hop.elapsed(), &asked);
         }
@@ -649,7 +661,7 @@ impl Node {
         if let Some(ok) = reply.get_mut("ok") {
             crate::vault::blot(ok, &used);
         }
-        // What a service endpoint kept for the call (on its device's oned), its caller's own scope keeps, as for one
+        // What a service kept for the call (on its device's oned), its caller's own scope keeps, as for one
         // run here.
         let kept: Vec<String> = match service {
             true => reply.get_mut("blobs").map(Value::take).and_then(|b| serde_json::from_value(b).ok()).unwrap_or_default(),

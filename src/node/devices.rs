@@ -252,9 +252,8 @@ impl Node {
     }
 
     /// Lists one of this device's parts, the service `service`, as its user's, a part of this device (oned turned it
-    /// on, and it asked with its endpoint), and tells the relay to let it in. It holds no
-    /// keys: the nodes that call it bring it the network's entries, which say who may. A part listed before it named its
-    /// device is listed again, naming it.
+    /// on, and it asked with its key and seal key). It holds no keys: it reads who's who from this device's runtime,
+    /// which says who may ask it. A part listed before it named its device is listed again, naming it.
     pub async fn list_part(&self, endpoint: &crate::keys::Endpoint, service: &str) -> Result<()> {
         let user = self.user()?;
         let caller = Caller::own(self.0.id, user.clone());
@@ -263,27 +262,10 @@ impl Node {
             ensure!(db.service(&endpoint.key)?.is_some() || db.machine_ever(&endpoint.key)?.is_none(), "that key is listed already, and not as a service");
             Ok(db.service(&endpoint.key)?.map(|s| s.device == Some(self.0.holds.device())))
         })?;
-        if listed.is_none() {
-            // Told first: a service the relay won't let in is never reached.
-            if let Err(err) = crate::settings::tell(self, self, json!({ "add": hex(&endpoint.key), "admin": false, "role": "service" })).await {
-                ensure!(crate::protocol::Coded::of(&err).as_deref() == Some(crate::protocol::code::ALREADY), "{YOURS}'s relay won't let {service} in: {err:#}");
-            }
-        }
         if listed != Some(true) {
             let name = self.device_name();
-            self.member_content(&caller, content::service_endpoint(endpoint, &user, &name, service, &self.0.holds.device())).await?;
+            self.member_content(&caller, content::listed_service(endpoint, &user, &name, service, &self.0.holds.device())).await?;
         }
-        // Its first hello brings it the entries that say it's theirs: as soon as the relay lets it in.
-        let (node, key) = (self.clone(), endpoint.key);
-        tokio::spawn(async move {
-            for _ in 0..20 {
-                if node.hello_service_now(&key).await {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-            tracing::warn!("service {} was listed but this device hasn't reached it", crate::keys::short(&key));
-        });
         Ok(())
     }
 

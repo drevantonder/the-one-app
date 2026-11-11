@@ -75,19 +75,17 @@ pub mod path {
     }
 }
 
-/// The kinds of message devices send each other over iroh, as `{ kind, body }`: a node's with another, with a service's
-/// endpoint, and what a client or the Cloudflare node asks of a node.
+/// The kinds of message devices send each other over iroh, as `{ kind, body }`: a node's with another, and what a
+/// client or the Cloudflare node asks of a node.
 pub mod message {
     /// A call to run (`{ call }`), or a user's request to join a network (`{ join }`).
     pub const ASK: &str = "ask";
     /// What a device says of itself to another, which answers what it needs to know of it.
     pub const HELLO: &str = "hello";
-    /// The scope database's steps, sent to a service's endpoint that is behind.
-    pub const STEPS: &str = "steps";
     /// An app's data changed, which the other devices pass on to their screens.
     pub const CHANGED: &str = "changed";
-    /// What a service's endpoint has to say to its own node for insights: its program starting and stopping, and OTLP.
-    pub const INSIGHTS: &str = "insights";
+    /// An ask of a service of the device's, sealed to it, which its runtime carries to it unread (`services::carried`).
+    pub const SERVICE: &str = "service";
 }
 
 /// What a database keeps in the bucket beside its steps (`<prefix>/<n>`): the newest step's hint, where its steps
@@ -321,7 +319,7 @@ pub fn javascript() -> String {
         most_needed = crate::keys::MOST_NEEDED,
         behind = json!(crate::keys::BEHIND),
         iroh = json!(IROH_PATHS.iter().copied().collect::<std::collections::BTreeMap<_, _>>()),
-        roles = json!(crate::database::scopes::Kind::ALL.map(crate::database::scopes::Kind::as_str)),
+        roles = json!(crate::database::scopes::Kind::ON_THE_RELAY.map(crate::database::scopes::Kind::as_str)),
         newest = json!(NEWEST),
         updates = json!(UPDATES),
         tidied = json!(TIDIED),

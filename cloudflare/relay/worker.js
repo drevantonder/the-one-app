@@ -8,7 +8,7 @@
 // frames. It's blind: what endpoints send each other is QUIC, sealed end to end, so it can only drop it.
 //
 // It admits only the network's endpoints, on its one list of them: `{ by, admin, role }` per key, `by` the key that let
-// it in, `role` what it is (`client`, `compute` or `service`, or a machine's several, with spaces). The network's first
+// it in, `role` what it is (`client` or `compute`, or a machine's both, with spaces). The network's first
 // devices, and its recovery key as a client, are put in when the network is made (`DEVICES`, `{ key, role, admin }`
 // each, from the Workers' deploy, taken only while the list is empty, which it never is again: the last admin can't
 // be taken out); after that,
@@ -47,7 +47,7 @@
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
 // shared/crypto.js, domain `one/relay`, each `(by, at)` taken once) with one of:
 // - `{ add, role, admin?, recovery? }`: a key (hex) to let in, and what it is, by any key on the list (who's who, which
-//   every reader checks, is the real gate on what a compute or a service may do), and an admin only by an admin's or the
+//   every reader checks, is the real gate on what a compute may do), and an admin only by an admin's or the
 //   recovery key (`by` is "recovery"; a new one is named so by an admin's, `recovery`); one already in is changed only by
 //   those, keeping who let it in. A device with an app runtime of its own drops compute from itself the same way, naming
 //   itself with the role client and `admin` as it is, and stays what it was otherwise.
@@ -764,6 +764,8 @@ export class List extends DurableObject {
     for (const { key, recovery } of devices) {
       if (recovery === true && isKey(key)) this.sql.exec("UPDATE keys SET by = 'recovery' WHERE key = ?", key);
     }
+    // Services were let in before their runtime carried their asks: they're on it no more.
+    this.sql.exec("DELETE FROM keys WHERE ' ' || role || ' ' LIKE '% service %'");
   }
 
   now() {

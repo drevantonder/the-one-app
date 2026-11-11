@@ -479,7 +479,7 @@ fn pages(m: &ScopeDb, user: &str, arrangements: &BTreeMap<String, Value>) -> Res
 fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &Here) -> Result<Network> {
     let set = rank::set(&m.settings()?);
     let switches = m.switches()?;
-    // Only devices: a service with an endpoint of its own is part of one, and its device says it runs it.
+    // Only devices: a service is part of one, and its device says it runs it.
     let mut devices: Vec<Device> = Vec::new();
     for s in m.machines()?.iter().filter(|s| !s.removed && s.is(Kind::Compute)) {
         let mut now = (here.device_now)(s)?;

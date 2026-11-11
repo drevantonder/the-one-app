@@ -1,29 +1,29 @@
-//! A service endpoint: a device's abilities (a service) offered over iroh, as a part of its device's oned, a process of
-//! its own (`oned <name>`). It's an endpoint of its own key, kept in its folder, and gets in when its device's oned lists
-//! it as its user's, a part of that device (`Node::list_part`), which tells the relay to let it in. It holds no keys
-//! and reads no bucket: the nodes that call it bring it `global`'s scope database's steps, from the first freeze naming
-//! the network's root (which oned gives it, so nothing on the way can make it another network's), from which it works out who's who and
-//! checks each caller by itself: a compute endpoint of the network that runs the calls of a user it serves. The program offering it, its
-//! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
-//! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its user's runs (`/api/call` on the loopback).
+//! A service's part: a device's abilities (a service) offered to the network, as a part of its device's oned, a process
+//! of its own (`oned <name>`). It has a key of its own, kept in its folder, which its device's oned lists as its user's,
+//! a part of that device (`Node::list_part`); it binds no endpoint of its own, and is reached only through its device's
+//! app runtime, which carries what it's asked sealed and signed (`carried`): it registers there over the loopback and
+//! long-polls for asks (`keep_socket`). It holds no keys and reads no bucket: it reads `global`'s scope database's steps
+//! from its runtime, from the first freeze naming the network's root (which oned gives it, so nothing on the way can
+//! make it another network's), from which it works out who's who and checks each asker by itself: a compute of the
+//! network that runs the calls of a user it serves. The program offering it, its app's own (`oned::program`), which this
+//! starts, registers over a loopback with the services' API and long-polls for calls, in its sandbox (`sandbox`),
+//! reaching out only through this part's proxy. A service writes nothing itself: what it asks for is a call, which its
+//! runtime runs (`/api/call` on the loopback).
 
 use crate::protocol::allowed;
 use crate::config::YOURS;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use axum::extract::{Path as UrlPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use ed25519_dalek::SigningKey;
-use iroh::endpoint::{Connection, QuicTransportConfig};
-use iroh::{Endpoint, EndpointAddr, PublicKey, RelayMode, SecretKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -31,21 +31,8 @@ use serde_json::{Value, json};
 use crate::keys::{Hash, Key, hex, short, unhex};
 use crate::database::scopes::{self, ScopeDb};
 use crate::database::steps::{Reader, Truth};
+use crate::services::carried;
 use crate::services::{Registry, Services, refused};
-
-/// The most an ask or its answer may carry, as between nodes.
-const MESSAGE_LIMIT: usize = 64 << 20;
-/// The most a computer this service doesn't know of yet may send it: `global`'s steps.
-const STRANGER_LIMIT: usize = 16 << 20;
-/// How many messages a computer this service doesn't know of may send on a connection: a hello, `global`'s steps, and
-/// a last hello.
-const STRANGER_MESSAGES: usize = 3;
-/// How many computers it doesn't know of may be connected at once.
-const STRANGERS: usize = 4;
-/// How many streams a node may have open on a connection at once.
-const STREAMS: u32 = 32;
-/// How long reaching a node may take.
-const CONNECT: Duration = Duration::from_secs(10);
 
 /// The network a service is in, as its device's oned gives it: its address, where its relay and auth are, its root,
 /// which its first freeze names, and the user whose service it is.
@@ -82,18 +69,18 @@ struct Inner {
     dir: PathBuf,
     key: SigningKey,
     network: Network,
-    /// Who's who, once a node brought `global`'s steps.
+    /// Its device's app runtime, on the loopback oned gave both (`--runtime=`).
+    runtime: String,
+    /// Who's who, once it read `global`'s steps from its runtime.
     known: Mutex<ScopeDb>,
-    /// Reads who's who from the steps of `global`'s scope database nodes bring, kept in its folder (`KEPT`) to start again
-    /// from: reading every step again costs a restart seconds of CPU for each of its device's services.
+    /// Reads who's who from the steps of `global`'s scope database its runtime gives, kept in its folder (`KEPT`) to
+    /// start again from: reading every step again costs a restart seconds of CPU for each of its device's services.
     reader: Mutex<Reader>,
     /// Where the program offering it registers and waits for calls.
     registry: Arc<Registry>,
-    endpoint: Mutex<Option<Endpoint>>,
-    /// A connection to each node it asks for calls.
-    conns: Mutex<HashMap<Key, Connection>>,
-    strangers: AtomicUsize,
-    /// What insights was told before a node brought who's who, and so before it knew where to say it.
+    /// The asks it took, so none is taken twice.
+    once: carried::Once,
+    /// What insights was told before it knew who's who, and so whether it's listed yet.
     untold: Mutex<Vec<Value>>,
     /// What its app declares its program may reach, as oned gave it (`declared.json`), if it did.
     declared: Option<crate::services::sandbox::Declared>,
@@ -101,15 +88,15 @@ struct Inner {
 
 /// Where it keeps what its reader of who's who read to, in its folder.
 const KEPT: &str = "whos-who.json";
-/// What `KEPT` replaced, which nodes bring again.
-const STEPS_BEFORE: &str = "steps";
 
-/// How many things it tells insights it holds on to before a node has told it who's who.
+/// How many things it tells insights it holds on to before it knows who's who.
 const MOST_UNTOLD: usize = 32;
 
 /// Where oned puts what a service's app declares it may reach, in its folder.
 pub const DECLARED: &str = "declared.json";
 
+/// How long its runtime may take to answer anything but a long poll for asks or a call.
+const RUNTIME_WAIT: Duration = Duration::from_secs(30);
 
 /// Where a service keeps its key, its network and what it knows of it.
 pub fn folder(name: &str) -> PathBuf {
@@ -125,8 +112,9 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 impl Service {
-    /// The service `name` kept in `dir`: its key (made the first time), and the network oned gave it.
-    pub fn open(dir: &Path, name: &str) -> Result<Service> {
+    /// The service `name` kept in `dir`: its key (made the first time), the network oned gave it, and its device's app
+    /// runtime at `runtime`.
+    pub fn open(dir: &Path, name: &str, runtime: &str) -> Result<Service> {
         ensure!(scopes::valid_app_name(name), "a service's name is lowercase words joined by -");
         std::fs::create_dir_all(dir)?;
         crate::os::set_mode(dir, 0o700)?;
@@ -149,19 +137,17 @@ impl Service {
             }
         };
         let root = Hash::from_hex(&network.root)?;
-        let _ = std::fs::remove_file(dir.join(STEPS_BEFORE));
         let (reader, members) = reader_kept(root, &dir.join(KEPT));
         Ok(Service(Arc::new(Inner {
             name: name.to_string(),
             dir: dir.to_path_buf(),
             key,
             network,
+            runtime: runtime.to_string(),
             known: Mutex::new(members),
             reader: Mutex::new(reader),
             registry: Registry::new(name, &token),
-            endpoint: Mutex::new(None),
-            conns: Mutex::new(HashMap::new()),
-            strangers: AtomicUsize::new(0),
+            once: carried::Once::default(),
             untold: Mutex::default(),
             declared: std::fs::read(dir.join(DECLARED)).ok().and_then(|b| serde_json::from_slice(&b).ok()),
         })))
@@ -173,11 +159,6 @@ impl Service {
 
     pub fn endpoint(&self) -> crate::keys::Endpoint {
         crate::keys::Endpoint::of(&self.0.key)
-    }
-
-    /// Where its endpoint is reached now, once it's bound.
-    pub fn addr(&self) -> Option<EndpointAddr> {
-        self.0.endpoint.lock().unwrap().as_ref().map(|e| e.addr())
     }
 
     /// Where the program offering it registers.
@@ -199,8 +180,13 @@ impl Service {
         Ok(m.service(&self.key())?.filter(|s| s.service.as_deref() == Some(self.0.name.as_str()) && s.user == self.0.network.user).map(|s| s.user))
     }
 
-    /// Starts it: its endpoint, through the network's relay (which lets it in once it's approved), asking to be
-    /// approved until it is, and the loopback the program offering it registers at. → that loopback's address.
+    /// The device it's part of, once who's who lists it.
+    fn device(&self) -> Option<Key> {
+        self.0.known.lock().unwrap().service(&self.key()).ok().flatten().and_then(|s| s.device)
+    }
+
+    /// Starts it: the loopback the program offering it registers at, its socket to its device's app runtime, and
+    /// asking to be listed until it is. → that loopback's address.
     pub async fn start(&self) -> Result<std::net::SocketAddr> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let at = listener.local_addr()?;
@@ -246,52 +232,136 @@ impl Service {
                 tracing::warn!("the service's loopback stopped: {err:#}");
             }
         });
-        tokio::spawn(self.clone().keep_endpoint());
+        tokio::spawn(self.clone().keep_socket());
         tokio::spawn(self.clone().ask_to_be_listed());
         Ok(at)
     }
 
-    /// Binds its endpoint, then takes the connections nodes open, for good.
-    async fn keep_endpoint(self) {
-        let mut wait = Duration::from_secs(1);
-        let endpoint = loop {
-            match self.bind().await {
-                Ok(endpoint) => break endpoint,
-                Err(err) => tracing::warn!("{}'s endpoint: {err:#}", self.0.name),
+    /// Asks its device's app runtime `method` of `path` with the token in the runtime's folder, waiting `wait`: → what
+    /// it answered, and its status.
+    async fn runtime(&self, method: &'static str, path: &str, body: Option<Value>, wait: Duration) -> Result<(u16, Value)> {
+        let url = format!("http://{}{path}", self.0.runtime);
+        tokio::task::spawn_blocking(move || {
+            let token = crate::api::local_token(&crate::node::runtime_folder(&crate::home())).context("its device's app runtime has no token yet")?;
+            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(wait)).build().into();
+            let mut resp = match body {
+                Some(body) => agent.post(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).send_json(body)?,
+                None if method == "GET" => agent.get(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).call()?,
+                None => agent.post(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).send_empty()?,
+            };
+            let status = resp.status().as_u16();
+            let said: Value = resp.body_mut().with_config().limit(64 << 20).read_json().unwrap_or(Value::Null);
+            anyhow::Ok((status, said))
+        })
+        .await?
+    }
+
+    /// Reads `global`'s scope database's steps its runtime has after the ones it read (`{ at, step }` each), each
+    /// checked as from anyone from the first freeze naming the network's root (`Truth::first`), then who's who from them.
+    async fn read_whos_who(&self) -> Result<()> {
+        let from = self.0.reader.lock().unwrap().at();
+        let (status, said) = self.runtime("GET", &format!("/api/services/steps?from={from}"), None, RUNTIME_WAIT).await?;
+        ensure!(status == 200, "its runtime didn't give who's who ({status}): {}", said["error"].as_str().unwrap_or(""));
+        self.take_steps(&said["steps"])
+    }
+
+    fn take_steps(&self, given: &Value) -> Result<()> {
+        let mut known = self.0.known.lock().unwrap();
+        let mut reader = self.0.reader.lock().unwrap();
+        let before = reader.at();
+        let now = now_ms();
+        for s in given.as_array().into_iter().flatten() {
+            let at = s["at"].as_u64().unwrap_or(0);
+            if at == reader.at() + 1 {
+                let bytes = s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
+                reader.take(crate::database::steps::given(&scopes::Scope::Global, at, bytes.as_deref()).as_ref(), now)?;
             }
-            tokio::time::sleep(wait).await;
-            wait = (wait * 2).min(Duration::from_secs(60));
-        };
-        *self.0.endpoint.lock().unwrap() = Some(endpoint.clone());
-        while let Some(incoming) = endpoint.accept().await {
-            let service = self.clone();
-            tokio::spawn(async move {
-                match incoming.accept() {
-                    Ok(accepting) => match accepting.await {
-                        Ok(conn) => service.take(conn).await,
-                        Err(err) => tracing::debug!("a connection that didn't open: {err:#}"),
-                    },
-                    Err(err) => tracing::debug!("a connection that didn't open: {err:#}"),
+        }
+        if reader.at() == before {
+            return Ok(());
+        }
+        let kept = reader.kept()?;
+        write_private(&self.0.dir.join(KEPT), &serde_json::to_vec(&kept)?)?;
+        *known = whos_who(&kept)?;
+        drop((known, reader));
+        self.tell_untold();
+        Ok(())
+    }
+
+    /// Its socket to its device's app runtime, for good: registered there as what the program offering it says it
+    /// is, once it has, then taking each ask the runtime carries to it. While none comes it reads who's who again.
+    async fn keep_socket(self) {
+        let name = self.0.name.clone();
+        loop {
+            let registered = self.services().describe().into_iter().next();
+            let Some(mut describe) = registered else {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            };
+            describe["runs"] = json!("service");
+            if let Err(err) = self.read_whos_who().await {
+                tracing::debug!("{name} reading who's who: {err:#}");
+            }
+            match self.runtime("POST", &format!("/api/services/carry/{name}"), Some(json!({ "describe": describe })), RUNTIME_WAIT).await {
+                Ok((200, _)) => {}
+                Ok((status, said)) => {
+                    tracing::debug!("{name} registering with its runtime ({status}): {}", said["error"].as_str().unwrap_or(""));
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
                 }
-            });
+                Err(err) => {
+                    tracing::debug!("{name} registering with its runtime: {err:#}");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            }
+            match self.runtime("GET", &format!("/api/services/carry/{name}"), None, Duration::from_secs(40)).await {
+                Ok((200, said)) => match serde_json::from_value::<carried::Carried>(said) {
+                    Ok(ask) => {
+                        let service = self.clone();
+                        tokio::spawn(async move { service.take(ask).await });
+                    }
+                    Err(err) => tracing::debug!("{name}: what its runtime carried: {err:#}"),
+                },
+                Ok((204, _)) => {}
+                Ok((status, said)) => {
+                    tracing::debug!("{name} asking its runtime for asks ({status}): {}", said["error"].as_str().unwrap_or(""));
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                Err(err) => {
+                    tracing::debug!("{name} asking its runtime for asks: {err:#}");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
         }
     }
 
-    async fn bind(&self) -> Result<Endpoint> {
-        let (_, map) = crate::node::relay(&self.0.network.address, None)?;
-        let transport = QuicTransportConfig::builder().max_concurrent_bidi_streams(STREAMS.into()).max_concurrent_uni_streams(0u32.into()).build();
-        Ok(Endpoint::builder(crate::node::Endpoints)
-            .secret_key(SecretKey::from_bytes(&self.0.key.to_bytes()))
-            .alpns(vec![crate::node::service_alpn()])
-            .transport_config(transport)
-            .relay_mode(RelayMode::Custom(map))
-            .bind()
-            .await?)
+    /// Answers an ask its runtime carried: opened and checked (`carried::open_ask`), run if its signer may, and the
+    /// answer signed and sealed to it. One that can't be opened is answered with why, which says nothing of a call.
+    async fn take(&self, ask: carried::Carried) {
+        let answered = async {
+            let sealed = carried::unb64(&ask.ask)?;
+            let (signer, body, at) = carried::open_ask(&self.0.key, &sealed, &self.0.once)?;
+            // A node this service hasn't read of yet: who's who is read again first.
+            if !self.is_node(&signer) {
+                self.read_whos_who().await?;
+            }
+            let answer = self.run(signer, &body["call"], body["traceparent"].as_str()).await.unwrap_or_else(|err| json!({ "error": format!("{err:#}") }));
+            let to = self.0.known.lock().unwrap().machine(&signer)?.map(|m| crate::keys::Endpoint { key: m.key, seal: m.seal }).context("who asked isn't one of the network's devices")?;
+            anyhow::Ok(json!({ "answer": carried::b64(&carried::answer(&self.0.key, &to, at, answer)?) }))
+        }
+        .await
+        .unwrap_or_else(|err| json!({ "error": format!("{err:#}") }));
+        let name = &self.0.name;
+        if let Err(err) = self.runtime("POST", &format!("/api/services/carry/{name}/{}", ask.id), Some(answered), RUNTIME_WAIT).await {
+            tracing::debug!("{name} answering an ask: {err:#}");
+        }
     }
 
     /// Asks its device's oned to list it, once the program offering it has said what it is (so whether it serves
-    /// everyone): `ask` in its folder, its endpoint and that, which oned reads and lists, until it's listed as its
-    /// user's and as part of a device (one listed before parts named their device is listed again).
+    /// everyone): `ask` in its folder, its key and seal key, which oned reads and lists, until it's listed as its
+    /// user's and as part of a device (one listed before parts named their device is listed again). Who's who is read
+    /// again each time until it is.
     async fn ask_to_be_listed(self) {
         let ask = self.0.dir.join("ask");
         loop {
@@ -305,119 +375,20 @@ impl Service {
             };
             if listed || !registered {
                 let _ = std::fs::remove_file(&ask);
-            } else if !ask.exists() {
-                let me = self.endpoint();
-                let said = json!({ "key": hex(&me.key), "seal": hex(&me.seal) });
-                if let Err(err) = write_private(&ask, said.to_string().as_bytes()) {
-                    tracing::warn!("asking oned to list {}: {err:#}", self.0.name);
+            } else {
+                if !ask.exists() {
+                    let me = self.endpoint();
+                    let said = json!({ "key": hex(&me.key), "seal": hex(&me.seal) });
+                    if let Err(err) = write_private(&ask, said.to_string().as_bytes()) {
+                        tracing::warn!("asking oned to list {}: {err:#}", self.0.name);
+                    }
+                }
+                if let Err(err) = self.read_whos_who().await {
+                    tracing::debug!("{} reading who's who: {err:#}", self.0.name);
                 }
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
-    }
-
-    /// Answers what a computer asks on a connection it opened: a node of the network anything a node asks a service;
-    /// one it doesn't know of only a hello and `global`'s steps, a few messages, a few at once, since anyone who
-    /// reaches it directly can connect.
-    async fn take(&self, conn: Connection) {
-        let remote = *conn.remote_id().as_bytes();
-        let known = self.is_node(&remote);
-        if !known && self.0.strangers.fetch_add(1, SeqCst) >= STRANGERS {
-            self.0.strangers.fetch_sub(1, SeqCst);
-            return conn.close(1u32.into(), b"not a device of this network");
-        }
-        let mut messages = 0;
-        while let Ok((mut send, mut recv)) = conn.accept_bi().await {
-            messages += 1;
-            let node = self.is_node(&remote);
-            if !node && messages > STRANGER_MESSAGES {
-                break;
-            }
-            let service = self.clone();
-            let answering = async move {
-                let limit = if node { MESSAGE_LIMIT } else { STRANGER_LIMIT };
-                let msg: Value = match recv.read_to_end(limit).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
-                    Ok(msg) => msg,
-                    Err(err) => return tracing::debug!("what {} sent: {err:#}", short(&remote)),
-                };
-                let answer = service.answer(remote, &msg).await;
-                if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
-                    tracing::debug!("answering {}: {err:#}", short(&remote));
-                }
-            };
-            // A node's asks run at once; a stranger's one at a time.
-            if node {
-                tokio::spawn(answering);
-            } else {
-                answering.await;
-            }
-        }
-        if !known {
-            self.0.strangers.fetch_sub(1, SeqCst);
-            conn.close(1u32.into(), b"not a device of this network");
-        }
-    }
-
-    async fn answer(&self, remote: Key, msg: &Value) -> Value {
-        let body = &msg["body"];
-        match msg["kind"].as_str() {
-            Some(crate::protocol::message::HELLO) => self.hello(remote, body["steps"].as_u64().unwrap_or(0) as usize).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
-            Some(crate::protocol::message::STEPS) => match self.take_steps(&remote, &body["steps"]) {
-                Ok(()) => json!({ "ok": true }),
-                Err(err) => json!({ "error": format!("{err:#}") }),
-            },
-            Some(crate::protocol::message::ASK) if self.is_node(&remote) => self.run(remote, &body["call"], body["traceparent"].as_str()).await.unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
-            _ => json!({ "error": format!("only {YOURS}'s devices are answered") }),
-        }
-    }
-
-    /// A node's hello, with how many of `global`'s steps it has: → what this service offers and whom it serves, to a
-    /// node of the network that may call it; that it's behind, if the node has more.
-    fn hello(&self, remote: Key, steps: usize) -> Result<Value> {
-        let may = {
-            let known = self.0.known.lock().unwrap();
-            known.compute(&remote)?.is_some() && known.service(&self.key())?.is_some()
-        };
-        if steps as u64 > self.0.reader.lock().unwrap().at() {
-            return Ok(json!({ "behind": true }));
-        }
-        if !may {
-            return Ok(json!({ "error": format!("only {YOURS}'s devices are answered") }));
-        }
-        let Some(mut describe) = self.services().describe().into_iter().next() else {
-            return Ok(json!({ "error": format!("{} isn't running here yet", self.0.name) }));
-        };
-        describe["runs"] = json!("service");
-        let known = self.0.known.lock().unwrap();
-        let m = &*known;
-        // Whom it serves is what its listing says, not what the program offering it claims.
-        let users: Vec<String> = m.users()?.into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&self.key()))).collect();
-        Ok(json!({ "describe": describe, "users": users }))
-    }
-
-    /// Takes `global`'s scope database's steps a node of the network brought (`{ at, step }` each, as
-    /// `GET /api/steps/global` gives them): those after the ones it has, each checked as from anyone, then who's who
-    /// from them.
-    fn take_steps(&self, remote: &Key, given: &Value) -> Result<()> {
-        let mut known = self.0.known.lock().unwrap();
-        // Anyone's while it knows of no node yet: who's who is the first freeze naming the network's root, signed by the
-        // recovery key it names (`Truth::first`).
-        ensure!(known.computes()?.is_empty() || known.compute(remote)?.is_some(), "only {YOURS}'s devices bring its steps");
-        let mut reader = self.0.reader.lock().unwrap();
-        let now = now_ms();
-        for s in given.as_array().into_iter().flatten() {
-            let at = s["at"].as_u64().unwrap_or(0);
-            if at == reader.at() + 1 {
-                let bytes = s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
-                reader.take(crate::database::steps::given(&scopes::Scope::Global, at, bytes.as_deref()).as_ref(), now)?;
-            }
-        }
-        let kept = reader.kept()?;
-        write_private(&self.0.dir.join(KEPT), &serde_json::to_vec(&kept)?)?;
-        *known = whos_who(&kept)?;
-        drop(known);
-        self.tell_untold();
-        Ok(())
     }
 
     /// Whether `key` is a node of the network, as this service knows it.
@@ -466,22 +437,28 @@ impl Service {
         })
     }
 
-    /// Asks a node of its user's own to run a call, as them: the first that answers. A service asks only for its own
-    /// app, in its user's own scope (`limited`), which their node runs with its own keys until grants land.
-    /// Tells this service's own device what insights keeps, in the background, or once a node has told it who's who and so
-    /// where its device is. Telemetry may be lost, and the program that said it doesn't wait.
+    /// Asks its device's app runtime `body` (`{ call }` or `{ insights }`), signed by this service: → its answer.
+    async fn ask_runtime(&self, body: Value, wait: Duration) -> Result<Value> {
+        let device = self.device().with_context(|| format!("{} isn't listed as a part of its device yet", self.0.name))?;
+        let signed = carried::own_ask(&self.0.key, &device, body);
+        let (status, said) = self.runtime("POST", "/api/services/ask", Some(signed), wait).await?;
+        ensure!(status == 200, "its device's app runtime refused it ({status}): {}", said["error"].as_str().unwrap_or(""));
+        Ok(said)
+    }
+
+    /// Tells this service's own device what insights keeps, in the background, or once it knows who's who and so
+    /// whether it's listed. Telemetry may be lost, and the program that said it doesn't wait.
     pub fn tell_node(&self, body: Value, runtime: &tokio::runtime::Handle) {
-        let device = self.0.known.lock().unwrap().service(&self.key()).ok().flatten().and_then(|s| s.device);
-        let Some(device) = device else {
+        if self.device().is_none() {
             let mut untold = self.0.untold.lock().unwrap();
             if untold.len() < MOST_UNTOLD {
                 untold.push(body);
             }
             return;
-        };
+        }
         let service = self.clone();
         runtime.spawn(async move {
-            if let Err(err) = service.send(device, &json!({ "kind": crate::protocol::message::INSIGHTS, "body": body })).await {
+            if let Err(err) = service.ask_runtime(json!({ "insights": body }), RUNTIME_WAIT).await {
                 tracing::debug!("telling insights: {err:#}");
             }
         });
@@ -489,49 +466,21 @@ impl Service {
 
     /// Who's who has come: whatever was waiting for it goes.
     fn tell_untold(&self) {
+        if self.device().is_none() {
+            return;
+        }
         for body in std::mem::take(&mut *self.0.untold.lock().unwrap()) {
             self.tell_node(body, &tokio::runtime::Handle::current());
         }
     }
 
+    /// Asks its device's app runtime to run a call, as its user. A service asks only for its own app, in its user's own
+    /// scope (`limited`).
     pub async fn ask_node(&self, call: Value) -> Result<Value> {
         let owner = self.owner()?.context("this service isn't approved yet")?;
         let mut call = limited(&self.0.name, &call)?;
         call["me"] = json!({ "key": hex(&self.key()), "user": owner });
-        let nodes: Vec<Key> = {
-            let known = self.0.known.lock().unwrap();
-            let m = &*known;
-            m.computes()?.into_iter().filter(|c| c.user == owner && m.runs_for(&c.key, &crate::database::scopes::Scope::User(owner.clone()))).map(|c| c.key).collect()
-        };
-        let mut why = Vec::new();
-        for node in nodes {
-            match self.send(node, &json!({ "kind": crate::protocol::message::ASK, "body": { "call": call } })).await {
-                Ok(answer) if answer.get("elsewhere").is_some() => why.push(answer["elsewhere"].as_str().unwrap_or("").to_string()),
-                Ok(answer) => return Ok(answer),
-                Err(err) => why.push(format!("{}: {err:#}", short(&node))),
-            }
-        }
-        bail!("no device of yours could run it ({})", why.join("; "))
-    }
-
-    async fn send(&self, to: Key, msg: &Value) -> Result<Value> {
-        let endpoint = self.0.endpoint.lock().unwrap().clone().with_context(|| format!("this service isn't connected to {YOURS}'s relay yet"))?;
-        let held = self.0.conns.lock().unwrap().get(&to).filter(|c| c.close_reason().is_none()).cloned();
-        let conn = match held {
-            Some(conn) => conn,
-            None => {
-                let (url, _) = crate::node::relay(&self.0.network.address, None)?;
-                let addr = EndpointAddr::new(PublicKey::from_bytes(&to)?).with_relay_url(url);
-                let conn = tokio::time::timeout(CONNECT, endpoint.connect(addr, &crate::node::alpn())).await.context("it isn't connected")??;
-                self.0.conns.lock().unwrap().insert(to, conn.clone());
-                conn
-            }
-        };
-        let (mut send, mut recv) = conn.open_bi().await?;
-        send.write_all(msg.to_string().as_bytes()).await?;
-        send.finish()?;
-        let answer = tokio::time::timeout(Duration::from_secs(600), recv.read_to_end(MESSAGE_LIMIT)).await.context("it didn't answer")??;
-        Ok(serde_json::from_slice(&answer)?)
+        self.ask_runtime(json!({ "call": call }), Duration::from_secs(600)).await
     }
 
     /// The loopback the program offering it registers at, with the local token in its folder: the services' API, its
@@ -790,11 +739,11 @@ fn die_with_oned() -> Result<()> {
     Ok(())
 }
 
-/// `oned <name>`: the service `name` as a part of this device's oned, which started it, until oned stops or this
-/// program is replaced: its program (`oned::program`), started here and again whenever it stops, told where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`,
+/// `oned <name> --runtime=<address>`: the service `name` as a part of this device's oned, which started it, reached
+/// through its device's app runtime at that address, until oned stops or this program is replaced: its program (`oned::program`), started here and again whenever it stops, told where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`,
 /// the service's folder) and where its data goes (`<NAME>_DATA`). One runs at a time: a part an update's oned starts
 /// waits for the one before to stop.
-pub fn run(name: &str) -> Result<()> {
+pub fn run(name: &str, runtime: &str) -> Result<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into());
     // What it and its program say is kept too, for `one logs --service <name>`.
     crate::logs::keep(name);
@@ -814,17 +763,17 @@ pub fn run(name: &str) -> Result<()> {
         None => program,
     };
     ensure!(program.exists(), "{name}'s program, {}, isn't there", program.display());
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-    let service = Service::open(&dir, name)?;
-    let at = runtime.block_on(service.start())?;
+    let tokio = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let service = Service::open(&dir, name, runtime)?;
+    let at = tokio.block_on(service.start())?;
     let data = crate::home().join(name);
     std::fs::create_dir_all(&data)?;
-    host(name, &program, &data, at, &service, &stop, runtime.handle())?;
+    host(name, &program, &data, at, &service, &stop, tokio.handle())?;
     eprintln!("{name}: stopping, for oned to start it again");
     Ok(())
 }
 
-/// Where the endpoint says why its program can't start in its sandbox, in its folder, which oned shows on it.
+/// Where the part says why its program can't start in its sandbox, in its folder, which oned shows on it.
 pub const PROBLEM: &str = "problem";
 
 enum Running {

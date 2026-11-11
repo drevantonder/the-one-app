@@ -515,7 +515,7 @@ impl Node {
         self.0.insights.0.lock().unwrap().span(span, kept, &[]);
     }
 
-    /// What a service's endpoint says for insights: its program starting and ending, and OTLP. Only one of the network's
+    /// What a service says for insights: its program starting and ending, and OTLP. Only one of the network's
     /// services, about itself: which app is what its key is listed as, never what it says.
     pub(super) async fn service_said(&self, remote: &Key, body: &Value) {
         let Ok(Some(app)) = self.with(|i| Ok(i.r.db().service(remote)?.map(|s| s.service.clone().unwrap_or_default()))) else { return };

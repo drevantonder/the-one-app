@@ -811,7 +811,7 @@ fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
     ensure!(!name.is_empty(), "an endpoint has a name");
     let service = data["service"].as_str().map(str::to_string);
     ensure!(service.as_deref().is_none_or(valid_app_name), "a service's name is lowercase words joined by -");
-    ensure!(service.is_some() == roles.contains(&Kind::Service), "a service endpoint names the service it offers, and only it does");
+    ensure!(service.is_some() == roles.contains(&Kind::Service), "a service names the service it offers, and only it does");
     let platform = data["platform"].as_str().map(str::to_string);
     ensure!(platform.as_deref().is_none_or(|p| PLATFORMS.contains(&p)), "a client's platform is one of {PLATFORMS:?}");
     Ok(Machine {
@@ -1315,15 +1315,52 @@ mod tests {
         assert!(net.db.switch(&linux_id, "whatsapp")?.unwrap().on && !net.db.switch(&linux_id, APPS_PART)?.unwrap().on);
         // linux lists its part; it lists it again naming itself, which an old listing lacked; Bob's device can't.
         let part = Dev::new(8);
-        let listed = |device: &Key| service_endpoint(&part.endpoint(), ANDRE, "linux", "whatsapp", device);
+        let listed = |device: &Key| listed_service(&part.endpoint(), ANDRE, "linux", "whatsapp", device);
         net.step(&linux, ANDRE, listed(&mac_id));
         assert!(net.step(&linux, ANDRE, listed(&linux_id)));
-        assert!(!net.step(&bobs, BOB, service_endpoint(&part.endpoint(), BOB, "linux", "whatsapp", &bobs_id)));
+        assert!(!net.step(&bobs, BOB, listed_service(&part.endpoint(), BOB, "linux", "whatsapp", &bobs_id)));
         let p = net.db.machine(&part.id())?.unwrap();
         assert_eq!((p.user.as_str(), p.device), (ANDRE, Some(linux_id)));
         // Nor is anything but a service listed again by its user.
         assert!(!net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None)));
         assert_eq!(net.db.machine(&linux_id)?.unwrap().roles.len(), 2);
+        Ok(())
+    }
+
+    /// A service carried by its device's runtime takes only asks sealed to it and signed by a node of the network, each
+    /// once, and a node calls it only as its own user: a hacked runtime carrying it can't forge, replay or read an ask,
+    /// nor call as anyone else.
+    #[test]
+    fn a_carried_ask_is_taken_once_from_whoever_signed_it_and_only_as_their_own_user() -> anyhow::Result<()> {
+        use crate::services::carried;
+        use crate::services::part::may_call;
+        let (mac, mut net) = setup();
+        let (bobs, linux, bobs_linux, part) = (Dev::new(3), Dev::new(4), Dev::new(6), Dev::new(8));
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", BOTH, None));
+        net.step(&bobs, BOB, device(&bobs_linux.endpoint(), BOB, "bob's linux", BOTH, None));
+        assert!(net.step(&linux, ANDRE, listed_service(&part.endpoint(), ANDRE, "linux", "shell", &linux.id())));
+        let once = carried::Once::default();
+        let call = json!({ "function": "run" });
+
+        // Andre's mac asks it: opened, as the mac's, once.
+        let (sealed, _) = carried::ask(&mac.0, &part.endpoint(), json!({ "call": call }))?;
+        let (by, body, _) = carried::open_ask(&part.0, &sealed, &once)?;
+        assert_eq!((by, &body["call"]), (mac.id(), &call));
+        assert!(carried::open_ask(&part.0, &sealed, &once).is_err(), "a replayed ask was taken");
+        // A byte changed, or sealed to someone else: refused.
+        let (mut forged, _) = carried::ask(&mac.0, &part.endpoint(), json!({ "call": call }))?;
+        let last = forged.len() - 1;
+        forged[last] ^= 1;
+        assert!(carried::open_ask(&part.0, &forged, &once).is_err(), "a changed ask was taken");
+        let (elsewhere, _) = carried::ask(&mac.0, &bobs.endpoint(), json!({ "call": call }))?;
+        assert!(carried::open_ask(&part.0, &elsewhere, &once).is_err(), "an ask sealed to another was opened");
+
+        // Andre's node calls as Andre; Bob's node, carrying it or not, never as Andre, and Andre's shell serves only him.
+        may_call(&net.db, &part.id(), &mac.id(), &mac.id(), ANDRE)?;
+        assert!(may_call(&net.db, &part.id(), &bobs_linux.id(), &mac.id(), ANDRE).is_err(), "Bob's node called as Andre");
+        assert!(may_call(&net.db, &part.id(), &bobs_linux.id(), &bobs_linux.id(), BOB).is_err(), "Andre's own service served Bob");
+        assert!(may_call(&net.db, &part.id(), &bobs.id(), &bobs.id(), BOB).is_err(), "a client that isn't a node was answered");
         Ok(())
     }
 
@@ -1610,7 +1647,7 @@ mod tests {
             ("someone new, an admin", device(&gus.endpoint(), GUS, "gus's phone", &[Kind::Client], Some(("Gus", Role::Admin)))),
             ("bob's new client", device(&gus.endpoint(), BOB, "bob's laptop", &[Kind::Client], None)),
             ("bob's new compute", device(&gus.endpoint(), BOB, "bob's server", &[Kind::Compute], None)),
-            ("bob's new service", service_endpoint(&part.endpoint(), BOB, "box", "whatsapp", &box_.id())),
+            ("bob's new service", listed_service(&part.endpoint(), BOB, "box", "whatsapp", &box_.id())),
             ("andre's new client", device(&gus.endpoint(), ANDRE, "andre's laptop", &[Kind::Client], None)),
             ("fay's new client", device(&gus.endpoint(), FAY, "fay's laptop", &[Kind::Client], None)),
             ("bob's box listed again", device(&box_.endpoint(), BOB, "bob's box", &[Kind::Compute], None)),

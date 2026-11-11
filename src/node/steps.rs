@@ -343,12 +343,13 @@ impl Node {
             if handled.members {
                 let db = i.r.db();
                 let mut listed = BTreeSet::new();
-                for peer in i.peers.keys() {
-                    if db.compute(peer)?.is_some() || db.service(peer)?.is_some() {
-                        listed.insert(*peer);
+                for key in i.peers.keys().chain(i.described.keys()) {
+                    if db.compute(key)?.is_some() || db.service(key)?.is_some() {
+                        listed.insert(*key);
                     }
                 }
                 i.peers.retain(|peer, _| listed.contains(peer));
+                i.described.retain(|service, _| listed.contains(service));
             }
             for log in &handled.dropped {
                 i.views.remove(log);

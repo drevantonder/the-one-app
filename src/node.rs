@@ -51,7 +51,7 @@ mod sessions;
 #[path = "insights/node.rs"]
 mod insights;
 pub use databases::NotGiven;
-pub use net::{Endpoints, alpn, relay, service_alpn};
+pub use net::{Endpoints, alpn, relay};
 pub use calls::{Elsewhere, Grant};
 use calls::{Granted, Reply};
 use apps::built_in_bundle;
@@ -114,9 +114,8 @@ pub fn now_ms() -> u64 {
 /// A service serving on a device: its name, the users it serves, and what it describes of itself.
 pub type Service = (String, Vec<String>, Value);
 
-/// Another device, as it last said hello (a service endpoint: the service it offers), and how loaded it is.
+/// Another device, as it last said hello, and how loaded it is.
 struct Peer {
-    services: Vec<Service>,
     load: Option<crate::load::Load>,
     /// Why it hasn't taken the latest update, if it says.
     updating: Option<String>,
@@ -129,6 +128,8 @@ struct Network {
     /// The network's bucket, and its fields, which a device joining is given.
     bucket: Option<(Place, BTreeMap<String, String>)>,
     peers: HashMap<Key, Peer>,
+    /// What each service of another device describes of itself, by its key, as that device's runtime said in its hello.
+    described: HashMap<Key, Value>,
     /// What each computer runs as processes of its oned, and each one's state, as its onet last said (`oned::keep_parts`).
     parts: HashMap<Key, Value>,
     /// The devices connected to the relay, as it last said: `Network::online`.
@@ -172,7 +173,7 @@ impl Network {
         self.connected.contains(device)
     }
 
-    /// Whether this device can count on reaching that device or service endpoint: it said hello here lately.
+    /// Whether this device can count on reaching that device: it said hello here lately.
     fn heard(&self, device: &Key) -> bool {
         self.peers.get(device).is_some_and(|p| p.seen.elapsed() < 3 * PRESENCE_EVERY)
     }
@@ -202,8 +203,13 @@ pub struct Inner {
     writes: tokio::sync::Mutex<()>,
     /// Wakes the task that loads deploys and announces this device.
     changed: tokio::sync::Notify,
-    /// Woken by each service endpoint's hello, for a call waiting for one that's starting.
+    /// Woken by each hello that says what a device's services are, and each part registering here, for a call waiting
+    /// for a service that's starting.
     heard: tokio::sync::Notify,
+    /// This device's parts, registered at its app runtime, which carries their asks to them.
+    sockets: crate::services::carried::Parts,
+    /// The asks this device's parts made of it, so none is taken twice.
+    part_asks: crate::services::carried::Once,
     /// What the record at the network's address last said (`crate::latest`), and why it couldn't take it, if so.
     latest: Mutex<crate::latest::Latest>,
     bundles: Mutex<BTreeMap<String, String>>,
@@ -355,6 +361,8 @@ impl Node {
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),
             heard: tokio::sync::Notify::new(),
+            sockets: Default::default(),
+            part_asks: Default::default(),
             latest: Mutex::new(Default::default()),
             bundles: Mutex::new(BTreeMap::new()),
             built_in,

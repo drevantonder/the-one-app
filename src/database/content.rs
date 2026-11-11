@@ -368,14 +368,15 @@ pub fn vault_answer(id: &str, declined: bool) -> Content {
     node(Change::VaultRequest, data)
 }
 
-/// Lists a service endpoint offering `service` as `user`'s, a part of `device`, by that device.
 /// Lists a device's app runtime, by that device: a compute of its own key, naming the device, carrying its rights to
 /// run things (`ScopeDb::device_of`).
 pub fn runtime(endpoint: &crate::keys::Endpoint, user: &str, name: &str, device: &Key) -> Content {
     node(Change::Device, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Compute], "device": hex(device) }))
 }
 
-pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, device: &Key) -> Content {
+/// Lists a service offering `service` as `user`'s, a part of `device`, by that device: its key and seal key, which
+/// its asks are signed with and sealed to.
+pub fn listed_service(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, device: &Key) -> Content {
     node(Change::Device, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service, "device": hex(device) }))
 }
 
@@ -393,7 +394,7 @@ mod tests {
         let built = [
             ("device", device(&endpoint, user, "mac", &[Kind::Client], None)),
             ("device, new user", device(&endpoint, other, "phone", &[Kind::Client, Kind::Compute], Some(("Bob", Role::Member)))),
-            ("service endpoint", service_endpoint(&endpoint, user, "whatsapp", "whatsapp", &[4; 32])),
+            ("listed service", listed_service(&endpoint, user, "whatsapp", "whatsapp", &[4; 32])),
             ("role", role(other, Role::Admin)),
             ("remove user", remove_user(other)),
             ("remove device", remove_device(&[5; 32])),
@@ -452,7 +453,7 @@ mod tests {
     const GOLDEN: &str = r#"first: {"device":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"mac","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202"},"epoch":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Home","recovery":"0303030303030303030303030303030303030303030303030303030303030303","user":"a000000000000001","user_name":"Andre"}
 device: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"mac","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"a000000000000001"}}
 device, new user: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"phone","role":"member","roles":["client","compute"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"b000000000000002","user_name":"Bob"}}
-service endpoint: {"app":"node","kind":"device","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","key":"0101010101010101010101010101010101010101010101010101010101010101","name":"whatsapp","roles":["service"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","service":"whatsapp","user":"a000000000000001"}}
+listed service: {"app":"node","kind":"device","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","key":"0101010101010101010101010101010101010101010101010101010101010101","name":"whatsapp","roles":["service"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","service":"whatsapp","user":"a000000000000001"}}
 role: {"app":"node","kind":"role","data":{"role":"admin","user":"b000000000000002"}}
 remove user: {"app":"node","kind":"remove","data":{"user":"b000000000000002"}}
 remove device: {"app":"node","kind":"remove","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505"}}

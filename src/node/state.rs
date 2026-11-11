@@ -59,6 +59,7 @@ impl Node {
         };
         let me = &viewer.user;
         let latest = self.latest();
+        let up = network.as_ref().map(|i| self.services_up(i)).transpose()?.unwrap_or_default();
         let device_now = |s: &scopes::Machine| -> Result<DeviceNow> {
             let Some(i) = network.as_ref() else { return Ok(DeviceNow::default()) };
             let m = i.r.db();
@@ -70,15 +71,11 @@ impl Node {
             {
                 l.containers.clear();
             }
-            let mut services: Vec<Service> = session.map(|s| s.services.clone()).unwrap_or_default();
-            // What its services with endpoints of their own run there, as each says: they're part of it.
-            for (k, p) in i.peers.iter().filter(|(k, _)| i.heard(k)) {
-                if m.machine(k)?.is_some_and(|p| p.is(scopes::Kind::Service) && p.device == Some(s.key)) {
-                    for d in p.services.iter() {
-                        if !services.iter().any(|h| h.0 == d.0) {
-                            services.push(d.clone());
-                        }
-                    }
+            // What its services run there, as each says: they're part of it.
+            let mut services: Vec<Service> = Vec::new();
+            for (p, d) in &up {
+                if p.device == Some(s.key) && !services.iter().any(|h| h.0 == d.0) {
+                    services.push(d.clone());
                 }
             }
             let build = i.running(&s.key);
@@ -147,7 +144,7 @@ impl Node {
         self.with(|i| i.r.db().find_node(name))
     }
 
-    /// The service endpoint offering `service` on the device called `name` (or by key prefix) that serves `user`, if
+    /// The service offering `service` on the device called `name` (or by key prefix) that serves `user`, if
     /// there's one: only `user`'s own (`own`), or one its user shares with everyone.
     pub(super) fn find_service(&self, service: &str, name: &str, user: &str, own: bool) -> Option<Key> {
         let found: Vec<Key> = self
@@ -204,7 +201,7 @@ impl Node {
     }
 
     pub(super) fn name_of(&self, key: &Key) -> String {
-        // What's part of a device (a service with an endpoint of its own, a native app's sign-in), by that device.
+        // What's part of a device (a service, a native app's sign-in), by that device.
         let of = |m: &ScopeDb| -> Result<Option<scopes::Machine>> {
             if let Some(d) = m.machine_ever(key)?.and_then(|s| s.device)
                 && let Some(machine) = m.machine_ever(&d)?

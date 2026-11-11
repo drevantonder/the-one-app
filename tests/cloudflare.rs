@@ -1312,11 +1312,11 @@ mod relay {
             assert_eq!(tell(&address, &stranger, json!({ "remove": hex(&stranger) })), 204);
             assert!(shut_out(&k, &stranger, None).await, "a key taken out reached the relay");
 
-            // Any key on the list adds a compute or a service: who's who, which every reader checks, is the real gate. A
-            // key's role, once it's in, only an admin's changes, but a device dropping compute from itself.
-            for role in ["compute", "service"] {
-                assert_eq!(tell(&address, &phone, json!({ "add": hex(&SecretKey::generate()), "role": role })), 204, "a client couldn't add a {role}");
-            }
+            // Any key on the list adds a compute: who's who, which every reader checks, is the real gate. A key's role,
+            // once it's in, only an admin's changes, but a device dropping compute from itself. A service is never on it:
+            // its device's runtime carries its asks.
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&SecretKey::generate()), "role": "compute" })), 204, "a client couldn't add a compute");
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&SecretKey::generate()), "role": "service" })), 403, "a service was let on the relay");
             let dropping = SecretKey::generate();
             assert_eq!(tell(&address, &first, json!({ "add": hex(&dropping), "role": "compute" })), 204);
             assert_eq!(tell(&address, &phone, json!({ "add": hex(&dropping), "role": "client" })), 403, "another device dropped compute from a key");
@@ -1329,7 +1329,6 @@ mod relay {
             let machine = SecretKey::generate();
             assert_eq!(tell(&address, &first, json!({ "add": hex(&machine), "role": "compute" })), 204);
             assert_eq!(tell(&address, &machine, json!({ "add": hex(&SecretKey::generate()), "role": "compute" })), 204, "a compute didn't add the computer it paired");
-            assert_eq!(tell(&address, &machine, json!({ "add": hex(&SecretKey::generate()), "role": "service" })), 204, "a compute didn't add its user's service");
             assert_eq!(tell(&address, &phone, json!({ "add": hex(&machine), "role": "client" })), 403, "a client changed a compute's role");
             assert_eq!(tell(&address, &machine, json!({ "add": hex(&phone), "role": "compute" })), 403, "a compute made a client a compute");
             // A device that let a key in adds it again as it is (approving it again, to finish): done, nothing changed.
@@ -1562,15 +1561,11 @@ mod relay {
             assert_eq!(seen(&stranger).0, 403, "a stranger was told who was seen");
             assert_eq!(computes(ask(&session, &certify(&stranger, &session, super::now() + 60_000))).0, 403);
 
-            // Only a client vouches for a session: a compute or a service, admin or not, doesn't.
-            let service = SecretKey::generate();
-            assert_eq!(tell(&address, &first, json!({ "add": hex(&service), "role": "service" })), 204);
-            for by in [&first, &service] {
-                let other = SecretKey::generate();
-                let vouched = certify(by, &other, super::now() + 60_000);
-                assert!(shut_out(&k, &other, Some(&vouched)).await, "a session a compute or service vouched for got in");
-                assert_eq!(computes(ask(&other, &vouched)).0, 403, "a session a compute or service vouched for was told the computes");
-            }
+            // Only a client vouches for a session: a compute, admin or not, doesn't.
+            let other = SecretKey::generate();
+            let vouched = certify(&first, &other, super::now() + 60_000);
+            assert!(shut_out(&k, &other, Some(&vouched)).await, "a session a compute vouched for got in");
+            assert_eq!(computes(ask(&other, &vouched)).0, 403, "a session a compute vouched for was told the computes");
 
             // With its key's proof it's taken in at once, with no challenge, once: shown again, stale, by another key or
             // for another's certificate, it's challenged as any key is (and a stranger's then refused).

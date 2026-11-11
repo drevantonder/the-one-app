@@ -7,7 +7,7 @@
 //!
 //! It runs the device's services (`keep_parts`), asking its onet what it needs (`/api/services`, which onet passes to its
 //! app runtime): each a process of oned's own (`oned <name>`, `service::run`) with its own key, which it lists as its
-//! device's. Each is on while the device's latest `service` step for it says so; with none, off; and each is started
+//! device's, reached only through the device's app runtime, whose loopback address oned gives it. Each is on while the device's latest `service` step for it says so; with none, off; and each is started
 //! again when it stops, the rest left running, whatever onet and the runtime do. Only the device's user writes that step
 //! (its switch in Settings' Devices), and the services start and stop as it changes. Each keeps its own key in its folder
 //! (`<home>/services/<name>`), so it answers only its own user whoever else's calls the device runs, and one failing
@@ -115,7 +115,7 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     for entry in dirs.iter().flat_map(std::fs::read_dir).flatten().flatten() {
         let file = entry.file_name().to_string_lossy().to_string();
         let Some(name) = file.strip_suffix(std::env::consts::EXE_SUFFIX).and_then(|f| f.strip_prefix(&prefix)).filter(|n| crate::database::scopes::valid_app_name(n)) else { continue };
-        if on.contains_key(name) || crate::services::endpoint::folder(name).is_dir() {
+        if on.contains_key(name) || crate::services::part::folder(name).is_dir() {
             names.insert(name.to_string());
         }
     }
@@ -128,7 +128,7 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
 /// erase what the device keeps.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Wanted {
-    pub network: crate::services::endpoint::Network,
+    pub network: crate::services::part::Network,
     /// The device's name, as what a part says of itself names it.
     pub device: String,
     pub on: BTreeMap<String, u64>,
@@ -241,7 +241,7 @@ impl Onet {
 /// What's put in a service's folder of the build its program is: its blob, and the release's commit time, or none for
 /// the build a deploy named (`deploy <blob>`).
 fn taken(name: &str) -> (Option<u64>, String) {
-    let kept = std::fs::read_to_string(crate::services::endpoint::folder(name).join("release")).unwrap_or_default();
+    let kept = std::fs::read_to_string(crate::services::part::folder(name).join("release")).unwrap_or_default();
     let (committed, blob) = kept.trim().split_once(' ').unwrap_or(("0", ""));
     (committed.parse().ok(), blob.to_string())
 }
@@ -261,7 +261,7 @@ fn put(onet: &Onet, address: &str, name: &str, build: &Build) -> anyhow::Result<
     std::fs::write(&new, bytes)?;
     crate::os::set_mode(&new, 0o755)?;
     std::fs::rename(&new, &path)?;
-    let folder = crate::services::endpoint::folder(name);
+    let folder = crate::services::part::folder(name);
     std::fs::create_dir_all(&folder)?;
     std::fs::write(folder.join("release"), &kept)?;
     tracing::info!("oned put {name} {kept} in place");
@@ -278,7 +278,7 @@ const TELL_EVERY: Duration = Duration::from_secs(30);
 /// runtimes (`POST /api/services`). Asked to erase what the device keeps, it stops them, and onet and the runtime
 /// (`kept`), deletes the home and exits, to start again as nobody's. In a thread of its own for good, so what it starts
 /// is oned's child, whatever onet and the runtime do.
-fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>) {
+fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String) {
     std::thread::spawn(move || {
         let home = crate::home();
         let onet = std::sync::Arc::new(Onet::new(home.clone()));
@@ -428,7 +428,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>) {
                     if on && named && !declaring && !running.contains_key(name) && here.exists() && !fetching.lock().unwrap().contains(name) {
                         started_with.insert(name.clone(), declares.clone());
                         up.remove(name);
-                        match start(&wanted.network, name, declares.as_ref()) {
+                        match start(&wanted.network, name, declares.as_ref(), &runtime) {
                             Ok(child) => {
                                 tracing::info!("oned started {name}");
                                 let held = Held { sandbox: crate::services::sandbox::unsandboxed(declares.as_ref(), device), user: declares.as_ref().is_some_and(|d| d.user) };
@@ -465,16 +465,16 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>) {
                     false
                 }
             });
-            // Started, it's on once it answers its device, asked until it does, even once it said what's wrong; one
+            // Started, it's on once it's registered with its device's app runtime, asked until it is, even once it said what's wrong; one
             // that doesn't in a minute says so. One that stayed up a minute no longer keeps stopping. One that can't
             // start in its sandbox says why, and one running without one says so.
             for (name, (_, started)) in &running {
                 let now = said.lock().unwrap().now(name);
-                if let Ok(why) = std::fs::read_to_string(crate::services::endpoint::folder(name).join(crate::services::endpoint::PROBLEM)) {
+                if let Ok(why) = std::fs::read_to_string(crate::services::part::folder(name).join(crate::services::part::PROBLEM)) {
                     say(name, Now { doing: None, problem: Some(why) });
                     continue;
                 }
-                if !up.contains(name) && onet.json::<Value>("POST", "/api/services/hello", Some(&json!({ "name": name }))).is_ok_and(|a| a["up"] == true) {
+                if !up.contains(name) && onet.json::<Value>("POST", "/api/services/up", Some(&json!({ "name": name }))).is_ok_and(|a| a["up"] == true) {
                     up.insert(name.clone());
                 }
                 if up.contains(name) {
@@ -489,7 +489,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>) {
                 }
             }
             for name in running.keys() {
-                let Ok(asked) = std::fs::read_to_string(crate::services::endpoint::folder(name).join("ask")) else { continue };
+                let Ok(asked) = std::fs::read_to_string(crate::services::part::folder(name).join("ask")) else { continue };
                 if listed.get(name).is_some_and(|(a, at)| *a == asked && at.elapsed() < Duration::from_secs(60)) {
                     continue;
                 }
@@ -514,17 +514,17 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>) {
     });
 }
 
-/// Starts a part, given the network it's in and what its app declares it may reach.
-fn start(network: &crate::services::endpoint::Network, name: &str, declared: Option<&crate::services::sandbox::Declared>) -> anyhow::Result<std::process::Child> {
-    let folder = crate::services::endpoint::folder(name);
+/// Starts a part, given the network it's in, what its app declares it may reach, and its device's app runtime's address.
+fn start(network: &crate::services::part::Network, name: &str, declared: Option<&crate::services::sandbox::Declared>, runtime: &str) -> anyhow::Result<std::process::Child> {
+    let folder = crate::services::part::folder(name);
     network.give(&folder)?;
-    let _ = std::fs::remove_file(folder.join(crate::services::endpoint::PROBLEM));
+    let _ = std::fs::remove_file(folder.join(crate::services::part::PROBLEM));
     match declared {
-        Some(d) => std::fs::write(folder.join(crate::services::endpoint::DECLARED), serde_json::to_vec(d)?)?,
-        None => drop(std::fs::remove_file(folder.join(crate::services::endpoint::DECLARED))),
+        Some(d) => std::fs::write(folder.join(crate::services::part::DECLARED), serde_json::to_vec(d)?)?,
+        None => drop(std::fs::remove_file(folder.join(crate::services::part::DECLARED))),
     }
-    // Its stdin is a pipe only this keeps the end of: the part ends when this does, however (`endpoint::run`).
-    Ok(command(&[name])?.stdin(std::process::Stdio::piped()).spawn()?)
+    // Its stdin is a pipe only this keeps the end of: the part ends when this does, however (`part::run`).
+    Ok(command(&[name, &format!("--runtime={runtime}")])?.stdin(std::process::Stdio::piped()).spawn()?)
 }
 
 /// Stops a part: asked, then made to, if it hasn't in ten seconds.
@@ -599,7 +599,7 @@ pub fn run(args: &[String]) -> Result<()> {
             return serve();
         }
         ([crate::database::scopes::APPS_PART], [_]) if let Some(listen) = flag("--listen=") => return crate::node::serve(listen),
-        ([name], []) if crate::database::scopes::valid_app_name(name) => return crate::services::endpoint::run(name),
+        ([name], [_]) if let Some(runtime) = flag("--runtime=") => return crate::services::part::run(name, runtime),
         _ => bail!("{}", usage()),
     }
     Ok(())
@@ -685,7 +685,7 @@ async fn serve() -> Result<()> {
         Kept::new(onet(), "onet", vec![format!("--listen={}", api::addr()), format!("--runtime={at}")]),
         Kept::new(name(), "the app runtime", vec![crate::database::scopes::APPS_PART.into(), format!("--listen={at}")]),
     ]));
-    keep_parts(kept.clone());
+    keep_parts(kept.clone(), at.clone());
     let stop = crate::os::stop_asked()?;
     tokio::spawn({
         let kept = kept.clone();

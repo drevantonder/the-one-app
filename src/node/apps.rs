@@ -50,7 +50,7 @@ impl Node {
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let mut out = self.catalog(viewer, false).await?;
         let remote = self.with(|i| {
-            let mut d: Vec<Value> = i.peers.iter().filter(|(k, _)| i.heard(k)).flat_map(|(_, s)| s.services.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
+            let mut d: Vec<Value> = self.services_up(i)?.into_iter().map(|(_, d)| d).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2).collect();
             d.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_string());
             Ok(d)
         })?;
@@ -101,7 +101,7 @@ impl Node {
             }
         }
         let mut services: Vec<Value> = self.with(|i| {
-            Ok(i.peers.iter().filter(|(k, _)| i.heard(k)).flat_map(|(_, s)| s.services.iter().map(|d| d.2.clone())).collect())
+            Ok(self.services_up(i)?.into_iter().map(|(_, d)| d.2).collect())
         })?;
         services.sort_by_key(|d| d["title"].as_str().or(d["name"].as_str()).unwrap_or("").to_lowercase());
         services.dedup_by(|a, b| a["name"] == b["name"]);
@@ -553,7 +553,7 @@ fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::
         if on {
             // What it's doing is its device's, as its onet said; it's run by its app runtime, where it has one of its own.
             let parts = i.parts.get(k).cloned();
-            let k = &m.computes()?.into_iter().find(|c| c.runtime_of() == Some(*k)).map_or(*k, |c| c.key);
+            let k = &m.runtime_for(k)?.unwrap_or(*k);
             let here = *k == node.0.id;
             let name = if Some(*k) == cloudflare { Some(crate::rank::CLOUDFLARE.to_string()) } else { m.machine(k)?.filter(|d| !d.removed).map(|d| d.name) };
             let part = parts.and_then(|p| match p {

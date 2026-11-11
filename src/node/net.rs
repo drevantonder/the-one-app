@@ -119,10 +119,6 @@ fn http_alpn() -> Vec<u8> {
     format!("{}/http/1", crate::config::CLI).into_bytes()
 }
 
-/// What service endpoints of this custom build answer (src/services/endpoint.rs): a node asks one with it.
-pub fn service_alpn() -> Vec<u8> {
-    format!("{}/service/1", crate::config::CLI).into_bytes()
-}
 
 /// iroh's minimal endpoint without its captive portal check, a request to the relay's address on each full net report
 /// that tells a device nothing it acts on. Every endpoint of a node and its services binds with it; onet's own is the
@@ -279,9 +275,6 @@ impl Node {
         if !self.is_device(&remote) && self.is_cloudflare_node(&remote) {
             return self.take_cloudflare_node(conn).await;
         }
-        if !self.is_device(&remote) && self.is_service(&remote) {
-            return self.take_service(conn).await;
-        }
         if !self.is_device(&remote) && self.has_runtime(&remote) {
             return self.take_onet(remote, conn).await;
         }
@@ -328,6 +321,7 @@ impl Node {
                         node.changed_from(&msg["body"]);
                         Value::Null
                     }
+                    Some(M::SERVICE) => node.carry(&msg["body"]).await,
                     _ => json!({ "error": "that isn't something devices ask each other" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
@@ -520,35 +514,6 @@ impl Node {
         }
     }
 
-    /// A service endpoint of the network, which asks only for calls, as its own user: a service doesn't write
-    /// itself, it asks a node to.
-    async fn take_service(&self, conn: Connection) {
-        let remote = *conn.remote_id().as_bytes();
-        while let Ok((mut send, mut recv)) = conn.accept_bi().await {
-            if !self.is_service(&remote) {
-                return conn.close(1u32.into(), b"not a service of this network");
-            }
-            let node = self.clone();
-            tokio::spawn(async move {
-                let msg: Value = match recv.read_to_end(MESSAGE_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
-                    Ok(msg) => msg,
-                    Err(err) => return tracing::debug!("what service {} sent: {err:#}", short(&remote)),
-                };
-                let answer = match msg["kind"].as_str() {
-                    Some(M::ASK) => node.accept_service_call(remote, &msg["body"]["call"]).await.json(),
-                    Some(M::INSIGHTS) => {
-                        node.service_said(&remote, &msg["body"]).await;
-                        Value::Null
-                    }
-                    _ => json!({ "error": "a service only asks for calls" }),
-                };
-                if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
-                    tracing::debug!("answering service {}: {err:#}", short(&remote));
-                }
-            });
-        }
-    }
-
     /// The device a session's endpoint `remote` asks as: the one its certificate names, if it's for `remote`, unexpired,
     /// and by a client device the network still lists, with its `until`. `kept` is the last checked, so a connection
     /// checks one signature.
@@ -643,7 +608,7 @@ impl Node {
     }
 
     /// Closes the connections of devices the network no longer lists: client devices' to the local API, and those
-    /// held to devices and services.
+    /// held to devices.
     pub(super) fn close_removed(&self) {
         let (clients, held): (Vec<Key>, Vec<Key>) = (self.0.net.clients.lock().unwrap().keys().copied().collect(), self.0.net.conns.lock().unwrap().keys().copied().collect());
         let (gonets, gone_held): (Vec<Key>, Vec<Key>) = self
@@ -658,7 +623,7 @@ impl Node {
                 }
                 let mut gone_held = Vec::new();
                 for k in held {
-                    if m.compute(&k)?.is_none() && m.service(&k)?.is_none() && m.setting(crate::database::scopes::CLOUDFLARE_NODE)?.is_none_or(|s| s != hex(&k)) {
+                    if m.compute(&k)?.is_none() && m.setting(crate::database::scopes::CLOUDFLARE_NODE)?.is_none_or(|s| s != hex(&k)) {
                         gone_held.push(k);
                     }
                 }
@@ -709,9 +674,8 @@ impl Node {
         trace::note(json!({ "step": "online" }), waiting.elapsed());
         let (url, _) = relay(&address, None)?;
         let addr = EndpointAddr::new(PublicKey::from_bytes(to)?).with_relay_url(url);
-        let alpn = if self.is_service(to) { service_alpn() } else { alpn() };
         let connecting = std::time::Instant::now();
-        let conn = match tokio::time::timeout(wait, endpoint.connect(addr, &alpn)).await {
+        let conn = match tokio::time::timeout(wait, endpoint.connect(addr, &alpn())).await {
             Ok(Ok(conn)) => conn,
             Ok(Err(err)) => {
                 self.0.net.down.lock().unwrap().insert(*to, Instant::now());
@@ -725,11 +689,9 @@ impl Node {
         self.0.net.down.lock().unwrap().remove(to);
         trace::note(json!({ "step": "connect", "to": short(to) }), connecting.elapsed());
         *held = Some(conn.clone());
-        if !self.is_service(to) {
-            // The other end asks on it too, once it keeps it for its asks (take_conn).
-            let (node, to, conn) = (self.clone(), *to, conn.clone());
-            tokio::spawn(async move { node.serve_device(to, conn).await });
-        }
+        // The other end asks on it too, once it keeps it for its asks (take_conn).
+        let (node, to, serving) = (self.clone(), *to, conn.clone());
+        tokio::spawn(async move { node.serve_device(to, serving).await });
         self.caught_up();
         Ok(conn)
     }
@@ -760,8 +722,7 @@ impl Node {
                     format!("{way}{on} {}ms: sent {} packets, {} B; got {} packets, {} B", s.rtt.as_millis(), s.udp_tx.datagrams, s.udp_tx.bytes, s.udp_rx.datagrams, s.udp_rx.bytes)
                 })
                 .collect();
-            let service = self.with_or(None, |i| Ok(i.r.db().machine_ever(&key)?.and_then(|m| m.service))).map(|s| format!(" ({s})")).unwrap_or_default();
-            tracing::info!("paths to {}{service} {}: {}", self.name_of(&key), short(&key), paths.join("; "));
+            tracing::info!("paths to {} {}: {}", self.name_of(&key), short(&key), paths.join("; "));
         }
     }
 
@@ -778,7 +739,7 @@ impl Node {
 
     /// Sends `to` a message of `kind` on a stream of its own, on the connection open or, if that one's gone, a new
     /// one: → its answer, waiting `limit` for it, if `answered`.
-    async fn send(&self, to: &Key, kind: &str, body: &Value, answered: bool, limit: Duration) -> Result<Value> {
+    pub(super) async fn send(&self, to: &Key, kind: &str, body: &Value, answered: bool, limit: Duration) -> Result<Value> {
         let msg = json!({ "kind": kind, "body": body }).to_string();
         ensure!(msg.len() <= MESSAGE_LIMIT, "it's {} MB, more than another device is sent at once ({} MB)", msg.len() >> 20, MESSAGE_LIMIT >> 20);
         let mut fresh = false;
@@ -832,32 +793,6 @@ impl Node {
             Some(err) => bail!("{err}"),
             None => Ok(()),
         }
-    }
-
-    /// Says hello to a service endpoint, with how many of `global`'s steps this device has:
-    /// it answers what it offers once it lists this device as one that may call it; until then, that it's behind, and
-    /// is sent them, which it checks itself. → what it offers, and whom it serves.
-    pub(super) async fn hello_service(&self, to: Key) -> Result<Option<(Value, Vec<String>)>> {
-        let at = self.with(|i| Ok(i.r.at()))?.unwrap_or(0);
-        let hello = json!({ "steps": at });
-        let mut answer = self.send(&to, M::HELLO, &hello, true, CONNECT).await?;
-        if answer["behind"] == true && at > 0 {
-            // `global`'s scope database's steps (`database::steps`), its freeze among them.
-            let (bucket, keys) = (self.bucket()?, self.step_keys(&Scope::Global).await?);
-            let made = self.with(|i| Ok(i.r.db().epoch(&Scope::Global)?))?;
-            let steps = crate::database::steps::read(&bucket, &keys, &Scope::Global, 0, made).await?.steps;
-            let list: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
-            let taken = self.send(&to, M::STEPS, &json!({ "steps": list }), true, CONNECT).await?;
-            if let Some(err) = taken["error"].as_str() {
-                bail!("{} didn't take the scope database's steps: {err}", short(&to));
-            }
-            answer = self.send(&to, M::HELLO, &hello, true, CONNECT).await?;
-        }
-        if let Some(err) = answer["error"].as_str() {
-            bail!("{err}");
-        }
-        let users = answer["users"].as_array().into_iter().flatten().filter_map(|u| u.as_str().map(str::to_string)).collect();
-        Ok(answer.get("describe").filter(|d| d.is_object()).map(|d| (d.clone(), users)))
     }
 
     /// Tells each of `to` that something changed, expecting no answer.

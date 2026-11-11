@@ -1,11 +1,12 @@
 //! Device services: native code a device runs beside its node, for what apps can't reach from workerd (a shell, local
-//! models, WhatsApp's linked phone, a Mac's own apps). A service serves its device's users, and the node says so in its
-//! hello to the other devices; its app, and only its app, calls it with `ctx.services`. Each is a program that
-//! registers over the local API and long-polls for calls: an app's own (`apps/<name>/service/`, in Rust on the
-//! `service` crate or in Go), or Swift in the Mac app. The core never names one. Each runs as an endpoint of its own
-//! key, a part of its device's oned (`endpoint`), in its sandbox (`sandbox`).
+//! models, WhatsApp's linked phone, a Mac's own apps). A service serves whom who's who says; its app, and only its app,
+//! calls it with `ctx.services`. Each is a program that registers over a loopback and long-polls for calls: an app's
+//! own (`apps/<name>/service/`, in Rust on the `service` crate or in Go), or Swift in the Mac app. The core never names
+//! one. Each runs as a part of its device's oned with a key of its own (`part`), in its sandbox (`sandbox`), and is
+//! reached only through its device's app runtime, which carries its asks sealed (`carried`).
 
-pub mod endpoint;
+pub mod carried;
+pub mod part;
 pub mod sandbox;
 
 use std::collections::HashMap;
@@ -44,7 +45,7 @@ impl std::fmt::Display for Elsewhere {
 
 impl std::error::Error for Elsewhere {}
 
-/// A registered service that hasn't asked for calls in this long is gone.
+/// A registered program that hasn't asked for what it's handed in this long is gone.
 const GONE_AFTER: Duration = Duration::from_secs(60);
 /// How long a call waits for a service's program, or its endpoint, to come back from a restart before it fails: longer
 /// than one takes on a machine busy with several at once.
@@ -69,18 +70,30 @@ pub struct Call {
     pub traceparent: Option<String>,
 }
 
-/// A service and its calls, which outlive any one run of its program: what the one before never took, the next one does.
-struct Registered {
+/// What a hub hands the program registered under a name: a call, or an ask its runtime carries, each with its id.
+pub trait Job: Serialize + Send + 'static {
+    fn id(&self) -> u64;
+}
+
+impl Job for Call {
+    fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+/// A registered program and what it's handed, which outlive any one run of it: what the one before never took, the
+/// next one does.
+struct Registered<J> {
     describe: Mutex<Value>,
-    calls: mpsc::UnboundedSender<Call>,
-    waiting: tokio::sync::Mutex<mpsc::UnboundedReceiver<Call>>,
-    /// The calls waiting for their answer.
+    jobs: mpsc::UnboundedSender<J>,
+    waiting: tokio::sync::Mutex<mpsc::UnboundedReceiver<J>>,
+    /// The jobs waiting for their answer.
     replies: Mutex<HashMap<u64, Waiting>>,
     seen: Mutex<Instant>,
 }
 
-impl Registered {
-    /// Takes back a call no program has taken, so that none will. → whether it did.
+impl<J> Registered<J> {
+    /// Takes back a job no program has taken, so that none will. → whether it did.
     fn take_back(&self, id: u64) -> bool {
         let mut replies = self.replies.lock().unwrap();
         let untaken = replies.get(&id).is_some_and(|w| !w.taken);
@@ -97,17 +110,26 @@ struct Waiting {
     taken: bool,
 }
 
-#[derive(Default)]
-/// The services registered over the local API.
-pub struct Services {
-    by_app: Mutex<HashMap<String, std::sync::Arc<Registered>>>,
+/// Programs registered by name, each long-polling for what it's handed: a service's program at its part
+/// (`Services`), and the parts at their device's app runtime (`carried::Parts`).
+pub struct Hub<J> {
+    by_app: Mutex<HashMap<String, std::sync::Arc<Registered<J>>>>,
     next: std::sync::atomic::AtomicU64,
-    /// Woken when a service registers, for a call waiting for one that is starting.
+    /// Woken when a program registers, for a job waiting for one that is starting.
     registered: tokio::sync::Notify,
 }
 
-impl Services {
-    /// Registers `app`: its program started, or its endpoint forgot it.
+impl<J> Default for Hub<J> {
+    fn default() -> Self {
+        Hub { by_app: Mutex::default(), next: Default::default(), registered: Default::default() }
+    }
+}
+
+/// The services registered at a part's loopback.
+pub type Services = Hub<Call>;
+
+impl<J: Job> Hub<J> {
+    /// Registers `app`: its program started, or what it registers with forgot it.
     pub fn register(&self, app: &str, mut describe: Value) {
         describe["name"] = json!(app);
         describe["runs"] = json!("here");
@@ -118,14 +140,14 @@ impl Services {
                 *p.seen.lock().unwrap() = Instant::now();
             }
             None => {
-                let (calls, rx) = mpsc::unbounded_channel();
-                by_app.insert(app.to_string(), std::sync::Arc::new(Registered { describe: Mutex::new(describe), calls, waiting: tokio::sync::Mutex::new(rx), replies: Mutex::default(), seen: Mutex::new(Instant::now()) }));
+                let (jobs, rx) = mpsc::unbounded_channel();
+                by_app.insert(app.to_string(), std::sync::Arc::new(Registered { describe: Mutex::new(describe), jobs, waiting: tokio::sync::Mutex::new(rx), replies: Mutex::default(), seen: Mutex::new(Instant::now()) }));
             }
         }
         self.registered.notify_waiters();
     }
 
-    /// `app`'s program stopped: the calls it took and hasn't answered fail now, as it may have begun them, so no other
+    /// `app`'s program stopped: the jobs it took and hasn't answered fail now, as it may have begun them, so no other
     /// program runs them. What it never took waits for the next one.
     pub fn program_stopped(&self, app: &str) {
         if let Some(p) = self.by_app.lock().unwrap().get(app) {
@@ -133,7 +155,7 @@ impl Services {
         }
     }
 
-    fn get(&self, app: &str) -> Option<std::sync::Arc<Registered>> {
+    fn get(&self, app: &str) -> Option<std::sync::Arc<Registered<J>>> {
         let p = self.by_app.lock().unwrap().get(app).cloned()?;
         let fresh = p.seen.lock().unwrap().elapsed() < GONE_AFTER;
         fresh.then_some(p)
@@ -143,9 +165,14 @@ impl Services {
         self.get(app).is_some()
     }
 
-    pub fn describe(&self) -> Vec<Value> {
+    /// What each program registered as, by name.
+    pub fn described(&self) -> Vec<(String, Value)> {
         let names: Vec<String> = self.by_app.lock().unwrap().keys().cloned().collect();
-        names.iter().filter_map(|n| self.get(n)).map(|p| p.describe.lock().unwrap().clone()).collect()
+        names.into_iter().filter_map(|n| Some((n.clone(), self.get(&n)?.describe.lock().unwrap().clone()))).collect()
+    }
+
+    pub fn describe(&self) -> Vec<Value> {
+        self.described().into_iter().map(|(_, d)| d).collect()
     }
 
     /// Waits until `app` is registered.
@@ -161,9 +188,9 @@ impl Services {
         }
     }
 
-    /// Hands a call to the service and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
-    /// caller's scope keeps, so the devices that hold the scope can fetch it.
-    pub async fn call(&self, app: &str, function: &str, input: Value, caller: Me, from: Option<String>, traceparent: Option<String>) -> Result<Answer> {
+    /// Hands `app`'s program the job `make` makes of its id, and waits for its reply. A program restarting takes it
+    /// when it's back, within `STARTS_WITHIN`; past that it fails unrun.
+    pub async fn hand(&self, app: &str, make: impl FnOnce(u64) -> J) -> Result<Value> {
         let now = tokio::time::Instant::now();
         let (starts_by, answers_by) = (now + STARTS_WITHIN, now + Duration::from_secs(600));
         if self.get(app).is_none() {
@@ -173,14 +200,40 @@ impl Services {
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, mut rx) = oneshot::channel();
         p.replies.lock().unwrap().insert(id, Waiting { answer: tx, taken: false });
-        p.calls.send(Call { id, function: function.into(), input, caller, from, traceparent }).map_err(|_| anyhow!("{app} stopped"))?;
-        // A running program takes a call at once; one restarting, when it's back. Past that it isn't coming in time.
+        p.jobs.send(make(id)).map_err(|_| anyhow!("{app} stopped"))?;
+        // A running program takes a job at once; one restarting, when it's back. Past that it isn't coming in time.
         let answer = match tokio::time::timeout_at(starts_by, &mut rx).await {
             Ok(answer) => answer,
             Err(_) if p.take_back(id) => return Err(not_running(app)),
             Err(_) => tokio::time::timeout_at(answers_by, rx).await.map_err(|_| anyhow!("{app} didn't answer"))?,
         };
-        let reply = answer.map_err(|_| crate::protocol::Coded::error(crate::protocol::code::STOPPED, format!("{app} stopped before it answered, and may have done some of it: look at what it did before asking again")))?;
+        answer.map_err(|_| crate::protocol::Coded::error(crate::protocol::code::STOPPED, format!("{app} stopped before it answered, and may have done some of it: look at what it did before asking again")))
+    }
+
+    /// The next job for `app`, waiting up to 25 seconds; None if there was none.
+    pub async fn next(&self, app: &str) -> Result<Option<J>> {
+        let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("register {app} first"))?;
+        *p.seen.lock().unwrap() = Instant::now();
+        let mut rx = p.waiting.lock().await;
+        let job = tokio::time::timeout(Duration::from_secs(25), rx.recv()).await.ok().flatten();
+        *p.seen.lock().unwrap() = Instant::now();
+        // One its caller gave up on isn't run.
+        Ok(job.filter(|j| p.replies.lock().unwrap().get_mut(&j.id()).map(|w| w.taken = true).is_some()))
+    }
+
+    pub fn reply(&self, app: &str, id: u64, reply: Value) -> Result<()> {
+        let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("no service {app}"))?;
+        let waiting = p.replies.lock().unwrap().remove(&id).ok_or_else(|| anyhow!("no call {id} waiting"))?;
+        let _ = waiting.answer.send(reply);
+        Ok(())
+    }
+}
+
+impl Services {
+    /// Hands a call to the service and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
+    /// caller's scope keeps, so the devices that hold the scope can fetch it.
+    pub async fn call(&self, app: &str, function: &str, input: Value, caller: Me, from: Option<String>, traceparent: Option<String>) -> Result<Answer> {
+        let reply = self.hand(app, |id| Call { id, function: function.into(), input, caller, from, traceparent }).await?;
         if let Some(why) = reply.get("elsewhere") {
             return Err(Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());
         }
@@ -190,25 +243,6 @@ impl Services {
         let blobs = reply["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
         Ok(Answer { ok: reply["ok"].clone(), blobs })
     }
-
-    /// The next call for `app`, waiting up to 25 seconds; None if there was none.
-    pub async fn next(&self, app: &str) -> Result<Option<Call>> {
-        let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("register {app} first"))?;
-        *p.seen.lock().unwrap() = Instant::now();
-        let mut rx = p.waiting.lock().await;
-        let call = tokio::time::timeout(Duration::from_secs(25), rx.recv()).await.ok().flatten();
-        *p.seen.lock().unwrap() = Instant::now();
-        // One its caller gave up on isn't run.
-        Ok(call.filter(|c| p.replies.lock().unwrap().get_mut(&c.id).map(|w| w.taken = true).is_some()))
-    }
-
-    pub fn reply(&self, app: &str, id: u64, reply: Value) -> Result<()> {
-        let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("no service {app}"))?;
-        let waiting = p.replies.lock().unwrap().remove(&id).ok_or_else(|| anyhow!("no call {id} waiting"))?;
-        let _ = waiting.answer.send(reply);
-        Ok(())
-    }
-
 }
 
 /// A call's input as `T`, where none is an empty one and a field that's null is one not given, as Go's services read them.

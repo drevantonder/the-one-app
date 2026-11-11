@@ -812,7 +812,7 @@ fn machines_in(st: &Value) -> (Machine, Vec<Machine>) {
     let mut here = all.iter().find(|d| d["here"] == true).map(|d| Machine::of(d)).unwrap_or_default();
     here.name = or(st["me"]["name"].as_str().unwrap_or_default(), &or(st["device"]["name"].as_str().unwrap_or_default(), &here.name));
     here.user = or(&here.user, st["user"]["id"].as_str().unwrap_or_default());
-    // A service endpoint's rows don't say what their devices run: its own device's row does.
+    // A service's rows don't say what their devices run: its own device's row does.
     if here.runs_for.is_none() {
         here.runs_for = Machine::of(&st["device"]).runs_for;
     }
@@ -1021,9 +1021,9 @@ mod tests {
         }
     }
 
-    /// A machine whose service endpoint says it runs others' calls too is shared, though its own row doesn't say.
+    /// A machine whose service says it runs others' calls too is shared, though its own row doesn't say.
     #[test]
-    fn what_a_service_endpoint_says_it_runs() {
+    fn what_a_service_says_it_runs() {
         let st = json!({ "device": { "name": "mac", "runs_for": ["user:u1", "global"] }, "me": { "name": "mac" }, "user": { "id": "u1" },
             "network": { "devices": [{ "name": "mac", "here": true, "online": true }] } });
         let (me, _) = machines_in(&st);

@@ -1,5 +1,5 @@
 //! The scopes this device holds: reading each from the bucket, and what devices tell each other about them: that one
-//! changed (pings), and who is on (presence).
+//! changed (pings), and who is on (presence), with what their services describe of themselves.
 
 use super::*;
 
@@ -216,13 +216,13 @@ impl Node {
         }
     }
 
-    /// Says hello to every other device, now and then: how loaded this one is. How far each is, is the round trip iroh
-    /// measures to it.
+    /// Says hello to every other device, now and then: how loaded this one is, and what each of its parts registered
+    /// here describes of itself. How far each is, is the round trip iroh measures to it.
     pub(super) fn say_hello(&self) {
         let Ok(devices) = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect::<Vec<Key>>())) else {
             return;
         };
-        let hello = json!({ "load": crate::load::current(), "updating": self.updating() });
+        let hello = json!({ "load": crate::load::current(), "updating": self.updating(), "services": self.parts_described() });
         for device in devices {
             let (node, hello) = (self.clone(), hello.clone());
             tokio::spawn(async move {
@@ -233,12 +233,42 @@ impl Node {
                 }
             });
         }
-        self.hello_services();
     }
 
+    /// Another device's hello: its load, and what the parts its runtime carries describe of themselves, kept for those
+    /// who's who lists as parts of its device.
     pub(super) fn hello_from(&self, from: &Key, hello: &Value) -> Result<()> {
         let load = serde_json::from_value(hello["load"].clone()).ok();
-        self.with(|i| Ok(i.peers.insert(*from, Peer { services: Vec::new(), load, updating: hello["updating"].as_str().map(str::to_string), seen: Instant::now() })))?;
+        let changed = self.with(|i| {
+            i.peers.insert(*from, Peer { load, updating: hello["updating"].as_str().map(str::to_string), seen: Instant::now() });
+            let m = i.r.db();
+            let device = m.device_of(from);
+            let mut said = HashMap::new();
+            for (key, describe) in hello["services"].as_object().into_iter().flatten() {
+                if let Ok(key) = crate::keys::unhex(key)
+                    && m.service(&key)?.is_some_and(|s| s.device == Some(device))
+                {
+                    said.insert(key, describe.clone());
+                }
+            }
+            let mut changed = Vec::new();
+            for key in i.described.keys().copied().collect::<Vec<_>>() {
+                if m.service(&key)?.is_none_or(|s| s.device == Some(device)) && !said.contains_key(&key) {
+                    changed.extend(i.described.remove(&key).and_then(|d| d["name"].as_str().map(str::to_string)));
+                }
+            }
+            for (key, describe) in said {
+                if i.described.get(&key) != Some(&describe) {
+                    changed.extend(describe["name"].as_str().map(str::to_string));
+                    i.described.insert(key, describe);
+                }
+            }
+            Ok(changed)
+        })?;
+        self.0.heard.notify_waiters();
+        if !changed.is_empty() {
+            self.learn_apps(changed);
+        }
         Ok(())
     }
 
@@ -251,62 +281,28 @@ impl Node {
         }
     }
 
-    /// Says hello to each service endpoint of the network, which says what it offers and whom it serves: it's listed
-    /// as a device offering that service, as another device's hello lists those there.
-    pub(super) fn hello_services(&self) {
-        let Ok(services) = self.with(|i| {
-            let mut services = Vec::new();
-            for m in i.r.db().machines()? {
-                if i.r.db().service(&m.key)?.is_some() {
-                    services.push((m.key, m.service.clone().unwrap_or_default()));
-                }
-            }
-            Ok(services)
-        }) else {
-            return;
-        };
-        for (key, _) in services {
-            let node = self.clone();
-            tokio::spawn(async move {
-                node.hello_service_now(&key).await;
-            });
+    /// Each service up as this device knows it, with whom it serves (as its listing says, never what it says of
+    /// itself) and what it describes of itself: this device's parts as they registered here, another's as its device's
+    /// runtime said in its last hello, while it's heard.
+    pub(super) fn services_up(&self, i: &Network) -> Result<Vec<(scopes::Machine, Service)>> {
+        let m = i.r.db();
+        let here = self.0.holds.device();
+        let registered: HashMap<String, Value> = self.0.sockets.described().into_iter().collect();
+        let mut out = Vec::new();
+        for s in m.machines()?.into_iter().filter(|s| !s.removed && s.is(scopes::Kind::Service)) {
+            let (Some(name), Some(device)) = (s.service.clone(), s.device) else { continue };
+            let describe = if device == here {
+                registered.get(&name).cloned()
+            } else {
+                m.runtime_for(&device)?.filter(|r| i.heard(r)).and_then(|_| i.described.get(&s.key).cloned())
+            };
+            let Some(mut describe) = describe else { continue };
+            describe["runs"] = json!("service");
+            let users: Vec<String> = m.users()?.into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&s.key))).collect();
+            let listed = self.listed_as_app(&name, describe);
+            out.push((s, (name, users, listed)));
         }
-    }
-
-    /// Says hello to one service endpoint now, and lists what it offers as another device's hello does. → whether it
-    /// answered as one that takes this device's calls.
-    pub(super) async fn hello_service_now(&self, key: &Key) -> bool {
-        let key = *key;
-        let Some(name) = self.with_or(None, |i| Ok(i.r.db().machine_ever(&key)?.and_then(|m| m.service.clone()))) else { return false };
-        let offers = match self.hello_service(key).await {
-            Ok(Some(offers)) => offers,
-            Ok(None) => {
-                tracing::debug!("service {} doesn't take calls from this device yet", short(&key));
-                return false;
-            }
-            Err(err) => {
-                tracing::debug!("service {}: {err:#}", short(&key));
-                return false;
-            }
-        };
-        let (describe, _) = offers;
-        // Whom it serves is what its listing says, never what it says of itself.
-        let users: Vec<String> = self.with_or(Default::default(), |i| { let m = i.r.db(); Ok(m.users()?.into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&key))).collect()) });
-        self.learn_app(&name).await;
-        let services: Vec<Service> = vec![(name.clone(), users, self.listed_as_app(&name, describe))];
-        let far = self.round_trip(&key);
-        let changed = self.with(|i| {
-            if let Some(far) = far {
-                i.far.insert(key, far);
-            }
-            let before = i.peers.insert(key, Peer { services: services.clone(), load: None, updating: None, seen: Instant::now() });
-            Ok(before.is_none_or(|p| p.services != services || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
-        });
-        self.0.heard.notify_waiters();
-        if changed.unwrap_or(false) {
-            self.emit(Event::Changed { apps: vec![name] });
-        }
-        true
+        Ok(out)
     }
 }
 
