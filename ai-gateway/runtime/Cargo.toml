@@ -5,16 +5,25 @@ edition = "2024"
 license = "MIT"
 publish = false
 
-# What the app runtime does for AI Gateway: picks the model and whose key pays, holds a retryKey's answer, sends the call
-# through the Vault's fill and says what it used, behind `Host`, which the app runtime implements.
+# What the app runtime does for AI Gateway: runs `ctx.ai.run` and its tools as their `Host`, through `api::AppRuntime`:
+# the keys that pay from the Vault's items, sent through its fill, the caller's own and Everyone's `node/ai-gateway`,
+# a device's models through a service that declares `ai`, and each call's span in Insights.
 [lib]
 doctest = false
 
 [dependencies]
 ai-gateway = { path = ".." }
+api = { path = "../../api" }
+scope = { path = "../../scope" }
+key = { path = "../../key" }
+vault = { path = "../../vault" }
+vault-runtime = { path = "../../vault/runtime" }
+insights = { path = "../../insights" }
+insights-runtime = { path = "../../insights/runtime" }
+custom-build = { path = "../../custom-build" }
+platform = { path = "../../platform", features = ["machine"] }
 anyhow = "1"
-# A retryKey's input is held to its first call's by hash.
-blake3 = "1"
-# A retryKey's answer is a row of the caller's own node database (`node/ai-gateway`), written in its transaction.
 rusqlite = { version = "0.41", features = ["bundled"] }
 serde_json = "1"
+tokio = { version = "1", features = ["sync", "rt"] }
+ureq = { version = "3", features = ["json"] }

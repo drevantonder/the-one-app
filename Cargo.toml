@@ -72,7 +72,7 @@ groups-runtime = { path = "groups/runtime", optional = true }
 widgets = { path = "widgets" }
 widgets-runtime = { path = "widgets/runtime", optional = true }
 anyhow = "1"
-# AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes and tools' specs, every build; what a node does for it, only a node's.
+# AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes, tools' specs, whose key pays and a call's flow, every build; running it on a machine, only a node's.
 ai-gateway = { path = "ai-gateway" }
 ai-gateway-runtime = { path = "ai-gateway/runtime", optional = true }
 data-encoding = "2"

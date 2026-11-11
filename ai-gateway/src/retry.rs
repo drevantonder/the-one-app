@@ -4,9 +4,8 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use ai_gateway::{Failed, RETRY_KEPT_MS};
-
-use crate::{Host, Whose};
+use crate::call::{Host, Whose};
+use crate::{Failed, RETRY_KEPT_MS};
 
 /// `node/ai-gateway`'s schema, as its changes, oldest first.
 pub const SCHEMA: &[&str] = &["

@@ -1,17 +1,27 @@
 //! AI Gateway (GLOSSARY): how apps use AI models with `ctx.ai.run`. This crate is what every build has of it: the
 //! input each kind takes and the answer it gives (OpenAI's chat completions; Cloudflare Clef's decisions), which model id
 //! runs where (`route`), the requests that sends and how their answers read (`google`, `anthropic` translate; the rest
-//! are OpenAI's shape already), what a call's span may say, and its tools' specs. It sends nothing and holds no key.
+//! are OpenAI's shape already), whose key pays (`pays`), a call's flow wherever it runs (`call`, over its `Host`), what a
+//! call's span may say, and its tools' specs. It sends nothing and holds no key: its hosts send what it builds, filled
+//! by the Vault.
 
 mod anthropic;
+mod call;
 mod google;
+mod pays;
+mod retry;
 pub mod route;
+
+pub use call::{Fut, Host, Key, Sent, Shared, Whose, defaults, models, run, set};
+pub use pays::pays;
+pub use retry::SCHEMA;
+pub use rusqlite::Connection;
 
 use serde_json::{Map, Value, json};
 
 pub use route::{Company, Route};
 
-pub const NAME: &str = "ai-gateway";
+pub const NAME: &str = api::path::AI_GATEWAY.split_at("/api/".len()).1;
 pub const TITLE: &str = "AI Gateway";
 pub const DESCRIPTION: &str = "How your apps use AI models: hosted ones with keys in the Vault, Workers AI, and models on your devices";
 /// A key's Vault kind starts with this, then the company's id: `AI key: google`.
@@ -379,6 +389,11 @@ fn text_of(content: &Value) -> String {
 }
 
 /// The tools' specs: core tools, `ai-gateway_<tool>`.
+/// AI Gateway as one of the core's features: its three tools.
+pub fn feature() -> api::Feature {
+    api::Feature { name: NAME, title: TITLE, description: DESCRIPTION.into(), guide: GUIDE.into(), tools: tools() }
+}
+
 pub fn tools() -> Vec<Value> {
     vec![
         json!({

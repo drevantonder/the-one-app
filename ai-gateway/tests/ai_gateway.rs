@@ -1,12 +1,12 @@
 //! AI Gateway's secrets, who pays and what's kept: what using it wouldn't show. Each runs the gateway's own code
-//! (`ai_gateway_runtime::run`) against a stand-in for the node it runs on (`Stand`), whose `send` is where the outside
+//! (`ai_gateway::run`) against a stand-in for the node it runs on (`Stand`), whose `send` is where the outside
 //! world begins: no request leaves it. It runs with the rest of `cargo test` (tests/main.rs).
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ::ai_gateway::{Company, Kind, Outgoing, Paid};
-use ai_gateway_runtime::{Connection, Fut, Host, Key, Sent, Span, Whose};
+use ai_gateway::{Connection, Fut, Host, Key, Sent, Span, Whose};
 use ::scope::scopes::Scope;
 use vault::{Field, Item, Items};
 use serde_json::{Value, json};
@@ -43,7 +43,7 @@ impl Stand {
     fn new(vault: Vec<(Scope, Items)>, app: Option<&str>, user: &str, answer: fn(&Outgoing) -> Sent) -> Stand {
         let db = || {
             let c = Connection::open_in_memory().unwrap();
-            for m in ai_gateway_runtime::SCHEMA {
+            for m in ai_gateway::SCHEMA {
                 c.execute_batch(m).unwrap();
             }
             Mutex::new(c)
@@ -61,7 +61,7 @@ impl Stand {
 
 impl Host for Stand {
     fn key(&self, company: Company) -> Fut<'_, Option<Key>> {
-        Box::pin(async move { Ok(one::ai_gateway::pays(&self.vault, self.app.as_deref(), &self.user, company).map(|(item, paid)| Key { item, paid })) })
+        Box::pin(async move { Ok(ai_gateway::pays(&self.vault, self.app.as_deref(), &self.user, company).map(|(item, paid)| Key { item, paid })) })
     }
 
     fn send<'a>(&'a self, key: &'a Key, out: Outgoing) -> Fut<'a, Sent> {
@@ -162,19 +162,19 @@ async fn whose_key_pays() {
         (Scope::Global, items(&[("everyones", key_item(g, "e", &host, &["node"], 1)), ("notes-own", key_item(g, "n", &host, &["notes"], 2))])),
         (Scope::User("u1".into()), items(&[("u1-own", key_item(g, "u", &host, &["node"], 3))])),
     ];
-    let pays = |app: Option<&str>, user: &str| one::ai_gateway::pays(&vault, app, user, g);
+    let pays = |app: Option<&str>, user: &str| ai_gateway::pays(&vault, app, user, g);
     assert_eq!(pays(Some("notes"), "u1"), Some(("notes-own".into(), Paid::App)), "an app's own key pays its calls first");
     assert_eq!(pays(Some("notes"), "u2"), Some(("notes-own".into(), Paid::App)));
     assert_eq!(pays(Some("tally"), "u1"), Some(("u1-own".into(), Paid::User)), "another app's call never takes notes' key: the user's pays");
     assert_eq!(pays(Some("tally"), "u2"), Some(("everyones".into(), Paid::Network)), "another user's call never takes u1's key");
     assert_eq!(pays(None, "u2"), Some(("everyones".into(), Paid::Network)));
     let only_an_apps = vec![(Scope::Global, items(&[("notes-own", key_item(g, "n", &host, &["notes"], 2))]))];
-    assert_eq!(one::ai_gateway::pays(&only_an_apps, Some("tally"), "u1", g), None, "an app's key pays for no one else's calls");
+    assert_eq!(ai_gateway::pays(&only_an_apps, Some("tally"), "u1", g), None, "an app's key pays for no one else's calls");
 
     // The user's key fails: the call fails with it, and nothing else is sent.
     let refused = |_: &Outgoing| Sent { status: 401, retry_after: None, body: b"bad key".to_vec() };
     let stand = Stand::new(vault.clone(), Some("tally"), "u1", refused);
-    let err = ai_gateway_runtime::run(&stand, "tally", chat("google/gemini-x", "hi"), None).await.unwrap_err();
+    let err = ai_gateway::run(&stand, "tally", chat("google/gemini-x", "hi"), None).await.unwrap_err();
     assert!(format!("{err:#}").contains("401"), "{err:#}");
     assert_eq!(*stand.keys_sent.lock().unwrap(), vec!["u1-own".to_string()], "a failing key never falls back to Everyone's");
 }
@@ -186,17 +186,17 @@ async fn a_retry_is_never_charged_twice() {
     let vault = vec![(Scope::Global, items(&[("everyones", key_item(Company::OpenAi, "e", &["api.openai.com"], &["node"], 1))]))];
     let stand = Stand::new(vault.clone(), Some("claims"), "u1", |_| says("first"));
     let input = chat("openai/gpt-x", "read this claim");
-    let first = ai_gateway_runtime::run(&stand, "claims", input.clone(), Some("c1:pay")).await.unwrap();
-    let again = ai_gateway_runtime::run(&stand, "claims", input.clone(), Some("c1:pay")).await.unwrap();
+    let first = ai_gateway::run(&stand, "claims", input.clone(), Some("c1:pay")).await.unwrap();
+    let again = ai_gateway::run(&stand, "claims", input.clone(), Some("c1:pay")).await.unwrap();
     assert_eq!(stand.sent.load(Ordering::SeqCst), 1, "the retry sent nothing");
     assert_eq!(again["one"]["replayed"], true);
     assert_eq!(again["choices"], first["choices"], "the retry is the first answer");
-    let changed = ai_gateway_runtime::run(&stand, "claims", chat("openai/gpt-x", "another claim"), Some("c1:pay")).await.unwrap_err();
+    let changed = ai_gateway::run(&stand, "claims", chat("openai/gpt-x", "another claim"), Some("c1:pay")).await.unwrap_err();
     assert_eq!(changed.downcast_ref::<::ai_gateway::Failed>(), Some(&::ai_gateway::Failed::RetryChanged));
     assert_eq!(stand.sent.load(Ordering::SeqCst), 1, "changed input on a used key sends nothing");
 
     let someone_else = Stand::new(vault, Some("claims"), "u2", |_| says("theirs"));
-    let theirs = ai_gateway_runtime::run(&someone_else, "claims", input, Some("c1:pay")).await.unwrap();
+    let theirs = ai_gateway::run(&someone_else, "claims", input, Some("c1:pay")).await.unwrap();
     assert_eq!(someone_else.sent.load(Ordering::SeqCst), 1, "another user's call with the same key is sent");
     assert_eq!(theirs["one"]["replayed"], false, "never someone else's answer");
 }
@@ -211,10 +211,10 @@ async fn no_prompt_or_answer_in_insights() {
     let vault = vec![(Scope::Global, items(&[("everyones", key_item(Company::OpenAi, "e", &["api.openai.com"], &["node"], 1))]))];
     let ok = Stand::new(vault.clone(), Some("notes"), "u1", |_| says(ANSWER));
     let input = json!({ "model": "openai/gpt-x", "messages": [{ "role": "system", "content": PROMPT }, { "role": "user", "content": PROMPT }], "max_completion_tokens": 50, "temperature": 0.2 });
-    ai_gateway_runtime::run(&ok, "notes", input.clone(), Some("r1")).await.unwrap();
-    ai_gateway_runtime::run(&ok, "notes", input.clone(), Some("r1")).await.unwrap();
+    ai_gateway::run(&ok, "notes", input.clone(), Some("r1")).await.unwrap();
+    ai_gateway::run(&ok, "notes", input.clone(), Some("r1")).await.unwrap();
     let broke = Stand::new(vault, Some("notes"), "u1", |_| Sent { status: 500, retry_after: None, body: b"{\"error\":\"overloaded\"}".to_vec() });
-    let _ = ai_gateway_runtime::run(&broke, "notes", input, None).await;
+    let _ = ai_gateway::run(&broke, "notes", input, None).await;
 
     let mut batch = insights::Batch::default();
     for stand in [&ok, &broke] {

@@ -60,6 +60,7 @@ pub mod path {
     pub const BADGES: &str = "/api/badges";
     pub const APPS: &str = "/api/apps";
     pub const VAULT: &str = "/api/vault";
+    pub const AI_GATEWAY: &str = "/api/ai-gateway";
     pub const OPENAPI: &str = "/api/openapi.json";
     pub const HOOKS_PROMPT: &str = "/hooks/prompt";
     /// The first segments of the API's own routes with more under them (`routes()` holds to it: `api::tests`).

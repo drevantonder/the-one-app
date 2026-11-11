@@ -145,7 +145,7 @@ pub fn may_hand(route: &Route, need: &Need) -> bool {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG, AI]) || code,
         (None, Route::Path(p)) if p == path::MCP => apps || node(&[VAULT, LOG, AI]) || code,
         (None, Route::Path(p)) if matches!(p.as_str(), path::BADGES) || p == path::WIDGETS || p.starts_with(&format!("{}/", path::WIDGETS)) => apps || node(&[VAULT, LOG]) || code,
-        (None, Route::Path(p)) if p.starts_with(&format!("/api/{}/", ai_gateway::NAME)) => node(&[VAULT, LOG, AI]),
+        (None, Route::Path(p)) if p.starts_with(&format!("{}/", path::AI_GATEWAY)) => node(&[VAULT, LOG, AI]),
         (None, Route::Path(p)) if p == path::APPS || p == path::OPENAPI => node(&[LOG]) || code,
         (None, Route::Path(p)) if p == path::VAULT || p.starts_with(&format!("{}/", path::VAULT)) => node(&[VAULT, LOG]),
         (None, _) => node(&[LOG]),

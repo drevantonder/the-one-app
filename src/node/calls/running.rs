@@ -295,7 +295,7 @@ impl Node {
             Ask::Fetch => bail!("{}'s requests go out as they're made here", grant.app),
             Ask::AiRun => {
                 let req: Value = serde_json::from_slice(&body)?;
-                ok(json!({ "ok": self.ai_run(&grant.caller, &grant.app, &grant.scopes, grant.trace.as_ref(), req["input"].clone(), req["retry_key"].as_str()).await? }))
+                ok(json!({ "ok": ai_gateway_runtime::run(&self.rt(), &grant.caller, &grant.app, &grant.scopes, grant.trace.as_ref(), req["input"].clone(), req["retry_key"].as_str()).await? }))
             }
         })
     }

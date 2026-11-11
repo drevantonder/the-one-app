@@ -32,7 +32,6 @@ use ::scope::rank;
 use crate::schedules::{self, Schedule};
 use ::scope::replica::{Handled, Replica};
 
-mod ai_gateway;
 pub mod apps;
 pub mod blobs;
 pub mod copied;

@@ -22,7 +22,7 @@ pub fn features() -> Vec<Runs> {
         notifications_runtime::runs(),
         device_logs_runtime::runs(),
         insights_runtime::runs(),
-        crate::ai_gateway::tools::runs(),
+        ai_gateway_runtime::runs(),
     ]
 }
 
@@ -30,14 +30,6 @@ pub fn features() -> Vec<Runs> {
 pub fn routes() -> crate::api::Routes {
     features().into_iter().fold(crate::api::Routes::default(), |routes, runs| routes.merge(runs.routes))
 }
-
-/// A `Serves` of a feature whose runtime half is still this program's: an `async fn(Node, Caller, Map<String, Value>)`.
-macro_rules! node_serves {
-    ($f:path) => {
-        |rt, me, input| Box::pin($f(crate::node::Node::of(&rt), me, input))
-    };
-}
-pub(crate) use node_serves;
 
 /// What the features keep while this runtime runs, and what wakes each one's loop.
 #[derive(Default)]

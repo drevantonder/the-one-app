@@ -6,10 +6,8 @@ pub mod carried {
     include!(concat!(env!("OUT_DIR"), "/carried.rs"));
 }
 
-
 // What the Cloudflare node (cloudflare/node/) and the native apps' onet (onet/) share with nodes on machines; the rest
 // is only theirs (the `node` feature).
-pub mod ai_gateway;
 #[cfg(feature = "node")]
 pub mod skills;
 #[cfg(feature = "node")]

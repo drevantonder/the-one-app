@@ -56,7 +56,14 @@ dependencies = [
 name = "ai-gateway"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "api",
+ "blake3",
+ "key",
+ "rusqlite",
+ "scope",
  "serde_json",
+ "vault",
 ]
 
 [[package]]
@@ -65,9 +72,19 @@ version = "0.1.0"
 dependencies = [
  "ai-gateway",
  "anyhow",
- "blake3",
+ "api",
+ "custom-build",
+ "insights",
+ "insights-runtime",
+ "key",
+ "platform",
  "rusqlite",
+ "scope",
  "serde_json",
+ "tokio",
+ "ureq",
+ "vault",
+ "vault-runtime",
 ]
 
 [[package]]
@@ -95,7 +112,6 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "api"
 version = "0.1.0"
 dependencies = [
- "ai-gateway",
  "anyhow",
  "axum",
  "bucket",
@@ -3351,7 +3367,6 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "ai-gateway",
- "ai-gateway-runtime",
  "anyhow",
  "api",
  "axum",
@@ -3403,7 +3418,6 @@ name = "one-cloudflare-node"
 version = "0.1.0"
 dependencies = [
  "ai-gateway",
- "ai-gateway-runtime",
  "anyhow",
  "api",
  "blake3",

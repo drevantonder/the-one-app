@@ -619,7 +619,7 @@ pub enum CoreDb {
     Vault,
     /// The blobs its steps name (`bucket::blob_name`).
     Blobs,
-    /// AI Gateway's rows: a retryKey's answers and the default models (`ai_gateway_runtime::SCHEMA`).
+    /// AI Gateway's rows: a retryKey's answers and the default models (`ai_gateway::SCHEMA`).
     AiGateway,
 }
 

@@ -11,7 +11,6 @@ publish = false
 doctest = false
 
 [dependencies]
-ai-gateway = { path = "../ai-gateway" }
 scope = { path = "../scope" }
 database = { path = "../database" }
 bucket = { path = "../bucket" }

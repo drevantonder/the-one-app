@@ -1,12 +1,9 @@
-//! AI Gateway (ai-gateway/) as one of the core's features: whose key pays for a call, here, as every node decides it
-//! (a machine's, src/node/ai_gateway.rs, and the Cloudflare node's). What a node does for it is src/node/ai_gateway.rs.
+//! Whose key pays for a call: as every place a call runs decides it.
 
-pub mod tools;
+use scope::scopes::Scope;
+use vault::Items;
 
-use ::ai_gateway::{Company, Paid};
-
-use ::scope::scopes::Scope;
-use ::vault::Items;
+use crate::{Company, Paid};
 
 /// The key that pays for `company`'s models in a call of `app` (none for the network's own, an agent's) by `user`, of the
 /// Vault items in `scopes` (those the call reached): the most specific there is, oldest first in each.
@@ -19,7 +16,7 @@ use ::vault::Items;
 /// here, before the call, so a key that fails never falls back to the next.
 pub fn pays(scopes: &[(Scope, Items)], app: Option<&str>, user: &str, company: Company) -> Option<(String, Paid)> {
     let kind = company.key_kind();
-    let oldest = |scope: Option<&Scope>, mine: &dyn Fn(&::vault::Item) -> bool| {
+    let oldest = |scope: Option<&Scope>, mine: &dyn Fn(&vault::Item) -> bool| {
         scopes
             .iter()
             .filter(|(s, _)| scope.is_none_or(|want| s == want))
@@ -28,7 +25,7 @@ pub fn pays(scopes: &[(Scope, Items)], app: Option<&str>, user: &str, company: C
             .min_by_key(|(_, it)| it.made)
             .map(|(id, _)| id.clone())
     };
-    let nobodys = |it: &::vault::Item| it.apps.iter().all(|a| a == key::APP);
+    let nobodys = |it: &vault::Item| it.apps.iter().all(|a| a == key::APP);
     let apps = app.and_then(|app| oldest(None, &|it| it.apps.contains(app))).map(|id| (id, Paid::App));
     apps.or_else(|| oldest(Some(&Scope::User(user.to_string())), &nobodys).map(|id| (id, Paid::User)))
         .or_else(|| oldest(Some(&Scope::Global), &nobodys).map(|id| (id, Paid::Network)))

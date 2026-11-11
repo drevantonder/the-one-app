@@ -110,7 +110,7 @@ mod tests {
     fn runtime_tools(root: &std::path::Path, feature: &str) -> Option<String> {
         std::fs::read_dir(root).ok()?.flatten().find_map(|folder| {
             let runs = std::fs::read_to_string(folder.path().join("runtime/src/lib.rs")).ok()?;
-            runs.contains(&format!("Runs::named(\"{feature}\")")).then(|| std::fs::read_to_string(folder.path().join("runtime/src/tools.rs")).ok())?
+            (folder.file_name() == feature || runs.contains(&format!("Runs::named(\"{feature}\")"))).then(|| std::fs::read_to_string(folder.path().join("runtime/src/tools.rs")).ok())?
         })
     }
 
