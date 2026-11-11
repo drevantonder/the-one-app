@@ -151,9 +151,6 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
 /// opened and applied by the client's keyring; and from a Welcome, sign-in's word passed on as JavaScript reads it.
 #[test]
 fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<()> {
-    let formats = Formats::start();
-    let js = |body: Value| formats.js(body);
-
     use ed25519_dalek::SigningKey;
     use ::scope::steps;
     use ::scope::steps::Step;

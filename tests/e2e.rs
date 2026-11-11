@@ -333,7 +333,6 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
 /// left without its device, nor a device without its runtime.
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_a_device_takes_its_app_runtime_and_naming_the_runtime_removes_the_device() {
-    use ::scope::scopes::Kind;
     let a = start("remove-runtime").await;
     create(&a, "Home", "Andre").await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
