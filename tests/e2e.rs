@@ -1109,15 +1109,13 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
     assert_eq!(ask(&runtime_at, "GET", "/api/state", &home_token, None).await.0, 403, "the runtime takes only its own token");
 
     let post = json!({ "app": "notes", "tool": "post", "input": { "text": "through onet" } });
-    let mut ran = Value::Null;
-    polled("a call through onet", &home.join("runtime.log"), async || {
-        let (status, _, trace) = ask(&onet_at, "POST", "/api/call", &home_token, Some(post.clone())).await;
-        ran = trace;
-        status == 200
+    // Its own runtime takes it, asked on its loopback, named by its device, once it has read what it holds: till then it
+    // passes it on.
+    polled("a call through onet that its own runtime runs", &home.join("runtime.log"), async || {
+        let (status, _, ran) = ask(&onet_at, "POST", "/api/call", &home_token, Some(post.clone())).await;
+        status == 200 && ran["steps"].as_array().into_iter().flatten().any(|s| s["here"] == true && s["result"] == "ran" && s["device"] == "onet-device")
     })
     .await;
-    let here = ran["steps"].as_array().into_iter().flatten().any(|s| s["here"] == true && s["device"] == "onet-device's runtime");
-    assert!(here, "its own runtime took it, asked on its loopback: {ran}");
     let lines = async |node: &one::node::Node| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("through onet")).await;
 }

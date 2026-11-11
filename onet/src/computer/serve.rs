@@ -184,10 +184,17 @@ async fn recovery(onet: &Onet, path: &str, req: Request) -> Result<Value> {
 /// A request passed on as this device (`Device::fetch`): answered by its keyring if it signs it, else asked of the best
 /// machine for it, its own app runtime first, as this computer's own program. A route only this computer's own programs
 /// may ask goes nowhere else.
-async fn pass_on(onet: &Onet, routes: &Routes, req: Request) -> Response {
+async fn pass_on(onet: &Arc<Onet>, routes: &Routes, req: Request) -> Response {
     let device = match (onet.device().await, &onet.runtime) {
         (Ok(device), _) if !device.address().is_empty() => device,
-        (_, Some(runtime)) => return to_runtime(runtime, req).await,
+        (_, Some(runtime)) => {
+            let answer = to_runtime(runtime, req).await;
+            // What it asked may have given the network its address (the setting), from which onet reaches it.
+            if let Err(err) = onet.start().await {
+                tracing::info!("{err:#}");
+            }
+            return answer;
+        }
         (Ok(_), None) => return refused(StatusCode::CONFLICT, format!("{YOURS} has no address yet, which this computer reaches it at: an admin sets one with {CLI} cloudflare use"), None),
         (Err(err), None) => return said(StatusCode::CONFLICT, &err),
     };

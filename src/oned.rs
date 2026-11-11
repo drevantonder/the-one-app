@@ -693,7 +693,14 @@ async fn serve() -> Result<()> {
     crate::watchdog::notify("READY=1");
     let mut pulled: Option<Instant> = None;
     loop {
-        kept.lock().unwrap().iter_mut().for_each(Kept::keep);
+        {
+            let [onet, runtime] = &mut *kept.lock().unwrap();
+            onet.keep();
+            // The runtime asks onet for what the device's key opens as it starts: once onet answers.
+            if runtime.child.is_some() || std::net::TcpStream::connect(api::addr()).is_ok() {
+                runtime.keep();
+            }
+        }
         if pulled.is_none_or(|p| p.elapsed() >= PULL_EVERY) {
             pulled = Some(Instant::now());
             let home = dir.clone();

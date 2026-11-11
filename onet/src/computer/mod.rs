@@ -81,6 +81,8 @@ pub(crate) struct Onet {
     device: tokio::sync::RwLock<Option<Arc<Device>>>,
     /// Whether it keeps this computer's harnesses and git, as it does once from its first start in a network.
     keeping: std::sync::atomic::AtomicBool,
+    /// Whether it has told the relay, since it started, that its runtime is the network's and it a client alone.
+    told: std::sync::atomic::AtomicBool,
     /// Held while it runs, so no other onet signs as this device at once.
     _lock: std::fs::File,
 }
@@ -126,7 +128,7 @@ impl Onet {
         let (key, name) = one::node::device_key(home)?;
         let token = one::node::load_local_token(home)?;
         let runtime = runtime.map(|at| Runtime { at, folder: one::node::runtime_folder(home) });
-        Ok(Onet { home: home.to_path_buf(), key, name, token, listen, runtime, device: Default::default(), keeping: Default::default(), _lock: lock })
+        Ok(Onet { home: home.to_path_buf(), key, name, token, listen, runtime, device: Default::default(), keeping: Default::default(), told: Default::default(), _lock: lock })
     }
 
     /// What it does from its start, and again every so often (`KEEP_EVERY`), if its home says it's in a network: lists
@@ -143,6 +145,10 @@ impl Onet {
             return Ok(());
         }
         one::update::keep_address(&self.home, device.address())?;
+        if !self.told.load(std::sync::atomic::Ordering::Relaxed) {
+            self.tell_relay_of(&device).await?;
+            self.told.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         if self.listen == one::api::addr() && matches!(one::mode::here(), one::mode::Mode::Own) && !self.keeping.swap(true, std::sync::atomic::Ordering::Relaxed) {
             tracing::info!("{} {} answering {} from {}", name(), &device.key()[..8], self.listen, self.home.display());
             one::git_wire::wire_here(device.address().to_string());
@@ -232,6 +238,24 @@ impl Onet {
             tracing::info!("this device runs nothing itself now: its app runtime does");
         }
         device.refresh().await.map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
+    /// Tells the network's relay, once it has one, what who's who says of this device and its runtime: the runtime one of
+    /// its endpoints, an admin's if its user is one, and this device a client. A network made on this computer had no
+    /// relay when they were listed, and the relay changes nothing it already has.
+    async fn tell_relay_of(&self, device: &Device) -> Result<()> {
+        use one::database::scopes::Kind;
+        let me = self.key.verifying_key().to_bytes();
+        let Some(said) = device.keyring().who(|who| -> Result<_> {
+            let Some(mine) = who.machine(&me)?.filter(|m| !m.removed) else { return Ok(None) };
+            let runtime = who.computes()?.into_iter().find(|c| c.runtime_of() == Some(me)).map(|c| c.key);
+            Ok(Some((runtime, who.may(&mine.user, "invite", one::database::scopes::NETWORK), mine.is(Kind::Compute))))
+        }) else {
+            return Ok(());
+        };
+        let Some((Some(runtime), admin, false)) = said? else { return Ok(()) };
+        self.tell(device, json!({ "add": one::keys::hex(&runtime), "admin": admin, "role": "compute" })).await?;
+        self.tell(device, json!({ "add": one::keys::hex(&me), "admin": admin, "role": "client" })).await
     }
 
     /// Tells the network's relay something, signed by this device, where the network has one yet: one it took already is
