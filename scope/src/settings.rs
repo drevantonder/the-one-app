@@ -1344,10 +1344,11 @@ pub async fn approve(m: &impl Me, r: &Asked, joining: &Joining) -> Result<Value>
     let user = m.user()?;
     let e = &r.endpoint;
     let device = device_of(r);
-    let (removed, listed, may_invite) = m.who(|who| {
+    let (removed, listed, may_invite, name) = m.who(|who| {
         let removed = who.key_for(&e.key, &r.user)?.is_some_and(|d| d.removed);
         let listed = who.client(&e.key)?.is_some_and(|c| c.user == r.user && c.seal == e.seal);
-        Ok((removed, listed, who.may(&user, "invite", scopes::NETWORK)))
+        let replacing: Vec<[u8; 32]> = replaced(who.clients()?, r).iter().map(|c| c.key).chain([e.key]).collect();
+        Ok((removed, listed, who.may(&user, "invite", scopes::NETWORK), who.free_device_name(&r.name, &replacing)?))
     })?;
     // Taken out, or turned down: never sealed anything again, whatever an app runtime says.
     ensure!(!removed, "{} was turned down or taken out, so it isn’t let in again. Start again on it, for a new code.", r.name);
@@ -1371,7 +1372,7 @@ pub async fn approve(m: &impl Me, r: &Asked, joining: &Joining) -> Result<Value>
         }
     };
     if !listed {
-        let mut listing = content::device(e, &r.user, &r.name, &[Kind::Client], new_user.as_ref().map(|(n, role)| (n.as_str(), *role)));
+        let mut listing = content::device(e, &r.user, &name, &[Kind::Client], new_user.as_ref().map(|(n, role)| (n.as_str(), *role)));
         if let Some(on) = &device {
             listing.data["device"] = json!(hex(on));
         }

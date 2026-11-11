@@ -7,8 +7,8 @@ description: Giving a throwaway network a second or third computer of your own, 
 
 `one-dev throwaway client linux` (and `--as sam`) is a computer of its own already: its home is the throwaway's
 `linux/computer`, its oned a unit of your systemd. Its CLI is that home's `bin/one` with the unit's environment
-(`systemctl --user cat oned-throwaway-<hash>.service` shows it). Each takes this machine's name: `one rename linux2`
-there, so `--device` and `add --node` can tell them apart.
+(`systemctl --user cat oned-throwaway-<hash>.service` shows it). Each is listed by this machine's name with a number
+after it (`linux 2`), which `--device` and `add --node` take.
 
 A bare one, joined with a pairing code, in a home and port of its own (`$H` the throwaway's folder):
 
@@ -19,6 +19,6 @@ A bare one, joined with a pairing code, in a home and port of its own (`$H` the 
     one-dev throwaway pair        # prints: one join <code>
     ONE_HOME=$C ONE_THROWAWAY=$C ONE_ADDR=127.0.0.1:$PORT ONE_RELEASE_KEY="$KEY" $C/bin/one join <code>
 
-Then `rename third` the same way. A service's program goes beside its `one` (`cp target/debug/one-shell $C/bin/`), then
-`one services on shell --device third`. `systemctl --user stop one-throwaway-third` when you're done: `one-dev
+It's listed by this machine's name with the next number (its `one status` says it). A service's program goes beside its
+`one` (`cp target/debug/one-shell $C/bin/`), then `one services on shell --device "<that name>"`. `systemctl --user stop one-throwaway-third` when you're done: `one-dev
 throwaway stop` doesn't know it.

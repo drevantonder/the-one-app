@@ -35,6 +35,7 @@ pub async fn approve(m: &impl Me, code: &str, recovery: &SigningKey, confirm: bo
     m.read().await?;
     // Listed already by an approval that didn't finish: the rest is done again, each step once.
     if !m.who(|db| Ok(db.client(&endpoint.key)?.is_some_and(|c| c.user == user && c.seal == endpoint.seal)))? {
+        let name = m.who(|db| db.free_device_name(&name, &[endpoint.key]))?;
         m.write_as(recovery, &user, content::device(&endpoint, &user, &name, &[Kind::Client], None)).await?;
     }
     let admin = m.who(|db| Ok(db.may(&user, "invite", scopes::NETWORK)))?;

@@ -149,9 +149,13 @@ async fn admit_with(rt: &Rt, key: Key, request: &JoinRequest, pairing: &Pairing)
     // lists it again (`scope::derive`'s runners).
     let roles = if user == pairing.user { MACHINE } else { &[scopes::Kind::Compute][..] };
     // Listed already by a join with this code that didn't finish: only the relay's left.
-    if !rt.read(|r| Ok(r.db().machine(&key)?.is_some_and(|m| m.user == user)))? {
-        let listed = content::device(&endpoint, &user, &request.name, roles, None);
-        rt.as_member(&Caller::own(by.unwrap_or(rt.id()), pairing.user.clone()), listed).await.context("this device can no longer admit that machine")?;
+    let (listed, name) = rt.read(|r| match r.db().machine(&key)?.filter(|m| m.user == user) {
+        Some(m) => Ok((true, m.name)),
+        None => Ok((false, r.db().free_device_name(&request.name, &[key])?)),
+    })?;
+    if !listed {
+        let listing = content::device(&endpoint, &user, &name, roles, None);
+        rt.as_member(&Caller::own(by.unwrap_or(rt.id()), pairing.user.clone()), listing).await.context("this device can no longer admit that machine")?;
     }
     // Waited for: until the relay lets it in, the machine that joined reaches nothing.
     if rt.address().is_ok() {
@@ -160,7 +164,7 @@ async fn admit_with(rt: &Rt, key: Key, request: &JoinRequest, pairing: &Pairing)
         // Auth learns whose it is only here, as it never signs in to ask: without this it just can't answer that
         // user's requests yet, so a refusal (a pairing device auth doesn't know either) doesn't stop the join.
         if user == pairing.user
-            && let Err(err) = rt.ask_auth("POST", "/api/auth/devices/theirs", json!({ "key": hex(&key), "user": user, "name": request.name })).await
+            && let Err(err) = rt.ask_auth("POST", "/api/auth/devices/theirs", json!({ "key": hex(&key), "user": user, "name": name })).await
         {
             tracing::warn!("telling auth whose computer this is: {err:#}");
         }

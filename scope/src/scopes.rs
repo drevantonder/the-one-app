@@ -340,6 +340,20 @@ impl ScopeDb {
         Ok(self.clients()?.into_iter().filter(holds).collect())
     }
 
+    /// The name a device asking for `name` is listed by: `name`, or `name 2`, `name 3`… while a device of the network
+    /// already goes by it (in any case), so two computers called the same, or two phones, are told apart by their names;
+    /// `replacing` are the devices it takes the place of.
+    pub fn free_device_name(&self, name: &str, replacing: &[Key]) -> Result<String> {
+        let taken: Vec<String> = self
+            .machines()?
+            .into_iter()
+            .filter(|m| !m.removed && !m.is(Kind::Service) && m.runtime_of().is_none() && !replacing.contains(&m.key))
+            .map(|m| m.name.to_lowercase())
+            .collect();
+        let name = name.trim();
+        Ok((1..).map(|n| if n == 1 { name.to_string() } else { format!("{name} {n}") }).find(|n| !taken.contains(&n.to_lowercase())).expect("a free name"))
+    }
+
     /// A device as someone gives it, by its name or the start of its key: the device, not the parts of it named for it.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         let listed: Vec<Machine> = self.machines()?.into_iter().filter(|m| !m.removed).collect();
