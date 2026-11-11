@@ -178,9 +178,22 @@ pub fn off(name: &str, seen: Option<u64>) -> String {
     }
 }
 
+/// A command's exit code for what went wrong: 2 what was typed is wrong, 3 refused (it needs --confirm, the user
+/// isn't allowed, or isn't signed in), 1 anything else.
+pub fn exit_code(err: &anyhow::Error) -> i32 {
+    match err.downcast_ref::<Failed>() {
+        Some(Failed::Typed(_)) => 2,
+        Some(Failed::Refused(_)) => exit::REFUSED,
+        None => match ::custom_build::protocol::Coded::of(err).as_deref() {
+            Some(::custom_build::protocol::code::REFUSED | ::custom_build::protocol::code::NOT_SIGNED_IN) => exit::REFUSED,
+            _ => 1,
+        },
+    }
+}
+
 /// What `<cli> cloudflare deploy` and the shell `update` runs it in exit with, which `update` acts on.
 pub mod exit {
-    /// Refused: a command that wasn't allowed, or needs `--confirm` (`tools::exit_code`).
+    /// Refused: a command that wasn't allowed, or needs `--confirm` (`exit_code`).
     pub const REFUSED: i32 = 3;
     /// The device's node isn't the build being sent out yet: ask again once it is (the exit code `sh` programs use for
     /// "try again", EX_TEMPFAIL).

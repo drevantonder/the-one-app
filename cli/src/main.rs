@@ -7,11 +7,14 @@ use ::custom_build::config::{CLI, NAME, YOURS};
 use api::cli::{Command, Given};
 use serde_json::Value;
 
+mod code;
 mod git_remote;
+mod mcp;
 mod network;
+mod skills;
+mod tools;
 
 use api::Client;
-use one::tools;
 use api::{Reader, SENDS};
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
@@ -34,10 +37,10 @@ fn commands() -> Vec<Command> {
         one::build::commands(),
         blobs::cli::commands(),
         own(),
-        one::skills::commands(),
-        one::code::commands(),
-        one::mcp::commands(),
-        one::tools::commands(),
+        skills::commands(),
+        code::commands(),
+        mcp::commands(),
+        tools::commands(),
     ]
 }
 
@@ -53,8 +56,8 @@ fn every_command(node: &Client) -> String {
 
 /// The core's tools as commands' forms, when a node can say what they are.
 fn core_forms(node: &Client) -> Vec<(String, String)> {
-    let core: Vec<Value> = tools::sets(node).unwrap_or_default().into_iter().filter(|s| s["runs"] == "client").collect();
-    tools::forms(&core)
+    let core: Vec<Value> = one::tools::sets(node).unwrap_or_default().into_iter().filter(|s| s["runs"] == "client").collect();
+    one::tools::forms(&core)
 }
 
 /// What `help` and the bare command say: what an agent needs to start, and where the rest is.
@@ -119,7 +122,7 @@ fn main() {
     if let Err(err) = run(args) {
         // What the node says names its tools (apps_restore); the command line names them as commands.
         eprintln!("{CLI}: {}", tools::in_cli_words(&node(Reader::Cli.client()), &format!("{err:#}")));
-        std::process::exit(tools::exit_code(&err));
+        std::process::exit(api::cli::exit_code(&err));
     }
 }
 
@@ -139,7 +142,7 @@ fn run(args: Vec<String>) -> Result<()> {
         };
     }
     let client = if positional.first().map(String::as_str) == Some("mcp") { Reader::Mcp } else { Reader::Cli };
-    let (agent, node, forms) = (one::mcp::agent_from_env(), node(client.client()), commands().into_iter().flat_map(|c| c.help).collect::<Vec<_>>());
+    let (agent, node, forms) = (mcp::agent_from_env(), node(client.client()), commands().into_iter().flat_map(|c| c.help).collect::<Vec<_>>());
     let given = Given { words: &positional, flags: &flags, args: &args, node: &node, agent: agent.as_deref(), json, trace, commands: &forms };
     // --help shows help, whatever the command: never runs it. An app's tool's is the app's own, and with no command
     // it's what the bare command says (`own`).
@@ -171,7 +174,7 @@ fn own() -> Command {
                 ["help", "all"] => println!("{}", every_command(g.node)),
                 ["help", rest @ ..] => match command_help(g.node, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
                     Some(text) => print!("{text}"),
-                    None => return Err(api::cli::Failed::Typed(tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
+                    None => return Err(api::cli::Failed::Typed(one::tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
                 },
                 ["version"] if g.json => println!("{}", one::release::Version::this().json()),
                 ["version"] => println!("{} {} ({})", NAME, ::custom_build::config::BUILD, ::custom_build::config::TARGET),
@@ -188,7 +191,7 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
     words.first()?;
     let typed: Vec<&str> = words.iter().take_while(|w| !w.starts_with('-')).map(String::as_str).collect();
     if let [set, tool, ..] = typed[..]
-        && tools::find(node, set, tool).is_some()
+        && one::tools::find(node, set, tool).is_some()
     {
         return None;
     }

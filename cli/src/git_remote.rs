@@ -136,7 +136,7 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
                 Some(::custom_build::protocol::code::NOT_THIS_MACHINE) => api::local::token_refused(&platform::home()),
                 _ => said["error"].as_str().unwrap_or("that didn't work").to_string(),
             };
-            return drop(head.send((status, "text/plain".into(), Some(one::tools::in_cli_words(&crate::node(api::Reader::Cli.client()), &error)))));
+            return drop(head.send((status, "text/plain".into(), Some(crate::tools::in_cli_words(&crate::node(api::Reader::Cli.client()), &error)))));
         }
         if head.send((status, kind, None)).is_err() {
             return;

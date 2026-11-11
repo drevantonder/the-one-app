@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use anyhow::Result;
 use api::Client;
 use ::custom_build::config::{CLI, NAME};
-use one::tools;
 
 mod ship;
 mod symbols;
@@ -44,7 +43,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(err) = run(args) {
         eprintln!("{}: {err:#}", dev());
-        std::process::exit(tools::exit_code(&err));
+        std::process::exit(api::cli::exit_code(&err));
     }
 }
 

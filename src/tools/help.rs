@@ -48,7 +48,7 @@ pub fn optional(tool: &Value) -> Vec<(String, Value)> {
 }
 
 /// A tool's `--help`; `call`: an app's, run as a call on a device, which takes `--device`, where the core's don't.
-pub(super) fn help(app: &Value, tool: &Value, call: bool) -> String {
+pub fn help(app: &Value, tool: &Value, call: bool) -> String {
     let (a, o) = (app["name"].as_str().unwrap_or(""), tool["name"].as_str().unwrap_or(""));
     let schema = &tool["input"];
     let props = schema["properties"].as_object().cloned().unwrap_or_default();
