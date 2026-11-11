@@ -603,7 +603,10 @@ impl Host {
                 nodes.sort_by_key(|k| *k != self.0.id);
                 return Ok(nodes);
             }
-            ensure!(self.names_cloudflare(req).is_none(), "{}", self.cloudflare_is_asked_directly());
+            // A computer's onet, the web app and a phone ask oned on Cloudflare themselves, as this answer names it.
+            if let Some(cloudflare) = self.names_cloudflare(req) {
+                return Err(::api::Elsewhere { why: self.cloudflare_is_asked_directly(), nodes: vec![hex(&cloudflare)] }.into());
+            }
             return Ok(vec![self.with(|i| i.r.db().find_runner(device))?]);
         }
         // A function of a service that's about its own machine (`prefer: { run: "here" }`: Shell's run, Models' here) runs on
