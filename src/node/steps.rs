@@ -6,6 +6,7 @@ use ::custom_build::allowed;
 use super::*;
 use ::scope::steps;
 use ::custom_build::protocol::{Coded, code};
+use ::api::runtime::Happened;
 
 impl Node {
     /// Whether this device has read who's who: `global`'s freeze, and the steps after it.
@@ -249,6 +250,9 @@ impl Node {
             Ok((kept, took, forgotten))
         })?;
         self.keep_scope_db(scope, &kept);
+        if !read.steps.is_empty() {
+            self.happened(Happened::Steps { scope: scope.clone() });
+        }
         if !forgotten.is_empty() {
             self.delete_forgotten(forgotten);
         }
@@ -361,6 +365,9 @@ impl Node {
             update_views(i)?;
             Ok(i.views.get("global").map(|s| s.forgotten.clone()).unwrap_or_default())
         })?;
+        if handled.members {
+            self.happened(Happened::Steps { scope: Scope::Global });
+        }
         self.close_dbs(|scope, _| handled.dropped.contains(&scope.to_string()));
         if let Ok(bucket) = self.bucket() {
             for log in &handled.dropped {

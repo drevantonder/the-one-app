@@ -76,6 +76,6 @@ impl Node {
 
     /// How `user` arranged their pages, by page, as their own scope's `arrange` entries say.
     pub(super) fn arrangements(&self, user: &str) -> BTreeMap<String, Value> {
-        self.with(|i| Ok(::scope::read::Read { replica: &i.r, states: &i.views }.arrangements(user))).unwrap_or_default()
+        self.with(|i| Ok(::scope::read::Read { replica: &i.r, states: &i.views, scopes: &i.scope_dbs }.arrangements(user))).unwrap_or_default()
     }
 }

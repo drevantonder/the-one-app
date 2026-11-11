@@ -8,11 +8,14 @@ use serde_json::Value;
 
 use crate::replica::Replica;
 use crate::scopes::{Scope, ScopeDb, ScopeState};
+use crate::steps::ScopeReader;
 
 pub struct Read<'a> {
     pub replica: &'a Replica,
     /// Each scope's own state, as its database says it, by its name.
     pub states: &'a HashMap<String, ScopeState>,
+    /// Each scope's own database but `global`'s, of those it holds.
+    pub scopes: &'a HashMap<Scope, ScopeReader>,
 }
 
 impl Read<'_> {
@@ -27,6 +30,14 @@ impl Read<'_> {
     /// `global`'s steps read, if any.
     pub fn at(&self) -> Option<u64> {
         self.replica.at()
+    }
+
+    /// A scope's own database: `global`'s is `db`.
+    pub fn scope_db(&self, scope: &Scope) -> Option<&ScopeDb> {
+        match scope {
+            Scope::Global => Some(self.db()),
+            _ => self.scopes.get(scope).map(|r| &r.db),
+        }
     }
 
     pub fn state(&self, scope: &Scope) -> Option<&ScopeState> {

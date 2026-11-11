@@ -114,6 +114,8 @@ pub trait Databases: Send + Sync {
     fn object<'a>(&'a self, name: &'a str) -> Fut<'a, Option<Vec<u8>>>;
     /// A blob, by its hash: from this device, else from the bucket, in a scope whose database names it.
     fn blob<'a>(&'a self, hash: &'a str) -> Fut<'a, Vec<u8>>;
+    /// The network's bucket, as a place: where everything is kept, which a feature that copies it reads.
+    fn bucket(&self) -> Result<bucket::Place>;
     /// Keeps `bytes` as a blob `caller` put, which they may then read back: → its hash.
     fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String>;
     /// Whether `caller` may read the blob `hash`: this machine's own programs, whoever put it, or someone a scope they
@@ -163,6 +165,8 @@ impl std::error::Error for NoneCould {}
 /// What its device's key opens, asked of its holder.
 pub trait Holds: Send + Sync {
     fn device(&self) -> Key;
+    /// Every epoch's key of `scope` the device's key opens, by number: none if it opens none yet.
+    fn epochs<'a>(&'a self, scope: &'a Scope) -> Fut<'a, database::stored::Keys>;
     /// The Vault secret keys of `scope` the device's key opens, of those `wanted` (number, public key).
     fn vault_keys<'a>(&'a self, scope: &'a Scope, wanted: &'a [(u32, [u8; 32])]) -> Fut<'a, BTreeMap<u32, [u8; 32]>>;
     /// A request of who can do what (`settings::answered`), asked by this machine's own programs and answered as its
@@ -275,12 +279,20 @@ pub struct Runs {
     /// What needs the viewer's attention, if anything: `state.features.<feature>` of `GET /api/state`, which badges a
     /// Settings item (`scope::state::settings_items`).
     pub problem: Option<fn(&Rt, &Caller) -> Result<Option<Value>>>,
+    /// What it follows of who's who, as it happens: quick, and never reading who's who itself.
+    pub on: Option<fn(&Rt, &Happened)>,
+}
+
+/// What happened in who's who, which a feature follows (`Runs.on`).
+pub enum Happened {
+    /// A scope's database took steps (for `global`, its members changed).
+    Steps { scope: Scope },
 }
 
 impl Runs {
     /// One that does nothing yet: `Runs { tools, .., ..Runs::named("vault") }`.
     pub fn named(feature: &'static str) -> Runs {
-        Runs { feature, tools: Vec::new(), routes: Routes::default(), state: Box::new(()), start: None, every: None, problem: None }
+        Runs { feature, tools: Vec::new(), routes: Routes::default(), state: Box::new(()), start: None, every: None, problem: None, on: None }
     }
 }
 

@@ -2,7 +2,7 @@
 
 use std::any::{Any, TypeId};
 
-use ::api::runtime::{Apps, Databases, Draws, Features, Fut, Here, Holds, PageApp, Peers, Rt, Runs, ScopeDatabase};
+use ::api::runtime::{Happened, Apps, Databases, Draws, Features, Fut, Here, Holds, PageApp, Peers, Rt, Runs, ScopeDatabase};
 use ::scope::read::Read;
 
 use super::*;
@@ -44,6 +44,7 @@ pub(super) struct Kept {
     states: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
     wakes: HashMap<&'static str, Arc<tokio::sync::Notify>>,
     problems: Vec<(&'static str, Problem)>,
+    ons: Vec<fn(&Rt, &Happened)>,
 }
 
 /// What a feature says needs a viewer's attention (`Runs.problem`).
@@ -62,6 +63,7 @@ impl Kept {
         for r in runs {
             starts.extend(r.start);
             kept.problems.extend(r.problem.map(|p| (r.feature, p)));
+            kept.ons.extend(r.on);
             if !r.state.is::<()>() {
                 kept.states.insert((*r.state).type_id(), r.state);
             }
@@ -116,6 +118,14 @@ impl Node {
             }
         }
         out
+    }
+
+    /// Tells each feature that follows who's who what happened in it (`Runs.on`), once who's who isn't held.
+    pub(super) fn happened(&self, happened: Happened) {
+        let rt = self.rt();
+        for on in &self.0.kept.ons {
+            on(&rt, &happened);
+        }
     }
 
     /// Wakes every feature's loop: what it follows may have changed all at once, as when a network is taken.
@@ -188,7 +198,7 @@ impl Here for Node {
 
 impl ScopeDatabase for Node {
     fn read_dyn(&self, f: &mut dyn FnMut(&Read<'_>) -> Result<()>) -> Result<()> {
-        self.with(|i| f(&Read { replica: &i.r, states: &i.views }))
+        self.with(|i| f(&Read { replica: &i.r, states: &i.views, scopes: &i.scope_dbs }))
     }
 
     fn append<'a>(&'a self, scope: &'a Scope, user: &'a str, content: Content) -> Fut<'a, ()> {
@@ -231,6 +241,10 @@ impl Databases for Node {
         Box::pin(Node::needs(self, caller, wants))
     }
 
+    fn bucket(&self) -> Result<::bucket::Place> {
+        Ok(Node::bucket(self)?.place)
+    }
+
     fn object<'a>(&'a self, name: &'a str) -> Fut<'a, Option<Vec<u8>>> {
         Box::pin(async move { Ok(::bucket::Bucket::get(&self.bucket()?, name).await?.map(|o| o.bytes)) })
     }
@@ -251,6 +265,10 @@ impl Databases for Node {
 impl Holds for Node {
     fn device(&self) -> Key {
         self.0.holds.device()
+    }
+
+    fn epochs<'a>(&'a self, scope: &'a Scope) -> Fut<'a, database::stored::Keys> {
+        Box::pin(self.epoch_keys(scope, false))
     }
 
     fn vault_keys<'a>(&'a self, scope: &'a Scope, wanted: &'a [(u32, [u8; 32])]) -> Fut<'a, BTreeMap<u32, [u8; 32]>> {
