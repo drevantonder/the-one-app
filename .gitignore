@@ -1,6 +1,8 @@
 /target
 node_modules/
-.claude/
+**/.claude/*
+# Claude Code reads a project's skills only from here: a link to .agents/skills.
+!/.claude/skills
 __pycache__/
 .build/
 .swiftpm/

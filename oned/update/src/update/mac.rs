@@ -1,5 +1,5 @@
 //! A Mac's window: the app the record names beside the program (`app/<target>`, the zip one Mac built and published,
-//! dev/skills/keep-mac-current), installed where `Mode::mac_app` says. It carries no background program, so taking it
+//! .agents/skills/keep-mac-current), installed where `Mode::mac_app` says. It carries no background program, so taking it
 //! stops nothing but the window: it's downloaded, checked and unpacked first, so anything wrong is said at once and
 //! changes nothing, then put in place of the one there, which is closed first and opened again if it was open.
 

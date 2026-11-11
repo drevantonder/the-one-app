@@ -5,8 +5,8 @@
 //!
 //! THIS FORMAT MUST NEVER BREAK. A device too old to speak anything else still reads it, and only by reading it does it
 //! get out of being too old; everything old in the field is on the other end of this. Readers ignore a line they don't
-//! understand, so new kinds of things are new lines (`tests` holds the format; dev/skills/keep-mac-current reads the same
-//! lines, in its own language). The text:
+//! understand, so new kinds of things are new lines (`tests` holds the format; .agents/skills/keep-mac-current reads the
+//! same lines, in its own language). The text:
 //!
 //! ```text
 //! <name> <commit> <committed> <sha256> <size> <config>

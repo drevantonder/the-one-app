@@ -56,7 +56,7 @@ pub fn release_key() -> Result<ssh_key::PrivateKey> {
     Ok(key)
 }
 
-/// What publishes what a Mac built (dev/skills/keep-mac-current), on a Mac with the release key.
+/// What publishes what a Mac built (.agents/skills/keep-mac-current), on a Mac with the release key.
 pub fn commands() -> ::api::cli::Command {
     ::api::cli::Command {
         help: vec![("publish-mac <folder> [--config <commit>]".into(), "publish what native-apps/mac/build.sh made in <folder> (its window, program and services), for every Mac to take with update".into())],

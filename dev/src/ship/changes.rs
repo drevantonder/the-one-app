@@ -109,7 +109,8 @@ impl Parts {
                 // Services' tests stay in the repo.
                 Some("services") if file.starts_with("services/tests/") => {}
                 // What only whoever builds this repo reads or runs by hand.
-                Some("dev") if file.starts_with("dev/skills/") || file.starts_with("dev/tools/") || file.starts_with("dev/plans/") => {}
+                Some(".agents" | ".claude") => {}
+                Some("dev") if file.starts_with("dev/tools/") || file.starts_with("dev/plans/") => {}
                 Some("dev") => parts.dev = true,
                 // The Workers' sources but for the web client's: the Workers alone. The relay's protos only make its
                 // WebAssembly by hand.
@@ -162,7 +163,7 @@ mod tests {
 
     #[test]
     fn a_change_sends_out_what_is_made_of_it() {
-        assert_eq!(of(&["dev/plans/x.md", "README.md", "tests/e2e.rs", "dev/tools/iteration/report.py", "apps/repos/tests/repos.rs", ".gitignore", "tests/workers/x.js", "relay/protos/a.proto"]), Parts::default());
+        assert_eq!(of(&["dev/plans/x.md", ".agents/skills/ship/SKILL.md", ".claude/skills", "README.md", "tests/e2e.rs", "dev/tools/iteration/report.py", "apps/repos/tests/repos.rs", ".gitignore", "tests/workers/x.js", "relay/protos/a.proto"]), Parts::default());
         assert_eq!(of(&["apps/board/app.js", "apps/board/screen.js"]), Parts { apps: vec!["board".into()], ..Default::default() });
         assert_eq!(of(&["apps/whatsapp/service/main.go"]), Parts { services: vec!["whatsapp".into()], ..Default::default() });
         assert!(of(&["services/sdk/src/lib.rs"]).service && of(&["services/sdk/src/lib.rs"]).mac);
