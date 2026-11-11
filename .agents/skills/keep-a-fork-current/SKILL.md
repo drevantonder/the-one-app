@@ -7,6 +7,8 @@ description: Keeping a custom build's fork of the core in step with upstream: wh
 
 A custom build whose `repo` (in its config) is a fork builds that fork, where its own people push. Upstream is the code it was forked from. Its own repo's AGENTS.md names both, the device it's built on, and its `<cli>-dev`.
 
+Keeping a fork in step is ordinary work: any agent that touches the fork, or ships something upstream that the fork's network is waiting for, does it as part of that change. A schedule that runs this is only the floor that catches what was missed, never the plan.
+
 In a checkout of the fork (origin), with upstream as a second remote:
 
     git fetch -q origin; git fetch -q --force upstream main 'refs/signoff/tested/*:refs/signoff/tested/*'
