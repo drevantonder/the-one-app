@@ -1513,7 +1513,7 @@ mod relay {
                     let alpn = format!("{}/http/1", custom_build::config::CLI).into_bytes();
                     let relay = RelayConfig::new(address.parse::<RelayUrl>().unwrap(), None);
                     let ep = Endpoint::builder(presets::Minimal).secret_key(key.clone()).alpns(vec![alpn]).clear_ip_transports().clear_address_lookup().relay_mode(RelayMode::Custom(relay.into())).bind().await.unwrap();
-                    tokio::time::timeout(LET_IN, ep.online()).await.expect("a node isn't let in");
+                    tokio::time::timeout(LET_IN, ep.online()).await.expect("an app runtime isn't let in");
                     let serving = ep.clone();
                     tokio::spawn(async move {
                         while let Some(incoming) = serving.accept().await {
@@ -1544,25 +1544,25 @@ mod relay {
             let sealed: Arc<Mutex<Vec<String>>> = Arc::default();
             let ask = || {
                 let request = onet::Request { method: "GET".into(), path: "/api/state".into(), headers: Vec::new(), body: Vec::new().into() };
-                client.fetch_with(request, |node| {
-                    let node = data_encoding::HEXLOWER.encode(node);
-                    sealed.lock().unwrap().push(node.clone());
-                    std::future::ready(vec![("x-one-keys".to_string(), format!("sealed to {node}"))])
+                client.fetch_with(request, |runtime| {
+                    let runtime = data_encoding::HEXLOWER.encode(runtime);
+                    sealed.lock().unwrap().push(runtime.clone());
+                    std::future::ready(vec![("x-one-keys".to_string(), format!("sealed to {runtime}"))])
                 })
             };
             // The first in order is slow to connect: the next, raced beside it, is asked, and it alone is handed keys.
-            let answered = ask().await.expect("no node answered");
-            assert_eq!(answered.node, *quick.public().as_bytes(), "the node raced beside the slow one wasn't asked");
-            assert_eq!(*sealed.lock().unwrap(), [hex(&quick)], "keys were sealed to a node the request didn't go to");
+            let answered = ask().await.expect("no app runtime answered");
+            assert_eq!(answered.runtime, *quick.public().as_bytes(), "the app runtime raced beside the slow one wasn't asked");
+            assert_eq!(*sealed.lock().unwrap(), [hex(&quick)], "keys were sealed to an app runtime the request didn't go to");
             assert_eq!(*got.lock().unwrap(), [(hex(&quick), format!("sealed to {}", hex(&quick)))]);
             // The slow one's connection, raced, is kept as it opens: a request to it alone waits for that one, and only
             // it is handed that request's keys.
             gate.notify_one();
-            client.set_nodes(&[*slow.public().as_bytes()]).unwrap();
-            let answered = ask().await.expect("no node answered");
-            assert_eq!(answered.node, *slow.public().as_bytes(), "the node asked wasn't the one asked");
+            client.set_runtimes(&[*slow.public().as_bytes()]).unwrap();
+            let answered = ask().await.expect("no app runtime answered");
+            assert_eq!(answered.runtime, *slow.public().as_bytes(), "the app runtime asked wasn't the one asked");
             assert_eq!(*sealed.lock().unwrap(), [hex(&quick), hex(&slow)]);
-            assert_eq!(got.lock().unwrap()[1..], [(hex(&slow), format!("sealed to {}", hex(&slow)))], "keys reached a node they weren't sealed to");
+            assert_eq!(got.lock().unwrap()[1..], [(hex(&slow), format!("sealed to {}", hex(&slow)))], "keys reached an app runtime they weren't sealed to");
             client.close().await;
         });
     }

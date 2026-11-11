@@ -126,7 +126,7 @@ impl Device {
             client.set_local(self.local());
             client.set_ranks(&self.keyring.ranks())?;
             client.set_wakes(self.keyring.cloudflare_node())?;
-            client.set_nodes(&self.ordered())?;
+            client.set_runtimes(&self.ordered())?;
         }
         Ok(())
     }
@@ -263,14 +263,14 @@ impl Device {
             Err(err) => return Err(err),
         }
         *self.order.lock().unwrap() = relayed;
-        let nodes = self.ordered();
-        if nodes.is_empty() {
+        let runtimes = self.ordered();
+        if runtimes.is_empty() {
             return Err(failed("None of your devices runs your things yet."));
         }
         let client = match self.local() {
             #[cfg(feature = "computer")]
-            Some(local) => Client::beside(self.key.to_bytes(), &self.address, &nodes, local).await?,
-            _ => Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?,
+            Some(local) => Client::beside(self.key.to_bytes(), &self.address, &runtimes, local).await?,
+            _ => Client::start(self.key.to_bytes(), None, &self.address, &runtimes).await?,
         };
         if let Some(dir) = self.logs.clone() {
             client.answer_with(std::sync::Arc::new(move |ask| device_logs::answer(&dir, &ask)));
@@ -510,7 +510,7 @@ impl Device {
         if let Some(client) = self.client().await {
             let _ = client.set_ranks(&self.keyring.ranks());
             let _ = client.set_wakes(self.keyring.cloudflare_node());
-            let _ = client.set_nodes(&self.ordered());
+            let _ = client.set_runtimes(&self.ordered());
         }
     }
 

@@ -15,7 +15,7 @@
 // app runtime's route has, which the keyring answers itself, signing it (onet's `settings`). `settle`, `renew` and `notifications`
 // are the rest a device does as itself; `ask` and `waited`, what it does before it's one, asking to be let in; and
 // `auth`, signing in. `kept` gives what a call that only reads answered last (onet's
-// `answers`), and `forget` forgets what this device kept, as it signs out. `nodes` gives the order to ask app runtimes in, which is remembered; `reconnect`
+// `answers`), and `forget` forgets what this device kept, as it signs out. `runtimes` gives the order to ask app runtimes in, which is remembered; `reconnect`
 // starts a fresh endpoint, after the network came back.
 
 /// How long before a session's certificate ends it's renewed, and how long after a renewal that failed it's tried again.
@@ -110,7 +110,7 @@ export function server(version, givenHost) {
   /// Of `keys`, the app runtimes the network's signed steps, as `device` last read them, list as running something of its
   /// user's: all of them before it's read any. An app runtime the relay or an app runtime names besides isn't asked.
   function theirs(device, keys) {
-    const listed = device && JSON.parse(device.nodes()).nodes;
+    const listed = device && JSON.parse(device.runtimes()).runtimes;
     return listed?.length ? keys.filter((key) => listed.includes(key)) : keys;
   }
 
@@ -231,7 +231,7 @@ export function server(version, givenHost) {
 
   async function begin(user) {
     const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { getAll, put }] = await code();
-    const [device, [nodes]] = await Promise.all([host.device(user), getAll([`nodes:${user}`])]);
+    const [device, [runtimes]] = await Promise.all([host.device(user), getAll([`runtimes:${user}`])]);
     if (!device) return null;
     // Its keyring, made while the session's key is.
     let made = null;
@@ -242,7 +242,7 @@ export function server(version, givenHost) {
       return k;
     });
     // As this browser last kept them, of those its keyring said (`theirs`).
-    const known = nodes || [];
+    const known = runtimes || [];
     const secret = crypto.getRandomValues(new Uint8Array(32));
     const endpoint = await ed25519Public(secret);
     const key = await signingKey(secret);
@@ -278,20 +278,20 @@ export function server(version, givenHost) {
       opened?.face.close();
       return null;
     }
-    if (!known.length) put(`nodes:${user}`, first).catch(() => {});
+    if (!known.length) put(`runtimes:${user}`, first).catch(() => {});
     const { Client } = await glue();
     const [client, keyring] = await Promise.all([Client.start(secret, certificate, host.address, known.length ? first : order(first)), making]);
     keyring.connect(client);
     computes.then(
       (c) => {
         if (c) {
-          if (known.length) client.nodes(order(c.all));
+          if (known.length) client.runtimes(order(c.all));
           if (Array.isArray(c.online)) client.online(c.online);
           return;
         }
         // Taken out: it forgets its app runtimes, and the session says it isn't a device, keeping what it kept for if the relay
         // lets it in again. A session started since is that one's.
-        put(`nodes:${user}`, []);
+        put(`runtimes:${user}`, []);
         client.close();
         const was = session;
         was?.ready.then((s) => s?.client === client && session === was && (session = { user, ready: Promise.resolve(null) }), () => {});
@@ -361,15 +361,15 @@ export function server(version, givenHost) {
             const s = await session.ready.catch(() => undefined);
             return post({ id, device: s === undefined ? null : s ? await s.still() : false });
           }
-          case "nodes": {
+          case "runtimes": {
             const s = await session?.ready;
-            const nodes = theirs(s?.keyring, m.nodes);
-            await (await code())[2].put(`nodes:${m.user}`, nodes);
+            const runtimes = theirs(s?.keyring, m.runtimes);
+            await (await code())[2].put(`runtimes:${m.user}`, runtimes);
             // Each one's run priority, where the state said it: those on the same one are raced at once.
-            const ranks = nodes.filter((k) => Number.isInteger(m.ranks?.[k]));
+            const ranks = runtimes.filter((k) => Number.isInteger(m.ranks?.[k]));
             if (ranks.length) s?.client.ranks(ranks, ranks.map((k) => m.ranks[k]));
-            if (m.wakes && nodes.includes(m.wakes)) s?.client.wakes(m.wakes);
-            return s?.client.nodes(nodes);
+            if (m.wakes && runtimes.includes(m.wakes)) s?.client.wakes(m.wakes);
+            return s?.client.runtimes(runtimes);
           }
           // Signing in at the network's auth, a step at a time (onet's `sign_in`): this browser registered (as
           // `name`, coming back to `back`) unless it has its `client` id, and an authorization asked for (`start`); what
@@ -443,7 +443,7 @@ export function server(version, givenHost) {
             const body = new Uint8Array(m.body || []);
             const r = await s.keyring.fetch(m.method, m.path, m.headers, body, m.until);
             reading.set(id, r);
-            post({ id, node: r.node, status: r.status, headers: r.headers, trace: r.trace });
+            post({ id, runtime: r.runtime, status: r.status, headers: r.headers, trace: r.trace });
             try {
               for (let part; (part = await r.chunk()); ) post({ id, part }, [part.buffer]);
               post({ id, done: true });

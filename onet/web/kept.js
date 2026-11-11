@@ -1,5 +1,5 @@
 // What this browser keeps in IndexedDB's `one` database, its one store: its keys by user (`device:<user>`), the
-// app runtimes it asks (`nodes:<user>`), and what its keyring keeps (`<name>:<user>`,
+// app runtimes it asks (`runtimes:<user>`), and what its keyring keeps (`<name>:<user>`,
 // onet's `keyring::Keep`). A module of its own, for the worker that reaches the app runtimes (net-worker.js) to read
 // with nothing else.
 

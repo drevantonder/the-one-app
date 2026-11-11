@@ -43,7 +43,7 @@ pub async fn erase(rt: &Rt, caller: &Caller, device: &str) -> Result<Value> {
     let me = rt.id();
     if key != me {
         ensure!(rt.reaches(&key).await, "{}, so it can't erase what it keeps. Turn it on and try again.", rt.away(&key));
-        return Err(api::Elsewhere { why: format!("only {name} erases what it keeps"), nodes: vec![hex(&key)] }.into());
+        return Err(api::Elsewhere { why: format!("only {name} erases what it keeps"), runtimes: vec![hex(&key)] }.into());
     }
     rt.read(|r| {
         let db = r.db();

@@ -145,7 +145,7 @@ mod tests {
     use crate::device::Device;
 
     fn response(body: &[u8]) -> crate::Response {
-        crate::Response { node: [0; 32], status: 200, headers: Vec::new(), body: crate::Body::whole(body.to_vec()), trace: None }
+        crate::Response { runtime: [0; 32], status: 200, headers: Vec::new(), body: crate::Body::whole(body.to_vec()), trace: None }
     }
 
     /// What a native app keeps of its screens' calls, to show at once next time (onet's `Answers`), is its user's

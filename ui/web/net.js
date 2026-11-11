@@ -42,7 +42,7 @@ function received(m) {
     const empty = m.status === 204 || m.status === 304;
     // And which app runtime answered, as its connection proved, and each try's app runtimes and what the one that answered did
     // (`trace`, JSON).
-    w.resolve(Object.assign(new Response(empty ? null : stream, { status: m.status, headers }), { node: m.node, trace: m.trace }));
+    w.resolve(Object.assign(new Response(empty ? null : stream, { status: m.status, headers }), { runtime: m.runtime, trace: m.trace }));
   } else if (m.part) {
     w.body?.enqueue(m.part);
   } else if (m.done) {
@@ -165,7 +165,7 @@ export const net = {
 
   /// A request to the app runtime, as this browser's device: method, path with its query, headers (`{ name: value }`), body
   /// bytes or none, an AbortSignal, and until when the keys it hands may be used (ms). → a
-  /// Response, its body streamed as it comes, and `node`, the key of the app runtime that answered. Fails with `notLetIn` while
+  /// Response, its body streamed as it comes, and `runtime`, the key of the app runtime that answered. Fails with `notLetIn` while
   /// the network doesn't list this device.
   fetch(method, path, headers = {}, body, signal, until = Date.now() + 60_000) {
     const bytes = body === undefined ? undefined : body instanceof Uint8Array ? body : new TextEncoder().encode(body);
@@ -188,8 +188,8 @@ export const net = {
 
   /// The app runtimes to ask, in the order things run on them, kept for the next session, and each one's run priority
   /// (`ranks`, a number by key), and oned on Cloudflare's key (`wakes`), which the relay never says is on.
-  nodes(user, nodes, ranks = {}, wakes = null) {
-    if (net.has) send({ op: "nodes", user, nodes, ranks, wakes });
+  runtimes(user, runtimes, ranks = {}, wakes = null) {
+    if (net.has) send({ op: "runtimes", user, runtimes, ranks, wakes });
   },
 
   /// A step of signing in at the network's auth (net-worker.js's `auth`): `{ step, … }` → what it gave.
@@ -226,14 +226,14 @@ export const net = {
   /// The app runtimes to ask, from what the app runtime said (`state`), in the order things run on them, oned on Cloudflare by its
   /// run priority (last, unless an admin moved it).
   ordered(state) {
-    const nodes = (state.network?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
+    const runtimes = (state.network?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
     const last = state.network?.cloudflare_node?.key;
-    if (last && !nodes.includes(last)) nodes.push(last);
+    if (last && !runtimes.includes(last)) runtimes.push(last);
     const rank = (p) => (p === "last" ? 0xffffffff : p);
     const ranks = Object.fromEntries((state.network?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
     if (last) ranks[last] = rank(state.network.cloudflare_node.priority ?? "last");
-    nodes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
-    if (nodes.length) net.nodes(state.user.id, nodes, ranks, last);
+    runtimes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
+    if (runtimes.length) net.runtimes(state.user.id, runtimes, ranks, last);
   },
 
   /// As each start of a client does: this user's own things, settled by this device if they aren't.

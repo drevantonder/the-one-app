@@ -269,9 +269,9 @@ impl Attrs {
     }
 
     /// What a client tried: which app runtime, and how it went.
-    pub fn tried(mut self, node: &str, result: &str) -> Attrs {
-        if node.len() == 64 && node.bytes().all(|b| b.is_ascii_hexdigit()) {
-            self.0.insert("one.node", json!(node));
+    pub fn tried(mut self, runtime: &str, result: &str) -> Attrs {
+        if runtime.len() == 64 && runtime.bytes().all(|b| b.is_ascii_hexdigit()) {
+            self.0.insert("one.device", json!(runtime));
         }
         self.0.insert("one.result", json!(if TRY_RESULTS.contains(&result) { result } else { "failed" }));
         self
@@ -294,7 +294,7 @@ impl Attrs {
     /// The device a signal is about, when that isn't the one saying it.
     pub fn subject(mut self, hex: &str) -> Attrs {
         if hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-            self.0.insert("one.node", json!(hex));
+            self.0.insert("one.device", json!(hex));
         }
         self
     }

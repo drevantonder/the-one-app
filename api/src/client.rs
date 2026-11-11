@@ -137,15 +137,15 @@ impl Client {
         if trace {
             headers.push((custom_build::protocol::header::TRACE, "1"));
         }
-        let (ok, node) = match self.send("POST", path, &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None, what) {
+        let (ok, answered_trace) = match self.send("POST", path, &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None, what) {
             Ok((mut answer, asked)) => {
-                let node = answer.trace.take().and_then(|h| data_encoding::BASE64.decode(h.as_bytes()).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-                (self.answered((answer, asked)), node)
+                let answered_trace = answer.trace.take().and_then(|h| data_encoding::BASE64.decode(h.as_bytes()).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+                (self.answered((answer, asked)), answered_trace)
             }
             Err(err) => (Err(err), None),
         };
-        let trace = trace.then(|| match &node {
-            Some(node) => crate::trace::said(node),
+        let trace = trace.then(|| match &answered_trace {
+            Some(answered_trace) => crate::trace::said(answered_trace),
             None => vec!["no trace came back".to_string()],
         });
         Called { ok: ok.map(answered), trace }

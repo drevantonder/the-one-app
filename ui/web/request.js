@@ -78,7 +78,7 @@ async function sending(url, method, body, raw, signal, call) {
     try {
       const asked = [method, url.pathname + url.search, headers, sent, signal, platform.until()];
       r = await Promise.race([recording.on() ? recording.fetch(platform.fetch, ...asked) : platform.fetch(...asked), watch.out]);
-      call.node = tried(r.trace).node;
+      call.runtime = tried(r.trace).runtime;
     } catch (err) {
       call.last = tried(err.trace).last;
       if (err.notLetIn) {

@@ -7,7 +7,7 @@
 //   `signOut()` (its tokens gone), and `welcome(props)`, the screen that asks for it.
 // - Being its user's device: `join(waiting)` (let in, calling `waiting(code, invited)` while it waits), `reaches(user)`,
 //   `fetch(…)` (net.js's), `removed()` (taken out, as the relay or the app says), `leave()` (signing out as a
-//   device), `nodes(state)`, `settle()`, `kept(…)`, `renew(app)`, `forget()`, `device()` (what Settings › Devices says
+//   device), `runtimes(state)`, `settle()`, `kept(…)`, `renew(app)`, `forget()`, `device()` (what Settings › Devices says
 //   of it), `address()` (where its Approve link goes).
 // - What the app's window does beyond a page: `changed()`, `badge(n)`, `appearance(v)`, `copy(text)`, `open(href)`,
 //   `notify(ask)`, `bridge(frame)` (what screens' bridges may ask of it), `look()` (what their

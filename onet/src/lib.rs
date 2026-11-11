@@ -172,11 +172,11 @@ impl Sent {
 
 pub struct Response {
     /// The app runtime that answered, as its connection proved: the one a 428 may be believed from, and keys sealed to.
-    pub node: [u8; 32],
+    pub runtime: [u8; 32],
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Body,
-    /// `{ tries, node }`, each app runtime it tried in order, with how long it waited and why it moved on, and for a request that
+    /// `{ tries, runtime }`, each app runtime it tried in order, with how long it waited and why it moved on, and for a request that
     /// asked for one (`header::TRACE`), what the app runtime that answered did, as it said.
     pub trace: Option<serde_json::Value>,
 }
@@ -190,7 +190,7 @@ struct Inner {
     way: Way,
     certificate: Mutex<Option<String>>,
     /// The app runtimes to ask, in the order things run on them: the first connected is asked.
-    nodes: Mutex<Vec<PublicKey>>,
+    runtimes: Mutex<Vec<PublicKey>>,
     /// The app runtimes the relay last said are on its network now, if it said: raced first, in that order.
     online: Mutex<Option<HashSet<PublicKey>>>,
     /// Each app runtime's run priority, where the network's state said it: app runtimes on the same one are raced at once.
@@ -235,43 +235,43 @@ struct Down {
 }
 
 impl Client {
-    /// The client of the device whose key is `secret`, in the network at `address`, asking `nodes` (in the order things
+    /// The client of the device whose key is `secret`, in the network at `address`, asking `runtimes` (in the order things
     /// run on them); or of a session's endpoint whose key is `secret`, with its device's `certificate`. It starts
     /// connecting to the first app runtime at once.
-    pub async fn start(secret: [u8; 32], certificate: Option<String>, address: &str, nodes: &[[u8; 32]]) -> Result<Client, Error> {
+    pub async fn start(secret: [u8; 32], certificate: Option<String>, address: &str, runtimes: &[[u8; 32]]) -> Result<Client, Error> {
         let url: RelayUrl = address.trim_end_matches('/').parse().map_err(|_| unsent("the network's address isn't a URL"))?;
         // A Worker has no UDP, so the relay serves no QUIC address discovery.
         let mut config = RelayConfig::from(url.clone());
         config.quic = None;
-        Client::with(secret, Way::Relay(url, config), certificate, nodes).await
+        Client::with(secret, Way::Relay(url, config), certificate, runtimes).await
     }
 
     /// The client of the device whose key is `secret` in a Worker, with no socket: what it sends goes to `send`, and
-    /// what the relay hands it for its key to the inbox this gives (`relayed`). It asks `nodes` as `start`'s does.
+    /// what the relay hands it for its key to the inbox this gives (`relayed`). It asks `runtimes` as `start`'s does.
     #[cfg(feature = "relayed")]
-    pub async fn relayed(secret: [u8; 32], send: relayed::Send, nodes: &[[u8; 32]]) -> Result<(Client, relayed::Inbox), Error> {
+    pub async fn relayed(secret: [u8; 32], send: relayed::Send, runtimes: &[[u8; 32]]) -> Result<(Client, relayed::Inbox), Error> {
         let inbox = relayed::Inbox::default();
         let public = *SecretKey::from_bytes(&secret).public().as_bytes();
         let way = Way::Custom(Arc::new(relayed::Relayed::new(&public, inbox.clone(), send)));
-        Ok((Client::with(secret, way, None, nodes).await?, inbox))
+        Ok((Client::with(secret, way, None, runtimes).await?, inbox))
     }
 
     /// `start`'s client, for a device whose own app runtime is on this machine (`Local`): no endpoint is made, nor any
     /// app runtime connected to, until a request finds the runtime doesn't answer, as only it is asked while it does.
     #[cfg(feature = "computer")]
-    pub async fn beside(secret: [u8; 32], address: &str, nodes: &[[u8; 32]], local: Local) -> Result<Client, Error> {
+    pub async fn beside(secret: [u8; 32], address: &str, runtimes: &[[u8; 32]], local: Local) -> Result<Client, Error> {
         let url: RelayUrl = address.trim_end_matches('/').parse().map_err(|_| unsent("the network's address isn't a URL"))?;
         let mut config = RelayConfig::from(url.clone());
         config.quic = None;
         let client = Client::made(secret, Way::Relay(url, config), None, Some(local));
-        client.set_nodes(nodes)?;
+        client.set_runtimes(runtimes)?;
         Ok(client)
     }
 
-    async fn with(secret: [u8; 32], way: Way, certificate: Option<String>, nodes: &[[u8; 32]]) -> Result<Client, Error> {
+    async fn with(secret: [u8; 32], way: Way, certificate: Option<String>, runtimes: &[[u8; 32]]) -> Result<Client, Error> {
         let client = Client::made(secret, way, certificate, None);
         client.endpoint().await?;
-        client.set_nodes(nodes)?;
+        client.set_runtimes(runtimes)?;
         Ok(client)
     }
 
@@ -280,7 +280,7 @@ impl Client {
             secret: SecretKey::from_bytes(&secret),
             way,
             certificate: Mutex::new(certificate),
-            nodes: Mutex::default(),
+            runtimes: Mutex::default(),
             online: Mutex::default(),
             ranks: Mutex::default(),
             wakes: Mutex::default(),
@@ -309,15 +309,15 @@ impl Client {
     }
 
     /// The app runtimes to ask, in the order things run on them, as the network's state says; connecting to them starts now.
-    pub fn set_nodes(&self, nodes: &[[u8; 32]]) -> Result<(), Error> {
-        let nodes = keys(nodes)?;
-        *self.0.nodes.lock().unwrap() = nodes;
+    pub fn set_runtimes(&self, runtimes: &[[u8; 32]]) -> Result<(), Error> {
+        let runtimes = keys(runtimes)?;
+        *self.0.runtimes.lock().unwrap() = runtimes;
         self.warm();
         Ok(())
     }
 
-    pub fn set_wakes(&self, node: Option<[u8; 32]>) -> Result<(), Error> {
-        *self.0.wakes.lock().unwrap() = node.map(|n| keys(&[n])).transpose()?.and_then(|k| k.into_iter().next());
+    pub fn set_wakes(&self, runtime: Option<[u8; 32]>) -> Result<(), Error> {
+        *self.0.wakes.lock().unwrap() = runtime.map(|n| keys(&[n])).transpose()?.and_then(|k| k.into_iter().next());
         Ok(())
     }
 
@@ -338,42 +338,42 @@ impl Client {
     }
 
     fn warm(&self) {
-        let nodes = self.0.nodes.lock().unwrap().clone();
-        if self.local_among(&nodes).is_some() {
+        let runtimes = self.0.runtimes.lock().unwrap().clone();
+        if self.local_among(&runtimes).is_some() {
             return;
         }
         let client = self.clone();
         n0_future::task::spawn(async move {
-            let (first, fallback) = client.in_order(&nodes);
+            let (first, fallback) = client.in_order(&runtimes);
             // Opens a connection ahead of the first call, which reports its own failure.
             let _ = client.pick(&first, &fallback, &mut None).await;
         });
     }
 
-    /// `nodes`, in order, as those to race first (on the relay's network, or all of them if it hasn't said, and
+    /// `runtimes`, in order, as those to race first (on the relay's network, or all of them if it hasn't said, and
     /// answering lately) and those to race after them (the rest, those that didn't answer last); and any that didn't
     /// answer that's been skipped a while tried again in the background.
-    fn in_order(&self, nodes: &[PublicKey]) -> (Vec<PublicKey>, Vec<PublicKey>) {
+    fn in_order(&self, runtimes: &[PublicKey]) -> (Vec<PublicKey>, Vec<PublicKey>) {
         let mut retry = Vec::new();
         let mut down = self.0.down.lock().unwrap();
-        for (node, d) in down.iter_mut() {
-            if !d.probing && d.since.elapsed() >= SKIP && nodes.contains(node) {
+        for (runtime, d) in down.iter_mut() {
+            if !d.probing && d.since.elapsed() >= SKIP && runtimes.contains(runtime) {
                 d.probing = true;
-                retry.push(*node);
+                retry.push(*runtime);
             }
         }
         let online = self.0.online.lock().unwrap();
         let (wakes, ranks) = (*self.0.wakes.lock().unwrap(), self.0.ranks.lock().unwrap().clone());
         let numbered = |n: &PublicKey| wakes == Some(*n) && ranks.get(n).is_some_and(|r| *r != u32::MAX);
         let on = |n: &PublicKey| online.as_ref().is_none_or(|o| o.contains(n)) || numbered(n);
-        let (first, rest): (Vec<PublicKey>, Vec<PublicKey>) = nodes.iter().partition(|n| !down.contains_key(*n) && on(n));
+        let (first, rest): (Vec<PublicKey>, Vec<PublicKey>) = runtimes.iter().partition(|n| !down.contains_key(*n) && on(n));
         let (mut later, gone): (Vec<PublicKey>, Vec<PublicKey>) = rest.into_iter().partition(|n| !down.contains_key(n));
         drop((down, online));
-        for node in retry {
+        for runtime in retry {
             let client = self.clone();
             n0_future::task::spawn(async move {
-                let _ = client.conn(&node, PATIENT).await;
-                if let Some(d) = client.0.down.lock().unwrap().get_mut(&node) {
+                let _ = client.conn(&runtime, PATIENT).await;
+                if let Some(d) = client.0.down.lock().unwrap().get_mut(&runtime) {
                     d.probing = false;
                 }
             });
@@ -382,27 +382,27 @@ impl Client {
         (first, later)
     }
 
-    fn live(&self, node: &PublicKey) -> Option<Connection> {
-        let slot = self.0.conns.lock().unwrap().get(node).cloned()?;
+    fn live(&self, runtime: &PublicKey) -> Option<Connection> {
+        let slot = self.0.conns.lock().unwrap().get(runtime).cloned()?;
         let held = slot.try_lock().ok()?;
         held.as_ref().filter(|c| c.close_reason().is_none()).cloned()
     }
 
-    fn opening(&self, node: &PublicKey) -> bool {
-        self.0.conns.lock().unwrap().get(node).is_some_and(|slot| slot.try_lock().is_err())
+    fn opening(&self, runtime: &PublicKey) -> bool {
+        self.0.conns.lock().unwrap().get(runtime).is_some_and(|slot| slot.try_lock().is_err())
     }
 
-    fn give_up(&self, node: &PublicKey) {
-        self.forget(node);
+    fn give_up(&self, runtime: &PublicKey) {
+        self.forget(runtime);
         let mut down = self.0.down.lock().unwrap();
-        let d = down.entry(*node).or_insert(Down { since: Instant::now(), probing: false });
+        let d = down.entry(*runtime).or_insert(Down { since: Instant::now(), probing: false });
         d.since = Instant::now();
     }
 
-    /// Closes `node`'s connection, so the next request opens a fresh one: its slot stays, as a connection being opened
+    /// Closes `runtime`'s connection, so the next request opens a fresh one: its slot stays, as a connection being opened
     /// into it is kept for the next.
-    fn forget(&self, node: &PublicKey) {
-        let slot = self.0.conns.lock().unwrap().get(node).cloned();
+    fn forget(&self, runtime: &PublicKey) {
+        let slot = self.0.conns.lock().unwrap().get(runtime).cloned();
         if let Some(conn) = slot.and_then(|s| s.try_lock().ok().and_then(|mut held| held.take())) {
             conn.close(0u32.into(), b"gone quiet");
         }
@@ -435,12 +435,12 @@ impl Client {
     }
 
     /// Asks one app runtime: the first in order whose connection is up, or else the first whose connection comes up as they're
-    /// raced (`pick`), each started `STAGGER` after the last. Only then are `node`'s headers made, for that app runtime alone
+    /// raced (`pick`), each started `STAGGER` after the last. Only then are `runtime`'s headers made, for that app runtime alone
     /// (its key): what's sealed to it. A request that never reached it is sent to the next; one whose connection was
     /// lost, again once on a fresh one, unless it may have reached the app runtime and isn't a GET or HEAD. An app runtime that says
     /// it can't run it (421, `{ elsewhere }`) is followed to those it names that this client knows, with their own
     /// headers.
-    pub async fn fetch_with<F, H>(&self, req: Request, node: H) -> Result<Response, Error>
+    pub async fn fetch_with<F, H>(&self, req: Request, runtime: H) -> Result<Response, Error>
     where
         H: Fn(&[u8; 32]) -> F,
         F: Future<Output = Vec<(String, String)>>,
@@ -449,22 +449,22 @@ impl Client {
         let again = matches!(req.method.as_str(), "GET" | "HEAD") || leased_call(&req);
         let mut why = unsent("there's no device to ask");
         let mut tries = Some(Trace { start: Instant::now(), tries: Vec::new() });
-        let traces = |tries: &mut Option<Trace>, node: Option<serde_json::Value>| tries.as_mut().map(|t| serde_json::json!({ "tries": std::mem::take(&mut t.tries), "node": node }));
+        let traces = |tries: &mut Option<Trace>, runtime: Option<serde_json::Value>| tries.as_mut().map(|t| serde_json::json!({ "tries": std::mem::take(&mut t.tries), "runtime": runtime }));
         let (mut skipped, mut fresh, mut only, mut followed, mut reconnected, mut asked_local_again) = (Vec::new(), Vec::new(), None::<Vec<PublicKey>>, 0, false, false);
         loop {
-            let nodes: Vec<PublicKey> = only.clone().unwrap_or_else(|| self.0.nodes.lock().unwrap().clone()).into_iter().filter(|n| !skipped.contains(n)).collect();
-            if nodes.is_empty() {
+            let runtimes: Vec<PublicKey> = only.clone().unwrap_or_else(|| self.0.runtimes.lock().unwrap().clone()).into_iter().filter(|n| !skipped.contains(n)).collect();
+            if runtimes.is_empty() {
                 return Err(Error { trace: traces(&mut tries, None), ..why });
             }
-            if let Some(local) = self.local_among(&nodes) {
+            if let Some(local) = self.local_among(&runtimes) {
                 let key = PublicKey::from_bytes(&local.key).map_err(|_| unsent("a device's key isn't a key"))?;
                 // One that stalled lately is asked again only after the rest, as any device that didn't answer is.
-                if nodes.len() > 1 && self.0.down.lock().unwrap().get(&key).is_some_and(|d| d.since.elapsed() < SKIP) {
+                if runtimes.len() > 1 && self.0.down.lock().unwrap().get(&key).is_some_and(|d| d.since.elapsed() < SKIP) {
                     skipped.push(key);
                     continue;
                 }
                 let began = Instant::now();
-                match self.ask_local(&local, &req, nodes.len() == 1).await {
+                match self.ask_local(&local, &req, runtimes.len() == 1).await {
                     Ok(mut response) => {
                         self.0.down.lock().unwrap().remove(&key);
                         if response.status == 421 && followed < MOST_ELSEWHERE {
@@ -498,7 +498,7 @@ impl Client {
                     }
                 }
             }
-            let (first, fallback) = self.in_order(&nodes);
+            let (first, fallback) = self.in_order(&runtimes);
             let (key, conn, opened) = match self.pick(&first, &fallback, &mut tries).await {
                 Ok(picked) => picked,
                 Err(err) => {
@@ -512,9 +512,9 @@ impl Client {
                 }
             };
             // The last has no other to give way to: it's given the time to answer.
-            let last = nodes.len() == 1;
+            let last = runtimes.len() == 1;
             let mut headers = req.headers.clone();
-            headers.extend(node(key.as_bytes()).await);
+            headers.extend(runtime(key.as_bytes()).await);
             let head = head(&req.method, &req.path, &headers, req.body.len()?, certificate.as_deref())?;
             let began = Instant::now();
             let err = match self.exchange(&key, &conn, opened.is_none(), &head, &req, last).await {
@@ -554,16 +554,16 @@ impl Client {
     /// `key`, which gave it: none leaves the answer as it came.
     async fn elsewhere(&self, response: &mut Response, key: &PublicKey) -> Result<Vec<PublicKey>, Error> {
         let bytes = std::mem::replace(&mut response.body, Body::whole(Vec::new())).bytes_within(HEAD_LIMIT).await?;
-        let known = self.0.nodes.lock().unwrap().clone();
+        let known = self.0.runtimes.lock().unwrap().clone();
         let said: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
         let named: Vec<PublicKey> = said["elsewhere"].as_array().into_iter().flatten().filter_map(|k| data_encoding::HEXLOWER_PERMISSIVE.decode(k.as_str()?.as_bytes()).ok()).filter_map(|k| PublicKey::try_from(&k[..]).ok()).filter(|k| known.contains(k) && k != key).collect();
         response.body = Body::whole(bytes);
         Ok(named)
     }
 
-    /// This device's own runtime, if it has one and it's among `nodes`.
-    fn local_among(&self, nodes: &[PublicKey]) -> Option<Local> {
-        self.0.local.lock().unwrap().clone().filter(|l| nodes.iter().any(|n| n.as_bytes() == &l.key))
+    /// This device's own runtime, if it has one and it's among `runtimes`.
+    fn local_among(&self, runtimes: &[PublicKey]) -> Option<Local> {
+        self.0.local.lock().unwrap().clone().filter(|l| runtimes.iter().any(|n| n.as_bytes() == &l.key))
     }
 
     /// This device's own app runtime as who's who lists it now: asked first from now on, or none.
@@ -627,7 +627,7 @@ impl Client {
             }
         }
         let (status, headers, body) = read_response_after(&mut from, req.method == "HEAD", first).await?;
-        Ok(Response { node: local.key, status, headers, body: Body { recv: Some(from), ..body }, trace: None })
+        Ok(Response { runtime: local.key, status, headers, body: Body { recv: Some(from), ..body }, trace: None })
     }
 
     #[cfg(not(feature = "computer"))]
@@ -722,20 +722,20 @@ impl Client {
         Ok(endpoint)
     }
 
-    /// A connection to `node`: the one open (and true), or a new one (if that one closed), within `limit` (which
+    /// A connection to `runtime`: the one open (and true), or a new one (if that one closed), within `limit` (which
     /// includes waiting for another to open it). One opened is kept in its slot for the next request, whoever opened it.
-    async fn conn(&self, node: &PublicKey, limit: Duration) -> Result<(Connection, bool), Error> {
+    async fn conn(&self, runtime: &PublicKey, limit: Duration) -> Result<(Connection, bool), Error> {
         let opening = async {
-            let slot = self.0.conns.lock().unwrap().entry(*node).or_default().clone();
+            let slot = self.0.conns.lock().unwrap().entry(*runtime).or_default().clone();
             let mut held = slot.lock().await;
             if let Some(conn) = held.as_ref().filter(|c| c.close_reason().is_none()) {
                 return Ok((conn.clone(), true));
             }
             let endpoint = self.endpoint().await?;
             let addr = match &self.0.way {
-                Way::Relay(url, _) => EndpointAddr::new(*node).with_relay_url(url.clone()),
+                Way::Relay(url, _) => EndpointAddr::new(*runtime).with_relay_url(url.clone()),
                 #[cfg(feature = "relayed")]
-                Way::Custom(_) => EndpointAddr::from_parts(*node, [iroh::TransportAddr::Custom(relayed::through_relay(node.as_bytes()))]),
+                Way::Custom(_) => EndpointAddr::from_parts(*runtime, [iroh::TransportAddr::Custom(relayed::through_relay(runtime.as_bytes()))]),
             };
             let conn = endpoint.connect(addr, &alpn()).await.map_err(|err| unsent(format!("the device couldn't be reached: {err}")))?;
             self.answering(&conn);
@@ -745,16 +745,16 @@ impl Client {
         match timeout(limit, opening).await {
             Ok(Ok(opened)) => {
                 if !opened.1 {
-                    self.0.down.lock().unwrap().remove(node);
+                    self.0.down.lock().unwrap().remove(runtime);
                 }
                 Ok(opened)
             }
             Ok(Err(err)) => {
-                self.give_up(node);
+                self.give_up(runtime);
                 Err(err)
             }
             Err(_) => {
-                self.give_up(node);
+                self.give_up(runtime);
                 Err(unsent("the device isn't connected"))
             }
         }
@@ -795,16 +795,16 @@ impl Client {
         }
     }
 
-    /// `req` asked on `conn` to `node`, which was open already if `reused`. Unless it's the `last` to ask, a GET or HEAD
-    /// must start to answer within `node`'s usual time.
-    async fn exchange(&self, node: &PublicKey, conn: &Connection, reused: bool, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {
-        let usual = format!("device {}", data_encoding::HEXLOWER.encode(node.as_bytes()));
+    /// `req` asked on `conn` to `runtime`, which was open already if `reused`. Unless it's the `last` to ask, a GET or HEAD
+    /// must start to answer within `runtime`'s usual time.
+    async fn exchange(&self, runtime: &PublicKey, conn: &Connection, reused: bool, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {
+        let usual = format!("device {}", data_encoding::HEXLOWER.encode(runtime.as_bytes()));
         let limit = platform::hedge::limit(&usual).max(ANSWER_LEAST);
         // A connection gone quiet takes no more streams once its peer's allowance is used: nothing was sent.
         let (mut send, recv) = match timeout(limit, conn.open_bi()).await {
             Ok(opened) => opened.map_err(unsent)?,
             Err(_) => {
-                self.give_up(node);
+                self.give_up(runtime);
                 return Err(unsent("the device isn't taking requests"));
             }
         };
@@ -820,7 +820,7 @@ impl Client {
         // as its receipt says, or the connection is given up and the request asked again on a fresh one (`fetch_with`).
         // A file sent takes as long as its size needs.
         if reused && matches!(req.body, Sent::Bytes(_)) && timeout(limit, send.stopped()).await.is_err() {
-            self.give_up(node);
+            self.give_up(runtime);
             return Err(sent("the device's connection had gone"));
         }
         let head_only = req.method == "HEAD";
@@ -833,19 +833,19 @@ impl Client {
                     read
                 }
                 Err(_) => {
-                    self.give_up(node);
+                    self.give_up(runtime);
                     Err(sent("the device didn't answer"))
                 }
             }
         } else {
             read_response(&mut recv, head_only).await
         }?;
-        Ok(Response { node: *conn.remote_id().as_bytes(), status, headers, body: Body { recv: Some(recv), ..body }, trace: None })
+        Ok(Response { runtime: *conn.remote_id().as_bytes(), status, headers, body: Body { recv: Some(recv), ..body }, trace: None })
     }
 }
 
-fn keys(nodes: &[[u8; 32]]) -> Result<Vec<PublicKey>, Error> {
-    nodes.iter().map(PublicKey::from_bytes).collect::<Result<Vec<_>, _>>().map_err(|_| unsent("a device's key isn't a key"))
+fn keys(runtimes: &[[u8; 32]]) -> Result<Vec<PublicKey>, Error> {
+    runtimes.iter().map(PublicKey::from_bytes).collect::<Result<Vec<_>, _>>().map_err(|_| unsent("a device's key isn't a key"))
 }
 
 struct Trace {
@@ -858,7 +858,7 @@ struct Trace {
 fn tried(trace: &mut Option<Trace>, key: &PublicKey, began: Instant, result: &str, opened: Option<Duration>) {
     if let Some(t) = trace {
         let ms = |d: Duration| d.as_millis() as u64;
-        t.tries.push(serde_json::json!({ "node": data_encoding::HEXLOWER.encode(key.as_bytes()), "at": ms(began.saturating_duration_since(t.start)), "ms": ms(began.elapsed()), "result": result, "connect": opened.map(ms) }));
+        t.tries.push(serde_json::json!({ "runtime": data_encoding::HEXLOWER.encode(key.as_bytes()), "at": ms(began.saturating_duration_since(t.start)), "ms": ms(began.elapsed()), "result": result, "connect": opened.map(ms) }));
     }
 }
 
@@ -881,7 +881,7 @@ enum Way {
 
 /// A request's head, checked: nothing in it can start another header or request. A session's certificate goes with it.
 fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certificate: Option<&str>) -> Result<Vec<u8>, Error> {
-    let mut head = lines(method, path, "node", headers)?;
+    let mut head = lines(method, path, "runtime", headers)?;
     if let Some(certificate) = certificate.filter(|c| c.bytes().all(|b| b.is_ascii_graphic())) {
         head.push_str(&format!("{}: {certificate}\r\n", header::ENDPOINT));
     }

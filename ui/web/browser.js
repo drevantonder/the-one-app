@@ -117,7 +117,7 @@ export function browser() {
   /// approval names again. As a native app's device forgets (onet's `Device::sign_out`).
   async function forgetDevice() {
     const user = auth.user();
-    if (user) await Promise.all(["device", "joined", "nodes", "root", "welcome", "who.json", "needs.json", "invites.json"].map((k) => del(`${k}:${user}`))).catch(() => {});
+    if (user) await Promise.all(["device", "joined", "runtimes", "root", "welcome", "who.json", "needs.json", "invites.json"].map((k) => del(`${k}:${user}`))).catch(() => {});
   }
 
   /// What was last registered for notifications here: the subscription's endpoint, the device's key and the network's VAPID
@@ -168,7 +168,7 @@ export function browser() {
       localStorage.removeItem(REGISTERED);
       await forgetDevice();
     },
-    nodes: (state) => net.ordered(state),
+    runtimes: (state) => net.ordered(state),
     /// Once it's in: its user's own things' first key and where they run, made by the first of their devices.
     settle: () => net.settle("browser").catch((err) => console.warn("making this user's own keys:", err)),
     kept: (app, tool, input) => net.kept(auth.user(), app, tool, input),

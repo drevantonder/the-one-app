@@ -185,11 +185,11 @@ pub fn bucket(kind: &str, took: std::time::Duration, found: bool) {
     });
 }
 
-/// A call's trace as a few readable lines: what the device that answered did (`node`, its `x-one-trace`), each wait with its milliseconds, and the total.
-pub fn said(node: &Value) -> Vec<String> {
-    let mut out: Vec<String> = node["trace"].as_str().map(|id| format!("trace-id {id}")).into_iter().collect();
-    steps(node, node["device"].as_str().unwrap_or("the device that answered"), &mut out);
-    out.push(format!("total {} ms", node["ms"].as_u64().unwrap_or(0)));
+/// A call's trace as a few readable lines: what the device that answered did (`answered`, its `x-one-trace`), each wait with its milliseconds, and the total.
+pub fn said(answered: &Value) -> Vec<String> {
+    let mut out: Vec<String> = answered["trace"].as_str().map(|id| format!("trace-id {id}")).into_iter().collect();
+    steps(answered, answered["device"].as_str().unwrap_or("the device that answered"), &mut out);
+    out.push(format!("total {} ms", answered["ms"].as_u64().unwrap_or(0)));
     out
 }
 

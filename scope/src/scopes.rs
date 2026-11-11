@@ -266,7 +266,7 @@ impl ScopeDb {
 
     /// The app runtimes that run calls, each with the key what's handed it is sealed to: the devices listed as compute, and
     /// oned on Cloudflare, whose seal key is its key's twin.
-    pub fn nodes(&self) -> Result<Vec<(Key, Key)>> {
+    pub fn runtimes(&self) -> Result<Vec<(Key, Key)>> {
         let mut out: Vec<(Key, Key)> = self.computes()?.into_iter().map(|d| (d.key, d.seal)).collect();
         if let Some(k) = self.cloudflare_node()?
             && let Ok(seal) = ::key::twin_public(&k)

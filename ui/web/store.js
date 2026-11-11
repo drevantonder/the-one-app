@@ -129,7 +129,7 @@ const draw = () => changes.forEach((fn) => fn());
 /// which group changed), drawn as soon as they're in; then the badges, drawn as they come.
 export async function refreshState({ apps = false } = {}) {
   const [state, list] = await Promise.all([shared("/api/state"), apps && !joining ? shared("/api/apps").catch(() => null) : null]);
-  if (state.user) platform.nodes(state);
+  if (state.user) platform.runtimes(state);
   const regrouped = JSON.stringify([state.user, state.network?.groups]) !== JSON.stringify([store.state?.user, store.state?.network?.groups]);
   store.state = state;
   // While it's being let in, its apps wait: they need the keys it's about to get.

@@ -54,8 +54,8 @@ function triesOf(trace) {
 /// The devices a request asked, for the timeline: → the one that answered it, if one did, and how the last try went.
 export function tried(trace) {
   const tries = triesOf(trace);
-  for (const t of tries) note({ name: "client.try", node: t.node, result: t.result, ms: t.ms });
-  return { node: tries.findLast((t) => t.result === "answered")?.node, last: tries.at(-1)?.result };
+  for (const t of tries) note({ name: "client.try", runtime: t.runtime, result: t.result, ms: t.ms });
+  return { runtime: tries.findLast((t) => t.result === "answered")?.runtime, last: tries.at(-1)?.result };
 }
 
 /// What this client asked of its devices, as OTEL's client spans (`client.call`), each the parent of what the app runtime that took
@@ -81,7 +81,7 @@ function sendCalls(send) {
 }
 
 /// Adds a request that ended, if it's kept: `{ traceparent, ms }`, a call's `app` and `tool` or else its `path`, the
-/// `node` that answered it, and `failed` with its `code` if what it answered was a failure, or, if no device answered,
+/// `runtime` that answered it, and `failed` with its `code` if what it answered was a failure, or, if no device answered,
 /// why (`error`) and what that said (`message`).
 export function called(send, call) {
   if (!call.failed && !call.error && call.ms < KEPT_SPANS.slow && !sampled(call.traceparent)) return;

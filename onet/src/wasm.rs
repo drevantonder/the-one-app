@@ -21,11 +21,11 @@ pub struct Client(std::rc::Rc<crate::Client>);
 impl Client {
     /// `secret`: the 32 bytes of this session's key, kept in WebAssembly's memory while it runs (the device's own key
     /// stays in WebCrypto). `certificate`: the device's word for it (`certify` in key/crypto.js).
-    /// `address`: the network's, where its relay is. `nodes`: the app runtimes to ask, hex, in the order things run on them.
-    pub async fn start(secret: Vec<u8>, certificate: String, address: String, nodes: Vec<String>) -> Result<Client, JsError> {
+    /// `address`: the network's, where its relay is. `runtimes`: the app runtimes to ask, hex, in the order things run on them.
+    pub async fn start(secret: Vec<u8>, certificate: String, address: String, runtimes: Vec<String>) -> Result<Client, JsError> {
         let secret: [u8; 32] = secret.try_into().map_err(|_| js("a session's key is 32 bytes"))?;
-        let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
-        Ok(Client(std::rc::Rc::new(crate::Client::start(secret, Some(certificate), &address, &nodes).await.map_err(js)?)))
+        let runtimes = runtimes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
+        Ok(Client(std::rc::Rc::new(crate::Client::start(secret, Some(certificate), &address, &runtimes).await.map_err(js)?)))
     }
 
     pub async fn certify(&self, certificate: String) {
@@ -37,9 +37,9 @@ impl Client {
         data_encoding::HEXLOWER.encode(&self.0.id())
     }
 
-    pub fn nodes(&self, nodes: Vec<String>) -> Result<(), JsError> {
-        let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
-        self.0.set_nodes(&nodes).map_err(js)
+    pub fn runtimes(&self, runtimes: Vec<String>) -> Result<(), JsError> {
+        let runtimes = runtimes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
+        self.0.set_runtimes(&runtimes).map_err(js)
     }
 
     /// Each app runtime's run priority, `keys` (hex) beside `ranks`: those on the same one are raced at once.
@@ -49,14 +49,14 @@ impl Client {
     }
 
     /// The app runtime that wakes when asked (oned on Cloudflare), hex, if the network has one.
-    pub fn wakes(&self, node: Option<String>) -> Result<(), JsError> {
-        self.0.set_wakes(node.map(|n| key(&n)).transpose()?).map_err(js)
+    pub fn wakes(&self, runtime: Option<String>) -> Result<(), JsError> {
+        self.0.set_wakes(runtime.map(|n| key(&n)).transpose()?).map_err(js)
     }
 
     /// The app runtimes the relay says are on its network now, hex: raced first.
-    pub fn online(&self, nodes: Vec<String>) -> Result<(), JsError> {
-        let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
-        self.0.set_online(&nodes).map_err(js)
+    pub fn online(&self, runtimes: Vec<String>) -> Result<(), JsError> {
+        let runtimes = runtimes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
+        self.0.set_online(&runtimes).map_err(js)
     }
 
     /// `headers`: names and values, one after the other. `keys`, if given, is asked for the `x-one-keys` of the one app runtime
@@ -64,10 +64,10 @@ impl Client {
     /// sealed to no other. A request with `x-one-trace` has its trace in its response, or in what it failed with.
     pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>, keys: Option<js_sys::Function>) -> Result<Response, Failed> {
         let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
-        let sealed = |node: &[u8; 32]| {
-            let (keys, node) = (keys.clone(), data_encoding::HEXLOWER.encode(node));
+        let sealed = |runtime: &[u8; 32]| {
+            let (keys, runtime) = (keys.clone(), data_encoding::HEXLOWER.encode(runtime));
             async move {
-                let Some(asked) = keys.and_then(|k| k.call1(&JsValue::NULL, &JsValue::from_str(&node)).ok()) else { return Vec::new() };
+                let Some(asked) = keys.and_then(|k| k.call1(&JsValue::NULL, &JsValue::from_str(&runtime)).ok()) else { return Vec::new() };
                 match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&asked)).await.ok().and_then(|v| v.as_string()) {
                     Some(k) if !k.is_empty() => vec![(custom_build::protocol::header::KEYS.to_string(), k)],
                     _ => Vec::new(),
@@ -77,7 +77,7 @@ impl Client {
         let response = self.0.fetch_with(crate::Request { method, path, headers, body: body.into() }, sealed).await.map_err(Failed::of)?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
         let trace = traced(response.trace);
-        Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
+        Ok(Response { runtime: data_encoding::HEXLOWER.encode(&response.runtime), status: response.status, headers, trace, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
     }
 
     pub async fn reconnect(&self) {
@@ -182,13 +182,13 @@ impl Keyring {
         self.keyring.read(&self.on).await.map_err(Failed::of)
     }
 
-    /// The app runtimes it may ask, hex (`nodes`), with each one's run priority (`ranks`, by key), and oned on Cloudflare's
+    /// The app runtimes it may ask, hex (`runtimes`), with each one's run priority (`ranks`, by key), and oned on Cloudflare's
     /// key (`wakes`), if the network has one, as JSON.
-    pub fn nodes(&self) -> String {
+    pub fn runtimes(&self) -> String {
         let hex = |k: &[u8; 32]| data_encoding::HEXLOWER.encode(k);
         let ranks: serde_json::Map<String, serde_json::Value> = self.keyring.ranks().into_iter().map(|(k, r)| (hex(&k), r.into())).collect();
-        let nodes: Vec<String> = self.keyring.nodes().keys().map(hex).collect();
-        serde_json::json!({ "nodes": nodes, "ranks": ranks, "wakes": self.keyring.cloudflare_node().as_ref().map(hex) }).to_string()
+        let runtimes: Vec<String> = self.keyring.runtimes().keys().map(hex).collect();
+        serde_json::json!({ "runtimes": runtimes, "ranks": ranks, "wakes": self.keyring.cloudflare_node().as_ref().map(hex) }).to_string()
     }
 
     /// A request to its user's app runtimes (`Keyring::request`), with the keys its kind needed, handed until `until` (ms),
@@ -218,7 +218,7 @@ impl Keyring {
         let response = sent.map_err(Failed::of)?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
         let trace = traced(response.trace);
-        Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
+        Ok(Response { runtime: data_encoding::HEXLOWER.encode(&response.runtime), status: response.status, headers, trace, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
     }
 
     /// As each start of a client does: its user's own things it settles if they aren't (`Keyring::settle_own`). A
@@ -301,7 +301,7 @@ impl Failed {
 
 #[wasm_bindgen]
 pub struct Response {
-    node: String,
+    runtime: String,
     status: u16,
     headers: Vec<String>,
     trace: String,
@@ -314,8 +314,8 @@ pub struct Response {
 impl Response {
     /// The app runtime that answered, hex, as its connection proved.
     #[wasm_bindgen(getter)]
-    pub fn node(&self) -> String {
-        self.node.clone()
+    pub fn runtime(&self) -> String {
+        self.runtime.clone()
     }
 
     #[wasm_bindgen(getter)]

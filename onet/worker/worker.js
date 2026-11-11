@@ -31,7 +31,7 @@
 // optional).
 
 import { DurableObject } from "cloudflare:workers";
-import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view } from "./oned_cloudflare_worker.js";
+import { initSync, device_start, device_deliver, device_fetch, device_runtimes, device_close, device_view } from "./oned_cloudflare_worker.js";
 import wasm from "./oned_cloudflare_worker_bg.wasm";
 import { b64u, ed25519Public, hex, joinCode, random, signBytes, signedRequest, untilTaken } from "../shared/crypto.js";
 import { CORS, answer, json, near, textOf } from "../shared/http.js";
@@ -221,7 +221,7 @@ export class Client extends DurableObject {
     this.copies = new Copies(ctx.storage);
     this.asking = 0;
     this.out = [];
-    /// Who's who as it last read it: `{ nodes: Map(key → seal), at }`.
+    /// Who's who as it last read it: `{ runtimes: Map(key → seal), at }`.
     this.view = null;
     this.viewing = Promise.resolve();
     /// Its endpoint, while it's awake: `{ key, phase, ready, ticket, until }`, one at a time, `phase` "starting" until
@@ -322,15 +322,15 @@ export class Client extends DurableObject {
         await this.join(device, token);
         return say(403, approve);
       }
-      let nodes;
+      let runtimes;
       try {
-        nodes = await this.start(me);
+        runtimes = await this.start(me);
       } catch (err) {
         // Taken out since it was approved: the relay no longer lets its key in, nor the network lists it.
         this.isApproved = false;
         return say(err.notLetIn || err.code === CODES.notLetIn ? 403 : 503, err.notLetIn || err.code === CODES.notLetIn ? approve : `${device.name} couldn't start: ${err.message}`);
       }
-      if (!nodes.length && !(await this.reorder(me))) return say(503, "None of your devices is on right now.");
+      if (!runtimes.length && !(await this.reorder(me))) return say(503, "None of your devices is on right now.");
       this.ctx.waitUntil(this.removeReplaced(me));
       return await this.forward(me, asking, say);
     } finally {
@@ -394,7 +394,7 @@ export class Client extends DurableObject {
     await this.see(me, await this.writes());
     ended();
     run.phase = "running";
-    console.log(JSON.stringify({ started: me.key.slice(0, 8), ms: Date.now() - began, listed: this.view.nodes.size, on: this.order.length }));
+    console.log(JSON.stringify({ started: me.key.slice(0, 8), ms: Date.now() - began, listed: this.view.runtimes.size, on: this.order.length }));
   }
 
   /// Binds its key to this object at the relay, which hands it what's sent to it, for an hour: again, once bound,
@@ -419,7 +419,7 @@ export class Client extends DurableObject {
     const reading = this.viewing.then(async () => {
       const said = JSON.parse(await device_view(me.key, me.seal.secret, this.on(me)));
       if (said.user !== me.user) throw Object.assign(new Error(`this device is not listed as one of ${this.env.YOURS}'s`), { notLetIn: true });
-      this.view = { nodes: new Map(said.nodes.map((n) => [n.key, n.seal])), at: Date.now(), writes };
+      this.view = { runtimes: new Map(said.runtimes.map((n) => [n.key, n.seal])), at: Date.now(), writes };
       await this.reorder(me);
     });
     this.viewing = reading.catch(() => {});
@@ -443,14 +443,14 @@ export class Client extends DurableObject {
   /// The app runtimes in the order they're tried: those online (in run priority's order), then the rest, the most recently
   /// seen first. → how many are online.
   async reorder(me) {
-    const nodes = this.view?.nodes || new Map();
-    const online = new Set(await answer(this.relay().connected([...nodes.keys()])));
-    const off = [...nodes.keys()].filter((k) => !online.has(k));
+    const runtimes = this.view?.runtimes || new Map();
+    const online = new Set(await answer(this.relay().connected([...runtimes.keys()])));
+    const off = [...runtimes.keys()].filter((k) => !online.has(k));
     const seen = off.length ? ((await answer(this.relay().seen()).catch(() => null)) ?? {}) : {};
-    const kept = ((await this.ctx.storage.get("order")) || []).filter((k) => nodes.has(k));
+    const kept = ((await this.ctx.storage.get("order")) || []).filter((k) => runtimes.has(k));
     off.sort((a, b) => (seen[b] ?? 0) - (seen[a] ?? 0));
     this.order = [...kept.filter((k) => online.has(k)), ...[...online].filter((k) => !kept.includes(k)), ...off];
-    if (this.run?.endpoint && this.run.key === me.key) device_nodes(me.key, this.order);
+    if (this.run?.endpoint && this.run.key === me.key) device_runtimes(me.key, this.order);
     return online.size;
   }
 
@@ -461,9 +461,9 @@ export class Client extends DurableObject {
     this.run.learned = true;
     try {
       const r = await device_fetch(me.key, "GET", "/api/state", [], new Uint8Array(), me.until, this.on(me));
-      if (r.status !== 200 || !this.view?.nodes.has(r.node)) return;
+      if (r.status !== 200 || !this.view?.runtimes.has(r.runtime)) return;
       const state = JSON.parse(new TextDecoder().decode(r.body));
-      const listed = this.view.nodes;
+      const listed = this.view.runtimes;
       const order = (state.network?.devices || []).filter((d) => listed.has(d.key) && Number.isFinite(d.order)).sort((a, b) => a.order - b.order).map((d) => d.key).slice(0, 64);
       await this.ctx.storage.put("order", order);
       await this.reorder(me);

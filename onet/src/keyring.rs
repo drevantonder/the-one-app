@@ -77,7 +77,7 @@ struct Known {
     steps: database::stored::Keys,
     user: String,
     /// The app runtimes it may ask, by key: their seal keys; and oned on Cloudflare, if the network has one.
-    nodes: HashMap<[u8; 32], [u8; 32]>,
+    runtimes: HashMap<[u8; 32], [u8; 32]>,
     cloudflare_node: Option<[u8; 32]>,
     /// Each app runtime's run priority, as the network's admins set it (scope/src/rank.rs): oned on Cloudflare's too.
     ranks: HashMap<[u8; 32], u32>,
@@ -96,21 +96,21 @@ impl Known {
         let user = who.client(key).map_err(failed)?.map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
         // The app runtimes that run something of its user's, and oned on Cloudflare, which runs anyone's calls.
         let cloudflare_node = who.cloudflare_node().map_err(failed)?;
-        let mut nodes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
-        for (key, seal) in who.nodes().map_err(failed)? {
+        let mut runtimes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
+        for (key, seal) in who.runtimes().map_err(failed)? {
             if Some(key) == cloudflare_node || who.serves(&key, &user).map_err(failed)? {
-                nodes.insert(key, seal);
+                runtimes.insert(key, seal);
             }
         }
         let set = ::scope::rank::set(&who.settings().map_err(failed)?);
-        let ranks = nodes
+        let ranks = runtimes
             .keys()
             .map(|k| {
                 let id = if Some(*k) == cloudflare_node { ::scope::rank::CLOUDFLARE.to_string() } else { hex(&who.device_of(k)) };
                 (*k, match ::scope::rank::priority(&set, &id) { ::scope::rank::Priority::Number(n) => n, ::scope::rank::Priority::Last => u32::MAX })
             })
             .collect();
-        Ok(Known { reader, steps, user, nodes, cloudflare_node, ranks, at })
+        Ok(Known { reader, steps, user, runtimes, cloudflare_node, ranks, at })
     }
 }
 
@@ -262,13 +262,13 @@ impl<O: Opens> Keyring<O> {
         Ok(())
     }
 
-    /// Reads who's who again if an app runtime said of `nodes` one it doesn't know, the first time one's said: one who's who
+    /// Reads who's who again if an app runtime said of `runtimes` one it doesn't know, the first time one's said: one who's who
     /// still doesn't list after that isn't one to ask.
-    pub async fn reread_for(&self, on: &(impl Address + Keep), nodes: &[[u8; 32]]) {
-        let Some(known) = self.known.lock().unwrap().as_ref().map(|k| k.nodes.keys().copied().collect::<std::collections::HashSet<_>>()) else { return };
+    pub async fn reread_for(&self, on: &(impl Address + Keep), runtimes: &[[u8; 32]]) {
+        let Some(known) = self.known.lock().unwrap().as_ref().map(|k| k.runtimes.keys().copied().collect::<std::collections::HashSet<_>>()) else { return };
         let new = {
             let mut reread = self.reread.lock().unwrap();
-            nodes.iter().filter(|n| !known.contains(*n)).fold(false, |new, n| reread.insert(*n) || new)
+            runtimes.iter().filter(|n| !known.contains(*n)).fold(false, |new, n| reread.insert(*n) || new)
         };
         if new {
             let _ = self.read(on).await;
@@ -291,15 +291,15 @@ impl<O: Opens> Keyring<O> {
     }
 
     /// The app runtimes it may ask, by key, with their seal keys.
-    pub fn nodes(&self) -> HashMap<[u8; 32], [u8; 32]> {
-        self.known.lock().unwrap().as_ref().map(|k| k.nodes.clone()).unwrap_or_default()
+    pub fn runtimes(&self) -> HashMap<[u8; 32], [u8; 32]> {
+        self.known.lock().unwrap().as_ref().map(|k| k.runtimes.clone()).unwrap_or_default()
     }
 
     /// This device's own app runtime among the app runtimes it may ask: the compute that names it as its device.
     pub fn own_runtime(&self) -> Option<[u8; 32]> {
         let known = self.known.lock().unwrap();
         let k = known.as_ref()?;
-        k.nodes.keys().copied().find(|n| *n != self.key && k.who().device_of(n) == self.key)
+        k.runtimes.keys().copied().find(|n| *n != self.key && k.who().device_of(n) == self.key)
     }
 
     /// Where who's who is read to, `global`'s newest epoch, and the keys its steps are sealed under: what the next step
@@ -317,14 +317,14 @@ impl<O: Opens> Keyring<O> {
     /// The app runtimes it may ask, in the order things run on them: `first`, as last said, then those it wasn't told of, the
     /// oned on Cloudflare last of them; then by run priority, which may put oned on Cloudflare first.
     pub fn ordered(&self, first: &[[u8; 32]]) -> Vec<[u8; 32]> {
-        let nodes = self.nodes();
+        let runtimes = self.runtimes();
         let last = self.cloudflare_node();
         let ranks: HashMap<[u8; 32], u32> = self.ranks().into_iter().collect();
-        let mut out: Vec<[u8; 32]> = first.iter().filter(|k| nodes.contains_key(*k) && Some(**k) != last).copied().collect();
-        let mut rest: Vec<[u8; 32]> = nodes.keys().filter(|k| !out.contains(k) && Some(**k) != last).copied().collect();
+        let mut out: Vec<[u8; 32]> = first.iter().filter(|k| runtimes.contains_key(*k) && Some(**k) != last).copied().collect();
+        let mut rest: Vec<[u8; 32]> = runtimes.keys().filter(|k| !out.contains(k) && Some(**k) != last).copied().collect();
         rest.sort();
         out.extend(rest);
-        out.extend(last.filter(|k| nodes.contains_key(k)));
+        out.extend(last.filter(|k| runtimes.contains_key(k)));
         out.sort_by_key(|k| ranks.get(k).copied().unwrap_or(1));
         out
     }
@@ -333,13 +333,13 @@ impl<O: Opens> Keyring<O> {
     /// → whether that listed an app runtime it hadn't known of, which it now asks too.
     async fn found_nodes(&self, client: &Client, on: &(impl Address + Keep)) -> bool {
         let stale = self.known.lock().unwrap().as_ref().is_some_and(|k| now() > k.at + REREAD);
-        let had = self.nodes();
-        if !stale || self.read(on).await.is_err() || self.nodes().keys().all(|k| had.contains_key(k)) {
+        let had = self.runtimes();
+        if !stale || self.read(on).await.is_err() || self.runtimes().keys().all(|k| had.contains_key(k)) {
             return false;
         }
         let _ = client.set_ranks(&self.ranks());
         let _ = client.set_wakes(self.cloudflare_node());
-        client.set_nodes(&self.ordered(&[])).is_ok()
+        client.set_runtimes(&self.ordered(&[])).is_ok()
     }
 
     pub fn ranks(&self) -> Vec<([u8; 32], u32)> {
@@ -377,7 +377,7 @@ impl<O: Opens> Keyring<O> {
                 Err(err) => (400, json!({ "error": err.to_string(), "code": err.code })),
             };
             let headers = vec![("content-type".to_string(), "application/json".to_string())];
-            return Ok(Response { node: [0; 32], status, headers, body: Body::whole(out.to_string().into_bytes()), trace: None });
+            return Ok(Response { runtime: [0; 32], status, headers, body: Body::whole(out.to_string().into_bytes()), trace: None });
         }
         if request.method == "GET" && request.path.split('?').next() == Some(::api::path::OPENAPI) {
             return self.document(client, on, request, until).await;
@@ -426,10 +426,10 @@ impl<O: Opens> Keyring<O> {
             }
             let response = sent?;
             if response.status == 428 {
-                let node = response.node;
+                let runtime = response.runtime;
                 let bytes = response.body.bytes().await?;
                 let answer: Value = serde_json::from_slice(&bytes).map_err(|err| failed(format!("the device asked for keys in a reply that wasn't JSON: {err}")))?;
-                let learned = self.learn(client, on, &kind, &node, &answer, sent_with, &asked).await?;
+                let learned = self.learn(client, on, &kind, &runtime, &answer, sent_with, &asked).await?;
                 let before = asked.len();
                 asked.extend(learned);
                 if asked.len() > before {
@@ -468,15 +468,15 @@ impl<O: Opens> Keyring<O> {
     async fn send(&self, client: &Client, mut request: Request, handed: &[Handed], until: u64) -> Result<Response, Error> {
         let user = self.user().ok_or_else(refused)?;
         request.headers.push((header::USER.into(), user));
-        client.fetch_with(request, |node| std::future::ready(self.sealed_for(node, handed, until))).await
+        client.fetch_with(request, |runtime| std::future::ready(self.sealed_for(runtime, handed, until))).await
     }
 
-    /// `handed`, of the scopes who's who says `node` runs, sealed to it (`x-one-keys`): none if it has none of them, or
+    /// `handed`, of the scopes who's who says `runtime` runs, sealed to it (`x-one-keys`): none if it has none of them, or
     /// isn't listed.
-    fn sealed_for(&self, node: &[u8; 32], handed: &[Handed], until: u64) -> Vec<(String, String)> {
+    fn sealed_for(&self, runtime: &[u8; 32], handed: &[Handed], until: u64) -> Vec<(String, String)> {
         let known = self.known.lock().unwrap();
-        let Some((k, seal)) = known.as_ref().and_then(|k| Some((k, k.nodes.get(node)?))) else { return Vec::new() };
-        let keys: Vec<Handed> = handed.iter().filter(|h| Scope::parse(&h.scope).is_ok_and(|s| k.who().runs_for(node, &s))).cloned().collect();
+        let Some((k, seal)) = known.as_ref().and_then(|k| Some((k, k.runtimes.get(runtime)?))) else { return Vec::new() };
+        let keys: Vec<Handed> = handed.iter().filter(|h| Scope::parse(&h.scope).is_ok_and(|s| k.who().runs_for(runtime, &s))).cloned().collect();
         if keys.is_empty() {
             return Vec::new();
         }
@@ -521,7 +521,7 @@ impl<O: Opens> Keyring<O> {
         Ok(handed)
     }
 
-    /// An app runtime's 428, taken only from the app runtime that answered (`node`), naming itself, asking only keys of scopes who's
+    /// An app runtime's 428, taken only from the app runtime that answered (`runtime`), naming itself, asking only keys of scopes who's
     /// who says it runs, and of databases that kind of request uses (`keys::asked_for`): what the request needed, with what
     /// the same request's 428s asked before (`before`), remembered for that kind of request and that app runtime, in place
     /// of what it needed before. Of each database asked for, every epoch a reader of it needs to its newest is handed, as
@@ -530,18 +530,18 @@ impl<O: Opens> Keyring<O> {
     /// request that another learned for since it was sent (`sent_with`, what it went with) learns nothing more.
     /// → what it remembered for that kind of request.
     #[allow(clippy::too_many_arguments)]
-    async fn learn(&self, client: &Client, on: &(impl Address + Keep), kind: &Kind, node: &[u8; 32], answer: &Value, sent_with: Option<(String, Vec<Need>)>, before: &BTreeSet<Need>) -> Result<Vec<Need>, Error> {
+    async fn learn(&self, client: &Client, on: &(impl Address + Keep), kind: &Kind, runtime: &[u8; 32], answer: &Value, sent_with: Option<(String, Vec<Need>)>, before: &BTreeSet<Need>) -> Result<Vec<Need>, Error> {
         let lock = self.learning.lock().unwrap().entry(kind.name.clone()).or_default().clone();
         let _learning = lock.lock().await;
         if self.needs_of(&kind.name) != sent_with {
             return Ok(self.needs_of(&kind.name).map(|(_, need)| need).unwrap_or_default());
         }
-        let mut need = ::api::handed::asked_for(&kind.route, &hex(node), answer).ok_or_else(|| failed("A device asked for keys that request doesn't use. Nothing was handed."))?;
-        if !self.nodes().contains_key(node) {
+        let mut need = ::api::handed::asked_for(&kind.route, &hex(runtime), answer).ok_or_else(|| failed("A device asked for keys that request doesn't use. Nothing was handed."))?;
+        if !self.runtimes().contains_key(runtime) {
             return Err(failed("A device that isn't one of yours asked for keys. Nothing was handed."));
         }
         let scopes: Vec<Scope> = need.iter().map(|n| Scope::parse(&n.scope)).collect::<Result<_, _>>().map_err(|_| failed("A device asked for keys of something that isn't. Nothing was handed."))?;
-        let runs = || self.who(|who| scopes.iter().all(|s| who.runs_for(node, s))).unwrap_or(false);
+        let runs = || self.who(|who| scopes.iter().all(|s| who.runs_for(runtime, s))).unwrap_or(false);
         // What it runs may be newer than this device read: read again, now and then, before refusing.
         if !runs() && self.known.lock().unwrap().as_ref().is_some_and(|k| now() > k.at + REREAD) {
             self.read(on).await?;
@@ -575,7 +575,7 @@ impl<O: Opens> Keyring<O> {
         if need.is_empty() {
             return Err(failed("A device asked for older keys than it needs. Nothing was handed."));
         }
-        let runs = |n: &Need| self.who(|who| Scope::parse(&n.scope).is_ok_and(|s| who.runs_for(node, &s))).unwrap_or(false);
+        let runs = |n: &Need| self.who(|who| Scope::parse(&n.scope).is_ok_and(|s| who.runs_for(runtime, &s))).unwrap_or(false);
         let need = handing(need, |n| epochs[&prefix(n)], before.iter().filter(|n| runs(n)).cloned());
         for n in &need {
             self.database_key(client, on, n).await?;
@@ -583,7 +583,7 @@ impl<O: Opens> Keyring<O> {
         let kept = {
             let mut needs = self.needs.lock().unwrap();
             let needs = needs.get_or_insert_default();
-            needs.insert(kind.name.clone(), (hex(node), need.clone()));
+            needs.insert(kind.name.clone(), (hex(runtime), need.clone()));
             if needs.len() > KINDS_KEPT
                 && let Some(other) = needs.keys().find(|k| **k != kind.name).cloned()
             {

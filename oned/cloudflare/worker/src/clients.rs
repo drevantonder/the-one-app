@@ -78,17 +78,17 @@ fn keys(hexes: &[String]) -> Result<Vec<Key>, JsError> {
     hexes.iter().map(|h| key(h)).collect()
 }
 
-/// Starts the device whose key is `seed`, asking `nodes` (hex, in the order things run on them), its datagrams going
-/// to `send`: → its key, hex. One already running is given `send` and `nodes`.
+/// Starts the device whose key is `seed`, asking `runtimes` (hex, in the order things run on them), its datagrams going
+/// to `send`: → its key, hex. One already running is given `send` and `runtimes`.
 #[wasm_bindgen]
-pub async fn device_start(seed: Vec<u8>, nodes: Vec<String>, send: Function) -> Result<String, JsError> {
+pub async fn device_start(seed: Vec<u8>, runtimes: Vec<String>, send: Function) -> Result<String, JsError> {
     let seed: Key = seed.try_into().map_err(|_| thrown("a device's key is 32 bytes"))?;
     let me = *iroh::SecretKey::from_bytes(&seed).public().as_bytes();
-    let nodes = keys(&nodes)?;
+    let runtimes = keys(&runtimes)?;
     sweep();
     SENDS.with(|s| s.borrow_mut().insert(me, send));
     if let Some(client) = running(&me) {
-        client.set_nodes(&nodes).map_err(thrown)?;
+        client.set_runtimes(&runtimes).map_err(thrown)?;
     } else {
         let to_relay: onet::relayed::Send = Arc::new(move |dst: &Key, segment: u16, contents: &[u8]| {
             SENDS.with(|s| {
@@ -98,7 +98,7 @@ pub async fn device_start(seed: Vec<u8>, nodes: Vec<String>, send: Function) -> 
                 }
             })
         });
-        let (client, inbox) = onet::Client::relayed(seed, to_relay, &nodes).await.map_err(thrown)?;
+        let (client, inbox) = onet::Client::relayed(seed, to_relay, &runtimes).await.map_err(thrown)?;
         CLIENTS.with(|c| c.borrow_mut().insert(me, (client, inbox, now())));
     }
     Ok(data_encoding::HEXLOWER.encode(&me))
@@ -115,15 +115,15 @@ pub fn device_deliver(to: &[u8], src: &[u8], segment_size: u32, contents: &[u8])
 
 /// The app runtimes the device `me` (hex) asks, in order.
 #[wasm_bindgen]
-pub fn device_nodes(me: &str, nodes: Vec<String>) -> Result<(), JsError> {
+pub fn device_runtimes(me: &str, runtimes: Vec<String>) -> Result<(), JsError> {
     let me = key(me)?;
     let client = running(&me).ok_or_else(|| thrown("that device isn't running"))?;
-    client.set_nodes(&keys(&nodes)?).map_err(thrown)
+    client.set_runtimes(&keys(&runtimes)?).map_err(thrown)
 }
 
 /// Asks the first of the device `me`'s app runtimes that answers, as its user, with the keys that kind of request needs
 /// (`Keyring::request`), handed until `until` (ms), through `on` (`On`): `headers` names and values, one after the other.
-/// → `{ node, status, headers, body }`, `node` the key (hex) of the app runtime that answered, the body whole, at most
+/// → `{ runtime, status, headers, body }`, `runtime` the key (hex) of the app runtime that answered, the body whole, at most
 /// `ANSWER_MOST`. Throws with `sent: false` if it reached none, and `notLetIn` if who's who doesn't list it.
 #[wasm_bindgen]
 pub async fn device_fetch(me: String, method: String, path: String, headers: Vec<String>, body: Vec<u8>, until: f64, on: JsValue) -> Result<JsValue, JsValue> {
@@ -141,12 +141,12 @@ pub async fn device_fetch(me: String, method: String, path: String, headers: Vec
     let request = onet::Request { method, path, headers, body: body.into() };
     let response = keyring.request(&client, &on, request, until as u64).await.map_err(|e| failed(&e))?;
     let body = response.body.bytes_within(ANSWER_MOST).await.map_err(|e| failed(&e))?;
-    Ok(answered(response.node, response.status, response.headers, &body))
+    Ok(answered(response.runtime, response.status, response.headers, &body))
 }
 
-fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8]) -> JsValue {
+fn answered(runtime: Key, status: u16, headers: Vec<(String, String)>, body: &[u8]) -> JsValue {
     let out = js_sys::Object::new();
-    let _ = Reflect::set(&out, &"node".into(), &data_encoding::HEXLOWER.encode(&node).into());
+    let _ = Reflect::set(&out, &"runtime".into(), &data_encoding::HEXLOWER.encode(&runtime).into());
     let _ = Reflect::set(&out, &"status".into(), &status.into());
     let said: js_sys::Array = headers.into_iter().flat_map(|(n, v)| [n, v]).map(JsValue::from).collect();
     let _ = Reflect::set(&out, &"headers".into(), &said);
@@ -219,7 +219,7 @@ pub async fn device_close(me: String) {
 }
 
 /// What the device `me` (hex), whose seal key's secret is `seal`, knows of who's who, read through `on` (`On`): the first
-/// time, everything, after that what's new. → `{ user, nodes: [{ key, seal }] }`: its user as who's who lists it, and
+/// time, everything, after that what's new. → `{ user, runtimes: [{ key, seal }] }`: its user as who's who lists it, and
 /// the app runtimes it may ask, hex. Throws with `notLetIn` until who's who lists it as a client device, with its keys.
 #[wasm_bindgen]
 pub async fn device_view(me: String, seal: Vec<u8>, on: JsValue) -> Result<String, JsValue> {
@@ -227,6 +227,6 @@ pub async fn device_view(me: String, seal: Vec<u8>, on: JsValue) -> Result<Strin
     let seal: Key = seal.try_into().map_err(|_| JsValue::from(thrown("a seal key's secret is 32 bytes")))?;
     let keyring = KEYRINGS.with(|k| k.borrow_mut().entry(me).or_insert_with(|| Rc::new(Keyring::new(me, seal))).clone());
     keyring.read(&On::of(on, me)).await.map_err(|e| failed(&e))?;
-    let nodes: Vec<_> = keyring.nodes().iter().map(|(key, seal)| json!({ "key": key::hex(key), "seal": key::hex(seal) })).collect();
-    Ok(json!({ "user": keyring.user(), "nodes": nodes }).to_string())
+    let runtimes: Vec<_> = keyring.runtimes().iter().map(|(key, seal)| json!({ "key": key::hex(key), "seal": key::hex(seal) })).collect();
+    Ok(json!({ "user": keyring.user(), "runtimes": runtimes }).to_string())
 }

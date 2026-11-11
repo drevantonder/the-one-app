@@ -10,7 +10,7 @@ pub struct Error(pub anyhow::Error);
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         if let Some(e) = self.0.downcast_ref::<Elsewhere>() {
-            return (StatusCode::MISDIRECTED_REQUEST, Json(json!({ "error": e.why, "elsewhere": e.nodes }))).into_response();
+            return (StatusCode::MISDIRECTED_REQUEST, Json(json!({ "error": e.why, "elsewhere": e.runtimes }))).into_response();
         }
         let status = match self.0.downcast_ref::<crate::handed::Needs>() {
             Some(_) => StatusCode::PRECONDITION_REQUIRED,
@@ -29,7 +29,7 @@ impl IntoResponse for Error {
 #[derive(Debug)]
 pub struct Elsewhere {
     pub why: String,
-    pub nodes: Vec<String>,
+    pub runtimes: Vec<String>,
 }
 
 impl std::fmt::Display for Elsewhere {
