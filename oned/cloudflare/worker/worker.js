@@ -1096,18 +1096,24 @@ async function route(p, request) {
     p.forgetLost(who);
     return json(JSON.parse(await sealed_global_steps(p.owner, who.user, p.bucket, Number(url.searchParams.get("from") || 0), url.searchParams.get("welcome") ?? undefined)));
   }
+  const scope = url.searchParams.get("scope");
   if ((request.method === "GET" && ["/api/state", "/api/apps", "/api/widgets", "/api/badges", "/api/events", "/api/openapi.json"].includes(path))) {
     const who = p.whom(request);
-    const run = new Run(p, who, await p.networkFor(who));
-    // Nothing here changes but what devices write, which they'll say once one is on: no events, so the client asks again
-    // in a while, and this app runtime sleeps meanwhile.
-    if (path === "/api/events") return new Response(null, { status: 204 });
-    const scope = url.searchParams.get("scope");
-    if (path === "/api/state") return json(run.view.state);
-    if (path === "/api/apps") return tagged(request, JSON.stringify(await run.apps()), "application/json");
-    if (path === "/api/openapi.json") return tagged(request, openapi(JSON.stringify(await run.apps())), "application/json");
-    if (path === "/api/widgets") return json(await run.widgets(scope, url.searchParams.get("kind")));
-    return json(await run.badges(scope));
+    const view = await p.networkFor(who);
+    // A page of a scope it doesn't run, as the user's own unless they chose it, is drawn by a machine that does: here it
+    // would have none of its apps.
+    const page = scope === "user" ? `user:${who.user}` : scope;
+    if (!(["/api/widgets", "/api/badges"].includes(path) && page && !view.runs.includes(page))) {
+      const run = new Run(p, who, view);
+      // Nothing here changes but what devices write, which they'll say once one is on: no events, so the client asks again
+      // in a while, and this app runtime sleeps meanwhile.
+      if (path === "/api/events") return new Response(null, { status: 204 });
+      if (path === "/api/state") return json(run.view.state);
+      if (path === "/api/apps") return tagged(request, JSON.stringify(await run.apps()), "application/json");
+      if (path === "/api/openapi.json") return tagged(request, openapi(JSON.stringify(await run.apps())), "application/json");
+      if (path === "/api/widgets") return json(await run.widgets(scope, url.searchParams.get("kind")));
+      return json(await run.badges(scope));
+    }
   }
   // Anything else only a machine does: to a client that asks one itself (`x-one-elsewhere`), the machines of its
   // user's that are on, as an app runtime on a computer names those that run a call it can't (421).
