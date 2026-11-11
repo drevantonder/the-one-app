@@ -20,7 +20,7 @@ pub struct Client(std::rc::Rc<crate::Client>);
 #[wasm_bindgen]
 impl Client {
     /// `secret`: the 32 bytes of this session's key, kept in WebAssembly's memory while it runs (the device's own key
-    /// stays in WebCrypto). `certificate`: the device's word for it (`certify` in cloudflare/shared/crypto.js).
+    /// stays in WebCrypto). `certificate`: the device's word for it (`certify` in key/crypto.js).
     /// `address`: the network's, where its relay is. `nodes`: the nodes to ask, hex, in the order things run on them.
     pub async fn start(secret: Vec<u8>, certificate: String, address: String, nodes: Vec<String>) -> Result<Client, JsError> {
         let secret: [u8; 32] = secret.try_into().map_err(|_| js("a session's key is 32 bytes"))?;

@@ -1,6 +1,6 @@
 //! Keys as devices hold them: each endpoint's own key, each scope's numbered epochs sealed to the endpoints that may
 //! open it, what's sealed under an epoch, signed requests, and the keys a caller hands a node for one call.
-//! `cloudflare/shared/crypto.js` writes the same formats, and `tests/contracts.rs` checks they agree.
+//! `key/crypto.js` writes the same formats, and `tests/contracts.rs` checks they agree.
 //!
 //! Every client is a device with its own key pair, never shared by a user's devices: a native app's in the Keychain,
 //! keystore or Credential Locker, a browser's a non-extractable WebCrypto key in IndexedDB, a local agent's its

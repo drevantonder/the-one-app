@@ -34,13 +34,14 @@ const SCREEN_SCRIPTS: [&str; 2] = ["ui/bridge.js", "ui/host.js"];
 /// Onboarding's auth pages, which the auth Worker imports as ../onboarding/pages.js.
 const AUTH_PAGES: &str = "onboarding/pages.js";
 
+/// The formats devices hold keys in, as the Workers and the web client write them, which they import as
+/// ../shared/crypto.js.
+const CRYPTO: &str = "key/crypto.js";
+
 /// Each file in the checkout at `root` the Workers and the web client are made of: its path among them, and where it
 /// is. All but the custom build's logo and icon, which its config names.
 pub fn list(root: &Path) -> Vec<(String, PathBuf)> {
-    let cloudflare = root.join("cloudflare");
-    let mut files = collect(&cloudflare);
-    // The Workers' tests stay in the repo.
-    files.retain(|(rel, _)| !rel.starts_with("test/"));
+    let mut files = vec![("shared/crypto.js".to_string(), root.join(CRYPTO)), ("web/shared/crypto.js".to_string(), root.join(CRYPTO))];
     // Each Worker's own folder, in the source tree the Workers are built from, so their imports of each other keep working.
     for (folder, source) in WORKERS {
         for (rel, abs) in collect(&root.join(folder)) {
@@ -57,14 +58,12 @@ pub fn list(root: &Path) -> Vec<(String, PathBuf)> {
         files.push((format!("web/screen/{}", script.rsplit('/').next().unwrap_or(script)), root.join(script)));
     }
     files.push((AUTH_PAGES.into(), root.join(AUTH_PAGES)));
-    // And the formats devices hold keys in, which the web client imports as ../shared/crypto.js.
-    files.push(("web/shared/crypto.js".into(), cloudflare.join("shared/crypto.js")));
     files
 }
 
 /// What `list` reads, for a build to watch: every folder and file it takes from.
 pub fn sources(root: &Path) -> Vec<PathBuf> {
-    ["cloudflare", KIT, AUTH_PAGES].into_iter().chain(WORKERS.map(|(folder, _)| folder)).chain(SCREEN_SCRIPTS).map(|f| root.join(f)).collect()
+    [CRYPTO, KIT, AUTH_PAGES].into_iter().chain(WORKERS.map(|(folder, _)| folder)).chain(SCREEN_SCRIPTS).map(|f| root.join(f)).collect()
 }
 
 /// Every folder of the client's own screens in React, each built into its `dist/`: the frame's (ui/home, ui/settings) and

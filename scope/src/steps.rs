@@ -14,7 +14,7 @@
 //!
 //! `log` is the scope, `seq` the position, `epoch` the scope's its writer knew, `body` the sha256 of the body (hex, the
 //! content as JSON) and `size` its length; `backlink` and `previous` are always empty, as every step signed has them.
-//! `cloudflare/shared/crypto.js` signs and checks steps the same (`signStep`), and `tests/contracts.rs` checks they
+//! `key/crypto.js` signs and checks steps the same (`signStep`), and `tests/contracts.rs` checks they
 //! agree.
 //!
 //! `global`'s database starts at its first step that is a freeze (`Change::Freeze`, `Truth::first`): it carries the database
@@ -565,7 +565,7 @@ pub struct Welcome {
 }
 
 impl Welcome {
-    /// A Welcome as it's said: none for one that isn't. `cloudflare/shared/crypto.js`'s `waited` reads it the same way.
+    /// A Welcome as it's said: none for one that isn't. `key/crypto.js`'s `waited` reads it the same way.
     pub fn parse(said: &str) -> Option<Welcome> {
         let number = |n: &str| (!n.is_empty() && n.len() <= 16 && !n.starts_with('0') && n.bytes().all(|b| b.is_ascii_digit())).then(|| n.parse::<u64>().ok()).flatten();
         let mut parts = said.splitn(3, '.');

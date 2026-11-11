@@ -4,7 +4,7 @@
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
-/// A workerd running `cloudflare/test/formats.js`, which does with the Workers' JavaScript what a test asks, for the test
+/// A workerd running `tests/workers/formats.js`, which does with the Workers' JavaScript what a test asks, for the test
 /// to compare with what Rust does.
 struct Formats {
     addr: String,
@@ -16,7 +16,7 @@ impl Formats {
     fn start() -> Self {
         let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
         // Each as the Workers are built from them: its name there, and where it is in the repo.
-        let sources = [("shared/crypto.js", "cloudflare/shared/crypto.js"), ("shared/token.js", "auth/token.js"), ("shared/http.js", "gateway/http.js"), ("gateway/worker.js", "gateway/worker.js"), ("telemetry/worker.js", "insights/worker/worker.js"), ("telemetry/usage.js", "insights/worker/usage.js"), ("test/formats.js", "cloudflare/test/formats.js")];
+        let sources = [("shared/crypto.js", "key/crypto.js"), ("shared/token.js", "auth/token.js"), ("shared/http.js", "gateway/http.js"), ("gateway/worker.js", "gateway/worker.js"), ("telemetry/worker.js", "insights/worker/worker.js"), ("telemetry/usage.js", "insights/worker/usage.js"), ("test/formats.js", "tests/workers/formats.js")];
         let mut files: Vec<(String, Vec<u8>)> = sources.map(|(name, path)| (name.to_string(), std::fs::read(root.join(path)).unwrap())).to_vec();
         files.push(("screen/agents.js".into(), std::fs::read(root.join("ui/settings/agents.js")).unwrap()));
         let dir = crate::temp("formats");
@@ -46,7 +46,7 @@ fn b(v: &Value) -> Vec<u8> {
     B64U.decode(v.as_str().unwrap().as_bytes()).unwrap()
 }
 
-/// The Workers (JavaScript, `cloudflare/shared/crypto.js`) and nodes each open what the other seals: to key pairs and
+/// The Workers (JavaScript, `key/crypto.js`) and nodes each open what the other seals: to key pairs and
 /// under secrets.
 #[test]
 fn the_workers_and_nodes_seal_keys_for_each_other() {
@@ -348,7 +348,7 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     assert_eq!(post("/notifications/send", ::key::signed_request(&node, ::custom_build::protocol::NOTIFICATIONS, fields, now())).1["to"][&to], json!({ "none": true }));
 }
 
-/// The browser's service worker opens a note as `notifications::open_note` does (`openNote` in `cloudflare/shared/crypto.js`): one a
+/// The browser's service worker opens a note as `notifications::open_note` does (`openNote` in `key/crypto.js`): one a
 /// device signed shows with who signed it, one the network's own Workers send is unsigned, and one whose signature is
 /// wrong, or isn't signed by who it says, is refused.
 #[test]

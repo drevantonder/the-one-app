@@ -1,4 +1,4 @@
-//! The network's Workers (`cloudflare/`) running in the pinned workerd, as nodes and auth use them.
+//! The network's Workers running in the pinned workerd, as nodes and auth use them.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -7,10 +7,10 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use oned_cloudflare::{self as cloudflare, Served};
 use serde_json::{Value, json};
 
-/// The Workers' files as they are in this checkout, and their tests (`cloudflare/test/`), as `ui_files::list` has them.
+/// The Workers' files as they are in this checkout, and their tests (`tests/workers/`), as `ui_files::list` has them.
 fn files() -> Vec<(String, Vec<u8>)> {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let tests = ui::ui_files::collect(&root.join("cloudflare/test")).into_iter().map(|(name, path)| (format!("test/{name}"), path));
+    let tests = ui::ui_files::collect(&root.join("tests/workers")).into_iter().map(|(name, path)| (format!("test/{name}"), path));
     ui::ui_files::list(root).into_iter().chain(tests).map(|(name, path)| (name, std::fs::read(path).unwrap())).collect()
 }
 

@@ -205,7 +205,7 @@ pub fn asked_for(route: &Route, node: &str, answer: &Value) -> Option<Vec<Need>>
 pub const BEHIND: [u64; 2] = [2_000, 4_000];
 
 /// What sign-in said of a device's request to be let in (`GET /api/auth/devices/requests/<key>`: its status, 0 if it
-/// didn't answer, and its JSON), which every client acts on the same way (`cloudflare/shared/crypto.js`'s `waited`).
+/// didn't answer, and its JSON), which every client acts on the same way (`key/crypto.js`'s `waited`).
 #[derive(Debug, PartialEq)]
 pub enum Waited {
     /// Its sign-in is no more: it signs in again.

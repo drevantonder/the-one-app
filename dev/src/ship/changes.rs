@@ -112,8 +112,7 @@ impl Parts {
                 Some("dev") if file.starts_with("dev/skills/") || file.starts_with("dev/tools/") || file.starts_with("dev/plans/") => {}
                 Some("dev") => parts.dev = true,
                 // The Workers' sources but for the web client's: the Workers alone. The relay's protos only make its
-                // WebAssembly by hand, and the Workers' tests stay in the repo.
-                Some("cloudflare") if file.starts_with("cloudflare/test/") => {}
+                // WebAssembly by hand.
                 Some("relay") if file.starts_with("relay/protos/") || file == "relay/build.sh" => {}
                 // What every Worker answers HTTP with, which the Cloudflare node carries too.
                 Some("gateway") if file == "gateway/http.js" => (parts.node, parts.workers) = (true, true),
@@ -128,8 +127,7 @@ impl Parts {
                 // The update path's tests stay in the repo.
                 Some("oned") if file.starts_with("oned/update/tests/") => {}
                 // What the web client is made of: the native apps' bundle, and the Workers that serve it.
-                Some("cloudflare") if file.starts_with("cloudflare/shared/") => (parts.web, parts.workers) = (true, true),
-                Some("cloudflare") => parts.workers = true,
+                Some("key") if file == "key/crypto.js" => (parts.web, parts.workers) = (true, true),
                 Some("onet") if file.starts_with("onet/web/") => (parts.web, parts.workers) = (true, true),
                 // The screens' kit, the client's own screens (the frame's and each feature's) and the sign-in pages: nodes
                 // hold a copy, but what shows is the web client's (`screens.js`). Phosphor's icons are built into the
@@ -164,7 +162,7 @@ mod tests {
 
     #[test]
     fn a_change_sends_out_what_is_made_of_it() {
-        assert_eq!(of(&["dev/plans/x.md", "README.md", "tests/e2e.rs", "dev/tools/iteration/report.py", "apps/repos/tests/repos.rs", ".gitignore", "cloudflare/test/x.js", "relay/protos/a.proto"]), Parts::default());
+        assert_eq!(of(&["dev/plans/x.md", "README.md", "tests/e2e.rs", "dev/tools/iteration/report.py", "apps/repos/tests/repos.rs", ".gitignore", "tests/workers/x.js", "relay/protos/a.proto"]), Parts::default());
         assert_eq!(of(&["apps/board/app.js", "apps/board/screen.js"]), Parts { apps: vec!["board".into()], ..Default::default() });
         assert_eq!(of(&["apps/whatsapp/service/main.go"]), Parts { services: vec!["whatsapp".into()], ..Default::default() });
         assert!(of(&["services/sdk/src/lib.rs"]).service && of(&["services/sdk/src/lib.rs"]).mac);
@@ -184,7 +182,7 @@ mod tests {
         assert_eq!(of(&["auth/worker.js", "relay/worker.js", "auth/package.json", "notifications/worker/senders.js"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
         let http = of(&["gateway/http.js"]);
         assert!(http.node && http.workers && !http.web, "the Cloudflare node carries what every Worker answers HTTP with");
-        for file in ["ui/web/web.js", "onet/web/net-worker.js", "cloudflare/shared/crypto.js", "ui/kit/dist/ui.js", "vault/screens/dist/vault.html", "ui/settings/dist/requests.html", "ui/bridge.js", "onboarding/pages.js", "onboarding/pages.tsx"] {
+        for file in ["ui/web/web.js", "onet/web/net-worker.js", "key/crypto.js", "ui/kit/dist/ui.js", "vault/screens/dist/vault.html", "ui/settings/dist/requests.html", "ui/bridge.js", "onboarding/pages.js", "onboarding/pages.tsx"] {
             assert_eq!(of(&[file]), Parts { web: true, workers: true, ..Default::default() }, "{file}: the web client and the Workers that serve it, with no node");
         }
         let cloudflare_node = of(&["oned/cloudflare/node/src/lib.rs"]);

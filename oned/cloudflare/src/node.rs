@@ -29,7 +29,7 @@ pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, 
         ("one_cloudflare_node_bg.wasm".into(), "application/wasm", wasm),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
         ("protocol.js".into(), "application/javascript+module", ::api::protocol_js::javascript().into_bytes()),
-        ("crypto.js".into(), "application/javascript+module", include_bytes!("../../../cloudflare/shared/crypto.js").to_vec()),
+        ("crypto.js".into(), "application/javascript+module", include_bytes!("../../../key/crypto.js").to_vec()),
         ("http.js".into(), "application/javascript+module", include_bytes!("../../../gateway/http.js").to_vec()),
     ]
 }
