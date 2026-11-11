@@ -6,9 +6,9 @@
 <script type="module">globalThis.__oneScreen={name:"panel",at:new Error().stack};
 import { useEffect as e, useState as t } from "react";
 import { createRoot as n } from "react-dom/client";
-import { Skeleton as r, WidgetCard as i, arranged as a, cn as o } from "@one/ui";
-import { jsx as s, jsxs as c } from "react/jsx-runtime";
-var l = (() => {
+import { Skeleton as r, WidgetCard as i, arranged as a } from "@one/ui";
+import { jsx as o, jsxs as s } from "react/jsx-runtime";
+var c = (() => {
 	let e = {
 		state: null,
 		apps: [],
@@ -214,94 +214,87 @@ var l = (() => {
 		watch: U
 	};
 })();
-function u() {
+function l() {
 	let e = /* @__PURE__ */ new Set(), t = [];
-	for (let n of l.pages()) for (let r of l.items(n)) {
+	for (let n of c.pages()) for (let r of c.items(n)) {
 		let i = r.widget;
 		i && !e.has(`${i.app}.${i.widget}`) && (e.add(`${i.app}.${i.widget}`), t.push({
 			w: {
 				...i,
-				title: i.title || l.label(l.app(i.app)) || i.widget
+				title: i.title || c.label(c.app(i.app)) || i.widget
 			},
 			p: n
 		}));
 	}
 	return t;
 }
-var d = (e) => ({
+var u = (e) => ({
 	async run(t, n, r) {
 		try {
-			await l.call(t, n, r);
+			await c.call(t, n, r);
 		} catch (e) {
 			return one.plain(e).title;
 		}
-		await l.loadWidgets([e.scope]), p();
+		await c.loadWidgets([e.scope]), f();
 	},
 	follow(t, n) {
 		if (typeof t == "string") return void (/^https?:/i.test(t) && one.link(t));
 		one.open(t?.screen || "main", t?.params || {}, n.app, { scope: e.scope });
 	}
 });
-function f() {
-	let e = l.data.state, t = e?.user?.id, n = one.params?.here;
+function d() {
+	let e = c.data.state, t = e?.user?.id, n = one.params?.here;
 	return (e?.network?.devices || []).filter((e) => !e.user || e.user === t).map((e) => ({
 		key: e.key,
 		name: String(e.name || "").replace(/\.local$/, ""),
-		online: e.online === !0,
+		presence: one.seen(e),
 		here: !!n && (e.key === n || e.device === n)
 	})).sort((e, t) => t.here - e.here || e.name.localeCompare(t.name));
 }
-var p = () => {};
-function m() {
+var f = () => {};
+function p() {
 	let [, n] = t(0);
-	if (p = () => n((e) => e + 1), e(() => {
-		l.load(p).catch(() => p()), l.watch(p);
-	}, []), !l.data.state) return /* @__PURE__ */ c("div", {
+	if (f = () => n((e) => e + 1), e(() => {
+		c.load(f).catch(() => f()), c.watch(f);
+	}, []), !c.data.state) return /* @__PURE__ */ s("div", {
 		className: "flex flex-col gap-2 p-4",
-		children: [/* @__PURE__ */ s(r, { className: "h-5 w-32" }), /* @__PURE__ */ s(r, { className: "h-4 w-48" })]
+		children: [/* @__PURE__ */ o(r, { className: "h-5 w-32" }), /* @__PURE__ */ o(r, { className: "h-4 w-48" })]
 	});
-	let a = u();
-	return /* @__PURE__ */ c("div", {
+	let a = l();
+	return /* @__PURE__ */ s("div", {
 		className: "flex flex-col gap-4 p-4 text-sm",
-		children: [/* @__PURE__ */ c("section", {
+		children: [/* @__PURE__ */ s("section", {
 			className: "flex flex-col gap-1.5",
-			children: [/* @__PURE__ */ s("h2", {
+			children: [/* @__PURE__ */ o("h2", {
 				className: "text-xs font-medium text-muted-foreground",
 				children: "Your Devices"
-			}), f().map((e) => /* @__PURE__ */ c("div", {
+			}), d().map((e) => /* @__PURE__ */ s("div", {
 				className: "flex items-center gap-2",
-				children: [
-					/* @__PURE__ */ s("span", { className: o("size-[7px] shrink-0 rounded-full", e.online || e.here ? "bg-foreground" : "bg-muted-foreground/40") }),
-					/* @__PURE__ */ s("span", {
-						className: "min-w-0 flex-1 truncate",
-						children: e.name
-					}),
-					e.here ? /* @__PURE__ */ s("span", {
-						className: "text-muted-foreground",
-						children: "This device"
-					}) : !e.online && /* @__PURE__ */ s("span", {
-						className: "text-muted-foreground/70",
-						children: "Offline"
-					})
-				]
+				children: [/* @__PURE__ */ o("span", {
+					className: "min-w-0 flex-1 truncate",
+					children: e.name
+				}), /* @__PURE__ */ o("span", {
+					className: "text-muted-foreground",
+					children: e.here ? "This device" : e.presence
+				})]
 			}, e.key))]
-		}), a.length > 0 && /* @__PURE__ */ c("section", {
+		}), a.length > 0 && /* @__PURE__ */ s("section", {
 			className: "flex flex-col gap-2",
-			children: [/* @__PURE__ */ s("h2", {
+			children: [/* @__PURE__ */ o("h2", {
 				className: "text-xs font-medium text-muted-foreground",
 				children: "Widgets"
 			}), a.map(({ w: e, p: t }) => {
-				let n = d(t), r = `${e.app}.${e.widget}`;
-				return /* @__PURE__ */ s(i, {
+				let n = u(t), r = `${e.app}.${e.widget}`;
+				return /* @__PURE__ */ o(i, {
 					w: e,
 					host: n,
-					tree: l.tree(e, "medium"),
+					tree: c.tree(e, "medium"),
 					className: "cursor-pointer rounded-2xl",
-					onClick: (t) => !t.defaultPrevented && n.follow(l.tree(e, "medium")?.link || { screen: "main" }, e)
+					onClick: (t) => !t.defaultPrevented && n.follow(c.tree(e, "medium")?.link || { screen: "main" }, e)
 				}, r);
 			})]
 		})]
 	});
 }
-n(document.getElementById("root")).render(/* @__PURE__ */ s(m, {}));
+n(document.getElementById("root")).render(/* @__PURE__ */ o(p, {}));
 </script>

@@ -386,7 +386,7 @@ function F(i) {
 								title: "Runs On",
 								children: /* @__PURE__ */ D(f, { children: T.runs_on.map((e) => /* @__PURE__ */ D(p, {
 									title: e.name || "A removed device",
-									sub: e.name && (e.online ? e.problem : "Off"),
+									sub: e.name && (e.online ? e.problem || "Online" : one.seen(e)),
 									trailing: T.nodes.length > 0 && /* @__PURE__ */ D(o, {
 										size: "sm",
 										variant: "outline",

@@ -31,7 +31,7 @@ var w = {
 	built_in: "Built in"
 };
 function T() {
-	let r = e(31), [s, m] = n(null), [g, x] = n(!1), [T, O] = n(null), [k, A] = n(""), [j, M] = n(null), N;
+	let r = e(34), [s, m] = n(null), [g, x] = n(!1), [T, O] = n(null), [k, A] = n(""), [j, M] = n(null), N;
 	r[0] === Symbol.for("react.memo_cache_sentinel") ? (N = async function() {
 		try {
 			let [e, t] = await Promise.all([y("POST", "/api/ai-gateway/models", {}), y("GET", "/api/state")]);
@@ -46,54 +46,55 @@ function T() {
 		one.on("changed", P), P();
 	}, I = [], r[1] = F, r[2] = I) : (F = r[1], I = r[2]), t(F, I);
 	let L;
-	r[3] === Symbol.for("react.memo_cache_sentinel") ? (L = async function(e) {
+	r[3] === g ? L = r[4] : (L = async function(e) {
+		let t = g ? "global" : "user";
 		A("");
-		let t = e.id === "workers-ai" ? {
+		let n = e.id === "workers-ai" ? {
 			account_id: { secret: !1 },
 			api_key: { secret: !0 }
 		} : { api_key: { secret: !0 } };
 		try {
-			let n = await y("POST", "/api/vault/request", {
-				scope: "global",
+			let r = await y("POST", "/api/vault/request", {
+				scope: t,
 				app: "node",
 				need: e.key_kind,
 				title: `${e.title} Key`,
-				fields: t,
+				fields: n,
 				hosts: [e.host],
-				why: `Pays for everyone's calls to ${e.title}'s models.`
+				why: g ? `Pays for everyone's calls to ${e.title}'s models.` : `Pays for your calls to ${e.title}'s models.`
 			});
 			one.open("request", {
-				id: n.id,
-				scope: n.scope
+				id: r.id,
+				scope: r.scope
 			});
 		} catch (e) {
 			A(b(e));
 		}
-	}, r[3] = L) : L = r[3];
+	}, r[3] = g, r[4] = L);
 	let R = L;
 	if (!s) {
 		let e;
-		r[4] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ _(c, { children: "AI Gateway" }), r[4] = e) : e = r[4];
+		r[5] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ _(c, { children: "AI Gateway" }), r[5] = e) : e = r[5];
 		let t;
-		return r[5] === T ? t = r[6] : (t = /* @__PURE__ */ v("div", {
+		return r[6] === T ? t = r[7] : (t = /* @__PURE__ */ v("div", {
 			className: "flex max-w-2xl flex-col gap-6",
 			children: [e, T ? /* @__PURE__ */ _(f, {
 				problem: T,
 				retry: P
 			}) : /* @__PURE__ */ _(d, { rows: 4 })]
-		}), r[5] = T, r[6] = t), t;
+		}), r[6] = T, r[7] = t), t;
 	}
 	let z, B;
-	r[7] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ _(c, { children: "AI Gateway" }), B = /* @__PURE__ */ _("p", {
+	r[8] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ _(c, { children: "AI Gateway" }), B = /* @__PURE__ */ _("p", {
 		className: "-mt-4 px-1 text-muted-foreground",
 		children: "How your apps use AI models."
-	}), r[7] = z, r[8] = B) : (z = r[7], B = r[8]);
+	}), r[8] = z, r[9] = B) : (z = r[8], B = r[9]);
 	let V;
-	r[9] === k ? V = r[10] : (V = k && /* @__PURE__ */ _(p, { title: k }), r[9] = k, r[10] = V);
+	r[10] === k ? V = r[11] : (V = k && /* @__PURE__ */ _(p, { title: k }), r[10] = k, r[11] = V);
 	let H;
-	r[11] === Symbol.for("react.memo_cache_sentinel") ? (H = ["chat", "decide"], r[11] = H) : H = r[11];
+	r[12] === Symbol.for("react.memo_cache_sentinel") ? (H = ["chat", "decide"], r[12] = H) : H = r[12];
 	let U;
-	r[12] === s.defaults ? U = r[13] : (U = /* @__PURE__ */ _(h, {
+	r[13] === s.defaults ? U = r[14] : (U = /* @__PURE__ */ _(h, {
 		title: "Default Models",
 		children: /* @__PURE__ */ _(l, { children: H.map((e) => {
 			let t = s.defaults[e];
@@ -107,32 +108,35 @@ function T() {
 				onClick: () => M(e)
 			}, e);
 		}) })
-	}), r[12] = s.defaults, r[13] = U);
+	}), r[13] = s.defaults, r[14] = U);
 	let W;
-	if (r[14] !== g || r[15] !== s.companies) {
+	if (r[15] !== R || r[16] !== g || r[17] !== s.companies) {
 		let e;
-		r[17] === g ? e = r[18] : (e = (e) => /* @__PURE__ */ _(u, {
+		r[19] !== R || r[20] !== g ? (e = (e) => /* @__PURE__ */ _(u, {
 			leading: /* @__PURE__ */ _(i, {
 				app: S(e),
 				size: 30
 			}),
 			title: e.title,
-			sub: e.paid === "network" ? e.id === "workers-ai" ? "Everyone's · your Cloudflare account" : "Everyone's" : "No key",
-			trailing: !e.paid && g && /* @__PURE__ */ _(a, {
+			sub: {
+				network: e.id === "workers-ai" ? "Everyone's · your Cloudflare account" : "Everyone's",
+				user: "Yours"
+			}[e.paid] || "No key",
+			trailing: (e.paid === null || !g && e.paid === "network") && /* @__PURE__ */ _(a, {
 				size: "sm",
 				variant: "outline",
 				onClick: () => R(e),
-				children: "Add Key"
+				children: g ? "Add Key" : "Add Mine"
 			})
-		}, e.id), r[17] = g, r[18] = e), W = s.companies.map(e), r[14] = g, r[15] = s.companies, r[16] = W;
-	} else W = r[16];
+		}, e.id), r[19] = R, r[20] = g, r[21] = e) : e = r[21], W = s.companies.map(e), r[15] = R, r[16] = g, r[17] = s.companies, r[18] = W;
+	} else W = r[18];
 	let G;
-	r[19] === W ? G = r[20] : (G = /* @__PURE__ */ _(h, {
+	r[22] === W ? G = r[23] : (G = /* @__PURE__ */ _(h, {
 		title: "Keys",
 		children: /* @__PURE__ */ _(l, { children: W })
-	}), r[19] = W, r[20] = G);
+	}), r[22] = W, r[23] = G);
 	let K;
-	r[21] === Symbol.for("react.memo_cache_sentinel") ? (K = /* @__PURE__ */ _(h, {
+	r[24] === Symbol.for("react.memo_cache_sentinel") ? (K = /* @__PURE__ */ _(h, {
 		title: "Spending",
 		children: /* @__PURE__ */ _(l, { children: /* @__PURE__ */ _(u, {
 			title: "What each call used",
@@ -143,17 +147,17 @@ function T() {
 			}),
 			onClick: E
 		}) })
-	}), r[21] = K) : K = r[21];
+	}), r[24] = K) : K = r[24];
 	let q;
-	r[22] !== g || r[23] !== s || r[24] !== j ? (q = j && /* @__PURE__ */ _(D, {
+	r[25] !== g || r[26] !== s || r[27] !== j ? (q = j && /* @__PURE__ */ _(D, {
 		kind: j,
 		models: s,
 		admin: g,
 		close: () => M(null),
 		done: P
-	}), r[22] = g, r[23] = s, r[24] = j, r[25] = q) : q = r[25];
+	}), r[25] = g, r[26] = s, r[27] = j, r[28] = q) : q = r[28];
 	let J;
-	return r[26] !== G || r[27] !== q || r[28] !== V || r[29] !== U ? (J = /* @__PURE__ */ v("div", {
+	return r[29] !== G || r[30] !== q || r[31] !== V || r[32] !== U ? (J = /* @__PURE__ */ v("div", {
 		className: "flex max-w-2xl flex-col gap-6",
 		children: [
 			z,
@@ -164,7 +168,7 @@ function T() {
 			K,
 			q
 		]
-	}), r[26] = G, r[27] = q, r[28] = V, r[29] = U, r[30] = J) : J = r[30], J;
+	}), r[29] = G, r[30] = q, r[31] = V, r[32] = U, r[33] = J) : J = r[33], J;
 }
 function E() {
 	return one.open("insights", {});

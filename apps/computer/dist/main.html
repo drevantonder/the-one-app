@@ -40,7 +40,7 @@ function k(e, { asking: t, note: n, fix: r }) {
 		fix: r
 	} : e.why ? {
 		title: "Not answering",
-		text: `Check that ${a} is on and online.`,
+		text: e.online ? `Check that ${a} is on.` : `${a} ${e.seen ? `was last seen ${one.ago(e.seen, { long: !0 })}` : "is off"}. Turn it on and try again.`,
 		warn: !0
 	} : null;
 	return {
