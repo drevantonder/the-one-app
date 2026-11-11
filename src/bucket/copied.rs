@@ -137,10 +137,18 @@ fn segment(s: &str) -> bool {
 
 impl<B: Bucket> Bucket for Copied<B> {
     async fn get(&self, name: &str) -> Result<Option<Object>> {
+        // A signature beside a step is read and never written now (`database::stored`), so one the bucket hadn't is
+        // kept here as missing, rather than asked for again each time its step is opened.
+        let none = (name.ends_with(".sig") && kept(name)).then(|| format!("{name}.none"));
         if kept(name) {
             if let Some(o) = Bucket::get(&self.here, name).await? {
                 return Ok(Some(o));
             }
+        }
+        if let Some(none) = &none
+            && Bucket::get(&self.here, none).await?.is_some()
+        {
+            return Ok(None);
         }
         if !self.reach {
             return Ok(None);
@@ -155,6 +163,11 @@ impl<B: Bucket> Bucket for Copied<B> {
             if let Err(err) = self.here.create(name, &o.bytes) {
                 tracing::debug!("keeping {name}: {err:#}");
             }
+        }
+        if let (None, Some(none)) = (&got, &none)
+            && let Err(err) = self.here.create(none, &[])
+        {
+            tracing::debug!("keeping {none}: {err:#}");
         }
         Ok(got)
     }
