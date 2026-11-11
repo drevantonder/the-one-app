@@ -1249,20 +1249,22 @@ function Line({ text }) {
   )
 }
 
-/// The ways a device joins: a browser, a computer or a server by one line (the computer's installs the app, which signs
-/// in and asks to be approved).
+/// The ways a device joins: a browser, a Mac by the line that installs the app, which signs in and asks to be approved,
+/// and a Linux or Windows computer by a line that installs it and joins as you.
 function AddDevice({ data, open, setOpen }) {
   const { state } = data
   const address = state.network?.settings?.address || ""
-  // A server's line holds a code made when this opens.
-  const [line, setLine] = useState(state.config?.install ? { loading: true } : null)
+  const install = state.config?.install
+  // A computer's line holds a code made when this opens.
+  const [code, setCode] = useState(install ? { loading: true } : null)
   useEffect(() => {
-    if (!state.config?.install) return
-    api("POST", "/api/pair", {}).then(
-      ({ code }) => setLine({ text: `${state.config.install} && ~/.local/bin/${state.config.cli} join ${code}` }),
-      (err) => setLine({ error: said(err) }),
-    )
+    if (!install) return
+    api("POST", "/api/pair", {}).then(({ code }) => setCode({ code }), (err) => setCode({ error: said(err) }))
   }, [])
+  const joining = (line) =>
+    code.loading ? <div className="mt-2 flex items-center gap-2 text-muted-foreground"><Spinner />Making a code</div>
+      : code.error ? <div className="mt-2"><Problem title={code.error} /></div>
+      : <Line text={line(code.code)} />
   const way = (icon, title, sub, extra) => (
     <div key={title} className="flex items-start gap-3 px-3 py-3 text-sm">
       <Icon name={icon} className="mt-0.5 size-6 text-muted-foreground" />
@@ -1278,11 +1280,11 @@ function AddDevice({ data, open, setOpen }) {
       <div className="overflow-y-auto p-4">
         <List>
           {address && way("browser", "A browser", "Open this and sign in. It shows up here to approve.", <Line text={address} />)}
-          {state.config?.install && way("desktop", "A computer", `Run this on a Mac or Linux computer, then sign in. It shows up here to approve.`, <Line text={state.config.install} />)}
-          {line && way("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.",
-            line.loading ? <div className="mt-2 flex items-center gap-2 text-muted-foreground"><Spinner />Making a code</div>
-              : line.error ? <div className="mt-2"><Problem title={line.error} /></div>
-              : <Line text={line.text} />)}
+          {install && way("apple-logo", "A Mac", "Run this in Terminal, then sign in. It shows up here to approve.", <Line text={install.sh} />)}
+          {install && way("linux-logo", "A Linux computer", "Run this on it. It joins as you, with everything you can see and do.",
+            joining((c) => `${install.sh} && ~/.local/bin/${state.config.cli} join ${c}`))}
+          {install && way("windows-logo", "A Windows computer", "Run this in PowerShell. It joins as you, with everything you can see and do.",
+            joining((c) => `${install.powershell}; ${state.config.cli} join ${c}`))}
         </List>
       </div>
     </ResponsiveDialog>

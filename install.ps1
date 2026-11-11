@@ -1,16 +1,17 @@
-# Installs the latest release for this Windows computer, if its signature is the release key's: the program, with
-# <cli>d, the device, run as a task of this user's, with no administrator. It runs while they're signed in, like a Mac's
-# launch agent. Run again to update.
+# Installs the newest build for this Windows computer, if the release key signed it: the program, with <cli>d, the
+# device, run as a task of this user's, with no administrator. It runs while they're signed in, like a Mac's launch
+# agent. Run again to update.
 # `install.ps1 <binary>` installs a binary you built instead.
 param([string]$Binary)
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell's progress bar makes a large download many times slower.
 $ProgressPreference = 'SilentlyContinue'
-# config.toml's repo, cli and release_key; a test keeps them the same.
-$repo = 'https://github.com/drevantonder/the-one-app'
-$cli = 'one'
-$key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM'
-$url = "$repo/releases/latest/download"
+# Where its builds are, a folder laid out as a network's /updates/ is (oned/update/src/latest.rs), and config.toml's cli
+# and release_key: whoever serves it fills them in (oned_update::install).
+$from = ''
+$cli = ''
+$key = ''
+if ($Binary) { $cli = [IO.Path]::GetFileNameWithoutExtension($Binary) }
 $bin = Join-Path $env:LOCALAPPDATA "$cli\bin"
 $oned = "${cli}d"
 $tmp = Join-Path $env:TEMP "$cli-install-$PID"
@@ -22,18 +23,30 @@ try {
         $program = $Binary
         $runtime = Join-Path (Split-Path $Binary) "$cli-apps.exe"
     } else {
-        # Windows' OpenSSH client checks the signature, as macOS's and Linux's do for install.sh.
+        if (-not $from) { throw "this installer doesn't say where builds are: run the one your network's address serves (irm <address>/install.ps1 | iex)" }
+        # What's newest at $from, if the release key signed it: the record `<cli> update` reads, checked as it checks it,
+        # with Windows' OpenSSH client, as macOS's and Linux's check it for install.sh.
         if (-not (Get-Command ssh-keygen -ErrorAction SilentlyContinue)) {
             throw "checking the download needs ssh-keygen: add Windows' OpenSSH Client, in Settings > Optional Features"
         }
-        Set-Content -NoNewline -Encoding ascii (Join-Path $tmp 'signers') "release namespaces=`"release`" $key"
-        $program, $runtime = foreach ($asset in "$cli-x86_64-pc-windows-gnu.exe", "$cli-apps-x86_64-pc-windows-gnu.exe") {
-            $file = Join-Path $tmp $asset
-            Write-Host "Downloading $asset"
-            Invoke-WebRequest -UseBasicParsing "$url/$asset" -OutFile $file
-            Invoke-WebRequest -UseBasicParsing "$url/$asset.sig" -OutFile "$file.sig"
-            cmd /c "ssh-keygen -Y verify -f `"$tmp\signers`" -I release -n release -s `"$file.sig`" < `"$file`" 2>nul" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "$asset isn't signed with the release key, so it isn't installed" }
+        Invoke-WebRequest -UseBasicParsing "$from/newest" -OutFile (Join-Path $tmp 'newest')
+        $newest = [IO.File]::ReadAllText((Join-Path $tmp 'newest'))
+        $at = $newest.IndexOf("-----BEGIN SSH SIGNATURE-----")
+        if ($at -lt 0) { throw "what's newest at $from isn't signed with the release key, so nothing is installed" }
+        $record = $newest.Substring(0, $at)
+        [IO.File]::WriteAllText((Join-Path $tmp 'record'), $record)
+        [IO.File]::WriteAllText((Join-Path $tmp 'record.sig'), $newest.Substring($at))
+        [IO.File]::WriteAllText((Join-Path $tmp 'signers'), "release namespaces=`"release-latest`" $key")
+        cmd /c "ssh-keygen -Y verify -f `"$tmp\signers`" -I release -n release-latest -s `"$tmp\record.sig`" < `"$tmp\record`" 2>nul" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "what's newest at $from isn't signed with the release key, so nothing is installed" }
+        # Each file the record names (node/<target>, …), if it's what the record names: its hash.
+        $program, $runtime = foreach ($name in 'node/x86_64-pc-windows-gnu', 'service/apps/x86_64-pc-windows-gnu') {
+            $line = $record -split "`n" | ForEach-Object { , ($_ -split ' ') } | Where-Object { $_.Count -eq 6 -and $_[0] -eq $name } | Select-Object -First 1
+            if (-not $line) { throw "there's no build for this machine at $from ($name)" }
+            $file = Join-Path $tmp ($name -replace '/', '-')
+            Write-Host "Downloading $name"
+            Invoke-WebRequest -UseBasicParsing "$from/$($line[3])" -OutFile $file
+            if ((Get-FileHash -Algorithm SHA256 $file).Hash -ne $line[3]) { throw "$name isn't what the signed record names, so it isn't installed" }
             $file
         }
     }

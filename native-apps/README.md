@@ -34,7 +34,7 @@ iPhone's `app.<cli>.phone` (or the build's `iphone`) with `.widgets`, `.notifica
 Keychain group), Android's `app.<cli>.android` (or the build's `android`) signed with the debug key it was signed with, Windows'
 package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a device would sign in again as a new one.
 
-- Linux: `one-dev release` builds it, install.sh puts it on a desktop; on a desktop with no `one`, it sets it up with its
+- Linux: `one-dev release` builds it into a GitHub release, whose install.sh puts it on a desktop; on a desktop with no `one`, it sets it up with its
   oned a unit of the user's own systemd. Its tray item shows only its menu (Linux's tray items show no other), so it has
   no panel.
 - Mac: `mac/build.sh` (the Mac's scheduled agent, through `disk.sh`) builds what's published for Macs: the window, which

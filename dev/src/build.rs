@@ -97,9 +97,6 @@ pub fn chrome() -> Option<std::process::Command> {
 
 #[cfg(test)]
 mod tests {
-    use ::custom_build::config::CLI;
-    use ::oned_update::platform::{PLATFORMS, WINDOWS};
-
     /// mise.toml installs what the build shells out to, and three of its versions are the repo's already: a machine set up from
     /// it must build with the Bun deploys download, the wasm-bindgen the client's WebAssembly links, and the Go the service asks for.
     #[test]
@@ -111,36 +108,6 @@ mod tests {
         assert_eq!(pinned("\"github:wasm-bindgen/wasm-bindgen\""), locked, "wasm-bindgen-cli must be the version Cargo.lock locks");
         let go = include_str!("../../apps/whatsapp/service/go.mod").lines().find_map(|l| l.strip_prefix("go ")).unwrap();
         assert_eq!(pinned("go"), go);
-    }
-
-    /// install.ps1 is PowerShell, so it says config.toml's repo, cli and key again, as install.sh does, and the asset's name.
-    #[test]
-    fn the_windows_installer_says_what_the_config_does() {
-        assert!(include_str!("../../install.ps1").contains(&format!("$cli-{WINDOWS}.exe\"")), "install.ps1 fetches the asset the table names");
-        let says = |name: &str| include_str!("../../install.ps1").lines().find_map(|l| l.strip_prefix(&format!("${name} = '"))?.strip_suffix('\''));
-        if scope::state::installer_says("cli") == Some(CLI) {
-            assert_eq!(says("cli"), Some(CLI));
-            assert_eq!(says("repo"), Some(::custom_build::config::REPO));
-            assert_eq!(says("key"), Some(::custom_build::config::RELEASE_KEY));
-        }
-    }
-
-    /// install.sh is shell, so it can't read the table: it must say what the table does.
-    #[test]
-    fn the_installer_is_for_the_platforms_here() {
-        let installer = include_str!("../../install.sh");
-        // A custom build's installer is its own: when it's this build's, it names the same repo and release key.
-        if scope::state::installer_says("cli") == Some(CLI) {
-            assert_eq!(scope::state::installer_says("repo"), Some(::custom_build::config::REPO));
-            assert_eq!(scope::state::installer_says("key"), Some(::custom_build::config::RELEASE_KEY));
-        }
-        for p in PLATFORMS.iter().filter(|p| p.target != WINDOWS) {
-            let (arch, rest) = p.target.split_once('-').unwrap();
-            let fetched = if ::oned_update::latest::is_mac(p.target) { "$cli-macos.zip".to_string() } else { format!("$cli-$arch-{}", rest) };
-            assert!(installer.contains(&format!("fetch \"{fetched}\"")), "install.sh fetches {fetched} for {}", p.target);
-            assert_eq!(p.asset(), fetched.replace("$cli", CLI).replace("$arch", arch));
-            assert!(installer.contains(&format!("arch={arch}")), "install.sh knows the processor {arch}");
-        }
     }
 }
 

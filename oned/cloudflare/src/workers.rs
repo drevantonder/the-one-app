@@ -878,7 +878,8 @@ pub fn android_package() -> String {
 impl Settings {
     /// The files the address serves itself: the web client's, as this release has them, Android's App Links file
     /// (`.well-known/assetlinks.json`) and Windows' web links file (`.well-known/windows-app-web-link`), which let the
-    /// apps open links to the address, and the guide to connecting an AI (`llms.txt`).
+    /// apps open links to the address, the guide to connecting an AI (`llms.txt`), and the installers that set up a
+    /// computer from what the network publishes (`install`, `install.ps1`).
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
         self.web_with(::ui::web::with_client())
     }
@@ -895,6 +896,7 @@ impl Settings {
         files.push((".well-known/windows-app-web-link".into(), windows_links()));
         // How an AI connects itself, for anyone who has the address: never what apps the network has.
         files.push(("llms.txt".into(), ::mcp::skills::guide(Some(&self.address)).into_bytes()));
+        files.extend(oned_update::install::served(&self.address));
         files
     }
 }

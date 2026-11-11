@@ -4,14 +4,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use ssh_key::{HashAlg, LineEnding, PrivateKey};
-
-/// The namespace a release's GitHub assets are signed in, which `install.sh` checks.
-pub const NAMESPACE: &str = "release";
-
-pub fn sign(key: &PrivateKey, bytes: &[u8]) -> Result<String> {
-    Ok(key.sign(NAMESPACE, HashAlg::Sha512, bytes)?.to_pem(LineEnding::LF)?)
-}
 
 /// Whether this program runs from inside an app bundle: the copy of it a Mac's window carries only because builds before
 /// it check it's there as they update (`native-apps/mac/build.sh`). Nothing runs it, and nothing updates it.
@@ -82,42 +74,4 @@ impl Version {
     pub fn json(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
     }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ssh_key::private::Ed25519Keypair;
-
-    fn key(seed: u8) -> PrivateKey {
-        PrivateKey::from(Ed25519Keypair::from_seed(&[seed; 32]))
-    }
-
-    fn public(key: &PrivateKey) -> String {
-        key.public_key().to_openssh().unwrap()
-    }
-
-    /// install.sh's own `fetch`, from a folder of files (curl reads file:// too), as the installer runs it.
-    #[test]
-    fn the_installers_fetch_checks_them() {
-        let publisher = key(1);
-        let dir = std::env::temp_dir().join(format!("one-release-{}", rand::random::<u32>()));
-        std::fs::create_dir_all(dir.join("served")).unwrap();
-        std::fs::create_dir_all(dir.join("tmp")).unwrap();
-        std::fs::write(dir.join("served/bin"), b"bin").unwrap();
-        std::fs::write(dir.join("served/bin.sig"), sign(&publisher, b"bin").unwrap()).unwrap();
-        let installer = include_str!("../../../install.sh");
-        let function = &installer[installer.find("fetch() {").unwrap()..];
-        let function = &function[..function.find("\n}\n").unwrap() + 3];
-        let fetch = |file: &str| {
-            let sh = format!("{function}\ntmp={tmp}; url=file://{served}; key='{key}'; fetch {file}", tmp = dir.join("tmp").display(), served = dir.join("served").display(), key = public(&publisher));
-            std::process::Command::new("sh").args(["-c", &sh]).output().unwrap().status.success()
-        };
-        assert!(fetch("bin"));
-        std::fs::write(dir.join("served/bin"), b"bim").unwrap();
-        assert!(!fetch("bin"), "a download that isn't what was signed");
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
 }

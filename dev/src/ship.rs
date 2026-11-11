@@ -6,11 +6,10 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use ::custom_build::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, REPO, TARGET};
+use ::custom_build::config::{CLI, CONFIG_FILE, CONFIG_REPO, RELEASE_KEY, REPO, TARGET};
 use oned_update::latest::{Latest, Thing};
 use oned_update::release::Version;
 use ::platform::cache;
-use oned_update::release;
 use serde_json::{Value, json};
 
 use crate::build;
@@ -174,10 +173,10 @@ fn changes(commit: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Publishes a build on GitHub, for the installer.
+/// Publishes a build on GitHub, for someone starting their first network, with no address to install from yet: laid out
+/// as a network's /updates/ is (the signed record, and each file it names by its hash), with the installers that read it.
 fn github_release(tag: &str) -> Result<()> {
     ensure!(version_tag(tag), "a release is named like v1.2.3");
-    ensure!(scope::state::installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub");
     ensure!(succeeds(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     let key = release_key()?;
     let _turn = turn()?;
@@ -187,70 +186,56 @@ fn github_release(tag: &str) -> Result<()> {
         Some(folder) => folder,
         None => build_release(&at)?,
     };
-    let binary = std::fs::canonicalize(folder.join("one"))?;
     let (src, commit, config) = (at.src.clone(), at.commit.clone(), at.config_file.clone());
     ensure!(!succeeds(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     let mut failed = false;
-    let mut assets = Vec::new();
     let dir = cache().join("release").join(tag);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
-    let name = format!("{CLI}-{TARGET}");
-    std::fs::copy(&binary, dir.join(&name))?;
-    assets.push(name);
-    // The app runtime beside it, which install.sh and install.ps1 put beside the program.
-    let runtime = format!("{CLI}-apps-{TARGET}");
-    std::fs::copy(folder.join("one-apps"), dir.join(&runtime))?;
-    assets.push(runtime);
-    // state::install_line() fetches it from the latest release.
-    std::fs::write(dir.join("install.sh"), include_str!("../../install.sh"))?;
-    assets.push("install.sh".into());
-    std::fs::write(dir.join("install.ps1"), include_str!("../../install.ps1"))?;
-    assets.push("install.ps1".into());
-    if let Some(windows) = PLATFORMS.iter().find(|p| p.target == WINDOWS)
-        && folder.join("one.exe").is_file()
-    {
-        std::fs::copy(folder.join("one.exe"), dir.join(windows.asset()))?;
-        assets.push(windows.asset());
-        let runtime = format!("{CLI}-apps-{}.exe", WINDOWS);
-        std::fs::copy(folder.join("one-apps.exe"), dir.join(&runtime))?;
-        assets.push(runtime);
+    // The program, and the app runtime beside it, which the installers put beside it.
+    let apps = |target| Thing::service_name(::scope::scopes::APPS_PART, target);
+    let mut built = vec![(Thing::program_name(TARGET), folder.join("one")), (apps(TARGET), folder.join("one-apps"))];
+    if folder.join("one.exe").is_file() {
+        built.extend([(Thing::program_name(WINDOWS), folder.join("one.exe")), (apps(WINDOWS), folder.join("one-apps.exe"))]);
     }
     // The native app for this platform (native-apps, its own workspace), which install.sh puts on a desktop.
     if cfg!(target_os = "linux") {
         println!("Building the Linux app");
         let native = src.join("native-apps");
         match quietly(cargo().current_dir(&native).env("CONFIG", &config).args(["build", "--release"])) {
-            Ok(()) => {
-                let name = format!("{CLI}-app-{TARGET}");
-                std::fs::copy(native.join("target/release/one-native"), dir.join(&name))?;
-                assets.push(name);
-            }
+            Ok(()) => built.push((Thing::app_name(TARGET), native.join("target/release/one-native"))),
             Err(err) => {
                 failed = true;
                 println!("  couldn't build the Linux app: {err:#}");
             }
         }
     }
+    let mut things = Vec::new();
+    for (name, path) in built {
+        let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+        let sha256 = oned_update::latest::sha256(&bytes);
+        std::fs::write(dir.join(&sha256), &bytes)?;
+        things.push(Thing { name, commit: commit.clone(), committed: at.committed, sha256, size: bytes.len() as u64, config: at.config_commit().into() });
+    }
     // The Mac app, once a Mac that holds the key has built and published it (`source-release`, which notarizes it).
     match timed("waited for a Mac's app", || await_app(&commit, &key_address(), Duration::from_secs(30 * 60))) {
         Ok(Some((thing, address))) => {
-            let zip = app_zip();
-            std::fs::write(dir.join(&zip), oned_update::latest::download(&address, &thing)?)?;
-            assets.push(zip);
+            std::fs::write(dir.join(&thing.sha256), oned_update::latest::download(&address, &thing)?)?;
+            things.push(thing);
         }
         Ok(None) => println!("No Mac published the app for {}, so {tag} has none.", &commit[..12]),
         Err(err) => println!("  couldn't get a Mac's app: {err:#}"),
     }
     for p in &PLATFORMS {
-        if !assets.contains(&p.asset()) {
+        if !things.iter().any(|t| t.name.ends_with(&format!("/{}", p.target)) && !t.name.starts_with("service/")) {
             println!("No device here builds {}, so {tag} has nothing for it.", p.target);
         }
     }
-    for asset in std::mem::take(&mut assets) {
-        std::fs::write(dir.join(format!("{asset}.sig")), release::sign(&key, &std::fs::read(dir.join(&asset))?)?)?;
-        assets.extend([format!("{asset}.sig"), asset]);
-    }
+    std::fs::write(dir.join(::custom_build::protocol::NEWEST), Latest { things }.signed(&key)?)?;
+    let from = format!("{REPO}/releases/latest/download");
+    std::fs::write(dir.join(::custom_build::protocol::INSTALL_POWERSHELL), oned_update::install::powershell(&from))?;
+    std::fs::write(dir.join("install.sh"), oned_update::install::sh(&from))?;
+    let assets: Vec<String> = std::fs::read_dir(&dir)?.map(|e| Ok(e?.file_name().to_string_lossy().into_owned())).collect::<Result<_>>()?;
     println!("Publishing {tag} on GitHub");
     let mut gh = Command::new("gh");
     gh.current_dir(&dir).args(["release", "create", tag, "--repo", REPO, "--target", &commit, "--generate-notes"]).args(&assets);
@@ -316,11 +301,6 @@ fn await_app(commit: &str, address: &str, limit: Duration) -> Result<Option<(Thi
         std::thread::sleep(Duration::from_secs(20));
     }
     Ok(None)
-}
-
-/// What the Mac app is published as.
-fn app_zip() -> String {
-    format!("{CLI}-macos.zip")
 }
 
 /// Says in the record that this commit is the one to build: every Mac takes the app published for it, or builds it itself

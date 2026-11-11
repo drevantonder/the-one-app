@@ -60,7 +60,17 @@ pub struct Config {
     pub name: String,
     pub cli: String,
     pub store: String,
-    pub install: Option<String>,
+    /// What sets up a computer from what the network publishes, where it has an address.
+    pub install: Option<Install>,
+}
+
+/// The lines that set up a computer from what the network at an address publishes (oned/update/src/install.rs).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Install {
+    /// For a Mac's or Linux's shell.
+    pub sh: String,
+    /// For Windows' PowerShell.
+    pub powershell: String,
 }
 
 /// Who is looking, and as which device or sign-in (`key` empty for a sign-in, which is no device).
@@ -409,7 +419,7 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<State> {
     let settings_items = m.map(|m| settings_items(m, user, &here.features, &store, passkeys.as_deref())).transpose()?.unwrap_or_default();
     let me = m.map(|m| m.user(user)).transpose()?.flatten();
     Ok(State {
-        config: Config { name: custom_build::config::NAME.into(), cli: custom_build::config::CLI.into(), store, install: install_line() },
+        config: Config { name: custom_build::config::NAME.into(), cli: custom_build::config::CLI.into(), store, install: address.map(|a| install(a)) },
         me: here.me,
         device: here.device,
         user: me.map(|u| User { id: u.id, name: u.name, role: u.role }),
@@ -593,19 +603,10 @@ pub fn settings(set: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     out
 }
 
-/// What install.sh sets as `name` (`repo`, `cli`, `key`): it is shell, which can't read config.toml, so it says it again.
-pub fn installer_says(name: &str) -> Option<&'static str> {
-    include_str!("../../install.sh").lines().find_map(|l| l.strip_prefix(&format!("{name}="))).map(|v| v.trim_matches('"'))
-}
-
-/// Whether install.sh, which gets releases from GitHub, installs this custom build. Only that custom build is released there.
-pub fn installer_is_ours() -> bool {
-    installer_says("cli") == Some(custom_build::config::CLI) && installer_says("repo") == Some(custom_build::config::REPO)
-}
-
-/// The one line that installs this custom build's latest release on a machine, if it publishes releases.
-pub fn install_line() -> Option<String> {
-    installer_is_ours().then(|| format!("curl -fsSL {}/releases/latest/download/install.sh | sh", custom_build::config::REPO))
+/// The lines that set up a computer from what the network at `address` publishes.
+pub fn install(address: &str) -> Install {
+    let (address, protocol) = (address.trim_end_matches('/'), (custom_build::protocol::INSTALL, custom_build::protocol::INSTALL_POWERSHELL));
+    Install { sh: format!("curl -fsSL {address}/{} | sh", protocol.0), powershell: format!("irm {address}/{} | iex", protocol.1) }
 }
 
 /// What to paste into an AI so it connects itself, for Connect Your AI: the guide at the network's address, where it

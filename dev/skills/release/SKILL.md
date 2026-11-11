@@ -1,9 +1,11 @@
 ---
 name: release
-description: Publishing a numbered release of The One App on GitHub, for the installer.
+description: Publishing a numbered release of The One App on GitHub, for someone starting their first network.
 ---
 
 # Release
+
+A GitHub release is only for someone starting their first network, who has no address yet: every network's other computers install from its own address (`<address>/install`). It's laid out as that address's `/updates/` is, a signed record and each file by its hash, with the same installers.
 
 Everything goes out, whatever `changes` says, and `cargo test` passes on the commit first.
 

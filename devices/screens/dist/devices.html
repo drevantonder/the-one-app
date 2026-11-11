@@ -1781,53 +1781,58 @@ function ze(t) {
 	}), n[10] = d, n[11] = h, n[12] = g) : g = n[12], g;
 }
 function Be(n) {
-	let i = e(22), { data: a, open: s, setOpen: c } = n, { state: l } = a, u = l.network?.settings?.address || "", d;
-	i[0] === l.config?.install ? d = i[1] : (d = l.config?.install ? { loading: !0 } : null, i[0] = l.config?.install, i[1] = d);
-	let [f, m] = r(d), h;
-	i[2] === l.config ? h = i[3] : (h = () => {
-		l.config?.install && j("POST", "/api/pair", {}).then((e) => {
+	let i = e(33), { data: a, open: s, setOpen: c } = n, { state: l } = a, u = l.network?.settings?.address || "", d = l.config?.install, f;
+	i[0] === d ? f = i[1] : (f = d ? { loading: !0 } : null, i[0] = d, i[1] = f);
+	let [m, h] = r(f), g;
+	i[2] === d ? g = i[3] : (g = () => {
+		d && j("POST", "/api/pair", {}).then((e) => {
 			let { code: t } = e;
-			return m({ text: `${l.config.install} && ~/.local/bin/${l.config.cli} join ${t}` });
-		}, (e) => m({ error: M(e) }));
-	}, i[2] = l.config, i[3] = h);
-	let g;
-	i[4] === Symbol.for("react.memo_cache_sentinel") ? (g = [], i[4] = g) : g = i[4], t(h, g);
-	let _ = Ve, b;
-	i[5] === c ? b = i[6] : (b = /* @__PURE__ */ k(o, {
+			return h({ code: t });
+		}, (e) => h({ error: M(e) }));
+	}, i[2] = d, i[3] = g);
+	let _;
+	i[4] === Symbol.for("react.memo_cache_sentinel") ? (_ = [], i[4] = _) : _ = i[4], t(g, _);
+	let b;
+	i[5] !== m.code || i[6] !== m.error || i[7] !== m.loading ? (b = (e) => m.loading ? /* @__PURE__ */ A("div", {
+		className: "mt-2 flex items-center gap-2 text-muted-foreground",
+		children: [/* @__PURE__ */ k(x, {}), "Making a code"]
+	}) : m.error ? /* @__PURE__ */ k("div", {
+		className: "mt-2",
+		children: /* @__PURE__ */ k(v, { title: m.error })
+	}) : /* @__PURE__ */ k(ze, { text: e(m.code) }), i[5] = m.code, i[6] = m.error, i[7] = m.loading, i[8] = b) : b = i[8];
+	let S = b, C = Ve, w;
+	i[9] === c ? w = i[10] : (w = /* @__PURE__ */ k(o, {
 		variant: "secondary",
 		size: "sm",
 		onClick: () => c(!1),
 		children: "Done"
-	}), i[5] = c, i[6] = b);
-	let S;
-	i[7] === u ? S = i[8] : (S = u && _("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ k(ze, { text: u })), i[7] = u, i[8] = S);
-	let C;
-	i[9] === l.config ? C = i[10] : (C = l.config?.install && _("desktop", "A computer", "Run this on a Mac or Linux computer, then sign in. It shows up here to approve.", /* @__PURE__ */ k(ze, { text: l.config.install })), i[9] = l.config, i[10] = C);
-	let w;
-	i[11] === f ? w = i[12] : (w = f && _("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.", f.loading ? /* @__PURE__ */ A("div", {
-		className: "mt-2 flex items-center gap-2 text-muted-foreground",
-		children: [/* @__PURE__ */ k(x, {}), "Making a code"]
-	}) : f.error ? /* @__PURE__ */ k("div", {
-		className: "mt-2",
-		children: /* @__PURE__ */ k(v, { title: f.error })
-	}) : /* @__PURE__ */ k(ze, { text: f.text })), i[11] = f, i[12] = w);
+	}), i[9] = c, i[10] = w);
 	let T;
-	i[13] !== S || i[14] !== C || i[15] !== w ? (T = /* @__PURE__ */ k("div", {
+	i[11] === u ? T = i[12] : (T = u && C("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ k(ze, { text: u })), i[11] = u, i[12] = T);
+	let E;
+	i[13] === d ? E = i[14] : (E = d && C("apple-logo", "A Mac", "Run this in Terminal, then sign in. It shows up here to approve.", /* @__PURE__ */ k(ze, { text: d.sh })), i[13] = d, i[14] = E);
+	let D;
+	i[15] !== d || i[16] !== S || i[17] !== l.config ? (D = d && C("linux-logo", "A Linux computer", "Run this on it. It joins as you, with everything you can see and do.", S((e) => `${d.sh} && ~/.local/bin/${l.config.cli} join ${e}`)), i[15] = d, i[16] = S, i[17] = l.config, i[18] = D) : D = i[18];
+	let O;
+	i[19] !== d || i[20] !== S || i[21] !== l.config ? (O = d && C("windows-logo", "A Windows computer", "Run this in PowerShell. It joins as you, with everything you can see and do.", S((e) => `${d.powershell}; ${l.config.cli} join ${e}`)), i[19] = d, i[20] = S, i[21] = l.config, i[22] = O) : O = i[22];
+	let N;
+	i[23] !== T || i[24] !== E || i[25] !== D || i[26] !== O ? (N = /* @__PURE__ */ k("div", {
 		className: "overflow-y-auto p-4",
 		children: /* @__PURE__ */ A(p, { children: [
-			S,
-			C,
-			w
+			T,
+			E,
+			D,
+			O
 		] })
-	}), i[13] = S, i[14] = C, i[15] = w, i[16] = T) : T = i[16];
-	let E;
-	return i[17] !== s || i[18] !== c || i[19] !== b || i[20] !== T ? (E = /* @__PURE__ */ k(y, {
+	}), i[23] = T, i[24] = E, i[25] = D, i[26] = O, i[27] = N) : N = i[27];
+	let P;
+	return i[28] !== s || i[29] !== c || i[30] !== N || i[31] !== w ? (P = /* @__PURE__ */ k(y, {
 		open: s,
 		onOpenChange: c,
 		title: "Add Device",
-		action: b,
-		children: T
-	}), i[17] = s, i[18] = c, i[19] = b, i[20] = T, i[21] = E) : E = i[21], E;
+		action: w,
+		children: N
+	}), i[28] = s, i[29] = c, i[30] = N, i[31] = w, i[32] = P) : P = i[32], P;
 }
 function Ve(e, t, n, r) {
 	return /* @__PURE__ */ A("div", {

@@ -13,6 +13,8 @@ one app to bring them all, and in the network bind them.
 curl -fsSL theoneapp.drevan.me | sh
 ```
 
+That starts your first network. Its other computers install from its own address: Settings › Devices › Add Device gives the line.
+
 > [!WARNING]
 > **Early days.** This changes every day and things break. I wouldn't use it or rely on it yet; wait until it settles.
 

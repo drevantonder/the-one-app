@@ -1,28 +1,44 @@
 #!/bin/sh
-# Installs the latest release for this machine, if its signature is the release key's: on Linux the program, with
-# <cli>d, the device, run as a system service, and on a desktop the app; on a Mac the app, which sets up <cli> and
+# Installs the newest build for this machine, if the release key signed it: on Linux the program, with <cli>d, the
+# device, run as a system service, and on a desktop the app where there's one; on a Mac the app, which sets up <cli> and
 # <cli>d as it's signed in. Run again to update; on a Mac, `<cli> update` does.
 # `sh install.sh <binary>` installs a binary you built instead.
 set -eu
-# config.toml's repo, cli and release_key; a test keeps them the same.
-repo=https://github.com/drevantonder/the-one-app
-cli=one
-key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM"
-url=$repo/releases/latest/download
+# Where its builds are, a folder laid out as a network's /updates/ is (oned/update/src/latest.rs), and config.toml's cli
+# and release_key: whoever serves it fills them in (oned_update::install).
+from=''
+cli=''
+key=''
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$HOME/.local/bin"
 
-# Downloads the release's file $1 and checks its signature, $1.sig, with OpenSSH, which macOS and Linux both have.
-fetch() {
+# What's newest at $from, kept as $tmp/record, if the release key signed it: the record `<cli> update` reads, checked as
+# it checks it, with OpenSSH, which macOS and Linux both have.
+newest() {
+	[ -n "$from" ] || { echo "this installer doesn't say where builds are: run the one your network's address serves (curl -fsSL <address>/install | sh)" >&2; exit 1; }
 	command -v ssh-keygen >/dev/null || { echo "checking the download needs ssh-keygen: install OpenSSH (openssh-client on Debian and Ubuntu)" >&2; exit 1; }
+	curl -fsSL "$from/newest" -o "$tmp/newest" || { echo "couldn't read what's newest at $from" >&2; exit 1; }
+	sed '/^-----BEGIN SSH SIGNATURE-----$/,$d' "$tmp/newest" > "$tmp/record"
+	sed -n '/^-----BEGIN SSH SIGNATURE-----$/,$p' "$tmp/newest" > "$tmp/record.sig"
+	echo "release namespaces=\"release-latest\" $key" > "$tmp/signers"
+	ssh-keygen -Y verify -f "$tmp/signers" -I release -n release-latest -s "$tmp/record.sig" < "$tmp/record" >/dev/null 2>&1 ||
+		{ echo "what's newest at $from isn't signed with the release key, so nothing is installed" >&2; exit 1; }
+}
+
+# The hash the record names $1 by, if it names it.
+named() {
+	awk -v name="$1" 'NF == 6 && $1 == name { print $4; exit }' "$tmp/record"
+}
+
+# Downloads what the record names $1 (node/<target>, …) as $tmp/$2, if it's what the record names: its hash.
+fetch() {
+	sha=$(named "$1")
+	[ -n "$sha" ] || { echo "there's no build for this machine at $from ($1)" >&2; exit 1; }
 	echo "Downloading $1"
-	for f in "$1" "$1.sig"; do
-		curl -fsSL "$url/$f" -o "$tmp/$f" || { echo "the latest release has nothing for this machine ($1)" >&2; exit 1; }
-	done
-	echo "release namespaces=\"release\" $key" > "$tmp/signers"
-	ssh-keygen -Y verify -f "$tmp/signers" -I release -n release -s "$tmp/$1.sig" < "$tmp/$1" >/dev/null 2>&1 ||
-		{ echo "$1 isn't signed with the release key, so it isn't installed" >&2; exit 1; }
+	curl -fsSL "$from/$sha" -o "$tmp/$2" || { echo "couldn't download $1 from $from" >&2; exit 1; }
+	if command -v sha256sum >/dev/null; then got=$(sha256sum "$tmp/$2"); else got=$(shasum -a 256 "$tmp/$2"); fi
+	[ "${got%% *}" = "$sha" ] || { echo "$1 isn't what the signed record names, so it isn't installed" >&2; exit 1; }
 }
 
 case $(uname -m) in
@@ -32,8 +48,9 @@ aarch64 | arm64) arch=aarch64 ;;
 esac
 
 if [ "$(uname -s)" = Darwin ]; then
-	fetch "$cli-macos.zip"
-	ditto -x -k "$tmp/$cli-macos.zip" "$tmp/app"
+	newest
+	fetch "app/$arch-apple-darwin" app.zip
+	ditto -x -k "$tmp/app.zip" "$tmp/app"
 	app=$(cd "$tmp/app" && ls -d -- *.app | head -1)
 	osascript -e "quit app id \"app.$cli.mac\"" 2>/dev/null || true
 	mkdir -p "$HOME/Applications"
@@ -47,10 +64,10 @@ else
 		bin=$1 cli=$(basename "$1")
 		runtime=$(dirname "$1")/$cli-apps
 	else
-		fetch "$cli-$arch-unknown-linux-gnu"
-		fetch "$cli-apps-$arch-unknown-linux-gnu"
-		bin=$tmp/$cli-$arch-unknown-linux-gnu
-		runtime=$tmp/$cli-apps-$arch-unknown-linux-gnu
+		newest
+		fetch "node/$arch-unknown-linux-gnu" program
+		fetch "service/apps/$arch-unknown-linux-gnu" runtime
+		bin=$tmp/program runtime=$tmp/runtime
 		chmod +x "$bin"
 	fi
 	name=$("$bin" help | head -1 | cut -d: -f1)
@@ -61,10 +78,10 @@ else
 	if [ -e "$runtime" ]; then install -m 755 "$runtime" "$HOME/.local/bin/$cli-apps"; fi
 	ln -sf "$cli" "$HOME/.local/bin/git-remote-$cli"
 	ln -sf "$cli" "$HOME/.local/bin/${cli}d"
-	# On a desktop, the app too, started once: it puts itself in the launcher and opens at login.
-	if [ $# -eq 0 ] && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
-		fetch "$cli-app-$arch-unknown-linux-gnu"
-		install -m 755 "$tmp/$cli-app-$arch-unknown-linux-gnu" "$HOME/.local/bin/$cli-app"
+	# On a desktop, the app too where there's one, started once: it puts itself in the launcher and opens at login.
+	if [ $# -eq 0 ] && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ -n "$(named "app/$arch-unknown-linux-gnu")" ]; then
+		fetch "app/$arch-unknown-linux-gnu" app
+		install -m 755 "$tmp/app" "$HOME/.local/bin/$cli-app"
 		(setsid "$HOME/.local/bin/$cli-app" >/dev/null 2>&1 &)
 		echo "Installed ~/.local/bin/$cli-app, the app, which is in your launcher."
 	fi

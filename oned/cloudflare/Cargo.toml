@@ -19,7 +19,7 @@ api = { path = "../../api" }
 deploy = { path = "../../deploy" }
 insights = { path = "../../insights" }
 ai-gateway = { path = "../../ai-gateway" }
-oned-update = { path = "../update" }
+oned-update = { path = "../update", features = ["machine"] }
 # The web client's files, the Workers' sources and oned on Cloudflare's WebAssembly this build carries.
 ui = { path = "../../ui" }
 # The guide the address serves (llms.txt).

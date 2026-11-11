@@ -16,7 +16,7 @@
 //! -----END SSH SIGNATURE-----
 //! ```
 //!
-//! `name` is `node/<target>` (the program: `one`, oned and onet), `app/<target>` (a Mac's window, zipped),
+//! `name` is `node/<target>` (the program: `one`, oned and onet), `app/<target>` (a Mac's window, zipped; Linux's, the program, in a GitHub release),
 //! `service/<name>/<target>` (a Mac helper's is its app, zipped), `web` (the web client's signed bundle), `workers` (the
 //! Workers' sources, which only their home device reads), or `source` (the commit a Mac's builder builds what's published for Macs from, whose `sha256` is `-`); `committed` is seconds
 //! since 1970; `config` is the custom build's config commit, `-` if it has none. The signature (the release key's, as

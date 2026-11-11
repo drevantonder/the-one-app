@@ -54,11 +54,11 @@ pub fn mcp_entries() -> String {
     )
 }
 
-fn install() -> String {
-    match scope::state::install_line() {
-        Some(line) => format!("install it with `{line}`"),
-        None => format!("ask an admin of {YOURS} to set it up there"),
-    }
+/// How to install it on a computer, from the network at `address` where it's known.
+fn install(address: Option<&str>) -> String {
+    let lines = scope::state::install(&address.map_or("<address>".into(), web));
+    let said = format!("install it with `{}` (in Windows' PowerShell, `{}`)", lines.sh, lines.powershell);
+    if address.is_some() { said } else { format!("{said}, where <address> is {YOURS}'s web address") }
 }
 
 /// Connecting for a user, at the network's `address` where it's known: a shell takes the command line, anything
@@ -70,7 +70,7 @@ pub fn connecting(address: Option<&str>) -> String {
     };
     format!(
         "When someone asks you to connect to {NAME}, do it yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can run commands (Claude Code, Codex, OpenCode, Cursor): run `{CLI} status`. If it answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.\n- If you can't (ChatGPT, Claude and other chat apps): you can't add it yourself, so show them where this app adds a connector (a custom MCP server) and have them add {mcp}. They sign in when it asks, and then you act as them.",
-        install()
+        install(address)
     )
 }
 

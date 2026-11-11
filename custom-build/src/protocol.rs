@@ -92,6 +92,10 @@ pub mod message {
 pub const NEWEST: &str = "newest";
 /// The bucket's folder of what `one-dev update` publishes, and the path it's read at from the network's address (oned/update/src/latest.rs).
 pub const UPDATES: &str = "updates";
+/// Where the network's address serves the installer, which takes the newest build from `UPDATES`: for a Mac's or Linux's
+/// shell, and for Windows' PowerShell (oned/update/src/install.rs).
+pub const INSTALL: &str = "install";
+pub const INSTALL_POWERSHELL: &str = "install.ps1";
 pub const TIDIED: &str = "tidied";
 pub const COPY: &str = "copy";
 /// The digits of a step's position in its name, so names sort in order.
