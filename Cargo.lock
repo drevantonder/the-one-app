@@ -135,6 +135,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "app-schedules"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "jiff",
+ "serde_json",
+]
+
+[[package]]
+name = "app-schedules-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "app-schedules",
+ "axum",
+ "bucket",
+ "custom-build",
+ "database",
+ "insights-runtime",
+ "key",
+ "rusqlite",
+ "scope",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3241,6 +3271,8 @@ dependencies = [
  "ai-gateway-runtime",
  "anyhow",
  "api",
+ "app-schedules",
+ "app-schedules-runtime",
  "axum",
  "backups",
  "backups-runtime",

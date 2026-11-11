@@ -61,7 +61,7 @@ impl Node {
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), Some(Hash::from_bytes(root)), now_ms());
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.network_place(&f)?, f))).transpose()?;
-        let network = Network { r, user: file.user, bucket, said: HashMap::new(), exchanged: HashMap::new(), described: HashMap::new(), stated: HashMap::new(), parts: HashMap::new(), last_seen: HashMap::new(), versions: serde_json::Value::Null, workers: serde_json::Value::Null, moved: None, connected: Default::default(), scope_dbs: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), far: HashMap::new(), read: false };
+        let network = Network { r, user: file.user, bucket, said: HashMap::new(), exchanged: HashMap::new(), described: HashMap::new(), stated: HashMap::new(), parts: HashMap::new(), last_seen: HashMap::new(), versions: serde_json::Value::Null, workers: serde_json::Value::Null, moved: None, connected: Default::default(), scope_dbs: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.network.lock()? = Some(network);
         self.start_kept();
         Ok(())

@@ -15,6 +15,7 @@ pub fn features() -> Vec<Runs> {
         deploy_runtime::remove_runs(),
         vault_runtime::runs(),
         backups_runtime::runs(),
+        app_schedules_runtime::runs(),
         groups_runtime::runs(),
         devices_runtime::runs(),
         services_runtime::runs(),

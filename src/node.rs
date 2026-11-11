@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
 use crate::app::runtime::{Apps, Context};
-use ::scope::state::{Me, handles, whose};
+use ::scope::state::{Me, handles};
 use ::api::call::Append;
 use ::api::call::{CallRequest, Event};
 use crate::node::copied::Copied;
@@ -29,7 +29,7 @@ use ::scope::content;
 use ::scope::scopes::{Principal, ScopeState};
 use ::custom_build::config::{CLI, YOURS};
 use ::scope::rank;
-use crate::schedules::{self, Schedule};
+use ::app_schedules::Schedule;
 use ::scope::replica::{Handled, Replica};
 
 pub mod apps;
@@ -45,7 +45,6 @@ pub use versions::heard;
 #[path = "../onboarding/runtime/pairing.rs"]
 mod pairing;
 pub(crate) mod releases;
-mod scheduled;
 pub(crate) mod screens;
 mod sessions;
 use ::api::runtime::NotGiven;
@@ -53,7 +52,6 @@ pub use net::{Endpoints, alpn, relay};
 pub use calls::Grant;
 use calls::{Granted, Reply};
 use ::deploy::build::built_in_bundle;
-use scheduled::switch_entry;
 pub use ::api::handed::Needs;
 pub mod services;
 mod app_schedules;
@@ -61,7 +59,6 @@ mod settings;
 pub(crate) use settings::routes as settings_routes;
 pub(crate) use holds::routes as holds_routes;
 mod state;
-mod status;
 mod steps;
 pub mod storage;
 use ::api::trace;
@@ -145,8 +142,6 @@ struct Network {
     /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
     /// last position read, and the database, once its anchor checked out here.
     scope_dbs: HashMap<Scope, ::scope::steps::ScopeReader>,
-    /// Each scope's rows of how things went, as this device last read them.
-    status: HashMap<String, status::Status>,
     /// Each scope's own state, as its database says it.
     views: HashMap<String, ScopeState>,
     /// How long each device took to answer a call lately.
@@ -423,7 +418,6 @@ impl Node {
         tokio::spawn(node.clone().pull_loop());
         tokio::spawn(node.clone().invites_loop());
         tokio::spawn(node.clone().tick_loop());
-        tokio::spawn(node.clone().schedule_loop());
         node.start_features(starts);
         let worker = node.clone();
         tokio::spawn(async move {
@@ -563,7 +557,6 @@ impl Node {
         self.keep_alone_here()?;
         self.wake_all();
         self.follow_net();
-        self.read_all_status(false);
         let reader = self.clone();
         tokio::spawn(async move {
             if let Err(err) = reader.read_scopes(None).await {
@@ -588,7 +581,6 @@ impl Node {
                     Err(err) => tracing::warn!("{err:#}"),
                 }
             }
-            let mut read = false;
             if self.has_network() {
                 if relayed.is_none_or(|at| at.elapsed() >= RELAY_EVERY) {
                     relayed = Some(Instant::now());
@@ -600,6 +592,7 @@ impl Node {
                 }
                 self.close_idle();
                 self.renew_app_schedules("");
+                self.forget_app_schedules();
                 self.start_owed_keys();
                 // The wall clock, which runs on while a machine sleeps, as `Instant` doesn't everywhere.
                 // A runtime its device hasn't listed yet reads who's who each tick, to run things from when it has.
@@ -617,8 +610,7 @@ impl Node {
                         }
                     };
                     seen = self.with_or(Value::Null, |i| Ok(i.moved.as_ref().map(|(_, m)| m.clone()).unwrap_or_default()));
-                    read = only.as_ref().is_none_or(|o| !o.is_empty());
-                    if read {
+                    if only.as_ref().is_none_or(|o| !o.is_empty()) {
                         if let Err(err) = self.read_scopes(only.as_ref()).await {
                             tracing::debug!("reading the bucket: {err:#}");
                         }
@@ -626,7 +618,6 @@ impl Node {
                     }
                 }
                 self.forget_sessions();
-                self.read_all_status(!read);
             }
             if tick % 6 == 0 && self.has_network() {
                 self.share_unshared().await;
@@ -661,10 +652,6 @@ fn reachable(i: &Network, app: &str, user: &str) -> Result<Vec<Scope>> {
     ::scope::state::reachable(i.r.db(), user, |s| i.r.holds(s).then(|| i.views.get(&s.to_string()).is_some_and(|st| st.added.contains(app))))
 }
 
-/// A user's name in the network, removed users' too; none if it never knew them.
-fn user_name(db: &ScopeDb, user: &str) -> Result<String> {
-    Ok(db.user_ever(user)?.map(|u| u.name).unwrap_or_default())
-}
 
 fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Result<Me> {
     let name = if caller.key == node.0.id { node.device_name() } else { db.machine(&caller.key)?.map(|k| k.name).unwrap_or_default() };

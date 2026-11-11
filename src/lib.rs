@@ -40,7 +40,6 @@ pub mod latest;
 #[cfg(feature = "node")]
 pub mod update;
 #[cfg(feature = "node")]
-pub mod schedules;
 #[cfg(feature = "node")]
 pub mod mode;
 #[cfg(feature = "node")]

@@ -1,9 +1,9 @@
 [workspace]
-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
-default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 
 [package]
 name = "one"
@@ -23,7 +23,7 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:insights-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:backups-runtime", "dep:devices-runtime", "dep:services", "dep:services-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "web-bundle"]
+node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:insights-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:backups-runtime", "dep:app-schedules-runtime", "dep:devices-runtime", "dep:services", "dep:services-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "web-bundle"]
 # `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
 web-bundle = ["dep:ssh-key", "dep:flate2"]
 
@@ -65,6 +65,9 @@ notifications-runtime = { path = "notifications/runtime", optional = true }
 # Backups (backups/): a place's Vault item kind and the tools' specs, every build; running them and the format, only a node's.
 backups = { path = "backups" }
 backups-runtime = { path = "backups/runtime", optional = true }
+# App schedules (app-schedules/): an app's schedules as its deploy declares them, every build; running them, only a node's.
+app-schedules = { path = "app-schedules" }
+app-schedules-runtime = { path = "app-schedules/runtime", optional = true }
 # Groups (groups/): who's in the network and its groups, every build; what the app runtime does for it, only a node's.
 groups = { path = "groups" }
 groups-runtime = { path = "groups/runtime", optional = true }
@@ -119,7 +122,7 @@ futures-util = { version = "0.3", default-features = false, optional = true }
 # (UPnP, NAT-PMP, PCP), with no n0 discovery or metrics. Pinned, since the relay runs iroh-relay's own code of this
 # version.
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "portmapper"], optional = true }
-# Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
+# A file's modified time as S3 says it (src/mode.rs's stand-in bucket).
 jiff = { version = "0.2", optional = true }
 # A device applies a database step another device sent only once the bucket confirms it holds those bytes, by their
 # ETag, which for R2's single PUT is their MD5 (bucket/src/place.rs); nothing already built gives MD5.

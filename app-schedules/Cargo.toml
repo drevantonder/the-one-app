@@ -1,0 +1,17 @@
+# App schedules, as every build has them: an app's schedules as its deploy declares them, when each runs next and how
+# it's said. Running them is the runtime's (runtime/).
+[package]
+name = "app-schedules"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow = "1"
+# Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
+jiff = "0.2"
+serde_json = "1"

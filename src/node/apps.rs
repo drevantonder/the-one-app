@@ -186,7 +186,7 @@ impl Node {
                     tools.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&::labs::app_key(&name, lab))));
                 }
                 if mine {
-                    let (list, activity) = self.schedules_of(viewer, &name, &declared)?;
+                    let (list, activity) = app_schedules_runtime::schedules_of(&self.rt(), viewer, &name, &declared)?;
                     info["schedules"] = json!(list);
                     info["activity"] = json!(activity);
                 }

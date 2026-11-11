@@ -264,7 +264,7 @@ impl Node {
                 let req: Value = serde_json::from_slice(&body)?;
                 ok(deploy_runtime::source(&self.rt(), req["app"].as_str().unwrap_or_default(), None, req["path"].as_str()).await?)
             }
-            Ask::Failing => ok(json!(self.failing_schedules(&grant.caller).await?)),
+            Ask::Failing => ok(json!(app_schedules_runtime::failing(&self.rt(), &grant.caller).await?)),
             // A notification to the caller's devices, from this app, through the network's notifications Worker.
             Ask::Notify => {
                 let send: ::notifications::Send = serde_json::from_slice(&body)?;

@@ -131,7 +131,7 @@ pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope
     Ok(match append {
         Append::Switch { app, schedule, scope, on } => {
             let scope = Scope::parse_for(&scope, &me.user)?;
-            (scope.clone(), switch_entry(i, &me.user, &scope, &app, title, &schedule, on)?)
+            (scope.clone(), app_schedules_runtime::switch_entry(&::scope::read::Read { replica: &i.r, states: &i.views, scopes: &i.scope_dbs }, &me.user, &scope, &app, title, &schedule, on)?)
         }
         Append::Forget { scope, blob } => {
             let scope = Scope::parse(&scope)?;

@@ -1,5 +1,5 @@
-//! Schedules: an app's tools that run on their own, every so often or at a time of day, on the machine keeping the
-//! app running (src/node/scheduled.rs).
+//! App schedules, as every build has them: an app's tools that run on their own, every so often or at a time of day,
+//! as its deploy declares them. Running them, on the machine their user chose, is the runtime's (runtime/).
 
 use anyhow::{Context as _, Result, bail, ensure};
 use serde_json::{Value, json};

@@ -1,0 +1,28 @@
+# What the app runtime does for App schedules: running each slot that's due once, on whichever of the machines their
+# user chose takes it first, with their keys alone; switching them; and how each ran, through `api::AppRuntime`.
+[package]
+name = "app-schedules-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+app-schedules = { path = ".." }
+api = { path = "../../api" }
+scope = { path = "../../scope" }
+database = { path = "../../database" }
+bucket = { path = "../../bucket", features = ["machine"] }
+key = { path = "../../key" }
+custom-build = { path = "../../custom-build" }
+insights-runtime = { path = "../../insights/runtime" }
+anyhow = "1"
+axum = "0.8"
+rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "sync"] }
+tracing = "0.1"
