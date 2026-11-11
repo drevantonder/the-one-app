@@ -40,12 +40,12 @@ impl Wasm<'_> {
     }
 }
 
-/// Builds the Cloudflare node (`oned/cloudflare/node/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
+/// Builds oned on Cloudflare (`oned/cloudflare/worker/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
 /// folder they're in. `profile` is cargo's: a release's is `release`, a throwaway network's `dev`.
-pub fn cloudflare_node(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
+pub fn oned_cloudflare(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
     let dir = if profile == "dev" { "debug" } else { profile };
-    let (wasm, out) = (src.join("target/wasm32-unknown-unknown").join(dir).join("one_cloudflare_node.wasm"), src.join("target/cloudflare-node"));
-    Wasm { what: "Cloudflare node", cargo: &["build", "--profile", profile, "-p", "one-cloudflare-node", "--target", "wasm32-unknown-unknown"], wasm, out, glued: "one_cloudflare_node_bg.wasm", shrink: false }.build(src, config)
+    let (wasm, out) = (src.join("target/wasm32-unknown-unknown").join(dir).join("oned_cloudflare_worker.wasm"), src.join("target/oned-cloudflare"));
+    Wasm { what: "oned on Cloudflare", cargo: &["build", "--profile", profile, "-p", "oned-cloudflare-worker", "--target", "wasm32-unknown-unknown"], wasm, out, glued: "oned_cloudflare_worker_bg.wasm", shrink: false }.build(src, config)
 }
 
 /// Builds onet (`onet/`) into WebAssembly for browsers and its JavaScript glue: → the folder they're in. `profile` is

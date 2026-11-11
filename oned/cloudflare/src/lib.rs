@@ -4,7 +4,7 @@
 
 pub mod basin;
 pub mod cli;
-pub mod node;
+pub mod worker;
 mod newest;
 mod workers;
 pub use newest::Newest;

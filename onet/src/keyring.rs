@@ -1,6 +1,6 @@
 //! What a client device knows of its network, the keys it opened, and how it asks a node with them, the same on every
 //! client that runs this crate: the CLI and native apps (`device.rs`), and the remote MCP server's devices
-//! (oned/cloudflare/node/src/clients.rs), and browsers (`wasm::Keyring`, in onet/web/net-worker.js).
+//! (oned/cloudflare/worker/src/clients.rs), and browsers (`wasm::Keyring`, in onet/web/net-worker.js).
 //!
 //! It trusts no node, nor the relay, for who's who: it reads `global`'s scope database's steps from the bucket itself,
 //! opens them with the epochs sealed to it, and applies them by the node's own rules (`steps::Reader`). It asks only

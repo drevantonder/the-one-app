@@ -27,7 +27,7 @@ pub struct Worker {
     /// Whether it's also reached at its workers.dev address: by what mustn't come through the gateway.
     own_address: bool,
     /// Whether it runs the Cloudflare node's build, which carries its devices' endpoints.
-    node_build: bool,
+    oned_build: bool,
     /// Whether it serves the web client's files, as its static assets.
     pub serves_web: bool,
     /// Whether it reads the network's bucket itself.
@@ -53,20 +53,20 @@ pub struct Was {
 /// Auth's Durable Object `Auth` holds every user's passkeys and accounts. The paths under `/api/auth` name the
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer, so they never change.
 pub const WORKERS: &[Worker] = &[
-    Worker { name: "auth", entry: "auth/worker.js", classes: &["Auth"], place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings, cron: None, was: None },
-    Worker { name: "relay", entry: "relay/worker.js", classes: &["Relay", "List"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings, cron: None, was: None },
-    Worker { name: "url-signer", entry: "url-signer/worker.js", classes: &[], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: url_signer_bindings, cron: None, was: Some(Was { name: "signer", classes: &[] }) },
+    Worker { name: "auth", entry: "auth/worker.js", classes: &["Auth"], place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, oned_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings, cron: None, was: None },
+    Worker { name: "relay", entry: "relay/worker.js", classes: &["Relay", "List"], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings, cron: None, was: None },
+    Worker { name: "url-signer", entry: "url-signer/worker.js", classes: &[], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: true, bindings: url_signer_bindings, cron: None, was: Some(Was { name: "signer", classes: &[] }) },
     // Its `Client` objects hold each outside program's sealed secret.
-    Worker { name: "onet", entry: "onet/worker.js", classes: &["Client"], place: None, own_address: false, node_build: true, serves_web: false, reads_bucket: true, bindings: onet_bindings, cron: None, was: Some(Was { name: "mcp", classes: &[("Client", "Client")] }) },
-    Worker { name: "telemetry", entry: "telemetry/worker.js", classes: &[], place: None, own_address: true, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *"), was: None },
-    Worker { name: "gateway", entry: "gateway/worker.js", classes: &[], place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None, was: None },
+    Worker { name: "onet", entry: "onet/worker.js", classes: &["Client"], place: None, own_address: false, oned_build: true, serves_web: false, reads_bucket: true, bindings: onet_bindings, cron: None, was: Some(Was { name: "mcp", classes: &[("Client", "Client")] }) },
+    Worker { name: "telemetry", entry: "telemetry/worker.js", classes: &[], place: None, own_address: true, oned_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *"), was: None },
+    Worker { name: "gateway", entry: "gateway/worker.js", classes: &[], place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, oned_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None, was: None },
     // Its `Notifications` object holds every device's registered address.
-    Worker { name: "notifications", entry: "notifications/worker.js", classes: &["Notifications"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: notifications_bindings, cron: None, was: Some(Was { name: "push", classes: &[("Push", "Notifications")] }) },
+    Worker { name: "notifications", entry: "notifications/worker.js", classes: &["Notifications"], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: false, bindings: notifications_bindings, cron: None, was: Some(Was { name: "push", classes: &[("Push", "Notifications")] }) },
 ];
 
-/// The Cloudflare node's Worker (`oned/cloudflare/node/`), `<cli>-oned`, oned on Cloudflare: no address, and an iroh
+/// The Cloudflare node's Worker (`oned/cloudflare/worker/`), `<cli>-oned`, oned on Cloudflare: no address, and an iroh
 /// endpoint of its own key, which the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
-pub const NODE: Worker = Worker { name: "oned", entry: "oned/worker.js", classes: &["Oned"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings, cron: None, was: Some(Was { name: "node", classes: &[("Node", "Oned")] }) };
+pub const ONED: Worker = Worker { name: "oned", entry: "oned/worker.js", classes: &["Oned"], place: None, own_address: false, oned_build: false, serves_web: false, reads_bucket: true, bindings: oned_bindings, cron: None, was: Some(Was { name: "node", classes: &[("Node", "Oned")] }) };
 
 /// The Workers traced at 100% (`metadata`), their logs exported too: all but the telemetry Worker and the Cloudflare node.
 /// The web client is the gateway's assets.
@@ -90,8 +90,8 @@ impl Worker {
     /// build (`node`), which runs its devices' endpoints. None if it needs that and there's none.
     pub fn modules(&self, files: &Files, node: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
         let mut out = wasm(files, self.entry);
-        if self.node_build {
-            out.extend(node?.iter().filter(|(name, _, _)| name.starts_with("one_cloudflare_node")).map(|(name, _, bytes)| (name.clone(), bytes.clone())));
+        if self.oned_build {
+            out.extend(node?.iter().filter(|(name, _, _)| name.starts_with("oned_cloudflare_worker")).map(|(name, _, bytes)| (name.clone(), bytes.clone())));
         }
         Some(out)
     }
@@ -705,7 +705,7 @@ fn notifications_bindings(settings: &Settings) -> Vec<Binding> {
 /// says to every device.
 fn relay_bindings(settings: &Settings) -> Vec<Binding> {
     let devices = (!settings.devices.is_empty()).then(|| plain("DEVICES", json!(settings.devices).to_string()));
-    let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("ONED", format!("object:{}:{}", NODE.name, NODE.classes[0]))]);
+    let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("ONED", format!("object:{}:{}", ONED.name, ONED.classes[0]))]);
     let onet = plain("ONET", format!("object:onet:{}", Worker::named("onet").classes[0]));
     let deployed = settings.deployed.clone().map(|d| plain("DEPLOYED", d));
     devices.into_iter().chain(node.into_iter().flatten()).chain([onet, plain("YOURS", custom_build::config::YOURS)]).chain(deployed).chain(location()).collect()
@@ -750,13 +750,13 @@ fn telemetry_bindings(settings: &Settings) -> Vec<Binding> {
 }
 
 /// The Cloudflare node: its endpoint's key, and the relay it's reached through.
-fn node_bindings(settings: &Settings) -> Vec<Binding> {
+fn oned_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![
         plain("AUTH", "service:auth"),
         plain("URL_SIGNER", "service:url-signer"),
         plain("TELEMETRY", "service:telemetry"),
         plain("LOADER", "loader:"),
-        // Workers AI, for AI Gateway's calls of the apps it runs, paid by the account (oned/cloudflare/node: `ai_run`).
+        // Workers AI, for AI Gateway's calls of the apps it runs, paid by the account (oned/cloudflare/worker: `ai_run`).
         plain("AI", "ai:"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", custom_build::config::NAME),
@@ -821,12 +821,12 @@ fn reaches(value: &str) -> Option<&str> {
 /// The network's Workers as one workerd runs them, the gateway serving the web client's files from `web`; and the
 /// Cloudflare node, if the network has one and this build carries it.
 pub fn served(settings: &Settings, web: &Path, sources: &Files) -> Result<Vec<Served>> {
-    served_with(settings, web, sources, crate::node::modules().ok())
+    served_with(settings, web, sources, crate::worker::modules().ok())
 }
 
 /// `served`, with the Cloudflare node's build `cloudflare_node` (this build's, or a test's).
 pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_node: Option<Modules>) -> Result<Vec<Served>> {
-    let node = cloudflare_node.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::node::served(settings, modules));
+    let node = cloudflare_node.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::worker::served(settings, modules));
     // A build without the Cloudflare node's WebAssembly has no remote MCP server, and nothing binds one.
     let mut served = Vec::new();
     for worker in WORKERS {
@@ -1192,7 +1192,7 @@ pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
         run(&["install", "--frozen-lockfile"])?;
     }
     let out = dir.join("out.js");
-    run(&["build", entry, "--target=browser", "--format=esm", "--external=cloudflare:*", "--external=node:*", "--external=*.wasm", "--external=*/one_cloudflare_node.js", &format!("--outfile={}", out.display())])?;
+    run(&["build", entry, "--target=browser", "--format=esm", "--external=cloudflare:*", "--external=node:*", "--external=*.wasm", "--external=*/oned_cloudflare_worker.js", &format!("--outfile={}", out.display())])?;
     Ok(std::fs::read(out)?)
 }
 
@@ -1634,7 +1634,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &
             let migration = scripts.get(&name).and_then(|s| s.migration.clone());
             let (mut meta, complete) = metadata(settings, worker, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
             let url = worker.place(settings).map(|(url, _)| url);
-            let Some(wasm) = worker.modules(sources, crate::node::modules().ok().as_ref()) else { bail!("this build has no oned for Cloudflare, which the {} Worker runs: {}-dev update program builds one", worker.name, custom_build::config::CLI) };
+            let Some(wasm) = worker.modules(sources, crate::worker::modules().ok().as_ref()) else { bail!("this build has no oned for Cloudflare, which the {} Worker runs: {}-dev update program builds one", worker.name, custom_build::config::CLI) };
             let module = module_from(sources.clone(), worker.entry)?;
             let mut what = vec![meta.to_string().into_bytes(), module.clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));
@@ -1712,7 +1712,7 @@ mod observability_tests {
             assert_eq!((&o["traces"]["enabled"], &o["traces"]["destinations"][0], &o["logs"]["destinations"][0]), (&json!(true), &json!(crate::basin::destination("traces")), &json!(crate::basin::destination("logs"))), "{name}");
         }
         assert!(TRACED.contains(&"onet"));
-        for worker in [Worker::named("telemetry"), &NODE] {
+        for worker in [Worker::named("telemetry"), &ONED] {
             let o = observed(worker);
             assert!(o["traces"].is_null() && o["logs"].is_null(), "{}", worker.name);
         }

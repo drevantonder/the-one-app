@@ -70,7 +70,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     let words: Vec<&str> = rest.iter().map(String::as_str).collect();
     let browser = words.first() == Some(&"client") && (words.get(1) == Some(&"web") || words.contains(&"--as"));
     if build.is_none() && (browser || words == ["cloudflare", "oned", "deploy"]) {
-        rebuild::web_client_and_cloudflare_node(&checkout)?;
+        rebuild::web_client_and_oned_cloudflare(&checkout)?;
         ui = ui.or_else(|| Throwaway::ui_in(&dir).is_none().then(|| checkout.clone()));
     }
     let starting = network::exclusive(&dir)?;
@@ -102,7 +102,7 @@ pub fn run(rest: &[String]) -> Result<()> {
         eprintln!("Its pages and screens are read from there now, and again by each command here. Its Workers' own code is read when they start: {} throwaway restart, once you've changed that.", dev());
     }
     if rest.iter().map(String::as_str).eq(["cloudflare", "oned", "deploy"]) {
-        return cloudflare_node(&dir);
+        return oned_cloudflare(&dir);
     }
     if rest.first().map(String::as_str) == Some("restart") {
         start(&dir)?;
@@ -252,7 +252,7 @@ fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
 
 /// Runs the throwaway network's Cloudflare node beside its Workers, in their workerd, as `cloudflare oned deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
-fn cloudflare_node(dir: &Path) -> Result<()> {
+fn oned_cloudflare(dir: &Path) -> Result<()> {
     let mut settings = oned_cloudflare::Settings::load_in(dir)?;
     if !settings.cloudflare_node {
         settings.cloudflare_node = true;

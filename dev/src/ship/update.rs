@@ -320,7 +320,7 @@ fn same_rust(at: &At) -> Result<()> {
     // change to dev/ alone doesn't, or any push to it would hold back the Workers and the web client until `update dev`.
     ensure!(!changed_since_built(at).with_context(stale)?.is_built_in(), "{}", stale());
     // A program `rebuild_if_stale` made has neither: a plain cargo build, which doesn't make them. `update dev` sends one that does.
-    ensure!(!ui::carried::ONET.is_empty() && !ui::carried::CLOUDFLARE_NODE.is_empty(), "{CLI}-dev was built without the web client's WebAssembly and oned on Cloudflare, which the Workers and the web client are put together with: {CLI}-dev update dev");
+    ensure!(!ui::carried::ONET.is_empty() && !ui::carried::ONED_CLOUDFLARE.is_empty(), "{CLI}-dev was built without the web client's WebAssembly and oned on Cloudflare, which the Workers and the web client are put together with: {CLI}-dev update dev");
     Ok(())
 }
 

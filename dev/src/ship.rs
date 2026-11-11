@@ -91,12 +91,12 @@ fn build_release(at: &At) -> Result<PathBuf> {
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     let (src, config) = (&at.src, &at.config_file);
     // Every release carries oned on Cloudflare: one without it couldn't deploy to Cloudflare.
-    let cloudflare = timed("built oned on Cloudflare", || build::cloudflare_node(src, config, "release")).context("couldn't build oned on Cloudflare")?;
+    let cloudflare = timed("built oned on Cloudflare", || build::oned_cloudflare(src, config, "release")).context("couldn't build oned on Cloudflare")?;
     // And the web client's way to devices: one without it couldn't reach them.
     let onet = timed("built the web client's onet", || build::onet(src, config, "web")).context("couldn't build the web client's WebAssembly")?;
     let release = || {
         let mut command = cargo();
-        command.current_dir(src).env("CONFIG", config).env("CLOUDFLARE_NODE", &cloudflare).env("ONET", &onet).args(["build", "--release"]);
+        command.current_dir(src).env("CONFIG", config).env("ONED_CLOUDFLARE", &cloudflare).env("ONET", &onet).args(["build", "--release"]);
         command
     };
     timed("built the program", || quietly(&mut release()))?;

@@ -115,7 +115,7 @@ pub fn usage(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
         settings.analytics_token = Some(token);
     }
     let named = |names: Vec<String>| names.into_iter().map(|n| (n.clone(), n)).collect::<BTreeMap<_, _>>();
-    let scripts: Vec<String> = super::WORKERS.iter().chain(settings.cloudflare_node.then_some(&super::NODE)).map(|w| w.worker_name()).collect();
+    let scripts: Vec<String> = super::WORKERS.iter().chain(settings.cloudflare_node.then_some(&super::ONED)).map(|w| w.worker_name()).collect();
     let namespaces: BTreeMap<String, String> = cf.list(&format!("/accounts/{}/workers/durable_objects/namespaces", cf.account))?.iter().filter(|n| n["script"].as_str().is_some_and(|s| scripts.iter().any(|w| w == s))).filter_map(|n| Some((n["id"].as_str()?.to_string(), n["name"].as_str()?.to_string()))).collect();
     let buckets: Vec<String> = [Some(telemetry.bucket.clone()), settings.bucket.as_ref().and_then(|b| b["bucket"].as_str()).map(str::to_string)].into_iter().flatten().collect();
     settings.usage = Some(json!({

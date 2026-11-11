@@ -24,7 +24,7 @@ fn what_runs_in_wasm_builds() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let out = std::process::Command::new(cargo)
-        .args(["check", "--quiet", "--target", "wasm32-unknown-unknown", "-p", "one-cloudflare-node", "-p", "onet"])
+        .args(["check", "--quiet", "--target", "wasm32-unknown-unknown", "-p", "oned-cloudflare-worker", "-p", "onet"])
         .current_dir(root)
         .output()
         .expect("cargo check");
@@ -111,9 +111,9 @@ fn the_relays_wasm_is_built_from_the_sources_beside_it() {
 /// `foo_<method>`, so a `foo_bar` function of the node's is the same name): wasm-bindgen links either one in place of the
 /// other, and the node answers with the wrong code. Read from the sources, which is cheaper than building the wasm.
 #[test]
-fn the_cloudflare_nodes_wasm_has_each_export_name_once() {
+fn oned_on_cloudflares_wasm_has_each_export_name_once() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let out = std::process::Command::new("git").args(["ls-files", "--cached", "--exclude-standard", "onet/src", "oned/cloudflare/node/src"]).current_dir(root).output().expect("git ls-files");
+    let out = std::process::Command::new("git").args(["ls-files", "--cached", "--exclude-standard", "onet/src", "oned/cloudflare/worker/src"]).current_dir(root).output().expect("git ls-files");
     let snake = |name: &str| {
         let mut out = String::new();
         for (i, c) in name.chars().enumerate() {

@@ -638,7 +638,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
     };
     names("the node's widgets", &read("widgets/runtime/src/draw.rs"), &["[\"late\"] = json!(true)"]);
     names("the node's route", &read("widgets/src/says.rs"), &["kind: Option<String>"]);
-    names("the Cloudflare node", &read("oned/cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
+    names("the Cloudflare node", &read("oned/cloudflare/worker/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
     names("the pages", &read("ui/home/lib/model.js"), &["w.late", "&kind="]);
     names("the native widgets", &read("native-apps/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
     names("a chat's view", &read("api/mcp/src/mcp/view.html"), &["w.late", "widgets_show"]);
@@ -726,7 +726,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
     let objects = [("user", names(user)), ("me", names(me)), ("device", names(device)), ("config", names(config)), ("client", names(client)), ("network", network.clone())];
 
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let mut sources = vec![root.join("oned/cloudflare/node/worker.js"), root.join("onet/worker/worker.js")];
+    let mut sources = vec![root.join("oned/cloudflare/worker/worker.js"), root.join("onet/worker/worker.js")];
     for dir in [root.join("ui/web"), root.join("onet/web")].into_iter().chain(ui::ui_files::screen_folders(root)) {
         let mut stack = vec![dir];
         while let Some(dir) = stack.pop() {
@@ -873,7 +873,7 @@ fn the_apis_paths_are_never_taken_for_an_apps() {
 /// (over HTTP with its asks going out through the node, and by RPC with the node answering them), gives the same answer,
 /// the same error and code, the same code on an error the node answers its ask with, and writes the node reads.
 #[test]
-fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
+fn an_app_answers_the_same_on_a_computer_and_in_oned_on_cloudflare() {
     const APP: &str = r#"
         export default {
           name: "probe",
@@ -983,7 +983,7 @@ fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
 /// What the shim asks the node is what `::api::call::Ask` names, and the Cloudflare node answers exactly those it says it
 /// does (a machine's node answers each, which the compiler holds it to).
 #[test]
-fn the_cloudflare_node_answers_the_asks_it_says_it_does() {
+fn oned_on_cloudflare_answers_the_asks_it_says_it_does() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let names: std::collections::BTreeMap<&str, bool> = ::api::call::Ask::names().collect();
     let quoted = |text: &str, before: &str| -> std::collections::BTreeSet<String> { text.split(before).skip(1).filter_map(|rest| Some(rest.split_once('"')?.0.to_string())).collect() };
@@ -991,7 +991,7 @@ fn the_cloudflare_node_answers_the_asks_it_says_it_does() {
     let asked: std::collections::BTreeSet<String> = quoted(&shim, "ask(\"").union(&quoted(&shim, "post(\"")).cloned().collect();
     let unknown: Vec<&String> = asked.iter().filter(|a| !names.contains_key(a.as_str())).collect();
     assert!(unknown.is_empty(), "the shim asks what api/src/call.rs doesn't name: {unknown:?}");
-    let worker = std::fs::read_to_string(root.join("oned/cloudflare/node/worker.js")).unwrap();
+    let worker = std::fs::read_to_string(root.join("oned/cloudflare/worker/worker.js")).unwrap();
     let ask = worker.split("  async ask(name, body) {").nth(1).expect("the Cloudflare node's ForCall.ask").split("\n  }\n").next().unwrap();
     let answered = quoted(ask, "case \"");
     let said: std::collections::BTreeSet<String> = names.iter().filter(|(_, on)| **on).map(|(n, _)| n.to_string()).collect();
@@ -1306,10 +1306,10 @@ fn ai_run_ask() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
     let shim = read("app-runtime/src/app/runtime/shim.js");
-    assert!(shim.contains("post(\"ai.run\", { input, retry_key: retryKey ?? null })"), "the shim's ai.run ask changed: change app-runtime/src/calls/running.rs and oned/cloudflare/node/src/lib.rs (`ai_run`), which read input and retry_key");
+    assert!(shim.contains("post(\"ai.run\", { input, retry_key: retryKey ?? null })"), "the shim's ai.run ask changed: change app-runtime/src/calls/running.rs and oned/cloudflare/worker/src/lib.rs (`ai_run`), which read input and retry_key");
     assert!(::api::call::Ask::names().any(|(name, cloudflare)| name == "ai.run" && cloudflare), "both nodes answer ai.run");
     let machine = read("app-runtime/src/calls/running.rs");
-    let cloudflare = read("oned/cloudflare/node/src/lib.rs");
+    let cloudflare = read("oned/cloudflare/worker/src/lib.rs");
     for (node, text) in [("a machine's", &machine), ("the Cloudflare", &cloudflare)] {
         assert!(text.contains("[\"input\"]") && text.contains("[\"retry_key\"]"), "{node} node reads ai.run's input and retry_key");
     }

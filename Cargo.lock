@@ -3481,41 +3481,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "one-cloudflare-node"
-version = "0.1.0"
-dependencies = [
- "ai-gateway",
- "anyhow",
- "api",
- "blake3",
- "bucket",
- "custom-build",
- "data-encoding",
- "database",
- "deploy",
- "ed25519-dalek 3.0.0",
- "getrandom 0.3.4",
- "getrandom 0.4.3",
- "httparse",
- "insights",
- "iroh",
- "iroh-base",
- "js-sys",
- "key",
- "n0-future",
- "n0-watcher",
- "noq-udp",
- "onet",
- "scope",
- "serde_json",
- "sqlite-wasm-rs",
- "ui",
- "vault",
- "wasm-bindgen",
- "wasm-bindgen-futures",
-]
-
-[[package]]
 name = "one-dev"
 version = "0.1.0"
 dependencies = [
@@ -3622,6 +3587,41 @@ dependencies = [
  "sha2 0.11.1",
  "ui",
  "ureq",
+]
+
+[[package]]
+name = "oned-cloudflare-worker"
+version = "0.1.0"
+dependencies = [
+ "ai-gateway",
+ "anyhow",
+ "api",
+ "blake3",
+ "bucket",
+ "custom-build",
+ "data-encoding",
+ "database",
+ "deploy",
+ "ed25519-dalek 3.0.0",
+ "getrandom 0.3.4",
+ "getrandom 0.4.3",
+ "httparse",
+ "insights",
+ "iroh",
+ "iroh-base",
+ "js-sys",
+ "key",
+ "n0-future",
+ "n0-watcher",
+ "noq-udp",
+ "onet",
+ "scope",
+ "serde_json",
+ "sqlite-wasm-rs",
+ "ui",
+ "vault",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-//! The Cloudflare node (`oned/cloudflare/node/`) on Cloudflare: a node of the network as a Worker in the account of its other Workers, with
+//! The Cloudflare node (`oned/cloudflare/worker/`) on Cloudflare: a node of the network as a Worker in the account of its other Workers, with
 //! no address of its own, and an iroh endpoint of its own key, which the relay wakes. A release carries its built
 //! WebAssembly (`update program` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the network's
 //! bucket, each at its latest deploy.
@@ -6,17 +6,17 @@
 use anyhow::{Context, Result};
 use serde_json::{json};
 
-use crate::{Cloudflare, Files, NODE, Settings, Worker, upload_hash};
+use crate::{Cloudflare, Files, ONED, Settings, Worker, upload_hash};
 
 /// The Cloudflare node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
 /// in (the apps themselves it reads from the bucket, each at its latest deploy).
 pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
-    let files = ::ui::ui_folder::wasm(::ui::carried::CLOUDFLARE_NODE_FILES, ::ui::carried::CLOUDFLARE_NODE);
+    let files = ::ui::ui_folder::wasm(::ui::carried::ONED_CLOUDFLARE_FILES, ::ui::carried::ONED_CLOUDFLARE);
     let built = |name: &str| {
         let found = files.iter().find(|(n, _)| n == name).map(|(_, b)| b.clone());
         found.with_context(|| format!("this build of {} has no oned for Cloudflare: {}-dev update program builds one, on a Linux device with Rust", custom_build::config::NAME, custom_build::config::CLI))
     };
-    Ok(modules_from(built("one_cloudflare_node.js")?, built("one_cloudflare_node_bg.wasm")?))
+    Ok(modules_from(built("oned_cloudflare_worker.js")?, built("oned_cloudflare_worker_bg.wasm")?))
 }
 
 /// Its modules, from its WebAssembly's glue and the WebAssembly, as wasm-bindgen makes them.
@@ -24,9 +24,9 @@ pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, 
     let shim = ::api::call::shim();
     let built_js = format!("export const shim = {};\nexport const compatibilityDate = {};\n", json!(shim), json!(::deploy::build::COMPATIBILITY_DATE));
     vec![
-        ("worker.js".into(), "application/javascript+module", include_bytes!("../node/worker.js").to_vec()),
-        ("one_cloudflare_node.js".into(), "application/javascript+module", glue),
-        ("one_cloudflare_node_bg.wasm".into(), "application/wasm", wasm),
+        ("worker.js".into(), "application/javascript+module", include_bytes!("../worker/worker.js").to_vec()),
+        ("oned_cloudflare_worker.js".into(), "application/javascript+module", glue),
+        ("oned_cloudflare_worker_bg.wasm".into(), "application/wasm", wasm),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
         ("protocol.js".into(), "application/javascript+module", ::api::protocol_js::javascript().into_bytes()),
         ("crypto.js".into(), "application/javascript+module", include_bytes!("../../../key/crypto.js").to_vec()),
@@ -38,12 +38,12 @@ pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, 
 pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u8>)>) -> crate::Served {
     let (_, _, main) = modules.remove(0);
     crate::Served {
-        name: NODE.name.into(),
+        name: ONED.name.into(),
         module: main,
         modules: modules.into_iter().map(|(name, _, bytes)| (name, bytes)).collect(),
-        classes: NODE.classes.iter().map(|c| c.to_string()).collect(),
+        classes: ONED.classes.iter().map(|c| c.to_string()).collect(),
         listen: None,
-        bindings: NODE.bindings(settings).into_iter().map(|(n, v, _)| (n, v)).collect(),
+        bindings: ONED.bindings(settings).into_iter().map(|(n, v, _)| (n, v)).collect(),
         assets: None,
         // A throwaway network's bucket is on this machine.
         outbound: Some(crate::NEARBY.to_string()),
@@ -56,9 +56,9 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<(
     anyhow::ensure!(settings.throwaway_user.is_none(), "a throwaway network's Workers run only beside its throwaway network");
     anyhow::ensure!(settings.cloudflare_node_endpoint().is_some(), "oned on Cloudflare has no key: cloudflare oned deploy makes one");
     let modules = modules()?;
-    let name = NODE.worker_name();
+    let name = ONED.worker_name();
     let scripts = cf.scripts()?;
-    let (meta, _) = crate::metadata(settings, &NODE, scripts.get(&name).and_then(|s| s.migration.as_deref()), |other| scripts.contains_key(other));
+    let (meta, _) = crate::metadata(settings, &ONED, scripts.get(&name).and_then(|s| s.migration.as_deref()), |other| scripts.contains_key(other));
     let mut what = vec![meta.to_string().into_bytes()];
     what.extend(modules.iter().flat_map(|(n, k, b)| [n.as_bytes().to_vec(), k.as_bytes().to_vec(), b.clone()]));
     let what = upload_hash(&what);
@@ -69,5 +69,5 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<(
     // Its address may have been turned on by hand.
     cf.hide(&name)?;
     crate::deploy_some(cf, settings, sources, &[], &[Worker::named("relay")])?;
-    crate::remove_renamed(cf, std::iter::once(&NODE))
+    crate::remove_renamed(cf, std::iter::once(&ONED))
 }

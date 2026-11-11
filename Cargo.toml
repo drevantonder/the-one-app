@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["custom-build", "platform", "key", "bucket", "database", "scope", "api", "api/mcp", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "app-runtime", "oned", "oned/update", "oned/cloudflare", "cli", "dev", "oned/cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = ["custom-build", "platform", "key", "bucket", "database", "scope", "api", "api/mcp", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "app-runtime", "oned", "oned/update", "oned/cloudflare", "cli", "dev", "oned/cloudflare/worker", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
@@ -127,7 +127,7 @@ strip = true
 incremental = true
 
 # wasm-bindgen reads which WebAssembly features the Cloudflare node's build uses from what stripping would remove.
-[profile.release.package.one-cloudflare-node]
+[profile.release.package.oned-cloudflare-worker]
 strip = false
 
 # onet's WebAssembly for browsers (onet/src/wasm.rs), as small as it builds: every page load downloads it once.

@@ -85,7 +85,7 @@ sha2 = "0.11"
 serde_json = "1"
 tracing = "0.1"
 
-# On Workers (the Cloudflare node, oned/cloudflare/node/), rand gets its randomness from the runtime's crypto.getRandomValues.
+# On Workers (the Cloudflare node, oned/cloudflare/worker/), rand gets its randomness from the runtime's crypto.getRandomValues.
 # The features every client lists, which this runtime serves, and the API's document made of them.
 onet = { path = "../onet" }
 # MCP at /mcp and the skills it serves.
