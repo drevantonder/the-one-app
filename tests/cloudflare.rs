@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 /// The Workers' files as they are in this checkout, and their tests (`cloudflare/test/`), as `ui_files::list` has them.
 fn files() -> Vec<(String, Vec<u8>)> {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let tests = one::ui_files::collect(&root.join("cloudflare/test")).into_iter().map(|(name, path)| (format!("test/{name}"), path));
-    one::ui_files::list(root).into_iter().chain(tests).map(|(name, path)| (name, std::fs::read(path).unwrap())).collect()
+    let tests = ui::ui_files::collect(&root.join("cloudflare/test")).into_iter().map(|(name, path)| (format!("test/{name}"), path));
+    ui::ui_files::list(root).into_iter().chain(tests).map(|(name, path)| (name, std::fs::read(path).unwrap())).collect()
 }
 
 fn module(entry: &str) -> Vec<u8> {
@@ -80,7 +80,7 @@ pub(crate) fn post(url: &str, headers: &[(&str, &str)], body: Value) -> (u16, Va
 /// markers left in it) fails here, not `one-dev update workers`.
 #[test]
 fn the_web_clients_scripts_parse() {
-    one::cloudflare::parses(&one::web::files()).unwrap();
+    one::cloudflare::parses(&ui::web::files()).unwrap();
 }
 
 /// The page's policy allows its one inline script (start.js) by its hash: of the text the page serves, whatever that
@@ -88,7 +88,7 @@ fn the_web_clients_scripts_parse() {
 #[test]
 fn the_pages_inline_script_is_the_one_its_policy_allows() {
     use sha2::Digest;
-    let files = one::web::files();
+    let files = ui::web::files();
     let page = String::from_utf8(files.iter().find(|(p, _)| p == "index.html").unwrap().1.clone()).unwrap();
     let body = page.split("<script>").nth(1).unwrap().split("</script>").next().unwrap();
     let hash = data_encoding::BASE64.encode(&sha2::Sha256::digest(body.as_bytes()));
@@ -270,7 +270,7 @@ impl Workers {
         let web = crate::temp("web");
         std::fs::write(web.join("index.html"), "<!doctype html><title>The web client</title>").unwrap();
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
-        let mut served = cloudflare::served_with(&settings, &web, &one::ui_folder::cloudflare(), None).unwrap();
+        let mut served = cloudflare::served_with(&settings, &web, &ui::ui_folder::cloudflare(), None).unwrap();
         for s in served.iter_mut().filter(|s| ["signer", "mcp", "push"].contains(&s.name.as_str())) {
             s.outbound = Some("sites".into());
         }

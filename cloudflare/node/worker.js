@@ -42,7 +42,7 @@ const CONFIG = JSON.parse(config());
 /// Whether a call's `device` names the Cloudflare node (this one), as `--device cloudflare` does: it runs here and is passed on to no machine.
 const namesThisNode = (device) => String(device || "").toLowerCase() === CONFIG.cloudflare;
 
-/// An answer named by its content, but for a page's nonce, as a node on a machine names it (src/screen.rs's `tag`): to
+/// An answer named by its content, but for a page's nonce, as a node on a machine names it (ui/src/screen.rs's `tag`): to
 /// a client that has it already, only that.
 async function tagged(request, body, type) {
   const nonce = body.split("'nonce-")[1]?.slice(0, 32);
@@ -1030,7 +1030,7 @@ function answered(out, app) {
   refuse(400, out.error || out.elsewhere || `${app} failed`, out.code ? { code: out.code } : undefined);
 }
 
-/// An app's screen, as its page (src/screen.rs).
+/// An app's screen, as its page (ui/src/screen.rs).
 async function screenOf(request, user, who, view, app, name, params, scope) {
   const reply = await user.appWorker(who, app).getEntrypoint("Call").run("screen", name, {}, null);
   const body = reply.ok ?? "";

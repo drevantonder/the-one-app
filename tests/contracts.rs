@@ -18,7 +18,7 @@ impl Formats {
         // Each as the Workers are built from them: its name there, and where it is in the repo.
         let sources = [("shared/crypto.js", "cloudflare/shared/crypto.js"), ("shared/token.js", "auth/token.js"), ("shared/http.js", "gateway/http.js"), ("gateway/worker.js", "gateway/worker.js"), ("telemetry/worker.js", "insights/worker/worker.js"), ("telemetry/usage.js", "insights/worker/usage.js"), ("test/formats.js", "cloudflare/test/formats.js")];
         let mut files: Vec<(String, Vec<u8>)> = sources.map(|(name, path)| (name.to_string(), std::fs::read(root.join(path)).unwrap())).to_vec();
-        files.push(("screen/agents.js".into(), std::fs::read(root.join("src/screen/settings/agents.js")).unwrap()));
+        files.push(("screen/agents.js".into(), std::fs::read(root.join("ui/settings/agents.js")).unwrap()));
         let dir = crate::temp("formats");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap().to_string();
@@ -147,7 +147,7 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
 
 /// Who's who as steps (`scope/src/steps.rs`), as a browser reads it: the node's key sealed under an epoch, the
 /// freeze the recovery key signed and a step a browser signed, sealed as a node
-/// puts them in the bucket and read from it as the URL signer's `get` gives them (`cloudflare/web/net-worker.js`),
+/// puts them in the bucket and read from it as the URL signer's `get` gives them (`onet/web/net-worker.js`),
 /// opened and applied by the client's keyring; and from a Welcome, sign-in's word passed on as JavaScript reads it.
 #[test]
 fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<()> {
@@ -283,7 +283,7 @@ fn the_workers_name_the_buckets_objects_as_nodes_do() {
     assert_eq!(out["codes"], json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notThisMachine": code::NOT_THIS_MACHINE, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "stopped": code::STOPPED, "notAdded": code::NOT_ADDED, "appDeleted": code::APP_DELETED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED, "pairingUsed": code::PAIRING_USED, "badPairingCode": code::BAD_PAIRING_CODE, "alreadyInNetwork": code::ALREADY_IN_NETWORK, "unreachable": code::UNREACHABLE }), "the codes answers carry");
 }
 
-/// The Settings screens say who agents are in an item's apps (`src/screen/settings/agents.js`) by the name the node
+/// The Settings screens say who agents are in an item's apps (`ui/settings/agents.js`) by the name the node
 /// gives them.
 #[test]
 fn the_screens_name_agents_as_the_vault_does() {
@@ -417,7 +417,7 @@ fn telemetrys_tables_are_the_ones_basin_is_set_up_with() {
 fn insights_on_the_screen_and_for_agents_agree_on_a_p95() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let rows = serde_json::json!([{ "buckets": [0, 20, 20, 10, 10, 5, 5, 10, 10, 0, 5, 5, 3, 0, 0, 2] }, { "buckets": [0, 0, 0, 0, 0, 0, 1, 2, 3] }, {}]);
-    let script = format!("const {{ quantile }} = await import({:?}); console.log(JSON.stringify([0, 0.5, 0.95, 1].map((q) => quantile({rows}, q))))", root.join("src/screen/settings/quantile.js").display());
+    let script = format!("const {{ quantile }} = await import({:?}); console.log(JSON.stringify([0, 0.5, 0.95, 1].map((q) => quantile({rows}, q))))", root.join("insights/screens/quantile.js").display());
     let out = std::process::Command::new(deploy::build::bun().unwrap()).args(["-e", &script]).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let screen: Vec<f64> = serde_json::from_slice(&out.stdout).unwrap();
@@ -611,7 +611,7 @@ fn every_renderer_of_a_widgets_tree_draws_the_same_types_and_tones() {
         ("the iPhone's", read("native-apps/iphone/Widget/WidgetTree.swift")),
         ("Android's", all("native-apps/android/app/src/main/kotlin/app/client/widget", "kt")),
         ("Windows'", read("native-apps/windows/WidgetCard.cs")),
-        ("the screens'", read("src/screen/ui/src/components/widget.tsx")),
+        ("the screens'", read("ui/kit/src/components/widget.tsx")),
     ];
     let mut missing = Vec::new();
     for (who, source) in &renderers {
@@ -641,7 +641,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
     names("the node's widgets", &read("widgets/runtime/src/draw.rs"), &["[\"late\"] = json!(true)"]);
     names("the node's route", &read("widgets/src/says.rs"), &["kind: Option<String>"]);
     names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
-    names("the pages", &read("src/screen/home/lib/model.js"), &["w.late", "&kind="]);
+    names("the pages", &read("ui/home/lib/model.js"), &["w.late", "&kind="]);
     names("the native widgets", &read("native-apps/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
     names("a chat's view", &read("src/mcp/view.html"), &["w.late", "widgets_show"]);
     assert!(missing.is_empty(), "{}", missing.join("\n"));
@@ -729,8 +729,8 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
 
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut sources = vec![root.join("cloudflare/node/worker.js"), root.join("onet/worker/worker.js")];
-    for dir in ["cloudflare/web", "src/screen/home", "src/screen/settings"] {
-        let mut stack = vec![root.join(dir)];
+    for dir in [root.join("ui/web"), root.join("onet/web")].into_iter().chain(ui::ui_files::screen_folders(root)) {
+        let mut stack = vec![dir];
         while let Some(dir) = stack.pop() {
             for f in std::fs::read_dir(&dir).unwrap().flatten() {
                 let path = f.path();
@@ -805,8 +805,9 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
     }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut files = Vec::new();
-    for dir in ["cloudflare", "auth", "gateway", "url-signer", "insights/worker", "src/screen", "onet/src", "native-apps/src", "apps"] {
-        let mut stack = vec![root.join(dir)];
+    let features = ui::ui_files::screen_folders(root).into_iter().filter(|f| !f.starts_with(root.join("ui")));
+    for dir in ["cloudflare", "auth", "gateway", "url-signer", "insights/worker", "ui", "onet/web", "onet/worker", "onet/src", "native-apps/src", "apps"].map(|d| root.join(d)).into_iter().chain(features) {
+        let mut stack = vec![dir];
         while let Some(dir) = stack.pop() {
             let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
             if matches!(name, "node_modules" | "dist" | "target" | "test" | "tests" | "service") {
@@ -999,7 +1000,7 @@ fn the_cloudflare_node_answers_the_asks_it_says_it_does() {
     assert_eq!(answered, said, "the asks the Cloudflare node answers, and those api/src/call.rs says it does");
 }
 
-/// A web bundle says the shell it needs by a number (`one::web::SHELL`): what the shell gives the page, its commands and
+/// A web bundle says the shell it needs by a number (`ui::web::SHELL`): what the shell gives the page, its commands and
 /// `window.__oneNative`, is pinned to each number, so changing them without raising it fails here, before a bundle that
 /// needs them reaches an app that hasn't got them.
 #[test]
@@ -1011,8 +1012,8 @@ fn what_the_shell_gives_the_page_is_pinned_to_its_number() {
     }
     let hash = hash.finalize().to_hex().to_string();
     const PINNED: &[(u32, &str)] = &[(4, "c373913c50e9158b6ce2056b8ad061f3f5670cff5b9af88a9155f11b89f8d99b"), (3, "7ae08c822ecc7bc95c15dcd268d6bbaaadc6e014d550d40304bb25b7c3db8742"), (2, "2f046373196f89532b94512e4e9c5f197bb76f8c418dffdc717bde2658cb5248"), (1, "44f63548b850ab33724d60f9da788d1885423d02901add2710901371cc37064c")];
-    let raise = format!("what the shell gives the page (native-apps/src/commands.rs, native.js) changed: raise one::web::SHELL and pin ({}, \"{hash}\")", one::web::SHELL + 1);
-    assert!(PINNED.iter().any(|(n, h)| *n == one::web::SHELL && *h == hash), "{raise}");
+    let raise = format!("what the shell gives the page (native-apps/src/commands.rs, native.js) changed: raise ui::web::SHELL and pin ({}, \"{hash}\")", ui::web::SHELL + 1);
+    assert!(PINNED.iter().any(|(n, h)| *n == ui::web::SHELL && *h == hash), "{raise}");
 }
 
 /// The iPhone's build scripts (`native-apps/apple.sh`) make its bundle id as build.rs does (`config::IPHONE`): from the
@@ -1035,7 +1036,7 @@ fn the_iphone_build_scripts_name_the_app_as_the_build_does() {
 #[test]
 fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let bridge = std::fs::read_to_string(root.join("src/screen/bridge.js")).unwrap();
+    let bridge = std::fs::read_to_string(root.join("ui/bridge.js")).unwrap();
     let from = bridge.find("  function described(err) {").expect("bridge.js says what threw");
     let body = &bridge[from..from + bridge[from..].find("\n  }\n").unwrap() + 4];
     let cases = serde_json::json!([

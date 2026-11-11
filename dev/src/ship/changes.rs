@@ -125,10 +125,14 @@ impl Parts {
                 // go out with it.
                 Some("cloudflare") if file.starts_with("cloudflare/node/") => (parts.node, parts.workers) = (true, true),
                 // What the web client is made of: the native apps' bundle, and the Workers that serve it.
-                Some("cloudflare") if file.starts_with("cloudflare/web/") || file.starts_with("cloudflare/shared/") => (parts.web, parts.workers) = (true, true),
+                Some("cloudflare") if file.starts_with("cloudflare/shared/") => (parts.web, parts.workers) = (true, true),
                 Some("cloudflare") => parts.workers = true,
-                // The screens' kit and the sign-in pages: nodes hold a copy, but what shows is the web client's (`screens.js`).
-                Some("src") if file.starts_with("src/screen/") => (parts.web, parts.workers) = (true, true),
+                Some("onet") if file.starts_with("onet/web/") => (parts.web, parts.workers) = (true, true),
+                // The screens' kit, the client's own screens (the frame's and each feature's) and the sign-in pages: nodes
+                // hold a copy, but what shows is the web client's (`screens.js`). Phosphor's icons are built into the
+                // native apps' widgets too.
+                Some("ui") if !file.ends_with(".rs") && !file.ends_with("Cargo.toml") && !file.starts_with("ui/vendor/") => (parts.web, parts.workers) = (true, true),
+                Some(_) if file.split('/').nth(1) == Some("screens") => (parts.web, parts.workers) = (true, true),
                 Some("onboarding") if !file.ends_with(".rs") && !file.ends_with("Cargo.toml") => (parts.web, parts.workers) = (true, true),
                 // The native app (native-apps) is its own workspace, not in the node: the Mac app, but for Windows' and
                 // Android's own (native-apps/windows/, native-apps/android/), which no update sends out.
@@ -177,12 +181,12 @@ mod tests {
         assert_eq!(of(&["auth/worker.js", "relay/worker.js", "auth/package.json", "notifications/worker/senders.js"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
         let http = of(&["gateway/http.js"]);
         assert!(http.node && http.workers && !http.web, "the Cloudflare node carries what every Worker answers HTTP with");
-        for file in ["cloudflare/web/web.js", "cloudflare/shared/crypto.js", "src/screen/ui/dist/ui.js", "src/screen/settings/dist/vault.html", "src/screen/bridge.js", "onboarding/pages.js", "onboarding/pages.tsx"] {
+        for file in ["ui/web/web.js", "onet/web/net-worker.js", "cloudflare/shared/crypto.js", "ui/kit/dist/ui.js", "vault/screens/dist/vault.html", "ui/settings/dist/requests.html", "ui/bridge.js", "onboarding/pages.js", "onboarding/pages.tsx"] {
             assert_eq!(of(&[file]), Parts { web: true, workers: true, ..Default::default() }, "{file}: the web client and the Workers that serve it, with no node");
         }
         let cloudflare_node = of(&["cloudflare/node/src/lib.rs"]);
         assert!(cloudflare_node.node && cloudflare_node.workers && !cloudflare_node.mac, "the Cloudflare node is built with the node");
-        for rust in ["src/node.rs", "src/screen.rs", "onboarding/src/lib.rs", "Cargo.toml", "somewhere/new.txt"] {
+        for rust in ["src/node.rs", "ui/src/screen.rs", "ui/vendor/phosphor/icons.json", "onboarding/src/lib.rs", "Cargo.toml", "somewhere/new.txt"] {
             let parts = of(&[rust]);
             assert!(parts.node && parts.mac && parts.workers && parts.web && parts.dev, "{rust}: anything not listed sends everything");
         }

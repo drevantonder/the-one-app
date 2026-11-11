@@ -38,6 +38,7 @@ notifications = { path = "../notifications" }
 backups = { path = "../backups" }
 # `backups check --folder`: a backup on a disk opened with the recovery key alone, with no network.
 backups-runtime = { path = "../backups/runtime" }
+ui = { path = "../ui", features = ["web-bundle"] }
 one = { path = ".." }
 # `<cli>t`, this computer's onet (onet/src/computer/), is this program run by that name.
 onet = { path = "../onet", features = ["computer"] }

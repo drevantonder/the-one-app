@@ -13,6 +13,8 @@ doctest = false
 
 [dependencies]
 api = { path = "../api" }
+# A screen opts in to @one/ui by its tag (`ui::UI`).
+ui = { path = "../ui" }
 custom-build = { path = "../custom-build" }
 platform = { path = "../platform" }
 anyhow = "1"

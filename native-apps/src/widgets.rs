@@ -180,7 +180,7 @@ fn trees(items: &[Value]) -> Vec<&Value> {
 
 /// The Phosphor icons the widgets may draw (each app's, and each named in a tree, and their filled forms).
 fn icons(dir: &Path, items: &[Value]) -> Result<(), String> {
-    let all: Map<String, Value> = serde_json::from_slice(one::screen::ICONS).unwrap_or_default();
+    let all: Map<String, Value> = serde_json::from_slice(ui::screen::ICONS).unwrap_or_default();
     // And the two a widget draws itself: its problem box's, and a chosen row's.
     let mut wanted: Vec<&str> = vec!["warning-fill", "check"];
     wanted.extend(items.iter().filter_map(|i| i["icon"].as_str()));

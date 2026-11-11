@@ -1,7 +1,7 @@
 # The native app
 
-One app for every platform, Tauri 2: its window is the web client's own page (`cloudflare/web/` and @one/ui, from
-`one::web`), the same sidebar, sheets, menus and alerts as in a browser, run on this device's onet rather than a
+One app for every platform, Tauri 2: its window is the web client's own page (`ui/web/` and @one/ui, from
+`ui::web`), the same sidebar, sheets, menus and alerts as in a browser, run on this device's onet rather than a
 browser's: on a phone, onet built in (`onet`, `../`), with the phone's key; on a computer, the computer's own onet, which
 the window is only a view of, with no key or background program of its own (`src/here.rs`: it sets up `one` where it's
 missing, and its Update is `one update`). `src/native.js` is what the page finds of the app; everything else a screen

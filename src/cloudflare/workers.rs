@@ -860,7 +860,7 @@ impl Settings {
     /// (`.well-known/assetlinks.json`) and Windows' web links file (`.well-known/windows-app-web-link`), which let the
     /// apps open links to the address, and the guide to connecting an AI (`llms.txt`).
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
-        self.web_with(crate::web::with_client())
+        self.web_with(::ui::web::with_client())
     }
 
     /// `web`, with the web client's files as `files` has them.
@@ -892,7 +892,7 @@ pub fn windows_package() -> String {
 }
 
 /// `/.well-known/windows-app-web-link`: the pages at the address the Windows app opens, when a link to one is opened
-/// from another app, as the web client has them (cloudflare/web/routes.js): You, a page, its Accounts, an app's screen,
+/// from another app, as the web client has them (ui/web/routes.js): You, a page, its Accounts, an app's screen,
 /// Settings, a Vault request and an invite.
 fn windows_links() -> Vec<u8> {
     let paths = ["/", "/page/*", "/accounts", "/accounts/*", "/app/*", "/settings", "/settings/*", "/vault", "/invite"];
@@ -900,7 +900,7 @@ fn windows_links() -> Vec<u8> {
 }
 
 /// Runs the network's Workers on this machine, in the pinned workerd, until it stops: their modules built from this
-/// release, the web client's files in `<home>/cloudflare/web`, and their storage in `<home>/cloudflare/data`. Where
+/// release, the web client's files in `<home>/ui/web`, and their storage in `<home>/cloudflare/data`. Where
 /// they're a throwaway network's, which has no Cloudflare to deploy to, a deploy (`redeploy`) starts them again on the
 /// newest the network's record names.
 pub fn serve(settings: &Settings) -> Result<()> {
@@ -1014,7 +1014,7 @@ fn web_dir(settings: &Settings) -> PathBuf {
 /// workerd reads each file as it's asked for, so a file written while they run is what the next request gets): each one
 /// whole or not at all, so a request never gets half of one.
 pub fn write_web(settings: &Settings) -> Result<()> {
-    write_web_of(settings, crate::web::with_client())
+    write_web_of(settings, ::ui::web::with_client())
 }
 
 fn write_web_of(settings: &Settings, client: Files) -> Result<()> {
@@ -1127,7 +1127,7 @@ pub fn parses(web: &[(String, Vec<u8>)]) -> Result<()> {
 /// A Worker's module, built from the sources this release was signed with by the pinned Bun, once per
 /// version of them.
 pub fn module(entry: &str) -> Result<Vec<u8>> {
-    module_from(crate::ui_folder::cloudflare(), entry)
+    module_from(::ui::ui_folder::cloudflare(), entry)
 }
 
 /// The module of what the Workers and the web client share with the Rust (`protocol::javascript`), in `cloudflare/`.

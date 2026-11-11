@@ -269,7 +269,7 @@ fn front(at: &At, workers: bool, web: bool) -> Result<()> {
         }
         None => {
             same_rust(at)?;
-            one::ui_folder::read_from(&at.src);
+            ui::ui_folder::read_from(&at.src);
             if w {
                 publish_workers(at, &key)?;
             }
@@ -313,7 +313,7 @@ fn same_rust(at: &At) -> Result<()> {
     // change to dev/ alone doesn't, or any push to it would hold back the Workers and the web client until `update dev`.
     ensure!(!changed_since_built(at).with_context(stale)?.is_built_in(), "{}", stale());
     // A program `rebuild_if_stale` made has neither: a plain cargo build, which doesn't make them. `update dev` sends one that does.
-    ensure!(!one::carried::ONET.is_empty() && !one::carried::CLOUDFLARE_NODE.is_empty(), "{CLI}-dev was built without the web client's WebAssembly and the Cloudflare node, which the Workers and the web client are put together with: {CLI}-dev update dev");
+    ensure!(!ui::carried::ONET.is_empty() && !ui::carried::CLOUDFLARE_NODE.is_empty(), "{CLI}-dev was built without the web client's WebAssembly and the Cloudflare node, which the Workers and the web client are put together with: {CLI}-dev update dev");
     Ok(())
 }
 
@@ -384,7 +384,7 @@ fn send_dev(at: &At) -> Result<()> {
 
 /// Packs the Workers' sources from the checkout and names them in the record, for a deploy to take.
 fn publish_workers(at: &At, key: &ssh_key::PrivateKey) -> Result<()> {
-    let packed = one::web::bundle::Bundle { commit: at.build_name(), committed: at.committed, shell: one::web::SHELL, files: one::ui_folder::cloudflare() }.packed()?;
+    let packed = ui::bundle::Bundle { commit: at.build_name(), committed: at.committed, shell: ui::web::SHELL, files: ui::ui_folder::cloudflare() }.packed()?;
     let file = cache().join("workers").join(format!("{}.bundle", at.build_name()));
     std::fs::create_dir_all(file.parent().context("its folder")?)?;
     std::fs::write(&file, packed)?;
@@ -395,7 +395,7 @@ fn publish_workers(at: &At, key: &ssh_key::PrivateKey) -> Result<()> {
 
 /// Puts the web client together from the checkout and publishes it, unless its files are what was last published.
 fn publish_assembled_web(at: &At, key: &ssh_key::PrivateKey) -> Result<()> {
-    let bundle = one::web::bundle::Bundle { commit: at.build_name(), committed: at.committed, shell: one::web::SHELL, files: one::web::with_client() };
+    let bundle = ui::bundle::Bundle { commit: at.build_name(), committed: at.committed, shell: ui::web::SHELL, files: ui::web::with_client() };
     publish_web_bundle(&bundle, &at.version(), at.config_commit(), key)
 }
 

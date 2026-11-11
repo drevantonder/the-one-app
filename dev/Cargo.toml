@@ -21,6 +21,7 @@ scope = { path = "../scope" }
 api = { path = "../api" }
 one = { path = ".." }
 deploy = { path = "../deploy" }
+ui = { path = "../ui", features = ["web-bundle"] }
 anyhow = "1"
 data-encoding = "2"
 libc = "0.2"

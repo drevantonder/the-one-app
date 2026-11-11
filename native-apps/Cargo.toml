@@ -1,5 +1,5 @@
 # The native app, one for every platform (Linux, Windows, Mac, iPhone, Android): a window that is the web client's own
-# (cloudflare/web, through one::web), on the client itself (onet, ../onet) with this device's key in the OS's secret
+# (ui/web, through ui::web), on the client itself (onet, ../onet) with this device's key in the OS's secret
 # store. Its own workspace, so the repo's `cargo build` and `cargo test` never build Tauri.
 [package]
 name = "one-native"
@@ -20,9 +20,10 @@ path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-# The web client's files and the custom build's name, which the window shows from and the app is called by.
-one = { path = "..", default-features = false }
+# The custom build's name, which the app is called by.
 custom-build = { path = "../custom-build" }
+# The web client's files, which the window shows from.
+ui = { path = "../ui" }
 serde_json = "1"
 # Windows' program icon (an .ico, which tauri-build requires there), drawn from the custom build's icon at each size:
 # both already built for Tauri's own icons.
@@ -52,6 +53,8 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-deep-link = "2"
 onet = { path = "../onet" }
 one = { path = "..", default-features = false, features = ["web-bundle"] }
+# The web client, built in and as the signed bundles it takes from the network; Phosphor's icons, for its widgets.
+ui = { path = "../ui", features = ["web-bundle"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Auth's requests, as the client's own.

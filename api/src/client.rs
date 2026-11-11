@@ -46,7 +46,7 @@ pub struct Called {
     pub trace: Option<Vec<String>>,
 }
 
-/// A request's client span while it's answered: `client.call`, as `cloudflare/web/insights.js` makes one.
+/// A request's client span while it's answered: `client.call`, as `ui/web/insights.js` makes one.
 struct Asked {
     call: Value,
     began: std::time::Instant,

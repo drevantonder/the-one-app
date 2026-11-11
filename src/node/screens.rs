@@ -57,7 +57,7 @@ impl Node {
         context["me"] = json!(self.me_for(viewer)?);
         let api = format!("http://localhost:{}", ::api::local::port());
         context["config"] = json!({ "name": custom_build::config::NAME, "cli": custom_build::config::CLI, "api": api, "made_here": custom_build::config::MADE_HERE });
-        Ok(crate::screen::page(&context, body, linked))
+        Ok(::ui::screen::page(&context, body, linked))
     }
 
     /// Arranges a page for `caller` alone: the order of its apps and widgets, which widgets, their sizes and options,

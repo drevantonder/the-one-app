@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 
 use ::custom_build::config::COMMITTED;
 use crate::latest::{Latest, Thing};
-use crate::web::bundle::{Bundle, open};
+use ::ui::bundle::{Bundle, open};
 
 use super::Files;
 
@@ -24,7 +24,7 @@ impl Newest {
     /// As this program was built with them.
     pub fn built() -> Newest {
         let of = |name: &str| format!("{} {} {name}", ::custom_build::config::BUILD, COMMITTED);
-        Newest { workers: crate::ui_folder::cloudflare(), web: crate::web::with_client(), said: format!("Workers and web client from this build, {}", ::custom_build::config::BUILD), workers_version: of(Thing::WORKERS), web_version: of(Thing::WEB) }
+        Newest { workers: ::ui::ui_folder::cloudflare(), web: ::ui::web::with_client(), said: format!("Workers and web client from this build, {}", ::custom_build::config::BUILD), workers_version: of(Thing::WORKERS), web_version: of(Thing::WEB) }
     }
 
     /// What the relay says of the Workers (`DEPLOYED`, `workers` in its answer to `POST /relay/computes`): the device they

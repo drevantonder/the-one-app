@@ -141,7 +141,7 @@ fun Theme(content: @Composable () -> Unit) {
 
 // MARK: Symbols
 
-/** Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every device draws the
+/** Phosphor's icons (ui/vendor/phosphor), which apps name for their tiles, screens and widgets, so every device draws the
  *  same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled.
  *  The app keeps those the widgets draw beside them (`widgets/icons.json`, src/widgets.rs). */
 object Glyphs {

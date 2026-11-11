@@ -11,7 +11,7 @@ pub fn listed() -> Vec<Said> {
     vec![("/api/insights/report", Who::Clients, Op::post("What went wrong on a client, and what it did before that").body::<Report>().done())]
 }
 
-/// `events`: what the client's timeline holds (`cloudflare/web/insights.js`), each `{ name, time, … }`.
+/// `events`: what the client's timeline holds (`ui/web/insights.js`), each `{ name, time, … }`.
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct Report {
     pub platform: String,

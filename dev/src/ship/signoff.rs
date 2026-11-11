@@ -90,9 +90,12 @@ fn check<'a>(here: &Path, files: impl Iterator<Item = &'a str>) -> Result<()> {
     if files.iter().any(|f| f.ends_with(".rs") || f.ends_with("Cargo.toml") || *f == "Cargo.lock") {
         timed("compiled", || quietly(build::nice_cargo().current_dir(here).args(["check", "--all-targets", "-q"])))?;
     }
-    let screen = |f: &&&str| (["src/screen/", "apps/"].iter().any(|top| f.starts_with(top)) || (f.starts_with("onboarding/") && !f.ends_with(".rs") && !f.ends_with("Cargo.toml"))) && !f.contains("/service/") && !f.contains("/tests/");
+    let screen = |f: &&&str| {
+        let built = ["ui/kit/", "ui/home/", "ui/settings/", "apps/"].iter().any(|top| f.starts_with(top)) || f.split('/').nth(1) == Some("screens");
+        (built || (f.starts_with("onboarding/") && !f.ends_with(".rs") && !f.ends_with("Cargo.toml"))) && !f.contains("/service/") && !f.contains("/tests/")
+    };
     if files.iter().any(|f| screen(&f)) {
-        let ui = here.join("src/screen/ui");
+        let ui = here.join("ui/kit");
         timed("built the screens", || {
             quietly(Command::new("bun").current_dir(&ui).args(["run", "build"]))
         })?;

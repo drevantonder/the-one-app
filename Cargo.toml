@@ -1,9 +1,9 @@
 [workspace]
-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
-default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 
 [package]
 name = "one"
@@ -23,9 +23,10 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:insights-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:backups-runtime", "dep:app-schedules-runtime", "dep:devices-runtime", "dep:services", "dep:services-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:hyper", "dep:hyper-util", "web-bundle"]
-# `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
-web-bundle = ["dep:ssh-key", "dep:flate2"]
+node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:insights-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:backups-runtime", "dep:app-schedules-runtime", "dep:devices-runtime", "dep:services", "dep:services-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:image", "dep:hyper", "dep:hyper-util", "web-bundle"]
+# `web-bundle`, what the native apps take from the network: a signed release record (src/latest.rs) and the signed web
+# client (ui's `web-bundle`).
+web-bundle = ["dep:ssh-key", "ui/web-bundle"]
 
 [dependencies]
 custom-build = { path = "custom-build" }
@@ -35,6 +36,8 @@ bucket = { path = "bucket" }
 database = { path = "database" }
 scope = { path = "scope" }
 api = { path = "api" }
+# The UI (ui/): a screen's page, the client's own screens, the web client's and the Workers' files.
+ui = { path = "ui" }
 # Deploy (deploy/): bundles, building an app with the pinned Bun, every build; what a node does for it, only a node's.
 deploy = { path = "deploy" }
 deploy-runtime = { path = "deploy/runtime", optional = true }
@@ -139,8 +142,6 @@ tokio = { version = "1", features = ["full", "test-util"], optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 ureq = { version = "3", features = ["json"] }
-# The native apps' signed web client is gzipped (src/web/bundle.rs).
-flate2 = { version = "1", optional = true }
 # Agent devices' screens come as PNG or JPEG and go out as JPEG at the width asked (src/agent_devices/picture.rs).
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"], optional = true }
 # Client devices ask a node's local API over iroh, HTTP/1.1 on each stream (src/node/net.rs), which hyper's server
@@ -151,8 +152,6 @@ hyper-util = { version = "0.1", features = ["tokio", "service"], optional = true
 
 [build-dependencies]
 toml = "0.9"
-# The custom build's icon drawn out to its edges (build.rs): already built for the node.
-image = { version = "0.24", default-features = false, features = ["png"] }
 
 # Crypto, CBOR and SQLite are unbearably slow unoptimized, even while developing. Named, not `"*"`: that would optimize every
 # proc macro and build script too (cargo gives a package override precedence over build-override), most of a cold build.

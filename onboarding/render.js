@@ -4,7 +4,7 @@
 //   bun onboarding/render.js [config.toml] [folder]
 //
 // This repo's config.toml and a folder in /tmp unless given. It draws what @one/ui's build last drew: after changing
-// pages.tsx or @one/ui, `bun run build` in src/screen/ui first.
+// pages.tsx or @one/ui, `bun run build` in ui/kit first.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";

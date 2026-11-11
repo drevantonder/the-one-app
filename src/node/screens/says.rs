@@ -18,6 +18,6 @@ pub fn listed() -> Vec<Said> {
 pub struct ScreenQuery {
     pub params: Option<String>,
     pub scope: Option<String>,
-    /// `@one/ui` and the bridge as the address's files (`crate::screen::page`), for the web client, which has them.
+    /// `@one/ui` and the bridge as the address's files (`ui::screen::page`), for the web client, which has them.
     pub linked: Option<bool>,
 }

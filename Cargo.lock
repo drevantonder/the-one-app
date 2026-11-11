@@ -1033,6 +1033,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "tracing",
+ "ui",
  "ureq",
 ]
 
@@ -3290,7 +3291,6 @@ dependencies = [
  "devices",
  "devices-runtime",
  "ed25519-dalek 3.0.0",
- "flate2",
  "futures-util",
  "getrandom 0.2.17",
  "groups",
@@ -3327,6 +3327,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "ui",
  "ureq",
  "vault",
  "vault-runtime",
@@ -3439,6 +3440,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
+ "ui",
  "ureq",
  "vault",
  "vault-runtime",
@@ -3474,6 +3476,7 @@ dependencies = [
  "scope",
  "serde_json",
  "sqlite-wasm-rs",
+ "ui",
  "vault",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3497,6 +3500,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "ssh-key",
+ "ui",
  "ureq",
 ]
 
@@ -5482,6 +5486,23 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "custom-build",
+ "data-encoding",
+ "flate2",
+ "image",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "ssh-key",
+ "toml",
+]
 
 [[package]]
 name = "unarray"

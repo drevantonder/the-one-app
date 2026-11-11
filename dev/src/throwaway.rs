@@ -163,10 +163,10 @@ pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
     let (node, key) = (node_at(dir, addr), Throwaway::own_release_key(dir)?);
     one::build::publish(&node, &build, &key, &version, None)?;
     // The Workers and the web client too, which Cloudflare's Update in Devices takes from the record.
-    let bundle = |files| one::web::bundle::Bundle { commit: version.commit.clone(), committed: version.committed, shell: one::web::SHELL, files };
+    let bundle = |files| ui::bundle::Bundle { commit: version.commit.clone(), committed: version.committed, shell: ui::web::SHELL, files };
     let (workers, web) = (dir.join("workers.bundle"), dir.join("web.bundle"));
-    std::fs::write(&workers, bundle(one::ui_folder::cloudflare()).packed()?)?;
-    std::fs::write(&web, one::web::bundle::signed(&key, &bundle(one::web::with_client()).packed()?)?)?;
+    std::fs::write(&workers, bundle(ui::ui_folder::cloudflare()).packed()?)?;
+    std::fs::write(&web, ui::bundle::signed(&key, &bundle(ui::web::with_client()).packed()?)?)?;
     one::build::publish_latest(&node, &key, &[(one::latest::Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()), (one::latest::Thing::WEB.into(), Some(web), version.clone(), "-".into())])
 }
 

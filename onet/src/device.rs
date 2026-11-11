@@ -41,7 +41,7 @@ fn failed(message: impl std::fmt::Display) -> Error {
     unsent(message)
 }
 
-/// Where a device is with its network, from its sign-in to its sign-out, as a browser goes the same way (cloudflare/web:
+/// Where a device is with its network, from its sign-in to its sign-out, as a browser goes the same way (ui/web:
 /// browser.js `join` and `leave`, web.js `start`, request.js `takenOut`). Whether this key was ever let in here is kept on disk (`joined`), as it
 /// outlives the program: `removed` asks it.
 enum Stage {

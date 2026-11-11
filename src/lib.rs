@@ -1,7 +1,7 @@
 //! The One App's program, every machine's: the node, oned, the CLI and MCP, and what the Cloudflare node and clients
 //! share with them. The domain's words are GLOSSARY.md's; each module's doc says what it is.
 
-/// What the program carries: the built-in apps, the Workers' and web client's files, and the WebAssembly (build.rs).
+/// What the program carries: the built-in apps (build.rs). The Workers' and web client's files are ui's (`ui::carried`).
 pub mod carried {
     include!(concat!(env!("OUT_DIR"), "/carried.rs"));
 }
@@ -45,7 +45,3 @@ pub mod oned;
 pub mod cloudflare;
 pub mod openapi;
 pub mod says;
-pub mod screen;
-pub mod ui_files;
-pub mod ui_folder;
-pub mod web;

@@ -95,6 +95,12 @@ else. Data goes to stdout, messages to stderr.
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // A throwaway network's programs read its pages and Workers from the checkout it was started with, if it was.
+    if let one::mode::Mode::Throwaway(network) = one::mode::here()
+        && let Some(folder) = network.ui()
+    {
+        ui::ui_folder::read_from(&folder);
+    }
     if one::oned::invoked() {
         if let Err(err) = one::oned::run(&args) {
             eprintln!("{}: {err:#}", ::custom_build::programs::oned());

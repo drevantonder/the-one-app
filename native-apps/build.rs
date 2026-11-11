@@ -1,4 +1,4 @@
-// The window's files are the web client's (one::web), written where Tauri takes its frontend from (`gen/web`). The app is named by the custom build (config.toml), as
+// The window's files are the web client's (ui::web), written where Tauri takes its frontend from (`gen/web`). The app is named by the custom build (config.toml), as
 // Tauri's own config says it (`TAURI_CONFIG`, which tauri-build and generate_context! both read). The app's own commands
 // (src/commands.rs) are listed, so each needs a permission, which the config's one capability grants the app's own
 // windows: left unlisted, Tauri would let any page call them.
@@ -17,7 +17,7 @@ const COMMANDS: &[&str] = commands!(names);
 fn main() {
     let dist = Path::new("gen/web");
     let _ = std::fs::remove_dir_all(dist);
-    for (path, bytes) in one::web::with_client() {
+    for (path, bytes) in ui::web::with_client() {
         let to = dist.join(&path);
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         std::fs::write(to, bytes).unwrap();

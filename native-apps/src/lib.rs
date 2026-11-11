@@ -1,4 +1,4 @@
-//! The native app: one window, which is the web client's own page (cloudflare/web/web.js, its files from one::web,
+//! The native app: one window, which is the web client's own page (ui/web/web.js, its files from ui::web,
 //! built in), drawn and run as it is in a browser, but on this device's onet rather than a browser's: on a phone, built
 //! into the app, with the phone's key in the OS's secret store; on a computer, the computer's own (`here`), of which the
 //! window is only a view, with no key or background program of its own.

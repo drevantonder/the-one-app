@@ -246,7 +246,7 @@ fn screen_name(file: &str) -> bool {
 
 /// Builds the app's React screens, if it has any: each `screens/<name>.jsx` or `.tsx` into `dist/<name>.html`, the
 /// screen's HTML that app.js imports as text (`with { type: "text" }`), opted in to @one/ui, with its own styles and
-/// module in it and React and @one/ui left to the page (src/screen.rs). Built by this machine's Bun, or else Node: the
+/// module in it and React and @one/ui left to the page (ui/src/screen.rs). Built by this machine's Bun, or else Node: the
 /// pinned Bun is only for bundling app.js, not for running build tools.
 pub fn screens(dir: &Path) -> Result<()> {
     let some = std::fs::read_dir(dir.join("screens")).into_iter().flatten().flatten().any(|e| screen_name(&e.file_name().to_string_lossy()));
@@ -269,14 +269,14 @@ pub fn screens(dir: &Path) -> Result<()> {
         ),
     };
     let tools = screen_tools(&install.0, install.1)?;
-    let shared: serde_json::Value = serde_json::from_str(include_str!("../../src/screen/ui/dist/importmap.json"))?;
+    let shared: serde_json::Value = serde_json::from_str(include_str!("../../ui/kit/dist/importmap.json"))?;
     let shared: Vec<&String> = shared["imports"].as_object().context("@one/ui's import map has no imports")?.keys().collect();
     let out = std::process::Command::new(&runtime)
         .arg(tools.join("screens.mjs"))
         .arg(dir.canonicalize()?.join("screens"))
         .arg(dir.canonicalize()?.join("dist"))
         .arg(dir.canonicalize()?)
-        .arg(crate::UI)
+        .arg(ui::UI)
         .args(shared)
         .current_dir(&tools)
         .env("DO_NOT_TRACK", "1")
@@ -293,10 +293,10 @@ pub fn screens(dir: &Path) -> Result<()> {
 /// theme's names it imports, where they are in @one/ui.
 fn screen_tools(installer: &Path, install: &[&str]) -> Result<PathBuf> {
     let files: [(&str, &str); 4] = [
-        ("package.json", include_str!("../../src/screen/ui/package.json")),
-        ("bun.lock", include_str!("../../src/screen/ui/bun.lock")),
-        ("src/theme.css", include_str!("../../src/screen/ui/src/theme.css")),
-        ("screens.mjs", include_str!("../../src/screen/ui/screens.mjs")),
+        ("package.json", include_str!("../../ui/kit/package.json")),
+        ("bun.lock", include_str!("../../ui/kit/bun.lock")),
+        ("src/theme.css", include_str!("../../ui/kit/src/theme.css")),
+        ("screens.mjs", include_str!("../../ui/kit/screens.mjs")),
     ];
     let mut hash = sha2::Sha256::new();
     for (path, text) in files {

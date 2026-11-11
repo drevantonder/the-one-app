@@ -345,7 +345,7 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
 
 /// This build's web client written to `dir` as `<commit>.bundle`, not yet signed: gzip, for `publish web` to sign and publish.
 fn web_bundle(dir: &Path) -> Result<PathBuf> {
-    let bundle = one::web::bundle::Bundle::of_this_build(::custom_build::config::BUILD, ::custom_build::config::COMMITTED);
+    let bundle = ui::bundle::Bundle::of_this_build(::custom_build::config::BUILD, ::custom_build::config::COMMITTED);
     std::fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.bundle", ::custom_build::config::BUILD));
     std::fs::write(&path, bundle.packed()?)?;
@@ -362,13 +362,13 @@ fn publish_web(folder: &Path, key: &ssh_key::PrivateKey) -> Result<()> {
     // The one-dev built beside it, from the same build of the library, holds the same web client.
     let out = Command::new(folder.join("one-dev")).args(["web", "bundle", "--out"]).arg(&dir).output().context("run the build")?;
     ensure!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr).trim());
-    let bundle = one::web::bundle::Bundle::unpacked(&std::fs::read(dir.join(format!("{}.bundle", version.commit)))?)?;
+    let bundle = ui::bundle::Bundle::unpacked(&std::fs::read(dir.join(format!("{}.bundle", version.commit)))?)?;
     publish_web_bundle(&bundle, &version, config.trim(), key)
 }
 
 /// `bundle` signed with the release key and named in the record the native apps read, unless its files are what was last
 /// published from here: an update that didn't change it costs a phone nothing.
-fn publish_web_bundle(bundle: &one::web::bundle::Bundle, version: &Version, config: &str, key: &ssh_key::PrivateKey) -> Result<()> {
+fn publish_web_bundle(bundle: &ui::bundle::Bundle, version: &Version, config: &str, key: &ssh_key::PrivateKey) -> Result<()> {
     let hash = bundle.files_hash();
     let last = cache().join("published-web");
     if std::fs::read_to_string(&last).is_ok_and(|was| was == hash) {
@@ -378,7 +378,7 @@ fn publish_web_bundle(bundle: &one::web::bundle::Bundle, version: &Version, conf
     let dir = cache().join("web");
     std::fs::create_dir_all(&dir)?;
     let file = dir.join(format!("{}.signed", version.commit));
-    std::fs::write(&file, one::web::bundle::signed(key, &bundle.packed()?)?)?;
+    std::fs::write(&file, ui::bundle::signed(key, &bundle.packed()?)?)?;
     build::publish_latest(&crate::node(), key, &[(Thing::WEB.into(), Some(file), version.clone(), config.to_string())])?;
     std::fs::write(&last, hash)?;
     println!("Published the web client of {}.", version.commit);

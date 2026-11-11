@@ -1,0 +1,33 @@
+# The UI (@one/ui), as every build has it, WebAssembly too: a screen's page, the client's own screens, the web client's
+# and the Workers' files (which ui_files lists), and the native apps' signed web client (`web-bundle`).
+[package]
+name = "ui"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[features]
+# The native apps' signed web client (src/bundle.rs): nodes sign them, apps open them.
+web-bundle = ["dep:ssh-key", "dep:flate2"]
+
+[dependencies]
+api = { path = "../api" }
+custom-build = { path = "../custom-build" }
+anyhow = "1"
+data-encoding = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+# Release signatures are OpenSSH signatures (sshsig): a bundle is signed and checked as a release is.
+ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"], optional = true }
+# The signed web client is gzipped (src/bundle.rs).
+flate2 = { version = "1", optional = true }
+
+[build-dependencies]
+toml = "0.9"
+# The custom build's icon drawn out to its edges (build.rs): already built for the node.
+image = { version = "0.24", default-features = false, features = ["png"] }

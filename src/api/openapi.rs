@@ -18,7 +18,7 @@ pub(super) fn routes() -> Routes {
 async fn document_for(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
     let apps = node.apps(&me.caller).await?;
     let body = serde_json::to_string(&crate::openapi::document(&apps, me.client.is_none()))?;
-    let tag = crate::screen::tag(&body);
+    let tag = ::ui::screen::tag(&body);
     Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
 }
 

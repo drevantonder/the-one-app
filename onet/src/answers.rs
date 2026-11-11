@@ -2,7 +2,7 @@
 //! opened before shows at once while it asks again. Each client keeps them sealed where it keeps things (`Shelf`), for
 //! its user alone, and forgets them as it signs out or is taken out: a phone's app and a computer's onet (for its
 //! windows, `/api/kept`) as files in its folder, sealed under a key from the device's own (`keys::answers_key`); a
-//! browser in IndexedDB, under a WebCrypto key of its own that can't be read (cloudflare/web/net-worker.js).
+//! browser in IndexedDB, under a WebCrypto key of its own that can't be read (onet/web/net-worker.js).
 
 use std::collections::HashMap;
 use std::sync::Mutex;

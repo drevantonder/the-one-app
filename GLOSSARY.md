@@ -45,6 +45,9 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   computer's.
 - **API**: what every client asks a device through, at `/api/*`: the CLI, MCP, the screens, the native apps and outside
   programs. Each route says who may call it, and MCP's tools and the CLI's commands are made from what they say.
+- **UI** (`@one/ui`, `ui/`): what every screen is drawn with (React and shadcn's components in one theme, `ui/kit`), and
+  the frame around them every client shows the same: the pages, Accounts, Settings' frame, the bridge a screen calls
+  (`one`), and the web client. A feature's own Settings screens are in its folder (`<feature>/screens/`), drawn with it.
 - **onet**: being built (ARCHITECTURE.md, Designed): the entry point into the network, the same on every device. Its library is the `onet` crate (`onet/`) today; on a computer it's `<cli>t` (`onet/src/computer/`), which oned starts, holding the device's key, of which the desktop app's window, the CLI and the local MCP server are views.
 - **oned**: the small program, and the spec it follows, that makes a machine a node: it connects the machine to the
   network (on a computer, by starting its onet), and installs and runs what the node's owner switches on there (the app

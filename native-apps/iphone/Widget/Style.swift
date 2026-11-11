@@ -29,7 +29,7 @@ func hexRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
     return (rgb[0], rgb[1], rgb[2])
 }
 
-/// Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every client draws the
+/// Phosphor's icons (ui/vendor/phosphor), which apps name for their tiles, screens and widgets, so every client draws the
 /// same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled.
 /// Only the ones the widgets draw, which the app leaves in its group (`icons.json`, src/widgets.rs).
 enum Icons {

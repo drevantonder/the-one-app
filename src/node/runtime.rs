@@ -182,11 +182,11 @@ impl Here for Node {
     }
 
     fn client_screens(&self) -> Vec<&'static str> {
-        crate::screen::client_screens().collect()
+        ::ui::screen::client_screens().collect()
     }
 
     fn client_map(&self, screen: &str) -> Option<&'static str> {
-        crate::screen::client_map(screen)
+        ::ui::screen::client_map(screen)
     }
 }
 

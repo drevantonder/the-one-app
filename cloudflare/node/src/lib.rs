@@ -348,11 +348,11 @@ pub fn statements(appends: &str, scopes: &str) -> Result<String, JsError> {
     Ok(Value::Object(out).to_string())
 }
 
-/// An app screen's page (`src/screen.rs`), from what the screen is told (JSON) and the HTML the app wrote, its kit
+/// An app screen's page (`ui/src/screen.rs`), from what the screen is told (JSON) and the HTML the app wrote, its kit
 /// `linked` or not.
 #[wasm_bindgen]
 pub fn screen(context: &str, body: &str, linked: bool) -> Result<String, JsError> {
-    Ok(one::screen::page(&serde_json::from_str(context)?, body, linked))
+    Ok(ui::screen::page(&serde_json::from_str(context)?, body, linked))
 }
 
 /// The custom build this node is: `{ name, cli, port, made_here }`, and the name a call gives for this node (`cloudflare`).

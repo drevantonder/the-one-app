@@ -10,7 +10,7 @@ pub const LISTED: usize = 20;
 /// What a fingerprint's `status` is when something broke, which is all that's listed unless other's asked for.
 pub const ERROR: &str = "error";
 /// A histogram's bucket bounds, OTEL's defaults and, for what's over them all, a minute to draw it as. The same as the
-/// screen's (`src/screen/settings/quantile.js`), held to it by tests/contracts.rs.
+/// screen's (`insights/screens/quantile.js`), held to it by tests/contracts.rs.
 pub const BOUNDS: [f64; 16] = [0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0, 5000.0, 7500.0, 10000.0, 60000.0];
 
 /// The last bound a duration is counted under: a quantile past it is only known to be over it.

@@ -111,7 +111,7 @@ fn launcher(app: &tauri::App) -> Result<(), String> {
     let data = app.path().data_dir().map_err(|e| e.to_string())?;
     let icon = data.join("icons/hicolor/1024x1024/apps").join(format!("{id}.png"));
     std::fs::create_dir_all(icon.parent().unwrap()).map_err(|e| e.to_string())?;
-    if let Some(bytes) = one::web::files().into_iter().find_map(|(path, bytes)| (path == "icon.png").then_some(bytes)) {
+    if let Some(bytes) = ui::web::files().into_iter().find_map(|(path, bytes)| (path == "icon.png").then_some(bytes)) {
         std::fs::write(&icon, bytes).map_err(|e| e.to_string())?;
     }
     let entry = format!(

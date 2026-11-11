@@ -42,7 +42,7 @@ pub(crate) fn choose(dir: &Path, build: Option<&Path>, ui: Option<&Path>) -> Res
 /// one: they're read as they start, and so a change since needs no restart (the Workers' own code does).
 pub(crate) fn read_pages_again(dir: &Path) -> Result<()> {
     let Some(ui) = Throwaway::ui_in(dir) else { return Ok(()) };
-    one::ui_folder::read_from(&ui);
+    ui::ui_folder::read_from(&ui);
     one::cloudflare::write_web(&Settings::load_in(dir)?)
 }
 

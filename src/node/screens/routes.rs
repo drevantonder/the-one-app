@@ -34,7 +34,7 @@ async fn screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap
 
 /// A screen's page, named by its content but for its nonce (its ETag).
 fn page(headers: &axum::http::HeaderMap, html: String) -> Response {
-    let tag = crate::screen::tag(&html);
+    let tag = ::ui::screen::tag(&html);
     tagged(headers, tag, axum::response::Html(html))
 }
 

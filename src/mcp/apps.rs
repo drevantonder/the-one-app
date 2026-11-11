@@ -27,14 +27,9 @@ pub fn read(uri: &str) -> Result<Value, Value> {
     if uri != view_uri() {
         return Err(json!({ "code": -32002, "message": format!("no resource {uri}") }));
     }
-    // @one/ui, the bridge and what web pages draw for screens, as the web client has them (src/screen/).
+    // @one/ui, the bridge and what web pages draw for screens, as the web client has them (ui/).
     let mut view = include_str!("view.html").to_string();
-    for (name, text) in [
-        ("ui.css", crate::ui_folder::text("src/screen/ui/dist/ui.css", include_str!("../screen/ui/dist/ui.css"))),
-        ("bridge.js", crate::ui_folder::text("src/screen/bridge.js", include_str!("../screen/bridge.js"))),
-        ("host.js", crate::ui_folder::text("src/screen/host.js", include_str!("../screen/host.js"))),
-        ("ui.js", crate::ui_folder::text("src/screen/ui/dist/ui.js", include_str!("../screen/ui/dist/ui.js"))),
-    ] {
+    for (name, text) in [("ui.css", ::ui::screen::ui_css()), ("bridge.js", ::ui::screen::bridge()), ("host.js", ::ui::screen::host()), ("ui.js", ::ui::screen::ui_js())] {
         view = view.replacen(&format!("/*{name}*/"), &text, 1);
     }
     // A screen's `one.copy` writes to the clipboard, which the chat's frame lets it only if asked.
@@ -225,7 +220,7 @@ fn changes(node: &Client, input: &Value) -> anyhow::Result<Value> {
 }
 
 fn icons(input: &Value) -> anyhow::Result<Value> {
-    static ALL: std::sync::LazyLock<serde_json::Map<String, Value>> = std::sync::LazyLock::new(|| serde_json::from_slice(crate::screen::ICONS).unwrap_or_default());
+    static ALL: std::sync::LazyLock<serde_json::Map<String, Value>> = std::sync::LazyLock::new(|| serde_json::from_slice(::ui::screen::ICONS).unwrap_or_default());
     let paths: serde_json::Map<String, Value> =
         input["names"].as_array().into_iter().flatten().filter_map(Value::as_str).take(500).map(|n| (n.to_string(), ALL.get(n).cloned().unwrap_or_else(|| "".into()))).collect();
     Ok(json!({ "content": [{ "type": "text", "text": format!("{} icons.", paths.len()) }], "structuredContent": { "paths": paths } }))

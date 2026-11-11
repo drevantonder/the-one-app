@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use one::web::bundle::{self, Bundle};
+use ui::bundle::{self, Bundle};
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
 use tauri::{Assets, Manager, Wry};
 
@@ -95,7 +95,7 @@ fn built_in() -> u64 {
 
 /// Whether this app should run `b`: newer than the copy built into it, and a shell it has.
 fn takes(b: &Bundle) -> bool {
-    b.committed > built_in() && b.shell <= one::web::SHELL
+    b.committed > built_in() && b.shell <= ui::web::SHELL
 }
 
 /// The newest bundle kept here this app can run, or none for the built-in, and how much of a shell the newest needed if
@@ -241,7 +241,7 @@ fn fetched(data: &Path, address: &str) -> Result<(), String> {
         return Err("refused a bundle whose commit isn't one".into());
     }
     keep(data, &bytes, &b)?;
-    if b.shell > one::web::SHELL {
+    if b.shell > ui::web::SHELL {
         device_logs::say(&format!("web: bundle {} needs a newer app (shell {})", b.commit, b.shell));
         keep_behind(data, Some(b.shell));
         return Ok(());

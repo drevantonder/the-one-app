@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <!-- The MCP Apps view `one mcp` serves (src/mcp/apps.rs): widgets drawn from their trees by @one/ui's WidgetCard, as
      the pages draw them, and apps' screens, each in a sandboxed frame whose bridge this page answers through the chat
-     client, as the web client answers it, with @one/ui's menus, alerts and sheets (src/screen/host.js).
+     client, as the web client answers it, with @one/ui's menus, alerts and sheets (ui/host.js).
      src/mcp/apps.rs writes those files in. -->
 <style>/*ui.css*/</style>
 <style>
@@ -234,7 +234,7 @@
     }));
 
   // An app's screen, in a sandboxed frame of its own, so it reaches nothing here and acts only as its app, through
-  // its bridge (src/screen/bridge.js): `sheet` when it's in one.
+  // its bridge (ui/bridge.js): `sheet` when it's in one.
   function mount(s, sheet) {
     // Its height is what it draws, not the frame's, so an empty page says it's empty.
     const shim = `<script>new ResizeObserver(() => parent.postMessage({ oneHeight: Math.ceil(document.documentElement.getBoundingClientRect().height) }, "*")).observe(document.documentElement);<\/script>`;
@@ -278,7 +278,7 @@
   }
 
   // The bridge's messages from a screen's frame, each acting as the screen's app, answered as the web client answers
-  // them (src/screen/host.js).
+  // them (ui/host.js).
   async function fromScreen(screen, m) {
     if (!screen) return;
     const { s, frame } = screen;

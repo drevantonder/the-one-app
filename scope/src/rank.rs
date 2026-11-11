@@ -3,7 +3,7 @@
 //! or by default 1, and the Cloudflare node always last. Calls, services' functions and new agent devices go to the
 //! lowest number that can run them, is up and has room; devices on the same number are equal, and the quickest
 //! runs it; a nearer one only when every one before it is far. Pure: settings in, priorities out; `src/node/calls.rs`,
-//! `cloudflare/node/` and every client (`onet/src/device.rs`, `cloudflare/web/browser.js`) order by it, and the app
+//! `cloudflare/node/` and every client (`onet/src/device.rs`, `ui/web/browser.js`) order by it, and the app
 //! runtime and onet try devices in `order`'s.
 
 use std::collections::BTreeMap;
