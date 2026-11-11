@@ -5,7 +5,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 
 ## The network
 
-- **Network**: one user's or one workplace's whole: its users, their devices and nodes, their apps, its bucket, and
+- **Network**: one user's or one workplace's whole: its users, their devices, their apps, its bucket, and
   the pieces at its address on Cloudflare. A key belongs to one network forever, and networks never talk to each other.
   Users see "your One App network", or a custom build's, "the Acme App network". Avoid: install.
 - **Demo**: a build's real screens answered from a recording of sample data, on the device, with no network, for a store's
@@ -31,10 +31,11 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 ## Machines
 
 - **Device**: a machine a user owns (a phone or a computer), a browser they signed in on, or a remote MCP client's
-  place in the remote MCP server, listed as theirs, with one key. A computer's key is its onet's, and its clients are
-  views of it; it's a node too, with an app runtime of its own. A phone, a browser and a remote MCP client's device are
-  only a client. A browser's sign-in is its device: nothing ties it to the computer it's on, so it's never part of that
-  computer's. The Cloudflare node is not a device.
+  place in the remote MCP server, listed as theirs, with one key. A **computer** (Mac, Windows, Linux) is a device
+  whose key is its onet's and whose clients are views of it, and which runs oned, an app runtime of its own and the
+  services switched on there. A phone, a browser and a remote MCP client's device are only a client. A browser's
+  sign-in is its device: nothing ties it to the computer it's on, so it's never part of that computer's. oned on
+  Cloudflare is not a device. Avoid: node.
 - **Onboarding**: what someone sees on a device before they're in the network, first time or coming back: the first
   screen, proving who they are, waiting for someone to say yes, and starting. Our word for the journey and
   for its folder (`onboarding/`); users see Sign In, Join and Waiting for Approval.
@@ -48,25 +49,25 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **UI** (`@one/ui`, `ui/`): what every screen is drawn with (React and shadcn's components in one theme, `ui/kit`), and
   the frame around them every client shows the same: the pages, Accounts, Settings' frame, the bridge a screen calls
   (`one`), and the web client. A feature's own Settings screens are in its folder (`<feature>/screens/`), drawn with it.
-- **onet**: being built (ARCHITECTURE.md, Designed): the entry point into the network, the same on every device. Its library is the `onet` crate (`onet/`) today; on a computer it's `<cli>t` (`onet/src/computer/`), which oned starts, holding the device's key, of which the desktop app's window, the CLI and the local MCP server are views.
-- **oned**: the small program, and the spec it follows, that makes a machine a node: it connects the machine to the
-  network (on a computer, by starting its onet), and installs and runs what the node's owner switches on there (the app
-  runtime, services). It never changes build by itself: `one update` replaces it and has it exit. It holds no key, runs nothing itself, and stays small. It has a version for each platform it runs on: computers (Mac, Windows, Linux) and
+- **onet**: the entry point into the network, the same on every device: its identity, who's who, connecting to the
+  best device, opening keys, answering the API, and the store of what it last read. Its library is the `onet` crate
+  (`onet/`): built into the phone app (`onet/ffi/`), in a browser's shared worker (`onet/web/`), in a Worker for each
+  outside program (`onet/worker/`), and on a computer `<cli>t` (`onet/src/computer/`), which oned starts, holding the
+  device's key, of which the desktop app's window, the CLI and the local MCP server are views.
+- **oned**: the small program, and the spec it follows, that starts and manages what runs on a computer and on
+  Cloudflare: on a computer it starts its onet and its app runtime, and installs and runs the services the computer's
+  owner switches on there, asking its onet which. It never changes build by itself: `one update` replaces it and has it exit. It holds no key, runs nothing itself, and stays small. It has a version for each platform it runs on: computers (Mac, Windows, Linux) and
   Cloudflare, and perhaps Android one day.
-- **Node**: one place oned runs: a computer's node, or the Cloudflare node. It holds no keys, except for app schedules
-  and the Vault, where a user chose that node, and a computer's node that is also its user's device, whose app runtime opens
-  that user's scopes with what the device's key opens. A phone is a device and not a node; the Cloudflare node is a node and
-  not a device; a computer can be both. Avoid "node" for the app runtime. Avoid: serverless node.
 - **Device logs**: what a device's programs and services print, kept on that device and read with `one logs <device>`.
   Not Insights: they stay on the device until asked for, and only the device's user and the network's admins read them.
 - **Platform**: what a client or oned is built for: Mac, Windows, Linux, iPhone, Android, a browser, Cloudflare.
-- **Endpoint**: an iroh identity, of its own key. Each client and node is one; the relay lets in only the network's.
-- **Network message**: what one node tells another directly over iroh, on a connection opened to say it and closed
+- **Endpoint**: an iroh identity, of its own key. Each client, app runtime and oned on Cloudflare is one; the relay lets in only the network's.
+- **Network message**: what one device tells another directly over iroh, on a connection opened to say it and closed
   a few idle minutes later: `changed` (that something changed), and an ask (a call; what a device runs, when a screen
   shows it; or a service's, which its device's runtime carries to it sealed), whose answer says how loaded the device
   is. A nudge, never trusted for what's true, which the bucket says.
 - **Agent device**: a machine agents use (Linux with a browser, Windows, Android, an iPhone), which the Agent Devices
-  service runs on a user's node. It is not in the network: it has no key there, and is reached only through that
+  service runs on a user's computer. It is not in the network: it has no key there, and is reached only through that
   service.
 
 ## Apps
@@ -77,30 +78,31 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   Groups, Devices, Widgets, Notifications, Device logs, Insights) have tools too, named the same way (`vault_list`), but are not apps: no list of
   apps has them. Avoid: worker, connector, operation (for a tool).
 - **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
-  linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,
+  linked phone, run a local model), run on one of the computers of whoever added the app, which they choose while adding it,
   as its own process, of its own key, reached only through its device's app runtime, which carries its calls sealed and
-  signed and can't read them. Adding WhatsApp asks which of your nodes runs its service. A service
+  signed and can't read them. Adding WhatsApp asks which of your computers runs its service. A service
   exposes **functions** (`ctx.services.whatsapp.send(…)`), and is its app's alone: only that app calls them, and other
   apps call that app's tools. Built-in apps' services ship with each release. Avoid: part, native component, device
-  service; operation, for a function.
+  service; operation, for a function; node, for the computer it runs on.
 - **Added**: an app recorded as added to a scope, by a user, or for a group or everyone by its admin: the state the
   network should be in. The App Store only records it, like any app could; the core makes it so, deploying the app and
-  running its service on the node the user chose while adding it, and takes it all away when it's removed. Avoid:
+  running its service on the computer the user chose while adding it, and takes it all away when it's removed. Avoid:
   install, uninstall.
 - **Accounts**: the accounts apps sign in to (a Gmail address, a WhatsApp number), listed together in the sidebar.
-- **App runtime**: where apps run on a node, switched on per node: a sandbox with no disk and no keys of its own, where
+- **App runtime**: where apps run, on every computer and in oned on Cloudflare: a sandbox with no disk and no keys of its own, where
   an app reaches only its own databases, its own services, the web, and other apps' tools, through `ctx`. It is our
-  wrapper around workerd (Cloudflare's open-source Workers runtime). A device can have one of its own, an endpoint
-  listed as compute and naming the device, which runs what the device runs. Avoid: node, app service.
-- **Call**: one run of an app's tool, screen or schedule, on one node, with the keys the caller hands it for that call,
+  wrapper around workerd (Cloudflare's open-source Workers runtime). A computer's is a program of its own
+  (`<cli>-apps`, `app-runtime/`), which oned starts: an endpoint listed as compute and naming the device, which runs
+  what the device runs and answers other devices' calls. Avoid: node, app service.
+- **Call**: one run of an app's tool, screen or schedule, in one app runtime, with the keys the caller hands it for that call,
   which expire within the hour.
 - **Deploy**: a version of an app put into a scope. **Built-in apps** are the folders in `apps/` with an `app.js`, shipped with every
   release; every other one is made in the network.
-- **App schedules**: a user choosing a node to keep an app running there, holding that app's keys in that scope, and
+- **App schedules**: a user choosing a device to keep an app running in its app runtime, holding that app's keys in that scope, and
   its Vault's, as a call of the app is handed them (for up to 30 days, and longer as they use it), so its schedules run
   while no one has it open. Avoid: keep, grant, standing
   work.
-- **Vault**: secrets apps use without anyone seeing them: a secret leaves a node only inside a request to one of its
+- **Vault**: secrets apps use without anyone seeing them: a secret leaves an app runtime only inside a request to one of its
   hosts.
 - **AI Gateway**: how apps use AI models (`ctx.ai.run`): hosted ones with keys in the Vault, Workers AI on the
   network's Cloudflare account, or a model on one of the network's devices. It picks where a call runs and whose key
@@ -118,9 +120,9 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   holds its credentials.
 - **Key**: every device has one (a computer's is its onet's), and every app runtime and service its own. Each scope has numbered **epochs** of keys, sealed to the devices
   that may open it and to the **recovery key**, which an admin keeps offline. Its **holders** are users an admin named,
-  who can read everything and restore anyone; it's sealed to their devices that are only clients, never a node or a browser.
+  who can read everything and restore anyone; it's sealed to their devices that are only clients, never a computer, which runs an app runtime, or a browser.
 - **Database**: one SQLite database, kept sealed in the bucket as steps at numbered positions, the bucket deciding their
-  order. A scope has three kinds: **an app's database**, its data and the truth; **the node's database**, how things
+  order. A scope has three kinds: **an app's database**, its data and the truth; **the core's database** (`node` in the bucket), how things
   went (schedules' runs, builds, backups); and **the scope database**, who's who, permissions and keys.
 - **Blob**: bytes a database's step names, kept in the bucket sealed with their scope's key.
 - **Backup**: an encrypted copy of everything in the bucket, kept on a disk or in S3-compatible storage, which a network
@@ -147,4 +149,6 @@ These run on Cloudflare, each named by its job, with no name for them together. 
   logs in as them), one device per program, serving the API at `/api/*` and MCP at `/mcp`. It opens keys, but only while a
   program calls, under that program's own tokens. The **local MCP server** is `one mcp`, which
   agents on a computer start themselves. Avoid: MCP Worker.
-- **Cloudflare node**: oned on Cloudflare. A node like any other.
+- **oned on Cloudflare**: oned's version for Cloudflare, the Worker `<cli>-oned` (`oned/cloudflare/`), which runs an
+  app runtime there: it answers devices' calls over iroh like a computer's, runs apps and no services, and holds no
+  keys but those a call hands it. Not a device. Avoid: node, Cloudflare node.
