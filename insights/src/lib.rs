@@ -618,9 +618,9 @@ impl Sum {
 }
 
 
-/// The network's own program, as a service.
+/// The network's own program, the app runtime, as a service: what Insights names what it does.
 pub fn own() -> &'static str {
-    ::custom_build::config::CLI
+    "app-runtime"
 }
 
 /// What a device has to say, since it last said it.

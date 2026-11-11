@@ -81,7 +81,7 @@ impl Host {
                     Some(named) => named.iter().map(|s| Scope::parse_for(s, &me.user)).collect::<Result<_>>()?,
                 };
                 let m = i.r.db();
-                ensure!(scopes.iter().all(|s| m.runs_for(&remote, s)), "{} doesn't run every scope that call reaches", short(&remote));
+                ensure!(scopes.iter().all(|s| m.runs_for(&remote, s)), "{} doesn't run everything that call reaches for you", m.machine(&m.device_of(&remote))?.map_or_else(|| short(&remote), |d| d.name));
                 Ok(())
             })?;
         }
@@ -98,7 +98,7 @@ impl Host {
         self.with(|i| {
             let m = i.r.db();
             allowed!(scopes.iter().all(|s| m.may(user, "use", &scopes::object(s))), "that call reaches a scope its user may not use");
-            ensure!(!machine || scopes.iter().all(|s| m.runs_for(from, s)), "{} doesn't run every scope that call names", short(from));
+            ensure!(!machine || scopes.iter().all(|s| m.runs_for(from, s)), "{} doesn't run everything that call names for its user", m.machine(&m.device_of(from))?.map_or_else(|| short(from), |d| d.name));
             Ok(())
         })?;
         self.hand_passed(from, user, sealed, &scopes, service)

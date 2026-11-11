@@ -210,6 +210,8 @@ fn steps(trace: &Value, lane: &str, out: &mut Vec<String>) {
                 listed += ms;
                 match result {
                     r if s["here"] == true => out.push(format!("{app}.{runs} on {lane}: {r}{}: {ms} ms", s["why"].as_str().map(|w| format!(" ({w})")).unwrap_or_default())),
+                    // To a service of its own device's, which its runtime carries the call to.
+                    "ran" if to == lane => out.push(format!("{lane} passed {app}.{runs} to its service: {ms} ms")),
                     "ran" => out.push(format!("{lane} passed {app}.{runs} to {to}: {ms} ms")),
                     r => out.push(format!("{lane} tried {to}: {}{}: {ms} ms", r.replace("no answer", "didn't answer"), s["why"].as_str().map(|w| format!(" ({w})")).unwrap_or_default())),
                 }
@@ -230,7 +232,7 @@ fn steps(trace: &Value, lane: &str, out: &mut Vec<String>) {
             }
             "online" if ms >= 5 => {
                 listed += ms;
-                out.push(format!("{lane} waited to be on the relay: {ms} ms"));
+                out.push(format!("{lane} waited to be connected to the network: {ms} ms"));
             }
             "connect" => {
                 listed += ms;

@@ -17,7 +17,7 @@ pub fn commands() -> Command {
             ("devices holders add|remove <user>".into(), "for an admin: name someone as holding the recovery key, or take them off".into()),
             ("devices holders seal [<code>] --recovery-key <file> [--confirm]".into(), "seal the recovery key, from a file or - for stdin, to the device of someone named that shows this code on its own screen (`devices code` there); with no code, says which are waiting".into()),
             ("devices restore <code> [--confirm]".into(), "for someone holding the recovery key: give the device showing this code, on a user who lost every device, their keys; an admin lets it in first".into()),
-            ("devices recovery-key replace --recovery-key <file> --new-key-file <file> [--confirm]".into(), "replace the recovery key, for one that was seen or stolen: a new one is written to the new file (or read from it, to finish a run that stopped), every scope gets new keys, and old holders' copies stop counting; nothing already sealed is deleted".into()),
+            ("devices recovery-key replace --recovery-key <file> --new-key-file <file> [--confirm]".into(), "replace the recovery key, for one that was seen or stolen: a new one is written to the new file (or read from it, to finish a run that stopped), everything everyone, each group and each user has gets new keys, and old holders' copies stop counting; nothing already sealed is deleted".into()),
             ("devices code".into(), "this device's code, for someone sealing it the recovery key or restoring you".into()),
         ],
         run,

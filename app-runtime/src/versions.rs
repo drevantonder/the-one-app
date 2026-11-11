@@ -34,7 +34,12 @@ impl Host {
             let newest = find(&builds, on);
             Some(json!({ "version": commit, "newest": newest.map(|b| &b.commit), "behind": newest.is_some_and(|b| wanted(b, commit, committed)) }))
         };
-        let mut out: serde_json::Map<String, Value> = told.as_object().map(|v| v.iter().filter_map(|(key, version)| Some((key.clone(), of(version.as_str()?, Latest::to_update_to)?))).collect()).unwrap_or_default();
+        // Each by its key, with its name, which is what a person reads.
+        let named = |key: &str, mut it: Value| {
+            it["name"] = json!(::key::unhex(key).map_or_else(|_| key.to_string(), |k| self.name_of(&k)));
+            it
+        };
+        let mut out: serde_json::Map<String, Value> = told.as_object().map(|v| v.iter().filter_map(|(key, version)| Some((key.clone(), named(key, of(version.as_str()?, Latest::to_update_to)?)))).collect()).unwrap_or_default();
         let part = |of_what: &str, find: Find| workers[of_what].as_str().and_then(|v| of(v, find));
         if let (Some(sources), Some(web)) = (part("workers", Latest::get), part("web", Latest::get)) {
             let from = workers["from"].as_str().and_then(|k| ::key::unhex(k).ok());

@@ -1032,6 +1032,10 @@ fn prepare(host: &Host, i: &Network, req: &CallRequest, me: &Caller, title: &str
         }
     };
     if reach.is_empty() {
+        // One that doesn't open the caller's own page can't say the app isn't on it: that's another device's to run.
+        if !i.r.holds(&Scope::User(me.user.clone())) {
+            return Ok(Err("it doesn't run your things".into()));
+        }
         bail!(custom_build::protocol::Coded::new(custom_build::protocol::code::NOT_ADDED, format!("{title} isn't on your pages: add it first")));
     }
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {

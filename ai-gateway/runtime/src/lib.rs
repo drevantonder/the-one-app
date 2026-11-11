@@ -152,7 +152,7 @@ impl Host for Call<'_> {
     }
 
     fn record(&self, span: Span) {
-        insights_runtime::record_gen_ai(self.rt, self.trace, self.app.unwrap_or(insights::own()), &self.caller.user, span);
+        insights_runtime::record_gen_ai(self.rt, self.trace, self.app.unwrap_or(ai_gateway::NAME), &self.caller.user, span);
     }
 
     fn now(&self) -> u64 {

@@ -577,7 +577,7 @@ impl Host {
     /// A connection to `to`: the one open, or a new one (`fresh`, or if that one closed). A `NotThere` if it can't
     /// be reached.
     async fn conn(&self, to: &Key, fresh: bool) -> Result<Connection> {
-        let (address, endpoint) = self.0.net.endpoint.lock().unwrap().clone().ok_or_else(|| NotThere(format!("this device isn't connected to {YOURS}'s relay")))?;
+        let (address, endpoint) = self.0.net.endpoint.lock().unwrap().clone().ok_or_else(|| NotThere(format!("this device isn't connected to {YOURS} right now: check it's on the internet")))?;
         let slot = self.conn_slot(to);
         let mut held = slot.lock().await;
         if let Some(conn) = held.as_ref().filter(|c| !fresh && c.close_reason().is_none()) {
@@ -592,7 +592,7 @@ impl Host {
         // Off the relay, a device is reached only on a connection it opened: one just started waits to be on it.
         let waiting = std::time::Instant::now();
         if tokio::time::timeout(CONNECT, endpoint.online()).await.is_err() {
-            bail!(NotThere(format!("this device isn't connected to {YOURS}'s relay")));
+            bail!(NotThere(format!("this device isn't connected to {YOURS} right now: check it's on the internet")));
         }
         trace::note(json!({ "step": "online" }), waiting.elapsed());
         let (url, _) = relay(&address, None)?;

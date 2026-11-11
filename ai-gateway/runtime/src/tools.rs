@@ -17,7 +17,7 @@ async fn run(rt: Rt, me: Caller, mut input: Map<String, Value>) -> Result<Value>
     let current = api::trace::current();
     let call = Call::new(&rt, &me, None, Vec::new(), current.as_ref());
     let retry_key = input.remove("retry_key").and_then(|k| k.as_str().map(str::to_string));
-    ai_gateway::run(&call, insights::own(), Value::Object(input), retry_key.as_deref()).await.map_err(coded)
+    ai_gateway::run(&call, ai_gateway::NAME, Value::Object(input), retry_key.as_deref()).await.map_err(coded)
 }
 
 async fn models(rt: Rt, me: Caller, _: Map<String, Value>) -> Result<Value> {

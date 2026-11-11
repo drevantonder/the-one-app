@@ -52,7 +52,8 @@ fn tools() -> Vec<serde_json::Value> {
                 "name": "versions", "title": "Each device's version", "reads": true,
                 "description": "Which version each device is on, as it last told the network, and whether a newer one is published for it; and Cloudflare, under `cloudflare`.",
                 "input": { "type": "object", "properties": {} },
-                "output": { "type": "object", "additionalProperties": { "type": "object", "properties": {
+                "output": { "type": "object", "description": "each device by its key", "additionalProperties": { "type": "object", "properties": {
+                    "name": { "type": "string", "description": "the device's name" },
                     "version": { "type": "string" }, "newest": { "type": ["string", "null"], "description": "the newest published for what it runs on, if any" },
                     "behind": { "type": "boolean", "description": "a newer version is published for it" },
                     "node": { "type": ["string", "null"], "description": "Cloudflare's: the version its node runs, which follows the device it is deployed from" },

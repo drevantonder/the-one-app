@@ -28,11 +28,11 @@ function places(ctx) {
 function placeOf(ctx, given) {
   const want = String(given || "").trim();
   const p = places(ctx).find((p) => [p.scope, p.id].includes(want) || p.name.toLowerCase() === want.toLowerCase());
-  if (!p) throw refusal(`no place ${want}: give user (you), global (everyone) or a group by its name (${places(ctx).filter((p) => p.id.startsWith("group:")).map((p) => p.name).join(", ") || "you're in no group"})`);
+  if (!p) throw refusal(`no place ${want}: give you, everyone or a group by its name (${places(ctx).filter((p) => p.id.startsWith("group:")).map((p) => p.name).join(", ") || "you're in no group"})`);
   return p.scope;
 }
 
-const placeInput = { type: "string", description: "user (you), global (everyone) or a group's name" };
+const placeInput = { type: "string", description: "you, everyone, or a group by its name" };
 
 /// Whether the caller acts for an owner (an app's, a device's): it's theirs, a group's they're an admin of, or admins'
 /// or the network's and they're an admin.
@@ -162,7 +162,7 @@ export default {
         if (gone) return apps.length ? [...apps.map(line), "", "apps_restore brings back one you own; apps_erase deletes it for good."].join("\n") : "Nothing is in Recently Deleted.";
         return [
           ...apps.map(line), "",
-          `You may add apps for: ${places(ctx).filter((p) => p.may).map((p) => p.scope === "user" ? "user (you)" : p.scope === "global" ? "global (everyone)" : p.name).join(", ")}.`,
+          `You may add apps for: ${places(ctx).filter((p) => p.may).map((p) => p.name).join(", ")}.`,
           ...(deleted ? [`${deleted} deleted ${deleted === 1 ? "app is" : "apps are"} in Recently Deleted: apps_list with deleted true lists them.`] : []),
         ].join("\n");
       },

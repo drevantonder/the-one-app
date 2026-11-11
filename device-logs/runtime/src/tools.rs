@@ -24,7 +24,11 @@ async fn logs(rt: Rt, me: Caller, mut input: Map<String, Value>) -> Result<Value
     let (shown, matched) = (r["shown"].as_u64().unwrap_or(0), r["matched"].as_u64().unwrap_or(0));
     let note = if shown == 0 {
         let from = r["oldest"].as_u64().map(|ms| format!("; its log goes back to {}", say_time(ms))).unwrap_or_default();
-        Some(format!("{device}'s {} log has no lines like that{from}.", r["log"].as_str().unwrap_or("node")))
+        let log = match r["log"].as_str() {
+            Some(service) if service != device_logs::NODE => format!("{service} log"),
+            _ => "log".to_string(),
+        };
+        Some(format!("{device}'s {log} has no lines like that{from}."))
     } else if matched > shown {
         Some(format!("{shown} of the {matched} lines that match, the newest: narrow it with since or grep."))
     } else {
