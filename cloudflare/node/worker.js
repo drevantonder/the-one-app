@@ -1142,7 +1142,7 @@ async function route(p, request) {
   refuse(503, `That needs one of your devices, and ${OFF}.`);
 }
 
-/// A scope's keys as a node gives them (src/node/devices.rs: `sealed_keys`): each epoch sealed to `to` (an endpoint's
+/// A scope's keys as a node gives them (src/node/keys.rs: `sealed_keys`): each epoch sealed to `to` (an endpoint's
 /// key, or `recovery`) → `{ epoch, sealed }`, or an app's key in each epoch → `{ sealed }`, by epoch, base64url. Its
 /// epochs are those sealed to the recovery key, every one of them, numbered from 1.
 async function sealedKeys(bucket, scope, to, app) {

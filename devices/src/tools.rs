@@ -1,6 +1,5 @@
-//! Devices' tools, each its own route (`api::Runs`). They change who can do what, so the caller's client
-//! answers them (`settings::answered`), and each route is only this machine's own programs', whose node answers it as
-//! its own device.
+//! Devices' tools: what each takes and answers. They change who can do what, so the caller's client answers them
+//! (`settings::answered`), and the runtime answers its own programs' as its own device (runtime/).
 
 use serde_json::json;
 
@@ -100,70 +99,4 @@ fn tools() -> Vec<serde_json::Value> {
                 "output": said("the link to give them, and what happens when they open it"),
             }),
     ]
-}
-
-/// What serves each tool, in this runtime.
-#[cfg(feature = "node")]
-pub fn runs() -> ::api::Runs {
-    use crate::node::runtime::node_serves;
-    ::api::Runs {
-        tools: vec![
-            ("requests", node_serves!(serve::requests)),
-            ("approve", node_serves!(serve::approve)),
-            ("remove", node_serves!(serve::remove)),
-            ("versions", node_serves!(serve::versions)),
-            ("update", node_serves!(serve::update)),
-            ("run_schedules", node_serves!(serve::run_schedules)),
-            ("stop_schedules", node_serves!(serve::stop_schedules)),
-            ("invite", node_serves!(serve::invite)),
-        ],
-        ..::api::Runs::named("devices")
-    }
-}
-
-#[cfg(feature = "node")]
-mod serve {
-    use anyhow::Result;
-    use serde_json::{Map, Value};
-
-    use crate::node::Node;
-    use ::api::Caller;
-
-    /// This machine's node answers as its own device (`settings`), signing what changes who can do what.
-    async fn as_mine(node: &Node, path: &str, input: &Map<String, Value>) -> Result<Value> {
-        Ok(node.answer_as_mine("POST", path, &serde_json::to_vec(input)?).await.map_err(|e| e.0)?.0)
-    }
-
-    pub async fn requests(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/api/devices/requests", &input).await
-    }
-
-    /// Lets in the device showing `code`, once the user agreed.
-    pub async fn approve(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/api/devices/approve", &input).await
-    }
-
-    pub async fn remove(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/api/devices/remove", &input).await
-    }
-
-    pub async fn versions(node: Node, _: Caller, _: Map<String, Value>) -> Result<Value> {
-        node.versions().await
-    }
-
-    pub async fn update(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/api/devices/update", &input).await
-    }
-
-    pub async fn run_schedules(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/api/devices/run_schedules", &input).await
-    }
-
-    pub async fn stop_schedules(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/api/devices/stop_schedules", &input).await
-    }
-
-    pub async fn invite(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        as_mine(&node, "/api/devices/invite", &input).await
-    }
 }

@@ -1,6 +1,7 @@
 //! The network's members and settings, as users and their clients see them and change them, and finding them by name.
 
 use super::*;
+use ::custom_build::config::YOURS;
 use ::scope::state::{Answering, ClientHere, DeviceNow, InstalledService, State, Viewer};
 
 impl Node {
@@ -68,7 +69,7 @@ impl Node {
             let m = i.r.db();
             let session = i.said.get(&s.key);
             // The containers on a device are its user's business.
-            let mut load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) };
+            let mut load = if s.key == self.0.id { Some(::devices::load::current()) } else { session.and_then(|s| s.load.clone()) };
             if let Some(l) = &mut load
                 && m.machine(&s.key)?.is_none_or(|d| d.user != *me)
             {
@@ -176,6 +177,11 @@ impl Node {
     }
 
     /// Finds a device or client of the network by name or key prefix.
+    /// The network's address, where users sign in.
+    pub fn address(&self) -> Result<String> {
+        self.with(|i| super::calls::address(i.r.db()))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))
+    }
+
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         self.with(|i| i.r.db().find_machine(name))
     }

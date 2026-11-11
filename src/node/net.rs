@@ -313,7 +313,7 @@ impl Node {
                 };
                 // Every answer says how loaded this device is, for the asker's routing: no device says so unasked.
                 if let Value::Object(said) = &mut answer {
-                    said.insert("load".into(), json!(crate::load::current()));
+                    said.insert("load".into(), json!(::devices::load::current()));
                     said.insert("updating".into(), json!(node.updating()));
                 }
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {

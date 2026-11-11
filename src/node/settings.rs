@@ -157,7 +157,60 @@ pub(crate) fn routes() -> crate::api::Routes {
         let answer = move |axum::extract::State(node): axum::extract::State<Node>, body: axum::body::Bytes| async move { node.answer_as_mine(method, path, &body).await };
         routes = routes.route(path, ::api::Who::ThisMachine, axum::routing::on(filter, answer));
     }
+    use ::api::Who;
+    use axum::routing::post;
     routes
+        .route("/api/pair", Who::Clients, post(own::pair))
+        .route("/api/name", Who::ThisMachine, post(own::name))
+        .route("/api/devices/approve-with-recovery", Who::ThisMachine, post(own::approve_with_recovery))
+        .route("/api/devices/recovery-key/replace", Who::ThisMachine, post(own::replace_recovery))
+        .route("/api/devices/recovery-holders/seal", Who::ThisMachine, post(own::seal_recovery))
+}
+
+/// Devices' routes this machine signs as its own device (`::devices::says`): pairing a machine, its own name, and letting
+/// one in with the network's recovery key, which the command on this computer read (`devices::cli`).
+mod own {
+    use axum::Json;
+    use axum::extract::State;
+    use serde::Deserialize;
+    use serde_json::json;
+
+    use ::api::{Body, Me, Reply, done, given};
+    use ::devices::says::{ApproveWithRecovery, Pair, ReplaceRecovery, SealRecovery, recovery_key};
+
+    use crate::node::Node;
+
+    pub async fn pair(State(node): State<Node>, me: Me, Body(body): Body<Pair>) -> Reply {
+        let (code, user) = node.pair_as(&me.caller, body.user.as_deref())?;
+        Ok(Json(json!({ "code": code, "user": user })))
+    }
+
+    /// Renames this device, for this machine's own programs: another is renamed as any device's user does
+    /// (`settings::answer`).
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Name {
+        name: String,
+    }
+
+    pub async fn name(State(node): State<Node>, Body(body): Body<Name>) -> Reply {
+        node.rename_device(given(&body.name, "name")?).await?;
+        done()
+    }
+
+    pub async fn approve_with_recovery(State(node): State<Node>, Body(body): Body<ApproveWithRecovery>) -> Reply {
+        let key = recovery_key(&body.recovery, "a recovery key")?;
+        Ok(Json(::scope::settings::recovery::approve(&node, given(&body.code, "code")?, &key, body.confirm).await?))
+    }
+
+    pub async fn replace_recovery(State(node): State<Node>, Body(body): Body<ReplaceRecovery>) -> Reply {
+        Ok(Json(::scope::settings::recovery::replace(&node, &recovery_key(&body.recovery, "a recovery key")?, &recovery_key(&body.next, "the next recovery key")?, body.confirm).await?))
+    }
+
+    pub async fn seal_recovery(State(node): State<Node>, Body(body): Body<SealRecovery>) -> Reply {
+        ::scope::settings::recovery::seal(&node, given(&body.to, "to")?, given(&body.copy, "copy")?).await?;
+        done()
+    }
 }
 
 impl Node {

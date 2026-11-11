@@ -13,8 +13,6 @@ pub mod apps;
 pub mod backups;
 #[path = "node/blobs/says.rs"]
 pub mod blobs;
-#[path = "node/devices/says.rs"]
-pub mod devices;
 #[path = "insights/says.rs"]
 pub mod insights;
 #[path = "node/screens/says.rs"]
@@ -22,5 +20,5 @@ pub mod screens;
 
 /// Every route that says what it is.
 pub fn listed() -> Vec<Said> {
-    [api::listed(), apps::listed(), backups::listed(), blobs::listed(), devices::listed(), insights::listed(), screens::listed(), ::vault::says::listed(), ::widgets::says::listed()].into_iter().flatten().collect()
+    [api::listed(), apps::listed(), backups::listed(), blobs::listed(), ::devices::says::listed(), insights::listed(), screens::listed(), ::vault::says::listed(), ::widgets::says::listed()].into_iter().flatten().collect()
 }

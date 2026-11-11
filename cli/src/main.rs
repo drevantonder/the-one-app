@@ -23,7 +23,7 @@ fn commands() -> Vec<Command> {
         network::commands(),
         groups::cli::commands(),
         one::backups::cli::commands(),
-        one::devices::cli::commands(),
+        devices::cli::commands(),
         apps::cli::commands(),
         vault::cli::commands(),
         one::cloudflare::cli::commands(),

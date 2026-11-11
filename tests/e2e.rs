@@ -406,9 +406,9 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     for file in &files {
         std::fs::write(file, b"anyone can make this").unwrap();
     }
-    assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "a fake isn't counted");
+    assert_eq!(devices_runtime::recovery_holders(&a.rt(), &me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "a fake isn't counted");
     ::scope::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.unwrap();
-    let listed = a.recovery_holders(&me).await.unwrap();
+    let listed = devices_runtime::recovery_holders(&a.rt(), &me).await.unwrap();
     assert_eq!(listed["holders"][0]["devices"][0]["holds"], true, "{listed}");
     assert_eq!(listed["holders"][0]["devices"].as_array().unwrap().len(), 1, "only the phone: {listed}");
     assert!(::scope::settings::recovery::seal(&a, &to, &sealed_for(&phone)).await.is_err(), "the one there stays");
@@ -422,7 +422,7 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     name(false).await;
     let laptop = new_device("linux").await;
     assert!(::scope::settings::recovery::seal(&a, &hex(&laptop.verifying_key().to_bytes()), &sealed_for(&laptop)).await.is_err(), "taken off, none of their devices is sealed it");
-    assert!(a.recovery_holders(&me).await.unwrap()["holders"].as_array().unwrap().is_empty());
+    assert!(devices_runtime::recovery_holders(&a.rt(), &me).await.unwrap()["holders"].as_array().unwrap().is_empty());
 }
 
 /// Someone who lost every device: a holder's own copy of the recovery key gives their new device their own scope's keys,
@@ -490,7 +490,7 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     ::scope::settings::approve(&a, &asked, &::scope::settings::Joining::Own { proved: true }).await.unwrap();
     ::scope::settings::answer(&a, "POST", "/api/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
     ::scope::settings::recovery::seal(&a, &hex(&e.key), &B64U.encode(&::key::held_copy(&old, &hex(&e.key), &seal_to(&e.seal, &old_secret).unwrap()))).await.unwrap();
-    assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], true);
+    assert_eq!(devices_runtime::recovery_holders(&a.rt(), &me).await.unwrap()["holders"][0]["devices"][0]["holds"], true);
 
     let own = ::scope::scopes::Scope::User(me.user.clone());
     vault_runtime::set_item(&a.rt(), &me, &own, json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
@@ -524,7 +524,7 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     let vault = std::fs::read(file_at(&::database::keys::vault_key_name(&own.to_string(), 2, "recovery")).expect("the Vault has new keys")).unwrap();
     assert!(opened(&vault, &new_secret).is_some() && opened(&vault, &seal_secret(&old)).is_none(), "under the new key only");
 
-    assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "old holders' copies stop counting");
+    assert_eq!(devices_runtime::recovery_holders(&a.rt(), &me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "old holders' copies stop counting");
     assert!(walk(&dir).into_iter().any(|p| p.to_string_lossy().contains(&format!("/_recovery/{}/", hex(&old.verifying_key().to_bytes())))), "and nothing sealed was deleted");
 
     let again = ::scope::settings::recovery::replace(&a, &old, &new, true).await.unwrap();

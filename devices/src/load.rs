@@ -1,3 +1,6 @@
+//! How loaded this machine is: memory, CPU, GPU, disk, and the containers it hosts, as `GET /api/state` and each answer
+//! to another device say it, sampled by a thread. Device info, like `build`: never an entry.
+
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 

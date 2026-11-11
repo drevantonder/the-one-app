@@ -6,7 +6,7 @@ use ::api::Feature;
 
 /// Every feature's, in the order they're listed.
 pub fn all() -> Vec<Feature> {
-    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), ::vault::tools::feature(), crate::backups::tools::feature(), ::groups::tools::feature(), crate::devices::tools::feature(), ::widgets::tools::feature(), crate::push::tools::feature(), ::device_logs::tools::feature(), crate::insights::tools::feature(), crate::ai_gateway::tools::feature()]
+    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), ::vault::tools::feature(), crate::backups::tools::feature(), ::groups::tools::feature(), ::devices::tools::feature(), ::widgets::tools::feature(), crate::push::tools::feature(), ::device_logs::tools::feature(), crate::insights::tools::feature(), crate::ai_gateway::tools::feature()]
 }
 
 /// The feature with the tool `name` (as MCP names it), and the tool's place in it.

@@ -90,7 +90,7 @@ fn seal(g: &Given, code: Option<&str>) -> Result<()> {
     let file = g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?;
     let secret = key::unhex(&key::recovery_key_in(file)?)?;
     let said = g.node.get("/api/devices/recovery-holders")?;
-    let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
+    let recovery = key::SigningKey::from_bytes(&secret);
     ensure!(said["recovery"].as_str() == Some(key::hex(&recovery.verifying_key().to_bytes()).as_str()), "That file doesn't hold {YOURS}'s recovery key.");
     let mut owed = Vec::new();
     for holder in said["holders"].as_array().into_iter().flatten() {

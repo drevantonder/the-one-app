@@ -324,7 +324,7 @@ async fn sign(onet: &Onet, req: Request) -> Result<Value> {
 
 /// What the network's recovery key does on this computer, signed here as this device (`::scope::settings::recovery`).
 async fn recovery(onet: &Onet, path: &str, req: Request) -> Result<Value> {
-    use one::says::devices::{ApproveWithRecovery, ReplaceRecovery, SealRecovery, recovery_key};
+    use ::devices::says::{ApproveWithRecovery, ReplaceRecovery, SealRecovery, recovery_key};
     use ::scope::settings::recovery;
     let device = onet.device().await?;
     let (keyring, client) = device.reached().await.map_err(|e| anyhow::anyhow!("{e}"))?;

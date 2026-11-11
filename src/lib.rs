@@ -27,13 +27,11 @@ pub mod mcp;
 #[cfg(feature = "node")]
 pub mod tools;
 pub mod core_tools;
-pub mod devices;
 pub mod app;
 #[cfg(feature = "node")]
 pub mod git_wire;
 #[cfg(feature = "node")]
 pub mod watchdog;
-pub mod load;
 pub mod insights;
 #[cfg(not(target_family = "wasm"))]
 pub mod loopback;

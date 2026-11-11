@@ -40,7 +40,7 @@ pub mod blobs;
 pub mod copied;
 mod calls;
 mod databases;
-pub mod devices;
+mod keys;
 mod sync;
 mod net;
 mod versions;
@@ -273,7 +273,7 @@ pub struct Inner {
     broken: Mutex<BTreeMap<String, String>>,
     /// The keys of the apps whose schedules this device runs for their users.
     app_schedules: app_schedules::State,
-    owed: Mutex<devices::Owed>,
+    owed: Mutex<keys::Owed>,
     /// Apps' keys the bucket hadn't, by scope, app and epoch, as of who's who at that position (`Node::sealed_keys`).
     no_app_keys: Mutex<HashMap<(Scope, String, u32), Option<u64>>>,
     issuer_keys: Mutex<settings::IssuerKeys>,
@@ -288,8 +288,6 @@ pub struct Inner {
     unfetched: std::sync::atomic::AtomicBool,
     /// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, while this node serves it there (`api::serve_guide`).
     guide: Mutex<Option<String>>,
-    /// Whether it was asked to erase what this device keeps, which its oned does (`oned::keep_parts`).
-    erasing: std::sync::atomic::AtomicBool,
     /// What its features keep (`runtime::features`).
     kept: runtime::Kept,
 }
@@ -422,7 +420,6 @@ impl Node {
             unfetched: Default::default(),
             erased: Default::default(),
             guide: Default::default(),
-            erasing: Default::default(),
             kept,
         }));
         let outbound_router = crate::app::outbound::router(node.clone());

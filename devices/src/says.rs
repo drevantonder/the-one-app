@@ -1,4 +1,4 @@
-//! What the devices' routes say of themselves (src/says.rs).
+//! What the devices' routes say of themselves (`api::says`).
 
 use serde::Deserialize;
 use serde_json::json;

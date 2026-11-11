@@ -1,12 +1,10 @@
-//! Devices' keys and parts: the keys sealed to each (`GET`/`POST /api/keys`, which any of the network's devices may read,
-//! sealed as they are), new keys a scope is owed, a device's services listed as its parts, and erasing what a device
-//! keeps. Letting devices in and taking them out is what this machine signs as its own device (`settings.rs`).
+//! Scopes' keys: those sealed to each device (`GET`/`POST /api/keys`, which any of the network's devices may read,
+//! sealed as they are), new keys a scope is owed, and the relay told of a new recovery key. Letting devices in and
+//! taking them out is what this machine signs as its own device (`settings.rs`).
 
 use ::custom_build::allowed;
-use ::custom_build::config::YOURS;
 use super::*;
 
-pub(crate) mod routes;
 use ::bucket::Bucket;
 use data_encoding::BASE64URL_NOPAD as B64U;
 
@@ -37,16 +35,6 @@ pub(super) struct Owed {
     sealed: BTreeSet<(Owing, u32)>,
     /// Those that weren't, at the last look.
     unsealed: BTreeSet<(Owing, u32)>,
-}
-
-/// Whether `who` may list a device of `user`'s that does `kinds`, as `rules` counts a `device` step: only of someone in
-/// the network now (one removed, or not in it yet, is added with their first device, by an invite's approval); a
-/// client or a service only from their own devices (`add-devices`), a machine that runs calls also by an admin
-/// (`add-machines`), which runs only what that admin's listing may, never their own scope. The rows give the verbs;
-/// which kind of device takes which is its rule's.
-pub(super) fn may_list(db: &ScopeDb, who: &str, user: &str, kinds: &[scopes::Kind]) -> Result<bool> {
-    let theirs = kinds.iter().any(|k| matches!(k, scopes::Kind::Client | scopes::Kind::Service));
-    Ok(db.user(user)?.is_some() && db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::user_principal(user)))
 }
 
 impl Node {
@@ -195,43 +183,6 @@ impl Node {
 }
 
 impl Node {
-    /// Who holds the recovery key, for any user of the network, as who's who says it does and what the bucket has for
-    /// them: `{ recovery, holders: [{ user, name, devices: [{ key, seal, name, holds }] }] }`. A device with `holds` false
-    /// waits for someone with the key to seal it (`devices::cli`).
-    pub async fn recovery_holders(&self, caller: &Caller) -> Result<Value> {
-        ensure!(self.is_user(&caller.user), "only the network's users read who holds its recovery key");
-        let bucket = self.bucket()?;
-        let (recovery, holders) = self.with(|i| {
-            let db = i.r.db();
-            let mut holders = Vec::new();
-            for user in db.recovery_holders()? {
-                let name = db.user(&user)?.map(|u| u.name).unwrap_or_default();
-                holders.push((user.clone(), name, db.recovery_devices(&user)?));
-            }
-            Ok((db.recovery()?.as_ref().map(hex), holders))
-        })?;
-        let mut out = Vec::new();
-        for (user, name, devices) in holders {
-            let mut listed = Vec::new();
-            for d in devices {
-                let holds = match &recovery {
-                    Some(r) => Bucket::get(&bucket, &database::keys::recovery_held_name(r, &hex(&d.key))).await?.is_some_and(|o| key::unhex(r).is_ok_and(|key| key::held_sealed(&key, &hex(&d.key), &o.bytes).is_some())),
-                    None => false,
-                };
-                listed.push(json!({ "key": hex(&d.key), "seal": hex(&d.seal), "name": d.name, "holds": holds }));
-            }
-            out.push(json!({ "user": user, "name": name, "devices": listed }));
-        }
-        Ok(json!({ "recovery": recovery, "holders": out }))
-    }
-}
-
-impl Node {
-    /// The network's address, where users sign in.
-    pub fn address(&self) -> Result<String> {
-        self.with(|i| super::calls::address(i.r.db()))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))
-    }
-
     /// Once the network's recovery key changed, an admin's device tells the relay to let the old one in no more and the
     /// new one in as a client: once each since this device started.
     pub(super) fn follow_recovery(&self) {
@@ -249,45 +200,6 @@ impl Node {
         if done.insert(now) {
             self.tell_relay(json!({ "add": hex(&now), "role": "client", "recovery": true }));
         }
-    }
-
-    /// Lists one of this device's parts, the service `service`, as its user's, a part of this device (oned turned it
-    /// on, and it asked with its key and seal key). It holds no keys: it reads who's who from this device's runtime,
-    /// which says who may ask it. A part listed before it named its device is listed again, naming it.
-    pub async fn list_part(&self, endpoint: &key::Endpoint, service: &str) -> Result<()> {
-        let user = self.user()?;
-        let caller = Caller::own(self.0.id, user.clone());
-        let listed = self.with(|i| {
-            let db = i.r.db();
-            ensure!(db.service(&endpoint.key)?.is_some() || db.machine_ever(&endpoint.key)?.is_none(), "that key is listed already, and not as a service");
-            Ok(db.service(&endpoint.key)?.map(|s| s.device == Some(self.0.holds.device())))
-        })?;
-        if listed != Some(true) {
-            let name = self.device_name();
-            self.member_content(&caller, content::listed_service(endpoint, &user, &name, service, &self.0.holds.device())).await?;
-        }
-        Ok(())
-    }
-
-    /// Erases what this device keeps (by name or key), for its user or an admin asking from one of their own devices,
-    /// directly: asked of another device, it says to ask that one, once it's reached it. Once it has answered, its oned stops its
-    /// parts and deletes its home (its copies of the network's data, the pages it kept, and each service's folder and
-    /// data, WhatsApp's link among them), then stops. Removing it next takes it out. → what's erasing.
-    pub async fn erase(&self, caller: &Caller, device: &str) -> Result<Value> {
-        let key = self.find_machine(device)?;
-        let name = self.with(|i| Ok(i.r.db().machine(&key)?.map(|d| d.name).unwrap_or_default()))?;
-        if key != self.0.id {
-            ensure!(self.reaches(&key).await, "{}, so it can't erase what it keeps. Turn it on and try again.", self.away(&key));
-            return Err(::api::Elsewhere { why: format!("only {name} erases what it keeps"), nodes: vec![hex(&key)] }.into());
-        }
-        self.with(|i| {
-            let db = i.r.db();
-            allowed!(caller.key != self.0.id && db.client(&caller.key)?.is_some() && db.may(&caller.user, "remove", &scopes::device(&key)), "only {name}'s user or an admin erases it, from another of their devices");
-            Ok(())
-        })?;
-        tracing::warn!("asked to erase what {name} keeps: its oned does, then stops");
-        self.0.erasing.store(true, std::sync::atomic::Ordering::SeqCst);
-        Ok(json!({ "erasing": name }))
     }
 
     /// Makes, in the background, each scope's keys that are owed, of what this device's user makes them of: a new

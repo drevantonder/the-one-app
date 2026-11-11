@@ -9,6 +9,24 @@ pub(crate) mod routes;
 pub mod cli;
 
 impl Node {
+    /// Lists one of this device's parts, the service `service`, as its user's, a part of this device (oned turned it
+    /// on, and it asked with its key and seal key). It holds no keys: it reads who's who from this device's runtime,
+    /// which says who may ask it. A part listed before it named its device is listed again, naming it.
+    pub async fn list_part(&self, endpoint: &key::Endpoint, service: &str) -> Result<()> {
+        let user = self.user()?;
+        let caller = Caller::own(self.0.id, user.clone());
+        let listed = self.with(|i| {
+            let db = i.r.db();
+            ensure!(db.service(&endpoint.key)?.is_some() || db.machine_ever(&endpoint.key)?.is_none(), "that key is listed already, and not as a service");
+            Ok(db.service(&endpoint.key)?.map(|s| s.device == Some(self.0.holds.device())))
+        })?;
+        if listed != Some(true) {
+            let name = self.device_name();
+            self.member_content(&caller, content::listed_service(endpoint, &user, &name, service, &self.0.holds.device())).await?;
+        }
+        Ok(())
+    }
+
     /// Asks each of `apps` what it is, so its service is listed as that and not as itself, then says they changed.
     pub(super) fn learn_apps(&self, apps: Vec<String>) {
         let node = self.clone();
@@ -64,7 +82,7 @@ impl Node {
                 device: self.device_name(),
                 on: on.into_iter().map(|((_, name), s)| (name, s.time)).collect(),
                 off: off.into_iter().map(|((_, name), _)| name).collect(),
-                erase: self.0.erasing.load(std::sync::atomic::Ordering::SeqCst),
+                erase: devices_runtime::erasing(&self.rt()),
             })
         })
     }

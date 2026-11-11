@@ -670,7 +670,7 @@ impl Node {
                 services.iter().map(|(k, _)| *k).collect()
             };
             let set = rank::set(&i.r.db().settings()?);
-            let here_load = crate::load::current();
+            let here_load = ::devices::load::current();
             let mut standing = BTreeMap::new();
             for k in &devices {
                 // A service is where its device is, and its load and distance are its device's runtime's, which carries

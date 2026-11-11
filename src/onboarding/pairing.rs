@@ -88,6 +88,16 @@ pub(super) fn load(dir: &Path) -> HashMap<[u8; 16], Pairing> {
         .collect()
 }
 
+/// Whether `who` may list a device of `user`'s that does `kinds`, as `rules` counts a `device` step: only of someone in
+/// the network now (one removed, or not in it yet, is added with their first device, by an invite's approval); a
+/// client or a service only from their own devices (`add-devices`), a machine that runs calls also by an admin
+/// (`add-machines`), which runs only what that admin's listing may, never their own scope. The rows give the verbs;
+/// which kind of device takes which is its rule's.
+pub(super) fn may_list(db: &ScopeDb, who: &str, user: &str, kinds: &[scopes::Kind]) -> Result<bool> {
+    let theirs = kinds.iter().any(|k| matches!(k, scopes::Kind::Client | scopes::Kind::Service));
+    Ok(db.user(user)?.is_some() && db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::user_principal(user)))
+}
+
 impl Node {
     /// Makes a one-time pairing code for another of the local user's machines, which joins as a device.
     pub fn pair(&self) -> Result<String> {
@@ -102,7 +112,7 @@ impl Node {
             let m = i.r.db();
             ensure!(m.compute(&self.0.id)?.is_some(), "this device isn't in {} yet", ::custom_build::config::YOURS);
             let kinds = if user.as_ref().is_none_or(|u| *u == asker.user) { MACHINE } else { &[scopes::Kind::Compute][..] };
-            allowed!(devices::may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds)?, "only admins pair other users' machines");
+            allowed!(may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds)?, "only admins pair other users' machines");
             ensure!(m.serves(&self.0.id, &asker.user)?, "{} doesn't serve you", self.device_name());
             Ok(())
         })?;
