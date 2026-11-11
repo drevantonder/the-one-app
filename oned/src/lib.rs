@@ -387,7 +387,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                     // Its app declares what it may reach, looked at with the builds (and while it's unknown) for one switched
                     // on: a declaration that changed starts it again in its sandbox.
                     if on && declared.get(name).is_none_or(|d| d.is_none()) {
-                        let d = onet.json("POST", "/api/services/declared", Some(&json!({ "name": name }))).map_err(|err| tracing::debug!("{name}'s declaration: {err:#}")).ok();
+                        let d = onet.json("POST", "/api/services/declared", Some(&json!({ "name": name }))).map_err(|err| tracing::debug!("{name}'s declaration: {err:#}")).ok().flatten();
                         declared.insert(name.clone(), d);
                     }
                     let declares = declared.get(name).cloned().flatten();

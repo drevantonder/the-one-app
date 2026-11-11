@@ -88,12 +88,14 @@ async fn name_services_scopes(rt: Rt) -> Result<()> {
     Ok(())
 }
 
-/// What the app `name` this device runs says of its service's wrapper (`service: { network, user }` in its app.js), or
-/// why it can't be read: the app isn't running here, or its deploy says nothing of it.
-pub async fn service_declared(rt: &Rt, name: &str) -> Result<Declared> {
-    let d = rt.describe(name).await.context("its app isn't running on this device")?;
-    ensure!(d["service"].is_object(), "its app doesn't say what its service may reach");
-    Ok(serde_json::from_value(d["service"].clone())?)
+/// What the app `name` this device runs says of its service's wrapper (`service: { network, user }` in its app.js): none
+/// while the app doesn't run here yet, as just after the runtime starts, or when its deploy says nothing of it.
+pub async fn service_declared(rt: &Rt, name: &str) -> Result<Option<Declared>> {
+    if !rt.names().iter().any(|n| n == name) {
+        return Ok(None);
+    }
+    let d = rt.describe(name).await?;
+    Ok(if d["service"].is_object() { Some(serde_json::from_value(d["service"].clone())?) } else { None })
 }
 
 /// Lists one of this device's parts, the service `service`, as its user's, a part of this device (oned turned it on,
