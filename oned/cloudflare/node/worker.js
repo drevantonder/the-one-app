@@ -24,7 +24,7 @@
 // it gets to the asker's user's object, and asks devices for calls for them, its connections living as long as it does.
 // It ends itself once nobody has asked for a while, since iroh's timers would keep it awake, and billed, for good.
 //
-// Bindings: SIGNER (the URL signer), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its endpoint's
+// Bindings: URL_SIGNER (the URL signer), LOADER (Worker Loader), ONED (this Worker's `Oned`), NODE_KEY (its endpoint's
 // key, a secret), RELAY (the relay's `CloudflareNode` entrypoint), LOCATION (where objects are made), ADDRESS (the
 // network's), NAME (its name) and AI (Workers AI, for AI Gateway's calls: `aiRun`). `built.js`, made when it's deployed, is the shim.
 
@@ -70,7 +70,7 @@ const USER = HEADER.user;
 /// How long the keys a request hands are kept, at most: they come again with the next.
 const HANDED_FOR = 3_600_000;
 
-const userOf = (env, user) => env.NODE.get(env.NODE.idFromName(`user:${user}`), near(env));
+const userOf = (env, user) => env.ONED.get(env.ONED.idFromName(`user:${user}`), near(env));
 
 async function bodyOf(request) {
   const text = await textOf(request, BODY_MOST);
@@ -165,7 +165,7 @@ class Bucket {
   /// this build reads of who's who (`READS`), which a write must.
   async sign(fields) {
     const request = signed(this.env.NODE_KEY, URLS, JSON.stringify({ ...fields, reads: READS }), Date.now());
-    const r = await this.env.SIGNER.fetch(`${this.env.ADDRESS}/urls`, { method: "POST", headers: { "content-type": "application/json" }, body: request });
+    const r = await this.env.URL_SIGNER.fetch(`${this.env.ADDRESS}/urls`, { method: "POST", headers: { "content-type": "application/json" }, body: request });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(`the URL signer said: ${out.error || r.status}`), { unanswered: r.status >= 500 });
     return out;
@@ -337,7 +337,7 @@ class User {
   whom(request) {
     const from = JSON.parse(request.headers.get(FROM) || "null");
     const user = request.headers.get(USER) || "";
-    if (!from?.device || !this.env.NODE.idFromName(`user:${user}`).equals(this.ctx.id)) refuse(403, "that request is someone else's");
+    if (!from?.device || !this.env.ONED.idFromName(`user:${user}`).equals(this.ctx.id)) refuse(403, "that request is someone else's");
     this.owner ||= user;
     const who = { hash: from.device, device: from.device, user, clientName: "", until: Math.min(from.until ?? Infinity, Date.now() + HANDED_FOR) };
     const sealed = request.headers.get(HEADER.keys);
@@ -1154,12 +1154,13 @@ export default {
 
 /// A Durable Object of the Cloudflare node: a user's (`user:<id>`), where their requests run, or the node's
 /// endpoint (`node`), which the relay wakes and which asks devices for calls.
-export class Node extends DurableObject {
+export class Oned extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     // The network's root, as auth pins it: a freeze naming any other is never taken for its first.
     if (env.ROOT) pin_root(env.ROOT);
-    this.isEndpoint = ctx.id.equals(env.NODE.idFromName("node"));
+    // "node" names its endpoint's object, which keeps what it held under that name.
+    this.isEndpoint = ctx.id.equals(env.ONED.idFromName("node"));
     /// Datagrams it sent this turn, for the relay; asks running now, and when the last one began or ended.
     this.out = [];
     this.asking = 0;
@@ -1177,7 +1178,7 @@ export class Node extends DurableObject {
   }
 
   endpoint() {
-    return this.env.NODE.get(this.env.NODE.idFromName("node"), near(this.env));
+    return this.env.ONED.get(this.env.ONED.idFromName("node"), near(this.env));
   }
 
   only() {

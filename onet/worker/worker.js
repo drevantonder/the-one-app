@@ -26,7 +26,7 @@
 // takes are onet's keyring (onet/src/keyring.rs, through oned/cloudflare/node/src/clients.rs), which keeps what each
 // tool needed in this object's storage, so a call hands only its own.
 //
-// Bindings: AUTH (auth), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), TELEMETRY, CLIENT
+// Bindings: AUTH (auth), RELAY (the relay's `McpDevices` entrypoint), URL_SIGNER (the URL signer), TELEMETRY, CLIENT
 // (this Worker's `Client`), ADDRESS (the network's), NAME (its name), LOCATION (where objects are made), IDLE (ms,
 // optional).
 
@@ -477,7 +477,7 @@ export class Client extends DurableObject {
   on(me) {
     const { storage } = this.ctx;
     const env = this.env;
-    const to = { "/urls": env.SIGNER, [`${IROH_PATHS.relay}/tell`]: env.RELAY, "/telemetry/write": env.TELEMETRY };
+    const to = { "/urls": env.URL_SIGNER, [`${IROH_PATHS.relay}/tell`]: env.RELAY, "/telemetry/write": env.TELEMETRY };
     return {
       address: origin(env),
       client: "remote-mcp",

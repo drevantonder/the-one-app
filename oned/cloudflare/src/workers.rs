@@ -35,6 +35,17 @@ pub struct Worker {
     bindings: fn(&Settings) -> Vec<Binding>,
     /// When Cloudflare runs it besides, as a cron expression (its `scheduled`): only there, never on one machine.
     cron: Option<&'static str>,
+    /// What it was deployed as before its name changed, if it was.
+    was: Option<Was>,
+}
+
+/// A Worker's name before it changed, and each Durable Object class it had, by its class now. Its first deploy by its
+/// new name takes those objects, and what they keep, from the old Worker (Cloudflare's `transferred_classes`), and the
+/// old Worker goes once the network's Workers are all deployed by their new names (`remove_renamed`).
+#[derive(Clone, Copy)]
+pub struct Was {
+    pub name: &'static str,
+    pub classes: &'static [(&'static str, &'static str)],
 }
 
 /// The network's Workers, in the order they're deployed.
@@ -42,18 +53,20 @@ pub struct Worker {
 /// Auth's Durable Object `Auth` holds every user's passkeys and accounts. The paths under `/api/auth` name the
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer, so they never change.
 pub const WORKERS: &[Worker] = &[
-    Worker { name: "auth", entry: "auth/worker.js", classes: &["Auth"], place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings, cron: None },
-    Worker { name: "relay", entry: "relay/worker.js", classes: &["Relay", "List"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings, cron: None },
-    Worker { name: "signer", entry: "signer/worker.js", classes: &[], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings, cron: None },
-    Worker { name: "mcp", entry: "mcp/worker.js", classes: &["Client"], place: None, own_address: false, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings, cron: None },
-    Worker { name: "telemetry", entry: "telemetry/worker.js", classes: &[], place: None, own_address: true, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *") },
-    Worker { name: "gateway", entry: "gateway/worker.js", classes: &[], place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None },
-    Worker { name: "push", entry: "push/worker.js", classes: &["Push"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: notifications_bindings, cron: None },
+    Worker { name: "auth", entry: "auth/worker.js", classes: &["Auth"], place: Some(|s| (s.auth_url.as_str(), s.ports[0])), own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings, cron: None, was: None },
+    Worker { name: "relay", entry: "relay/worker.js", classes: &["Relay", "List"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings, cron: None, was: None },
+    Worker { name: "url-signer", entry: "url-signer/worker.js", classes: &[], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: url_signer_bindings, cron: None, was: Some(Was { name: "signer", classes: &[] }) },
+    // Its `Client` objects hold each outside program's sealed secret.
+    Worker { name: "onet", entry: "onet/worker.js", classes: &["Client"], place: None, own_address: false, node_build: true, serves_web: false, reads_bucket: true, bindings: onet_bindings, cron: None, was: Some(Was { name: "mcp", classes: &[("Client", "Client")] }) },
+    Worker { name: "telemetry", entry: "telemetry/worker.js", classes: &[], place: None, own_address: true, node_build: false, serves_web: false, reads_bucket: false, bindings: telemetry_bindings, cron: Some("10 * * * *"), was: None },
+    Worker { name: "gateway", entry: "gateway/worker.js", classes: &[], place: Some(|s| (s.address.as_str(), s.ports[1])), own_address: false, node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings, cron: None, was: None },
+    // Its `Notifications` object holds every device's registered address.
+    Worker { name: "notifications", entry: "notifications/worker.js", classes: &["Notifications"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: notifications_bindings, cron: None, was: Some(Was { name: "push", classes: &[("Push", "Notifications")] }) },
 ];
 
-/// The Cloudflare node's Worker (`oned/cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
-/// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
-pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", classes: &["Node"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings, cron: None };
+/// The Cloudflare node's Worker (`oned/cloudflare/node/`), `<cli>-oned`, oned on Cloudflare: no address, and an iroh
+/// endpoint of its own key, which the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
+pub const NODE: Worker = Worker { name: "oned", entry: "oned/worker.js", classes: &["Oned"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings, cron: None, was: Some(Was { name: "node", classes: &[("Node", "Oned")] }) };
 
 /// The Workers traced at 100% (`metadata`), their logs exported too: all but the telemetry Worker and the Cloudflare node.
 /// The web client is the gateway's assets.
@@ -668,7 +681,7 @@ fn secret(name: &str, value: impl Into<String>) -> Binding {
 /// The gateway holds no secrets.
 fn gateway_bindings(_: &Settings) -> Vec<Binding> {
     let named = [("NAME", custom_build::config::NAME), ("YOURS", custom_build::config::YOURS), ("CLI", custom_build::config::CLI)].map(|(n, v)| plain(n, v));
-    let bound = [("AUTH", "auth"), ("IROH", "relay"), ("SIGNER", "signer"), ("MCP", "mcp"), ("PUSH", "push"), ("TELEMETRY", "telemetry")].map(|(n, s)| plain(n, format!("service:{s}")));
+    let bound = [("AUTH", "auth"), ("IROH", "relay"), ("URL_SIGNER", "url-signer"), ("ONET", "onet"), ("NOTIFICATIONS", "notifications"), ("TELEMETRY", "telemetry")].map(|(n, s)| plain(n, format!("service:{s}")));
     bound.into_iter().chain(named).collect()
 }
 
@@ -692,19 +705,19 @@ fn notifications_bindings(settings: &Settings) -> Vec<Binding> {
 /// says to every device.
 fn relay_bindings(settings: &Settings) -> Vec<Binding> {
     let devices = (!settings.devices.is_empty()).then(|| plain("DEVICES", json!(settings.devices).to_string()));
-    let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("NODE", format!("object:{}:{}", NODE.name, NODE.classes[0]))]);
-    let mcp = plain("MCP", format!("object:mcp:{}", Worker::named("mcp").classes[0]));
+    let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("ONED", format!("object:{}:{}", NODE.name, NODE.classes[0]))]);
+    let onet = plain("ONET", format!("object:onet:{}", Worker::named("onet").classes[0]));
     let deployed = settings.deployed.clone().map(|d| plain("DEPLOYED", d));
-    devices.into_iter().chain(node.into_iter().flatten()).chain([mcp, plain("YOURS", custom_build::config::YOURS)]).chain(deployed).chain(location()).collect()
+    devices.into_iter().chain(node.into_iter().flatten()).chain([onet, plain("YOURS", custom_build::config::YOURS)]).chain(deployed).chain(location()).collect()
 }
 
 /// The remote MCP server: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches the
 /// relay only by its entrypoint for them, and reads the bucket through the URL signer as any device does.
-fn mcp_bindings(settings: &Settings) -> Vec<Binding> {
+fn onet_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![
         plain("AUTH", "service:auth"),
         plain("RELAY", "service:relay:McpDevices"),
-        plain("SIGNER", "service:signer"),
+        plain("URL_SIGNER", "service:url-signer"),
         plain("TELEMETRY", "service:telemetry"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", custom_build::config::NAME),
@@ -740,7 +753,7 @@ fn telemetry_bindings(settings: &Settings) -> Vec<Binding> {
 fn node_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![
         plain("AUTH", "service:auth"),
-        plain("SIGNER", "service:signer"),
+        plain("URL_SIGNER", "service:url-signer"),
         plain("TELEMETRY", "service:telemetry"),
         plain("LOADER", "loader:"),
         // Workers AI, for AI Gateway's calls of the apps it runs, paid by the account (oned/cloudflare/node: `ai_run`).
@@ -757,7 +770,7 @@ fn node_bindings(settings: &Settings) -> Vec<Binding> {
 }
 
 /// The URL signer holds only the bucket's credentials, and asks the relay who's allowed.
-fn signer_bindings(settings: &Settings) -> Vec<Binding> {
+fn url_signer_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![plain("RELAY", "service:relay"), plain("YOURS", custom_build::config::YOURS)];
     if let Some(bucket) = &settings.bucket {
         out.push(secret("BUCKET", bucket.to_string()));
@@ -774,7 +787,7 @@ fn auth_bindings(settings: &Settings) -> Vec<Binding> {
         // Whether a request's signer is one of the network's endpoints, and an admin's.
         plain("RELAY", "service:relay"),
         // Notifies a user's devices, by the notifications Worker's entrypoint for the network's own Workers.
-        plain("PUSH", "service:push:Sender"),
+        plain("NOTIFICATIONS", "service:notifications:Sender"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", custom_build::config::NAME),
         plain("YOURS", custom_build::config::YOURS),
@@ -1572,7 +1585,16 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
     }
     let had = migration.and_then(|tag| tag.strip_prefix('v')?.parse::<usize>().ok()).unwrap_or(0);
     if had < worker.classes.len() {
-        meta["migrations"] = json!({ "new_tag": format!("v{}", worker.classes.len()), "new_sqlite_classes": worker.classes[had..] });
+        // A Worker deployed by its new name for the first time, while its old one is there, takes its old one's objects.
+        let taken: Vec<Value> = match worker.was.filter(|was| had == 0 && exists(&worker_name(was.name))) {
+            Some(was) => was.classes.iter().map(|(from, to)| json!({ "from": from, "from_script": worker_name(was.name), "to": to })).collect(),
+            None => Vec::new(),
+        };
+        let new: Vec<&str> = worker.classes[had..].iter().filter(|class| !taken.iter().any(|t| t["to"] == **class)).copied().collect();
+        meta["migrations"] = json!({ "new_tag": format!("v{}", worker.classes.len()), "new_sqlite_classes": new });
+        if !taken.is_empty() {
+            meta["migrations"]["transferred_classes"] = json!(taken);
+        }
         if had > 0 {
             meta["migrations"]["old_tag"] = json!(format!("v{had}"));
         }
@@ -1584,7 +1606,18 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
 /// the web client's files (`web`) as its static assets, which it serves itself. A service whose binding names one not
 /// deployed yet goes up without it, and again once that one is.
 pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &[(String, Vec<u8>)]) -> Result<()> {
-    deploy_some(cf, settings, sources, web, &WORKERS.iter().collect::<Vec<_>>())
+    deploy_some(cf, settings, sources, web, &WORKERS.iter().collect::<Vec<_>>())?;
+    remove_renamed(cf, WORKERS.iter())
+}
+
+/// Removes the Workers `workers` were deployed as before their names changed, once all of them are deployed by their new
+/// names and their objects taken (`Was`): nothing binds the old ones by then.
+pub fn remove_renamed<'a>(cf: &Cloudflare, workers: impl Iterator<Item = &'a Worker>) -> Result<()> {
+    let scripts = cf.scripts()?;
+    for was in workers.filter_map(|w| w.was).filter(|was| scripts.contains_key(&worker_name(was.name))) {
+        cf.delete(&format!("/accounts/{}/workers/scripts/{}", cf.account, worker_name(was.name))).with_context(|| format!("remove the Worker {}, renamed", worker_name(was.name)))?;
+    }
+    Ok(())
 }
 
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &[(String, Vec<u8>)], workers: &[&Worker]) -> Result<()> {
@@ -1678,7 +1711,7 @@ mod observability_tests {
             let o = observed(Worker::named(name));
             assert_eq!((&o["traces"]["enabled"], &o["traces"]["destinations"][0], &o["logs"]["destinations"][0]), (&json!(true), &json!(crate::basin::destination("traces")), &json!(crate::basin::destination("logs"))), "{name}");
         }
-        assert!(TRACED.contains(&"mcp"));
+        assert!(TRACED.contains(&"onet"));
         for worker in [Worker::named("telemetry"), &NODE] {
             let o = observed(worker);
             assert!(o["traces"].is_null() && o["logs"].is_null(), "{}", worker.name);

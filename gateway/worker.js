@@ -26,16 +26,16 @@ const prefixOf = (path, prefixes) => prefixes.find((p) => under(path, [p]));
 export function routeOf(path) {
   const iroh = prefixOf(path, Object.values(IROH_PATHS));
   if (iroh) return { to: "relay", route: iroh };
-  if (path === "/urls") return { to: "signer", route: path };
-  if (path.startsWith(`/${UPDATES}/`)) return { to: "signer", route: `/${UPDATES}/` };
+  if (path === "/urls") return { to: "url-signer", route: path };
+  if (path.startsWith(`/${UPDATES}/`)) return { to: "url-signer", route: `/${UPDATES}/` };
   if (path.startsWith("/notifications/")) return { to: "notifications", route: "/notifications/" };
   if (path.startsWith("/telemetry/")) return { to: "telemetry", route: "/telemetry/" };
   if (GIT.test(path)) return { to: "git", route: "git" };
   const mcp = prefixOf(path, MCP);
-  if (mcp) return { to: "mcp", route: mcp };
+  if (mcp) return { to: "onet", route: mcp };
   const auth = prefixOf(path, AUTH);
   if (auth) return { to: "auth", route: auth };
-  if (path.startsWith("/api/")) return { to: "mcp", route: "/api/" };
+  if (path.startsWith("/api/")) return { to: "onet", route: "/api/" };
   if (path === "/icons") return { to: "web", route: path };
   if (path.startsWith("/onet/")) return { to: "web", route: "/onet/" };
   return { to: "web", route: "/" };
@@ -141,11 +141,11 @@ async function route(request, env) {
   const url = new URL(request.url);
   switch (routeOf(url.pathname).to) {
     case "relay": return env.IROH.fetch(request);
-    case "signer": return env.SIGNER.fetch(request);
-    case "notifications": return env.PUSH.fetch(request);
+    case "url-signer": return env.URL_SIGNER.fetch(request);
+    case "notifications": return env.NOTIFICATIONS.fetch(request);
     case "telemetry": return env.TELEMETRY.fetch(request);
     case "git": return gitWithoutCli(env, url);
-    case "mcp": return env.MCP ? env.MCP.fetch(request) : refusal(503, "this network's MCP isn't set up yet", NOSNIFF);
+    case "onet": return env.ONET ? env.ONET.fetch(request) : refusal(503, "this network's MCP isn't set up yet", NOSNIFF);
     case "auth": return env.AUTH.fetch(request);
     default: return toWeb(request, env, url);
   }

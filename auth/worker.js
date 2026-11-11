@@ -36,12 +36,12 @@
 // any other's (a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
 // which is approved only by a tap.
 //
-// It notifies (`PUSH`, the notifications Worker's entrypoint for the network's own Workers) the user's devices, never the one asking: "<device>
+// It notifies (`NOTIFICATIONS`, the notifications Worker's entrypoint for the network's own Workers) the user's devices, never the one asking: "<device>
 // wants in · <place>", with the action `{ join: <code> }`, as soon as it asks (`WANTS_IN` for the one a device lets in with
 // no tap), or to the network's admins if the user has no device left to ask; and "<device> joined · <place>" once one is approved, opening
 // Settings › Devices. It knows a user's devices as those that
 // asked to join as them here, or said they're theirs as they asked which wait (`devices`), and those that registered
-// with the notifications Worker as theirs, by a request each signed (`PUSH.theirs`): only for whom to notify, since a device
+// with the notifications Worker as theirs, by a request each signed (`NOTIFICATIONS.theirs`): only for whom to notify, since a device
 // opens a note, and acts on its code, only as the network's signed steps say.
 //
 // What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
@@ -790,15 +790,15 @@ export class Auth extends DurableObject {
   /// Sends a note about the request `r` to its user's devices, but the one asking: tapping it opens Settings ›
   /// Devices. Never fails what it's said with.
   async notify(r, note) {
-    if (!this.env.PUSH) return;
+    if (!this.env.NOTIFICATIONS) return;
     const known = this.ctx.storage.sql.exec("select key from devices where user = ? order by at desc limit ?", r.user, NOTIFIED).toArray().map((d) => d.key);
     try {
       // No device registered as theirs (someone new, or who lost every one): an admin answers.
-      const registered = (await answer(this.env.PUSH.theirs(r.user, NOTIFIED))).filter((key) => key !== r.key);
+      const registered = (await answer(this.env.NOTIFICATIONS.theirs(r.user, NOTIFIED))).filter((key) => key !== r.key);
       const admins = registered.length || !this.env.RELAY ? [] : await answer(this.env.RELAY.admins(NOTIFIED));
       const to = [...new Set([...registered, ...known, ...admins])].filter((key) => key !== r.key).slice(0, NOTIFIED);
       const plain = { id: hex16(), app: "settings", screen: "devices", ...note };
-      if (to.length) await this.env.PUSH.send(to.map((key) => ({ to: key, plain })));
+      if (to.length) await this.env.NOTIFICATIONS.send(to.map((key) => ({ to: key, plain })));
     } catch (err) {
       console.error(`notifying of a device asking in: ${err.stack || err}`);
     }

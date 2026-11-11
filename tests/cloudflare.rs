@@ -271,7 +271,7 @@ impl Workers {
         std::fs::write(web.join("index.html"), "<!doctype html><title>The web client</title>").unwrap();
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
         let mut served = cloudflare::served_with(&settings, &web, &ui::ui_folder::cloudflare(), None).unwrap();
-        for s in served.iter_mut().filter(|s| ["signer", "mcp", "push"].contains(&s.name.as_str())) {
+        for s in served.iter_mut().filter(|s| ["url-signer", "onet", "notifications"].contains(&s.name.as_str())) {
             s.outbound = Some("sites".into());
         }
         // `TEST` gives auth and the relay a clock a test moves and the relay a log of what it refused: a network's

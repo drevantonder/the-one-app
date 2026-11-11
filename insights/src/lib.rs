@@ -79,10 +79,10 @@ impl Ended {
 /// The most a batch holds of each, past which what's new is dropped: as many as the telemetry Worker takes at once.
 const MOST_ROWS: usize = 5000;
 /// The Workers read as `worker.<name>` services (`worker_service`): all but the Cloudflare node, which reports as a node.
-pub const WORKERS: [&str; 7] = ["gateway", "auth", "relay", "signer", "push", "mcp", "telemetry"];
+pub const WORKERS: [&str; 7] = ["gateway", "auth", "relay", "url-signer", "notifications", "onet", "telemetry"];
 /// Those whose traces and logs Cloudflare exports, as the telemetry Worker's `TRACED` says: not the telemetry Worker itself,
 /// as an export of what it did would be the next thing it was handed.
-pub const TRACED: [&str; 6] = ["gateway", "auth", "relay", "signer", "push", "mcp"];
+pub const TRACED: [&str; 6] = ["gateway", "auth", "relay", "url-signer", "notifications", "onet"];
 
 /// One of `WORKERS`, as a service.
 pub fn worker_service(worker: &str) -> String {

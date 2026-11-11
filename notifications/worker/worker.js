@@ -42,7 +42,8 @@ const MOST = 64;
 const NOTE_BYTES = 2_600;
 const MINUTE = 60_000;
 
-const push = (env) => env.PUSH.get(env.PUSH.idFromName("push"));
+// "push" names its one object, which keeps what it held under that name.
+const push = (env) => env.NOTIFICATIONS.get(env.NOTIFICATIONS.idFromName("push"));
 
 export default class extends WorkerEntrypoint {
   async fetch(request) {
@@ -79,7 +80,7 @@ function senders(env) {
   return VIAS.filter((via) => ({ apns: env.APNS_KEY, fcm: env.FCM_ACCOUNT, wns: env.WNS_CLIENT_SECRET, webpush: env.VAPID_KEY })[via]);
 }
 
-export class Push extends DurableObject {
+export class Notifications extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     const sql = ctx.storage.sql;

@@ -9,10 +9,10 @@ const WORKERS: [(&str, &str); 9] = [
     ("relay", "relay"),
     ("auth", "auth"),
     ("gateway", "gateway"),
-    ("url-signer", "signer"),
-    ("notifications/worker", "push"),
+    ("url-signer", "url-signer"),
+    ("notifications/worker", "notifications"),
     ("insights/worker", "telemetry"),
-    ("onet/worker", "mcp"),
+    ("onet/worker", "onet"),
     ("ui/web", "web"),
     ("onet/web", "web"),
 ];

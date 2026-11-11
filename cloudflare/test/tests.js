@@ -1,12 +1,12 @@
 // The Workers' own tests, run by `workerd test` (tests/cloudflare.rs runs them with cargo test).
 import { b64u, ed25519Public, random, signedRequest } from "../shared/crypto.js";
 import { READS, URLS } from "../shared/protocol.js";
-import signer from "../signer/worker.js";
+import signer from "../url-signer/worker.js";
 import { presign } from "../shared/s3.js";
 import { Issuer, verify } from "../shared/token.js";
-import { Copies } from "../mcp/copies.js";
-import { deviceName } from "../mcp/name.js";
-import { apns, encrypt, fcm, webPush, wns } from "../push/senders.js";
+import { Copies } from "../onet/copies.js";
+import { deviceName } from "../onet/name.js";
+import { apns, encrypt, fcm, webPush, wns } from "../notifications/senders.js";
 
 class Store {
   constructor() {

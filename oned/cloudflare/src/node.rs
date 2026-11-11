@@ -68,5 +68,6 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<(
     }
     // Its address may have been turned on by hand.
     cf.hide(&name)?;
-    crate::deploy_some(cf, settings, sources, &[], &[Worker::named("relay")])
+    crate::deploy_some(cf, settings, sources, &[], &[Worker::named("relay")])?;
+    crate::remove_renamed(cf, std::iter::once(&NODE))
 }

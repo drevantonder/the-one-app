@@ -431,7 +431,7 @@ export class Relay extends DurableObject {
     if (out[0] !== 0) return;
     const to = hex.encode(out.subarray(1, 33));
     if (said.pairing && to !== said.to) return this.note(said.id, "forbidden");
-    if (to === this.env.BOUND && this.env.NODE) return this.toNode(said.id, bytes);
+    if (to === this.env.BOUND && this.env.ONED) return this.toNode(said.id, bytes);
     const client = this.boundTo(to);
     if (client) return this.toClient(to, client, said.id, bytes);
     const other = this.sockets.get(to);
@@ -466,7 +466,7 @@ export class Relay extends DurableObject {
     queueMicrotask(() => {
       const batch = this.forNode;
       this.forNode = [];
-      const node = this.env.NODE.get(this.env.NODE.idFromName("node"), near(this.env));
+      const node = this.env.ONED.get(this.env.ONED.idFromName("node"), near(this.env));
       this.ctx.waitUntil(node.deliver(batch).catch((err) => console.log(JSON.stringify({ node: "unreached", why: String(err?.message ?? err) }))));
     });
   }
@@ -511,7 +511,7 @@ export class Relay extends DurableObject {
   }
 
   boundTo(key) {
-    const b = this.env.MCP && this.bound.get(key);
+    const b = this.env.ONET && this.bound.get(key);
     if (!b) return null;
     if (b.until > Date.now()) return b.name;
     this.unbind(key);
@@ -563,7 +563,7 @@ export class Relay extends DurableObject {
       queueMicrotask(() => {
         const batch = waiting.get(to);
         waiting.delete(to);
-        const object = this.env.MCP.get(this.env.MCP.idFromName(name), near(this.env));
+        const object = this.env.ONET.get(this.env.ONET.idFromName(name), near(this.env));
         this.ctx.waitUntil(object.deliver(to, batch).catch((err) => console.log(JSON.stringify({ client: "unreached", why: String(err?.message ?? err) }))));
       });
     }
@@ -1038,8 +1038,8 @@ export class List extends DurableObject {
   /// and a device signed in again in its place stays.
   forgetObject(key) {
     const [object] = this.sql.exec("DELETE FROM objects WHERE key = ? RETURNING name", key).toArray();
-    if (!object || !this.env.MCP) return;
-    const stub = this.env.MCP.get(this.env.MCP.idFromName(object.name), near(this.env));
+    if (!object || !this.env.ONET) return;
+    const stub = this.env.ONET.get(this.env.ONET.idFromName(object.name), near(this.env));
     this.ctx.waitUntil(stub.removed(key).catch((err) => console.log(JSON.stringify({ forgotten: "not", why: String(err?.message ?? err) }))));
   }
 
