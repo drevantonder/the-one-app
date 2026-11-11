@@ -22,7 +22,7 @@ To learn more, point your agent at this repo and ask it to explain.
 
 ## Building it
 
-A Linux machine that builds what `one-dev update` sends (the node, the Cloudflare node, the web client and its WebAssembly, the apps' screens and services) needs a C compiler, a clang that can build for WebAssembly, curl and git from its package manager, then rustup and mise to install the rest, as `rust-toolchain.toml` and `mise.toml` say:
+A Linux machine that builds what `one-dev update` sends (the computers' programs, oned on Cloudflare, the web client and its WebAssembly, the apps' screens and services) needs a C compiler, a clang that can build for WebAssembly, curl and git from its package manager, then rustup and mise to install the rest, as `rust-toolchain.toml` and `mise.toml` say:
 
 ```sh
 sudo apt install ca-certificates curl git gcc clang    # Ubuntu 26.04
