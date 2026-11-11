@@ -48,7 +48,6 @@ impl Part {
 
 /// Main's tip, or a commit, as this device's clean checkout has it, with the config it's built with: what one `update`
 /// sends and marks sent, whatever lands on main meanwhile.
-#[derive(Clone)]
 pub(super) struct At {
     pub(super) src: PathBuf,
     pub(super) commit: String,
@@ -156,7 +155,7 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<At> {
         }
         Some(Part::Mac) => {
             attempt("mac", send(Part::Mac, &at, release));
-            attempt("mac's app", super::mac::build_and_publish(&at, started + Duration::from_secs(CALL) - super::mac::AFTER));
+            attempt("mac's app", super::mac::build_and_publish(started + Duration::from_secs(CALL) - super::mac::AFTER));
         }
         Some(part) => attempt(part.name(), send(part, &at, release)),
         None => {
@@ -165,8 +164,8 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<At> {
                 attempt(part.name(), send(part, &at, release));
                 // Built on the Mac while the rest is built and sent here.
                 if part == Part::Mac {
-                    let (at, deadline) = (at.clone(), started + Duration::from_secs(CALL) - super::mac::AFTER);
-                    mac = Some(std::thread::spawn(move || super::mac::build_and_publish(&at, deadline)));
+                    let deadline = started + Duration::from_secs(CALL) - super::mac::AFTER;
+                    mac = Some(std::thread::spawn(move || super::mac::build_and_publish(deadline)));
                 }
             }
             // Together: one deploy, not one for each.
