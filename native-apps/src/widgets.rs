@@ -109,8 +109,8 @@ pub fn forget(dir: &Path) {
     let _ = write(&dir.join("widgets.json"), br#"{"widgets":[],"signedOut":true}"#);
 }
 
-/// A tree's most prominent text (the biggest, then the first that isn't muted): what a one-line place shows (an iPhone's
-/// Lock Screen widget, a Mac's menu bar item).
+/// A tree's most prominent text (the biggest, then the first): what a one-line place shows (an iPhone's Lock Screen
+/// widget, a Mac's menu bar item). Muted text, like an empty state or a caption, is never one: then there's none.
 fn headline(tree: &Value) -> Option<String> {
     fn texts(n: &Value, out: &mut Vec<(String, i32, bool)>) {
         match n["t"].as_str() {
@@ -141,10 +141,8 @@ fn headline(tree: &Value) -> Option<String> {
     }
     let mut all = Vec::new();
     texts(tree, &mut all);
-    let all: Vec<_> = all.into_iter().filter(|t| !t.0.is_empty()).collect();
-    // The biggest; of those, one that isn't muted; of those, the first.
-    let best = all.iter().enumerate().max_by_key(|(i, t)| (t.1, !t.2, -(*i as i64)))?;
-    Some(best.1.0.clone())
+    let best = all.into_iter().enumerate().filter(|(_, t)| !t.0.is_empty() && !t.2).max_by_key(|(i, t)| (t.1, -(*i as i64)))?;
+    Some(best.1.0)
 }
 
 /// Whether an app added at `added` (`user:<id>`, `group:<id>`, `global`) is on the page `scope`.
