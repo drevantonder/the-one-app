@@ -114,8 +114,10 @@ impl one::keys::Signs for On {
 
 /// The bucket as a device reads it where it runs as WebAssembly: each object's bytes from the URL signer (`get`), for a
 /// request it signs (`one/urls`), as it can't reach the bucket itself. Reading a step also reads the ones after it, in
-/// the same request, as they're read next: those are answered from here. What the URL signer read for it it counts, and
-/// says itself as `bucket.reads` once a minute, as the `client` its object names (`browser` if none).
+/// the same request, as they're read next, and reading one that isn't there also reads the step after it, which a reader
+/// looks at next: those are answered from here, until one that isn't there is.
+/// What the URL signer read for it it counts, and says itself as `bucket.reads` once a minute, as the `client` its
+/// object names (`browser` if none).
 pub struct Urls {
     me: Me,
     ahead: std::cell::RefCell<std::collections::HashMap<String, Option<Object>>>,
@@ -139,8 +141,14 @@ impl Urls {
 
 impl Bucket for Urls {
     async fn get(&self, name: &str) -> Result<Option<Object>> {
-        if let Some(found) = self.ahead.borrow_mut().remove(name) {
-            return Ok(found);
+        {
+            let mut ahead = self.ahead.borrow_mut();
+            if let Some(found) = ahead.remove(name) {
+                if found.is_none() {
+                    ahead.clear();
+                }
+                return Ok(found);
+            }
         }
         let mut names = vec![name.to_string()];
         names.extend(one::database::stored::following(name, 15));
@@ -156,18 +164,14 @@ impl Bucket for Urls {
             return Err(if status >= 500 || status == 0 { Failed(Trouble::Unreachable, said).into() } else { anyhow!(said) });
         }
         let object = |n: &str| out["get"][n].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.trim_end_matches('=').as_bytes()).ok()).map(|bytes| Object { bytes, tag: String::new() });
-        // The signer reads the rest only once the first is there.
-        let first = object(name).is_some();
-        for n in names.iter().take(if first { names.len() } else { 1 }) {
+        // What the signer read is in its answer; what it didn't is left out.
+        for n in names.iter().filter(|n| out["get"].get(n.as_str()).is_some()) {
             self.reads.count(n, out["get"][n].is_string());
         }
         self.say();
         let mut ahead = self.ahead.borrow_mut();
-        for n in &names[1..] {
-            if let Some(o) = object(n) {
-                ahead.insert(n.clone(), Some(o));
-            }
-        }
+        ahead.clear();
+        ahead.extend(names[1..].iter().filter(|n| out["get"].get(n.as_str()).is_some()).map(|n| (n.clone(), object(n))));
         Ok(object(name))
     }
 

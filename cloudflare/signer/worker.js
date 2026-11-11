@@ -112,9 +112,10 @@ async function due(env, bucket, names) {
   return names.filter((_, i) => !needs[i] || needs[i].some((n) => there.get(n)));
 }
 
-/// Each object's bytes, base64url, or null. A reader at the end of a log asks for the next step and the positions
-/// after it, which aren't there yet: so of a database's steps (and the signatures beside them), the first asked is
-/// read first, and the rest only if it's there.
+/// Each object's bytes, base64url, or null if it isn't there; one not read is left out. A reader at the end of a log asks
+/// for the next step and the positions after it, which aren't there yet: so of a database's steps (and the signatures
+/// beside them), the first asked is read first, and the rest only if it's there; if it isn't, only the step after it,
+/// which a reader looks at next, to tell the end of a log from a gap.
 async function got(env, bucket, names) {
   const reads = env.R2 ? null : (await bucketUrls(bucket, { read: names }, 60)).read;
   const out = {};
@@ -140,8 +141,11 @@ async function got(env, bucket, names) {
       asked.sort((a, b) => a[0] - b[0] || a[1].length - b[1].length);
       const [[, first], ...rest] = asked;
       await read(first);
-      if (out[first] === null && !first.endsWith(".sig")) for (const [, name] of rest) out[name] = null;
-      else await Promise.all(rest.map(([, name]) => read(name)));
+      if (out[first] !== null || first.endsWith(".sig")) await Promise.all(rest.map(([, name]) => read(name)));
+      else {
+        const next = rest.find(([n, name]) => n === Number(step.exec(first)[2]) + 1 && !name.endsWith(".sig"));
+        if (next) await read(next[1]);
+      }
     }),
   ]);
   return Object.fromEntries(names.map((n) => [n, out[n]]));

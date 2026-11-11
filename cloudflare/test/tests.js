@@ -101,7 +101,7 @@ async function browsersReadStepsFromTheBucket() {
   equal([b64u.decode(got["global/node/scope/000000000001"]).join(), b64u.decode(got["global/node/scope/000000000002"]).join(), got["global/node/scope/000000000003"]], ["1,2,3", "4", null], "each step's bytes as the bucket holds them, and null past the last");
   asked.length = 0;
   const past = (await (await ask({ get: [{ steps: "global/node/scope", from: 3, to: 18 }] })).json()).get;
-  equal([Object.values(past).every((b) => b === null), asked], [true, ["global/node/scope/000000000003"]], "past the last step, only the first asked is read");
+  equal([past, asked], [{ "global/node/scope/000000000003": null, "global/node/scope/000000000004": null }, ["global/node/scope/000000000003", "global/node/scope/000000000004"]], "past the last step, only the first asked and the step after it, which a reader looks at for a gap, are read, and the rest left out");
   equal((await ask({ get: [{ steps: "global/node/scope", from: 1, to: 33 }] })).status, 400, "at most 32 at once");
   equal((await ask({ get: ["global/node/scope/000000000001"] }, { ...env, RELAY: { allowed: async () => null } }, random(32))).status, 403, "only the network's devices");
 }
