@@ -29,8 +29,8 @@ pub type Fut<'a, T> = BoxFuture<'a, Result<T>>;
 pub type Rt = Arc<dyn AppRuntime>;
 
 /// Everything a feature reaches of its runtime. A function needing less names less (`&dyn Holds`).
-pub trait AppRuntime: Here + ScopeDatabase + Databases + Holds + Apps + Features {}
-impl<T: Here + ScopeDatabase + Databases + Holds + Apps + Features + ?Sized> AppRuntime for T {}
+pub trait AppRuntime: Here + ScopeDatabase + Databases + Holds + Apps + Peers + Features {}
+impl<T: Here + ScopeDatabase + Databases + Holds + Apps + Peers + Features + ?Sized> AppRuntime for T {}
 
 /// This app runtime, on its device.
 pub trait Here: Any + Send + Sync {
@@ -96,6 +96,8 @@ pub trait Databases: Send + Sync {
     fn write<'a>(&'a self, caller: &'a Caller, scope: &'a Scope, app: &'a str, database: &'a str, schema: &'a [&'a str], change: &'a mut (dyn FnMut(&rusqlite::Connection) -> Result<()> + Send)) -> Fut<'a, ()>;
     /// Refuses (428, `handed::Needs`) a caller that wasn't handed the keys of all of `wants` (scope, app, database).
     fn needs<'a>(&'a self, caller: &'a Caller, wants: &'a [(Scope, &'a str, &'a str)]) -> Fut<'a, ()>;
+    /// An object of the network's bucket, by its name (`database::keys` names them): none if it has none.
+    fn object<'a>(&'a self, name: &'a str) -> Fut<'a, Option<Vec<u8>>>;
 }
 
 /// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
@@ -149,6 +151,17 @@ pub trait Draws: Send + Sync {
     fn widget_options<'a>(&'a self, name: &'a str) -> Fut<'a, Value>;
     /// The count on its icon.
     fn badge(&self) -> Fut<'_, Value>;
+}
+
+/// The network's other devices, as this runtime reaches them and the relay says who's connected.
+pub trait Peers: Send + Sync {
+    /// Whether `device` answers now: connected to it already, or once it connects.
+    fn reaches<'a>(&'a self, device: &'a Key) -> BoxFuture<'a, bool>;
+    /// That `device` is off, for whoever asked it something: its name, and when it was last seen.
+    fn away(&self, device: &Key) -> String;
+    /// What each device and the Workers are on, as each last told the relay, and whether a newer build is published for
+    /// each.
+    fn versions(&self) -> Fut<'_, Value>;
 }
 
 /// The features it runs.
@@ -210,5 +223,5 @@ impl Runs {
 
 /// What a feature's runtime crate uses to reach its runtime: `use api::runtime::prelude::*;`.
 pub mod prelude {
-    pub use super::{AppRuntime, Apps, Databases, Draws, Features, Fut, Here, Holds, PageApp, ReadExt, Rt, ScopeDatabase, StateExt};
+    pub use super::{AppRuntime, Apps, Databases, Draws, Features, Fut, Here, Holds, PageApp, Peers, ReadExt, Rt, ScopeDatabase, StateExt};
 }

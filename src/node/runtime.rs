@@ -2,7 +2,7 @@
 
 use std::any::{Any, TypeId};
 
-use ::api::runtime::{Apps, Databases, Draws, PageApp, Features, Fut, Here, Holds, Rt, Runs, ScopeDatabase};
+use ::api::runtime::{Apps, Databases, Draws, Features, Fut, Here, Holds, PageApp, Peers, Rt, Runs, ScopeDatabase};
 use ::scope::read::Read;
 
 use super::*;
@@ -205,6 +205,10 @@ impl Databases for Node {
     fn needs<'a>(&'a self, caller: &'a Caller, wants: &'a [(Scope, &'a str, &'a str)]) -> Fut<'a, ()> {
         Box::pin(Node::needs(self, caller, wants))
     }
+
+    fn object<'a>(&'a self, name: &'a str) -> Fut<'a, Option<Vec<u8>>> {
+        Box::pin(async move { Ok(::bucket::Bucket::get(&self.bucket()?, name).await?.map(|o| o.bytes)) })
+    }
 }
 
 impl Holds for Node {
@@ -266,6 +270,20 @@ impl Draws for Drawn {
 
     fn badge(&self) -> Fut<'_, Value> {
         Box::pin(self.node.0.apps.badge(&self.app, &self.ctx))
+    }
+}
+
+impl Peers for Node {
+    fn reaches<'a>(&'a self, device: &'a Key) -> futures_util::future::BoxFuture<'a, bool> {
+        Box::pin(Node::reaches(self, device))
+    }
+
+    fn away(&self, device: &Key) -> String {
+        Node::away(self, device)
+    }
+
+    fn versions(&self) -> Fut<'_, Value> {
+        Box::pin(Node::versions(self))
     }
 }
 
