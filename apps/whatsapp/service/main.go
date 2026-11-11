@@ -32,29 +32,29 @@ type call struct {
 func main() {
 	home, _ := os.UserHomeDir()
 	dir := cmp.Or(os.Getenv("WHATSAPP_DATA"), filepath.Join(home, ".local", "share", "one", "whatsapp"))
-	node := "http://" + nodeAddr()
+	runtime := "http://" + runtimeAddr()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	w, err := openAll(dir, node)
+	w, err := openAll(dir, runtime)
 	if err != nil {
 		log.Fatal(err)
 	}
-	serve(node, w)
+	serve(runtime, w)
 }
 
 // serve registers with the app runtime and answers its calls, registering again
 // whenever the app runtime forgets (it keeps services in memory) or restarts.
-func serve(node string, w *whatsapp) {
-	poll := &http.Client{Timeout: 40 * time.Second, Transport: toNode}
+func serve(runtime string, w *whatsapp) {
+	poll := &http.Client{Timeout: 40 * time.Second, Transport: toRuntime}
 	for {
-		if err := post(node+"/api/services/"+app, describe); err != nil {
+		if err := post(runtime+"/api/services/"+app, describe); err != nil {
 			log.Printf("registering: %v", err)
 			time.Sleep(3 * time.Second)
 			continue
 		}
 		for {
-			c, err := next(poll, node)
+			c, err := next(poll, runtime)
 			if err != nil {
 				log.Printf("waiting for calls: %v", err)
 				time.Sleep(time.Second)
@@ -76,7 +76,7 @@ func serve(node string, w *whatsapp) {
 				case err != nil:
 					reply = map[string]any{"error": err.Error()}
 				}
-				if err := post(fmt.Sprintf("%s/api/services/%s/calls/%d", node, app, c.ID), reply); err != nil {
+				if err := post(fmt.Sprintf("%s/api/services/%s/calls/%d", runtime, app, c.ID), reply); err != nil {
 					log.Printf("answering %s: %v", c.Function, err)
 				}
 			}()
@@ -84,8 +84,8 @@ func serve(node string, w *whatsapp) {
 	}
 }
 
-func next(client *http.Client, node string) (*call, error) {
-	resp, err := client.Get(node + "/api/services/" + app + "/calls")
+func next(client *http.Client, runtime string) (*call, error) {
+	resp, err := client.Get(runtime + "/api/services/" + app + "/calls")
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +149,8 @@ func request(client *http.Client, url string, body any) ([]byte, error) {
 	return msg, nil
 }
 
-func callOn(node, device, function string, input, out any) error {
-	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toNode}, node+"/api/call",
+func callOn(runtime, device, function string, input, out any) error {
+	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toRuntime}, runtime+"/api/call",
 		map[string]any{"app": app, "service": app, "function": function, "input": input, "device": device})
 	if err != nil {
 		return err

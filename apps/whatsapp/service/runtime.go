@@ -8,21 +8,21 @@ import (
 	"strings"
 )
 
-// toNode sends what a client asks the app runtime with the token in the app runtime's home
+// toRuntime sends what a client asks the app runtime with the token in the app runtime's home
 // (ONE_HOME, else ~/.local/share/<ONE_CLI>), which only this machine's user
 // can read: the app runtime takes nothing else as one of this machine's own programs
 // (src/api.rs). http.DefaultClient uses it, and so must every other client
 // that asks the app runtime; http.DefaultTransport stays as it is, which libraries
 // (whatsmeow) take to be an *http.Transport.
-var toNode http.RoundTripper = http.DefaultTransport
+var toRuntime http.RoundTripper = http.DefaultTransport
 
-func nodeAddr() string {
+func runtimeAddr() string {
 	addr := cmp.Or(os.Getenv("ONE_ADDR"), "127.0.0.1:4747")
 	home, _ := os.UserHomeDir()
 	data := cmp.Or(os.Getenv("XDG_DATA_HOME"), filepath.Join(home, ".local", "share"))
 	dir := cmp.Or(os.Getenv("ONE_HOME"), filepath.Join(data, cmp.Or(os.Getenv("ONE_CLI"), "one")))
-	toNode = asThisMachine{addr, filepath.Join(dir, "local-token"), http.DefaultTransport}
-	http.DefaultClient.Transport = toNode
+	toRuntime = asThisMachine{addr, filepath.Join(dir, "local-token"), http.DefaultTransport}
+	http.DefaultClient.Transport = toRuntime
 	return addr
 }
 

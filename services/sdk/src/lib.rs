@@ -116,36 +116,36 @@ pub struct Service {
 pub struct Host {
     pub name: &'static str,
     pub dir: PathBuf,
-    node: String,
+    runtime: String,
     agent: ureq::Agent,
 }
 
 impl Host {
     pub fn get(&self, path: &str) -> Result<Value> {
-        Ok(answer(self.agent.get(format!("{}{path}", self.node)).call())?.unwrap_or_default())
+        Ok(answer(self.agent.get(format!("{}{path}", self.runtime)).call())?.unwrap_or_default())
     }
 
     pub fn post(&self, path: &str, body: &Value) -> Result<Value> {
-        Ok(answer(self.agent.post(format!("{}{path}", self.node)).send_json(body))?.unwrap_or_default())
+        Ok(answer(self.agent.post(format!("{}{path}", self.runtime)).send_json(body))?.unwrap_or_default())
     }
 
     pub fn post_within(&self, path: &str, body: &Value, limit: Duration) -> Result<Value> {
-        Ok(answer(self.agent.post(format!("{}{path}", self.node)).config().timeout_global(Some(limit)).build().send_json(body))?.unwrap_or_default())
+        Ok(answer(self.agent.post(format!("{}{path}", self.runtime)).config().timeout_global(Some(limit)).build().send_json(body))?.unwrap_or_default())
     }
 
     /// The port of its app runtime's loopback.
     pub fn port(&self) -> u16 {
-        self.node.rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(0)
+        self.runtime.rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(0)
     }
 
     pub fn for_test(dir: &std::path::Path) -> Host {
-        Host { name: "test", dir: dir.to_path_buf(), node: "http://127.0.0.1:1".into(), agent: ureq::Agent::new_with_defaults() }
+        Host { name: "test", dir: dir.to_path_buf(), runtime: "http://127.0.0.1:1".into(), agent: ureq::Agent::new_with_defaults() }
     }
 
     /// Keeps bytes, read from `body` as they come, as a blob the caller's scope keeps once the call names it in its
     /// answer: its hash and size.
     pub fn put_blob(&self, body: impl std::io::Read + Send + 'static) -> Result<(String, u64)> {
-        let resp = self.agent.post(format!("{}/api/blobs", self.node)).header("content-type", "application/octet-stream").send(ureq::SendBody::from_owned_reader(body));
+        let resp = self.agent.post(format!("{}/api/blobs", self.runtime)).header("content-type", "application/octet-stream").send(ureq::SendBody::from_owned_reader(body));
         let put = answer(resp)?.unwrap_or_default();
         let blob = put["blob"].as_str().filter(|b| !b.is_empty()).ok_or_else(|| anyhow!("the app runtime kept no blob"))?;
         Ok((blob.to_string(), put["size"].as_u64().unwrap_or(0)))
@@ -153,7 +153,7 @@ impl Host {
 
     /// A blob's bytes, as they come, from whichever device has it.
     pub fn get_blob(&self, hash: &str) -> Result<impl std::io::Read + Send + 'static> {
-        let resp = self.agent.get(format!("{}/api/blobs/{hash}", self.node)).call()?;
+        let resp = self.agent.get(format!("{}/api/blobs/{hash}", self.runtime)).call()?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.into_body().read_to_string().unwrap_or_default();
@@ -219,7 +219,7 @@ pub fn serve(service: Service) -> Result<()> {
     };
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).middleware(as_this_program.clone()).build().into();
     let poll: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(40))).middleware(as_this_program).build().into();
-    let host = Arc::new(Host { name, dir, node: format!("http://{at}"), agent });
+    let host = Arc::new(Host { name, dir, runtime: format!("http://{at}"), agent });
     if let Some(start) = service.start {
         start(&host);
     }
@@ -232,7 +232,7 @@ pub fn serve(service: Service) -> Result<()> {
             continue;
         }
         loop {
-            let call = match answer(poll.get(format!("{}/api/services/{name}/calls", host.node)).call()) {
+            let call = match answer(poll.get(format!("{}/api/services/{name}/calls", host.runtime)).call()) {
                 Ok(Some(call)) => match serde_json::from_value::<Call>(call) {
                     Ok(call) => call,
                     Err(err) => {

@@ -83,12 +83,12 @@ func (l *link) devices() (devices, error) {
 			}
 		}
 	}
-	body, err := request(&http.Client{Timeout: 5 * time.Second, Transport: toNode}, l.node+"/api/state", nil)
+	body, err := request(&http.Client{Timeout: 5 * time.Second, Transport: toRuntime}, l.runtime+"/api/state", nil)
 	if err == nil {
 		err = json.Unmarshal(body, &state)
 	}
 	if err != nil {
-		return devices{}, fmt.Errorf("asking this device's node: %w", err)
+		return devices{}, fmt.Errorf("asking this device's runtime: %w", err)
 	}
 	s := devices{here: state.Device.Name}
 	for _, o := range state.Network.Devices {
@@ -102,7 +102,7 @@ func (l *link) devices() (devices, error) {
 func (l *link) linkedElsewhere(s devices) (device, phone string) {
 	for _, name := range s.others {
 		var h holding
-		if err := callOn(l.node, name, "_holder", map[string]any{}, &h); err == nil && h.Phone != "" {
+		if err := callOn(l.runtime, name, "_holder", map[string]any{}, &h); err == nil && h.Phone != "" {
 			return name, h.Phone
 		}
 	}
@@ -128,7 +128,7 @@ func (w *whatsapp) move(l *link, to string) (string, error) {
 	}
 	mine := l.holder().Phone
 	var there holding
-	if err := callOn(l.node, to, "_holder", map[string]any{}, &there); err != nil {
+	if err := callOn(l.runtime, to, "_holder", map[string]any{}, &there); err != nil {
 		return "", fmt.Errorf("not moved: %s didn't answer (it needs WhatsApp installed and to be online): %w", to, err)
 	}
 	if mine != "" && there.has(mine) {
@@ -169,7 +169,7 @@ func (w *whatsapp) move(l *link, to string) (string, error) {
 	parts := (len(data) + partSize - 1) / partSize
 	for i := 0; i < parts && err == nil; i++ {
 		part := data[i*partSize : min((i+1)*partSize, len(data))]
-		err = callOn(l.node, to, "_take", map[string]any{"from": s.here, "move": id, "part": i, "parts": parts, "data": part}, &there)
+		err = callOn(l.runtime, to, "_take", map[string]any{"from": s.here, "move": id, "part": i, "parts": parts, "data": part}, &there)
 	}
 	if err == nil && !there.has(number) {
 		err = fmt.Errorf("%s answered without it", to)
@@ -222,7 +222,7 @@ func (w *whatsapp) settle(l *link) string {
 	switch st.State {
 	case handingOff:
 		var answer struct{ Taken bool }
-		if err := callOn(l.node, st.To, "_moved", map[string]any{"move": st.Move}, &answer); err != nil {
+		if err := callOn(l.runtime, st.To, "_moved", map[string]any{"move": st.Move}, &answer); err != nil {
 			log.Printf("asking %s whether it took the link: %v", st.To, err)
 			return ""
 		}
@@ -255,7 +255,7 @@ func (w *whatsapp) settle(l *link) string {
 		}
 		for _, name := range s.others {
 			var h holding
-			if callOn(l.node, name, "_holder", map[string]any{}, &h) != nil {
+			if callOn(l.runtime, name, "_holder", map[string]any{}, &h) != nil {
 				continue
 			}
 			for _, one := range h.all() {
@@ -404,7 +404,7 @@ func (w *whatsapp) take(from, move string, part, parts int, data string) (holdin
 	if err := w.saveMoved(); err != nil {
 		log.Printf("%v", err) // the link's database says so too
 	}
-	l, err := open(path, w.node)
+	l, err := open(path, w.runtime)
 	if err != nil {
 		return holding{}, err
 	}

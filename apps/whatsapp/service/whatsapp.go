@@ -30,7 +30,7 @@ import (
 // link is this device's link to the account: whatsmeow's client, and the
 // database it shares with the messages.
 type link struct {
-	node string // this device's app runtime, through which it asks the user's other devices
+	runtime string // this device's app runtime, through which it asks the user's other devices
 	path string
 
 	mu        sync.Mutex
@@ -48,9 +48,9 @@ var (
 	loggedIn = func(c *whatsmeow.Client) bool { return c.IsLoggedIn() }
 )
 
-func open(path, node string) (*link, error) {
+func open(path, runtime string) (*link, error) {
 	store.SetOSInfo("The One App", [3]uint32{0, 2, 0})
-	l := &link{node: node, path: path, st: loadState(path)}
+	l := &link{runtime: runtime, path: path, st: loadState(path)}
 	if err := l.load(); err != nil {
 		return nil, err
 	}

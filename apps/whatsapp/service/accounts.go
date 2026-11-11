@@ -20,7 +20,7 @@ import (
 )
 
 type whatsapp struct {
-	node, dir string
+	runtime, dir string
 
 	mu    sync.Mutex
 	links []*link
@@ -30,16 +30,16 @@ type whatsapp struct {
 	moved    map[string]string   // each move's answer here, taken or refused, by move
 }
 
-func openAll(dir, node string) (*whatsapp, error) {
-	first, err := open(filepath.Join(dir, "whatsapp.db"), node)
+func openAll(dir, runtime string) (*whatsapp, error) {
+	first, err := open(filepath.Join(dir, "whatsapp.db"), runtime)
 	if err != nil {
 		return nil, err
 	}
-	w := &whatsapp{node: node, dir: dir, links: []*link{first}, arriving: map[string]*arrival{}}
+	w := &whatsapp{runtime: runtime, dir: dir, links: []*link{first}, arriving: map[string]*arrival{}}
 	more, _ := filepath.Glob(filepath.Join(dir, "whatsapp-*.db"))
 	slices.Sort(more)
 	for _, path := range more {
-		l, err := open(path, node)
+		l, err := open(path, runtime)
 		if err != nil {
 			log.Printf("%s: %v", path, err)
 			continue
@@ -165,7 +165,7 @@ func (w *whatsapp) spare() (*link, error) {
 			return l, nil
 		}
 	}
-	l, err := open(filepath.Join(w.dir, fmt.Sprintf("whatsapp-%d.db", time.Now().UnixNano())), w.node)
+	l, err := open(filepath.Join(w.dir, fmt.Sprintf("whatsapp-%d.db", time.Now().UnixNano())), w.runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (w *whatsapp) accounts() ([]map[string]any, []string, error) {
 	}
 	for _, name := range s.others {
 		var h holding
-		if err := callOn(w.node, name, "_holder", map[string]any{}, &h); err == nil {
+		if err := callOn(w.runtime, name, "_holder", map[string]any{}, &h); err == nil {
 			answered = append(answered, name)
 			for _, one := range h.all() {
 				add(one, name)

@@ -19,7 +19,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-type fakeNodes struct {
+type fakeRuntimes struct {
 	mu       sync.Mutex
 	services map[string]*whatsapp
 	// lose is asked before and after each call: true loses it there (before:
@@ -27,7 +27,7 @@ type fakeNodes struct {
 	lose func(function string, in map[string]any, after bool) bool
 }
 
-func (f *fakeNodes) node(t *testing.T, name string) string {
+func (f *fakeRuntimes) runtime(t *testing.T, name string) string {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/state":
@@ -96,13 +96,13 @@ func linkAs(t *testing.T, l *link, number string) {
 	}
 }
 
-func devicesAB(t *testing.T, f *fakeNodes) (a, b *whatsapp, dirA string) {
+func devicesAB(t *testing.T, f *fakeRuntimes) (a, b *whatsapp, dirA string) {
 	dirA, dirB := t.TempDir(), t.TempDir()
 	var err error
-	if a, err = openAll(dirA, f.node(t, "a")); err != nil {
+	if a, err = openAll(dirA, f.runtime(t, "a")); err != nil {
 		t.Fatal(err)
 	}
-	if b, err = openAll(dirB, f.node(t, "b")); err != nil {
+	if b, err = openAll(dirB, f.runtime(t, "b")); err != nil {
 		t.Fatal(err)
 	}
 	f.services = map[string]*whatsapp{"a": a, "b": b}
@@ -124,7 +124,7 @@ func kept(t *testing.T, w *whatsapp, number string) int {
 
 func TestMoveLeavesOneCopy(t *testing.T) {
 	offline(t)
-	f := &fakeNodes{}
+	f := &fakeRuntimes{}
 	a, b, _ := devicesAB(t, f)
 	linkAs(t, a.links[0], "61400000001")
 	if _, err := a.run(context.Background(), "move", json.RawMessage(`{"to":"b"}`)); err != nil {
@@ -139,7 +139,7 @@ func TestMoveLeavesOneCopy(t *testing.T) {
 // lost, and the source restarts: it stays off until it hears, then deletes.
 func TestMoveAnswerLostThenRestart(t *testing.T) {
 	offline(t)
-	f := &fakeNodes{}
+	f := &fakeRuntimes{}
 	a, b, dirA := devicesAB(t, f)
 	linkAs(t, a.links[0], "61400000002")
 	lost := 0
@@ -161,7 +161,7 @@ func TestMoveAnswerLostThenRestart(t *testing.T) {
 	}
 	before := connects["61400000002"]
 	// A restart: the state on disk keeps it off.
-	a2, err := openAll(dirA, a.node)
+	a2, err := openAll(dirA, a.runtime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestMoveAnswerLostThenRestart(t *testing.T) {
 // linked again; a part still on its way is refused.
 func TestMoveRefusedRollsBack(t *testing.T) {
 	offline(t)
-	f := &fakeNodes{}
+	f := &fakeRuntimes{}
 	a, b, _ := devicesAB(t, f)
 	linkAs(t, a.links[0], "61400000003")
 	var move string
@@ -210,7 +210,7 @@ func TestMoveRefusedRollsBack(t *testing.T) {
 // Two devices moving links to one at once: each arrives whole, as its own.
 func TestTwoMovesToOne(t *testing.T) {
 	offline(t)
-	f := &fakeNodes{}
+	f := &fakeRuntimes{}
 	a, b, _ := devicesAB(t, f)
 	linkAs(t, a.links[0], "61400000004")
 	l2, err := a.spare()
@@ -239,7 +239,7 @@ func TestTwoMovesToOne(t *testing.T) {
 // The phone unlinking it deletes what it kept, so the next link starts empty.
 func TestUnlinkedFromThePhoneWipes(t *testing.T) {
 	offline(t)
-	f := &fakeNodes{}
+	f := &fakeRuntimes{}
 	a, _, _ := devicesAB(t, f)
 	l := a.links[0]
 	linkAs(t, l, "61400000006")
