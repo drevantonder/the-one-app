@@ -10,6 +10,15 @@ pub(crate) mod routes;
 /// How often a node reads the record (`crate::latest`).
 const PULL_EVERY: Duration = Duration::from_secs(30);
 
+/// What each record kept in `updates/` beside the newest is named after, then its publish and when it was written (ms).
+const PAST: &str = "past-";
+/// How many publishes before the newest record still have their files: a device that read one a while ago still
+/// finds what it names.
+const KEPT_PUBLISHES: usize = 5;
+/// How long a file in `updates/` stays, whatever names it (ms): a publisher writes its files before its record names
+/// them, and another may publish meanwhile.
+const UPLOADING: u64 = 60 * 60 * 1000;
+
 impl Node {
     /// Reads the record at the network's address now and then, for what's published for this platform and its
     /// services, and keeps the network's address in its home for oned and `one update`, which can read nothing else.
@@ -92,6 +101,9 @@ impl Node {
                 self.device_signal("update.sent", Attrs::default().part(&thing.name), Status::Unset);
             }
         }
+        if replaced {
+            tidy(&bucket, crate::mode::here().release_key(), text).await.context("the record is published, but the builds no record names weren't removed from the bucket's updates/")?;
+        }
         Ok(replaced)
     }
 
@@ -134,6 +146,40 @@ impl Node {
     }
 }
 
+/// Once `text` is the record, keeps it as its publish's latest record, and removes from `updates/` each file that
+/// neither the newest record nor the latest record of each of the `KEPT_PUBLISHES` publishes before it name, unless it
+/// was written in the last `UPLOADING`. → how many objects went.
+async fn tidy(bucket: &impl crate::bucket::Bucket, key: &str, text: &str) -> Result<usize> {
+    use crate::latest::{FOLDER, Latest};
+    let read = |text: &[u8]| Latest::read(key, &String::from_utf8_lossy(text));
+    let record = read(text.as_bytes()).context("the record published doesn't verify")?;
+    let newest = bucket.get(&crate::latest::newest_name()).await?.context("the record isn't there")?;
+    let mut keep: BTreeSet<String> = record.things.iter().chain(&read(&newest.bytes).context("the record there doesn't verify")?.things).map(|t| t.sha256.clone()).collect();
+    let now = bucket.now();
+    // A publish writes the record once for each thing it sends: its records are the ones whose newest thing is its commit.
+    let publish = record.things.iter().max_by_key(|t| t.committed).map_or(String::new(), |t| format!("{:010}-{}", t.committed, t.commit));
+    bucket.create(&format!("{FOLDER}/{PAST}{publish}-{now:016}"), text.as_bytes()).await?;
+    let objects = bucket.objects(FOLDER).await?;
+    let mut past: Vec<(&str, &str)> = objects.iter().filter_map(|(n, _)| Some((n.strip_prefix(PAST)?.rsplit_once('-')?.0, n.as_str()))).collect();
+    past.sort();
+    let mut latest: Vec<(&str, &str)> = past.iter().rev().copied().collect();
+    latest.dedup_by_key(|(p, _)| *p);
+    let kept: Vec<&str> = latest.iter().take(KEPT_PUBLISHES + 1).map(|(_, n)| *n).collect();
+    for name in &kept {
+        if let Some(record) = bucket.get(&format!("{FOLDER}/{name}")).await? {
+            keep.extend(read(&record.bytes).with_context(|| format!("{FOLDER}/{name} doesn't verify"))?.things.into_iter().map(|t| t.sha256));
+        }
+    }
+    let built = |n: &str| n.len() == 64 && n.bytes().all(|b| b.is_ascii_hexdigit());
+    let files = objects.iter().filter(|(n, written)| built(n) && !keep.contains(n) && written + UPLOADING <= now).map(|(n, _)| n.as_str());
+    let records = past.iter().map(|(_, n)| *n).filter(|n| !kept.contains(n));
+    let gone: Vec<String> = files.chain(records).map(|n| format!("{FOLDER}/{n}")).collect();
+    for name in &gone {
+        bucket.delete(name).await?;
+    }
+    Ok(gone.len())
+}
+
 /// What a device runs of a service on its platform.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Build {
@@ -143,4 +189,53 @@ pub enum Build {
     Deployed(String),
     /// Nothing: its app's latest deploy names builds, none for this platform.
     None,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bucket::Place;
+    use crate::latest::{Latest, Thing};
+    use ssh_key::private::{Ed25519Keypair, PrivateKey};
+
+    /// Publishing many times keeps what the newest record and the last record of each of the five publishes before
+    /// it name, and what's just been uploaded for a record still to come, and removes the rest.
+    #[tokio::test]
+    async fn a_publish_removes_the_builds_no_recent_publish_names() {
+        let dir = std::env::temp_dir().join(format!("one-tidy-{}", rand::random::<u64>()));
+        let bucket = Place::Folder(dir.clone());
+        let key = PrivateKey::from(Ed25519Keypair::from_seed(&[7; 32]));
+        let public = key.public_key().to_openssh().unwrap();
+        let file = |n: u8, old: bool| {
+            let name = crate::latest::sha256(&[n]);
+            let path = dir.join("updates").join(&name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, [n]).unwrap();
+            if old {
+                std::fs::File::options().write(true).open(&path).unwrap().set_modified(std::time::SystemTime::now() - Duration::from_secs(2 * 60 * 60)).unwrap();
+            }
+            name
+        };
+        let (mut record, mut tag) = (Latest::default(), None);
+        for n in 0..10u8 {
+            // Each publish sends two things, writing the record once for each.
+            for (thing, at) in [("node/x", n), ("web", 50 + n)] {
+                record = record.merged([Thing { name: thing.into(), commit: format!("c{n}"), committed: n as u64, sha256: file(at, true), size: 1, config: "-".into() }]);
+                let text = record.signed(&key).unwrap();
+                assert!(bucket.replace(&crate::latest::newest_name(), text.as_bytes(), tag.as_deref()).unwrap());
+                tag = bucket.get_object(&crate::latest::newest_name()).unwrap().map(|o| o.tag);
+                let (unnamed, uploading) = (file(100 + n, true), file(200 + n, false));
+                tidy(&bucket, &public, &text).await.unwrap();
+                assert!(!dir.join("updates").join(unnamed).exists(), "an old file no record names goes");
+                assert!(dir.join("updates").join(uploading).exists(), "a file just uploaded stays: a record may yet name it");
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        }
+        let left = |n: u8| dir.join("updates").join(crate::latest::sha256(&[n])).exists();
+        assert!((4..10).all(|n| left(n) && left(50 + n)), "what the newest publish and the five before it sent stays");
+        assert!(!(0..4).any(|n| left(n) || left(50 + n)), "what older ones sent goes");
+        let past = std::fs::read_dir(dir.join("updates")).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with(PAST)).count();
+        assert_eq!(past, KEPT_PUBLISHES + 1, "one record of each publish still kept is");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
