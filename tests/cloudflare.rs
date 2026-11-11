@@ -1459,6 +1459,47 @@ mod relay {
         });
     }
 
+    /// A computer's onet asks the computes again with the mark of the last answer (`after`), and the relay holds it until
+    /// a compute's socket opens or closes, or an ask is left for it: so a device coming or going, or Update pressed,
+    /// is heard at once, with one request a minute while nothing happens.
+    #[test]
+    fn a_computes_request_naming_its_mark_is_answered_once_a_compute_comes_or_an_ask_is_left() {
+        let first = SecretKey::generate();
+        let k = super::Workers::for_devices(vec![hex(&first)]);
+        let address = k.address.replace("localhost", "127.0.0.1");
+        let phone = SecretKey::generate();
+        let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
+        let ask = |after: Option<&Value>| {
+            let mut fields = json!({ "computes": true, "reads": custom_build::protocol::READS, "version": "abcdef123456 1700000000 x86_64-unknown-linux-gnu" });
+            if let Some(after) = after {
+                fields["after"] = after.clone();
+            }
+            let (url, body) = (format!("{address}/relay/computes"), key::signed_request(&signer(&phone), "one/relay", fields, at()));
+            tokio::task::spawn_blocking(move || super::post(&url, &[], body))
+        };
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
+            let (status, said) = ask(None).await.unwrap();
+            assert_eq!((status, &said["online"]), (200, &json!([])));
+            let mark = said["changes"].clone();
+
+            let held = ask(Some(&mark));
+            let _first = online(&address, &first, None).await.expect("the network's first device isn't let in");
+            let (status, said) = held.await.unwrap();
+            assert_eq!((status, &said["online"]), (200, &json!([hex(&first)])), "{said}");
+            assert_ne!(said["changes"], mark, "answered as its hold ran out, not as the compute came");
+
+            let mark = said["changes"].clone();
+            let held = ask(Some(&mark));
+            assert_eq!(tell(&address, &first, json!({ "update": hex(&phone) })), 204);
+            let (status, said) = held.await.unwrap();
+            assert_eq!(status, 200);
+            assert_ne!(said["changes"], mark, "answered as its hold ran out, not as the ask was left");
+            assert_eq!(key::check_request("one/relay", &said["asked"], super::now()).unwrap().1["update"], hex(&phone), "{said}");
+        });
+    }
+
     #[test]
     fn a_device_that_reads_less_is_told_to_update_by_the_relay() {
         let first = SecretKey::generate();
@@ -1509,6 +1550,7 @@ mod relay {
                 let (status, said) = computes(body);
                 let mut said = said;
                 let seen = said.as_object_mut().unwrap().remove("seen").unwrap_or_default();
+                assert!(said.as_object_mut().unwrap().remove("changes").is_some_and(|c| c.is_string()), "no changes mark");
                 for key in [&first, &phone] {
                     assert!(seen[hex(key)].as_u64().is_some_and(|t| t <= super::now()), "{} wasn't seen: {seen}", hex(key));
                 }

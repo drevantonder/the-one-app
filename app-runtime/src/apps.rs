@@ -330,7 +330,7 @@ fn runs_on(host: &Host, i: &Network, switches: &BTreeMap<(Key, String), scopes::
                 _ => None,
             });
             let online = here || Some(*k) == cloudflare || i.online(k);
-            out.push(json!({ "scope": s.scope, "node": hex(k), "name": name, "online": online, "seen": i.seen(k), "problem": part.and_then(|p| p["problem"].as_str().map(str::to_string)) }));
+            out.push(json!({ "scope": s.scope, "node": hex(k), "name": name, "online": online, "seen": i.seen(k, |k| host.down(k)), "problem": part.and_then(|p| p["problem"].as_str().map(str::to_string)) }));
         }
     }
     Ok(out)

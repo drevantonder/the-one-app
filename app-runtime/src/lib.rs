@@ -166,16 +166,16 @@ impl Network {
         self.online(device) || self.exchanged.get(device).is_some_and(|at| at.elapsed() < net::IDLE)
     }
 
-    /// When a device was last seen (ms): now if it's online, else the latest of what the relay saw of it or its
-    /// runtime and when this device last talked to either.
-    fn seen(&self, device: &Key) -> Option<u64> {
+    /// When a device was last seen (ms): now if it's online and answering (not `down`, as `Host::down` says), else the
+    /// latest of what the relay saw of it or its runtime and when this device last talked to either.
+    fn seen(&self, device: &Key, down: impl Fn(&Key) -> bool) -> Option<u64> {
         let m = self.r.db();
         let device = m.device_of(device);
         let keys = [Some(device), m.runtime_for(&device).ok().flatten()];
         let now = now_ms();
         let mut seen = None;
         for k in keys.into_iter().flatten() {
-            if self.online(&k) {
+            if self.online(&k) && !down(&k) {
                 return Some(now);
             }
             let talked = self.exchanged.get(&k).map(|at| now.saturating_sub(at.elapsed().as_millis() as u64));
@@ -567,7 +567,8 @@ impl Host {
                 }
             }
             if self.has_network() {
-                if relayed.is_none_or(|at| at.elapsed() >= RELAY_EVERY) {
+                // A computer's runtime is given what the relay says as its onet hears it.
+                if matches!(self.0.holds, holds::Holds::Key(_)) && relayed.is_none_or(|at| at.elapsed() >= RELAY_EVERY) {
                     relayed = Some(Instant::now());
                     self.read_connected();
                 }

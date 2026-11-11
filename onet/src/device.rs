@@ -131,13 +131,21 @@ impl Device {
         Ok(())
     }
 
-    /// Tells the relay what this device is on, as each device does, and → what it left for this device (`asked`), if
-    /// anything: an ask to update, for a computer's onet to hear (`app_runtime::heard`).
+    /// Tells the relay what this device is on, as each device does, and → its answer: who's online and was last seen,
+    /// and what it left for this device (`asked`), if anything: an ask to update, for a computer's onet to hear
+    /// (`devices::asked::heard`). Given the mark its last answer carried (`changes`), the relay holds it until
+    /// something it says changed, for up to a minute.
     #[cfg(feature = "computer")]
-    pub(crate) async fn told(&self) -> Result<Value, Error> {
-        let asked = json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": ::custom_build::protocol::version() });
-        let (_, out) = self.relay_computes(asked).await?;
-        Ok(out["asked"].clone())
+    pub(crate) async fn told(&self, after: Option<&str>) -> Result<Value, Error> {
+        let mut asked = json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": ::custom_build::protocol::version() });
+        if let Some(after) = after {
+            asked["after"] = json!(after);
+        }
+        let (status, out) = self.relay_computes(asked).await?;
+        if status != 200 {
+            return Err(failed(error(&out).unwrap_or_else(|| format!("{YOURS}'s relay answered {status}."))));
+        }
+        Ok(out)
     }
 
     fn with(secret: [u8; 32], address: String, dir: &str, bucket: Reached) -> Device {
@@ -322,16 +330,21 @@ impl Device {
         Ok(Some((keys(&out["computes"]), keys(&out["online"]), out["moved"]["global"].as_u64())))
     }
 
-    /// `asked` of the relay's `/relay/computes`, signed by this device: → its status and answer.
+    /// `asked` of the relay's `/relay/computes`, signed by this device: → its status and answer. One the relay may
+    /// hold (`after`) is given as long as it holds it, and a little more.
     async fn relay_computes(&self, asked: Value) -> Result<(u16, Value), Error> {
-        let url = format!("{}/relay/computes", self.address);
+        let url = &format!("{}/relay/computes", self.address);
+        let held = asked.get("after").is_some();
+        let ask = |at| {
+            let body = Some(::key::signed_request(&self.key, ::custom_build::protocol::RELAY, asked.clone(), at));
+            async move { if held { held_http(url, body).await } else { http("POST", url, None, body).await } }
+        };
         // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
-        let mut at = ::key::next_at(now());
-        let (mut status, mut out) = http("POST", &url, None, Some(::key::signed_request(&self.key, ::custom_build::protocol::RELAY, asked.clone(), at))).await?;
+        let at = ::key::next_at(now());
+        let (status, out) = ask(at).await?;
         if out["code"] == ::custom_build::protocol::code::REPLAYED {
             tokio::time::sleep(::key::again_in(at)).await;
-            at = ::key::next_at(now());
-            (status, out) = http("POST", &url, None, Some(::key::signed_request(&self.key, ::custom_build::protocol::RELAY, asked, at))).await?;
+            return ask(::key::next_at(now())).await;
         }
         Ok((status, out))
     }
@@ -572,6 +585,22 @@ impl Address for Device {
 }
 
 /// A request to the network's address (auth, the relay), JSON in and out: → its status and JSON.
+/// How long the relay holds a computes request that names `after`, at most (`HOLD` in relay/worker.js), and a little more.
+const HELD: Duration = Duration::from_secs(70);
+
+/// A POST the relay may hold till something changes (`HELD`): its answer comes when it does, not in the usual time.
+async fn held_http(url: &str, body: Option<Value>) -> Result<(u16, Value), Error> {
+    let url = url.to_string();
+    tokio::task::spawn_blocking(move || {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(HELD)).build().into();
+        let body = body.map(|b| ::key::canonical(&b)).unwrap_or_default();
+        let mut response = agent.post(&url).header("content-type", "application/json").send(&body[..]).map_err(|e| failed(format!("Couldn't reach {YOURS}: {e}")))?;
+        Ok((response.status().as_u16(), response.body_mut().read_json().unwrap_or(Value::Null)))
+    })
+    .await
+    .map_err(failed)?
+}
+
 async fn http(method: &str, url: &str, header: Option<(&str, String)>, body: Option<Value>) -> Result<(u16, Value), Error> {
     let (method, url, header) = (method.to_string(), url.to_string(), header.map(|(n, v)| (n.to_string(), v)));
     tokio::task::spawn_blocking(move || {

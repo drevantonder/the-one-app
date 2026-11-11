@@ -41,7 +41,10 @@
 // nothing) is 426, telling it to update. A browser's session runs the code the address serves, the newest, so it isn't
 // asked. A device's own request can carry `version` (`<commit> <committed> <target>`), kept here, and it's answered
 // with `asked`, what was left for it (`update` below), taken once. Both happen before the `reads` check, so a device
-// too old to be told anything else still hears. That body, and the signed ask, are frozen, as the signed record is
+// too old to be told anything else still hears. Every answer carries `changes`, a mark that's another once a compute's
+// socket opens or closes here or an ask is left for a device; a request that names the mark it was last given
+// (`after`) is held until it's another, for up to `HOLD`, and then answered as it is: how a computer's onet hears at
+// once that a device came or went, or that it's asked to update, with one request a minute while nothing does. That body, and the signed ask, are frozen, as the signed record is
 // (`tests/contracts.rs`): a device left behind has to be able to read them.
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
@@ -100,6 +103,9 @@ const UNPROVEN_PER_PLACE = 8;
 const UNPROVEN_PER_SITE = 32;
 const UNPROVEN = 256;
 const PAIRINGS_PER_DEVICE = 8;
+/// How long a computes request that names `after` is held, at most: under a minute, which nothing between a device
+/// and here cuts off.
+const HOLD = 50_000;
 const is = (it, role) => !!it && rolesOf(it.role).includes(role);
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
@@ -165,7 +171,8 @@ export default class extends WorkerEntrypoint {
       const { by, fields } = await checkRequest(RELAY, JSON.parse(new TextDecoder().decode(body)));
       if (fields[what] !== true) throw new Error(`ask with { ${what}: true }, signed`);
       if (fields.version !== undefined && (typeof fields.version !== "string" || fields.version.length > VERSION_BYTES)) throw new Error("a version is short text");
-      asked = { by, at: fields.at, reads: Number.isSafeInteger(fields.reads) ? fields.reads : 0, version: fields.version };
+      if (fields.after !== undefined && (typeof fields.after !== "string" || fields.after.length > VERSION_BYTES)) throw new Error("after is the changes mark an answer gave");
+      asked = { by, at: fields.at, reads: Number.isSafeInteger(fields.reads) ? fields.reads : 0, version: fields.version, after: fields.after };
       if (fields.certificate !== undefined) {
         const session = await checkCertificate(fields.certificate);
         if (session.endpoint !== by) throw new Error("sign with the key your certificate names");
@@ -174,9 +181,11 @@ export default class extends WorkerEntrypoint {
     } catch (e) {
       return refusal(400, String(e.message || e));
     }
-    const said = await answer(this.list()[what](asked.by, asked));
+    let said = await answer(this.list()[what](asked.by, asked));
     if (said?.update) return refusal(426, { error: updateRefusal(this.env.YOURS), code: CODES.update, ...(said.asked && { asked: said.asked }) });
-    if (what === "computes" && said?.computes) return Response.json({ ...said, online: await answer(this.relay().connected(said.computes)) });
+    // Held while nothing it's told of changed, then answered as it is then: its request was taken already.
+    if (what === "computes" && said?.computes && !said.asked && asked.after !== undefined && (await answer(this.relay().held(asked.after, HOLD)))) said = await answer(this.list().computes(asked.by, { ...asked, at: undefined }));
+    if (what === "computes" && said?.computes) return Response.json({ ...said, online: await answer(this.relay().connected(said.computes)), changes: await answer(this.relay().changes()) });
     if (what === "seen" && said && typeof said === "object") return Response.json({ seen: said, let_in: await answer(this.list().letIn()) });
     if (said?.code) return refusal(400, said);
     if (said && typeof said === "object") return Response.json({ [what]: said });
@@ -305,6 +314,39 @@ export class Relay extends DurableObject {
     this.skew = 0;
     this.log = [];
     this.waiting = [];
+    // The mark computes answers carry, another for each object (it's lost on hibernation, which a held ask waits out
+    // anyway), and the computes requests held until it's another.
+    this.mark = { of: hex.encode(crypto.getRandomValues(new Uint8Array(8))), n: 0 };
+    this.holding = new Set();
+  }
+
+  /// The mark computes answers carry now (`changes`).
+  changes() {
+    return `${this.mark.of}.${this.mark.n}`;
+  }
+
+  /// Something a held computes request is told of changed: a compute's socket opened or closed, or an ask was left.
+  changed() {
+    this.mark.n++;
+    const held = this.holding;
+    this.holding = new Set();
+    for (const done of held) done();
+  }
+
+  /// Waits until the mark is another than `after`, for up to `ms`: → whether it waited, as it does only while it's
+  /// `after` still.
+  async held(after, ms) {
+    if (after !== this.changes()) return false;
+    await new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.holding.delete(done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      this.holding.add(done);
+    });
+    return true;
   }
 
   now() {
@@ -633,6 +675,7 @@ export class Relay extends DurableObject {
     this.sockets.set(id, ws);
     ws.send(confirm());
     this.saw(attachment.by || id);
+    if (attachment.compute) this.changed();
   }
 
   /// Tells the list it saw `key` now, without waiting on it.
@@ -646,6 +689,7 @@ export class Relay extends DurableObject {
     const ws = this.sockets.get(key);
     this.sockets.delete(key);
     if (!ws) return;
+    if (ws.deserializeAttachment()?.compute) this.changed();
     this.note(key, "ended");
     ws.serializeAttachment({});
     try {
@@ -725,7 +769,10 @@ export class Relay extends DurableObject {
     const said = ws.deserializeAttachment();
     if (!said?.id || this.sockets.get(said.id) !== ws) return;
     this.sockets.delete(said.id);
-    this.saw(said.by || said.id).then(() => this.note(said.id, "left"));
+    this.saw(said.by || said.id).then(() => {
+      if (said.compute) this.changed();
+      this.note(said.id, "left");
+    });
   }
 }
 
@@ -888,10 +935,11 @@ export class List extends DurableObject {
   }
 
   /// What a socket that proved it's `id` is let in as, from what it showed when it connected (`said`: a session's
-  /// certificate, or a pairing code's ticket hash): `{ id }` for a key on the list, a session's endpoint, a pairing code's
-  /// computer, or null.
+  /// certificate, or a pairing code's ticket hash): `{ id }` for a key on the list (`compute` too for a compute's, whose
+  /// socket opening or closing changes what computes answers), a session's endpoint, a pairing code's computer, or null.
   admits(id, said) {
-    if (this.key(id)) return { id };
+    const it = this.key(id);
+    if (it) return is(it, "compute") ? { id, compute: true } : { id };
     const now = this.now();
     if (said?.session?.endpoint === id && this.client(said.session.by) && said.session.until > now) return { id, by: said.session.by, until: said.session.until };
     const pairing = said?.joining && this.pairing(said.joining);
@@ -1014,6 +1062,7 @@ export class List extends DurableObject {
       const key = told.cloudflare === true ? (this.env.DEPLOYED ? JSON.parse(this.env.DEPLOYED).from : null) : told.update;
       if (!isKey(key) || !this.key(key)) return { error: "that key isn't on the list", code: CODES.notListed };
       this.sql.exec("INSERT OR REPLACE INTO asks VALUES (?, ?)", key, JSON.stringify(signed));
+      this.tellRelay((r) => r.changed());
       return null;
     }
     return "a tell adds or removes a key, makes or ends a pairing code, or asks a device to update, or to deploy the Workers";

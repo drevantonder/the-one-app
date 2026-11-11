@@ -66,6 +66,7 @@ pub const OWN: &[&str] = &[
     "/api/holds/shared",
     "/api/holds/write",
     "/api/holds/sign",
+    "/api/relay",
 ];
 
 async fn answer(State(onet): State<Arc<Onet>>, req: Request) -> Response {
@@ -87,6 +88,7 @@ async fn answer(State(onet): State<Arc<Onet>>, req: Request) -> Response {
         ("POST", "/api/holds/shared") => shared(&onet, req).await,
         ("POST", "/api/holds/write") => write(&onet, req).await,
         ("POST", "/api/holds/sign") => sign(&onet, req).await,
+        ("GET", "/api/relay") => Ok(onet.relay()),
         ("POST", "/api/services") => services(&onet, req).await,
         _ => return pass_on(&onet, req).await,
     };

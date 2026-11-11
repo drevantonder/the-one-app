@@ -88,7 +88,7 @@ impl Host {
                 far: i.far.get(&s.key).is_some_and(|d| *d > FAR),
                 here: s.key == self.0.id,
                 online: s.key == self.0.id || i.online(&s.key),
-                seen: if s.key == self.0.id { Some(now_ms()) } else { i.seen(&s.key).max(m.runtime_for(&s.key)?.and_then(|r| i.seen(&r))) },
+                seen: if s.key == self.0.id { Some(now_ms()) } else { i.seen(&s.key, |k| self.down(k)).max(m.runtime_for(&s.key)?.and_then(|r| i.seen(&r, |k| self.down(k)))) },
                 build: build.as_ref().map(|r| r.commit.clone()),
                 target: build.as_ref().map(|r| r.target.clone()),
                 services: services.iter().map(|d| d.0.clone()).collect(),
@@ -205,7 +205,7 @@ impl Host {
 
     /// Why a device that won't answer is off, in words for its caller: "mac was last seen 2 min ago".
     pub(super) fn away(&self, key: &Key) -> String {
-        ::api::cli::off(&self.name_of(key), self.with_or(None, |i| Ok(i.seen(key))))
+        ::api::cli::off(&self.name_of(key), self.with_or(None, |i| Ok(i.seen(key, |k| self.down(k)))))
     }
 
     /// The network's compute devices' names by key (hex), and oned on Cloudflare's (`cloudflare`): what a trace's reader calls the

@@ -92,11 +92,15 @@ pub(crate) struct Onet {
     told: std::sync::atomic::AtomicBool,
     /// This device asking to be let in, as a user signed in on this computer (`serve::ask`), until it's in.
     asking: tokio::sync::Mutex<Option<Arc<Device>>>,
+    /// What the relay last answered it, but what it left for this device: who's online and was last seen, what each
+    /// device is on, the writes it counted. Given to its runtime as it comes, and when the runtime asks.
+    relay: std::sync::Mutex<Value>,
     /// Held while it runs, so no other onet signs as this device at once.
     _lock: std::fs::File,
 }
 
-/// How often onet tells the relay what this device is on, hears an ask left for it, and sees to its listings.
+/// How often onet sees to its listings, and tells the relay what this device is on and hears an ask left for it, while
+/// the relay doesn't hold its ask until something changes (`Onet::hear`).
 const KEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub fn run(args: &[String]) -> Result<()> {
@@ -110,9 +114,19 @@ pub fn run(args: &[String]) -> Result<()> {
         let onet = Arc::new(Onet::open(&platform::home(), flag("--listen=").unwrap_or_else(api::local::addr), flag("--runtime="))?);
         let keeping = onet.clone();
         tokio::spawn(async move {
+            let mut after = None;
             loop {
                 if let Err(err) = keeping.start().await {
                     tracing::warn!("{err:#}");
+                }
+                match keeping.hear(after.take()).await {
+                    // The relay held it until something changed, or a while: it's asked again at once.
+                    Ok(Some(mark)) => {
+                        after = Some(mark);
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(err) => tracing::warn!("{err:#}"),
                 }
                 tokio::time::sleep(KEEP_EVERY).await;
             }
@@ -137,7 +151,7 @@ impl Onet {
         let (key, name) = api::home::device_key(home)?;
         let token = api::home::load_local_token(home)?;
         let runtime = runtime.map(|at| Runtime { at, folder: api::home::runtime_folder(home) });
-        Ok(Onet { home: home.to_path_buf(), key, name, token, listen, runtime, device: Default::default(), keeping: Default::default(), told: Default::default(), asking: Default::default(), _lock: lock })
+        Ok(Onet { home: home.to_path_buf(), key, name, token, listen, runtime, device: Default::default(), keeping: Default::default(), told: Default::default(), asking: Default::default(), relay: Default::default(), _lock: lock })
     }
 
     /// What it does from its start, and again every so often (`KEEP_EVERY`), if its home says it's in a network: lists
@@ -173,11 +187,36 @@ impl Onet {
             tokio::spawn(harnesses::keep(apps, self.home.clone(), self.listen.clone()));
         }
         device.connect().await.map_err(|err| anyhow::anyhow!("reaching {}'s devices: {err}", ::custom_build::config::YOURS))?;
-        let asked = device.told().await.map_err(|err| anyhow::anyhow!("telling {}'s relay what this device is on: {err}", ::custom_build::config::YOURS))?;
+        Ok(())
+    }
+
+    /// Tells the relay what this device is on, once its network has an address, and hears its answer: an ask left for
+    /// this device, and who's online and was last seen, which its runtime is given. Given the mark of its last answer,
+    /// the relay holds it until something it says changed (a computer's runtime came or went, an ask was left), so it's
+    /// heard at once. → the mark of this answer, to ask with next, if the relay gave one.
+    async fn hear(&self, after: Option<String>) -> Result<Option<String>> {
+        let Some(device) = self.device.read().await.clone() else { return Ok(None) };
+        let mut said = device.told(after.as_deref()).await.map_err(|err| anyhow::anyhow!("telling {}'s relay what this device is on: {err}", ::custom_build::config::YOURS))?;
+        let asked = said.as_object_mut().and_then(|s| s.remove("asked")).unwrap_or_default();
         if !asked.is_null() {
             device.keyring().who(|who| ::devices::asked::heard(who, &self.key.verifying_key().to_bytes(), &asked));
         }
-        Ok(())
+        let mark = said["changes"].as_str().map(str::to_string);
+        *self.relay.lock().unwrap() = said.clone();
+        if let Some(runtime) = &self.runtime {
+            let (at, folder) = (runtime.at.clone(), runtime.folder.clone());
+            tokio::spawn(async move {
+                if let Err(err) = (Runtime { at, folder }).ask("POST".into(), "/api/relay".into(), vec![("content-type".into(), "application/json".into())], said.to_string().into_bytes()).await {
+                    tracing::debug!("giving this computer's own app runtime what the relay said: {err:#}");
+                }
+            });
+        }
+        Ok(mark)
+    }
+
+    /// What the relay last answered, but what it left for this device: for its runtime as it starts.
+    fn relay(&self) -> Value {
+        self.relay.lock().unwrap().clone()
     }
 
     /// Its device, once its home says it's in a network: kept once who's who names the network's address, which it

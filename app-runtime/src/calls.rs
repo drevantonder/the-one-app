@@ -674,7 +674,7 @@ impl Host {
                     priority: rank::priority(&set, &hex(&at)),
                     far: !here && i.far.get(&via).is_some_and(|d| *d > FAR),
                     full: load.is_some_and(full),
-                    seen: i.seen(&via).max(i.seen(&at)),
+                    seen: i.seen(&via, |k| self.down(k)).max(i.seen(&at, |k| self.down(k))),
                     took: i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)),
                 });
             }

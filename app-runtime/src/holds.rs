@@ -34,7 +34,7 @@ pub struct Holder {
 }
 
 impl Holder {
-    async fn ask(&self, method: &'static str, path: &str, body: Option<Value>) -> Result<Value> {
+    pub(super) async fn ask(&self, method: &'static str, path: &str, body: Option<Value>) -> Result<Value> {
         let (url, token) = (format!("http://{}{path}", self.at), self.token.clone());
         let (status, said) = tokio::task::spawn_blocking(move || -> Result<(u16, Value)> {
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();

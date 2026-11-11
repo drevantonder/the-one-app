@@ -836,8 +836,20 @@ impl Host {
         };
     }
 
-    /// Reads which of the network's devices are connected to the relay. What it last said stands until it answers.
+    /// Reads which of the network's devices are connected to the relay: as its device's onet last heard it, for the
+    /// runtime of a computer (which onet gives it again each time it hears more, `heard_relay`), else of the relay itself.
+    /// What it last said stands until it answers.
     pub(super) fn read_connected(&self) {
+        if let holds::Holds::Asks { holder, .. } = &self.0.holds {
+            let (host, holder) = (self.clone(), holder.clone());
+            tokio::spawn(async move {
+                match holder.ask("GET", "/api/relay", None).await {
+                    Ok(said) => host.heard_relay(&said),
+                    Err(err) => tracing::debug!("reading who's connected, as onet heard it: {err:#}"),
+                }
+            });
+            return;
+        }
         let Some(address) = self.with_or(None, |i| Ok(i.r.db().setting("address")?)) else { return };
         let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());
         let url = format!("{}/relay/computes", address.trim_end_matches('/'));
@@ -857,26 +869,34 @@ impl Host {
                 Err(err) => return tracing::debug!("reading who's connected: {err:#}"),
             };
             host.heard_ask(&said["asked"]);
-            host.with_or((), |i| {
-                i.versions = said["versions"].clone();
-                i.workers = said["workers"].clone();
-                i.moved = said["moved"].is_object().then(|| (Instant::now(), said["moved"].clone()));
-                Ok(())
-            });
-            let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| key::unhex(k.as_str()?).ok()).collect();
-            let seen: HashMap<Key, u64> = said["seen"].as_object().into_iter().flatten().filter_map(|(k, at)| Some((key::unhex(k).ok()?, at.as_u64()?))).collect();
-            let was = host.with_or(None, |i| {
-                i.last_seen = seen;
-                let was = std::mem::replace(&mut i.connected, connected.clone());
-                Ok((was != connected).then_some(was))
-            });
-            if let Some(was) = was {
-                // One whose socket opened again since is tried again at once.
-                host.0.net.down.lock().unwrap().retain(|k, _| was.contains(k) || !connected.contains(k));
-                insights_runtime::relay_says(&host.rt(), &was, &connected);
-                host.emit(Event::Devices);
-            }
+            host.heard_relay(&said);
         });
+    }
+
+    /// Takes what the relay answered (`/relay/computes`): who's online and was last seen, what each device is on and
+    /// the Workers are, and the writes it counted. One that says none of it (onet hasn't heard the relay yet) is passed
+    /// over.
+    pub(super) fn heard_relay(&self, said: &Value) {
+        let Some(online) = said["online"].as_array() else { return };
+        self.with_or((), |i| {
+            i.versions = said["versions"].clone();
+            i.workers = said["workers"].clone();
+            i.moved = said["moved"].is_object().then(|| (Instant::now(), said["moved"].clone()));
+            Ok(())
+        });
+        let connected: std::collections::HashSet<Key> = online.iter().filter_map(|k| key::unhex(k.as_str()?).ok()).collect();
+        let seen: HashMap<Key, u64> = said["seen"].as_object().into_iter().flatten().filter_map(|(k, at)| Some((key::unhex(k).ok()?, at.as_u64()?))).collect();
+        let was = self.with_or(None, |i| {
+            i.last_seen = seen;
+            let was = std::mem::replace(&mut i.connected, connected.clone());
+            Ok((was != connected).then_some(was))
+        });
+        if let Some(was) = was {
+            // One whose socket opened again since is tried again at once.
+            self.0.net.down.lock().unwrap().retain(|k, _| was.contains(k) || !connected.contains(k));
+            insights_runtime::relay_says(&self.rt(), &was, &connected);
+            self.emit(Event::Devices);
+        }
     }
 
     /// Tells the relay at the network's address something, signed by this device's key (`holds`): a device it admitted

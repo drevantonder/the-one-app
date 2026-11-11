@@ -1214,7 +1214,7 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
     assert_eq!(tell(&admin, json!({ "add": hex_device, "role": "client" })).0, 204);
     let version = "abcdef123456 1700000000 x86_64-unknown-linux-gnu";
     let (status, said) = computes(&device, json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": version }));
-    assert_eq!((status, said.as_object().unwrap().keys().cloned().collect::<Vec<_>>()), (200, ["computes", "moved", "online", "seen", "versions", "workers"].map(String::from).to_vec()));
+    assert_eq!((status, said.as_object().unwrap().keys().cloned().collect::<Vec<_>>()), (200, ["changes", "computes", "moved", "online", "seen", "versions", "workers"].map(String::from).to_vec()));
     assert_eq!(said["versions"][&hex_device], version);
     // What a deploy says of the Workers: the device they were last deployed from, and each part's version in a version's words.
     assert_eq!(said["workers"], json!({ "from": hex(&admin), "workers": crate::cloudflare::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null }));
