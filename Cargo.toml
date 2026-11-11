@@ -23,7 +23,7 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:insights-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:backups-runtime", "dep:app-schedules-runtime", "dep:devices-runtime", "dep:services", "dep:services-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "web-bundle"]
+node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:insights-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:backups-runtime", "dep:app-schedules-runtime", "dep:devices-runtime", "dep:services", "dep:services-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:hyper", "dep:hyper-util", "web-bundle"]
 # `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
 web-bundle = ["dep:ssh-key", "dep:flate2"]
 
@@ -143,8 +143,6 @@ ureq = { version = "3", features = ["json"] }
 flate2 = { version = "1", optional = true }
 # Agent devices' screens come as PNG or JPEG and go out as JPEG at the width asked (src/agent_devices/picture.rs).
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"], optional = true }
-jsonc-parser = { version = "0.34", features = ["cst", "serde"], optional = true }
-toml_edit = { version = "0.25", optional = true }
 # Client devices ask a node's local API over iroh, HTTP/1.1 on each stream (src/node/net.rs), which hyper's server
 # answers as axum's does over TCP (axum already builds hyper).
 hyper = { version = "1", features = ["server", "http1"], optional = true }

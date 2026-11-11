@@ -11,8 +11,6 @@ pub mod carried {
 #[cfg(feature = "node")]
 pub mod skills;
 #[cfg(feature = "node")]
-pub mod harnesses;
-#[cfg(feature = "node")]
 pub mod api;
 #[cfg(feature = "node")]
 pub mod build;

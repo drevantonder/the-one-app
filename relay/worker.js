@@ -73,7 +73,7 @@
 // comes back by RPC (`fromNode`, on the `CloudflareNode` entrypoint, which only its Worker binds) and goes out as from
 // it. It's one of the network's endpoints, as compute.
 //
-// Nor are the remote MCP server's devices (cloudflare/mcp/), one per remote MCP client, each in a Durable Object of
+// Nor are the remote MCP server's devices (onet/worker/), one per remote MCP client, each in a Durable Object of
 // that Worker's (`MCP`) while it runs: one binds its key (`bind`, a request signed by that key, which must be on the list) to its
 // object, which then gets the datagrams sent to that key by RPC (`deliver`), and passes back by RPC what it sends
 // (`fromClient`), until it unbinds or its binding lapses. Binding gives it a ticket, which sending and unbinding must

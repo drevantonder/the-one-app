@@ -1,4 +1,4 @@
-//! What answers this computer's API (its node, or its onet, `<cli>t`) hooks the agent harnesses here up to it: each
+//! This computer's onet (`<cli>t`), which answers its API, hooks the agent harnesses here up to it: each
 //! harness installed here gets this network's MCP server and the API's prompt hook, git sends Repos the API's token, and
 //! the built-in skills (`src/skills.rs`) go in each skills folder. A file is written only if it's missing or unchanged
 //! since it was last written here, so an edit made on disk is never overwritten. The user's own AGENTS.md and skills are
@@ -16,17 +16,17 @@ use serde_json::Value;
 
 use ::api::path::HOOKS_PROMPT;
 
-/// Marks a skill folder as this custom build's to replace, so the nodes of two custom builds on one machine leave each other's alone.
+/// Marks a skill folder as this custom build's to replace, so the onets of two custom builds on one machine leave each other's alone.
 fn marker() -> String {
     format!(".synced-{}", custom_build::config::CLI)
 }
 
 fn built_in(name: &str) -> bool {
-    let server = crate::skills::server_name();
+    let server = one::skills::server_name();
     name == server || name.starts_with(&format!("{server}-"))
 }
 
-/// How often a node looks again, so a harness installed later gets them too.
+/// How often it looks again, so a harness installed later gets them too.
 const EVERY: Duration = Duration::from_secs(60);
 
 /// Sets up every harness installed on this device, as what serves its local API at `addr` from `home` does as it starts
@@ -44,11 +44,11 @@ pub async fn keep<F: Future<Output = Option<Vec<Value>>>>(apps: impl Fn() -> F, 
     }
 }
 
-fn set_up(node_home: &Path, addr: &str, apps: &[Value]) {
+fn set_up(onet_home: &Path, addr: &str, apps: &[Value]) {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return };
-    let mut written = Written::load(node_home);
-    harnesses(&home, node_home, addr, &mut written);
-    let skills: BTreeMap<String, BTreeMap<String, String>> = crate::skills::all(apps).into_iter().map(|s| (s.name.clone(), s.all_files().into_iter().collect())).collect();
+    let mut written = Written::load(onet_home);
+    harnesses(&home, onet_home, addr, &mut written);
+    let skills: BTreeMap<String, BTreeMap<String, String>> = one::skills::all(apps).into_iter().map(|s| (s.name.clone(), s.all_files().into_iter().collect())).collect();
     for root in skill_roots(&home) {
         for (name, files) in &skills {
             if let Err(err) = write_skill(&root.join(name), files) {
@@ -132,20 +132,20 @@ fn mcp_args(harness: &str) -> &'static [&'static str] {
     }
 }
 
-/// Gives each harness installed here the node's prompt hook and this network's MCP server, leaving everything else
+/// Gives each harness installed here the API's prompt hook and this network's MCP server, leaving everything else
 /// in its settings as it was.
-fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
+fn harnesses(home: &Path, onet_home: &Path, addr: &str, written: &mut Written) {
     let dir = |var: &str, default: PathBuf| std::env::var_os(var).map(PathBuf::from).unwrap_or(default);
     let claude = dir("CLAUDE_CONFIG_DIR", home.join(".claude"));
     let codex = dir("CODEX_HOME", home.join(".codex"));
     let config = dir("XDG_CONFIG_HOME", home.join(".config"));
     let pi = dir("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     // Asked as one of this machine's own programs: with the token only its user can read.
-    let token = node_home.join(::api::local::LOCAL_TOKEN);
+    let token = onet_home.join(::api::local::LOCAL_TOKEN);
     let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{} || true", custom_build::protocol::header::LOCAL_TOKEN, token.display(), ::api::path::HOOKS_PROMPT);
-    // Another custom build's node on this machine has a hook of its own, on its own port; an older hook of its own is replaced.
+    // Another custom build's onet on this machine has a hook of its own, on its own port; an older hook of its own is replaced.
     let port = format!(":{}{}", ::api::local::port_of(addr), &HOOKS_PROMPT[..=HOOKS_PROMPT.rfind('/').unwrap_or_default()]);
-    let server = crate::skills::server_name();
+    let server = one::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
     let installed = home.join(".local/bin").join(custom_build::config::CLI);
@@ -186,18 +186,18 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
     if pi.is_dir() {
         written.write(&pi.join("extensions").join(format!("{}-hooks.ts", custom_build::config::CLI)), &plugin(PI_EXTENSION));
     }
-    git(node_home, addr);
+    git(onet_home, addr);
 }
 
-/// Git reaches Repos at the node (`git clone http://localhost:<port>/repos/<owner>/<repo>.git`) as one of this machine's own
-/// programs: the user's git config includes one of the node's, which only they can read, sending its token there and telling
-/// the remote helper (cli/src/git_remote.rs) the node's home.
-fn git(node_home: &Path, addr: &str) {
-    let Some(token) = ::api::local::local_token(node_home) else { return };
+/// Git reaches Repos at this computer's API (`git clone http://localhost:<port>/repos/<owner>/<repo>.git`) as one of this machine's own
+/// programs: the user's git config includes one of onet's, which only they can read, sending its token there and telling
+/// the remote helper (cli/src/git_remote.rs) onet's home.
+fn git(onet_home: &Path, addr: &str) {
+    let Some(token) = ::api::local::local_token(onet_home) else { return };
     let port = ::api::local::port_of(addr);
-    let file = node_home.join("git-config");
+    let file = onet_home.join("git-config");
     let hosts: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", custom_build::protocol::header::LOCAL_TOKEN)).collect();
-    let text = format!("{hosts}{}", crate::git_wire::home_config(node_home));
+    let text = format!("{hosts}{}", one::git_wire::home_config(onet_home));
     if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
         use std::io::Write;
         let wrote = platform::os::private_file().truncate(true).open(&file).and_then(|mut f| f.write_all(text.as_bytes()));
@@ -377,8 +377,8 @@ struct Written {
 }
 
 impl Written {
-    fn load(node_home: &Path) -> Self {
-        let path = node_home.join("agents-written.json");
+    fn load(onet_home: &Path) -> Self {
+        let path = onet_home.join("agents-written.json");
         let hashes = platform::files::read_json(&path);
         Written { path, hashes }
     }

@@ -45,7 +45,7 @@ fn main() {
     // The Workers' sources, built with the pinned Bun when they're run or deployed (src/cloudflare.rs), so a
     // release deploys exactly the Workers it was signed with. Which files they are is `ui_files`.
     let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    for watched in ["cloudflare", "relay", "auth", "gateway", "url-signer", "notifications/worker", "insights/worker", "src/screen", "onboarding/pages.js"] {
+    for watched in ["cloudflare", "relay", "auth", "gateway", "url-signer", "notifications/worker", "insights/worker", "onet/worker", "src/screen", "onboarding/pages.js"] {
         println!("cargo:rerun-if-changed={}", root.join(watched).display());
     }
     let mut files: Vec<(String, String)> = ui_files::list(&root).into_iter().map(|(rel, abs)| (rel, abs.to_string_lossy().into())).collect();

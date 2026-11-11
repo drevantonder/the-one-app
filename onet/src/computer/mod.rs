@@ -20,6 +20,7 @@ use one::node::NetworkFile;
 use crate::Device;
 use crate::keyring::Address;
 
+mod harnesses;
 mod serve;
 
 pub use serve::OWN;
@@ -168,7 +169,7 @@ impl Onet {
                     serde_json::from_slice(&response.body.bytes().await.ok()?).ok()
                 }
             };
-            tokio::spawn(one::harnesses::keep(apps, self.home.clone(), self.listen.clone()));
+            tokio::spawn(harnesses::keep(apps, self.home.clone(), self.listen.clone()));
         }
         device.connect().await.map_err(|err| anyhow::anyhow!("reaching {}'s devices: {err}", ::custom_build::config::YOURS))?;
         let asked = device.told().await.map_err(|err| anyhow::anyhow!("telling {}'s relay what this device is on: {err}", ::custom_build::config::YOURS))?;

@@ -52,7 +52,7 @@ fn say(answered: Option<(Value, bool)>) -> std::io::Result<()> {
 }
 
 /// MCP over Streamable HTTP, at `/mcp`: for a client device over iroh, as its user (the remote MCP server,
-/// cloudflare/mcp/, is remote MCP clients' device), or for a program on this machine, as its user. Each POST is
+/// onet/worker/, is remote MCP clients' device), or for a program on this machine, as its user. Each POST is
 /// answered with JSON; the server sends nothing unasked, so there's no stream to GET. A tool that needs keys it wasn't
 /// handed is answered 428 with what it needs, as `/api/call` is, for its caller to hand them and ask again. Nothing is
 /// kept between requests, since the next may reach another node: the session id carries only the client's name,

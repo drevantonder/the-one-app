@@ -134,6 +134,8 @@ impl Parts {
                 // Android's own (native-apps/windows/, native-apps/android/), which no update sends out.
                 Some("native-apps") if file.starts_with("native-apps/windows/") || file.starts_with("native-apps/android/") => {}
                 Some("native-apps") if file.starts_with("native-apps/") => parts.mac = true,
+                // The remote MCP server's Worker; the rest of the folder is Rust.
+                Some("onet") if file.starts_with("onet/worker/") => parts.workers = true,
                 // onet is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
                 Some("onet") => (parts.node, parts.mac, parts.web, parts.dev) = (true, true, true, true),
                 Some("docs" | "tests" | "tools") => {}
