@@ -463,11 +463,15 @@ impl Node {
         }
         let prefix = crate::bucket::database_prefix(&scope.to_string(), app, database);
         let opening = Instant::now();
+        // Open here already, with other keys, it's kept up in this device's copy (`read_ready`, `fill_copies`): opened
+        // again from that, as a read is, unless another device said it wrote what the copy hasn't got yet.
+        let kept_up = self.open_dbs().iter().any(|(open, _)| *open == id) && !self.0.databases.behind.lock().unwrap().contains(&id);
+        let from = if kept_up { bucket.here_only() } else { bucket.clone() };
         let (mut keys, mut tries) = (keys, 0);
         let mut db = loop {
             tries += 1;
             let junk = self.0.databases.junk.lock().unwrap().get(&prefix).cloned().unwrap_or_default();
-            let err = match Db::open_passing(&bucket, &prefix, keys.clone(), junk).await {
+            let err = match Db::open_passing(&from, &prefix, keys.clone(), junk).await {
                 Ok(db) => break db,
                 Err(err) if tries > TRIES => return Err(err),
                 Err(err) => err,
