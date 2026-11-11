@@ -202,6 +202,10 @@ impl Host {
         if conn.alpn() == http_alpn() {
             return self.take_client(conn).await;
         }
+        // A device listed on another that this one hasn't read yet, as a computer's new app runtime is, is let in, not refused.
+        if !self.is_device(&remote) && !self.is_oned_on_cloudflare(&remote) {
+            self.catch_up().await;
+        }
         if !self.is_device(&remote) && self.is_oned_on_cloudflare(&remote) {
             return self.take_oned_on_cloudflare(conn).await;
         }

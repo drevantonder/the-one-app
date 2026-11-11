@@ -90,7 +90,7 @@ const STEPS_CHECKED: usize = 64;
 /// The longest keys handed (a client device's, or with a call passed on) are kept here.
 const CLIENT_KEYS: u64 = 3_600_000;
 
-/// How often, at most, `global` is read for a client device this device doesn't list.
+/// How often, at most, `global` is read for a device this device doesn't list.
 const CATCH_UP_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl Host {
@@ -109,7 +109,7 @@ impl Host {
         self.client(key)
     }
 
-    /// Reads `global`'s newest entries, for a client device this device doesn't list: at most once every few seconds,
+    /// Reads `global`'s newest entries, for a device this device doesn't list: at most once every few seconds,
     /// whoever asks, since anyone who reaches this device can ask as a key it doesn't know, and one read is everyone's.
     pub async fn catch_up(&self) {
         let mut last = self.0.caught_up.lock().await;
