@@ -714,7 +714,7 @@ impl Node {
     /// opened, and what it said while there was none was lost.
     fn caught_up(&self) {
         let node = self.clone();
-        tokio::spawn(async move { node.fill_copies().await });
+        tokio::spawn(async move { node.fill_copies(None).await });
     }
 
     /// Sends `to` a message of `kind` on a stream of its own, on the connection open or, if that one's gone, a new
@@ -880,6 +880,7 @@ impl Node {
             node.with_or((), |i| {
                 i.versions = said["versions"].clone();
                 i.workers = said["workers"].clone();
+                i.moved = said["moved"].is_object().then(|| (Instant::now(), said["moved"].clone()));
                 Ok(())
             });
             let connected: std::collections::HashSet<Key> = said["online"].as_array().into_iter().flatten().filter_map(|k| crate::keys::unhex(k.as_str()?).ok()).collect();

@@ -342,14 +342,14 @@ impl Node {
         Ok(false)
     }
 
-    /// Fetches into this device's copy what the bucket has of each database open here that it lacks, every tick: what
-    /// a lost `changed` would have said. A database a call is using is left for the next.
-    pub(super) async fn fill_copies(&self) {
+    /// Fetches into this device's copy what the bucket has of each database open here that it lacks (of `only`'s scopes,
+    /// if given): what a lost `changed` would have said. A database a call is using is left for the next.
+    pub(super) async fn fill_copies(&self, only: Option<&HashSet<Scope>>) {
         let Ok(bucket) = self.bucket() else { return };
         let mut changed = Vec::new();
         // A database open more than once (with keys calls were handed) is filled once, from where the furthest behind is.
         let mut open: BTreeMap<String, (String, u64)> = BTreeMap::new();
-        for ((_, name), db) in self.open_dbs() {
+        for ((_, name), db) in self.open_dbs().into_iter().filter(|((scope, _), _)| only.is_none_or(|o| o.contains(scope))) {
             let Ok((prefix, at)) = db.try_lock().map(|db| (db.prefix().to_string(), db.at())) else { continue };
             open.entry(prefix).and_modify(|(_, least)| *least = (*least).min(at)).or_insert((name, at));
         }

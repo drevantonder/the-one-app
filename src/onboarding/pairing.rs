@@ -149,7 +149,7 @@ impl Node {
         self.open_network()?;
         let node = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = node.read_scopes().await {
+            if let Err(err) = node.read_scopes(None).await {
                 tracing::debug!("reading the bucket after joining: {err:#}");
             }
         });

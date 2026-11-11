@@ -1211,7 +1211,7 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
     assert_eq!(tell(&admin, json!({ "add": hex_device, "role": "client" })).0, 204);
     let version = "abcdef123456 1700000000 x86_64-unknown-linux-gnu";
     let (status, said) = computes(&device, json!({ "computes": true, "reads": one::database::READS, "version": version }));
-    assert_eq!((status, said.as_object().unwrap().keys().cloned().collect::<Vec<_>>()), (200, ["computes", "online", "versions", "workers"].map(String::from).to_vec()));
+    assert_eq!((status, said.as_object().unwrap().keys().cloned().collect::<Vec<_>>()), (200, ["computes", "moved", "online", "versions", "workers"].map(String::from).to_vec()));
     assert_eq!(said["versions"][&hex_device], version);
     // What a deploy says of the Workers: the device they were last deployed from, and each part's version in a version's words.
     assert_eq!(said["workers"], json!({ "from": hex(&admin), "workers": crate::cloudflare::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null }));
@@ -1244,6 +1244,31 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
     let (by, fields) = keys::check_request("one/relay", &said["asked"], at()).unwrap();
     assert_eq!((data_encoding::HEXLOWER.encode(&by), fields["cloudflare"].clone()), (hex_device.clone(), json!(true)));
     assert!(computes(&admin, from).1.get("asked").is_none(), "heard once");
+}
+
+/// A device tells the relay each scope it writes to by its name as Rust says it (`Scope`'s), and every device hears each
+/// one's count of writes with the computes, to read from the bucket only what moved (`Node::moved`).
+#[test]
+fn the_relay_counts_writes_to_scopes_by_their_names() {
+    use iroh::SecretKey;
+    use one::database::scopes::Scope;
+    let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
+    let hex = |k: &SecretKey| data_encoding::HEXLOWER.encode(k.public().as_bytes());
+    let (admin, other) = (SecretKey::generate(), SecretKey::generate());
+    let k = crate::cloudflare::Workers::for_devices(vec![hex(&admin)]);
+    let address = k.address.replace("localhost", "127.0.0.1");
+    let clock = std::sync::atomic::AtomicU64::new(one::node::now_ms());
+    let at = || clock.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let post = |path: &str, by: &SecretKey, fields: Value| crate::cloudflare::post(&format!("{address}/relay/{path}"), &[], keys::signed_request(&signer(by), "one/relay", fields, at()));
+    let (user, group) = (Scope::User("976091fe8c23a057".into()).to_string(), Scope::Group("0a1b2c3d4e5f6071".into()).to_string());
+    assert_eq!(post("tell", &admin, json!({ "add": hex(&other), "role": "compute" })).0, 204);
+    assert_eq!(post("tell", &admin, json!({ "moved": [Scope::Global.to_string(), user] })).0, 204);
+    assert_eq!(post("tell", &other, json!({ "moved": [user, group] })).0, 204);
+    assert_eq!(post("tell", &other, json!({ "moved": ["../global"] })).0, 403, "only scopes' names");
+    let stranger = SecretKey::generate();
+    assert_eq!(post("tell", &stranger, json!({ "moved": ["global"] })).0, 403, "only the network's devices");
+    let (status, said) = post("computes", &other, json!({ "computes": true, "reads": one::database::READS }));
+    assert_eq!((status, &said["moved"]), (200, &json!({ "global": 1, user: 2, group: 1 })), "{said}");
 }
 
 /// A release for Windows adds its own line to the signed record. Signed once, as a record with that line is: every device

@@ -10,9 +10,9 @@ const PATHS_EVERY: Duration = Duration::from_secs(5 * 60);
 
 impl Node {
     /// Reads what each scope this device holds has in the bucket after what it last read, `global` first, until it
-    /// holds no scope it didn't.
-    pub(super) async fn read_scopes(&self) -> Result<()> {
-        let held = || self.with(|i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<Scope>>()));
+    /// holds no scope it didn't: of `only`, if given, those, and any it hasn't read yet.
+    pub(super) async fn read_scopes(&self, only: Option<&HashSet<Scope>>) -> Result<()> {
+        let held = || self.with(|i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.holds(s) && only.is_none_or(|o| o.contains(s) || (*s != Scope::Global && !i.scope_dbs.contains_key(s)))).collect::<Vec<Scope>>()));
         let mut read: Vec<Scope> = Vec::new();
         loop {
             let mut scopes: Vec<Scope> = held()?.into_iter().filter(|s| !read.contains(s)).collect();
@@ -93,6 +93,8 @@ impl Node {
             }
         }
         self.notify(&devices, &input);
+        // And the relay, which counts each scope's writes for a device whose notice was lost (`Node::moved`).
+        self.tell_relay(json!({ "moved": [scope.to_string()] }));
     }
 
     /// What another device said changed in `scope`, which this device holds: its steps, which it reads now, or with

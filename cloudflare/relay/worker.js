@@ -58,6 +58,11 @@
 // - `{ update }`: a key on the list, whose device this signed ask is left for, whole, until it next asks for the computes:
 //   any key on the list may leave one, the receiver checks who signed it and that they may remove it, and it can only
 //   ever bring the signed record's newest build. Another replaces it.
+// - `{ moved: [scope] }`: that the device just wrote to each scope (a scope's name, as `global` or `user:<id>`), by any key
+//   on the list, as it tells the devices that hold them: each scope's count goes up by one. `computes` answers with
+//   `moved`, each scope's count, for a device to read from the bucket only what moved since it last looked. It's only
+//   a hint: the bucket is the truth, and a device reads all of it now and then anyway. The Cloudflare node, which tells
+//   no device, counts its own by its binding (`CloudflareNode.moved`).
 // - `{ cloudflare: true }`: the same, to deploy the Workers again, left for the device they were last deployed from (`workers.from`),
 //   which checks that the asker is an admin.
 //
@@ -85,6 +90,9 @@ initSync({ module: wasm });
 const PROTOCOL = "iroh-relay-v2";
 const TELL_BYTES = 4096;
 const VERSION_BYTES = 128;
+/// A scope's name (src/database/scopes.rs `Scope`): `global`, or a kind and an id.
+const SCOPE = /^(global|[a-z]+:[0-9A-Za-z_-]{1,64})$/;
+const MOST_MOVED = 16;
 const PROVE_WITHIN = 30_000;
 const UNPROVEN_PER_PLACE = 8;
 const UNPROVEN_PER_SITE = 32;
@@ -242,6 +250,11 @@ export class McpDevices extends WorkerEntrypoint {
 export class CloudflareNode extends WorkerEntrypoint {
   fromNode(items) {
     return answer(relay(this.env).fromNode(items));
+  }
+
+  /// The Cloudflare node's writes, which it tells no device of: as a device's `{ moved }` tell.
+  moved(scopes) {
+    return answer(list(this.env).move(scopes));
   }
 
   connected(keys) {
@@ -673,7 +686,8 @@ export class List extends DurableObject {
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
       CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS asks (key TEXT PRIMARY KEY, signed TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS objects (key TEXT PRIMARY KEY, name TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS objects (key TEXT PRIMARY KEY, name TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS moved (scope TEXT PRIMARY KEY, n INTEGER NOT NULL);`);
     /// A test's clock, as the Relay's (`Relay.testing`).
     this.skew = 0;
     ctx.blockConcurrencyWhile(() => this.start());
@@ -760,7 +774,8 @@ export class List extends DurableObject {
     if (asked && !asked.session && behind(asked.reads)) return { update: true, ...heard };
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
     const versions = Object.fromEntries(this.sql.exec("SELECT key, version FROM keys WHERE version IS NOT NULL").toArray().map((r) => [r.key, r.version]));
-    return { computes: this.env.BOUND ? [...keys, this.env.BOUND] : keys, versions, ...(this.env.DEPLOYED && { workers: JSON.parse(this.env.DEPLOYED) }), ...heard };
+    const moved = Object.fromEntries(this.sql.exec("SELECT scope, n FROM moved").toArray().map((r) => [r.scope, r.n]));
+    return { computes: this.env.BOUND ? [...keys, this.env.BOUND] : keys, versions, moved, ...(this.env.DEPLOYED && { workers: JSON.parse(this.env.DEPLOYED) }), ...heard };
   }
 
   /// Keeps what `by` says it's on, and gives it what was left for it, once: → `{ asked }`, or nothing.
@@ -784,6 +799,13 @@ export class List extends DurableObject {
     if (this.sql.exec("SELECT 1 FROM tells WHERE by = ? AND at = ?", by, at).toArray().length) return false;
     this.sql.exec("INSERT INTO tells VALUES (?, ?)", by, at);
     return true;
+  }
+
+  /// Counts a write to each of `scopes`, as their writer says: → why not, if they aren't scopes' names.
+  move(scopes) {
+    if (!Array.isArray(scopes) || !scopes.length || scopes.length > MOST_MOVED || !scopes.every((s) => typeof s === "string" && SCOPE.test(s))) return "moved is the names of the scopes written to";
+    for (const scope of new Set(scopes)) this.sql.exec("INSERT INTO moved VALUES (?, 1) ON CONFLICT (scope) DO UPDATE SET n = n + 1", scope);
+    return null;
   }
 
   /// Whether a pairing code's ticket hash still works.
@@ -840,6 +862,7 @@ export class List extends DurableObject {
     if (!by) return `only ${this.env.YOURS}'s devices tell the relay`;
     if (!this.take(told.by, told.at)) return replayed("tell");
     const admin = by.admin === 1;
+    if (told.moved !== undefined) return this.move(told.moved);
     if (told.add !== undefined) {
       if (!isKey(told.add)) return "add is a key, in hex";
       if (!ROLES.includes(told.role)) return `add says its role: ${ROLES.join(", ")}`;

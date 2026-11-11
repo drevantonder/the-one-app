@@ -1,7 +1,7 @@
 //! A node: this device's network (a custom build holds one), its replica and views, its socket to the relay, and where
 //! calls run.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -97,6 +97,11 @@ const TICK: Duration = Duration::from_secs(10);
 /// How often a device reads what other devices wrote that no notice told it of, for a notice that was lost; and as it
 /// wakes from sleep, when it may have missed many.
 const REFILL: Duration = Duration::from_secs(120);
+/// How often a refill reads every scope from the bucket whatever the relay says moved (`Node::moved`), for a write it
+/// wasn't told of.
+const WHOLE_REFILL: Duration = Duration::from_secs(1800);
+/// How old what the relay said of writes (`moved`) may be for a refill to go by it.
+const MOVED_FRESH: Duration = Duration::from_secs(60);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
 /// How often a device says hello to the others: how loaded it is, and what its parts are doing.
@@ -133,6 +138,8 @@ struct Network {
     versions: Value,
     /// What the relay says the Workers are on, and the device they're deployed from (`workers` in its answer).
     workers: Value,
+    /// How many writes the relay has counted to each scope (`moved` in its answer), and when it said so.
+    moved: Option<(Instant, Value)>,
     builds: HashMap<Key, release::Running>,
     /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
     /// last position read, and the database, once its anchor checked out here.
@@ -351,7 +358,7 @@ impl Node {
             node.read_all_status(false);
             let reader = node.clone();
             tokio::spawn(async move {
-                if let Err(err) = reader.read_scopes().await {
+                if let Err(err) = reader.read_scopes(None).await {
                     tracing::warn!("reading the bucket: {err:#}");
                 }
                 reader.share_blobs().await;
@@ -497,22 +504,39 @@ impl Node {
 
     /// Now and then, reads what other devices wrote and said.
     async fn tick_loop(self) {
-        let mut refilled: Option<SystemTime> = None;
+        let (mut refilled, mut whole): (Option<SystemTime>, Option<SystemTime>) = (None, None);
+        // What the relay said of writes at the last refill.
+        let mut seen = Value::Null;
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
+            let mut read = false;
             if self.has_network() {
                 // The wall clock, which runs on while a machine sleeps, as `Instant` doesn't everywhere.
                 // A runtime its device hasn't listed yet reads who's who each tick, to run things from when it has.
-                let refill = refilled.is_none_or(|at| at.elapsed().unwrap_or_default() >= REFILL) || !self.ready();
-                if refill {
+                let due = |at: Option<SystemTime>, every| at.is_none_or(|at| at.elapsed().unwrap_or_default() >= every) || !self.ready();
+                if due(refilled, REFILL) {
                     refilled = Some(SystemTime::now());
-                    if let Err(err) = self.read_scopes().await {
-                        tracing::debug!("reading the bucket: {err:#}");
+                    // Only the scopes the relay counted writes to since the last refill, while it answers; all of them now
+                    // and then, and whenever it doesn't.
+                    let moved = self.with_or(None, |i| Ok(i.moved.as_ref().filter(|(at, _)| at.elapsed() < MOVED_FRESH).map(|(_, m)| m.clone())));
+                    let only = match moved {
+                        Some(now) if !due(whole, WHOLE_REFILL) => Some(moved_since(&seen, &now)),
+                        _ => {
+                            whole = refilled;
+                            None
+                        }
+                    };
+                    seen = self.with_or(Value::Null, |i| Ok(i.moved.as_ref().map(|(_, m)| m.clone()).unwrap_or_default()));
+                    read = only.as_ref().is_none_or(|o| !o.is_empty());
+                    if read {
+                        if let Err(err) = self.read_scopes(only.as_ref()).await {
+                            tracing::debug!("reading the bucket: {err:#}");
+                        }
+                        self.fill_copies(only.as_ref()).await;
                     }
-                    self.fill_copies().await;
                 }
                 self.forget_sessions();
-                self.read_all_status(!refill);
+                self.read_all_status(!read);
                 self.read_own_items();
             }
             if tick % 6 == 0 && self.has_network() {
@@ -523,6 +547,13 @@ impl Node {
             }
         }
     }
+}
+
+/// The scopes whose count of writes the relay said changed between `was` and `now` (`moved`, each scope's name to a
+/// count).
+fn moved_since(was: &Value, now: &Value) -> HashSet<Scope> {
+    let names = now.as_object().into_iter().chain(was.as_object()).flat_map(|m| m.keys());
+    names.filter(|s| was.get(s.as_str()) != now.get(s.as_str())).filter_map(|s| Scope::parse(s).ok()).collect()
 }
 
 /// `global`'s state, as its scope database says it: each other scope's is its own database's

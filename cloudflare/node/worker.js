@@ -647,12 +647,15 @@ class Call {
     return types ? this.on(scope, ask) : ask(undefined);
   }
 
-  /// Writes a call's appends: each scope's statements as one step. Nobody is told: this node runs only while no
-  /// machine's answers, and devices read what changed from the bucket. → the databases it wrote.
+  /// Writes a call's appends: each scope's statements as one step. No device is told, as this node runs only while
+  /// no machine's answers: the relay counts each scope written (`moved`), and devices read what moved from the bucket.
+  /// → the databases it wrote.
   async write(appends) {
     const each = JSON.parse(statements(JSON.stringify(appends), JSON.stringify(this.scopes)));
     for (const [scope, list] of Object.entries(each)) await this.on(scope, (handle) => write(handle, this.user.bucket, JSON.stringify(list)), true);
-    return Object.keys(each).map((scope) => prefix(scope, this.app.name, "main"));
+    const scopes = Object.keys(each);
+    if (scopes.length) this.user.ctx.waitUntil(Promise.resolve(this.user.env.RELAY.moved(scopes)).catch(() => {}));
+    return scopes.map((scope) => prefix(scope, this.app.name, "main"));
   }
 
   close() {
