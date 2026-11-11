@@ -37,6 +37,6 @@ Building it:
 - AIs do the building. They can try a change on every kind of device we support, see it running, and check their own work before calling it done.
 - I run the latest development version in my own network, so the newest changes reach my devices quickly and I can dogfood it.
 - While it runs, it shows what it's doing: what's slow, what's failing, what it costs, and anything that makes it worse to use, for a person or for an AI. No one has to dig for it.
-- The codebase follows best practices in an era where agents do the development.
+- The codebase follows best practices in an era where agents do the development: the right way is the easy way because the code's structure makes it so, work is proven on the real thing, and it is tidied constantly.
 - Many AIs can work on it at once, on several machines, without getting in each other's way.
 - What slows a builder down gets written down and fixed.
