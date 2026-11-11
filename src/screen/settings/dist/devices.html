@@ -84,7 +84,7 @@ function Z(e, t) {
 				...e.clients,
 				e.runtime,
 				e.node
-			].filter(Boolean).map((e) => e.key).sort((t, n) => (t === e.node?.device) - (n === e.node?.device)), e.me = [e.node, ...e.clients].some((e) => e?.me), e.online = !!e.node?.online, e.runs = !!e.node, e.priority = e.node?.priority ?? null;
+			].filter(Boolean).map((e) => e.key).sort((t, n) => (t === e.node?.device) - (n === e.node?.device)), e.removes = e.keys.filter((t) => ![e.runtime, e.node?.device && e.node].some((e) => e?.key === t)), e.me = [e.node, ...e.clients].some((e) => e?.me), e.online = !!e.node?.online, e.runs = !!e.node, e.priority = e.node?.priority ?? null;
 			let n = [...e.clients].sort((e, t) => t.me - e.me || (a[t.key] || 0) - (a[e.key] || 0) || (t.since || 0) - (e.since || 0));
 			e.signIn = n[0] || null, e.old = n.slice(1), e.seen = Math.max(0, ...e.keys.map((e) => a[e] || 0)), e.letInBy = e.keys.map((e) => i.find((t) => t.key === c[e] && t.platform === "cloudflare")).find(Boolean)?.name || null, e.version = e.node && s[X(e.node)] || s[e.signIn?.key] || null, e.icon = e.node ? H(e.node.kind === "laptop" ? "laptop" : /apple|windows/.test(e.node.target || "") ? "desktop" : "hard-drives", B(e.node.target, e.name), !e.online) : G({
 				...e.signIn,
@@ -416,7 +416,7 @@ function Q() {
 		}) : r[a].title === "This Device’s Code" ? G(async () => one.alert({
 			title: "This Device’s Code",
 			text: (await j("GET", "/api/devices/code")).code
-		})) : e.me ? fe() : le(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null, t ? [] : e.letIn));
+		})) : e.me ? fe() : le(e.name, t ? [e.key] : e.removes, !t && e.node && e.online ? e.node.key : null, t ? [] : e.letIn));
 	}
 	async function le(e, t, n, r = []) {
 		if (n || r.length) return P({ remove: {
@@ -1634,7 +1634,7 @@ function Pe(e) {
 	return e.name;
 }
 function Fe(e) {
-	return e.keys;
+	return e.removes;
 }
 function Ie(n) {
 	let i = e(35), { clients: a, me: s, open: c, setOpen: l, done: u } = n, [d, f] = r(null), [m, h] = r(""), [g, _] = r(null), b = a.flatMap(Le), x;

@@ -882,11 +882,12 @@ async fn update_device(m: &impl Me, device: &str) -> Result<Value> {
     Ok(json!({ "said": format!("Asked {name} to update.") }))
 }
 
-/// Takes one of this user's devices out (by its key or name), or for an admin, anyone's: off the network first,
-/// then unlisted, it and its parts; then each scope its user opens that this user may move on gets a new epoch
-/// it doesn't have. Itself, it leaves (`Me::leave`).
+/// Takes one of this user's devices out (by its key or name, or its app runtime's), or for an admin, anyone's: off the
+/// network first, then unlisted, it and its parts, each part only if who's who didn't take it out with the device; then
+/// each scope its user opens that this user may move on gets a new epoch it doesn't have. Itself, it leaves
+/// (`Me::leave`).
 async fn remove(m: &impl Me, device: &str) -> Result<Value> {
-    let key = m.who(|who| who.find_machine(device))?;
+    let key = m.who(|who| who.find_machine(device).map(|k| who.device_of(&k)))?;
     if key == m.public() {
         return m.leave().await.map(|()| json!({ "removed": "this device" }));
     }
@@ -900,7 +901,9 @@ async fn remove(m: &impl Me, device: &str) -> Result<Value> {
     })?;
     for k in &keys {
         take_out(m, k).await?;
-        m.write(content::remove_device(k)).await?;
+        if m.who(|who| who.machine(k))?.is_some() {
+            m.write(content::remove_device(k)).await?;
+        }
     }
     let left = renew(m, &scopes, &keys).await?;
     Ok(json!({ "removed": name, "not_renewed": left }))

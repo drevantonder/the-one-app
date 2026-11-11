@@ -329,6 +329,36 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     a.call(notes("post", json!({ "text": "after" }))).await.unwrap();
 }
 
+/// Removing a device with an app runtime of its own takes the runtime out with it, named by either: a runtime is never
+/// left without its device, nor a device without its runtime.
+#[tokio::test(flavor = "multi_thread")]
+async fn removing_a_device_takes_its_app_runtime_and_naming_the_runtime_removes_the_device() {
+    use one::database::scopes::Kind;
+    let a = start("remove-runtime").await;
+    create(&a, "Home", "Andre").await;
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    // A computer of Andre's, approved from his machine, listing its own app runtime, as its onet does.
+    let computer = async || {
+        let device = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+        one::settings::approve(&a, &asks(&device, &me.user, None), &one::settings::Joining::Own { proved: true }).await.unwrap();
+        let runtime = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+        let listed = one::database::content::runtime(&runtime, &me.user, "computer", &device.verifying_key().to_bytes());
+        signed_by(&a, &me, &device, listed).await;
+        (device.verifying_key().to_bytes(), runtime.key)
+    };
+    let listed = |k: [u8; 32]| one::settings::Me::who(&a, |w| w.machine(&k)).unwrap().is_some();
+    let remove = async |k: [u8; 32]| one::settings::answer(&a, "POST", "/api/devices/remove", json!({ "device": one::keys::hex(&k) }).to_string().as_bytes()).await.unwrap();
+
+    let (device, runtime) = computer().await;
+    assert!(listed(device) && listed(runtime));
+    remove(device).await.unwrap();
+    assert!(!listed(device) && !listed(runtime), "removing the device takes its runtime");
+
+    let (device, runtime) = computer().await;
+    remove(runtime).await.unwrap();
+    assert!(!listed(device) && !listed(runtime), "naming its runtime removes the device");
+}
+
 /// The recovery key is sealed only to a device of someone an admin named, not to a node, and only where nothing holds it
 /// yet; naming a holder changes nothing a device already opens; and one taken off is sealed no more.
 #[tokio::test(flavor = "multi_thread")]

@@ -136,6 +136,8 @@ function model(x, again) {
       if (named) c.name = shown(named.name)
       // Its oned last, then the device itself: removing it takes what's part of it, its apps' sign-ins first here.
       c.keys = [...c.clients, c.runtime, c.node].filter(Boolean).map((e) => e.key).sort((a, b) => (a === c.node?.device) - (b === c.node?.device))
+      // What Remove takes out: its app runtime goes with the device.
+      c.removes = c.keys.filter((k) => ![c.runtime, c.node?.device && c.node].some((e) => e?.key === k))
       c.me = [c.node, ...c.clients].some((e) => e?.me)
       c.online = !!c.node?.online
       c.runs = !!c.node
@@ -416,7 +418,7 @@ function Devices() {
     else if (items[i].title === "Sign-Ins…") show({ signIns: signedIn, me: item.me })
     else if (items[i].title === "This Device’s Code") act(async () => one.alert({ title: "This Device’s Code", text: (await api("GET", "/api/devices/code")).code }))
     else if (item.me) signOut()
-    else remove(item.name, passkey ? [item.key] : item.keys, !passkey && item.node && item.online ? item.node.key : null, passkey ? [] : item.letIn)
+    else remove(item.name, passkey ? [item.key] : item.removes, !passkey && item.node && item.online ? item.node.key : null, passkey ? [] : item.letIn)
   }
 
   /// Removes a device, everything on it: it opens nothing new. One that runs oned and is on can also erase what it
@@ -1134,7 +1136,7 @@ function RemoveDevice({ name, keys, erasable, letIn = [], open, setOpen, done })
     setError("")
     try {
       if (erase) await api("POST", "/api/erase", { key: erasable })
-      for (const key of also ? letIn.flatMap((c) => c.keys) : []) await api("POST", "/api/devices/remove", { device: key })
+      for (const key of also ? letIn.flatMap((c) => c.removes) : []) await api("POST", "/api/devices/remove", { device: key })
       for (const key of keys) await api("POST", "/api/devices/remove", { device: key })
       one.tap("success")
       done()
