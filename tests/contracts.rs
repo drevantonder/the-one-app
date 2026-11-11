@@ -638,8 +638,8 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
             missing.push(format!("{who} doesn't name `{name}`"));
         }
     };
-    names("the node's widgets", &read("src/node/screens.rs"), &["[\"late\"] = json!(true)"]);
-    names("the node's route", &read("src/node/widgets/says.rs"), &["kind: Option<String>"]);
+    names("the node's widgets", &read("widgets/runtime/src/draw.rs"), &["[\"late\"] = json!(true)"]);
+    names("the node's route", &read("widgets/src/says.rs"), &["kind: Option<String>"]);
     names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
     names("the pages", &read("src/screen/home/lib/model.js"), &["w.late", "&kind="]);
     names("the native widgets", &read("client/native/src/widgets.rs"), &["w[\"late\"]", "&kind="]);

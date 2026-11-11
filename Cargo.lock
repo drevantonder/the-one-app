@@ -3074,6 +3074,8 @@ dependencies = [
  "ureq",
  "vault",
  "vault-runtime",
+ "widgets",
+ "widgets-runtime",
  "windows-sys 0.61.2",
 ]
 
@@ -5615,6 +5617,33 @@ name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
+
+[[package]]
+name = "widgets"
+version = "0.1.0"
+dependencies = [
+ "api",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "widgets-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "axum",
+ "custom-build",
+ "futures-util",
+ "key",
+ "scope",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "widgets",
+]
 
 [[package]]
 name = "winapi"

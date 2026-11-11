@@ -1,0 +1,17 @@
+# Widgets, as every build has them, WebAssembly too: the tool that shows them and what their routes say. What draws them
+# is the runtime's (runtime/).
+[package]
+name = "widgets"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+api = { path = "../api" }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

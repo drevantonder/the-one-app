@@ -72,7 +72,6 @@ mod status;
 mod steps;
 pub mod storage;
 use ::api::trace;
-pub mod widgets;
 mod caller;
 pub mod runtime;
 mod exclusive;

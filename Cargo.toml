@@ -1,9 +1,9 @@
 [workspace]
-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "vault", "vault/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "vault", "vault/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "service", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
-default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "vault", "vault/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "vault", "vault/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 
 [package]
 name = "one"
@@ -23,7 +23,7 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["bucket/machine", "platform/machine", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:vault-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
+node = ["bucket/machine", "platform/machine", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
 # `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
 web-bundle = ["dep:ssh-key", "dep:flate2"]
 
@@ -46,6 +46,9 @@ vault-runtime = { path = "vault/runtime", optional = true }
 # Groups (groups/): who's in the network and its groups, every build; what the app runtime does for it, only a node's.
 groups = { path = "groups" }
 groups-runtime = { path = "groups/runtime", optional = true }
+# Widgets (widgets/): the tool that shows them, every build; what the app runtime does for them, only a node's.
+widgets = { path = "widgets" }
+widgets-runtime = { path = "widgets/runtime", optional = true }
 anyhow = "1"
 # AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes and tools' specs, every build; what a node does for it, only a node's.
 ai-gateway = { path = "ai-gateway" }
@@ -96,7 +99,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 axum = { version = "0.8", optional = true }
 opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "trace", "logs", "metrics", "with-serde"], optional = true }
 prost = { version = "0.14", optional = true }
-# Its join_all and BoxFuture run a node's asks of several things at once (src/node/screens.rs, src/core_tools.rs); axum and iroh
+# Its join_all and BoxFuture run a node's asks of several things at once (src/core_tools.rs); axum and iroh
 # already build it.
 futures-util = { version = "0.3", default-features = false, optional = true }
 # Devices reach each other over iroh (src/node/net.rs): QUIC between their device keys, direct where a path opens and
