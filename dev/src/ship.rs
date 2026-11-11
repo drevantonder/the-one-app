@@ -32,9 +32,9 @@ use update::*;
 pub use wait::{CALL, wait};
 use wait::*;
 
-pub fn commands() -> one::cli::Command {
+pub fn commands() -> api::cli::Command {
     let form = |usage: &str, about: String| (usage.to_string(), about);
-    one::cli::Command {
+    api::cli::Command {
         help: vec![
             form("changes [<commit>]", "what has to go out for main's tip, or <commit>, part by part, since each part was last sent".into()),
             form("update [workers|web|apps|services|mac|node|dev] [--release]", format!("send out the part named, built and sent on its own, or, with none, each that changed, in order: apps, mac, services, node, workers, web, dev. A part with nothing changed does nothing, and each keeps the commit it sent. --release has a Mac notarize its app. Run it on a device with the release key: {CLI}-dev changes says what's due")),

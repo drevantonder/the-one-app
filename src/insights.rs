@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use ::custom_build::protocol::code;
+use ::api::traceparent::{TIMEOUT, UNREACHABLE, stage};
 
 pub mod cost;
 pub mod message;
@@ -77,10 +78,6 @@ impl Ended {
     }
 }
 
-/// Whether `trace` is one of those. By its id, so every span of a trace agrees, on any device.
-pub fn sampled(trace: &str) -> bool {
-    u64::from_str_radix(trace.get(trace.len().saturating_sub(8)..).unwrap_or(""), 16).is_ok_and(|n| n % ::custom_build::protocol::SAMPLED_ONE_IN == 0)
-}
 
 /// The most a batch holds of each, past which what's new is dropped: as many as the telemetry Worker takes at once.
 const MOST_ROWS: usize = 5000;
@@ -154,23 +151,6 @@ impl Failure {
     }
 }
 
-/// Where a call failed: the order it goes through them.
-pub mod stage {
-    /// Whether it can run at all: its scopes, whether its app's deleted, a lab that's off.
-    pub const CHECK: &str = "check";
-    /// The loop guard that stopped its app.
-    pub const GUARD: &str = "guard";
-    pub const KEYS: &str = "keys";
-    pub const LEASE: &str = "lease";
-    pub const RUN: &str = "run";
-    pub const PREPARE: &str = "prepare";
-    pub const WRITE: &str = "write";
-    /// It took longer than it may.
-    pub const LIMIT: &str = "limit";
-    /// Going from device to device to find one that will run it.
-    pub const ROUTE: &str = "route";
-    pub const ALL: &[&str] = &[CHECK, GUARD, KEYS, LEASE, RUN, PREPARE, WRITE, LIMIT, ROUTE];
-}
 
 /// What a client names itself on a call. Anything else is `other`, since a caller says it.
 pub const CLIENTS: &[&str] = &["cli", "mcp", "code", "mac", "phone", "android", "windows", "linux", "browser", "web", "schedule", "app", "node", "api", "onet", "remote-mcp", "cloudflare-node"];
@@ -188,9 +168,6 @@ const REASONS: &[&str] = &["renewed", "stopped", "failed", "update", "watchdog",
 pub const INVALID: &str = "invalid";
 /// A name of OTEL's for an error of no known kind.
 pub const OTHER: &str = "_OTHER";
-pub const TIMEOUT: &str = "timeout";
-/// A device that couldn't be reached, and one that went away while it was being asked.
-pub const UNREACHABLE: &str = "unreachable";
 pub const LOST: &str = "lost";
 /// Every device asked said to ask another, so none would run it.
 pub const UNAVAILABLE: &str = "unavailable";
@@ -483,15 +460,6 @@ const RESULTS: &[&str] = &["ran", "failed", "elsewhere", "needs keys", "unreacha
 /// Those of them that say a step didn't do what it tried.
 const FAILED_RESULTS: &[&str] = &["failed", "unreachable", "no answer", "lost"];
 
-/// A new W3C span id.
-pub fn new_span() -> String {
-    data_encoding::HEXLOWER.encode(&rand::random::<[u8; 8]>())
-}
-
-/// A new W3C trace id.
-pub fn new_trace() -> String {
-    data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>())
-}
 
 /// The most spans of its own a call may add (`ctx.span`), and attributes on each.
 pub const MOST_APP_SPANS: usize = 32;
@@ -506,7 +474,7 @@ pub fn step_spans(parent: &Span, steps: &[Value]) -> Vec<Span> {
         Span {
             time: parent.time + step[if app { "began" } else { "at" }].as_u64().unwrap_or(0),
             trace: parent.trace.clone(),
-            span: new_span(),
+            span: ::api::traceparent::ids::span(),
             parent: Some(parent.span.clone()),
             name: step[if app { "name" } else { "step" }].as_str().unwrap_or("").to_string(),
             service: parent.service.clone(),
@@ -652,12 +620,6 @@ impl Sum {
     }
 }
 
-/// `traceparent`'s trace and span, if it's W3C's and has them: what another device sent, so nothing else is kept.
-pub fn parent_of(text: &str) -> Option<(String, String)> {
-    let hex = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-    let ["00", trace, span, _] = text.split('-').collect::<Vec<_>>()[..] else { return None };
-    (hex(trace, 32) && hex(span, 16)).then(|| (trace.to_string(), span.to_string()))
-}
 
 /// The network's own program, as a service.
 pub fn own() -> &'static str {
@@ -690,9 +652,9 @@ impl Batch {
             }
         }
         let time = now.saturating_sub(call.ms);
-        let (trace, parent) = trace.unwrap_or_else(|| (new_trace(), None));
+        let (trace, parent) = trace.unwrap_or_else(|| (::api::traceparent::ids::trace(), None));
         let status = failure.as_ref().map_or(Status::Unset, Failure::status);
-        let span = Span { time, trace, span: new_span(), parent, name: call.name, service: service.to_string(), version: None, instance: instance.to_string(), kind: SpanKind::Client, status, duration: call.ms, message, attrs };
+        let span = Span { time, trace, span: ::api::traceparent::ids::span(), parent, name: call.name, service: service.to_string(), version: None, instance: instance.to_string(), kind: SpanKind::Client, status, duration: call.ms, message, attrs };
         // The metrics' attributes: what they're read by (operation, company, model, payer, tier), never more.
         let by: Vec<(&'static str, Value)> = call.attrs.iter().filter(|(k, _)| matches!(*k, "gen_ai.operation.name" | "gen_ai.provider.name" | "gen_ai.request.model" | "one.paid" | "one.tier")).cloned().collect();
         let about = Attrs::default().gen_ai(&by).user(user);

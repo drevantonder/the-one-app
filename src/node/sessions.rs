@@ -67,14 +67,12 @@ impl Held {
     }
 }
 
-impl Credential {
-    /// What its session is kept by: none for this device's own keys, or app schedules', which no session holds.
-    fn held(&self) -> Option<Held> {
-        match self {
+/// What a credential's session is kept by: none for this device's own keys, or app schedules', which no session holds.
+fn held(credential: &Credential) -> Option<Held> {
+    match credential {
             Credential::Client(key) => Some(Held::Client(*key)),
             Credential::Passed { node, user } => Some(Held::Passed(*node, user.clone())),
             Credential::Own | Credential::AppSchedules { .. } => None,
-        }
     }
 }
 
@@ -129,7 +127,7 @@ impl Node {
     /// Cloudflare node's key), and not yet expired; and no longer than `most`, until when its caller's own
     /// word lasts (a session's certificate's).
     pub fn hand(&self, credential: &Credential, user: &str, sealed: &str, most: u64) -> Result<()> {
-        let held = credential.held().context("nothing is handed for this device's own calls, or app schedules'")?;
+        let held = held(credential).context("nothing is handed for this device's own calls, or app schedules'")?;
         // Keys this device can't open (sealed to another: the node a client asked before, say) are left, never refused:
         // the call goes on without them and asks for what it needs (428), sealed to this device, which the client
         // checks against its own entries before handing anything. Leaving them gives nothing away.
@@ -194,7 +192,7 @@ impl Node {
     /// The keys a call of `app` was handed here, of `scopes` alone, for passing it on, until when they're kept: what a
     /// client would hand a node for that call (`keys::may_hand`), never another app's.
     pub(super) fn passing_on(&self, credential: &Credential, scopes: &[Scope], app: &str) -> (Vec<::api::handed::Handed>, u64) {
-        let Some(held) = credential.held() else { return (Vec::new(), 0) };
+        let Some(held) = held(credential) else { return (Vec::new(), 0) };
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         let route = ::api::handed::Route::Call(app.to_string());
         let kept = self.0.sessions.kept.lock().unwrap();
@@ -215,7 +213,7 @@ impl Node {
         if let Credential::AppSchedules { scope: s, app: a } = &me.credential {
             return self.app_schedules_handed(s, a, scope, app, database);
         }
-        let Some(held) = me.credential.held() else { return Keys::new() };
+        let Some(held) = held(&me.credential) else { return Keys::new() };
         let kept = self.0.sessions.kept.lock().unwrap();
         kept.get(&held).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
     }
@@ -432,7 +430,7 @@ impl Node {
                 return Ok((self.database(scope, app, database, schema, None).await?, bucket));
             }
             Credential::AppSchedules { scope, app } => (true, self.app_schedules_until(scope, app)),
-            other => (false, other.held().and_then(|h| self.0.sessions.kept.lock().unwrap().get(&h).map(|s| s.until)).unwrap_or(0)),
+            other => (false, held(other).and_then(|h| self.0.sessions.kept.lock().unwrap().get(&h).map(|s| s.until)).unwrap_or(0)),
         };
         self.needs(me, &[(scope.clone(), app, database)]).await?;
         let keys = self.handed(me, scope, app, database);

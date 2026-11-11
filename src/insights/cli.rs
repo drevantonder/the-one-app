@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::cli::Command;
+use ::api::cli::Command;
 
 pub fn commands() -> Command {
     Command {
@@ -11,8 +11,8 @@ pub fn commands() -> Command {
             let words = g.words();
             let ["insights"] = words.as_slice() else { return Ok(false) };
             g.takes_only(&["service", "trace-id", "effect-of", "parts", "raw", "name", "min-ms", "since", "status", "limit", "check"])?;
-            let schema = super::tools::feature().tools.remove(0).spec["input"].clone();
-            let input = crate::tools::input(&schema, &[], vec![], g.flags.clone(), &[]).map_err(|e| crate::cli::Failed::Typed(format!("{e:#}")))?;
+            let schema = super::tools::feature().tools.remove(0)["input"].clone();
+            let input = ::api::tools::input(&schema, &[], vec![], g.flags.clone(), &[]).map_err(|e| ::api::cli::Failed::Typed(format!("{e:#}")))?;
             let ran = g.node.route(g.agent, "/api/insights/insights", &Value::Object(input), g.trace);
             let said = ran.ok.map_err(|e| {
                 crate::tools::print_trace(ran.trace.as_deref());

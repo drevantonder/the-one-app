@@ -91,7 +91,7 @@ pub(super) fn load(dir: &Path) -> HashMap<[u8; 16], Pairing> {
 impl Node {
     /// Makes a one-time pairing code for another of the local user's machines, which joins as a device.
     pub fn pair(&self) -> Result<String> {
-        Ok(self.pair_as(&Caller::local(self)?, None)?.0)
+        Ok(self.pair_as(&self.caller()?, None)?.0)
     }
 
     /// Like `pair`, for `asker`, or for an admin, a code for another machine of `user` (an id or a name). With the id

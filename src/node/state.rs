@@ -140,7 +140,7 @@ impl Node {
         file.name = name.to_string();
         write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
         if self.has_network() {
-            self.member_content(&Caller::local(self)?, content::rename("key", &hex(&self.0.holds.device()), name)).await?;
+            self.member_content(&self.caller()?, content::rename("key", &hex(&self.0.holds.device()), name)).await?;
         }
         Ok(())
     }
@@ -220,7 +220,7 @@ impl Node {
 
     /// Why a device that won't answer is off, in words for its caller: "mac was last seen 2 min ago".
     pub(super) fn away(&self, key: &Key) -> String {
-        crate::cli::off(&self.name_of(key), self.with_or(None, |i| Ok(i.seen(key))))
+        ::api::cli::off(&self.name_of(key), self.with_or(None, |i| Ok(i.seen(key))))
     }
 
     /// The network's compute devices' names by key (hex), and the Cloudflare node's (`cloudflare`): what a trace's reader calls the

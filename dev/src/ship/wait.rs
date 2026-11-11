@@ -12,7 +12,7 @@ pub(super) fn devices() -> Vec<Value> {
 }
 
 /// `status --until <commit> [--device <name>]… [--timeout <time>]`.
-pub fn wait(g: &one::cli::Given) -> Result<()> {
+pub fn wait(g: &api::cli::Given) -> Result<()> {
     g.takes_only(&["until", "device", "timeout"])?;
     let names: Vec<String> = g.values("device").iter().flat_map(|d| d.split(',')).map(str::to_string).collect();
     let limit = limit(g, CALL)?;
@@ -27,8 +27,8 @@ pub fn wait(g: &one::cli::Given) -> Result<()> {
 pub const CALL: u64 = 9 * 60;
 
 /// `--timeout`, or `default` seconds.
-pub(super) fn limit(g: &one::cli::Given, default: u64) -> Result<Duration> {
-    let typed = || anyhow::Error::from(one::cli::Failed::Typed("--timeout is like 90s, 10m or 1h".into()));
+pub(super) fn limit(g: &api::cli::Given, default: u64) -> Result<Duration> {
+    let typed = || anyhow::Error::from(api::cli::Failed::Typed("--timeout is like 90s, 10m or 1h".into()));
     let Some(value) = g.flag("timeout") else { return Ok(Duration::from_secs(default)) };
     let (n, unit) = value.split_at(value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len()));
     let n: u64 = n.parse().map_err(|_| typed())?;

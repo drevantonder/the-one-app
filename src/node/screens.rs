@@ -181,7 +181,7 @@ impl Node {
     /// looking.
     pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str, linked: bool) -> Result<String> {
         context["me"] = json!(self.me_for(viewer)?);
-        let api = format!("http://localhost:{}", crate::api::port());
+        let api = format!("http://localhost:{}", ::api::local::port());
         context["config"] = json!({ "name": custom_build::config::NAME, "cli": custom_build::config::CLI, "api": api, "made_here": custom_build::config::MADE_HERE });
         Ok(crate::screen::page(&context, body, linked))
     }

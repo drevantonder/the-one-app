@@ -8,13 +8,15 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde_json::{Value, json};
 
-use crate::node::{Caller, Node};
+use crate::node::Node;
 
-use super::{Routes, Who, port};
+use super::Routes;
+use ::api::Who;
+use ::api::local::port;
 
 /// The skills for this machine's user (src/skills.rs).
 async fn skills(node: &Node) -> Vec<crate::skills::Skill> {
-    let apps = match Caller::local(node) {
+    let apps = match node.caller() {
         Ok(me) => node.apps(&me).await.map(|a| json!(a)).unwrap_or_else(|err| {
             tracing::warn!("the skills leave out apps' own: {err:#}");
             json!([])

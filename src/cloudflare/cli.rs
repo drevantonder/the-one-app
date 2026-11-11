@@ -3,10 +3,10 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
-use crate::cli::{Command, Given};
+use ::api::cli::{Command, Given};
 use ::custom_build::config::{CLI, NAME, YOURS};
 use ::scope::scopes::Role;
-use crate::api::Client;
+use ::api::Client;
 
 /// `settings` with the network's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
 /// node on this machine knows them, for the relay to take only them; none when no node answers here, which `needed`

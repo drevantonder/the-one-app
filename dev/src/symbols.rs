@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Result, ensure};
-use one::cli::{Command as Cli, Failed};
+use api::cli::{Command as Cli, Failed};
 use ::custom_build::config::CLI;
 
 pub fn command() -> Cli {

@@ -3,7 +3,7 @@
 use anyhow::{Context, bail};
 use serde_json::Value;
 
-use crate::cli::Command;
+use ::api::cli::Command;
 
 pub fn commands() -> Command {
     Command {

@@ -3,7 +3,9 @@
 use serde_json::json;
 
 use ::api::call::CallRequest;
-use crate::says::{Op, Said, Who};
+use ::api::says::Op;
+use ::api::says::Said;
+use ::api::says::Who;
 
 pub fn listed() -> Vec<Said> {
     vec![

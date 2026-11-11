@@ -7,8 +7,16 @@ use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::api::{Body, Error, Me, Reply, Routes, Who, done, given, tagged};
-use crate::node::{Caller, Node};
+use crate::api::Routes;
+use ::api::Body;
+use ::api::Error;
+use ::api::Me;
+use ::api::Reply;
+use ::api::Who;
+use ::api::done;
+use ::api::given;
+use ::api::tagged;
+use crate::node::Node;
 use crate::says::apps::{Arrange, Deploy};
 
 pub fn routes() -> Routes {
@@ -99,7 +107,7 @@ struct Fork {
 
 async fn fork(State(node): State<Node>, Body(body): Body<Fork>) -> Reply {
     let owner = body.owner.as_deref().map(|o| owner(&node, o)).transpose()?;
-    node.fork(&Caller::local(&node)?, given(&body.app, "app")?, given(&body.name, "name")?, owner.as_deref()).await?;
+    node.fork(&node.caller()?, given(&body.app, "app")?, given(&body.name, "name")?, owner.as_deref()).await?;
     done()
 }
 

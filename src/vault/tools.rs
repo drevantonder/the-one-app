@@ -1,10 +1,10 @@
-//! The Vault's tools, each its own route (`core_tools::Runs::Route`): what it takes and answers, beside what serves it
+//! The Vault's tools, each its own route (`api::Runs`): what it takes and answers, beside what serves it
 //! on a node (`serve`). `grant` changes who can do what, so the caller's client answers it (`settings::answered`), and
 //! its route is only this machine's own programs', whose node answers it as its own device.
 
 use serde_json::{Value, json};
 
-use crate::core_tools::{Feature, Tool, serves};
+use ::api::Feature;
 
 const GUIDE: &str = "The Vault keeps the user's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the user to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask leaving out app, then call vault_fetch with {{<field>}} where it goes: a machine that opens the Vault fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.";
 
@@ -25,13 +25,12 @@ fn said(about: &str) -> Value {
 
 /// The Vault is the node's, not an app's: agents list its items (never a secret field's value), set and remove
 /// fields, switch apps on for items, and ask the user for one.
-fn tools() -> Vec<Tool> {
+fn tools() -> Vec<serde_json::Value> {
     let scope = json!({ "type": "string", "description": "user (yours, the default), global (everyone's), or a group's name or id" });
     let item = json!({ "type": "string", "description": "the item's title or id" });
     let strings = json!({ "type": "array", "items": { "type": "string" } });
     vec![
-        Tool::route(
-            json!({
+        json!({
                 "name": "list", "title": "List the Vault's items", "reads": true,
                 "description": "The Vault's items you may change: title, type, fields (a secret one never with its value), the sites they're sent to (hosts), the apps switched on for each (apps) and those that want it (wanted_by), and app when an app's sign-in keeps it.",
                 "input": { "type": "object", "properties": { "scope": scope } },
@@ -43,46 +42,31 @@ fn tools() -> Vec<Tool> {
                     "type": { "type": "string" }, "domain": { "type": "string" }, "app": { "type": "string", "description": "the app whose sign-in keeps it" }, "account": { "type": "boolean" },
                 } } },
             }),
-            serves!(serve::list),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "set", "title": "Keep a secret in the Vault",
                 "description": "Keep a key, token or password someone pasted (or any field) in an item, making the item if no item has that title. An app puts {{<item id>:<field>}} in a request and a machine that opens the Vault fills it in, a secret field only for the item's hosts; nobody reads a secret back, not you either. When the user has the value, use vault_request instead: never ask them to paste it into the chat.",
                 "input": { "type": "object", "required": ["item", "field", "value"], "properties": { "item": item, "field": { "type": "string", "description": "the field's name, like token or password" }, "value": { "type": "string", "description": "the field's value" }, "secret": { "type": "boolean", "description": "never shown again; true for keys, passwords and tokens" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "app": { "type": "string", "description": "an app to switch on for it" }, "scope": scope } },
                 "output": said("what was set, and how agents use it"),
             }),
-            serves!(serve::set),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "use", "title": "Switch an app on for an item",
                 "description": "Switch an app on (or off) for an item, so its calls may use the item's fields. Only the user switches agents on (for vault_fetch): ask them with vault_request.",
                 "input": { "type": "object", "required": ["item", "app"], "properties": { "item": item, "app": { "type": "string", "description": "the app's name, like gmail" }, "on": { "type": "boolean", "description": "false switches it off" }, "scope": scope } },
                 "output": said("what's switched on or off"),
             }),
-            serves!(serve::switch),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "grant", "title": "Let a machine open a Vault",
                 "description": format!("Let a machine of {} open a Vault's secrets and fill them into requests (or, with on false, no longer). Only the Vault's admins say which: the user for their own, a group's admins, the network's for everyone's. A Vault no machine opens keeps no secret, so grant before you set one. Nobody else reads a secret back, not even on their own device.", ::custom_build::config::YOURS),
                 "input": { "type": "object", "required": ["device"], "properties": { "device": { "type": "string", "description": "the machine's name" }, "on": { "type": "boolean", "description": "false: it no longer opens it" }, "scope": scope } },
                 "output": said("which machine opens the Vault now"),
             }),
-            serves!(serve::grant),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "remove", "title": "Delete an item or a field", "confirm": true, "words": ["item", "field"],
                 "description": "Delete an item, or with field, one of its fields.",
                 "input": { "type": "object", "required": ["item"], "properties": { "item": item, "field": { "type": "string", "description": "only this field, by name; the whole item when not given" }, "scope": scope } },
                 "output": said("what was deleted"),
             }),
-            serves!(serve::remove),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "request", "title": "Ask the user for a secret", "words": ["app"],
                 "description": "Ask the user for a key, token, password or sign-in an app or agents may use, instead of handling its values yourself: need names what the app declares (its vault), or give title, fields and hosts. Returns a link to give them; it opens a sheet where they pick one of their items or make one (and their Settings lists it). You never see a secret. Tell the user; check vault_status when they say they've done it.",
                 "input": { "type": "object", "properties": { "app": { "type": "string", "description": "the app that will use it; leave it out for one you use yourself with vault_fetch" }, "need": { "type": "string", "description": "what the app declares it needs, by name, like client for gmail; leave it out and give title, fields and hosts for anything else" }, "title": { "type": "string", "description": "the item's title, for one no app declares" }, "fields": { "type": "object", "description": "field name → { secret: true|false }", "additionalProperties": { "type": "object", "properties": { "secret": { "type": "boolean" } } } }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the user sees: what it's for and where to find it" }, "scope": scope } },
@@ -91,10 +75,7 @@ fn tools() -> Vec<Tool> {
                     "link": { "type": "string", "description": "where the user answers it" }, "said": { "type": "string", "description": "what to tell the user" },
                 } },
             }),
-            serves!(serve::request),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "fetch", "title": "Make a request with Vault items filled in",
                 "description": "Make an HTTP request with your user's Vault items filled in, without seeing them: write {{<field>}} (or {{<item id>:<field>}}) where a value goes, in url, headers or body, and a machine that opens the Vault fills it in from the items they let agents use, a secret field only for its item's sites. You get { status, headers, body }; a secret the site echoes back is blotted out. To get an item, ask with vault_request, leaving out app.",
                 "input": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string", "description": "the URL, with {{<field>}} where a value goes" }, "method": { "type": "string", "description": "GET by default, POST with a body" }, "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "like { \"authorization\": \"Bearer {{token}}\" }" }, "body": { "type": "string", "description": "the request's body, with {{<field>}} where a value goes" } } },
@@ -104,10 +85,7 @@ fn tools() -> Vec<Tool> {
                     "cut": { "type": "string", "description": "how much was left out, when it was long" },
                 } },
             }),
-            serves!(serve::fetch),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "status", "title": "How a request for an item went", "reads": true,
                 "description": "How a request for an item went: waiting, set, declined or expired, and who answered. Never a value.",
                 "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "the request's id, from vault_request" } } },
@@ -116,9 +94,26 @@ fn tools() -> Vec<Tool> {
                     "answered": { "type": "object", "properties": { "by": { "type": "string" }, "time": { "type": "integer" } }, "description": "who answered it, and when, in ms since 1970" },
                 } },
             }),
-            serves!(serve::status),
-        ),
     ]
+}
+
+/// What serves each tool, in this runtime.
+#[cfg(feature = "node")]
+pub fn runs() -> ::api::Runs {
+    use crate::node::runtime::node_serves;
+    ::api::Runs {
+        tools: vec![
+            ("list", node_serves!(serve::list)),
+            ("set", node_serves!(serve::set)),
+            ("use", node_serves!(serve::switch)),
+            ("grant", node_serves!(serve::grant)),
+            ("remove", node_serves!(serve::remove)),
+            ("request", node_serves!(serve::request)),
+            ("fetch", node_serves!(serve::fetch)),
+            ("status", node_serves!(serve::status)),
+        ],
+        ..::api::Runs::named("vault")
+    }
 }
 
 #[cfg(feature = "node")]
@@ -127,9 +122,10 @@ mod serve {
     use serde_json::{Map, Value, json};
 
     use ::custom_build::config::CLI;
-    use crate::core_tools::text;
+    use ::api::feature::text;
     use ::scope::scopes::{AGENTS, Scope};
-    use crate::node::{Caller, Node};
+    use crate::node::Node;
+    use ::api::Caller;
 
     /// The scope its input names: user, the default, global, or a group's name or id.
     fn scope(node: &Node, me: &Caller, input: &Map<String, Value>) -> Result<Scope> {

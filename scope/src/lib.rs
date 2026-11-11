@@ -4,6 +4,7 @@
 pub mod content;
 pub mod migrate;
 pub mod permissions;
+pub mod read;
 pub mod rank;
 pub mod replica;
 pub mod rules;

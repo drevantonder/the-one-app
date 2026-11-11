@@ -23,7 +23,7 @@ pub(crate) async fn create(a: &Node, name: &str, user_name: &str) -> String {
 /// admits: `a` says it's the network's.
 async fn relay(a: &Node) -> crate::cloudflare::Workers {
     let k = tokio::task::block_in_place(|| crate::cloudflare::Workers::for_devices(vec![::key::hex(&a.id())]));
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
     k
 }
@@ -42,7 +42,7 @@ pub(crate) async fn eventually(what: &str, node: &Node, mut check: impl AsyncFnM
 }
 
 /// `content` written to `global`'s scope database as a step `caller`'s own device (`key`) signs, as a client does.
-pub(crate) async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: ::scope::content::Content) {
+pub(crate) async fn signed_by(a: &Node, caller: &api::Caller, key: &ed25519_dalek::SigningKey, content: ::scope::content::Content) {
     let global = ::scope::scopes::Scope::Global;
     let next = a.global_steps(caller, ::scope::steps::NUMBER_MAX, None).await.unwrap();
     let (at, epoch) = (next["at"].as_u64().unwrap(), next["epoch"].as_u64().unwrap() as u32);
@@ -76,7 +76,7 @@ fn notes(tool: &str, input: Value) -> CallRequest {
 /// Deploys the tests' own app, `tests/notes/app.js` (lines of text in `global`'s database), for everyone, as an admin
 /// would add an app, and waits for this device to run it.
 async fn add_notes(a: &Node) {
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
     a.deploy_making(&me, "notes", &bundle, Some("admins"), true).await.unwrap();
     a.add(&me, "notes", &::scope::scopes::Scope::Global, true, None).await.unwrap();
@@ -115,7 +115,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     add_notes(&a).await;
     let _relay = relay(&a).await;
     b.join(&a.pair().unwrap()).await.unwrap();
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
     a.set_item(&me, &::scope::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
@@ -289,7 +289,7 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let global = ::scope::scopes::Scope::Global;
     let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
@@ -336,7 +336,7 @@ async fn removing_a_device_takes_its_app_runtime_and_naming_the_runtime_removes_
     use ::scope::scopes::Kind;
     let a = start("remove-runtime").await;
     create(&a, "Home", "Andre").await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     // A computer of Andre's, approved from his machine, listing its own app runtime, as its onet does.
     let computer = async || {
         let device = ed25519_dalek::SigningKey::from_bytes(&rand::random());
@@ -369,7 +369,7 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let global = ::scope::scopes::Scope::Global;
     let new_device = async |platform: &str| {
         let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
@@ -438,7 +438,7 @@ async fn a_holder_restores_someone_and_no_one_else_can() {
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let own = Scope::User(me.user.clone());
     eventually("their own scope's first keys", &a, async || !a.sealed_keys(&me, &own, Some(&hex(&a.id())), None).await.unwrap()["sealed"].as_object().unwrap().is_empty()).await;
     let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
@@ -481,7 +481,7 @@ async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
     std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     let old_secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let global = ::scope::scopes::Scope::Global;
     let old = ed25519_dalek::SigningKey::from_bytes(&old_secret);
     let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
@@ -540,7 +540,7 @@ async fn a_backup_keeps_a_holders_copy_of_the_recovery_key() {
     use ::key::{Endpoint, hex, open_sealed, seal_secret, seal_to, unhex};
     let a = start("holder-backup").await;
     let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
     let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = Endpoint::of(&phone);
@@ -640,7 +640,7 @@ async fn an_app_taken_off_a_page_and_added_back_has_what_it_kept() {
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before it left" }))).await.is_ok()).await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     a.add(&me, "notes", &::scope::scopes::Scope::Global, false, None).await.unwrap();
     assert!(a.call(notes("read", json!({}))).await.is_err(), "an app off the page doesn't run there");
     a.add(&me, "notes", &::scope::scopes::Scope::Global, true, None).await.unwrap();
@@ -652,7 +652,7 @@ async fn an_app_taken_off_a_page_and_added_back_has_what_it_kept() {
 async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     let a = start("put-from").await;
     create(&a, "Home", "Andre").await;
-    let caller = |user: &str| one::node::Caller { key: a.id(), user: user.into(), agent: None, credential: one::node::Credential::Client([user.len() as u8; 32]) };
+    let caller = |user: &str| api::Caller { key: a.id(), user: user.into(), agent: None, credential: api::Credential::Client([user.len() as u8; 32]) };
     let (sam, andre) = (caller("sam"), caller(&a.user().unwrap()));
     let (hash, size) = a.put_blob_from(&sam, axum::body::Body::from("Sam's file")).await.unwrap();
     assert_eq!(size, 10);
@@ -666,7 +666,7 @@ async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
-    use one::node::trace;
+    use api::trace;
     let a = start("trace-a").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
@@ -716,7 +716,7 @@ async fn only_a_devices_user_or_an_admin_reads_its_logs() {
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
-    let andre = one::node::Caller::own(a.id(), a.user().unwrap());
+    let andre = api::Caller::own(a.id(), a.user().unwrap());
     let now = custom_build::now_ms();
     let log: String = (0..3000).map(|i| format!("{} line {i}\n", now - 1000 + i)).collect();
     std::fs::create_dir_all(dir.join("logs")).unwrap();
@@ -730,7 +730,7 @@ async fn only_a_devices_user_or_an_admin_reads_its_logs() {
 
     // Sam, invited as a member, may not; once an admin, may.
     let sam = let_sam_in(&a, &ed25519_dalek::SigningKey::from_bytes(&rand::random())).await;
-    let from_sam = one::node::Caller::own(a.id(), sam.clone());
+    let from_sam = api::Caller::own(a.id(), sam.clone());
     let refused = a.call_as(logs(json!({})), from_sam.clone()).await.unwrap_err();
     assert!(format!("{refused:#}").contains("reads its logs"), "{refused:#}");
     assert!(!a.may_read_logs(&sam).unwrap() && a.may_read_logs(&andre.user).unwrap());
@@ -747,7 +747,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let build = a.put_blob(b"a program").unwrap();
     let bundle = |services: Value| {
         let files = vec![("app.js".to_string(), b"export default { tools: {} }".to_vec()), (one::app::bundle::SERVICES.to_string(), services.to_string().into_bytes())];
@@ -768,10 +768,10 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     assert_eq!(a.service_builds().await.get("tiny"), Some(&Build::None));
 
     // Sam may not deploy Andre's app, so names no build of its service.
-    let sam = one::node::Caller { key: a.id(), user: "sam".into(), agent: None, credential: one::node::Credential::Client([8; 32]) };
+    let sam = api::Caller { key: a.id(), user: "sam".into(), agent: None, credential: api::Credential::Client([8; 32]) };
     assert!(a.deploy(&sam, "tiny", &named, false).await.is_err());
     // Nor does Andre, from elsewhere, name a build he can't read: one Sam put, by its hash.
-    let away = one::node::Caller { key: [7; 32], credential: one::node::Credential::Client([7; 32]), ..me.clone() };
+    let away = api::Caller { key: [7; 32], credential: api::Credential::Client([7; 32]), ..me.clone() };
     let (sams, _) = a.put_blob_from(&sam, axum::body::Body::from("Sam's program")).await.unwrap();
     let (his, _) = a.put_blob_from(&away, axum::body::Body::from(one::app::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (one::app::bundle::SERVICES.to_string(), json!({ custom_build::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
     let refused = a.deploy(&away, "tiny", &his, false).await.unwrap_err();
@@ -787,7 +787,7 @@ async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_doe
     let a = start("vault-fill").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let item = json!({ "title": "Work", "type": "Browser profile", "hosts": ["notes"], "apps": ["notes"], "fields": { "_key": { "value": "s3cret", "secret": true } } });
     let id = a.set_item(&me, &Scope::User(me.user.clone()), item).await.unwrap();
     let asked = || json!({ "profile": { "key": format!("{{{{{id}:_key}}}}") } });
@@ -809,7 +809,7 @@ async fn nothing_secret_is_kept_where_no_machine_opens_the_vault_and_what_is_kep
     let a = start("vault-grant").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let own = Scope::User(me.user.clone());
     let grant = async |on: bool| ::scope::settings::answer(&a, "POST", "/api/vault/grant", json!({ "device": a.device_name(), "on": on }).to_string().as_bytes()).await.unwrap().unwrap();
     let item = |title: &str| json!({ "title": title, "type": "Token", "hosts": ["notes"], "apps": ["notes"], "fields": { "_key": { "value": "s3cret", "secret": true } } });
@@ -836,7 +836,7 @@ async fn an_apps_schedules_see_its_vault_items_as_its_calls_do_while_theyre_set(
     let a = start("schedules-vault").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     for (title, app) in [("For notes", "notes"), ("For another", "another")] {
         a.set_item(&me, &Scope::Global, json!({ "title": title, "type": "Token", "hosts": ["api.example.com"], "apps": [app], "fields": { "token": { "value": "s3cret", "secret": true } } })).await.unwrap();
     }
@@ -855,7 +855,8 @@ async fn an_apps_schedules_see_its_vault_items_as_its_calls_do_while_theyre_set(
 /// needing keys they didn't hand is answered 428 with what it needs, for them to hand and ask again.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_devices_mcp_runs_as_its_user() {
-    use one::api::client::{InProcess, Via};
+    use api::client::Via;
+    use one::api::InProcess;
     let a = start("mcp").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
@@ -909,12 +910,12 @@ async fn a_client_devices_mcp_runs_as_its_user() {
 async fn a_tool_answers_what_its_output_says() {
     let a = start("answers").await;
     create(&a, "Home", "Andre").await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("answers/app.js").to_vec())]).unwrap()).unwrap();
     let deployed = a.deploy_making(&me, "answers", &bundle, Some("admins"), true).await.unwrap();
     assert_eq!(deployed["lacking"], json!(["unsaid"]), "the deploy names the tool that says nothing of its answer: {deployed}");
     let schema = &one::openapi::document(&[], true)["paths"]["/api/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
-    one::tools::check(schema, &deployed).unwrap_or_else(|err| panic!("a deploy answers what the document doesn't say: {err:#}\n{deployed}"));
+    api::tools::check(schema, &deployed).unwrap_or_else(|err| panic!("a deploy answers what the document doesn't say: {err:#}\n{deployed}"));
     a.add(&me, "answers", &::scope::scopes::Scope::Global, true, None).await.unwrap();
     let call = |tool: &str| CallRequest { app: "answers".into(), tool: tool.into(), input: json!({}), ..Default::default() };
     eventually("answers to run", &a, async || a.call(call("keeps")).await.is_ok()).await;
@@ -932,7 +933,7 @@ async fn a_tool_answers_what_its_output_says() {
 async fn every_built_in_apps_tools_say_what_they_answer() {
     let a = start("built-in-outputs").await;
     create(&a, "Home", "Andre").await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let mut lacking = Vec::new();
     let mut seen = 0;
     let all = a.catalog(&me, true).await.unwrap();
@@ -950,16 +951,17 @@ async fn every_built_in_apps_tools_say_what_they_answer() {
 /// is to its output.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_routes_answer_is_what_the_document_says() {
-    use one::api::client::{InProcess, Via};
+    use api::client::Via;
+    use one::api::InProcess;
     let a = start("route-answers").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
-    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let me = api::Caller::own(a.id(), a.user().unwrap());
     let document = one::openapi::document(&a.apps(&me).await.unwrap(), true);
     // As this machine's own programs ask: over its loopback, with the token in the node's home.
     let mut headers = axum::http::HeaderMap::new();
-    headers.insert(custom_build::protocol::header::LOCAL_TOKEN, one::api::local_token(a.dir()).unwrap().parse().unwrap());
+    headers.insert(custom_build::protocol::header::LOCAL_TOKEN, api::local::local_token(a.dir()).unwrap().parse().unwrap());
     let from = std::sync::Arc::new(InProcess::new(a.clone(), None, Some(axum::extract::ConnectInfo("127.0.0.1:1".parse().unwrap())), &headers));
     let mut asked = 0;
     for (method, path, body) in [
@@ -983,7 +985,7 @@ async fn a_routes_answer_is_what_the_document_says() {
         .await
         .unwrap();
         assert_eq!(answer.0, 200, "{method} {path}: {}", answer.1);
-        one::tools::check(&schema, &answer.1).unwrap_or_else(|err| panic!("{method} {path} answered what the document doesn't say: {err:#}\n{}", answer.1));
+        api::tools::check(&schema, &answer.1).unwrap_or_else(|err| panic!("{method} {path} answered what the document doesn't say: {err:#}\n{}", answer.1));
         asked += 1;
     }
     assert_eq!(asked, 8);
@@ -1027,12 +1029,12 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     let _relay = relay(&k).await;
     let b = start("rt-other").await;
     b.join(&k.pair().unwrap()).await.unwrap();
-    let me = one::node::Caller::own(k.id(), k.user().unwrap());
+    let me = api::Caller::own(k.id(), k.user().unwrap());
 
     // The device's own key, held on its loopback, where its own programs ask with the token in its home.
     let holder = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let holder_at = holder.local_addr().unwrap().to_string();
-    tokio::spawn(one::api::serve(holder, one::api::router(k.clone())));
+    tokio::spawn(api::serve(holder, one::api::router(k.clone())));
 
     // Its runtime: a key of its own in its folder, in a home with the device's network and token, listed by the
     // device as a compute naming it, let in at the relay; then the device drops its own Compute.
@@ -1044,7 +1046,7 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     std::fs::write(folder.join("key"), ::key::hex(&key.to_bytes())).unwrap();
     std::fs::create_dir_all(home.join("network")).unwrap();
     std::fs::copy(k.dir().join("network/network.json"), home.join("network/network.json")).unwrap();
-    std::fs::copy(k.dir().join(one::api::LOCAL_TOKEN), home.join(one::api::LOCAL_TOKEN)).unwrap();
+    std::fs::copy(k.dir().join(api::local::LOCAL_TOKEN), home.join(api::local::LOCAL_TOKEN)).unwrap();
     // The device runs its user's app schedules of notes, for everyone.
     let ran = ::scope::settings::answer(&k, "POST", "/api/devices/run_schedules", json!({ "app": "notes", "device": ::key::hex(&k.id()), "scope": "global" }).to_string().as_bytes()).await.unwrap().unwrap();
     assert!(ran["until"].is_u64(), "{ran}");
@@ -1066,10 +1068,10 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
 
     // Only the device's own programs ask it, with the token in its folder, never the one in the device's home.
     let log = home.join("runtime.log");
-    let started = async || std::fs::exists(folder.join(one::api::LOCAL_TOKEN)).unwrap() && ask_runtime(&at, "", json!({})).await.0 == 403;
+    let started = async || std::fs::exists(folder.join(api::local::LOCAL_TOKEN)).unwrap() && ask_runtime(&at, "", json!({})).await.0 == 403;
     polled("the runtime to start", &log, started).await;
-    let token = std::fs::read_to_string(folder.join(one::api::LOCAL_TOKEN)).unwrap();
-    let home_token = std::fs::read_to_string(k.dir().join(one::api::LOCAL_TOKEN)).unwrap();
+    let token = std::fs::read_to_string(folder.join(api::local::LOCAL_TOKEN)).unwrap();
+    let home_token = std::fs::read_to_string(k.dir().join(api::local::LOCAL_TOKEN)).unwrap();
     assert_eq!(ask_runtime(&at, &home_token, json!({ "app": "notes", "tool": "read", "input": {} })).await.0, 403);
     let post = json!({ "app": "notes", "tool": "post", "input": { "text": "from the runtime" } });
     polled("the runtime to run a call", &log, async || ask_runtime(&at, &token, post.clone()).await.0 == 200).await;
@@ -1101,12 +1103,12 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
     let _relay = relay(&k).await;
     let b = start("onet-other").await;
     b.join(&k.pair().unwrap()).await.unwrap();
-    let me = one::node::Caller::own(k.id(), k.user().unwrap());
+    let me = api::Caller::own(k.id(), k.user().unwrap());
 
     // The device's home as onet and its runtime share it: its key, network and token; the runtime's key in its folder,
     // listed by the device as a compute naming it, let in at the relay; then the device drops its own Compute.
     let home = crate::temp("onet-home");
-    for file in ["device.json", one::api::LOCAL_TOKEN, "network/network.json"] {
+    for file in ["device.json", api::local::LOCAL_TOKEN, "network/network.json"] {
         std::fs::create_dir_all(home.join(file).parent().unwrap()).unwrap();
         std::fs::copy(k.dir().join(file), home.join(file)).unwrap();
     }
@@ -1132,7 +1134,7 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
         Runtime(program.spawn().unwrap())
     };
     let _onet = started(onet::computer::name(), vec![format!("--listen={onet_at}"), format!("--runtime={runtime_at}")], &onet_at, "onet.log");
-    let home_token = std::fs::read_to_string(home.join(one::api::LOCAL_TOKEN)).unwrap();
+    let home_token = std::fs::read_to_string(home.join(api::local::LOCAL_TOKEN)).unwrap();
     let held = async || ask(&onet_at, "GET", "/api/holds", &home_token, None).await;
     polled("onet to answer", &home.join("onet.log"), async || held().await.0 == 200).await;
     assert_eq!(held().await.1["key"], ::key::hex(&k.id()), "it holds the device's key");
@@ -1172,7 +1174,7 @@ async fn a_computers_home_from_before_onet_is_the_same_device_with_its_runtime_l
     create(&k, "Home", "Andre").await;
     add_notes(&k).await;
     k.call(notes("post", json!({ "text": "before onet" }))).await.unwrap();
-    let me = one::node::Caller::own(k.id(), k.user().unwrap());
+    let me = api::Caller::own(k.id(), k.user().unwrap());
     let before = k.global_steps(&me, 0, None).await.unwrap()["at"].as_u64().unwrap();
 
     // Its home, on a computer of its own: its bucket the folder in it.
@@ -1190,7 +1192,7 @@ async fn a_computers_home_from_before_onet_is_the_same_device_with_its_runtime_l
     std::os::unix::process::CommandExt::arg0(&mut oned, custom_build::programs::oned());
     oned.env(custom_build::config::env("HOME"), &home).env(custom_build::config::env("ADDR"), &at).stdout(log.try_clone().unwrap()).stderr(log);
     let _oned = Oned(oned.spawn().unwrap());
-    let token = std::fs::read_to_string(home.join(one::api::LOCAL_TOKEN)).unwrap();
+    let token = std::fs::read_to_string(home.join(api::local::LOCAL_TOKEN)).unwrap();
 
     // What it read before, through onet, from its runtime opening the epochs sealed to its key.
     let read = json!({ "app": "notes", "tool": "read", "input": {} });

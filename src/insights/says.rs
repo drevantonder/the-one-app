@@ -3,7 +3,9 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::says::{Op, Said, Who};
+use ::api::says::Op;
+use ::api::says::Said;
+use ::api::says::Who;
 
 pub fn listed() -> Vec<Said> {
     vec![("/api/insights/report", Who::Clients, Op::post("What went wrong on a client, and what it did before that").body::<Report>().done())]

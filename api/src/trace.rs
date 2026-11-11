@@ -1,5 +1,5 @@
 //! What a request did on this device, step by step with how long each took, for a caller that asks for it: it asks
-//! with `x-one-trace` and gets it back in the same header (`api::guard`), and another device asked for a call adds its
+//! with `x-one-trace` and gets it back in the same header (the runtime's guard), and another device asked for a call adds its
 //! own, in its answer (`trace` beside `ok`). Steps hold timings, device, app and tool
 //! names, never data or keys. Every call has one, asked for or not: it's the span insights keeps of a call (`src/insights`)
 //! as well as what `--trace` shows.
@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use serde_json::{Value, json};
+
+use crate::traceparent::{ids, parent_of, stage};
 
 tokio::task_local! {
     static TRACE: Trace;
@@ -27,7 +29,7 @@ struct Inner {
     trace_id: String,
     /// The span running now, what a call started within it has as its parent.
     span: Mutex<Option<String>>,
-    /// Where it's got to, which is where a failure failed (`insights::stage`).
+    /// Where it's got to, which is where a failure failed (`traceparent::stage`).
     stage: Mutex<&'static str>,
     /// A call has run in it, whose own span says how it went.
     called: AtomicBool,
@@ -45,12 +47,12 @@ impl Trace {
 
     /// One a device asked for this one's part of, continuing its `traceparent`, W3C's `00-<trace>-<span>-01`, if that's one.
     pub fn continuing(asked: bool, traceparent: Option<&str>) -> Trace {
-        Trace::make(asked, traceparent.and_then(crate::insights::parent_of))
+        Trace::make(asked, traceparent.and_then(parent_of))
     }
 
     fn make(asked: bool, parent: Option<(String, String)>) -> Trace {
         let (trace_id, span) = parent.map_or_else(|| (ids::trace(), None), |(t, s)| (t, Some(s)));
-        Trace(Arc::new(Inner { start: Instant::now(), steps: Mutex::new(Vec::new()), asked, trace_id, span: Mutex::new(span), stage: Mutex::new(crate::insights::stage::CHECK), called: AtomicBool::new(false) }))
+        Trace(Arc::new(Inner { start: Instant::now(), steps: Mutex::new(Vec::new()), asked, trace_id, span: Mutex::new(span), stage: Mutex::new(stage::CHECK), called: AtomicBool::new(false) }))
     }
 
     pub fn note(&self, mut step: Value, took: std::time::Duration) {
@@ -119,11 +121,6 @@ impl Trace {
     pub fn at(&self) -> u64 {
         self.0.start.elapsed().as_millis() as u64
     }
-}
-
-/// W3C's ids: 16 random bytes for a trace and 8 for a span, as lowercase hex.
-pub mod ids {
-    pub use crate::insights::{new_span as span, new_trace as trace};
 }
 
 /// A scope as a trace names it: its kind alone, never whose.

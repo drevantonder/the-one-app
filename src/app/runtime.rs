@@ -190,7 +190,7 @@ impl Apps {
                         tracing::warn!("the app runtime is stuck; starting it again");
                         runtime.restart();
                     }
-                    crate::node::trace::stage(crate::insights::stage::LIMIT);
+                    ::api::trace::stage(::api::traceparent::stage::LIMIT);
                     bail!("the app took longer than {}s", limit.as_secs())
                 }
                 Err(err) => Err(err.into()),
@@ -198,11 +198,11 @@ impl Apps {
         })
         .await??;
         for span in reply["spans"].as_array().into_iter().flatten().take(crate::insights::MOST_APP_SPANS) {
-            crate::node::trace::note(json!({ "step": "span", "name": span["name"], "began": span["began"], "failed": span["failed"], "attrs": span["attrs"] }), Duration::from_millis(span["ms"].as_u64().unwrap_or(0)));
+            ::api::trace::note(json!({ "step": "span", "name": span["name"], "began": span["began"], "failed": span["failed"], "attrs": span["attrs"] }), Duration::from_millis(span["ms"].as_u64().unwrap_or(0)));
         }
         if let Some(err) = reply.get("error") {
             if reply["exception"].is_object() {
-                crate::node::trace::note(json!({ "step": "exception", "exception": reply["exception"] }), Duration::ZERO);
+                ::api::trace::note(json!({ "step": "exception", "exception": reply["exception"] }), Duration::ZERO);
             }
             return Err(custom_build::protocol::Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("the app failed")));
         }
@@ -211,11 +211,11 @@ impl Apps {
 
     /// Runs a tool, for at most `limit`: longer for an app that waits on services.
     pub async fn call(&self, app: &str, tool: &str, input: Value, ctx: &Context, limit: Duration) -> Result<Outcome> {
-        let reply = self.ask_for(app, "call", json!({ "tool": tool, "input": input, "labs": crate::labs::of_app(&ctx.labs, app), "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from, "port": crate::api::port(), "address": ctx.address, "handles": ctx.handles }), limit).await?;
+        let reply = self.ask_for(app, "call", json!({ "tool": tool, "input": input, "labs": crate::labs::of_app(&ctx.labs, app), "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from, "port": ::api::local::port(), "address": ctx.address, "handles": ctx.handles }), limit).await?;
         let result = reply["ok"].clone();
         let described = self.describe(app).await?;
         if let Some(output) = described["tools"].as_array().into_iter().flatten().find(|t| t["name"] == tool).and_then(|t| t.get("output")) {
-            crate::tools::check(output, &result).with_context(|| format!("{app} {tool} answered what its output schema doesn't say"))?;
+            ::api::tools::check(output, &result).with_context(|| format!("{app} {tool} answered what its output schema doesn't say"))?;
         }
         Ok(Outcome { result, appends: appends(&reply["appends"])?, later: reply["later"] == true })
     }

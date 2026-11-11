@@ -47,7 +47,7 @@ pub fn split(args: &[String]) -> (Vec<String>, Flags) {
     (words, flags)
 }
 
-pub(super) fn kebab(name: &str) -> String {
+pub fn kebab(name: &str) -> String {
     name.replace('_', "-")
 }
 
@@ -61,7 +61,7 @@ fn input_name(props: &Map<String, Value>, flag: &str) -> String {
 }
 
 /// The inputs words fill, in order: the tool's `words` when it names them, else its required inputs.
-pub(super) fn places(tool: &Value) -> Vec<String> {
+pub fn places(tool: &Value) -> Vec<String> {
     match tool["words"].as_array() {
         Some(words) => words.iter().filter_map(Value::as_str).map(String::from).collect(),
         None => required(&tool["input"]),
@@ -127,11 +127,11 @@ pub fn input(schema: &Value, places: &[String], words: Vec<String>, flags: Flags
     );
 }
 
-pub(super) fn required(schema: &Value) -> Vec<String> {
+pub fn required(schema: &Value) -> Vec<String> {
     schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect()
 }
 
-pub(super) fn missing(schema: &Value, input: &Map<String, Value>) -> Vec<String> {
+pub fn missing(schema: &Value, input: &Map<String, Value>) -> Vec<String> {
     required(schema).into_iter().filter(|r| !input.contains_key(r)).collect()
 }
 
@@ -174,7 +174,7 @@ fn value(flag: &str, values: &[Option<String>], prop: Option<&Value>) -> Result<
 
 /// Fills missing inputs from stdin: a user at a terminal types each, a line each; or what's piped, a JSON object of
 /// inputs, or the one missing input's text.
-pub(super) fn from_stdin(schema: &Value, missing: &[String], input: &mut Map<String, Value>) -> Result<()> {
+pub fn from_stdin(schema: &Value, missing: &[String], input: &mut Map<String, Value>) -> Result<()> {
     let props = schema["properties"].as_object().cloned().unwrap_or_default();
     if std::io::stdin().is_terminal() {
         if std::io::stderr().is_terminal() {

@@ -4,8 +4,8 @@ use anyhow::Result;
 use serde_json::json;
 use std::collections::BTreeSet;
 
-use crate::api::Client;
-use crate::cli::{Command, Failed, ago};
+use ::api::Client;
+use ::api::cli::{Command, Failed, ago};
 use ::custom_build::config::{CLI, NAME};
 
 pub fn commands() -> Command {
@@ -21,7 +21,7 @@ pub fn commands() -> Command {
                     let Some(network) = g.node.state()?.network else { return Ok(true) };
                     for s in &network.devices {
                         let (installed, off) = (&s.now.installed_services, &s.off_services);
-                        let away = Some(crate::cli::presence(s.now.online, s.now.seen)).filter(|p| !s.now.online && !p.is_empty()).map(|p| format!(" ({p})")).unwrap_or_default();
+                        let away = Some(::api::cli::presence(s.now.online, s.now.seen)).filter(|p| !s.now.online && !p.is_empty()).map(|p| format!(" ({p})")).unwrap_or_default();
                         if let Some(parts) = &s.now.parts {
                             println!("{}{away}", s.name);
                             for p in parts {

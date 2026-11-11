@@ -1,0 +1,217 @@
+//! This app runtime as its features see it (`api::AppRuntime`), and the features it runs, the one list (`features`).
+
+use std::any::{Any, TypeId};
+
+use ::api::runtime::{Apps, Databases, Features, Fut, Here, Holds, Rt, Runs, ScopeDatabase};
+use ::scope::read::Read;
+
+use super::*;
+
+/// Every feature this runtime runs, a line each.
+pub fn features() -> Vec<Runs> {
+    vec![
+        crate::app::tools::add_runs(),
+        crate::app::tools::remove_runs(),
+        crate::vault::tools::runs(),
+        crate::backups::tools::runs(),
+        crate::groups::tools::runs(),
+        crate::devices::tools::runs(),
+        crate::widgets::tools::runs(),
+        crate::push::tools::runs(),
+        crate::logs::tools::runs(),
+        crate::insights::tools::runs(),
+        crate::ai_gateway::tools::runs(),
+    ]
+}
+
+/// Every feature's routes that aren't tools.
+pub fn routes() -> crate::api::Routes {
+    features().into_iter().fold(crate::api::Routes::default(), |routes, runs| routes.merge(runs.routes))
+}
+
+/// A `Serves` of a feature whose runtime half is still this program's: an `async fn(Node, Caller, Map<String, Value>)`.
+macro_rules! node_serves {
+    ($f:path) => {
+        |rt, me, input| Box::pin($f(crate::node::Node::of(&rt), me, input))
+    };
+}
+pub(crate) use node_serves;
+
+/// What the features keep while this runtime runs, and what wakes each one's loop.
+#[derive(Default)]
+pub(super) struct Kept {
+    states: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    wakes: HashMap<&'static str, Arc<tokio::sync::Notify>>,
+}
+
+/// Each feature's loop: what it is, how often, and what it runs.
+pub(super) type Loop = (&'static str, Duration, fn(Rt) -> Fut<'static, ()>);
+
+impl Kept {
+    /// What `features()` keep, and their loops, which `run_loops` starts.
+    pub(super) fn of(runs: Vec<Runs>) -> (Kept, Vec<Loop>) {
+        let (mut kept, mut loops) = (Kept::default(), Vec::new());
+        for r in runs {
+            if !r.state.is::<()>() {
+                kept.states.insert((*r.state).type_id(), r.state);
+            }
+            if let Some((every, f)) = r.every {
+                kept.wakes.insert(r.feature, Arc::default());
+                loops.push((r.feature, every, f));
+            }
+        }
+        (kept, loops)
+    }
+}
+
+impl Node {
+    /// This runtime, as its features reach it.
+    pub fn rt(&self) -> Rt {
+        Arc::new(self.clone())
+    }
+
+    /// The runtime a feature was given, which in this program is always a `Node`.
+    pub fn of(rt: &Rt) -> Node {
+        (&**rt as &dyn Any).downcast_ref::<Node>().expect("this program's features run in a Node").clone()
+    }
+
+    /// Starts each feature's loop: at once, then every so often, or when it's woken.
+    pub(super) fn run_loops(&self, loops: Vec<Loop>) {
+        for (feature, every, f) in loops {
+            let (node, wake) = (self.clone(), self.0.kept.wakes[feature].clone());
+            tokio::spawn(async move {
+                loop {
+                    if let Err(err) = f(node.rt()).await {
+                        tracing::debug!("{feature}: {err:#}");
+                    }
+                    let _ = tokio::time::timeout(every, wake.notified()).await;
+                }
+            });
+        }
+    }
+
+    /// Wakes every feature's loop: what it follows may have changed all at once, as when a network is taken.
+    pub(super) fn wake_all(&self) {
+        for wake in self.0.kept.wakes.values() {
+            wake.notify_one();
+        }
+    }
+}
+
+impl axum::extract::FromRef<Rt> for Node {
+    fn from_ref(rt: &Rt) -> Node {
+        Node::of(rt)
+    }
+}
+
+impl Here for Node {
+    fn id(&self) -> Key {
+        self.0.id
+    }
+
+    fn device_name(&self) -> String {
+        Node::device_name(self)
+    }
+
+    fn home(&self) -> &Path {
+        &self.0.dir
+    }
+
+    fn ready(&self) -> bool {
+        Node::ready(self)
+    }
+
+    fn caller(&self) -> Result<Caller> {
+        Node::caller(self)
+    }
+
+    fn is_this_machine(&self, caller: &Caller) -> bool {
+        self.this_machine(caller)
+    }
+
+    fn own_ports(&self) -> Vec<u16> {
+        Node::own_ports(self)
+    }
+
+    fn address(&self) -> Result<String> {
+        Node::address(self)
+    }
+
+    fn emit(&self, event: Event) {
+        Node::emit(self, event)
+    }
+}
+
+impl ScopeDatabase for Node {
+    fn read_dyn(&self, f: &mut dyn FnMut(&Read<'_>) -> Result<()>) -> Result<()> {
+        self.with(|i| f(&Read { replica: &i.r, states: &i.views }))
+    }
+
+    fn append<'a>(&'a self, scope: &'a Scope, user: &'a str, content: Content) -> Fut<'a, ()> {
+        Box::pin(self.append_as(scope, user, content))
+    }
+}
+
+impl Databases for Node {
+    fn open<'a>(&'a self, caller: &'a Caller, scope: &'a Scope, app: &'a str, database: &'a str, schema: &'a [&'a str]) -> Fut<'a, Arc<tokio::sync::Mutex<Db>>> {
+        Box::pin(async move {
+            let (db, bucket) = self.call_database(caller, scope, app, database, Some(schema.iter().map(|s| s.to_string()).collect())).await?;
+            self.read_ready(&(scope.clone(), format!("{app}/{database}")), &mut *db.lock().await, &bucket).await?;
+            Ok(db)
+        })
+    }
+
+    fn write<'a>(&'a self, caller: &'a Caller, scope: &'a Scope, app: &'a str, database: &'a str, schema: &'a [&'a str], change: &'a mut (dyn FnMut(&rusqlite::Connection) -> Result<()> + Send)) -> Fut<'a, ()> {
+        Box::pin(async move {
+            let (db, bucket) = self.call_database(caller, scope, app, database, Some(schema.iter().map(|s| s.to_string()).collect())).await?;
+            let mut db = db.lock().await;
+            self.read_ready(&(scope.clone(), format!("{app}/{database}")), &mut db, &bucket).await?;
+            let at = db.at();
+            self.write_in(scope, &mut db, &bucket, |c| change(c)).await?;
+            if db.at() > at {
+                self.ping(scope, Some((app, database, db.at())));
+            }
+            Ok(())
+        })
+    }
+
+    fn needs<'a>(&'a self, caller: &'a Caller, wants: &'a [(Scope, &'a str, &'a str)]) -> Fut<'a, ()> {
+        Box::pin(Node::needs(self, caller, wants))
+    }
+}
+
+impl Holds for Node {
+    fn device(&self) -> Key {
+        self.0.holds.device()
+    }
+
+    fn vault_keys<'a>(&'a self, scope: &'a Scope, wanted: &'a [(u32, [u8; 32])]) -> Fut<'a, BTreeMap<u32, [u8; 32]>> {
+        Box::pin(async move { self.0.holds.vault_keys(&self.bucket()?, scope, wanted).await })
+    }
+}
+
+impl Apps for Node {
+    fn describe<'a>(&'a self, app: &'a str) -> Fut<'a, Value> {
+        Box::pin(self.0.apps.describe(app))
+    }
+
+    fn apps_for<'a>(&'a self, viewer: &'a Caller) -> Fut<'a, Vec<Value>> {
+        Box::pin(self.apps(viewer))
+    }
+
+    fn logo(&self, domain: &str, app: &str) -> Option<(String, String)> {
+        Node::logo(self, domain, app)
+    }
+}
+
+impl Features for Node {
+    fn state_dyn(&self, of: TypeId) -> Option<&(dyn Any + Send + Sync)> {
+        self.0.kept.states.get(&of).map(|s| &**s)
+    }
+
+    fn wake(&self, feature: &str) {
+        if let Some(wake) = self.0.kept.wakes.get(feature) {
+            wake.notify_one();
+        }
+    }
+}

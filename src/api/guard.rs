@@ -10,11 +10,11 @@ use serde_json::json;
 use tokio_stream::StreamExt;
 
 use ::custom_build::config::YOURS;
-use crate::node::{Caller, Credential, Node};
+use ::api::local::{from_this_machine, not_this_machine};
+use ::api::{Caller, Credential, Me, Who};
+use crate::node::Node;
 
-use super::local::{from_this_machine, not_this_machine};
-use super::reply::Error;
-use super::{Routes, Who};
+use super::Routes;
 
 /// A request a client device sent over iroh (src/node/net.rs), with the key its connection proved it holds (or the
 /// device that vouched for a session's endpoint), and until when what it hands counts (that session's certificate's
@@ -30,21 +30,21 @@ pub fn guarded(routes: Routes, node: Node) -> Router {
         .route_layer(axum::middleware::from_fn_with_state((node.clone(), who), only_this_machine))
         .layer(axum::middleware::map_response(sandboxed))
         .layer(axum::middleware::from_fn_with_state(node.clone(), traced))
-        .with_state(node)
+        .with_state(node.rt())
 }
 
 /// Every request is a trace, which a failure names to its caller. One that names the trace it's part of (W3C's
 /// `traceparent`) continues it. One that asks for a trace (`x-one-trace`, as `--trace` does) gets what it did
-/// here in the same header of its answer, as base64 of its JSON (`node::trace`).
+/// here in the same header of its answer, as base64 of its JSON (`api::trace`).
 async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
-    use crate::node::trace;
+    use ::api::trace;
     let asked = req.headers().contains_key(::custom_build::protocol::header::TRACE);
     let parent = req.headers().get(::custom_build::protocol::header::TRACEPARENT).and_then(|h| h.to_str().ok()).map(str::to_string);
     let route = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string());
     let t = trace::Trace::continuing(asked, parent.as_deref());
     let began = std::time::Instant::now();
     let mut resp = trace::within(Some(t.clone()), next.run(req)).await;
-    if let (Some(failed), Some(route)) = (resp.extensions_mut().remove::<super::RouteFailed>(), route) {
+    if let (Some(failed), Some(route)) = (resp.extensions_mut().remove::<::api::RouteFailed>(), route) {
         node.finish_route_request(&t, &route, began.elapsed(), &failed);
     }
     if !asked {
@@ -126,23 +126,4 @@ async fn sandboxed(mut resp: Response) -> Response {
     headers.insert(axum::http::header::CONTENT_SECURITY_POLICY, axum::http::HeaderValue::from_static("sandbox"));
     headers.insert(axum::http::header::X_CONTENT_TYPE_OPTIONS, axum::http::HeaderValue::from_static("nosniff"));
     resp
-}
-
-/// Who asked: this machine's own user, or a client device of the network, whom this device acts for.
-#[derive(Clone)]
-pub(crate) struct Me {
-    pub(crate) caller: Caller,
-    /// A client device's name; none for this machine's own programs.
-    pub(crate) client: Option<String>,
-}
-
-impl axum::extract::FromRequestParts<Node> for Me {
-    type Rejection = Error;
-
-    async fn from_request_parts(parts: &mut axum::http::request::Parts, node: &Node) -> Result<Me, Error> {
-        match parts.extensions.get::<Me>() {
-            Some(me) => Ok(me.clone()),
-            None => Ok(Me { caller: Caller::local(node)?, client: None }),
-        }
-    }
 }

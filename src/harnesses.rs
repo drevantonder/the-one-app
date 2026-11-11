@@ -141,10 +141,10 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
     let config = dir("XDG_CONFIG_HOME", home.join(".config"));
     let pi = dir("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     // Asked as one of this machine's own programs: with the token only its user can read.
-    let token = node_home.join(crate::api::LOCAL_TOKEN);
+    let token = node_home.join(::api::local::LOCAL_TOKEN);
     let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{} || true", custom_build::protocol::header::LOCAL_TOKEN, token.display(), ::api::path::HOOKS_PROMPT);
     // Another custom build's node on this machine has a hook of its own, on its own port; an older hook of its own is replaced.
-    let port = format!(":{}{}", crate::api::port_of(addr), &HOOKS_PROMPT[..=HOOKS_PROMPT.rfind('/').unwrap_or_default()]);
+    let port = format!(":{}{}", ::api::local::port_of(addr), &HOOKS_PROMPT[..=HOOKS_PROMPT.rfind('/').unwrap_or_default()]);
     let server = crate::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
@@ -193,8 +193,8 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
 /// programs: the user's git config includes one of the node's, which only they can read, sending its token there and telling
 /// the remote helper (cli/src/git_remote.rs) the node's home.
 fn git(node_home: &Path, addr: &str) {
-    let Some(token) = crate::api::local_token(node_home) else { return };
-    let port = crate::api::port_of(addr);
+    let Some(token) = ::api::local::local_token(node_home) else { return };
+    let port = ::api::local::port_of(addr);
     let file = node_home.join("git-config");
     let hosts: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", custom_build::protocol::header::LOCAL_TOKEN)).collect();
     let text = format!("{hosts}{}", crate::git_wire::home_config(node_home));

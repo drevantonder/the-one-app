@@ -7,15 +7,17 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, post};
 use serde_json::{Value, json};
 
-use crate::node::{Caller, Node};
+use crate::node::Node;
+use ::api::Caller;
 use ::api::call::CallRequest;
 
-use super::{Routes, Who};
-use super::guard::Me;
-use super::reply::{Body, Error, Reply, failed};
+use super::Routes;
+use ::api::Who;
+use ::api::Me;
+use ::api::reply::{Body, Error, Reply, failed};
 
 /// What a client that picks the node it asks itself says with each request (onet/src/lib.rs): a call this node can't
-/// run is answered 421 with the nodes that can (`node::Elsewhere`), not passed on.
+/// run is answered 421 with the nodes that can (`api::Elsewhere`), not passed on.
 
 /// An app's own requests (`app_http`): how stock git reaches Repos.
 pub(super) const APP_ROUTE: &str = "/{app}/{*path}";

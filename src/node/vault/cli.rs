@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use crate::cli::{Command, Given};
+use ::api::cli::{Command, Given};
 
 /// The user's own answer to a request for an item, with its values on stdin: not a tool, since an agent that answered
 /// one would see the secret vault_request keeps from it.

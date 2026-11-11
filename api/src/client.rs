@@ -9,9 +9,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use crate::node::Node;
 
-/// What the node answered: its status, its trace when asked for one (`node::trace::HEADER`, as sent), and its body as
+/// What the node answered: its status, its trace when asked for one (`protocol::header::TRACE`, as sent), and its body as
 /// it comes.
 pub struct Answer {
     pub status: u16,
@@ -41,7 +40,7 @@ pub struct Client {
     sets: Mutex<Option<Vec<Value>>>,
 }
 
-/// A call's answer, with what it did as lines when its trace was asked for (`node::trace::said`).
+/// A call's answer, with what it did as lines when its trace was asked for (`trace::said`).
 pub struct Called {
     pub ok: Result<Value>,
     pub trace: Option<Vec<String>>,
@@ -79,7 +78,7 @@ impl Client {
     pub fn sets(&self) -> Result<Vec<Value>> {
         let mut kept = self.sets.lock().unwrap();
         if kept.is_none() {
-            *kept = Some(crate::openapi::sets(&self.get(::api::path::OPENAPI)?));
+            *kept = Some(crate::openapi::sets(&self.get(crate::path::OPENAPI)?));
         }
         Ok(kept.clone().unwrap_or_default())
     }
@@ -146,7 +145,7 @@ impl Client {
             Err(err) => (Err(err), None),
         };
         let trace = trace.then(|| match &node {
-            Some(node) => crate::node::trace::said(node),
+            Some(node) => crate::trace::said(node),
             None => vec!["no trace came back".to_string()],
         });
         Called { ok: ok.map(answered), trace }
@@ -156,7 +155,7 @@ impl Client {
     /// app and tool), or else its path: → its answer, and the span, to end once the answer's read. One no node answered
     /// has ended here.
     fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<Duration>, what: Option<Value>) -> Result<(Answer, Asked)> {
-        let traceparent = format!("00-{}-{}-01", crate::insights::new_trace(), crate::insights::new_span());
+        let traceparent = format!("00-{}-{}-01", crate::traceparent::ids::trace(), crate::traceparent::ids::span());
         let mut call = what.unwrap_or_else(|| json!({ "path": path.split('?').next().unwrap_or(path) }));
         call["traceparent"] = json!(traceparent);
         let asked = Asked { call, began: std::time::Instant::now() };
@@ -182,13 +181,13 @@ impl Client {
     }
 
     /// Ends a request's span with how it went, and records it if it's kept: only what failed, was slow or is one trace in
-    /// 20 (`insights::sampled`). It's sent to the node at once, with what wasn't sent before, or kept for the next to send
+    /// 20 (`traceparent::sampled`). It's sent to the node at once, with what wasn't sent before, or kept for the next to send
     /// once a node answers, for as long as a node takes them back (a day).
     fn ended(&self, Asked { mut call, began }: Asked, how: Value) {
         let ms = began.elapsed().as_millis() as u64;
         call.as_object_mut().unwrap().extend(how.as_object().cloned().unwrap_or_default().into_iter().filter(|(_, v)| !v.is_null()));
         (call["name"], call["time"], call["ms"]) = (json!("client.call"), json!(now_ms().saturating_sub(ms)), json!(ms));
-        let kept = call["failed"] == true || call["error"].is_string() || ms >= custom_build::protocol::SLOW_MS || call["traceparent"].as_str().and_then(crate::insights::parent_of).is_some_and(|(trace, _)| crate::insights::sampled(&trace));
+        let kept = call["failed"] == true || call["error"].is_string() || ms >= custom_build::protocol::SLOW_MS || call["traceparent"].as_str().and_then(crate::traceparent::parent_of).is_some_and(|(trace, _)| crate::traceparent::sampled(&trace));
         let unsent = platform::cache().join(format!("unsent-{}.json", self.client));
         let mut events: Vec<Value> = std::fs::read(&unsent).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         if kept {
@@ -237,7 +236,7 @@ fn now_ms() -> u64 {
 /// Why no node answered a request, as insights names it: it timed out, or none could be reached.
 fn unreached(err: &anyhow::Error) -> &'static str {
     let said = format!("{err:#}").to_lowercase();
-    if said.contains("timeout") || said.contains("timed out") { crate::insights::TIMEOUT } else { crate::insights::UNREACHABLE }
+    if said.contains("timeout") || said.contains("timed out") { crate::traceparent::TIMEOUT } else { crate::traceparent::UNREACHABLE }
 }
 
 /// The code of what a node answered failed, as `answered` read it: a refusal's is `refused`.
@@ -252,7 +251,7 @@ pub fn answered(status: u16, body: Value, home: &std::path::Path) -> Result<Valu
     let Some(err) = body.get("error") else { return Ok(body) };
     let code = body.get("code").and_then(Value::as_str).map(str::to_string);
     let err = match code.as_deref() {
-        Some(custom_build::protocol::code::NOT_THIS_MACHINE) => super::token_refused(home),
+        Some(custom_build::protocol::code::NOT_THIS_MACHINE) => crate::local::token_refused(home),
         Some(custom_build::protocol::code::UPDATE) => format!("{} Run {} update.", err.as_str().unwrap_or("failed"), custom_build::config::CLI),
         _ => err.as_str().unwrap_or("failed").to_string(),
     };
@@ -264,76 +263,4 @@ pub fn answered(status: u16, body: Value, home: &std::path::Path) -> Result<Valu
         true => crate::cli::Failed::Refused(err).into(),
         false => custom_build::protocol::Coded::or_plain(code, err),
     })
-}
-
-/// The node's own routes, asked in the node itself as the request its MCP answers asked them: with that request's proof
-/// of who asks (the client device its connection proved, or this machine's own program), which
-/// `only_this_machine` checks for each, as it would over HTTP.
-pub struct InProcess {
-    router: axum::Router,
-    client: Option<super::FromClient>,
-    peer: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
-    headers: axum::http::HeaderMap,
-    runtime: tokio::runtime::Handle,
-}
-
-impl InProcess {
-    /// As a request that came with `client` (over iroh), from `peer` (over TCP), and `headers`. Called in the runtime.
-    pub fn new(node: Node, client: Option<super::FromClient>, peer: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>, headers: &axum::http::HeaderMap) -> InProcess {
-        let proof = [axum::http::header::AUTHORIZATION.as_str(), custom_build::protocol::header::LOCAL_TOKEN, custom_build::protocol::header::READS];
-        let headers = headers.iter().filter(|(n, _)| proof.contains(&n.as_str())).map(|(n, v)| (n.clone(), v.clone())).collect();
-        InProcess { router: super::guarded(super::routes(), node), client, peer, headers, runtime: tokio::runtime::Handle::current() }
-    }
-}
-
-impl Via for InProcess {
-    fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, _wait: Option<Duration>) -> Result<Answer> {
-        use hyper::service::Service;
-        let mut req = axum::http::Request::builder().method(method).uri(path).body(axum::body::Body::from(body.unwrap_or_default()))?;
-        req.headers_mut().extend(self.headers.clone());
-        for (name, value) in headers {
-            req.headers_mut().insert(axum::http::HeaderName::try_from(*name)?, value.parse()?);
-        }
-        if let Some(client) = self.client {
-            req.extensions_mut().insert(client);
-        }
-        if let Some(peer) = self.peer {
-            req.extensions_mut().insert(peer);
-        }
-        let service = hyper_util::service::TowerToHyperService::new(self.router.clone());
-        let (parts, body) = self.runtime.block_on(service.call(req))?.into_parts();
-        // Its body as it comes: the node's events stream until whoever reads them stops.
-        let (sending, chunks) = std::sync::mpsc::channel();
-        self.runtime.spawn(async move {
-            use tokio_stream::StreamExt;
-            let mut body = body.into_data_stream();
-            while let Some(Ok(chunk)) = body.next().await {
-                if sending.send(chunk).is_err() {
-                    break;
-                }
-            }
-        });
-        let trace = parts.headers.get(custom_build::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
-        Ok(Answer { status: parts.status.as_u16(), trace, body: Box::new(Streamed { chunks, part: Default::default() }) })
-    }
-}
-
-struct Streamed {
-    chunks: std::sync::mpsc::Receiver<axum::body::Bytes>,
-    part: axum::body::Bytes,
-}
-
-impl Read for Streamed {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        while self.part.is_empty() {
-            match self.chunks.recv() {
-                Ok(chunk) => self.part = chunk,
-                Err(_) => return Ok(0),
-            }
-        }
-        let n = buf.len().min(self.part.len());
-        buf[..n].copy_from_slice(&self.part[..n]);
-        self.part = self.part.slice(n..);
-        Ok(n)
-    }
 }

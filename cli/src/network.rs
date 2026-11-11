@@ -1,8 +1,8 @@
 //! Who's in the network and this machine, on the command line: status, making or joining a network, and its settings.
 
 use anyhow::Context;
-use one::api::Client;
-use one::cli::Command;
+use api::Client;
+use api::cli::Command;
 use ::custom_build::config::{CLI, YOURS};
 use ::scope::rank::Priority;
 use ::scope::state::State;
@@ -55,13 +55,13 @@ pub fn commands() -> Command {
                     // A lab's setting is named when it's first set; any other name must be one of the network's.
                     let names: Vec<String> = g.node.state()?.network.context("not in a network yet")?.settings.into_keys().collect();
                     if !name.starts_with("lab.") && !names.iter().any(|n| n == name) {
-                        return Err(one::cli::Failed::Typed(format!("no setting called {name}: {}", names.join(", "))).into());
+                        return Err(api::cli::Failed::Typed(format!("no setting called {name}: {}", names.join(", "))).into());
                     }
                     let value = if g.has("default") { Value::Null } else { json!(value.join(" ")) };
                     g.node.post("/api/settings", json!({ "name": name, "value": value }))?;
                     println!("Set {name}.");
                 }
-                ["role", _, role] if !matches!(*role, "admin" | "member") => return Err(one::cli::Failed::Typed(format!("a role is admin or member, not {role}")).into()),
+                ["role", _, role] if !matches!(*role, "admin" | "member") => return Err(api::cli::Failed::Typed(format!("a role is admin or member, not {role}")).into()),
                 ["role", user, role] => {
                     g.node.post("/api/role", json!({ "user": user, "role": role }))?;
                     println!("{user} is now {role}.");
@@ -103,7 +103,7 @@ fn status(node: &Client, state: &State) {
     let title = |app: &str| apps.iter().find(|a| a["name"] == app).and_then(|a| a["title"].as_str()).unwrap_or(app).to_string();
     println!("\nDevices");
     for s in &i.devices {
-        let presence = Some(one::cli::presence(s.now.online, s.now.seen)).filter(|p| !p.is_empty()).map(|p| format!("  {p}")).unwrap_or_default();
+        let presence = Some(api::cli::presence(s.now.online, s.now.seen)).filter(|p| !p.is_empty()).map(|p| format!("  {p}")).unwrap_or_default();
         let here = if s.now.here { " (this one)" } else { "" };
         let serves = if s.serves_me { "" } else { ", doesn't run yours" };
         let build = s.now.build.as_ref().map(|b| format!("  {b}")).unwrap_or_default();

@@ -1,4 +1,4 @@
-//! The node's route for its API's document, `/api/openapi.json`, made as every host makes it (src/openapi.rs).
+//! The node's route for its API's document, `/api/openapi.json`, made as every host makes it (`api::openapi`).
 
 use axum::extract::State;
 use axum::response::Response;
@@ -6,8 +6,10 @@ use axum::routing::get;
 use crate::node::Node;
 use ::api::path;
 
-use super::reply::{Error, tagged};
-use super::{Me, Routes, Who};
+use ::api::reply::{Error, tagged};
+use super::Routes;
+use ::api::Me;
+use ::api::Who;
 
 pub(super) fn routes() -> Routes {
     Routes::default().route(path::OPENAPI, Who::Clients, get(document_for))
@@ -42,7 +44,7 @@ mod tests {
     fn the_sets_a_document_lists_are_what_was_listed() {
         let tool = json!({ "name": "send", "title": "Send", "description": "Sends", "input": { "type": "object", "required": ["to"], "properties": { "to": { "type": "string" }, "file": { "type": "object", "format": "file", "description": "it" }, "more": { "type": "array", "items": { "type": "object", "format": "file", "required": ["name"] } } } }, "output": { "type": "object" }, "confirm": true, "accounts": true, "words": ["to"] });
         let apps = [json!({ "name": "notes", "title": "Notes", "description": "d", "instructions": "i", "tagline": "t", "needs": "a Mac", "runs": "service", "uses": { "services": ["x"] }, "added": ["user:a"], "tools": [tool, { "name": "_http", "input": {} }] }), json!({ "name": "gone", "title": "Gone", "deleted": { "time": 1 }, "tools": [{ "name": "run" }] }), json!({ "name": "new", "title": "New" })];
-        let sets = crate::openapi::sets(&crate::openapi::document(&apps, false));
+        let sets = ::api::openapi::sets(&crate::openapi::document(&apps, false));
         let of = |name: &str| sets.iter().find(|s| s["name"] == name).unwrap();
         let notes = of("notes");
         for (key, want) in [("title", "Notes"), ("description", "d"), ("instructions", "i"), ("tagline", "t"), ("needs", "a Mac"), ("runs", "service")] {
@@ -67,7 +69,7 @@ mod tests {
     #[test]
     fn each_route_says_what_it_answers() {
         for (path, _, op) in crate::says::listed() {
-            assert!(op.answer != crate::says::Op::unsaid(), "{} {path} says what it answers (src/says.rs: `answers`, `answers_as`, `done`)", op.method);
+            assert!(op.answer != ::api::says::Op::unsaid(), "{} {path} says what it answers (src/says.rs: `answers`, `answers_as`, `done`)", op.method);
         }
     }
 
@@ -130,10 +132,10 @@ mod tests {
     fn a_tool_a_client_answers_takes_what_the_client_reads() {
         for feature in crate::core_tools::all() {
             for tool in &feature.tools {
-                let at = feature.path(&tool.spec);
+                let at = feature.path(tool);
                 let Some((.., body)) = scope::settings::answered_routes().find(|(_, path, ..)| *path == at) else { continue };
                 let names = |schema: &Value| schema["properties"].as_object().map(|p| p.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
-                assert_eq!(names(&tool.spec["input"]), names(&body), "{at}'s tool and what its client reads");
+                assert_eq!(names(&tool["input"]), names(&body), "{at}'s tool and what its client reads");
             }
         }
     }

@@ -118,7 +118,7 @@ enum Route {
 /// The only list of them: a route of a path and method, which `answer` runs (its `match` fails to compile for one
 /// missing here or there), and `answered` tells a request that comes by of; and whether a machine with a node answers
 /// it with this alone (`on_a_node`), false where the node serves that path itself: its own name, and services, which it serves for
-/// more than its own programs, and a tool that is a route (`core_tools::Runs::Route`), which asks `answer_as_mine` itself.
+/// more than its own programs, and a tool that is a route (`api::Runs`), which asks `answer_as_mine` itself.
 const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/api/role", Route::Role, true),
     ("POST", "/api/devices/remove", Route::Remove, false),

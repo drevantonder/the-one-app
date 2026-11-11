@@ -30,7 +30,6 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use ::custom_build::config::{CLI, NAME};
-use crate::api;
 
 pub fn invoked() -> bool {
     platform::os::invoked_as().is_some_and(|me| me == ::custom_build::programs::oned())
@@ -193,8 +192,8 @@ impl Onet {
 
     /// `method` of `path`, with a JSON body: → what it answered, once that's a 200.
     fn ask(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Vec<u8>> {
-        let token = api::local_token(&self.home).context("onet hasn't started yet")?;
-        let mut request = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", api::addr())).header(::custom_build::protocol::header::LOCAL_TOKEN, token);
+        let token = ::api::local::local_token(&self.home).context("onet hasn't started yet")?;
+        let mut request = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", ::api::local::addr())).header(::custom_build::protocol::header::LOCAL_TOKEN, token);
         if body.is_some() {
             request = request.header("content-type", "application/json");
         }
@@ -679,7 +678,7 @@ async fn serve() -> Result<()> {
     with_bucket_address(&dir)?;
     let at = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
     let kept = std::sync::Arc::new(std::sync::Mutex::new([
-        Kept::new(::custom_build::programs::onet(), "onet", vec![format!("--listen={}", api::addr()), format!("--runtime={at}")]),
+        Kept::new(::custom_build::programs::onet(), "onet", vec![format!("--listen={}", ::api::local::addr()), format!("--runtime={at}")]),
         Kept::new(::custom_build::programs::oned(), "the app runtime", vec![::scope::scopes::APPS_PART.into(), format!("--listen={at}")]),
     ]));
     keep_parts(kept.clone(), at.clone());
@@ -699,7 +698,7 @@ async fn serve() -> Result<()> {
             let [onet, runtime] = &mut *kept.lock().unwrap();
             onet.keep();
             // The runtime asks onet for what the device's key opens as it starts: once onet answers.
-            if runtime.child.is_some() || std::net::TcpStream::connect(api::addr()).is_ok() {
+            if runtime.child.is_some() || std::net::TcpStream::connect(::api::local::addr()).is_ok() {
                 runtime.keep();
             }
         }

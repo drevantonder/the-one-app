@@ -59,7 +59,7 @@ pub fn run(args: &[String]) -> Result<i32> {
 
 /// The address of the network this computer's node is in.
 fn here() -> Result<String> {
-    let state = crate::node(one::core_tools::Reader::Cli.client()).state()?;
+    let state = crate::node(api::Reader::Cli.client()).state()?;
     let address = state.address().with_context(|| format!("this computer's {NAME} has no address yet: an admin sets it with {CLI} cloudflare use"))?;
     Ok(address.trim_end_matches('/').to_string())
 }
@@ -103,9 +103,9 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
     let (head, answered) = tokio::sync::oneshot::channel::<(u16, String, Option<String>)>();
     let (giving, given) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(8);
     std::thread::spawn(move || {
-        let url = format!("http://{}{path}", one::api::addr());
+        let url = format!("http://{}{path}", api::local::addr());
         let asked = if post {
-            let mut r = one::api::agent().post(&url);
+            let mut r = api::local::agent().post(&url);
             for (n, v) in &headers {
                 r = r.header(n, v);
             }
@@ -113,7 +113,7 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
         } else {
             // What git asks first: again while onet starts again (`one::loopback`).
             one::loopback::while_refused(|| {
-                let mut r = one::api::agent().get(&url);
+                let mut r = api::local::agent().get(&url);
                 for (n, v) in &headers {
                     r = r.header(n, v);
                 }
@@ -133,10 +133,10 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
         if status >= 400 && kind.starts_with("application/json") {
             let said: serde_json::Value = resp.body_mut().read_json().unwrap_or_default();
             let error = match said["code"].as_str() {
-                Some(::custom_build::protocol::code::NOT_THIS_MACHINE) => one::api::token_refused(&platform::home()),
+                Some(::custom_build::protocol::code::NOT_THIS_MACHINE) => api::local::token_refused(&platform::home()),
                 _ => said["error"].as_str().unwrap_or("that didn't work").to_string(),
             };
-            return drop(head.send((status, "text/plain".into(), Some(one::tools::in_cli_words(&crate::node(one::core_tools::Reader::Cli.client()), &error)))));
+            return drop(head.send((status, "text/plain".into(), Some(one::tools::in_cli_words(&crate::node(api::Reader::Cli.client()), &error)))));
         }
         if head.send((status, kind, None)).is_err() {
             return;

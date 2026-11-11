@@ -3,7 +3,9 @@
 use serde::Deserialize;
 
 use ::api::call::Event;
-use crate::says::{Op, Said, Who};
+use ::api::says::Op;
+use ::api::says::Said;
+use ::api::says::Who;
 
 pub fn listed() -> Vec<Said> {
     vec![

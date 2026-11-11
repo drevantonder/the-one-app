@@ -56,7 +56,7 @@ mod sessions;
 mod insights;
 pub use databases::NotGiven;
 pub use net::{Endpoints, alpn, relay};
-pub use calls::{Elsewhere, Grant};
+pub use calls::Grant;
 use calls::{Granted, Reply};
 use apps::built_in_bundle;
 use scheduled::switch_entry;
@@ -71,16 +71,17 @@ mod state;
 mod status;
 mod steps;
 pub mod storage;
-pub mod trace;
+use ::api::trace;
 pub mod vault;
 pub mod widgets;
 mod caller;
+pub mod runtime;
 mod exclusive;
 mod holds;
 mod home;
 mod network;
 
-pub use caller::{Caller, Credential};
+use ::api::{Caller, Credential};
 pub use holds::{HeldShare, HeldSign, HeldWrite, Holder, sign_request};
 use exclusive::*;
 pub use home::{device_here, device_key, load_local_token, runtime_endpoint, runtime_folder};
@@ -293,6 +294,8 @@ pub struct Inner {
     guide: Mutex<Option<String>>,
     /// Whether it was asked to erase what this device keeps, which its oned does (`oned::keep_parts`).
     erasing: std::sync::atomic::AtomicBool,
+    /// What its features keep (`runtime::features`).
+    kept: runtime::Kept,
 }
 
 #[derive(Clone)]
@@ -334,15 +337,15 @@ pub async fn serve(listen: &str) -> Result<()> {
         std::process::exit(0)
     });
     let dir = platform::home();
-    let token = crate::api::local_token(&dir).with_context(|| format!("{} has no token for this device's own programs: its onet makes it as it starts", dir.display()))?;
-    let node = Node::runtime(&dir, Holder { at: crate::api::addr(), token }).await?;
+    let token = ::api::local::local_token(&dir).with_context(|| format!("{} has no token for this device's own programs: its onet makes it as it starts", dir.display()))?;
+    let node = Node::runtime(&dir, Holder { at: ::api::local::addr(), token }).await?;
     let _ = ready_node.send(node.clone());
     node.node_started(crate::insights::Ended::read(&dir));
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
     tracing::info!("{} app runtime {} answering {listen} from {}", ::custom_build::config::NAME, ::key::short(&node.id()), dir.display());
     tokio::spawn(crate::api::serve_guide(node.clone()));
     crate::watchdog::watch();
-    let served = crate::api::serve(listener, crate::api::guarded(crate::api::routes(), node)).await;
+    let served = ::api::serve(listener, crate::api::guarded(crate::api::routes(), node)).await;
     crate::app::runtime::stop_all();
     Ok(served?)
 }
@@ -376,6 +379,7 @@ impl Node {
         for (app, files) in crate::carried::BUILT_IN {
             built_in.insert(app.to_string(), release::put_blob(dir, &built_in_bundle(files)?)?);
         }
+        let (kept, loops) = runtime::Kept::of(runtime::features());
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),
             local_token,
@@ -423,6 +427,7 @@ impl Node {
             erased: Default::default(),
             guide: Default::default(),
             erasing: Default::default(),
+            kept,
         }));
         let outbound_router = crate::app::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -439,6 +444,7 @@ impl Node {
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
         tokio::spawn(node.clone().insights_loop());
+        node.run_loops(loops);
         let worker = node.clone();
         tokio::spawn(async move {
             loop {
@@ -576,6 +582,7 @@ impl Node {
         self.with(update_views)?;
         self.keep_alone_here()?;
         self.read_own_items();
+        self.wake_all();
         self.follow_net();
         self.read_all_status(false);
         let reader = self.clone();

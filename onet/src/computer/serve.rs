@@ -8,7 +8,7 @@ use axum::body::Bytes;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use one::api::Who;
+use api::Who;
 use ::custom_build::config::{CLI, YOURS};
 use one::node::NetworkFile;
 use ::custom_build::protocol::{Coded, code};
@@ -52,7 +52,7 @@ pub(super) async fn serve(onet: Arc<Onet>) -> Result<()> {
     if let one::mode::Mode::Throwaway(network) = one::mode::here() {
         router = network.serve_beside(router);
     }
-    Ok(one::api::serve(listener, router).await?)
+    Ok(api::serve(listener, router).await?)
 }
 
 fn said(status: StatusCode, err: &anyhow::Error) -> Response {
@@ -91,8 +91,8 @@ pub const OWN: &[&str] = &[
 ];
 
 async fn answer(State((onet, routes)): State<(Arc<Onet>, Arc<Routes>)>, req: Request) -> Response {
-    if !one::api::from_this_machine(&onet.token, &req) {
-        return refused(StatusCode::FORBIDDEN, one::api::not_this_machine(), Some(code::NOT_THIS_MACHINE));
+    if !api::local::from_this_machine(&onet.token, &req) {
+        return refused(StatusCode::FORBIDDEN, api::local::not_this_machine(), Some(code::NOT_THIS_MACHINE));
     }
     let (method, path) = (req.method().to_string(), req.uri().path().to_string());
     let done = match (method.as_str(), path.as_str()) {

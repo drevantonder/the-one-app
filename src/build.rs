@@ -107,7 +107,7 @@ pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item 
 
 /// Has the node publish the program at `path` as this node's build (`service` none) or that service's, in the record
 /// at the network's address. → what it said.
-pub fn publish(node: &crate::api::Client, path: &Path, key: &ssh_key::PrivateKey, version: &Version, service: Option<&str>) -> Result<Value> {
+pub fn publish(node: &::api::Client, path: &Path, key: &ssh_key::PrivateKey, version: &Version, service: Option<&str>) -> Result<Value> {
     if version.commit.ends_with("+dirty") {
         bail!("that build has uncommitted changes; commit, build again, then publish");
     }
@@ -121,7 +121,7 @@ pub fn publish(node: &crate::api::Client, path: &Path, key: &ssh_key::PrivateKey
 
 /// Puts `things`' files where devices take them, and adds them to the record at the network's address, signed with the
 /// release key: each `(name, file, version, config commit)`, with no file for what's built, not fetched (`source`).
-pub fn publish_latest(node: &crate::api::Client, key: &ssh_key::PrivateKey, things: &[(String, Option<PathBuf>, Version, String)]) -> Result<()> {
+pub fn publish_latest(node: &::api::Client, key: &ssh_key::PrivateKey, things: &[(String, Option<PathBuf>, Version, String)]) -> Result<()> {
     use crate::latest::{Latest, Thing};
     let mut made = Vec::new();
     for (name, path, version, config) in things {
@@ -320,7 +320,7 @@ mod tests {
 
 /// The app in `dir` built into a bundle, as a blob of `node`'s, with its service built here for each platform this
 /// machine can build it for, each build a blob its bundle names: → the bundle, and what was built of its service.
-pub fn built_with_service(node: &crate::api::Client, dir: &Path) -> Result<(String, String)> {
+pub fn built_with_service(node: &::api::Client, dir: &Path) -> Result<(String, String)> {
     let mut builds = std::collections::BTreeMap::new();
     let mut service = String::new();
     let out = std::env::temp_dir().join(format!("{CLI}-service-{}", std::process::id()));
@@ -345,7 +345,7 @@ pub fn built_with_service(node: &crate::api::Client, dir: &Path) -> Result<(Stri
 
 /// MCP's deploy tool's files built into a bundle on this machine, as a blob of `node`'s: for React screens and a
 /// service in Go, which only the machine that deploys builds. → the bundle, and what was built of its service.
-pub fn built_here(node: &crate::api::Client, files: &serde_json::Map<String, Value>) -> Result<(String, String)> {
+pub fn built_here(node: &::api::Client, files: &serde_json::Map<String, Value>) -> Result<(String, String)> {
     ensure!(!files.contains_key("service/Cargo.toml"), "its service is in Rust, whose build would run its build scripts here: deploy it with {CLI} deploy <its folder>");
     let files = crate::app::deploy::given(files)?;
     if !files.iter().any(|(p, _)| p == "service/go.mod") {
@@ -439,8 +439,8 @@ pub fn release_key() -> Result<ssh_key::PrivateKey> {
 }
 
 /// What publishes what a Mac built (dev/skills/keep-mac-current), on a Mac with the release key.
-pub fn commands() -> crate::cli::Command {
-    crate::cli::Command {
+pub fn commands() -> ::api::cli::Command {
+    ::api::cli::Command {
         help: vec![("publish-mac <folder> [--config <commit>]".into(), "publish what client/native/mac/build.sh made in <folder> (its window, program and services), for every Mac to take with update".into())],
         run: |g| {
             let words = g.words();

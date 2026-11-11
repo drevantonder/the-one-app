@@ -1,6 +1,6 @@
 //! `one update`, at the command line.
 
-use crate::cli::Command;
+use ::api::cli::Command;
 use ::custom_build::config::CLI;
 
 pub fn commands() -> Command {

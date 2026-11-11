@@ -75,7 +75,7 @@ pub fn runtime_endpoint(dir: &Path) -> Result<key::Endpoint> {
 /// This machine's own programs' token (in its app runtime's folder, the one they ask that with), made once: only its
 /// user reads the file, which a program in a VM or emulator here, or a page, can't.
 pub fn load_local_token(dir: &Path) -> Result<String> {
-    let path = dir.join(crate::api::LOCAL_TOKEN);
+    let path = dir.join(::api::local::LOCAL_TOKEN);
     match std::fs::read_to_string(&path) {
         Ok(token) if !token.trim().is_empty() => Ok(token.trim().to_string()),
         _ => {

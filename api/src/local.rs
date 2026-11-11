@@ -1,6 +1,17 @@
 //! How this machine's own programs prove they are: the token in the node's home, which they send and the node checks.
 
-use super::addr;
+/// Where this machine's node serves its local API: the config's port, or `<CLI>_ADDR`.
+pub fn addr() -> String {
+    std::env::var(custom_build::config::env("ADDR")).unwrap_or_else(|_| format!("127.0.0.1:{}", custom_build::config::PORT))
+}
+
+pub fn port() -> u16 {
+    port_of(&addr())
+}
+
+pub fn port_of(addr: &str) -> u16 {
+    addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(custom_build::config::PORT)
+}
 
 /// The file in a node's home holding the token its machine's own programs send, in `protocol::header::LOCAL_TOKEN`, to say they
 /// are: only the machine's user can read it. The CLI, its MCP, services and the Mac app read it there.

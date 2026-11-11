@@ -233,7 +233,7 @@ pub fn prepare(name: &str, program: &Path, launcher: &Path, token: &str, launch:
             std::fs::rename(&new, &to)?;
         }
     }
-    let token_file = dir.join(crate::api::LOCAL_TOKEN);
+    let token_file = dir.join(::api::local::LOCAL_TOKEN);
     std::fs::write(&token_file, token)?;
     platform::os::set_mode(&token_file, 0o644)?;
     std::fs::write(dir.join("sandbox.json"), serde_json::to_vec_pretty(launch)?)?;

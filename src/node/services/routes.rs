@@ -9,7 +9,13 @@ use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::api::{Body, Me, Reply, Routes, Who, done, given};
+use crate::api::Routes;
+use ::api::Body;
+use ::api::Me;
+use ::api::Reply;
+use ::api::Who;
+use ::api::done;
+use ::api::given;
 use crate::node::Node;
 
 pub fn routes() -> Routes {
@@ -63,7 +69,7 @@ async fn builds(State(node): State<Node>) -> Reply {
     Ok(Json(json!(node.service_builds().await)))
 }
 
-async fn build(State(node): State<Node>, Path(hash): Path<String>) -> Result<axum::response::Response, crate::api::Error> {
+async fn build(State(node): State<Node>, Path(hash): Path<String>) -> Result<axum::response::Response, ::api::Error> {
     let bytes = node.service_build(&hash).await?;
     Ok(([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
 }
@@ -102,7 +108,7 @@ async fn register(State(node): State<Node>, Path(name): Path<String>, Body(body)
 }
 
 /// The next ask carried to a part, waiting a while: `{ id, ask }`, or nothing.
-async fn next_ask(State(node): State<Node>, Path(name): Path<String>) -> Result<axum::response::Response, crate::api::Error> {
+async fn next_ask(State(node): State<Node>, Path(name): Path<String>) -> Result<axum::response::Response, ::api::Error> {
     Ok(match node.0.sockets.next(&name).await? {
         Some(ask) => Json(json!(ask)).into_response(),
         None => axum::http::StatusCode::NO_CONTENT.into_response(),

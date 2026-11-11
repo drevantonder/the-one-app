@@ -20,8 +20,6 @@ pub mod harnesses;
 #[cfg(feature = "node")]
 pub mod api;
 #[cfg(feature = "node")]
-pub mod cli;
-#[cfg(feature = "node")]
 pub mod build;
 #[cfg(feature = "node")]
 pub mod code;

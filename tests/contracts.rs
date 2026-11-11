@@ -540,7 +540,7 @@ mod service_protocol {
             let (mut registry, mut server) = start(name, &port);
 
             let home = crate::temp(&format!("service-{name}"));
-            std::fs::write(home.join(one::api::LOCAL_TOKEN), format!("{TOKEN}\n")).unwrap();
+            std::fs::write(home.join(api::local::LOCAL_TOKEN), format!("{TOKEN}\n")).unwrap();
             let data = home.join("data");
             let _running = Running(
                 Command::new(&case.program)
@@ -853,7 +853,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
         }
     }
     assert!(unserved.is_empty(), "these paths aren't routes of the node (src/api.rs):\n{}", unserved.join("\n"));
-    assert!(unlisted.is_empty(), "these paths aren't in the OpenAPI document (src/openapi.rs): add the route to its feature's `says.rs` (src/says.rs):\n{}", unlisted.join("\n"));
+    assert!(unlisted.is_empty(), "these paths aren't in the OpenAPI document (`api::openapi`): add the route to its feature's `says.rs` (src/says.rs):\n{}", unlisted.join("\n"));
 }
 
 /// What isn't an app's own request (`protocol::path::ROOTS`) is every first segment the API's routes have: a route under

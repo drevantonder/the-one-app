@@ -260,7 +260,7 @@ pub fn input<T: serde::de::DeserializeOwned + Default>(input: &Value) -> Result<
 /// The environment a service's program starts with (`wire.json`'s `env`): where it registers, its folder, which holds
 /// the token it sends (`local-token`), the CLI it may run, and where its data goes.
 pub fn program_env(name: &str, at: std::net::SocketAddr, home: &std::path::Path, data: &std::path::Path) -> Vec<(String, std::ffi::OsString)> {
-    let token = crate::api::local_token(home).unwrap_or_default();
+    let token = ::api::local::local_token(home).unwrap_or_default();
     vec![
         ("ONE_ADDR".into(), at.to_string().into()),
         ("ONE_HOME".into(), home.into()),

@@ -34,7 +34,7 @@ impl Part {
     }
 
     fn named(word: &str) -> Result<Part> {
-        ORDER.into_iter().find(|p| p.name() == word).ok_or_else(|| one::cli::Failed::Typed(format!("{word} isn't a part to update: {}", ORDER.map(Part::name).join(", "))).into())
+        ORDER.into_iter().find(|p| p.name() == word).ok_or_else(|| api::cli::Failed::Typed(format!("{word} isn't a part to update: {}", ORDER.map(Part::name).join(", "))).into())
     }
 
     fn marker(self) -> PathBuf {

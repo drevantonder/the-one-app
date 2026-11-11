@@ -211,7 +211,7 @@ struct Inner {
 }
 
 /// This device's own app runtime, on its own machine: its endpoint's key, and where its loopback answers this machine's
-/// own programs, which show its token (`one::api::LOCAL_TOKEN`). It's asked ahead of every node over iroh, as this
+/// own programs, which show its token (`api::local::LOCAL_TOKEN`). It's asked ahead of every node over iroh, as this
 /// device's own, so it hands it nothing and passes calls on itself; one it doesn't answer goes to the rest.
 #[derive(Clone)]
 pub struct Local {

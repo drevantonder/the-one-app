@@ -10,64 +10,29 @@
 use axum::Router;
 use axum::routing::post;
 
+use ::api::Who;
+use ::api::runtime::Rt;
 use crate::node::Node;
-pub use crate::says::Who;
 
-pub mod client;
-pub use client::Client;
 mod agents;
 mod calls;
 mod guard;
-mod local;
+mod in_process;
 mod network;
 pub mod openapi;
-mod reply;
-mod serve;
 mod tools;
 
 pub use agents::serve_guide;
 pub use calls::{APP_SAYS, app_route};
 pub(crate) use calls::call_from_cloudflare_node;
 pub use guard::{FromClient, guarded};
-pub(crate) use guard::Me;
-pub use local::{LOCAL_TOKEN, agent, as_this_machine, from_this_machine, local_token, not_this_machine, token_refused};
-pub(crate) use reply::{Body, Error, Invalid, Reply, RouteFailed, done, given, tagged};
-pub use serve::serve;
+pub use in_process::InProcess;
 
-/// Where this machine's node serves its local API: the config's port, or `<CLI>_ADDR`.
-pub fn addr() -> String {
-    std::env::var(custom_build::config::env("ADDR")).unwrap_or_else(|_| format!("127.0.0.1:{}", custom_build::config::PORT))
-}
+/// The API's routes in this program: over the runtime its handlers read (`State<Node>` reads it as this one).
+pub type Routes = ::api::Routes<Rt>;
 
 pub fn router(node: Node) -> Router {
     guarded(routes(), node)
-}
-
-/// The local API's routes, each with who may ask it (`Who`): what `guarded` lets in. What a route says of itself in the
-/// OpenAPI document is in src/says.rs.
-#[derive(Default)]
-pub struct Routes {
-    router: Router<Node>,
-    who: Vec<(String, Who)>,
-}
-
-impl Routes {
-    pub fn route(mut self, path: &str, who: Who, handler: axum::routing::MethodRouter<Node>) -> Routes {
-        self.router = self.router.route(path, handler);
-        self.who.push((path.to_string(), who));
-        self
-    }
-
-    pub fn merge(mut self, other: Routes) -> Routes {
-        self.router = self.router.merge(other.router);
-        self.who.extend(other.who);
-        self
-    }
-
-    /// Every route's path, with who may ask it.
-    pub fn who(&self) -> &[(String, Who)] {
-        &self.who
-    }
 }
 
 /// The route `path` is asked by, as the API names it (`/api/blobs/{id}`), if it's one of its: a literal route before one
@@ -108,14 +73,7 @@ pub fn routes() -> Routes {
         .merge(crate::node::blobs::routes::routes())
         .merge(crate::node::screens::routes::routes())
         .merge(crate::insights::routes::routes())
-}
-
-pub fn port() -> u16 {
-    port_of(&addr())
-}
-
-pub fn port_of(addr: &str) -> u16 {
-    addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(custom_build::config::PORT)
+        .merge(crate::node::runtime::routes())
 }
 
 #[cfg(test)]
@@ -148,7 +106,7 @@ mod tests {
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let at = listener.local_addr().unwrap();
-        tokio::spawn(super::serve(listener, router));
+        tokio::spawn(::api::serve(listener, router));
         let asked = tokio::task::spawn_blocking(move || {
             // A refusal can close its connection (`refuse`), so none is kept for the next request.
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_idle_connections(0).build().into();

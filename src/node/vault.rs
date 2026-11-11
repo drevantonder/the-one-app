@@ -88,7 +88,7 @@ impl Node {
     /// changes nothing else, done at once after this machine's own user changed which machines open it.
     pub(crate) async fn reseal_vault(&self, scope: &Scope) -> Result<()> {
         if self.with(|i| i.r.db().opens_vault(&self.0.holds.device(), scope))? && self.vault_secrets(scope, None).await?.is_some_and(|k| k.len() > 1) {
-            self.write_item(&Caller::local(self)?, scope, |items| Ok(items.iter().next().map(|(id, _)| json!({ "id": id })).unwrap_or(Value::Null))).await?;
+            self.write_item(&self.caller()?, scope, |items| Ok(items.iter().next().map(|(id, _)| json!({ "id": id })).unwrap_or(Value::Null))).await?;
         }
         Ok(())
     }
@@ -139,7 +139,7 @@ impl Node {
     /// since anyone may write an item. A device that doesn't open `global` has none.
     async fn refresh_own_items(&self) {
         let read = async {
-            let me = Caller::local(self)?;
+            let me = self.caller()?;
             ensure!(self.with(|i| Ok(i.r.holds(&Scope::Global) && i.r.db().may(&me.user, "use", &scopes::object(&Scope::Global))))?, "this device doesn't open global");
             self.items(&me, &Scope::Global).await
         };

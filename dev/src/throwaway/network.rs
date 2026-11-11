@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use one::api::client::{Answer, Client, Via};
+use api::client::{Answer, Client, Via};
 use ::custom_build::config::CLI;
 use one::cloudflare::Settings;
 use one::mode::{Throwaway, programs};
@@ -150,8 +150,8 @@ pub(crate) fn start_new(dir: &Path) -> Result<String> {
 
 fn create(dir: &Path) -> Result<String> {
     // Called what the user is called in their own network, if this machine is in one.
-    let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
-    let mine = quick.get(format!("http://{}/api/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<scope::state::State>().ok());
+    let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(api::local::as_this_machine).build().into();
+    let mine = quick.get(format!("http://{}/api/state", api::local::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<scope::state::State>().ok());
     let me = mine.map(|s| s.looking().to_string());
     let me = me.or_else(|| std::env::var("USER").ok()).unwrap_or_else(|| "You".into());
     std::fs::create_dir_all(dir)?;
@@ -238,7 +238,7 @@ pub(crate) fn shares_native_build(dir: &Path, cargo: &mut std::process::Command)
 
 /// The throwaway network's node, asked at `addr` as one of this machine's programs: with the token in its home.
 pub(crate) fn node_at(dir: &Path, addr: &str) -> Client {
-    Client::new(Direct { dir: dir.to_path_buf(), addr: addr.to_string() }, false, one::core_tools::Reader::Cli.client())
+    Client::new(Direct { dir: dir.to_path_buf(), addr: addr.to_string() }, false, api::Reader::Cli.client())
 }
 
 /// The throwaway network's node, at the address its folder says.
@@ -261,7 +261,7 @@ impl Via for Direct {
         for (name, value) in headers {
             req = req.header(*name, *value);
         }
-        if let Some(token) = one::api::local_token(&self.dir) {
+        if let Some(token) = api::local::local_token(&self.dir) {
             req = req.header(::custom_build::protocol::header::LOCAL_TOKEN, token);
         }
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();

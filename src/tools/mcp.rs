@@ -4,9 +4,9 @@
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Map, Value, json};
 
-use crate::api::Client;
+use ::api::Client;
 
-use super::files::{FILE_LIMIT, as_file, mime};
+use ::api::tools::{FILE_LIMIT, as_file, mime};
 use super::{device_about, own_device, runs_on_devices};
 
 /// What MCP takes inline from an agent, which sends base64 in its own output.
@@ -115,7 +115,7 @@ fn mcp_file(node: &Client, v: &Value) -> Result<Value> {
 fn fetch_file(node: &Client, url: &str) -> Result<ureq::http::Response<ureq::Body>> {
     let agent = match node.elsewhere() {
         true => platform::reach::agent(ureq::Agent::config_builder().http_status_as_error(false), platform::reach::public),
-        false => crate::api::agent(),
+        false => ::api::local::agent(),
     };
     agent.get(url).call().with_context(|| format!("couldn't get {url}"))
 }

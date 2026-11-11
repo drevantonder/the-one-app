@@ -8,7 +8,7 @@
 use serde_json::{Value, json};
 
 use ::custom_build::config::{CLI, NAME, REPO, YOURS};
-use crate::core_tools::SENDS;
+use ::api::SENDS;
 
 /// Claude Code keeps only the first 4,096 characters (UTF-16 units) of an MCP server's instructions; stay under them.
 pub const INSTRUCTIONS_LIMIT: usize = 4000;
@@ -177,7 +177,7 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             .collect();
     }
     // Each set of tools with a guide: the core's, then the apps'.
-    let core: Vec<Value> = crate::core_tools::all().iter().map(crate::core_tools::Feature::listed).collect();
+    let core: Vec<Value> = crate::core_tools::all().iter().map(::api::Feature::listed).collect();
     skills.extend(core.iter().chain(apps).filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["tools"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
     skills
 }
@@ -268,15 +268,6 @@ pub fn ts(schema: &Value) -> String {
     }
 }
 
-/// A tool's path in a code mode script: `tools.gmail.search`, or `tools["google-calendar"].events`.
-pub fn path(app: &str, tool: &str) -> String {
-    let key = |k: &str| match k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !k.starts_with(|c: char| c.is_ascii_digit()) {
-        true => format!(".{k}"),
-        false => format!("[{k:?}]"),
-    };
-    format!("tools{}{}", key(app), key(tool))
-}
-
 /// Which tools `<cli> mcp` serves: every one, or code mode's few.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -286,10 +277,10 @@ pub enum Mode {
 
 impl Mode {
     /// Who reads a search's answer in this mode: an MCP client calling tools, or a script.
-    pub fn reader(self) -> crate::core_tools::Reader {
+    pub fn reader(self) -> ::api::Reader {
         match self {
-            Mode::All => crate::core_tools::Reader::Mcp,
-            Mode::Code => crate::core_tools::Reader::Code,
+            Mode::All => ::api::Reader::Mcp,
+            Mode::Code => ::api::Reader::Code,
         }
     }
 }
@@ -349,8 +340,8 @@ fn len(s: &str) -> usize {
 }
 
 /// `skills` on the command line: the list, or one skill's file.
-pub fn commands() -> crate::cli::Command {
-    crate::cli::Command {
+pub fn commands() -> ::api::cli::Command {
+    ::api::cli::Command {
         help: vec![("skills [<name> [<file>]]".into(), format!("the skills agents load: {NAME}'s own (how to connect, the rules, which MCP to add; also /llms.txt), and each area's and app's"))],
         run: |g| {
             match g.words().as_slice() {
@@ -364,7 +355,7 @@ pub fn commands() -> crate::cli::Command {
                 }
                 ["skills", name, path @ ..] => {
                     let skill = crate::mcp::skills(g.node).into_iter().find(|s| s.name == *name || s.name.strip_prefix(&format!("{}-", server_name())) == Some(*name));
-                    let skill = skill.ok_or_else(|| crate::cli::Failed::Typed(format!("no skill {name}: {CLI} skills lists them")))?;
+                    let skill = skill.ok_or_else(|| ::api::cli::Failed::Typed(format!("no skill {name}: {CLI} skills lists them")))?;
                     let path = path.first().copied().unwrap_or("SKILL.md");
                     print!("{}", anyhow::Context::with_context(skill.file(path), || format!("{} has no {path}: it has {}", skill.name, skill.all_files().iter().map(|f| f.0.as_str()).collect::<Vec<_>>().join(", ")))?);
                 }

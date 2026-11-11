@@ -47,7 +47,7 @@ impl Me for Node {
     }
 
     async fn write(&self, content: Content) -> Result<()> {
-        self.member_content(&Caller::local(self)?, content).await
+        self.member_content(&self.caller()?, content).await
     }
 
     async fn held(&self, scope: &Scope) -> Result<Vec<(u32, [u8; 32])>> {
@@ -58,7 +58,7 @@ impl Me for Node {
         let text = |k: &str| sealed[k].as_str();
         let scope = Scope::parse(text("scope").unwrap_or_default())?;
         let n = sealed["n"].as_u64().context("n is an epoch's number")? as u32;
-        self.seal_key(&Caller::local(self)?, &scope, n, text("to"), text("app"), sealed["vault"] == true, text("sealed").unwrap_or_default()).await.map(|_| ())
+        self.seal_key(&self.caller()?, &scope, n, text("to"), text("app"), sealed["vault"] == true, text("sealed").unwrap_or_default()).await.map(|_| ())
     }
 
     async fn app_key(&self, scope: &Scope, app: &str, n: u32) -> Result<[u8; 32]> {
@@ -155,14 +155,14 @@ pub(crate) fn routes() -> crate::api::Routes {
     for (method, path) in ::scope::settings::on_a_node() {
         let filter = axum::routing::MethodFilter::try_from(axum::http::Method::from_bytes(method.as_bytes()).expect("a method")).expect("a method");
         let answer = move |axum::extract::State(node): axum::extract::State<Node>, body: axum::body::Bytes| async move { node.answer_as_mine(method, path, &body).await };
-        routes = routes.route(path, crate::api::Who::ThisMachine, axum::routing::on(filter, answer));
+        routes = routes.route(path, ::api::Who::ThisMachine, axum::routing::on(filter, answer));
     }
     routes
 }
 
 impl Node {
     /// What this machine's own programs ask of who can do what, answered as its own device (`settings::answer`).
-    pub(crate) async fn answer_as_mine(&self, method: &str, path: &str, body: &[u8]) -> crate::api::Reply {
+    pub(crate) async fn answer_as_mine(&self, method: &str, path: &str, body: &[u8]) -> ::api::Reply {
         let answered = ::scope::settings::answer(self, method, path, body).await.with_context(|| format!("{path} isn't one this device answers"))?;
         Ok(axum::Json(answered?))
     }

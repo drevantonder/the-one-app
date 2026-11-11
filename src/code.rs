@@ -8,11 +8,12 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 use ::custom_build::config::CLI;
-use crate::skills::{Mode, path, ts};
+use crate::skills::{Mode, ts};
+use ::api::feature::code_path;
 use serde_json::{Value, json};
 
-use crate::api::Client;
-use crate::core_tools::Reader;
+use ::api::Client;
+use ::api::Reader;
 use crate::tools;
 
 /// The core's tools, then every app added for this user that has tools, as `GET /api/apps` gives them, with each
@@ -99,7 +100,7 @@ fn score_app(app: &Value, query: &[String]) -> (u32, usize) {
 fn call(app: &Value, tool: &Value, how: Reader) -> String {
     let (a, o) = (app["name"].as_str().unwrap_or(""), tool["name"].as_str().unwrap_or(""));
     match how {
-        Reader::Code => format!("{}({})", path(a, o), ts(&tool["input"])),
+        Reader::Code => format!("{}({})", code_path(a, o), ts(&tool["input"])),
         Reader::Mcp => format!("{} {}", tool["id"].as_str().unwrap_or(&format!("{a}_{o}")), ts(&tool["input"])),
         Reader::Cli => {
             let mut line = tools::usage(a, tool);
@@ -268,7 +269,7 @@ const LIMITS: (u64, u64, u64) = (600_000, 100, 60_000);
 pub fn execute_tool() -> Value {
     json!({
         "name": "execute",
-        "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the user, as any tool does: what {} needs `confirm: true` in its input, given once the user agreed. Up to {} calls, {} minutes and {} KB back.", crate::core_tools::SENDS, LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
+        "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the user, as any tool does: what {} needs `confirm: true` in its input, given once the user agreed. Up to {} calls, {} minutes and {} KB back.", ::api::SENDS, LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
         "inputSchema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "description": "the script" } } },
         "annotations": crate::skills::hints(false, false),
     })
@@ -398,8 +399,8 @@ pub fn shown(result: &Value) -> String {
 }
 
 /// `search` and `run` on the command line.
-pub fn commands() -> crate::cli::Command {
-    crate::cli::Command {
+pub fn commands() -> ::api::cli::Command {
+    ::api::cli::Command {
         help: vec![
             ("search <words>".into(), "the tools for a task in every app: how to call each, and its app's guide".into()),
             ("run <file>".into(), format!("run a short script that calls tools, as tools.<app>.<tool>({{ ... }}) (- reads it from stdin), and print what it returns; {CLI} search gives each call")),
@@ -427,7 +428,7 @@ pub fn commands() -> crate::cli::Command {
                 ["search", words @ ..] if !words.is_empty() => {
                     let limit = match (g.has("limit"), g.flag("limit")) {
                         (false, _) => 8,
-                        (true, given) => given.and_then(|l| l.parse().ok()).ok_or_else(|| crate::cli::Failed::Typed(format!("--limit is how many tools, a number: not {}", given.unwrap_or("nothing"))))?,
+                        (true, given) => given.and_then(|l| l.parse().ok()).ok_or_else(|| ::api::cli::Failed::Typed(format!("--limit is how many tools, a number: not {}", given.unwrap_or("nothing"))))?,
                     };
                     let (apps, addable) = catalogs(g.node)?;
                     println!("{}", search(&apps, &addable, &words.join(" "), limit, Reader::Cli));

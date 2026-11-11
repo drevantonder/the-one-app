@@ -59,7 +59,7 @@ pub fn as_file(v: &Value) -> Option<(String, String, Vec<u8>)> {
 
 /// Prints a tool's result: text as it is, files saved (to `out`, or a temporary file named for them) and their
 /// paths printed, anything else as JSON. With `out`, a result that isn't a file is saved there instead.
-pub(super) fn show(app: &str, tool: &str, ok: &Value, out: Option<&str>, json: bool) -> Result<()> {
+pub fn show(app: &str, tool: &str, ok: &Value, out: Option<&str>, json: bool) -> Result<()> {
     let mut out = out.map(std::path::PathBuf::from);
     let mut save = |i: usize, name: &str, ty: &str, bytes: &[u8]| -> Result<String> {
         let path = match out.take() {

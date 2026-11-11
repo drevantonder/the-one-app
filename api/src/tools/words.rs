@@ -44,7 +44,7 @@ fn inline(key: &str, v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         Value::Number(n) => match n.as_u64().filter(|ms| moment(key, *ms)) {
-            Some(ms) => crate::core_tools::say_time(ms),
+            Some(ms) => crate::feature::say_time(ms),
             None => n.to_string(),
         },
         Value::Array(items) => items.iter().map(|i| inline(key, i)).collect::<Vec<_>>().join(", "),

@@ -6,7 +6,7 @@ use anyhow::{Context, Result, ensure};
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
-use crate::cli::{Command, Given};
+use ::api::cli::{Command, Given};
 use ::custom_build::config::{CLI, NAME, YOURS};
 
 pub fn commands() -> Command {

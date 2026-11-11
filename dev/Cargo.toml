@@ -18,6 +18,7 @@ custom-build = { path = "../custom-build" }
 platform = { path = "../platform" }
 key = { path = "../key" }
 scope = { path = "../scope" }
+api = { path = "../api" }
 one = { path = ".." }
 anyhow = "1"
 data-encoding = "2"

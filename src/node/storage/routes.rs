@@ -5,8 +5,11 @@ use axum::extract::State;
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
 
-use crate::api::{Body, Reply, Routes, Who};
-use crate::node::{Caller, Node};
+use crate::api::Routes;
+use ::api::Body;
+use ::api::Reply;
+use ::api::Who;
+use crate::node::Node;
 
 pub fn routes() -> Routes {
     Routes::default().route("/api/storage", Who::ThisMachine, get(storage).post(set))
@@ -27,5 +30,5 @@ struct Storage {
 }
 
 async fn set(State(node): State<Node>, Body(body): Body<Storage>) -> Reply {
-    Ok(Json(node.set_storage(&Caller::local(&node)?, &serde_json::to_value(body)?).await?))
+    Ok(Json(node.set_storage(&node.caller()?, &serde_json::to_value(body)?).await?))
 }

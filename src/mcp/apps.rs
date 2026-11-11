@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use ::custom_build::config::CLI;
 
-use crate::api::Client;
+use ::api::Client;
 
 const MIME: &str = "text/html;profile=mcp-app";
 
@@ -46,7 +46,7 @@ pub fn tools() -> Vec<Value> {
     vec![
         {
             let widgets = crate::widgets::tools::feature();
-            let mut show = crate::tools::mcp_tool(&widgets.listed(), &widgets.tools[0].spec, widgets.mcp_name(&widgets.tools[0].spec));
+            let mut show = crate::tools::mcp_tool(&widgets.listed(), &widgets.tools[0], widgets.mcp_name(&widgets.tools[0]));
             show["_meta"] = ui.clone();
             show
         },
@@ -183,7 +183,7 @@ fn for_screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     if input["confirm"] == true && found.as_ref().is_some_and(|(_, spec)| spec["confirm"] == true) {
         arguments.insert("confirm".into(), true.into());
     }
-    let ok = crate::tools::dispatch(node, &format!("{app}_{tool}"), arguments, crate::core_tools::Reader::Mcp, None, found).ok?;
+    let ok = crate::tools::dispatch(node, &format!("{app}_{tool}"), arguments, ::api::Reader::Mcp, None, found).ok?;
     Ok(json!({ "content": [{ "type": "text", "text": "Done." }], "structuredContent": { "ok": ok } }))
 }
 

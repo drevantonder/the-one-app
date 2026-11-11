@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use one::api::Client;
+use api::Client;
 use ::custom_build::config::{CLI, NAME};
 use one::tools;
 
@@ -28,15 +28,15 @@ pub fn program() -> Result<PathBuf> {
 
 /// This machine's node, asked as one of its programs.
 pub fn node() -> Client {
-    throwaway::node_at(&platform::home(), &one::api::addr())
+    throwaway::node_at(&platform::home(), &api::local::addr())
 }
 
 /// An HTTP client for this machine's programs.
 pub fn agent() -> ureq::Agent {
-    one::api::agent()
+    api::local::agent()
 }
 
-fn commands() -> Vec<one::cli::Command> {
+fn commands() -> Vec<api::cli::Command> {
     vec![ship::commands(), symbols::command(), throwaway::command()]
 }
 
@@ -53,10 +53,10 @@ fn run(args: Vec<String>) -> Result<()> {
     if args.first().map(String::as_str) == Some("throwaway") {
         return throwaway::run(&args[1..]);
     }
-    let (positional, flags) = tools::split(&args);
+    let (positional, flags) = api::tools::split(&args);
     let node = node();
     let forms: Vec<(String, String)> = commands().into_iter().flat_map(|c| c.help).collect();
-    let given = one::cli::Given { words: &positional, flags: &flags, args: &args, node: &node, agent: None, json: false, trace: false, commands: &forms };
+    let given = api::cli::Given { words: &positional, flags: &flags, args: &args, node: &node, agent: None, json: false, trace: false, commands: &forms };
     let asked_help = positional.is_empty() || positional[0] == "help" || flags.contains_key("help") || flags.contains_key("h");
     if !asked_help {
         for command in commands() {
@@ -68,16 +68,16 @@ fn run(args: Vec<String>) -> Result<()> {
     let first = positional.first().filter(|w| *w != "help");
     let these: Vec<&(String, String)> = forms.iter().filter(|(usage, _)| first.is_some_and(|w| usage.split_whitespace().next() == Some(w))).collect();
     if first.is_some() && these.is_empty() {
-        return Err(one::cli::Failed::Typed(format!("{} isn't a command of {}: {} help lists them", positional[0], dev(), dev())).into());
+        return Err(api::cli::Failed::Typed(format!("{} isn't a command of {}: {} help lists them", positional[0], dev(), dev())).into());
     }
     if !these.is_empty() {
-        print!("Usage:\n{}", one::cli::help_as(&dev(), these));
+        print!("Usage:\n{}", api::cli::help_as(&dev(), these));
         return Ok(());
     }
     println!(
         "{}: for whoever builds {NAME} from its repo. Users of a network, and their agents, use {CLI}.\n\nUsage:\n{}",
         dev(),
-        one::cli::help_as(&dev(), &forms)
+        api::cli::help_as(&dev(), &forms)
     );
     Ok(())
 }

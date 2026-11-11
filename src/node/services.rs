@@ -72,7 +72,7 @@ impl Node {
     /// Each service switched on here before a service named the scope of the app it runs for, switched on again naming
     /// it, once: so removing the app, or moving its service, reaches it. Each goes on running throughout.
     pub async fn name_services_scopes(&self) {
-        let Ok(caller) = Caller::local(self) else { return };
+        let Ok(caller) = self.caller() else { return };
         let named = self.with(|i| {
             let m = i.r.db();
             let switches = m.switches()?;

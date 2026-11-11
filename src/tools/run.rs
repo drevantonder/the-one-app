@@ -4,30 +4,10 @@
 use anyhow::bail;
 use serde_json::{Map, Value, json};
 
-use crate::api::Client;
-use crate::api::client::Called;
-use crate::cli::Failed;
-use ::custom_build::config::CLI;
-use crate::core_tools::Reader;
-
-impl Reader {
-    /// A tool as this reader calls it: `one gmail sign_in`, `gmail_sign_in`, `tools.gmail.sign_in`; a core tool named as
-    /// its feature (`logs`, `remove`) has no tool part: `one remove`, `remove`, `tools.remove`.
-    pub fn named(self, app: &str, tool: &str) -> String {
-        if tool.is_empty() {
-            return match self {
-                Reader::Cli => format!("{CLI} {app}"),
-                Reader::Mcp => app.to_string(),
-                Reader::Code => format!("tools.{app}"),
-            };
-        }
-        match self {
-            Reader::Cli => format!("{CLI} {app} {tool}"),
-            Reader::Mcp => format!("{app}_{tool}"),
-            Reader::Code => crate::skills::path(app, tool),
-        }
-    }
-}
+use ::api::Client;
+use ::api::client::Called;
+use ::api::cli::Failed;
+use ::api::Reader;
 
 /// How a tool is run, besides its input.
 pub struct Run<'a> {
@@ -48,7 +28,7 @@ pub fn dispatch(node: &Client, name: &str, mut input: Map<String, Value>, reader
     let checked = (|| {
         let found = spec.or_else(|| super::named(node, name));
         let Some((set, tool)) = found else { bail!("{}", unknown_tool(node, name)?) };
-        super::check(&super::mcp_schema(&set, &tool), &Value::Object(input.clone()))?;
+        ::api::tools::check(&super::mcp_schema(&set, &tool), &Value::Object(input.clone()))?;
         let device = if super::own_device(&tool) { None } else { input.remove("device").and_then(|d| d.as_str().map(str::to_string)) };
         let scopes = match input.remove("scopes") {
             Some(Value::Array(names)) => Some(super::scopes::read(names.iter().filter_map(Value::as_str))?),
@@ -74,9 +54,9 @@ pub fn run(node: &Client, name: &str, tool_spec: &Value, input: Map<String, Valu
         return refused(how.reader.unconfirmed(&how.reader.named(app, tool)));
     }
     if let Some(route) = tool_spec["route"].as_str() {
-        let body = crate::core_tools::body(tool_spec, input, how.confirmed);
+        let body = ::api::feature::body(tool_spec, input, how.confirmed);
         let called = node.route(how.agent, route, &body, how.trace);
-        return Called { ok: called.ok.map(crate::core_tools::said), trace: called.trace };
+        return Called { ok: called.ok.map(::api::feature::said), trace: called.trace };
     }
     node.call(&json!({ "device": how.device, "scopes": how.scopes, "app": app, "tool": tool, "input": input, "agent": how.agent, "client": how.reader.client() }), how.trace)
 }
@@ -90,7 +70,7 @@ fn unknown_tool(node: &Client, name: &str) -> anyhow::Result<String> {
         return super::unknown(node, app, Some(tool), None);
     }
     let names: Vec<String> = sets.iter().flat_map(|a| a["tools"].as_array().into_iter().flatten().filter_map(move |o| Some(format!("{}_{}", a["name"].as_str()?, o["name"].as_str()?)))).collect();
-    match super::nearest(name, &names.iter().map(String::as_str).collect::<Vec<_>>()).as_slice() {
+    match ::api::tools::nearest(name, &names.iter().map(String::as_str).collect::<Vec<_>>()).as_slice() {
         [] => match name.split_once('_') {
             Some((app, tool)) => super::unknown(node, app, Some(tool), None),
             None => Ok(format!("no tool {name}: search finds the tools for a task")),

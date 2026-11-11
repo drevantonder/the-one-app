@@ -1,36 +1,29 @@
 //! Apps' tools from the command line and MCP: inputs from flags, words, piped JSON and files, help built from
 //! each tool's input schema, and files in results.
 
-mod check;
-mod files;
 mod help;
-mod input;
 mod mcp;
 mod run;
 mod scopes;
-mod words;
 
-pub use check::{check, nearest};
-pub use words::said;
-pub use files::{FILE_LIMIT, as_file, mime, read_file};
 pub use help::{forms, list, optional, usage};
 pub use mcp::{BUDGET, MCP_FILE_LIMIT, mcp_content, mcp_files, mcp_schema, mcp_tool, within_budget};
-pub use input::{Flags, input, split, takes};
 pub use run::{Run, dispatch};
 
-pub use crate::openapi::{own_device, runs_on_devices};
+pub use ::api::openapi::{own_device, runs_on_devices};
 
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::api::Client;
-use crate::cli::{Failed, asked_yes};
+use ::api::Client;
+use ::api::cli::{Failed, asked_yes};
+use ::api::tools::{check, input, nearest, split};
 use ::custom_build::config::CLI;
-use crate::core_tools::Reader;
+use ::api::Reader;
 
-use files::show;
+use ::api::tools::show;
 use help::help;
-use input::{from_stdin, missing, places};
+use ::api::tools::{from_stdin, missing, places};
 
 /// A tool as the command line reads it, with its set, as the API's document lists them (`Client::sets`); None when it
 /// lists none.
@@ -65,9 +58,9 @@ pub fn sets(node: &Client) -> Result<Vec<Value>> {
 pub fn exit_code(err: &anyhow::Error) -> i32 {
     match err.downcast_ref::<Failed>() {
         Some(Failed::Typed(_)) => 2,
-        Some(Failed::Refused(_)) => crate::cli::exit::REFUSED,
+        Some(Failed::Refused(_)) => ::api::cli::exit::REFUSED,
         None => match ::custom_build::protocol::Coded::of(err).as_deref() {
-            Some(::custom_build::protocol::code::REFUSED | ::custom_build::protocol::code::NOT_SIGNED_IN) => crate::cli::exit::REFUSED,
+            Some(::custom_build::protocol::code::REFUSED | ::custom_build::protocol::code::NOT_SIGNED_IN) => ::api::cli::exit::REFUSED,
             _ => 1,
         },
     }
@@ -81,7 +74,7 @@ fn typed(err: anyhow::Error) -> anyhow::Error {
 }
 
 /// `<CLI> <app> <tool> [words] [--<input> <value>]...`: runs it and prints what it gives back.
-pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Result<()> {
+pub fn run(g: &::api::cli::Given, app: &str, tool: &str, args: &[String]) -> Result<()> {
     let node = g.node;
     let (mut words, mut flags) = split(args);
     // A last word `-` asks for inputs from stdin even when none is missing; otherwise stdin is read only when one is,
@@ -251,10 +244,10 @@ pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[
     }
     let names: Vec<String> = apps.iter().filter(|a| a["deleted"].is_null()).filter_map(|a| a["name"].as_str()).map(String::from).collect();
     let forms = commands.unwrap_or_default();
-    let commands = crate::cli::words(forms);
+    let commands = ::api::cli::words(forms);
     let all: Vec<&str> = names.iter().chain(commands.iter()).map(String::as_str).collect();
     Ok(match nearest(app, &all).first() {
-        Some(n) if *n == app && commands.iter().any(|c| c == n) => format!("usage:\n{}", crate::cli::help(forms.iter().filter(|(usage, _)| usage.split_whitespace().next() == Some(app))).trim_end()),
+        Some(n) if *n == app && commands.iter().any(|c| c == n) => format!("usage:\n{}", ::api::cli::help(forms.iter().filter(|(usage, _)| usage.split_whitespace().next() == Some(app))).trim_end()),
         Some(n) if commands.iter().any(|c| c == n) && !names.contains(&n.to_string()) => format!("no command {app}: did you mean {CLI} {n}? {CLI} help says the rest"),
         Some(n) => format!("no app {app}: did you mean {n}?"),
         None if cli => format!("no command or app {app}: {CLI} help says the commands, {CLI} search <words> finds tools"),
@@ -272,8 +265,8 @@ fn device_about(app: &Value) -> &'static str {
 }
 
 /// Any app's tools on the command line, after every built-in command.
-pub fn commands() -> crate::cli::Command {
-    crate::cli::Command {
+pub fn commands() -> ::api::cli::Command {
+    ::api::cli::Command {
         help: vec![
             ("<app>".into(), "an app's tools".into()),
             ("<app> <tool> [words] [--<input> <value>]".into(), format!("run a tool, e.g. {CLI} repos list; --help says what it takes. Words fill its main inputs in order (--help shows which), lists repeat a flag, required inputs not given are asked for at a terminal, else read as JSON from stdin (a last word - reads it anyway), --file <input>=<path> gives a file and --out <path> saves what it gives back. --device <name> runs it on that device; --trace prints, after its answer (or why it failed), what it did: the devices tried, the one that ran it, each wait in ms, where its data came from, and the total")),

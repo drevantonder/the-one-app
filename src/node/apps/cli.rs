@@ -3,8 +3,8 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
-use crate::api::Client;
-use crate::cli::{Command, Given, ago};
+use ::api::Client;
+use ::api::cli::{Command, Given, ago};
 use ::custom_build::config::CLI;
 use crate::{build, tools};
 
@@ -128,7 +128,7 @@ fn deploy(g: &Given, dir: &std::path::Path) -> Result<()> {
 
 /// Says what the deploy did. One that doesn't start is deployed, but this command failed.
 fn deployed_said(node: &Client, app: &str, deployed: &Value, service: &str) -> Result<()> {
-    let said = format!("{}{service}", crate::app::deploy::said(node, app, deployed, crate::core_tools::Reader::Cli));
+    let said = format!("{}{service}", crate::app::deploy::said(node, app, deployed, ::api::Reader::Cli));
     if deployed["failed"].is_string() {
         anyhow::bail!("{said}");
     }

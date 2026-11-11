@@ -258,7 +258,9 @@ impl Needs {
 
 #[cfg(test)]
 mod tests {
-    use ::key::*;
+    use serde_json::json;
+
+    use super::*;
 
     fn call(app: &str) -> Route {
         Route::Call(app.into())

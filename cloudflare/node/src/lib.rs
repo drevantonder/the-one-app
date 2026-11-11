@@ -71,21 +71,21 @@ pub fn bucket_read(name: &str, found: bool, instance: &str, now: f64) -> Option<
 #[wasm_bindgen]
 pub fn call_span(app: &str, tool: &str, user: &str, instance: &str, time: f64, ms: f64, failed: bool, code: Option<String>, said: Option<String>, traceparent: Option<String>) -> String {
     use one::insights::{Attrs, Batch, Failure, Span, SpanKind, Status, message, own, token};
-    let failure = failed.then(|| Failure::of(code.as_deref(), None, one::insights::stage::RUN));
+    let failure = failed.then(|| Failure::of(code.as_deref(), None, ::api::traceparent::stage::RUN));
     let name = if token(tool) { tool } else { "_unknown" };
     let mut attrs = Attrs::default().client("api").user(user).rpc(app, name).build(custom_build::config::BUILD);
     let mut text = None;
     if let Some(failure) = &failure {
-        attrs = attrs.failed(failure).stage(one::insights::stage::RUN).fingerprint(failure.kind(), "stage:run", custom_build::config::BUILD);
+        attrs = attrs.failed(failure).stage(::api::traceparent::stage::RUN).fingerprint(failure.kind(), "stage:run", custom_build::config::BUILD);
         if let Failure::Broke(_) = failure {
             text = said.as_deref().map(message::cleaned);
         }
     }
-    let parent = traceparent.as_deref().and_then(one::insights::parent_of);
-    let (trace, parent) = parent.map_or_else(|| (one::insights::new_trace(), None), |(t, s)| (t, Some(s)));
+    let parent = traceparent.as_deref().and_then(::api::traceparent::parent_of);
+    let (trace, parent) = parent.map_or_else(|| (::api::traceparent::ids::trace(), None), |(t, s)| (t, Some(s)));
     let service = if token(app) { app } else { own() };
     let mut batch = Batch::default();
-    batch.span(Span { time: time as u64, trace, span: one::insights::new_span(), parent, name: name.to_string(), service: service.to_string(), version: None, instance: instance.to_string(), kind: SpanKind::Server, status: failure.as_ref().map_or(Status::Unset, Failure::status), duration: ms as u64, message: text, attrs }, false, &[]);
+    batch.span(Span { time: time as u64, trace, span: ::api::traceparent::ids::span(), parent, name: name.to_string(), service: service.to_string(), version: None, instance: instance.to_string(), kind: SpanKind::Server, status: failure.as_ref().map_or(Status::Unset, Failure::status), duration: ms as u64, message: text, attrs }, false, &[]);
     batch.rows().to_string()
 }
 
@@ -862,7 +862,7 @@ pub async fn ai_run(bucket: JsValue, own: u32, everyone: u32, vault: String, app
         Err(err) => json!({ "error": format!("{err:#}"), "code": err.downcast_ref::<ai_gateway::Failed>().and_then(ai_gateway::Failed::code) }),
     };
     let mut batch = one::insights::Batch::default();
-    let parent = traceparent.as_deref().and_then(one::insights::parent_of).map(|(t, s)| (t, Some(s)));
+    let parent = traceparent.as_deref().and_then(::api::traceparent::parent_of).map(|(t, s)| (t, Some(s)));
     let service = if one::insights::token(&app) { app.as_str() } else { one::insights::own() };
     for span in gateway.spans.take() {
         batch.gen_ai(js_sys::Date::now() as u64, parent.clone(), service, &instance, &user, span);

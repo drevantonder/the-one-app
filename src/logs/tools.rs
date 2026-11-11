@@ -1,9 +1,9 @@
-//! Logs, as the core's tool `logs`, its own route (`core_tools::Runs::Route`): a device's log, or one of its services',
+//! Logs, as the core's tool `logs`, its own route (`api::Runs`): a device's log, or one of its services',
 //! read over the network.
 
 use serde_json::json;
 
-use crate::core_tools::{Feature, Tool, serves};
+use ::api::Feature;
 
 pub fn feature() -> Feature {
     Feature {
@@ -11,8 +11,7 @@ pub fn feature() -> Feature {
         title: "Logs",
         description: "A device's log, or one of its services', over the network".into(),
         guide: String::new(),
-        tools: vec![Tool::route(
-            json!({
+        tools: vec![json!({
                 "name": "logs", "title": "Read a device's log", "reads": true,
                 "description": "Read a device's log over the network, instead of ssh: its node's, or one of its services', or for a phone or computer app, what its app and page say went wrong (read while the app is open and connected). The newest lines (200 by default, at most 1000 or 48 KiB), oldest first. Only the device's user and the network's admins may.",
                 "input": { "type": "object", "required": ["device"], "properties": {
@@ -23,9 +22,19 @@ pub fn feature() -> Feature {
                     "lines": { "type": "integer", "description": "how many of the newest to give" },
                 } },
                 "output": { "type": "object", "required": ["said"], "properties": { "said": { "type": "string", "description": "the lines, oldest first, then a note when there are none or more than shown" } } },
-            }),
-            serves!(serve::logs),
-        )],
+            })],
+    }
+}
+
+/// What serves each tool, in this runtime.
+#[cfg(feature = "node")]
+pub fn runs() -> ::api::Runs {
+    use crate::node::runtime::node_serves;
+    ::api::Runs {
+        tools: vec![
+            ("logs", node_serves!(serve::logs)),
+        ],
+        ..::api::Runs::named("logs")
     }
 }
 
@@ -34,8 +43,9 @@ mod serve {
     use anyhow::Result;
     use serde_json::{Map, Value, json};
 
-    use crate::core_tools::{say_time, text};
-    use crate::node::{Caller, Node};
+    use ::api::feature::{say_time, text};
+    use crate::node::Node;
+    use ::api::Caller;
     use ::api::call::CallRequest;
 
     /// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the

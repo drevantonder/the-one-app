@@ -97,15 +97,25 @@ version = "0.1.0"
 dependencies = [
  "ai-gateway",
  "anyhow",
+ "axum",
  "bucket",
  "custom-build",
  "data-encoding",
  "database",
+ "futures-util",
+ "jiff",
  "key",
+ "platform",
+ "rand 0.8.8",
+ "rusqlite",
  "schemars",
  "scope",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
+ "tokio",
+ "tracing",
+ "ureq",
 ]
 
 [[package]]
@@ -3143,6 +3153,7 @@ name = "one-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api",
  "custom-build",
  "data-encoding",
  "key",

@@ -158,7 +158,7 @@ fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8])
 /// `scope::settings::answered`): one that changes who can do what, which it signs as its user's, as any device does.
 /// None for any other MCP message, which goes to a node, as its user.
 async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, onet::Error>> {
-    use one::core_tools::Reader;
+    use api::Reader;
     let msg: Value = serde_json::from_slice(body).ok()?;
     if msg["method"] != "tools/call" {
         return None;
@@ -169,7 +169,7 @@ async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8
     let confirmed = input.remove("confirm") == Some(json!(true));
     // Any other a node runs.
     let asks = Some(feature.request(at, &input, confirmed)).filter(|r| scope::settings::answered(&r.path))?;
-    if feature.tools[at].spec["confirm"] == true && !confirmed {
+    if feature.tools[at]["confirm"] == true && !confirmed {
         return Some(Ok(result(&msg, Err(Reader::Mcp.unconfirmed(name)))));
     }
     let request = onet::Request {
@@ -185,7 +185,7 @@ async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8
     let status = response.status;
     let answer: Value = response.body.bytes().await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let said = match status {
-        200 => Ok(one::core_tools::said(answer)),
+        200 => Ok(api::feature::said(answer)),
         _ => Err(answer["error"].as_str().map_or_else(|| format!("That wasn't done ({status})."), str::to_string)),
     };
     Some(Ok(result(&msg, said)))

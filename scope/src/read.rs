@@ -1,0 +1,54 @@
+//! Who's who as a device last read it, for what a feature reads of it: the scope database of `global` and each scope
+//! held (`replica`), and each scope's own state (`states`).
+
+use std::collections::HashMap;
+
+use anyhow::Result;
+
+use crate::replica::Replica;
+use crate::scopes::{Scope, ScopeDb, ScopeState};
+
+pub struct Read<'a> {
+    pub replica: &'a Replica,
+    /// Each scope's own state, as its database says it, by its name.
+    pub states: &'a HashMap<String, ScopeState>,
+}
+
+impl Read<'_> {
+    pub fn db(&self) -> &ScopeDb {
+        self.replica.db()
+    }
+
+    pub fn holds(&self, scope: &Scope) -> bool {
+        self.replica.holds(scope)
+    }
+
+    /// `global`'s steps read, if any.
+    pub fn at(&self) -> Option<u64> {
+        self.replica.at()
+    }
+
+    pub fn state(&self, scope: &Scope) -> Option<&ScopeState> {
+        self.states.get(&scope.to_string())
+    }
+
+    /// A scope as a user calls it: Everyone, a user's name, a group's name.
+    pub fn scope_name(&self, scope: &Scope) -> Result<String> {
+        let db = self.db();
+        Ok(match scope {
+            Scope::Global => "Everyone".to_string(),
+            Scope::User(u) => db.user(u)?.map(|u| u.name).unwrap_or_else(|| u.clone()),
+            Scope::Group(g) => db.group(g)?.map(|g| g.name).unwrap_or_else(|| g.clone()),
+        })
+    }
+
+    /// A user's name in the network, removed users' too; none if it never knew them.
+    pub fn user_name(&self, user: &str) -> Result<String> {
+        Ok(self.db().user_ever(user)?.map(|u| u.name).unwrap_or_default())
+    }
+
+    /// A scope as `user` gives it: `user` (their own), `global`, `group:<id>`, or a group's name or id.
+    pub fn scope_for(&self, user: &str, scope: &str) -> Result<Scope> {
+        Scope::parse_for(scope, user).or_else(|_| self.db().find_group(scope).map(Scope::Group))
+    }
+}

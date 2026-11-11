@@ -4,16 +4,15 @@
 
 use anyhow::Result;
 use ::custom_build::config::{CLI, NAME, YOURS};
-use one::cli::{Command, Given};
-use one::api;
+use api::cli::{Command, Given};
 use serde_json::Value;
 
 mod git_remote;
 mod network;
 
-use one::api::Client;
+use api::Client;
 use one::tools;
-use one::core_tools::{Reader, SENDS};
+use api::{Reader, SENDS};
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
 fn commands() -> Vec<Command> {
@@ -47,8 +46,8 @@ fn every_command(node: &Client) -> String {
     let core = core_forms(node);
     format!(
         "Usage:\n{}\n{NAME}'s own tools, each a command as an app's tools are (--help after one says what it takes):\n{}\n{NAME} holds one network. For another context, run that context's own app.",
-        one::cli::help(commands().iter().flat_map(|c| &c.help)),
-        one::cli::help(&core)
+        api::cli::help(commands().iter().flat_map(|c| &c.help)),
+        api::cli::help(&core)
     )
 }
 
@@ -131,7 +130,7 @@ fn run(args: Vec<String>) -> Result<()> {
     // --trace too: a call prints what it did, and where, after its answer.
     let trace = args[..end].iter().any(|a| a == "--trace");
     let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || (*a != "--json" && *a != "--trace")).map(|(_, a)| a.clone()).collect();
-    let (positional, flags) = tools::split(&args);
+    let (positional, flags) = api::tools::split(&args);
     if positional.first().map(String::as_str) != Some("mcp") {
         // Printing into `| head` ends quietly, as other commands do, instead of panicking.
         #[cfg(unix)]
@@ -172,7 +171,7 @@ fn own() -> Command {
                 ["help", "all"] => println!("{}", every_command(g.node)),
                 ["help", rest @ ..] => match command_help(g.node, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
                     Some(text) => print!("{text}"),
-                    None => return Err(one::cli::Failed::Typed(tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
+                    None => return Err(api::cli::Failed::Typed(tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
                 },
                 ["version"] if g.json => println!("{}", one::release::Version::this().json()),
                 ["version"] => println!("{} {} ({})", NAME, ::custom_build::config::BUILD, ::custom_build::config::TARGET),
@@ -198,7 +197,7 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
     // The forms for the most words given that have any: vault answer's, else every vault form.
     let starts = |n: usize| -> Vec<&(String, String)> { forms.iter().copied().filter(|(usage, _)| usage.split_whitespace().take(n).eq(typed[..n].iter().copied())).collect() };
     let these = (1..=typed.len()).rev().map(starts).find(|f| !f.is_empty()).unwrap_or_default();
-    (!these.is_empty()).then(|| format!("Usage:\n{}", one::cli::help(these)))
+    (!these.is_empty()).then(|| format!("Usage:\n{}", api::cli::help(these)))
 }
 
 fn connection(node: &Client) -> String {
@@ -219,19 +218,19 @@ fn connection(node: &Client) -> String {
 /// once it has run here, which made its token.
 struct Http;
 
-impl one::api::client::Via for Http {
-    fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<std::time::Duration>) -> Result<one::api::client::Answer> {
+impl api::client::Via for Http {
+    fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<std::time::Duration>) -> Result<api::client::Answer> {
         let body = body.unwrap_or_default();
         let ask = || {
-            let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", api::addr()));
+            let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", api::local::addr()));
             for (name, value) in headers {
                 req = req.header(*name, *value);
             }
-            let agent = api::agent();
+            let agent = api::local::agent();
             let req = agent.configure_request(req.body(body.clone())?).timeout_global(wait).build();
             agent.run(req)
         };
-        let asked = || if api::local_token(&platform::home()).is_some() { one::loopback::while_refused(&ask) } else { ask() };
+        let asked = || if api::local::local_token(&platform::home()).is_some() { one::loopback::while_refused(&ask) } else { ask() };
         let resp = match asked() {
             Ok(resp) => resp,
             Err(err) if one::loopback::lost(&err) => {
@@ -242,7 +241,7 @@ impl one::api::client::Via for Http {
             Err(err) => return Err(unreached(err)),
         };
         let trace = resp.headers().get(::custom_build::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
-        Ok(one::api::client::Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
+        Ok(api::client::Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
     }
 }
 

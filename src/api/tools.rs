@@ -1,4 +1,4 @@
-//! The core's tools, each their own route (`core_tools::Tool`), each at `POST /api/<feature>/<tool>`: its
+//! The core's tools, each their own route (`api::Feature`), each at `POST /api/<feature>/<tool>`: its
 //! body is held to the tool's input schema before it runs, and its answer to its output schema before it goes.
 
 use axum::Json;
@@ -7,35 +7,40 @@ use axum::http::HeaderMap;
 use axum::routing::post;
 use serde_json::{Map, Value};
 
-use crate::core_tools::Serves;
-use crate::node::{Caller, Node};
+use ::api::runtime::{Rt, Serves};
+use ::api::{Caller, Error, Invalid, Me, Reply, Who};
 
-use super::guard::Me;
-use super::reply::{Error, Reply};
-use super::{Routes, Who};
+use super::Routes;
 
 /// Every one, asked by a client device; but one a client answers itself (`settings::answered`) only by this
-/// machine's own programs, which its node answers as its own device.
+/// machine's own programs, which its node answers as its own device. What serves each is its feature's `Runs`.
 pub(super) fn routes() -> Routes {
+    let runs = crate::node::runtime::features();
     let mut routes = Routes::default();
     for feature in crate::core_tools::all() {
         for tool in &feature.tools {
-            let serves = tool.serves;
-            let path = feature.path(&tool.spec);
+            let name = feature.mcp_name(tool);
+            let serves = served(&runs, feature.name, tool).unwrap_or_else(|| panic!("{name} is listed and nothing serves it (`every_core_tool_is_served_once`)"));
+            let path = feature.path(tool);
             let who = if scope::settings::answered(&path) { Who::ThisMachine } else { Who::Clients };
-            let (spec, name) = (tool.spec.clone(), feature.mcp_name(&tool.spec));
-            routes = routes.route(&path, who, post(move |node: State<Node>, me: Me, headers: HeaderMap, input: Json<Map<String, Value>>| serve(node, me, headers, input, serves, spec, name)));
+            let spec = tool.clone();
+            routes = routes.route(&path, who, post(move |rt: State<Rt>, me: Me, headers: HeaderMap, input: Json<Map<String, Value>>| serve(rt, me, headers, input, serves, spec, name)));
         }
     }
     routes
 }
 
-async fn serve(State(node): State<Node>, me: Me, headers: HeaderMap, Json(input): Json<Map<String, Value>>, serves: Serves, spec: Value, name: String) -> Reply {
-    crate::tools::check(&spec["input"], &Value::Object(input.clone())).map_err(|e| super::Invalid(format!("{e:#}")))?;
+/// What serves `tool` of `feature`, of what each feature runs.
+fn served(runs: &[::api::Runs], feature: &str, tool: &Value) -> Option<Serves> {
+    runs.iter().filter(|r| r.feature == feature).flat_map(|r| &r.tools).find(|(name, _)| tool["name"] == *name).map(|(_, serves)| *serves)
+}
+
+async fn serve(State(rt): State<Rt>, me: Me, headers: HeaderMap, Json(input): Json<Map<String, Value>>, serves: Serves, spec: Value, name: String) -> Reply {
+    ::api::tools::check(&spec["input"], &Value::Object(input.clone())).map_err(|e| Invalid(format!("{e:#}")))?;
     let agent = headers.get(custom_build::protocol::header::AGENT).and_then(|a| data_encoding::BASE64URL_NOPAD.decode(a.as_bytes()).ok()).and_then(|a| String::from_utf8(a).ok());
     let me = Caller { agent: agent.or(me.caller.agent), ..me.caller };
-    let answer = serves(node, me, input).await?;
-    crate::tools::check(&spec["output"], &answer).map_err(|e| Error(e.context(format!("{name} answered what its output schema doesn't say"))))?;
+    let answer = serves(rt, me, input).await?;
+    ::api::tools::check(&spec["output"], &answer).map_err(|e| Error(e.context(format!("{name} answered what its output schema doesn't say"))))?;
     Ok(Json(answer))
 }
 
@@ -49,10 +54,27 @@ mod tests {
     fn a_tool_that_is_a_route_says_what_it_takes_and_answers() {
         for feature in all() {
             for tool in feature.tools.iter() {
-                let name = feature.mcp_name(&tool.spec);
-                assert!(tool.spec["input"]["type"] == "object", "{name} says what it takes");
-                assert!(!tool.spec["output"]["type"].is_null(), "{name} says what it answers");
-                assert!(tool.spec["title"].is_string() && tool.spec["description"].is_string(), "{name} says what it is");
+                let name = feature.mcp_name(tool);
+                assert!(tool["input"]["type"] == "object", "{name} says what it takes");
+                assert!(!tool["output"]["type"].is_null(), "{name} says what it answers");
+                assert!(tool["title"].is_string() && tool["description"].is_string(), "{name} says what it is");
+            }
+        }
+    }
+
+    /// Every tool a client lists is served by exactly one feature's `Runs`, and no `Runs` serves one nobody lists: the two
+    /// lists, the features every client lists and what this runtime runs, agree.
+    #[test]
+    fn every_core_tool_is_served_once() {
+        let runs = crate::node::runtime::features();
+        let listed: Vec<(String, String)> = all().iter().flat_map(|f| f.tools.iter().map(|t| (f.name.to_string(), t["name"].as_str().unwrap_or("").to_string())).collect::<Vec<_>>()).collect();
+        for (feature, tool) in &listed {
+            let serving = runs.iter().filter(|r| r.feature == feature).flat_map(|r| &r.tools).filter(|(name, _)| name == tool).count();
+            assert_eq!(serving, 1, "{feature}_{tool} is served once");
+        }
+        for r in &runs {
+            for (name, _) in &r.tools {
+                assert!(listed.iter().any(|(f, t)| f == r.feature && t == name), "{}_{name} is served and no feature lists it", r.feature);
             }
         }
     }
@@ -61,22 +83,24 @@ mod tests {
     /// schema leaves out is one that never reaches it, the same as a misspelled one.
     #[test]
     fn a_tool_reads_only_the_inputs_its_schema_takes() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut served: std::collections::HashMap<String, (String, std::collections::VecDeque<String>)> = Default::default();
         for feature in all() {
             let folder = if matches!(feature.name, "add" | "remove") { "app".to_string() } else { feature.name.replace('-', "_") };
             let (source, queue) = served.entry(folder.clone()).or_insert_with(|| {
-                let source = std::fs::read_to_string(root.join(&folder).join("tools.rs")).unwrap();
-                let queue = source.split("serves!(serve::").skip(1).map(|s| s.split(')').next().unwrap().to_string()).collect();
+                // A feature's runtime crate (`<feature>/runtime/src/tools.rs`), or one whose runtime half is still this program's.
+                let own = root.join(feature.name).join("runtime/src/tools.rs");
+                let source = std::fs::read_to_string(&own).or_else(|_| std::fs::read_to_string(root.join("src").join(&folder).join("tools.rs"))).unwrap();
+                let queue = source.split("serves!(").skip(1).map(|s| s.split(')').next().unwrap().rsplit("::").next().unwrap().to_string()).collect();
                 (source, queue)
             });
             for tool in &feature.tools {
-                let name = feature.mcp_name(&tool.spec);
+                let name = feature.mcp_name(tool);
                 let f = queue.pop_front().unwrap_or_else(|| panic!("{name}: a tool for each serves! in {folder}/tools.rs"));
                 let (mut reads, mut seen) = (Default::default(), Default::default());
                 inputs_read(source, &f, &mut reads, &mut seen);
                 for input in reads {
-                    assert!(crate::tools::takes(&tool.spec["input"], &input), "{name}'s handler reads {input}, which its input schema doesn't take");
+                    assert!(::api::tools::takes(&tool["input"], &input), "{name}'s handler reads {input}, which its input schema doesn't take");
                 }
             }
         }

@@ -74,7 +74,7 @@ impl Node {
 
     /// The ports this node serves on this machine: its local API, workerd, and apps' outbound requests.
     pub fn own_ports(&self) -> Vec<u16> {
-        vec![crate::api::port(), self.0.apps.port(), self.0.outbound]
+        vec![::api::local::port(), self.0.apps.port(), self.0.outbound]
     }
 
     pub fn grant_of(&self, token: &str) -> Option<Grant> {
@@ -87,7 +87,7 @@ impl Node {
     /// `PROMPT_LIMIT` (the harness waits for this) is left out.
     pub async fn prompt(&self, event: Value) -> Result<String> {
         let session = event["session_id"].as_str().unwrap_or("").to_string();
-        let caller = Caller::local(self)?;
+        let caller = self.caller()?;
         let path = self.0.dir.join("hooks.json");
         let mut seen: serde_json::Map<String, Value> = platform::files::read_json(&path);
         let now = now_ms();

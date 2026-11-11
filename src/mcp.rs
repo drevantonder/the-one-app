@@ -8,7 +8,7 @@ pub mod apps;
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::api::Client;
+use ::api::Client;
 use ::custom_build::config::{CLI, NAME};
 use crate::skills::Mode;
 use crate::{code, tools};
@@ -67,7 +67,7 @@ pub async fn http(
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     let elsewhere = client.is_some() || headers.contains_key(axum::http::header::AUTHORIZATION);
-    let asks = Client::new(crate::api::client::InProcess::new(node, client.map(|c| c.0), peer.map(|p| p.0), &headers), elsewhere, crate::core_tools::Reader::Mcp.client());
+    let asks = Client::new(crate::api::InProcess::new(node, client.map(|c| c.0), peer.map(|p| p.0), &headers), elsewhere, ::api::Reader::Mcp.client());
     let agent = headers.get("mcp-session-id").and_then(|s| s.to_str().ok()).and_then(|s| s.split_once('.')).and_then(|(_, name)| data_encoding::BASE64URL_NOPAD.decode(name.as_bytes()).ok()).and_then(|n| String::from_utf8(n).ok());
     let Ok(msg) = serde_json::from_str::<Value>(&body) else {
         let error = json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "the body isn't JSON" } });
@@ -297,7 +297,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
     // This server's own tools, checked as apps' are, in dispatch.
     let own = [code::search_tool(session.mode), code::execute_tool(), deploy_tool()].into_iter().chain(apps::tools()).find(|t| t["name"] == name);
-    if let Some(Err(e)) = own.map(|t| tools::check(&t["inputSchema"], &Value::Object(input.clone()))) {
+    if let Some(Err(e)) = own.map(|t| ::api::tools::check(&t["inputSchema"], &Value::Object(input.clone()))) {
         return failed(format!("{e:#}"));
     }
     if let Some(out) = apps::call(node, name, &Value::Object(input.clone())) {
@@ -335,7 +335,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             };
             match node.post("/api/deploy", body) {
                 Ok(r) => {
-                    let text = format!("{}{service}", crate::app::deploy::said(node, app, &r, crate::core_tools::Reader::Mcp));
+                    let text = format!("{}{service}", crate::app::deploy::said(node, app, &r, ::api::Reader::Mcp));
                     json!({ "isError": r["failed"].is_string(), "content": [{ "type": "text", "text": text }] })
                 }
                 Err(e) => failed(format!("{e:#}")),
@@ -346,11 +346,11 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             Err(e) => failed(format!("{e:#}")),
         },
         _ => {
-            let ran = tools::dispatch(node, name, input, crate::core_tools::Reader::Mcp, agent, None);
+            let ran = tools::dispatch(node, name, input, ::api::Reader::Mcp, agent, None);
             with_trace(
                 match ran.ok {
                     // A script gets an empty list as it is; an agent reading gets it in words.
-                    Ok(ok) => match name.split_once('_').filter(|_| ok == json!([])).and_then(|(app, tool)| tools::find(node, app, tool)).and_then(|(a, o)| tools::none_said(node, &a, &o, &ok, crate::core_tools::Reader::Mcp)) {
+                    Ok(ok) => match name.split_once('_').filter(|_| ok == json!([])).and_then(|(app, tool)| tools::find(node, app, tool)).and_then(|(a, o)| tools::none_said(node, &a, &o, &ok, ::api::Reader::Mcp)) {
                         Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
                         None => json!({ "content": tools::mcp_content(node, &ok) }),
                     },
@@ -363,8 +363,8 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
 }
 
 /// `mcp` on the command line: this server, over stdio.
-pub fn commands() -> crate::cli::Command {
-    crate::cli::Command {
+pub fn commands() -> ::api::cli::Command {
+    ::api::cli::Command {
         help: vec![("mcp [--code]".into(), "the local MCP server, over stdio, for agents: every tool, or with --code, search and execute".into())],
         run: |g| {
             if g.words() != ["mcp"] {

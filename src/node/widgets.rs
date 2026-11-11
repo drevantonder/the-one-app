@@ -6,7 +6,10 @@ pub(crate) mod routes {
     use axum::routing::get;
     use serde_json::json;
 
-    use crate::api::{Me, Reply, Routes, Who};
+    use crate::api::Routes;
+    use ::api::Me;
+    use ::api::Reply;
+    use ::api::Who;
     use crate::node::Node;
     use crate::says::widgets::{WidgetsAsked, WidgetsQuery};
 
@@ -17,7 +20,7 @@ pub(crate) mod routes {
     }
 
     async fn widgets(State(node): State<Node>, me: Me, Query(q): Query<WidgetsAsked>) -> Reply {
-        let only = q.kind.as_deref().map(|kind| kind.split_once('.').ok_or_else(|| crate::api::Invalid("a widget's kind is <app>.<widget>".into()))).transpose()?;
+        let only = q.kind.as_deref().map(|kind| kind.split_once('.').ok_or_else(|| ::api::Invalid("a widget's kind is <app>.<widget>".into()))).transpose()?;
         Ok(Json(json!(node.widgets(me.caller, q.scope.as_deref(), only).await?)))
     }
 

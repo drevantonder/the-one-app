@@ -4,7 +4,7 @@
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 
-use crate::cli::{Command, Given};
+use ::api::cli::{Command, Given};
 
 pub fn commands() -> Command {
     Command {
@@ -17,7 +17,7 @@ fn run(g: &Given) -> Result<bool> {
     let (["backups", "check"], Some(folder)) = (g.words().as_slice(), g.flag("folder")) else { return Ok(false) };
     let key = key::recovery_key_in(g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?)?;
     let report = check_folder(folder, &key)?;
-    println!("{}", if g.json { report.to_string() } else { crate::tools::said(&report) });
+    println!("{}", if g.json { report.to_string() } else { ::api::tools::said(&report) });
     Ok(true)
 }
 

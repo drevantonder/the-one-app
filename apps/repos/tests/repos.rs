@@ -15,7 +15,7 @@ use ::api::call::CallRequest;
 /// owners delete one.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_delete_it() {
-    use one::node::Caller;
+    use api::Caller;
     let a = start("repos-owner").await;
     create(&a, "Home", "Andre").await;
     let me = Caller::own(a.id(), a.user().unwrap());
@@ -80,7 +80,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
         }
     }
 
-    let client = Caller { key: e.key, user: sam_id.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
+    let client = Caller { key: e.key, user: sam_id.clone(), agent: None, credential: api::Credential::Client(e.key) };
     {
         let (sam, handed_for) = (client.clone(), key::hex(&e.key));
         let handoff = ::api::handed::Handoff { for_: handed_for, until: u64::MAX, keys: keys.clone() };
@@ -241,7 +241,7 @@ async fn a_repos_merged_packs_hold_every_object_pushed() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_groups_github_organization_shows_only_to_its_members_and_a_users_github_sign_in_only_to_them() {
-    use one::node::Caller;
+    use api::Caller;
     use std::sync::{Arc, Mutex};
     let a = start("repos-github").await;
     create(&a, "Home", "Andre").await;
@@ -302,7 +302,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_users_gith
             keys.push(::api::handed::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key });
         }
     }
-    let client = Caller { key: e.key, user: sam_id.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
+    let client = Caller { key: e.key, user: sam_id.clone(), agent: None, credential: api::Credential::Client(e.key) };
     let handoff = ::api::handed::Handoff { for_: key::hex(&e.key), until: u64::MAX, keys };
     a.hand(&client.credential, &sam_id, &::api::handed::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
     let sams_list = async || {

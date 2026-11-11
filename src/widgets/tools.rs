@@ -1,9 +1,9 @@
-//! Widgets' tool, its own route (`core_tools::Runs::Route`): the user's widgets as text, for an agent, or a chat that
+//! Widgets' tool, its own route (`api::Runs`): the user's widgets as text, for an agent, or a chat that
 //! can't draw them (src/mcp/apps.rs draws them in one that can, from the same answer).
 
 use serde_json::json;
 
-use crate::core_tools::{Feature, Tool, serves};
+use ::api::Feature;
 
 pub fn feature() -> Feature {
     Feature {
@@ -11,8 +11,7 @@ pub fn feature() -> Feature {
         title: "Widgets",
         description: "Your widgets, as text".into(),
         guide: String::new(),
-        tools: vec![Tool::route(
-            json!({
+        tools: vec![json!({
                 "name": "show", "title": "Show the widgets", "reads": true,
                 "description": "Show the user's widgets inline, drawn as their apps draw them (or as text where a chat can't draw them): all of them, one app's, or one. Use it when they ask how things stand at a glance. One that says it's still drawing took too long beside the rest: ask for it alone, with its app and widget.",
                 "input": { "type": "object", "properties": {
@@ -24,9 +23,19 @@ pub fn feature() -> Feature {
                     "said": { "type": "string", "description": "the widgets, in words" },
                     "widgets": { "type": "array", "items": { "type": "object" }, "description": "each as `GET /api/widgets` gives it, to draw" },
                 } },
-            }),
-            serves!(serve::show),
-        )],
+            })],
+    }
+}
+
+/// What serves each tool, in this runtime.
+#[cfg(feature = "node")]
+pub fn runs() -> ::api::Runs {
+    use crate::node::runtime::node_serves;
+    ::api::Runs {
+        tools: vec![
+            ("show", node_serves!(serve::show)),
+        ],
+        ..::api::Runs::named("widgets")
     }
 }
 
@@ -35,7 +44,8 @@ mod serve {
     use anyhow::Result;
     use serde_json::{Map, Value, json};
 
-    use crate::node::{Caller, Node};
+    use crate::node::Node;
+    use ::api::Caller;
 
     /// The widgets `input` asks for (`scope`, `app`, `widget`): in words, and as they are to draw.
     pub async fn show(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {

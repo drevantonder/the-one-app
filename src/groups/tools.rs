@@ -1,30 +1,26 @@
-//! Groups' tools, each its own route (`core_tools::Runs::Route`). `handle` changes who can do what, so the caller's
+//! Groups' tools, each its own route (`api::Runs`). `handle` changes who can do what, so the caller's
 //! client answers it (`settings::answered`), and its route is only this machine's own programs', whose node answers it
 //! as its own device.
 
 use serde_json::json;
 
 use ::custom_build::config::YOURS;
-use crate::core_tools::{Feature, Tool, serves};
+use ::api::Feature;
 
 pub fn feature() -> Feature {
     let guide = format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the users who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined. Each user and group has a handle, like andre or family, unique among them, which apps call them by (Repos' addresses are <handle>/<repo>); groups_handle changes yours, or a group's you're an admin of.");
     Feature { name: "groups", title: "Groups", description: format!("Who's in {YOURS}, and in each of its groups"), guide, tools: tools(), }
 }
 
-fn tools() -> Vec<Tool> {
+fn tools() -> Vec<serde_json::Value> {
     vec![
-        Tool::route(
-            json!({
+        json!({
                 "name": "list", "title": "Who's in the network and its groups", "reads": true,
                 "description": format!("The users in {YOURS}, you first, each with their handle, as admin or member; then every group with its handle: who's in it and who's invited but hasn't joined yet."),
                 "input": { "type": "object", "properties": {} },
                 "output": { "type": "object", "required": ["said"], "properties": { "said": { "type": "string", "description": "the users and groups, in words" } } },
             }),
-            serves!(serve::list),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "handle", "title": "Change a handle",
                 "description": "Change your handle, or a group's you're an admin of: what every app calls you or it by, like Repos' addresses <handle>/<repo>, which move with it.",
                 "input": { "type": "object", "required": ["handle"], "properties": {
@@ -33,9 +29,20 @@ fn tools() -> Vec<Tool> {
                 } },
                 "output": { "type": "object", "required": ["said"], "properties": { "said": { "type": "string", "description": "whose handle it is now" } } },
             }),
-            serves!(serve::handle),
-        ),
     ]
+}
+
+/// What serves each tool, in this runtime.
+#[cfg(feature = "node")]
+pub fn runs() -> ::api::Runs {
+    use crate::node::runtime::node_serves;
+    ::api::Runs {
+        tools: vec![
+            ("list", node_serves!(serve::list)),
+            ("handle", node_serves!(serve::handle)),
+        ],
+        ..::api::Runs::named("groups")
+    }
 }
 
 #[cfg(feature = "node")]
@@ -44,7 +51,8 @@ mod serve {
     use serde_json::{Map, Value, json};
 
     use ::custom_build::config::YOURS;
-    use crate::node::{Caller, Node};
+    use crate::node::Node;
+    use ::api::Caller;
     use ::scope::state::State;
 
     pub async fn list(node: Node, me: Caller, _: Map<String, Value>) -> Result<Value> {

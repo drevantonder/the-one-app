@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::cli::Command;
+use ::api::cli::Command;
 
 pub fn commands() -> Command {
     Command {
@@ -11,8 +11,8 @@ pub fn commands() -> Command {
             let words = g.words();
             let ["logs", device] = words.as_slice() else { return Ok(false) };
             g.takes_only(&["service", "since", "grep", "lines"])?;
-            let schema = super::tools::feature().tools.remove(0).spec["input"].clone();
-            let mut input = crate::tools::input(&schema, &[], vec![], g.flags.clone(), &[]).map_err(|e| crate::cli::Failed::Typed(format!("{e:#}")))?;
+            let schema = super::tools::feature().tools.remove(0)["input"].clone();
+            let mut input = ::api::tools::input(&schema, &[], vec![], g.flags.clone(), &[]).map_err(|e| ::api::cli::Failed::Typed(format!("{e:#}")))?;
             input.insert("device".into(), json!(device));
             let said = g.node.post_for(g.agent, "/api/logs/logs", Value::Object(input)).map_err(|e| crate::tools::in_cli_error(g.node, e))?;
             println!("{}", said["said"].as_str().unwrap_or(""));

@@ -278,7 +278,7 @@ impl Node {
         let name = self.with(|i| Ok(i.r.db().machine(&key)?.map(|d| d.name).unwrap_or_default()))?;
         if key != self.0.id {
             ensure!(self.reaches(&key).await, "{}, so it can't erase what it keeps. Turn it on and try again.", self.away(&key));
-            return Err(super::calls::Elsewhere { why: format!("only {name} erases what it keeps"), nodes: vec![hex(&key)] }.into());
+            return Err(::api::Elsewhere { why: format!("only {name} erases what it keeps"), nodes: vec![hex(&key)] }.into());
         }
         self.with(|i| {
             let db = i.r.db();

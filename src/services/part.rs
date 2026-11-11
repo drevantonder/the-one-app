@@ -128,11 +128,11 @@ impl Service {
             }
         };
         let network: Network = serde_json::from_slice(&std::fs::read(Network::path(dir)).with_context(|| format!("{name} is started by its device's oned, which says which network it's in"))?)?;
-        let token = match std::fs::read_to_string(dir.join(crate::api::LOCAL_TOKEN)) {
+        let token = match std::fs::read_to_string(dir.join(::api::local::LOCAL_TOKEN)) {
             Ok(t) if !t.trim().is_empty() => t.trim().to_string(),
             _ => {
                 let t = hex(&rand::random::<[u8; 32]>());
-                write_private(&dir.join(crate::api::LOCAL_TOKEN), t.as_bytes())?;
+                write_private(&dir.join(::api::local::LOCAL_TOKEN), t.as_bytes())?;
                 t
             }
         };
@@ -242,7 +242,7 @@ impl Service {
     async fn runtime(&self, method: &'static str, path: &str, body: Option<Value>, wait: Duration) -> Result<(u16, Value)> {
         let url = format!("http://{}{path}", self.0.runtime);
         tokio::task::spawn_blocking(move || {
-            let token = crate::api::local_token(&crate::node::runtime_folder(&platform::home())).context("its device's app runtime has no token yet")?;
+            let token = ::api::local::local_token(&crate::node::runtime_folder(&platform::home())).context("its device's app runtime has no token yet")?;
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(wait)).build().into();
             let mut resp = match body {
                 Some(body) => agent.post(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, token.trim()).send_json(body)?,
@@ -656,9 +656,9 @@ async fn blobs(s: &Service, headers: &HeaderMap, method: &'static str, path: &st
     if let Err(r) = s.0.registry.ours(headers) {
         return r;
     }
-    let url = format!("http://{}{path}", crate::api::addr());
+    let url = format!("http://{}{path}", ::api::local::addr());
     let asked = tokio::task::spawn_blocking(move || -> Result<(u16, Vec<u8>)> {
-        let token = std::fs::read_to_string(platform::home().join(crate::api::LOCAL_TOKEN)).context("its device's oned has no local token")?;
+        let token = std::fs::read_to_string(platform::home().join(::api::local::LOCAL_TOKEN)).context("its device's oned has no local token")?;
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         let resp = match body {
             Some(body) => agent.post(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, token.trim()).header("content-type", "application/octet-stream").send(&body[..])?,
@@ -897,7 +897,7 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
             crate::oned::command(&[&format!("--sandboxed={}", dir.display())])?
         }
         How::Seatbelt => {
-            let token = service.0.dir.join(crate::api::LOCAL_TOKEN);
+            let token = service.0.dir.join(::api::local::LOCAL_TOKEN);
             let profile = crate::services::sandbox::seatbelt(&declared, at.port(), data, &token, program);
             let mut command = std::process::Command::new("/usr/bin/sandbox-exec");
             command.arg("-p").arg(profile).arg(program);

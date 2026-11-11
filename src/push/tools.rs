@@ -1,10 +1,10 @@
-//! Push's tools, each its own route (`core_tools::Runs::Route`): notifications to the user's own devices, for agents
+//! Push's tools, each its own route (`api::Runs`): notifications to the user's own devices, for agents
 //! (apps push with `ctx.notify`).
 
 use serde_json::json;
 
 use ::custom_build::config::YOURS;
-use crate::core_tools::{Feature, Tool, serves};
+use ::api::Feature;
 
 pub fn feature() -> Feature {
     Feature {
@@ -16,11 +16,10 @@ pub fn feature() -> Feature {
     }
 }
 
-fn tools() -> Vec<Tool> {
+fn tools() -> Vec<serde_json::Value> {
     let none = json!({ "type": "object", "properties": {} });
     vec![
-        Tool::route(
-            json!({
+        json!({
                 "name": "send", "title": "Push a notification",
                 "description": "Push a notification to your devices: { title, body?, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many devices it went to.",
                 "input": { "type": "object", "required": ["title"], "properties": {
@@ -35,10 +34,7 @@ fn tools() -> Vec<Tool> {
                     "why": { "type": "string", "description": "what stopped it, when it didn't go to all" },
                 } },
             }),
-            serves!(serve::send),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "devices", "title": "Your devices that get notifications", "reads": true,
                 "description": "Your devices that get notifications.",
                 "input": none,
@@ -46,18 +42,27 @@ fn tools() -> Vec<Tool> {
                     "name": { "type": "string" }, "via": { "type": "string", "description": "apns, fcm, wns or webpush" }, "since": { "type": "integer", "description": "when it registered, in ms since 1970" },
                 } } },
             }),
-            serves!(serve::devices),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "status", "title": "Which push services are in use", "reads": true,
                 "description": format!("Which push services {YOURS} sends through: apns, fcm, wns, webpush."),
                 "input": none,
                 "output": { "type": "object", "required": ["via"], "properties": { "via": { "type": "array", "items": { "type": "string" } } } },
             }),
-            serves!(serve::status),
-        ),
     ]
+}
+
+/// What serves each tool, in this runtime.
+#[cfg(feature = "node")]
+pub fn runs() -> ::api::Runs {
+    use crate::node::runtime::node_serves;
+    ::api::Runs {
+        tools: vec![
+            ("send", node_serves!(serve::send)),
+            ("devices", node_serves!(serve::devices)),
+            ("status", node_serves!(serve::status)),
+        ],
+        ..::api::Runs::named("push")
+    }
 }
 
 #[cfg(feature = "node")]
@@ -65,7 +70,8 @@ mod serve {
     use anyhow::Result;
     use serde_json::{Map, Value};
 
-    use crate::node::{Caller, Node};
+    use crate::node::Node;
+    use ::api::Caller;
 
     /// A note to the caller's devices: → how many it went to, and how many of theirs get pushes.
     pub async fn send(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {

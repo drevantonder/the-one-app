@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::json;
 
-use crate::cli::{Command, Given};
+use ::api::cli::{Command, Given};
 
 /// Making and joining groups, which aren't tools yet: Settings › Groups does them.
 pub fn commands() -> Command {

@@ -1,8 +1,8 @@
-//! Insights, as the core's tool `insights`, its own route (`core_tools::Runs::Route`).
+//! Insights, as the core's tool `insights`, its own route (`api::Runs`).
 
 use serde_json::json;
 
-use crate::core_tools::{Feature, Tool, serves};
+use ::api::Feature;
 
 pub fn feature() -> Feature {
     Feature {
@@ -10,8 +10,7 @@ pub fn feature() -> Feature {
         title: "Insights",
         description: "How your network and apps are doing: requests, errors, slow calls and traces".into(),
         guide: String::new(),
-        tools: vec![Tool::route(
-            json!({
+        tools: vec![json!({
                 "name": "insights", "title": "Read how things went", "reads": true,
                 "description": "How the network and its apps are doing, from what you may see (an app's only if you may deploy it; a device's only if you're an admin), as a few lines to read: each service's requests, error rate and slowest calls (P95), and the top errors. Give service for that service's operations, its failing and slow traces and its readings (a gauge's newest, a counter's total), then trace_id for one trace's spans. For an admin, the overview also says what the network's use of Cloudflare cost in that time, estimated at list prices. The overview says what AI Gateway's calls spent too, by app, model and user, priced at list prices (of the apps you may see); give ai for that alone. Use it when something is failing, erroring or slow. raw gives the rows themselves instead: requests by the hour, spans, logs, metrics and errors as JSON, each up to limit, and traces, the newest traces with a span of service, name, status and min_ms over the whole range, each with all its spans. Never holds a call's arguments or answer; a real failure keeps what it said, cleaned of anything that names someone or opens something. Errors are what broke: a caller's mistake (refused, invalid input, no such thing) is status unset, listed only with status unset. What's newest takes up to a minute or two to show.",
                 "input": { "type": "object", "properties": {
@@ -29,9 +28,19 @@ pub fn feature() -> Feature {
                     "limit": { "type": "integer", "description": "how many lines to list, or with raw, how many of the newest of each kind of row, up to 10000 (20 and 100 by default)" },
                 } },
                 "output": { "type": ["string", "object"], "description": "the lines to read, or with raw `{ requests, spans, logs, metrics, errors }`", "additionalProperties": true },
-            }),
-            serves!(serve::insights),
-        )],
+            })],
+    }
+}
+
+/// What serves each tool, in this runtime.
+#[cfg(feature = "node")]
+pub fn runs() -> ::api::Runs {
+    use crate::node::runtime::node_serves;
+    ::api::Runs {
+        tools: vec![
+            ("insights", node_serves!(serve::insights)),
+        ],
+        ..::api::Runs::named("insights")
     }
 }
 
@@ -41,7 +50,8 @@ mod serve {
     use serde_json::{Map, Value, json};
 
     use crate::insights::{Ask, cost, view};
-    use crate::node::{Caller, Node};
+    use crate::node::Node;
+    use ::api::Caller;
 
     /// As much of a table as a reading of it needs: its lines are cut, never what they add up from.
     const ALL_ROWS: usize = 10_000;

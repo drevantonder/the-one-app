@@ -1,12 +1,12 @@
 //! onet on a computer, `<cli>t`: the computer's way into its network, holding its device's key (`<home>/device.json`),
 //! and answering this computer's own programs (the CLI, the local MCP server, the desktop app, harnesses) on its
-//! loopback, with the token in its home (`one::api::LOCAL_TOKEN`). What a client answers itself it answers
+//! loopback, with the token in its home (`api::local::LOCAL_TOKEN`). What a client answers itself it answers
 //! (`::scope::settings::answered`); joining with a pairing code, and what the recovery key does here, it does; every other
 //! request goes, as this device, to the best machine for it: its own app runtime by its loopback, which it asks as this
 //! computer's own program, or another over iroh, with the keys it opens. Until its network has an address, all of that
 //! is its own app runtime's to answer. It holds the device's key for that runtime (`/api/holds`), lists it as the
 //! device's the first time it runs (`list_runtime`), tells the relay what the device is on, hears an ask to update
-//! it, and says to every app runtime what the computer's oned says its services are doing (`/api/services`). The computer's oned starts it: `--listen=<addr>` where it answers (the API's own address, `one::api::addr`),
+//! it, and says to every app runtime what the computer's oned says its services are doing (`/api/services`). The computer's oned starts it: `--listen=<addr>` where it answers (the API's own address, `api::local::addr`),
 //! `--runtime=<addr>` where this device's own app runtime does.
 
 use std::path::{Path, PathBuf};
@@ -49,14 +49,14 @@ impl Runtime {
     /// The runtime `key` listed as this device's, as it's asked.
     pub(crate) fn local(&self, key: [u8; 32]) -> crate::Local {
         let folder = self.folder.clone();
-        crate::Local { key, addr: self.at.clone(), token: Arc::new(move || one::api::local_token(&folder)) }
+        crate::Local { key, addr: self.at.clone(), token: Arc::new(move || api::local::local_token(&folder)) }
     }
 
     /// `method` of `path` asked of the runtime, as this computer's own program, with `body`: → its status, headers and
     /// body; again while it starts again (`one::loopback`). What it answers before this computer's onet reaches its
     /// network (`Onet::device`).
     async fn ask(&self, method: String, path: String, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<(u16, Vec<(String, String)>, Vec<u8>)> {
-        let (url, token) = (format!("http://{}{path}", self.at), one::api::local_token(&self.folder).context("this computer's own app runtime hasn't started yet")?);
+        let (url, token) = (format!("http://{}{path}", self.at), api::local::local_token(&self.folder).context("this computer's own app runtime hasn't started yet")?);
         tokio::task::spawn_blocking(move || {
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
             let mut answer = one::loopback::while_refused(|| {
@@ -105,7 +105,7 @@ pub fn run(args: &[String]) -> Result<()> {
     tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(async {
         one::logs::keep(LOG);
         tracing_subscriber::fmt().with_writer(one::logs::Tee).with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "onet=info,one=info,warn".into())).init();
-        let onet = Arc::new(Onet::open(&platform::home(), flag("--listen=").unwrap_or_else(one::api::addr), flag("--runtime="))?);
+        let onet = Arc::new(Onet::open(&platform::home(), flag("--listen=").unwrap_or_else(api::local::addr), flag("--runtime="))?);
         let keeping = onet.clone();
         tokio::spawn(async move {
             loop {
@@ -156,7 +156,7 @@ impl Onet {
             self.tell_relay_of(&device).await?;
             self.told.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        if self.listen == one::api::addr() && matches!(one::mode::here(), one::mode::Mode::Own) && !self.keeping.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        if self.listen == api::local::addr() && matches!(one::mode::here(), one::mode::Mode::Own) && !self.keeping.swap(true, std::sync::atomic::Ordering::Relaxed) {
             tracing::info!("{} {} answering {} from {}", name(), &device.key()[..8], self.listen, self.home.display());
             one::git_wire::wire_here(device.address().to_string());
             let asked = self.clone();

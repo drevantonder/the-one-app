@@ -1,7 +1,8 @@
 //! A node's part of insights: the batch it keeps in memory, sent every minute or so and when it stops, and what it reads
 //! back for the tool.
 
-use crate::insights::{self, Ask, Attrs, Batch, Exception, Failure, Log, Severity, Span, SpanKind, Status, source_map, stage};
+use crate::insights::{self, Ask, Attrs, Batch, Exception, Failure, Log, Severity, Span, SpanKind, Status, source_map};
+use ::api::traceparent::stage;
 
 use super::calls::record::Destination;
 use super::*;
@@ -73,7 +74,7 @@ impl Node {
     pub(super) fn begin_call(&self) -> Call {
         let trace = trace::current().unwrap_or_else(trace::Trace::quiet);
         trace.call_begins();
-        let span = trace::ids::span();
+        let span = ::api::traceparent::ids::span();
         let parent = trace.enter(span.clone());
         let stage = trace.stage();
         trace.stage_is(stage::CHECK);
@@ -97,7 +98,7 @@ impl Node {
         let exception = steps.iter().rev().find(|s| s["step"] == "exception").and_then(|s| Exception::from_json(&s["exception"]));
         let failure = code.map(|code| Failure::of(code.as_deref(), exception.as_ref(), at));
         let status = failure.as_ref().map_or(Status::Unset, Failure::status);
-        let kept = failure.is_some() || ms >= custom_build::protocol::SLOW_MS || insights::sampled(&trace.trace_id());
+        let kept = failure.is_some() || ms >= custom_build::protocol::SLOW_MS || ::api::traceparent::sampled(&trace.trace_id());
         let destination = self.destination(&req.app).unwrap_or(Destination { named: false, kind: "everyone" });
         let build = custom_build::config::BUILD;
         let bundle = self.0.bundles.lock().unwrap().get(&req.app).cloned().filter(|_| destination.named);
@@ -148,7 +149,7 @@ impl Node {
 
     /// A request to one of the API's routes that failed with no call to say so, so its trace has a span to find: named by
     /// its route, never its path.
-    pub(crate) fn finish_route_request(&self, traced: &trace::Trace, route: &str, took: Duration, failed: &crate::api::RouteFailed) {
+    pub(crate) fn finish_route_request(&self, traced: &trace::Trace, route: &str, took: Duration, failed: &::api::RouteFailed) {
         if traced.called() {
             return;
         }
@@ -157,7 +158,7 @@ impl Node {
         let build = custom_build::config::BUILD;
         let attrs = Attrs::default().client("api").build(build).failed(&failure).stage(stage::CHECK).fingerprint(failure.kind(), &name, build);
         let message = matches!(failure, Failure::Broke(_)).then(|| insights::message::cleaned(&failed.said));
-        let span = Span { time: now_ms().saturating_sub(took.as_millis() as u64), trace: traced.trace_id(), span: trace::ids::span(), parent: traced.span(), name, service: insights::own().to_string(), version: None, instance: hex(&self.0.id), kind: SpanKind::Server, status: failure.status(), duration: took.as_millis() as u64, message, attrs };
+        let span = Span { time: now_ms().saturating_sub(took.as_millis() as u64), trace: traced.trace_id(), span: ::api::traceparent::ids::span(), parent: traced.span(), name, service: insights::own().to_string(), version: None, instance: hex(&self.0.id), kind: SpanKind::Server, status: failure.status(), duration: took.as_millis() as u64, message, attrs };
         self.0.insights.0.lock().unwrap().span(span, true, &[]);
     }
 
@@ -179,7 +180,7 @@ impl Node {
         });
         let status = failure.as_ref().map_or(Status::Unset, Failure::status);
         let ms = started.elapsed().as_millis() as u64;
-        let kept = ended.is_err() || ms >= custom_build::protocol::SLOW_MS || insights::sampled(&trace.trace_id());
+        let kept = ended.is_err() || ms >= custom_build::protocol::SLOW_MS || ::api::traceparent::sampled(&trace.trace_id());
         let answers = req.from.is_none() && !run_says;
         let destination = self.destination(&req.app).unwrap_or(Destination { named: false, kind: "everyone" });
         let build = custom_build::config::BUILD;
@@ -358,7 +359,7 @@ impl Node {
         self.device_signal(CANARY, Attrs::default(), Status::Unset);
         let mut batch = self.0.insights.0.lock().unwrap();
         batch.metric(now, insights::CANARY, insights::own(), &instance, &attrs, 1);
-        batch.span(Span { time: now, trace: trace::ids::trace(), span: trace::ids::span(), parent: None, name: CANARY.into(), service: insights::own().into(), version: None, instance, kind: SpanKind::Internal, status: Status::Unset, duration: 0, message: None, attrs }, true, &[]);
+        batch.span(Span { time: now, trace: ::api::traceparent::ids::trace(), span: ::api::traceparent::ids::span(), parent: None, name: CANARY.into(), service: insights::own().into(), version: None, instance, kind: SpanKind::Internal, status: Status::Unset, duration: 0, message: None, attrs }, true, &[]);
     }
 
     /// Whether what was `sent` came back: none if it did, or what's wrong.
@@ -451,7 +452,7 @@ impl Node {
         };
         let service = if destination.named { app.to_string() } else { insights::own().to_string() };
         let message = exception.as_ref().and_then(|x| x.message.as_deref()).map(insights::message::cleaned);
-        let span = Span { time, trace: trace::ids::trace(), span: trace::ids::span(), parent: None, name: span_name, service, version: bundle, instance, kind: SpanKind::Internal, status: Status::Error, duration: ms, message, attrs };
+        let span = Span { time, trace: ::api::traceparent::ids::trace(), span: ::api::traceparent::ids::span(), parent: None, name: span_name, service, version: bundle, instance, kind: SpanKind::Internal, status: Status::Error, duration: ms, message, attrs };
         self.0.insights.0.lock().unwrap().span(span, true, &[]);
     }
 
@@ -472,8 +473,8 @@ impl Node {
             }
         };
         let (parent_trace, parent) = trace::parent_now();
-        let trace = parent_trace.unwrap_or_else(trace::ids::trace);
-        let kept = !ok || ms >= custom_build::protocol::SLOW_MS || insights::sampled(&trace);
+        let trace = parent_trace.unwrap_or_else(::api::traceparent::ids::trace);
+        let kept = !ok || ms >= custom_build::protocol::SLOW_MS || ::api::traceparent::sampled(&trace);
         let mut attrs = Attrs::default().client(req.client.as_deref().unwrap_or("api")).user(&me.user).scope(destination.kind).build(custom_build::config::BUILD).tried(&hex(&device), result);
         if kept {
             attrs = attrs.bytes(req.input.to_string().len() as u64 + answer.map_or(0, |a| a.to_string().len() as u64));
@@ -482,7 +483,7 @@ impl Node {
             attrs = attrs.error(error);
         }
         let service = if destination.named { req.app.clone() } else { insights::own().to_string() };
-        let span = Span { time: now_ms().saturating_sub(ms), trace, span: trace::ids::span(), parent, name: "service.hop".into(), service, version: None, instance: hex(&self.0.id), kind: SpanKind::Client, status: Status::of(ok), duration: ms, message: None, attrs };
+        let span = Span { time: now_ms().saturating_sub(ms), trace, span: ::api::traceparent::ids::span(), parent, name: "service.hop".into(), service, version: None, instance: hex(&self.0.id), kind: SpanKind::Client, status: Status::of(ok), duration: ms, message: None, attrs };
         self.0.insights.0.lock().unwrap().span(span, kept, &[]);
     }
 
@@ -507,8 +508,8 @@ impl Node {
             }
         }
         let service = if destination.named { app.to_string() } else { insights::own().to_string() };
-        let kept = failure.is_some() || ms >= custom_build::protocol::SLOW_MS || insights::sampled(&traced.trace_id());
-        let span = Span { time: now_ms().saturating_sub(ms), trace: traced.trace_id(), span: trace::ids::span(), parent: None, name: "schedule.run".into(), service, version: None, instance: hex(&self.0.id), kind: SpanKind::Internal, status, duration: ms, message, attrs };
+        let kept = failure.is_some() || ms >= custom_build::protocol::SLOW_MS || ::api::traceparent::sampled(&traced.trace_id());
+        let span = Span { time: now_ms().saturating_sub(ms), trace: traced.trace_id(), span: ::api::traceparent::ids::span(), parent: None, name: "schedule.run".into(), service, version: None, instance: hex(&self.0.id), kind: SpanKind::Internal, status, duration: ms, message, attrs };
         self.0.insights.0.lock().unwrap().span(span, kept, &[]);
     }
 
@@ -549,11 +550,11 @@ impl Node {
             }
             let name = if destination.named { item.name.clone() } else { "span".into() };
             let time = now_ms().saturating_sub(item.ms);
-            let (trace, span, parent) = item.ids.clone().unwrap_or_else(|| (trace::ids::trace(), trace::ids::span(), None));
+            let (trace, span, parent) = item.ids.clone().unwrap_or_else(|| (::api::traceparent::ids::trace(), ::api::traceparent::ids::span(), None));
             let mut batch = self.0.insights.0.lock().unwrap();
             match item.span_kind {
                 Some(kind) => {
-                    let kept = !item.ok || item.ms >= custom_build::protocol::SLOW_MS || insights::sampled(&trace);
+                    let kept = !item.ok || item.ms >= custom_build::protocol::SLOW_MS || ::api::traceparent::sampled(&trace);
                     batch.span(Span { time, trace, span, parent, name, service: service.clone(), version: version.clone(), instance: instance.clone(), kind, status: Status::of(item.ok), duration: item.ms, message: None, attrs }, kept, &[]);
                 }
                 None => batch.log(Log { time, trace: Some(trace), span: Some(span), severity: if item.ok { Severity::Info } else { Severity::Error }, body: name, service: service.clone(), version: version.clone(), instance: instance.clone(), attrs }),
@@ -567,7 +568,7 @@ impl Node {
     /// which node answered and whether what it answered failed, or why none did (`error`). One no node answered has no
     /// node's span to be found by, so it's in the Errors list itself.
     async fn client_called(&self, me: &Caller, e: &Value, time: u64, ms: u64, attrs: Attrs) {
-        let Some((trace, span)) = e["traceparent"].as_str().and_then(insights::parent_of) else { return };
+        let Some((trace, span)) = e["traceparent"].as_str().and_then(::api::traceparent::parent_of) else { return };
         let attrs = attrs.user(&me.user);
         let (service, name, mut attrs) = match (e["app"].as_str(), e["tool"].as_str(), e["path"].as_str().and_then(crate::api::route_of)) {
             (Some(app), Some(tool), _) => {
@@ -725,9 +726,9 @@ impl Node {
 /// Why a device couldn't be asked, as `error.type` and as a try's result.
 pub(super) fn asking_failed(err: &anyhow::Error) -> (&'static str, &'static str) {
     if err.is::<net::NotThere>() {
-        (insights::UNREACHABLE, "unreachable")
+        (::api::traceparent::UNREACHABLE, "unreachable")
     } else if err.to_string() == "timed out" {
-        (insights::TIMEOUT, "no answer")
+        (::api::traceparent::TIMEOUT, "no answer")
     } else {
         (insights::LOST, "lost")
     }

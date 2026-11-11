@@ -1,11 +1,11 @@
-//! Devices' tools, each its own route (`core_tools::Runs::Route`). They change who can do what, so the caller's client
+//! Devices' tools, each its own route (`api::Runs`). They change who can do what, so the caller's client
 //! answers them (`settings::answered`), and each route is only this machine's own programs', whose node answers it as
 //! its own device.
 
 use serde_json::json;
 
 use ::custom_build::config::{CLI, NAME, YOURS};
-use crate::core_tools::{Feature, Tool, serves};
+use ::api::Feature;
 
 pub fn feature() -> Feature {
     let guide = format!("A new device signs in, then shows a code of 16 letters and digits. devices_approve with that code, run on one of the user's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, on the device that made the link. devices_versions says what each device and Cloudflare are on; devices_update asks one of your computers to take the newest published version, or Cloudflare (an admin) to deploy it. devices_remove takes a device out, or a user with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in on a computer running {NAME}, by the command {CLI} devices approve <code> --recovery-key <file>, with a file holding {YOURS}'s recovery key, never the key in the chat. If an admin already let that device in, someone holding the recovery key gives it its keys with {CLI} devices restore <code>, from the code on its own screen (This Device's Code in its menu, or {CLI} devices code). An app's schedules run only on a device chosen for them: devices_run_schedules picks one, which then holds that app's keys there and the Vault's, as a call of it is handed them, and no other app's, and devices_stop_schedules stops them.");
@@ -23,10 +23,9 @@ fn said(about: &str) -> serde_json::Value {
     json!({ "type": "object", "required": ["said"], "additionalProperties": true, "properties": { "said": { "type": "string", "description": about } } })
 }
 
-fn tools() -> Vec<Tool> {
+fn tools() -> Vec<serde_json::Value> {
     vec![
-        Tool::route(
-            json!({
+        json!({
                 "name": "requests", "title": "Devices waiting to join", "reads": true,
                 "description": "Devices waiting to join that you may approve: your own new devices, the first device of someone you invited or an admin may let in, and someone with no device left.",
                 "input": { "type": "object", "properties": {} },
@@ -35,10 +34,7 @@ fn tools() -> Vec<Tool> {
                     "yours": { "type": "boolean", "description": "one of your own" }, "new": { "type": "boolean", "description": "the first of someone you invited" },
                 } } },
             }),
-            serves!(serve::requests),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "approve", "title": "Approve a new device",
                 "description": "Approve the new device showing this code. Without confirm, says whose device it is; with confirm: true, lets it in.",
                 "input": { "type": "object", "required": ["code"], "properties": {
@@ -47,19 +43,13 @@ fn tools() -> Vec<Tool> {
                 } },
                 "output": said("whose device it is, or that it's in"),
             }),
-            serves!(serve::approve),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "remove", "title": "Take a device or a user out", "confirm": true,
                 "description": "Take a device out, by its name, or a user, with all their devices: they open nothing made after. Their own data stays.",
                 "input": { "type": "object", "properties": { "device": { "type": "string", "description": "a device's name" }, "user": { "type": "string", "description": "a user's name, to remove them" } } },
                 "output": said("what was taken out"),
             }),
-            serves!(serve::remove),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "versions", "title": "Each device's version", "reads": true,
                 "description": "Which version each device is on, as it last told the network, and whether a newer one is published for it; and Cloudflare, under `cloudflare`.",
                 "input": { "type": "object", "properties": {} },
@@ -69,10 +59,7 @@ fn tools() -> Vec<Tool> {
                     "node": { "type": ["string", "null"], "description": "Cloudflare's: the version its node runs, which follows the device it is deployed from" },
                 } } },
             }),
-            serves!(serve::versions),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "update", "title": "Update a device to the newest version", "confirm": true,
                 "description": "Asks one of your computers, by name, to take the newest published version and restart on it; or Cloudflare, as `cloudflare`, to deploy the newest from the computer it is deployed from. Nothing updates by itself. It can't be undone: nothing has an earlier version to go back to. A device's user or an admin only; Cloudflare, an admin only.",
                 "input": { "type": "object", "required": ["device"], "properties": {
@@ -80,10 +67,7 @@ fn tools() -> Vec<Tool> {
                 } },
                 "output": said("that it was asked"),
             }),
-            serves!(serve::update),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "run_schedules", "title": "Run an app's schedules on a device",
                 "description": "Run an app's schedules on one of your devices: the device holds only that app's keys in that place, and the Vault's there, for 30 days and longer as you use the app. Settings › Devices lists them under App Schedules, with Stop.",
                 "input": { "type": "object", "required": ["app", "device"], "properties": {
@@ -94,10 +78,7 @@ fn tools() -> Vec<Tool> {
                 } },
                 "output": said("which device runs them now, and for how long"),
             }),
-            serves!(serve::run_schedules),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "stop_schedules", "title": "Stop an app's schedules on a device",
                 "description": "Stop an app's schedules on a device: they no longer run there, and it no longer opens that app's data.",
                 "input": { "type": "object", "required": ["app", "device"], "properties": {
@@ -107,10 +88,7 @@ fn tools() -> Vec<Tool> {
                 } },
                 "output": said("which device no longer runs them"),
             }),
-            serves!(serve::stop_schedules),
-        ),
-        Tool::route(
-            json!({
+        json!({
                 "name": "invite", "title": "Invite someone",
                 "description": "Lets someone new join, once, for a few days: a link to give them yourself: with their email, where the network has providers, it's the network's address, and they sign in with that email. It sends nothing.",
                 "input": { "type": "object", "required": ["name"], "properties": {
@@ -121,9 +99,26 @@ fn tools() -> Vec<Tool> {
                 } },
                 "output": said("the link to give them, and what happens when they open it"),
             }),
-            serves!(serve::invite),
-        ),
     ]
+}
+
+/// What serves each tool, in this runtime.
+#[cfg(feature = "node")]
+pub fn runs() -> ::api::Runs {
+    use crate::node::runtime::node_serves;
+    ::api::Runs {
+        tools: vec![
+            ("requests", node_serves!(serve::requests)),
+            ("approve", node_serves!(serve::approve)),
+            ("remove", node_serves!(serve::remove)),
+            ("versions", node_serves!(serve::versions)),
+            ("update", node_serves!(serve::update)),
+            ("run_schedules", node_serves!(serve::run_schedules)),
+            ("stop_schedules", node_serves!(serve::stop_schedules)),
+            ("invite", node_serves!(serve::invite)),
+        ],
+        ..::api::Runs::named("devices")
+    }
 }
 
 #[cfg(feature = "node")]
@@ -131,7 +126,8 @@ mod serve {
     use anyhow::Result;
     use serde_json::{Map, Value};
 
-    use crate::node::{Caller, Node};
+    use crate::node::Node;
+    use ::api::Caller;
 
     /// This machine's node answers as its own device (`settings`), signing what changes who can do what.
     async fn as_mine(node: &Node, path: &str, input: &Map<String, Value>) -> Result<Value> {

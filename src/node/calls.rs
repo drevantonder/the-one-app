@@ -167,7 +167,7 @@ impl std::error::Error for Stopped {}
 /// twice, as it's a tool that only reads, or it never reached its app. An app that ran may have done something outside
 /// (sent a message) and still be running.
 fn may_go_on(reads: bool, stage: &str) -> bool {
-    use crate::insights::stage::{PREPARE, RUN, WRITE};
+    use ::api::traceparent::stage::{PREPARE, RUN, WRITE};
     reads || ![RUN, PREPARE, WRITE].contains(&stage)
 }
 
@@ -181,21 +181,6 @@ async fn unless_writing<T>(deadline: tokio::time::Instant, writing: &AtomicBool,
     if writing.load(Ordering::Relaxed) { Some(work.await) } else { None }
 }
 
-/// A call a client device picked this node for that this node can't run: the API answers 421 with the nodes that can,
-/// in the order to ask them (`{ error, elsewhere }`), which the client asks itself, handing each its own keys.
-#[derive(Debug)]
-pub struct Elsewhere {
-    pub why: String,
-    pub nodes: Vec<String>,
-}
-
-impl std::fmt::Display for Elsewhere {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.why)
-    }
-}
-
-impl std::error::Error for Elsewhere {}
 
 /// How a device asked for a call didn't answer: it lacked keys its caller hands (this device), or never answered.
 enum Asked {
@@ -226,7 +211,7 @@ impl std::error::Error for NoneCould {}
 impl Node {
     /// Runs a tool for this device's local user: here, or on the nearest device that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
-        self.call_as(req, Caller::local(self)?).await
+        self.call_as(req, self.caller()?).await
     }
 
     /// Runs a tool for `me`, whom this device acts for: here, or on the nearest device that can.
@@ -247,7 +232,7 @@ impl Node {
         if let Some(cloudflare) = self.names_cloudflare(&req) {
             let why = self.cloudflare_is_asked_directly();
             trace::note(req.named(json!({ "step": "device", "device": self.device_name(), "result": "elsewhere", "here": true, "why": why })), Duration::ZERO);
-            return Err(Elsewhere { why, nodes: vec![hex(&cloudflare)] }.into());
+            return Err(::api::Elsewhere { why, nodes: vec![hex(&cloudflare)] }.into());
         }
         if req.service.is_some() || req.device.is_some() {
             return self.route(req, me).await;
@@ -264,7 +249,7 @@ impl Node {
         if !devices.contains(&self.0.id) {
             let why = format!("{name} doesn't run everything {} reaches for you", req.app);
             tried("elsewhere", Some(&why));
-            return Err(Elsewhere { why, nodes: others }.into());
+            return Err(::api::Elsewhere { why, nodes: others }.into());
         }
         match self.run_or_need(&req, &me).await {
             Ok(Reply::Ok(v)) => {
@@ -277,7 +262,7 @@ impl Node {
             }
             Ok(Reply::Elsewhere(why)) if !others.is_empty() => {
                 tried("elsewhere", Some(&why));
-                Err(Elsewhere { why, nodes: others }.into())
+                Err(::api::Elsewhere { why, nodes: others }.into())
             }
             Ok(Reply::Elsewhere(why)) => bail!("None of your devices can do this now. Try again soon. ({name}: {why})"),
             Ok(Reply::Needs(need)) | Err(need) => {
@@ -338,7 +323,7 @@ impl Node {
         let limit = self.limit(&req).await;
         let candidates = self.candidates_or_starting(&req, &me, limit).await?;
         let left = limit.saturating_sub(began.elapsed());
-        trace::stage(crate::insights::stage::ROUTE);
+        trace::stage(::api::traceparent::stage::ROUTE);
         // A device that stalls costs a call's whole limit, so no call waits on more than one more after that.
         let most = limit * 2;
         // Devices are asked in turn; an app's call that one hasn't started within its usual time (`taken`) is asked of
@@ -564,7 +549,7 @@ impl Node {
         let why = match (r["name"].as_str(), r["online"] == true, r["problem"].as_str()) {
             _ if runs.is_empty() => "it runs on none".to_string(),
             (None, ..) => "its device was removed".to_string(),
-            (Some(node), false, _) => crate::cli::off(node, r["seen"].as_u64()),
+            (Some(node), false, _) => ::api::cli::off(node, r["seen"].as_u64()),
             (Some(node), true, problem) => format!("on {node}, {}", problem.unwrap_or("it isn't running")),
         };
         Some(format!("{title} needs a device that's on: {why}. Turn it on, or move it with apps_move {app} <node> (apps_devices {app} lists them)."))
@@ -845,7 +830,7 @@ impl Node {
             },
             Some(Err(_)) | None => {
                 let at = call.trace.stage();
-                call.trace.stage_is(crate::insights::stage::LIMIT);
+                call.trace.stage_is(::api::traceparent::stage::LIMIT);
                 let reads = self.reads(req).await;
                 if may_go_on(reads, at) { Reply::Elsewhere(stopped(limit)) } else { Reply::error(stopped(limit)) }
             }
@@ -907,7 +892,7 @@ impl Node {
             return Ok(Reply::Error(format!("{title} was deleted: its owners can restore it from Recently Deleted in the App Store"), Some(custom_build::protocol::code::APP_DELETED.into())));
         }
         if let Some(why) = self.stopped(&req.app) {
-            trace::stage(crate::insights::stage::GUARD);
+            trace::stage(::api::traceparent::stage::GUARD);
             return Ok(Reply::error(why));
         }
         // A tool of a lab that's off isn't there.
@@ -925,7 +910,7 @@ impl Node {
             want.extend(scopes.iter().map(|s| (s.clone(), key::APP, key::CoreDb::Vault.name())));
         }
         let checking = Instant::now();
-        trace::stage(crate::insights::stage::KEYS);
+        trace::stage(::api::traceparent::stage::KEYS);
         self.needs(me, &want).await?;
         trace::note(json!({ "step": "keys" }), checking.elapsed());
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
@@ -934,7 +919,7 @@ impl Node {
             if !self.reads(req).await {
                 let base = format!("{}/{}/calls/{id}", bucket::folder(&scope.to_string()), req.app);
                 let leasing = Instant::now();
-                trace::stage(crate::insights::stage::LEASE);
+                trace::stage(::api::traceparent::stage::LEASE);
                 let taken = self.take_lease(&base).await?;
                 trace::note(json!({ "step": "lease" }), leasing.elapsed());
                 let Some(taken) = taken else {
@@ -951,18 +936,18 @@ impl Node {
         // stopped; then its steps are written whatever happens to whoever's waiting.
         let running = Instant::now();
         let answered = AtomicBool::new(false);
-        trace::stage(crate::insights::stage::RUN);
+        trace::stage(::api::traceparent::stage::RUN);
         let ran = unless_writing(deadline, writing, async {
             let ran = self.0.apps.call(&req.app, &req.tool, input, &ctx, deadline.saturating_duration_since(tokio::time::Instant::now())).await;
             answered.store(true, Ordering::Relaxed);
             let mut outcome = ran?;
             trace::note(req.named(json!({ "step": "run" })), running.elapsed());
             let preparing = Instant::now();
-            trace::stage(crate::insights::stage::PREPARE);
+            trace::stage(::api::traceparent::stage::PREPARE);
             let prepared = self.prepare_appends(std::mem::take(&mut outcome.appends), &scopes, me).await?;
             trace::note(json!({ "step": "prepare" }), preparing.elapsed());
             writing.store(true, Ordering::Relaxed);
-            trace::stage(crate::insights::stage::WRITE);
+            trace::stage(::api::traceparent::stage::WRITE);
             let writing_at = Instant::now();
             let (node, app, scopes, me) = (self.clone(), req.app.clone(), scopes.clone(), me.clone());
             let traced = trace::current();
@@ -1071,7 +1056,7 @@ mod tests {
     /// One stopped at its limit runs on another device only if nothing it did could then be done twice.
     #[test]
     fn a_call_that_may_have_done_something_is_never_tried_again_after_its_limit() {
-        use crate::insights::stage::{KEYS, LEASE, PREPARE, RUN, WRITE};
+        use ::api::traceparent::stage::{KEYS, LEASE, PREPARE, RUN, WRITE};
         assert!(may_go_on(true, RUN), "it only reads");
         assert!(may_go_on(false, KEYS), "it never reached its app");
         assert!(may_go_on(false, LEASE), "it never reached its app");

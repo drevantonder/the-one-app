@@ -3,7 +3,7 @@
 use ::custom_build::config::CLI;
 use serde_json::Value;
 
-use super::input::{kebab, places, required};
+use ::api::tools::{kebab, places, required};
 use super::{device_about, own_device};
 
 fn kind(prop: &Value) -> String {
@@ -89,7 +89,7 @@ pub(super) fn help(app: &Value, tool: &Value, call: bool) -> String {
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
     rows.push(("--json".into(), "print what it gives back as JSON".into()));
     if tool["confirm"] == true {
-        rows.push(("--confirm".into(), format!("go ahead without asking: it {}", crate::core_tools::SENDS)));
+        rows.push(("--confirm".into(), format!("go ahead without asking: it {}", ::api::SENDS)));
     }
     let width = rows.iter().map(|(f, _)| f.chars().count()).max().unwrap_or(0).min(32);
     let mut text = format!("Usage: {usage}\n\n{}\n\nInputs:\n", tool["description"].as_str().unwrap_or(""));
@@ -101,7 +101,7 @@ pub(super) fn help(app: &Value, tool: &Value, call: bool) -> String {
     text.push('\n');
     text.push_str(&match (tool["reads"] == true, tool["confirm"] == true) {
         (true, _) => "It only reads.\n".to_string(),
-        (_, true) => format!("{} At a terminal, it asks first.\n", crate::core_tools::Reader::Cli.needs_confirm()),
+        (_, true) => format!("{} At a terminal, it asks first.\n", ::api::Reader::Cli.needs_confirm()),
         _ => String::new(),
     });
     if !required.is_empty() {

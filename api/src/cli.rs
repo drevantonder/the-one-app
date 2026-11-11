@@ -5,8 +5,9 @@ use std::io::IsTerminal;
 
 use anyhow::Result;
 
-use ::custom_build::config::CLI;
-use crate::api::Client;
+use custom_build::config::CLI;
+
+use crate::client::Client;
 
 /// Why a command failed, when its exit code says more than 1: what was typed is wrong (2), or it was refused (3).
 #[derive(Debug)]
@@ -138,7 +139,7 @@ pub fn asked_yes(command: &str) -> Result<bool> {
     if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
         return Ok(false);
     }
-    eprint!("{command} {}. Go ahead? [y/N] ", crate::core_tools::SENDS);
+    eprint!("{command} {}. Go ahead? [y/N] ", crate::feature::SENDS);
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
     if !matches!(answer.trim(), "y" | "Y" | "yes" | "Yes") {
@@ -149,7 +150,7 @@ pub fn asked_yes(command: &str) -> Result<bool> {
 
 /// How long ago `ms` (since 1970) was, for users: "just now", "5 min ago", "3 h ago", "2 days ago".
 pub fn ago(ms: u64) -> String {
-    let s = ::custom_build::now_ms().saturating_sub(ms) / 1000;
+    let s = custom_build::now_ms().saturating_sub(ms) / 1000;
     match s {
         0..60 => "just now".into(),
         60..3600 => format!("{} min ago", s / 60),
