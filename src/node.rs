@@ -239,6 +239,8 @@ pub struct Inner {
     /// The keys of the apps whose schedules this device runs for their users.
     app_schedules: app_schedules::State,
     owed: Mutex<devices::Owed>,
+    /// Apps' keys the bucket hadn't, by scope, app and epoch, as of who's who at that position (`Node::sealed_keys`).
+    no_app_keys: Mutex<HashMap<(Scope, String, u32), Option<u64>>>,
     issuer_keys: Mutex<settings::IssuerKeys>,
     net: net::Net,
     /// How many times its deploys were settled (`settle`), the first once its apps are loaded.
@@ -372,6 +374,7 @@ impl Node {
             broken: Default::default(),
             app_schedules: Default::default(),
             owed: Default::default(),
+            no_app_keys: Default::default(),
             issuer_keys: Default::default(),
             net: Default::default(),
             settled: tokio::sync::watch::channel(0).0,

@@ -75,16 +75,23 @@ impl Node {
                 }
                 Ok(json!({ "epoch": newest, "sealed": sealed }))
             }
+            // One the bucket hadn't is asked for again only once who's who has moved on, or this node keeps one: a
+            // device that wants it makes it, and is given whichever is there (`seal_key`).
             (None, Some(app)) => {
                 ensure!(app == scopes::APP || scopes::valid_app_name(app), "{app} isn't an app's name");
-                let got = futures_util::future::try_join_all((1..=newest).map(|n| {
-                    let (bucket, at) = (&bucket, crate::keys::app_key_name(&name, app, n));
+                let at = self.with(|i| Ok(i.r.at()))?;
+                let id = |n: u32| (scope.clone(), app.to_string(), n);
+                let asked: Vec<u32> = (1..=newest).filter(|n| self.0.no_app_keys.lock().unwrap().get(&id(*n)) != Some(&at)).collect();
+                let got = futures_util::future::try_join_all(asked.iter().map(|n| {
+                    let (bucket, at) = (&bucket, crate::keys::app_key_name(&name, app, *n));
                     async move { Bucket::get(bucket, &at).await }
                 }))
                 .await?;
-                for (n, o) in (1..=newest).zip(got) {
-                    if let Some(o) = o {
-                        sealed.insert(n.to_string(), json!(B64U.encode(&o.bytes)));
+                let mut missing = self.0.no_app_keys.lock().unwrap();
+                for (n, o) in asked.into_iter().zip(got) {
+                    match o {
+                        Some(o) => drop(sealed.insert(n.to_string(), json!(B64U.encode(&o.bytes)))),
+                        None => drop(missing.insert(id(n), at)),
                     }
                 }
                 Ok(json!({ "sealed": sealed }))
@@ -162,6 +169,7 @@ impl Node {
                 allowed!(self.with(|i| Ok(i.r.db().may(&caller.user, "use", &scopes::object(scope))))?, "you don't use {scope}");
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
                 let key = crate::keys::app_key_name(&name, app, n);
+                self.0.no_app_keys.lock().unwrap().remove(&(scope.clone(), app.to_string(), n));
                 let there = match crate::database::stored::created(&bucket, &key, &sealed).await? {
                     true => sealed,
                     false => Bucket::get(&bucket, &key).await?.context("an app's key went as it was made")?.bytes,
