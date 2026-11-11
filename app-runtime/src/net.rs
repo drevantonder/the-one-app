@@ -157,6 +157,8 @@ impl Host {
             };
             *self.0.net.endpoint.lock().unwrap() = Some((address.clone(), endpoint.clone()));
             tracing::info!("this device is reached through the relay at {address}");
+            // Who else is on the relay, so its first calls know whom to wait for.
+            self.read_connected();
             while let Some(incoming) = endpoint.accept().await {
                 let host = self.clone();
                 tokio::spawn(async move {
