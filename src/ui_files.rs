@@ -3,14 +3,29 @@
 
 use std::path::{Path, PathBuf};
 
+/// The folders of the Workers that have one of their own, and their names in the source tree they're built from.
+const WORKERS: [(&str, &str); 1] = [("relay", "relay")];
+
+/// What stays in the repo: the relay's WebAssembly is built from `relay/protos/` by hand (`relay/build.sh`), so only what it
+/// built ships.
+const NOT_SHIPPED: [&str; 2] = ["relay/protos/", "relay/build.sh"];
+
 /// Each file in the checkout at `root` the Workers and the web client are made of: its path among them, and where it
 /// is. All but the custom build's logo and icon, which its config names.
 pub fn list(root: &Path) -> Vec<(String, PathBuf)> {
     let cloudflare = root.join("cloudflare");
     let mut files = collect(&cloudflare);
-    // The Workers' tests stay in the repo. The relay's WebAssembly is built from relay/protos/ by hand (relay/build.sh),
-    // so only what it built ships; the Cloudflare node (node/) is Rust, which ships built.
-    files.retain(|(rel, _)| !rel.starts_with("test/") && !rel.starts_with("relay/protos/") && rel != "relay/build.sh" && !rel.starts_with("node/"));
+    // The Workers' tests stay in the repo, and the Cloudflare node (node/) is Rust, which ships built.
+    files.retain(|(rel, _)| !rel.starts_with("test/") && !rel.starts_with("node/"));
+    // Each Worker's own folder, in the source tree the Workers are built from, so their imports of each other keep working.
+    for (folder, source) in WORKERS {
+        for (rel, abs) in collect(&root.join(folder)) {
+            let path = format!("{folder}/{rel}");
+            if !NOT_SHIPPED.iter().any(|p| path.starts_with(p)) {
+                files.push((format!("{source}/{rel}"), abs));
+            }
+        }
+    }
     // The gateway serves the screens' design kit beside the web client, the same files nodes put in screens.
     // Not its source maps: only nodes read those, and every client would download them.
     files.extend(collect(&root.join("src/screen")).into_iter().filter(|(rel, _)| !rel.ends_with(".html.map")).filter_map(|(rel, abs)| {

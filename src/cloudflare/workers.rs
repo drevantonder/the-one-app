@@ -17,7 +17,7 @@ pub type Binding = (String, String, bool);
 /// One of the network's Workers: everything said about it is here.
 pub struct Worker {
     pub name: &'static str,
-    /// Its module, in `cloudflare/`. Its WebAssembly is the `.wasm` files in its module's folder, modules of its own
+    /// Its module, among the Workers' files (`ui_files::list`). Its WebAssembly is the `.wasm` files in its module's folder, modules of its own
     /// (Workers can't compile it).
     pub entry: &'static str,
     /// Its Durable Objects' classes, if it keeps anything, in the order they were added: each one's migration is its place.

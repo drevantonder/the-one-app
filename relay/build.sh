@@ -5,7 +5,7 @@
 # records what it was built from in protos.sha256, which `cargo test` holds protos/ to (tests/tree.rs).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-target="$here/../../target/relay-protos"
+target="$here/../target/relay-protos"
 cargo build --locked --release --target wasm32-unknown-unknown --manifest-path "$here/protos/Cargo.toml" --target-dir "$target"
 wasm-bindgen --target web --no-typescript --out-dir "$here" "$target/wasm32-unknown-unknown/release/relay_protos.wasm"
 if command -v wasm-opt >/dev/null; then

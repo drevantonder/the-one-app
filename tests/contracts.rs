@@ -808,7 +808,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
         let mut stack = vec![root.join(dir)];
         while let Some(dir) = stack.pop() {
             let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-            if matches!(name, "node_modules" | "dist" | "target" | "test" | "tests" | "relay" | "service") {
+            if matches!(name, "node_modules" | "dist" | "target" | "test" | "tests" | "service") {
                 continue;
             }
             for f in std::fs::read_dir(&dir).into_iter().flatten().flatten() {

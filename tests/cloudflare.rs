@@ -7,35 +7,11 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use one::cloudflare::{self, Served};
 use serde_json::{Value, json};
 
-/// The Workers' files as they are in this checkout, tests and all, with the screens' design kit and onboarding's pages where build.rs puts them.
+/// The Workers' files as they are in this checkout, and their tests (`cloudflare/test/`), as `ui_files::list` has them.
 fn files() -> Vec<(String, Vec<u8>)> {
-    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
-        for entry in std::fs::read_dir(dir).unwrap().flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') || name == "node_modules" {
-                continue;
-            }
-            let path = entry.path();
-            if path.is_dir() {
-                walk(root, &path, out);
-            } else {
-                out.push((path.strip_prefix(root).unwrap().to_string_lossy().into(), std::fs::read(&path).unwrap()));
-            }
-        }
-    }
-    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("cloudflare");
-    let mut out = Vec::new();
-    walk(&root, &root, &mut out);
-    let screen = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("src/screen");
-    let mut kit = Vec::new();
-    walk(&screen, &screen, &mut kit);
-    let kit = kit.into_iter().filter_map(|(path, bytes)| match path.strip_prefix("ui/") {
-        Some(ui) => ui.strip_prefix("dist/").map(|built| (format!("ui/{built}"), bytes)),
-        None => Some((path, bytes)),
-    });
-    out.extend(kit.map(|(path, bytes)| (format!("web/screen/{path}"), bytes)));
-    out.push(("onboarding/pages.js".into(), std::fs::read(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../src/onboarding/pages.js"))).unwrap()));
-    out
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let tests = one::ui_files::collect(&root.join("cloudflare/test")).into_iter().map(|(name, path)| (format!("test/{name}"), path));
+    one::ui_files::list(root).into_iter().chain(tests).map(|(name, path)| (name, std::fs::read(path).unwrap())).collect()
 }
 
 fn module(entry: &str) -> Vec<u8> {
@@ -1017,7 +993,7 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
 const ROOT: [u8; 32] = [5; 32];
 
 /// iroh endpoints, as nodes are, through the relay at a network's address and nothing else: its relay protocol is
-/// iroh-relay's Rust as WebAssembly in a Durable Object (cloudflare/relay/), which must agree with iroh's own.
+/// iroh-relay's Rust as WebAssembly in a Durable Object (relay/), which must agree with iroh's own.
 mod relay {
     use std::time::Duration;
 
