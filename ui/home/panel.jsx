@@ -44,7 +44,7 @@ const host = (p) => ({
 
 /// The user's devices, this one first.
 function devices() {
-  // This device: the computer's own node, as the app says (`here`), not whichever node answered.
+  // This device: the computer's own app runtime, as the app says (`here`), not whichever device answered.
   const state = home.data.state, me = state?.user?.id, here = one.params?.here
   const mine = (state?.network?.devices || []).filter((d) => !d.user || d.user === me)
   return mine.map((d) => ({ key: d.key, name: String(d.name || "").replace(/\.local$/, ""), presence: one.seen(d), here: !!here && (d.key === here || d.device === here) }))

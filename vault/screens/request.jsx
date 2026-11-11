@@ -1,5 +1,5 @@
 // A request for an item an app or an agent may use: who asks, in the title; what they'd get and where it goes, in one
-// grey line; then the user's items that have the fields it wants, to pick one, or new values, which go to the node and
+// grey line; then the user's items that have the fields it wants, to pick one, or new values, which go to the app runtime and
 // nowhere else. Allow is the only way to say yes, and the sheet's Cancel declines (screens.js). The asker never sees a
 // secret. It closes itself with whether it was allowed, as it is when it's answered somewhere else (another device, an
 // agent's CLI).

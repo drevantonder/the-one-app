@@ -1,6 +1,6 @@
 // The web client's page, kept in this browser so it opens with no trip: each of the client's own places (web.js's
 // route()) is answered with the page as it was last, and the page as it is now is kept for next time. Its scripts and
-// styles are named by their content (`?v=`), so the browser keeps them for good. Nothing else is touched: a node's
+// styles are named by their content (`?v=`), so the browser keeps them for good. Nothing else is touched: an app runtime's
 // answers, signing in and every other file go to the network as they would without this.
 //
 // And its notifications: each (notifications/worker/) carries a note sealed to one of this browser's devices (one per user

@@ -1,4 +1,4 @@
-// Connect Your AI: what to paste into an AI so it connects itself, as the node says (`agent_prompt`, scope/src/state.rs).
+// Connect Your AI: what to paste into an AI so it connects itself, as the app runtime says (`agent_prompt`, scope/src/state.rs).
 //
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/connect-ai.html.
 import { useEffect, useState } from "react"

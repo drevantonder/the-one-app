@@ -268,7 +268,7 @@ export function app(native) {
     /// touch and hold, which lifts what a screen marks `data-one-held` with its menu.
     look: () => ({ __oneApp: true, ...(about?.scan ? { __oneCan: { scan: true } } : {}), ...(about?.lifts ? { __oneLifts: true } : {}) }),
 
-    /// The panel's: what its screen is told (this device's node), and its rows under it, each `[label, run, checked]`
+    /// The panel's: what its screen is told (this device's app runtime), and its rows under it, each `[label, run, checked]`
     /// (checked null for none).
     panelScreen: () => ({ here: about.node || "" }),
     panelRows: (signedIn, name, redraw) => [

@@ -50,7 +50,7 @@ export const tell = (m) => {
 };
 
 /// What this device keeps of the screens it showed, until it signs out, for the user who saw them: each route's page as
-/// the node last gave it (`page`), and its still (`still`), the page as it last looked here without its scripts, which
+/// the app runtime last gave it (`page`), and its still (`still`), the page as it last looked here without its scripts, which
 /// bridge.js sends.
 const kept = {
   // An https URL of its own, which the cache takes on any page's origin (the app's tauri:// one too, where it
@@ -82,7 +82,7 @@ const kept = {
 const same = (a, b) => a?.replace(/nonce(-|=")[0-9a-f]{32}/g, "") === b?.replace(/nonce(-|=")[0-9a-f]{32}/g, "");
 
 /// A route's page, asked for once (the one the window opens on as it starts, beside the sidebar's): an app's from
-/// the node, and kept; the client's own from this client's files (`ownPage`).
+/// the app runtime, and kept; the client's own from this client's files (`ownPage`).
 let asked = null;
 function screenPage(r) {
   const key = JSON.stringify(r);
@@ -96,7 +96,7 @@ function screenPage(r) {
   return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope, linked: true }, raw: true }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
 }
 
-/// One of the client's own screens' pages, which act as the user, so never a node's: the address's
+/// One of the client's own screens' pages, which act as the user, so never an app runtime's: the address's
 /// `screens/<name>.html` (ui/src/screen.rs's `client_template`), with a nonce of its own and its params filled in.
 async function ownPage(r) {
   const resp = await fetch(asset(`screens/${files[`screens/${r.name}.html`] ? r.name : "missing"}.html`));
@@ -108,10 +108,10 @@ async function ownPage(r) {
 /// The page of the screen the window opens on, asked for as it starts.
 export const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r) }).page.catch(() => {});
 
-/// A page that links @one/ui and the bridge (`linked`, ui/src/screen.rs: an app's as its node gives it, and the client's
+/// A page that links @one/ui and the bridge (`linked`, ui/src/screen.rs: an app's as its app runtime gives it, and the client's
 /// own), with them written in from this window's cache, where its own page has them: a sandboxed frame's cache is its
 /// alone, so it would download them again for every screen. Each that can't be had here stays linked. Its import map
-/// is this client's own too, not the one the node wrote in, which says what @one/ui exported when that node was built.
+/// is this client's own too, not the one the app runtime wrote in, which says what @one/ui exported when that app runtime was built.
 const LINKED = /<link rel="stylesheet" href="(\/screen\/[a-z/]+\.css\?v=[0-9a-f]+)">|<script( nonce="[0-9a-f]+")? src="(\/screen\/[a-z/]+\.js\?v=[0-9a-f]+)"><\/script>/g;
 const IMPORT_MAP = /<script( nonce="[0-9a-f]+")? type="importmap">.*?<\/script>/s;
 const KIT = "/screen/ui/ui.js";
@@ -204,7 +204,7 @@ function screenIn(box, r, from) {
   return frameFor(r, into, { kitted: frame });
 }
 
-/// What a route shows, in a new frame: its page as kept here if there is one, else as the node gives it now; one
+/// What a route shows, in a new frame: its page as kept here if there is one, else as the app runtime gives it now; one
 /// that's changed since (its app deployed) starts the screen again. → the frame's record, whose `drawn` is once its still
 /// or the screen itself has drawn. Beside the sidebar, its still shows until the screen says it has drawn.
 function frameFor(r, into, { sheet, kitted } = {}) {
@@ -237,13 +237,13 @@ function frameFor(r, into, { sheet, kitted } = {}) {
     else into.append(frame);
   };
   const fresh = screenPage(r);
-  // The client's own aren't kept: one kept before they came from its files came from a node.
+  // The client's own aren't kept: one kept before they came from its files came from an app runtime.
   const tried = Promise.all([r.kind === "own" ? null : kept.get("page", f.key), sheet ? null : kept.get("still", f.key, into.clientWidth)]).then(([page, still]) => {
     if (f.page) return;
     if (still) showStill(f, still);
     if (page) draw(page);
   });
-  /// The page as its node gives it now: drawn, or, if it's changed since the kept one, the screen started again.
+  /// The page as its app runtime gives it now: drawn, or, if it's changed since the kept one, the screen started again.
   const update = async (page) => {
     if (!f.html) return draw(page);
     if (same(page, f.page)) return;
@@ -263,7 +263,7 @@ function frameFor(r, into, { sheet, kitted } = {}) {
   fresh.then((page) => ((came = true), offline.done(f.key), update(page)), async (err) => {
     await tried;
     if (err.code === CODES.appDeleted) return (came = true), offline.done(f.key), deleted(f, r);
-    // No node answered: it opens by itself once one does.
+    // No device answered: it opens by itself once one does.
     if (f.page || err.unanswered) return away();
     screenDrew(f);
     failed(into, one.plain(err).title);
@@ -448,7 +448,7 @@ export const screen = {
       });
     }
     if (early && !from) drop(early.into);
-    // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the gateway's, not a node's.
+    // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the gateway's, not an app runtime's.
     const item = r.kind === "own" && settingsItems().find((i) => i.name === r.name && i.url && here(i.url));
     let f;
     if (early && from) f = early;
@@ -510,7 +510,7 @@ export function openSheet(r) {
 }
 
 /// A request for an item, in a sheet → whether it was allowed. Closed without an answer, it's declined; if that can't
-/// reach a node the request just waits in Requests until it expires. However it closed, Settings' badge counts it
+/// reach an app runtime the request just waits in Requests until it expires. However it closed, Settings' badge counts it
 /// answered at once.
 export async function openRequest(scope, id) {
   const answer = await openSheet(own("request", { scope, id }));
@@ -573,7 +573,7 @@ addEventListener("message", async (e) => {
     const got = mine ? null : await platform.kept(r.app, String(m.tool || ""), m.input ?? {}).catch(() => null);
     return void f.frame.contentWindow?.postMessage({ oneReply: id, ok: got }, "*");
   }
-  // What's here needs no node: the icons, and what this device keeps for its own screens (`one.cache`, the home's last
+  // What's here needs no device: the icons, and what this device keeps for its own screens (`one.cache`, the home's last
   // pages), so a screen offline starts from them.
   if (m.type !== "icons" && !(mine && m.type === "cache")) await joined;
   const reply = (ok) => f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*");

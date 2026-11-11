@@ -1,6 +1,6 @@
 // The web client: the window of every client, in a browser and in the app (platform.js says which, once). It asks the
-// user's nodes as their device (request.js), and draws the window (window.js) around screens it frames (screens.js),
-// at the place the URL names (routes.js), from what the nodes say (store.js). App screens are untrusted: each runs in a
+// user's app runtimes as their device (request.js), and draws the window (window.js) around screens it frames (screens.js),
+// at the place the URL names (routes.js), from what the app runtimes say (store.js). App screens are untrusted: each runs in a
 // sandboxed frame, and this page answers its bridge, making each call itself; the client's own screens (Settings) are
 // answered as the user (settings.js). The modules import only downward, as each is named by its content with its
 // imports' names in it (ui/src/web.rs): view, platform, request, store, routes, offline, settings, moves, screens, window, web.
@@ -73,7 +73,7 @@ async function start() {
     request = { scope: q.get("scope"), id: q.get("id") };
     history.replaceState(null, "", "/");
   }
-  // Everything the window opens on, asked for at once: its screen, beside the node's state and apps; meanwhile the
+  // Everything the window opens on, asked for at once: its screen, beside the network's state and apps; meanwhile the
   // window as it was last. Its screens' asks wait until this is its user's device (`joined`).
   ask(route());
   if (lastWindow()) render();
@@ -81,7 +81,7 @@ async function start() {
   setJoining(true);
   for (let misses = 1; ; misses++) {
     try {
-      // A device from the start, as a node may need the keys it hands (the Cloudflare node, even for the state).
+      // A device from the start, as an app runtime may need the keys it hands (oned on Cloudflare, even for the state).
       let waited = false;
       await platform.join((code, invited) => ((waited = true), showJoin(code, invited)));
       if (waited) show(h(ui.Starting, { logo }));
@@ -115,7 +115,7 @@ async function start() {
       break;
     } catch (err) {
       if (err.signedOut) return clearTimeout(away), clearTimeout(slow), err.removed ? undefined : void signOut(err.message);
-      // What it showed last stays, as a screen whose node is restarting does, saying so.
+      // What it showed last stays, as a screen whose app runtime is restarting does, saying so.
       if (!windowShowing()) (console.warn("starting:", err.message), showUnreachable());
       else offline.add("state", () => refreshState(), lastAt());
       await sleep(retryWait(misses));

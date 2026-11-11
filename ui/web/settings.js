@@ -1,12 +1,12 @@
 // What the client's own screens (Settings, Home, the panel) ask of this page, as the user, which no app's may:
-// `one.api` to their nodes and to this device's own answers (onet's `settings`, its keyring signing what changes
+// `one.api` to their devices and to this device's own answers (onet's `settings`, its keyring signing what changes
 // who can do what), the look, and what they keep. screens.js answers their
 // bridges with these, and with what opens over the window.
 import { platform } from "./platform.js";
 import { api, shared } from "./request.js";
 import { keeping, leave, refreshState, screensKey, withWaiting } from "./store.js";
 
-/// `one.api` for a client's own screen: the node's /api at this origin, as this user; nothing else here. What
+/// `one.api` for a client's own screen: the app runtime's /api at this origin, as this user; nothing else here. What
 /// changes who can do what, and letting devices in, this device answers itself, as its keyring signs it
 /// (onet's `settings`), at the same paths.
 async function clientApi(m) {

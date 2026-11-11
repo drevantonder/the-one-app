@@ -289,7 +289,7 @@ function keepPages(pages) {
   const items = mine?.items || keptOf(home.page("user") || { scope: "user" })
   const listed = state.pages
   state.arrangements = { ...(before || {}), user: { ...(mine || {}), items, hidden: mine?.hidden || [], pages } }
-  // The list as the node will say it: theirs first, their groups' as ordered (hidden marked), everyone's last.
+  // The list as the app runtime will say it: theirs first, their groups' as ordered (hidden marked), everyone's last.
   state.pages = [listed[0], ...pages.order.map((scope) => ({ ...listed.find((p) => p.scope === scope), hidden: pages.hidden.includes(scope) })), listed.at(-1)]
   const after = state.arrangements
   draw()

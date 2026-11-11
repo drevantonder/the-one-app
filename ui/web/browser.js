@@ -112,7 +112,7 @@ export function browser() {
   }
 
   /// This browser's key goes, signing out or starting over: a removed key can't be let in again, so signing in makes a
-  /// new one. With it, what it kept as that device: the nodes it asks, and what its keyring kept (onet's
+  /// new one. With it, what it kept as that device: the devices it asks, and what its keyring kept (onet's
   /// `keyring::Keep`: the network it was let into, who's who and what each kind of request needed), which the next
   /// approval names again. As a native app's device forgets (onet's `Device::sign_out`).
   async function forgetDevice() {
@@ -160,7 +160,7 @@ export function browser() {
     /// until signing in again (`join`). A client with no session yet (a tab that just took over the others') doesn't know.
     removed: async () => (await net.still().catch(() => null)) === false,
     /// Out of its user's devices first (removing itself, which its keyring does as `leave`), so signing in again
-    /// replaces it, then its key goes. One that can't get out in a few seconds (no node answering) goes anyway, and
+    /// replaces it, then its key goes. One that can't get out in a few seconds (no device answering) goes anyway, and
     /// stays listed, last seen when it signed out, until it's removed in Settings › Devices.
     async leave(api) {
       if (device) await Promise.race([api("/api/devices/remove", { method: "POST", body: { device: device.key } }), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));

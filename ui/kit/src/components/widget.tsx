@@ -335,7 +335,7 @@ function WidgetToggle({ n, w, host }: Parts) {
   const { busy, error, act } = useAct(w, host)
   const [on, setOn] = useState(!!n.on)
   const [seen, setSeen] = useState(!!n.on)
-  // The node says how it stands, once it does.
+  // The app runtime says how it stands, once it does.
   if (seen !== !!n.on) { setSeen(!!n.on); setOn(!!n.on) }
   return (
     <label className="flex flex-1 items-center justify-between gap-2" title={error} onClick={(e) => e.stopPropagation()}>

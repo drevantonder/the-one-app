@@ -1,10 +1,10 @@
-// What the window shows, as the user's nodes say it: their state (`/api/state`), their apps and their badges, kept
+// What the window shows, as the user's devices say it: their state (`/api/state`), their apps and their badges, kept
 // here as the window was last so it draws at once; the devices waiting to be let in; and signing out, which forgets it.
 // The window draws it again whenever it changes (`whenChanged`).
 import { platform } from "./platform.js";
 import { api, shared, whenRemoved } from "./request.js";
 
-/// The sidebar's: the node's state, its apps and their badges. What's beside it is a screen the node serves.
+/// The sidebar's: the network's state, its apps and their badges. What's beside it is a screen the app runtime serves.
 export const store = { state: null, apps: [], badges: {} };
 
 export const me = () => store.state?.user;
@@ -20,7 +20,7 @@ const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
 const keepsAccounts = (a) => !!a?.tools?.some((t) => t.accounts);
 const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
 
-/// Every page this user can read, as the sidebar lists them: the node's (`pages` in `/api/state`).
+/// Every page this user can read, as the sidebar lists them: the app runtime's (`pages` in `/api/state`).
 export const pages = () => store.state?.pages || [];
 const page = (scope) => pages().find((p) => p.scope === scope);
 export const appsOn = (p) => store.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
@@ -43,7 +43,7 @@ export function withWaiting(state) {
   return { ...state, settings_items: items };
 }
 
-/// What Settings shows this user, in order, as the node says (`settings_items`).
+/// What Settings shows this user, in order, as the app runtime says (`settings_items`).
 export const settingsItems = () => withWaiting(store.state)?.settings_items || [];
 /// Whether a url is this site's: a page the gateway serves, shown in place rather than in a new tab.
 export const here = (url) => new URL(url, location.href).origin === location.origin;
@@ -66,7 +66,7 @@ export function titleOf(r) {
 /// What the tab, a bookmark and the history call a screen: its title, and the network's name after it.
 export const tabTitle = (title) => (title ? `${title} – ${config().name}` : config().name);
 
-/// The window as it was last (and when), drawn before the node answers, its user's alone.
+/// The window as it was last (and when), drawn before the app runtime answers, its user's alone.
 const LAST = "one.last.window";
 const lastKey = () => `${LAST}.${platform.user()}`;
 /// What the client's own screens keep between visits (`one.cache`).
@@ -88,7 +88,7 @@ export function forgetScreens() {
   return platform.forget();
 }
 
-/// The window as it was last, drawn before the node answers: → whether there was one.
+/// The window as it was last, drawn before the app runtime answers: → whether there was one.
 export function lastWindow() {
   try {
     const kept = JSON.parse(localStorage.getItem(lastKey()) || "null");
@@ -113,7 +113,7 @@ let joining = false;
 export const isJoining = () => joining;
 export const setJoining = (on) => (joining = on);
 /// Settled once this device has been let in as its user's device, or needn't be: what screens ask waits for it,
-/// since only a device hands a node the keys it needs.
+/// since only a device hands an app runtime the keys it needs.
 export const joined = (() => {
   let done;
   const p = new Promise((r) => (done = r));
@@ -125,7 +125,7 @@ const changes = [];
 export const whenChanged = (fn) => changes.push(fn);
 const draw = () => changes.forEach((fn) => fn());
 
-/// Loads what the sidebar shows: the node's state and its apps together (its apps only if `apps`, or if who's in
+/// Loads what the sidebar shows: the network's state and its apps together (its apps only if `apps`, or if who's in
 /// which group changed), drawn as soon as they're in; then the badges, drawn as they come.
 export async function refreshState({ apps = false } = {}) {
   const [state, list] = await Promise.all([shared("/api/state"), apps && !joining ? shared("/api/apps").catch(() => null) : null]);

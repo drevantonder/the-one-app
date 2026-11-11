@@ -71,7 +71,7 @@ function Pending({ call, rows = 3, tiles, icon }: { call: Call; rows?: number; t
   return call.error ? <LoadFailure problem={bridge().plain(call.error)} retry={call.reload} /> : <ListSkeleton rows={rows} tiles={tiles} icon={icon} />
 }
 
-/// A call's answer, from the app's node: `data` is null until the first comes, and a later failure keeps what's shown, in
+/// A call's answer, from the app's runtime: `data` is null until the first comes, and a later failure keeps what's shown, in
 /// `error`. It's asked for when drawn and whenever the app changes. When `input` changes the last answer stays, with
 /// `moving` true, until the next comes (`of` says which input `data` answers). With `input` null it isn't asked for (yet).
 type Call<T = any> = { data: T | null; error: unknown; of: string | null; moving: boolean; reload: () => Promise<unknown> }

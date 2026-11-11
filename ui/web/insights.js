@@ -13,8 +13,8 @@ export function note(event) {
   while (kept.length > MOST || (kept.length && kept[0].time < from)) kept.shift();
 }
 
-/// A node can be restarting, or out of reach, for a minute or two, and takes an event back from the last five minutes: a
-/// report no node took goes again then, with whatever's newer.
+/// An app runtime can be restarting, or out of reach, for a minute or two, and takes an event back from the last five minutes: a
+/// report no device took goes again then, with whatever's newer.
 const AGAIN_AFTER = 30_000;
 const KEPT_FOR = 300_000;
 let sending = null;
@@ -58,10 +58,10 @@ export function tried(trace) {
   return { node: tries.findLast((t) => t.result === "answered")?.node, last: tries.at(-1)?.result };
 }
 
-/// What this client asked of its nodes, as OTEL's client spans (`client.call`), each the parent of what the node that took
-/// it did: only what failed, was slow, or is one trace in 20, as a node keeps its own (`KEPT_SPANS`), so a phone's battery and
-/// the bucket aren't spent on what went well. Sent about once a minute, and, as a report is, again while no node takes
-/// them, for as long as a node takes them back (a day).
+/// What this client asked of its devices, as OTEL's client spans (`client.call`), each the parent of what the app runtime that took
+/// it did: only what failed, was slow, or is one trace in 20, as an app runtime keeps its own (`KEPT_SPANS`), so a phone's battery and
+/// the bucket aren't spent on what went well. Sent about once a minute, and, as a report is, again while no device takes
+/// them, for as long as an app runtime takes them back (a day).
 const CALLS_EVERY = 60_000;
 const CALLS_KEPT_FOR = 86_400_000;
 const sampled = (traceparent) => parseInt(traceparent.split("-")[1].slice(-8), 16) % KEPT_SPANS.sampledOneIn === 0;
@@ -81,7 +81,7 @@ function sendCalls(send) {
 }
 
 /// Adds a request that ended, if it's kept: `{ traceparent, ms }`, a call's `app` and `tool` or else its `path`, the
-/// `node` that answered it, and `failed` with its `code` if what it answered was a failure, or, if no node answered,
+/// `node` that answered it, and `failed` with its `code` if what it answered was a failure, or, if no device answered,
 /// why (`error`) and what that said (`message`).
 export function called(send, call) {
   if (!call.failed && !call.error && call.ms < KEPT_SPANS.slow && !sampled(call.traceparent)) return;

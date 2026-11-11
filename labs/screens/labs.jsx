@@ -17,7 +17,7 @@ function Labs() {
   const [labs, setLabs] = useState(null)
   const [problem, setProblem] = useState(null)
   const [error, setError] = useState("")
-  // What a switch was just set to, until the node says it has it.
+  // What a switch was just set to, until the app runtime says it has it.
   const [asked, setAsked] = useState({})
   const latest = useRef(0)
 
@@ -88,7 +88,7 @@ function Labs() {
 }
 
 // A feature: its title, what it is, and a switch. It moves at once; one that couldn't change goes back when the
-// node's list comes.
+// app runtime's list comes.
 function Lab({ lab, on, busy, set }) {
   return (
     <label className="flex cursor-pointer items-center gap-3 px-3 py-3 text-sm">

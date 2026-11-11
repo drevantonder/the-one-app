@@ -1,5 +1,5 @@
 // What the pages and Accounts screens know, the same on every client: the user's pages (theirs, their groups',
-// everyone's), the apps on each and what each offers, all read from the node as the user looking (`one.api`).
+// everyone's), the apps on each and what each offers, all read from the network as the user looking (`one.api`).
 import { arranged } from "@one/ui";
 
 export const home = (() => {
@@ -16,7 +16,7 @@ export const home = (() => {
   // The tool that lists an app's accounts, the one it says does (`accounts: true`): none for an app without.
   const accountsTool = (a) => a?.tools?.find((o) => o.accounts)?.name;
   const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
-  /// Every page this user can read, as the node lists them (`pages` in `/api/state`): theirs, their groups' in the
+  /// Every page this user can read, as the app runtime lists them (`pages` in `/api/state`): theirs, their groups' in the
   /// order they chose, everyone's last. The ones they hid are marked, and left out of `pages`.
   const allPages = () => h.state?.pages || [];
   const pages = () => allPages().filter((p) => !p.hidden);
@@ -139,7 +139,7 @@ export const home = (() => {
 
   // MARK: Reading
 
-  /// Loads what the screens show: the node's state, its apps, and each page's widgets and badges. `drawn` runs as
+  /// Loads what the screens show: the network's state, its apps, and each page's widgets and badges. `drawn` runs as
   /// soon as there's something new to draw: the state and apps, then each page's widgets and badges as they come, so
   /// a slow one holds up only itself.
   async function load(drawn) {
@@ -179,7 +179,7 @@ export const home = (() => {
   /// The pages an app is on: those to read again when its data changes.
   const pagesOf = (names) => allPages().filter((p) => h.apps.some((a) => names.includes(a.name) && scopes(a).includes(p.scope))).map((p) => p.scope);
 
-  /// Keeps up: `draw` runs again whenever the node says something changed, and when the soonest widget asks to be
+  /// Keeps up: `draw` runs again whenever the app runtime says something changed, and when the soonest widget asks to be
   /// drawn again (a tree's `next`), between a minute and fifteen from now. An app's data changing reads again only
   /// the pages it's on; anything else (who's in, what's where, how pages are arranged) reads everything.
   function watch(draw) {

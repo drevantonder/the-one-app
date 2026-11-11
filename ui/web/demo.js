@@ -1,4 +1,4 @@
-// Try a Demo: the app's real screens answered from a recording, with no network, sign-in or node, for a store's reviewer
+// Try a Demo: the app's real screens answered from a recording, with no network, sign-in or app runtime, for a store's reviewer
 // (Apple's needs a way in that a work-only sign-in can't give). The recording is the build's own file (`demo` in its
 // config.toml, served as /demo.json), made by using a throwaway network with sample data while `recording` is on.
 //

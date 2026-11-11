@@ -22,7 +22,7 @@
   }
 
   // Framed: each message goes up as `{ one: message, id }`, answered with `{ oneReply: id, ok }` or `{ oneReply: id,
-  // error, code?, trace? }`; node events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
+  // error, code?, trace? }`; network events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
   let asked = 0;
   // What's out to the user's devices, and whether the page holding the frame was told it all came (`answered`).
   let asking = 0, toldFresh = false;
@@ -116,11 +116,11 @@
       });
       return toDevices ? answer.finally(() => (asking--, answered())) : answer;
     }
-    // Nothing else answers: the node refuses browsers, which would run a screen as this machine's own programs.
+    // Nothing else answers: onet refuses browsers, which would run a screen as this machine's own programs.
     throw new Error("Open this in the app.");
   }
 
-  // What goes wrong in a screen, for its host to report (`thrown`): what threw, where, and what it said, which the node
+  // What goes wrong in a screen, for its host to report (`thrown`): what threw, where, and what it said, which the app runtime
   // cleans before keeping. A few per screen, as one loop of errors is one problem.
   let threw = 0;
   function thrown(err) {
@@ -207,7 +207,7 @@
   // What a call answered last time: the client keeps the last answer of each call that only reads (`reads: true`),
   // sealed on its device for its user, and gives it (`kept`, with when it was answered) to a screen that asks that
   // call again. The first time a screen asks a call, it's answered at once with what was kept, while the call goes out
-  // as ever; if its answer differs, the screen is told its app changed, as by a node, and asking again gives it.
+  // as ever; if its answer differs, the screen is told its app changed, as by an app runtime, and asking again gives it.
   // Asked again after that, a call goes out, so nothing a screen does after a write is answered from before it. A host
   // that keeps nothing (an older one, a chat's) refuses `kept`, and every call goes out.
   const first = new Set();
@@ -251,7 +251,7 @@
   // Errors and statuses are written for users and agents at once: what happened and what to do, in users' words,
   // then after a colon or in brackets what an agent needs (a tool to call, an id, a code). A sentence with any of
   // those is for agents only.
-  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|network’s|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
+  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|oned|onet|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|network’s|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
 
   // Whether a screen has asked for a large title (`largeTitle`): it sets up the bar's title once.
   let titled = false;
@@ -397,13 +397,13 @@
     on: (event, fn) => (handlers[event] ||= []).push(fn),
     // What React's error boundary caught (@one/ui's `createRoot`), which never reaches the window.
     __thrown: thrown,
-    // The host calls this with node events: an app screen's "changed" is its app's data changing; a Settings
+    // The host calls this with network events: an app screen's "changed" is its app's data changing; a Settings
     // screen's, any event, since what it shows is the network's.
     __event(e) {
       if (!ctx.app || (e.type === "changed" && (e.apps || []).includes(ctx.app))) landed.clear(), handlers.changed.forEach((f) => f(e));
     },
     // For Settings screens only (no app's: a client answers these for its own Settings screens and refuses an app
-    // screen). `api` asks the node's /api API as the user looking ("POST", "/api/group", { name }) and gives its JSON,
+    // screen). `api` asks the app runtime's /api API as the user looking ("POST", "/api/group", { name }) and gives its JSON,
     // failing with its `error`. `signOut` signs this client out. `appearance` gives this client's ("automatic",
     // "light" or "dark"), first setting it to `value` if given. `device` is this client:
     // `{ name ("mac", "Chrome on Mac"), signOut (whether it can sign out), notify? }`, `notify` a browser's notifications
@@ -421,7 +421,7 @@
     notify: () => host({ type: "notify" }),
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]),
     // Whether a device is on, for a row's grey line: "Online" while it's online, "Seen 2 minutes ago" once it isn't,
-    // and "" for one never seen. `d` is a device as the node's state gives it: `{ online, seen }` (ms).
+    // and "" for one never seen. `d` is a device as the network's state gives it: `{ online, seen }` (ms).
     seen: (d) => (d.online ? "Online" : d.seen ? `Seen ${one.ago(d.seen, { long: true })}` : ""),
     // How long ago: short ("5 min", "Tue", "3 Oct") for tight rows, or with `{ long: true }` for where there's room
     // ("5 minutes ago", "3 days ago", "2 years ago").

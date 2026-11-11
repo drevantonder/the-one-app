@@ -1,4 +1,4 @@
-// How a tab of the web client reaches its nodes: through the one client every tab of this browser shares
+// How a tab of the web client reaches its devices: through the one client every tab of this browser shares
 // (net-worker.js), in a SharedWorker; where there's none, in the tab holding the `one.net` lock, which the others ask
 // over a BroadcastChannel. index.html loads this first, so the client's WebAssembly is on its way while the page draws,
 // and a user already signed in starts their session at once.
@@ -21,7 +21,7 @@ const waiting = new Map();
 let n = 0;
 const tab = crypto.getRandomValues(new Uint32Array(2)).join("-");
 
-/// What's told as the way to every node goes and comes back (`net.whenRelay`).
+/// What's told as the way to every app runtime goes and comes back (`net.whenRelay`).
 const relayChanges = [];
 
 function received(m) {
@@ -40,7 +40,7 @@ function received(m) {
     const headers = new Headers();
     for (let i = 0; i + 1 < m.headers.length; i += 2) headers.append(m.headers[i], m.headers[i + 1]);
     const empty = m.status === 204 || m.status === 304;
-    // And which node answered, as its connection proved, and each try's nodes and what the one that answered did
+    // And which app runtime answered, as its connection proved, and each try's app runtimes and what the one that answered did
     // (`trace`, JSON).
     w.resolve(Object.assign(new Response(empty ? null : stream, { status: m.status, headers }), { node: m.node, trace: m.trace }));
   } else if (m.part) {
@@ -151,7 +151,7 @@ export const net = {
   has,
 
   /// Starts `user`'s session (again, once this browser was just let in): → whether this browser is their device, so
-  /// it reaches their nodes itself. `as` is another device of theirs to ask as instead (`{ key, sign }`, a listed
+  /// it reaches their devices itself. `as` is another device of theirs to ask as instead (`{ key, sign }`, a listed
   /// passkey's, while it lets this browser in).
   start(user, again = false) {
     if (!net.has) return Promise.resolve(false);
@@ -163,9 +163,9 @@ export const net = {
     return starting.ready;
   },
 
-  /// A request to the node, as this browser's device: method, path with its query, headers (`{ name: value }`), body
+  /// A request to the app runtime, as this browser's device: method, path with its query, headers (`{ name: value }`), body
   /// bytes or none, an AbortSignal, and until when the keys it hands may be used (ms). → a
-  /// Response, its body streamed as it comes, and `node`, the key of the node that answered. Fails with `notLetIn` while
+  /// Response, its body streamed as it comes, and `node`, the key of the app runtime that answered. Fails with `notLetIn` while
   /// the network doesn't list this device.
   fetch(method, path, headers = {}, body, signal, until = Date.now() + 60_000) {
     const bytes = body === undefined ? undefined : body instanceof Uint8Array ? body : new TextEncoder().encode(body);
@@ -186,8 +186,8 @@ export const net = {
     });
   },
 
-  /// The nodes to ask, in the order things run on them, kept for the next session, and each one's run priority
-  /// (`ranks`, a number by key), and the Cloudflare node's key (`wakes`), which the relay never says is on.
+  /// The app runtimes to ask, in the order things run on them, kept for the next session, and each one's run priority
+  /// (`ranks`, a number by key), and oned on Cloudflare's key (`wakes`), which the relay never says is on.
   nodes(user, nodes, ranks = {}, wakes = null) {
     if (net.has) send({ op: "nodes", user, nodes, ranks, wakes });
   },
@@ -223,7 +223,7 @@ export const net = {
     }
   },
 
-  /// The nodes to ask, from what the node said (`state`), in the order things run on them, the Cloudflare node by its
+  /// The app runtimes to ask, from what the app runtime said (`state`), in the order things run on them, oned on Cloudflare by its
   /// run priority (last, unless an admin moved it).
   ordered(state) {
     const nodes = (state.network?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);

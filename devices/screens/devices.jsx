@@ -71,7 +71,7 @@ function signInLabel(a) {
 }
 
 // Each switch flipped here, by device and part: what was asked (`on`, and for Try Again the problem it retries), and
-// how far it got: `sent`, then `written` once the node wrote it or `failed` with why it couldn't. Shown as asked until
+// how far it got: `sent`, then `written` once its device wrote it or `failed` with why it couldn't. Shown as asked until
 // its device says it did, or for `LATE`; then, if it still hasn't, its dot says so.
 const asked = {}
 // Try Again's restart can come and go between two draws, so the same problem a few seconds on is its answer.
@@ -79,11 +79,11 @@ const LATE = 30_000, AGAIN = 10_000
 // How long a device has to come back on a new version before it counts as not having.
 const UPDATE_WITHIN = 5 * 60_000
 
-/// The device a node entry is, for what's recorded against a device (its priority, its grants, its parts): itself, or
+/// The device a compute entry is, for what's recorded against a device (its priority, its grants, its parts): itself, or
 /// the device it's the app runtime of.
-const deviceKey = (node) => node.device || node.key
+const deviceKey = (compute) => compute.device || compute.key
 
-// What the screen knows of the devices, from what the node says: each of theirs with what's on it, their passkeys, and
+// What the screen knows of the devices, from what the network's state says: each of theirs with what's on it, their passkeys, and
 // what each part of a device is doing. `again` gives what Try Again runs.
 function model(x, again) {
   const { state, device, apps, seen, seenRead, versions, letIn = {} } = x
@@ -97,23 +97,23 @@ function model(x, again) {
   // What exists, grouped by the device it's on, as each says by its key: a machine's oned and the sign-ins of its
   // apps; a client with no device link, such as a browser, is a device of its own.
   function grouped() {
-    // This device, as its node says, or by its own key: a browser's, which signs in, or the one asking.
+    // This device, as the state says, or by its own key: a browser's, which signs in, or the one asking.
     const mark = (e) => ({ ...e, me: e.me || [device.key, state.me?.key].includes(e.key) })
     const devices = (state.network?.devices || []).map(mark), clients = (state.network?.clients || []).map(mark)
     const cards = [], passkeys = [], stale = []
     const card = (user, name) => {
-      const c = { user, name: shown(name), node: null, clients: [] }
+      const c = { user, name: shown(name), compute: null, clients: [] }
       cards.push(c)
       return c
     }
     const byKey = new Map()
     const computes = devices.filter((d) => (d.roles || []).includes("compute"))
-    for (const d of computes.filter((d) => !d.device)) byKey.set(d.key, Object.assign(card(d.user, d.name), { node: d }))
+    for (const d of computes.filter((d) => !d.device)) byKey.set(d.key, Object.assign(card(d.user, d.name), { compute: d }))
     // A device's app runtime, folded under that device: the device's own card if it still runs things itself, else its
     // only card, under the device's key.
     for (const d of computes.filter((d) => d.device)) {
       if (byKey.has(d.device)) byKey.get(d.device).runtime = d
-      else byKey.set(d.device, Object.assign(card(d.user, d.name), { node: d }))
+      else byKey.set(d.device, Object.assign(card(d.user, d.name), { compute: d }))
     }
     for (const c of clients) {
       if (c.passkey) {
@@ -132,36 +132,36 @@ function model(x, again) {
       ;(byKey.get(c.device || c.key) || card(c.user, c.name)).clients.push(c)
     }
     for (const c of cards) {
-      c.id = c.node?.key || c.clients[0]?.key
+      c.id = c.compute?.key || c.clients[0]?.key
       // A device with a runtime of its own goes by the device's name, in its client row.
-      const named = c.node?.device && c.clients.find((e) => e.key === c.node.device)
+      const named = c.compute?.device && c.clients.find((e) => e.key === c.compute.device)
       if (named) c.name = shown(named.name)
       // Its oned last, then the device itself: removing it takes what's part of it, its apps' sign-ins first here.
-      c.keys = [...c.clients, c.runtime, c.node].filter(Boolean).map((e) => e.key).sort((a, b) => (a === c.node?.device) - (b === c.node?.device))
+      c.keys = [...c.clients, c.runtime, c.compute].filter(Boolean).map((e) => e.key).sort((a, b) => (a === c.compute?.device) - (b === c.compute?.device))
       // What Remove takes out: its app runtime goes with the device.
-      c.removes = c.keys.filter((k) => ![c.runtime, c.node?.device && c.node].some((e) => e?.key === k))
-      c.me = [c.node, ...c.clients].some((e) => e?.me)
-      c.online = !!c.node?.online
-      c.runs = !!c.node
-      c.priority = c.node?.priority ?? null
+      c.removes = c.keys.filter((k) => ![c.runtime, c.compute?.device && c.compute].some((e) => e?.key === k))
+      c.me = [c.compute, ...c.clients].some((e) => e?.me)
+      c.online = !!c.compute?.online
+      c.runs = !!c.compute
+      c.priority = c.compute?.priority ?? null
       // Its sign-in now: this one, else the last seen, else the newest; the rest are old.
       const now = [...c.clients].sort((a, b) => b.me - a.me || (seen[b.key] || 0) - (seen[a.key] || 0) || (b.since || 0) - (a.since || 0))
       c.signIn = now[0] || null
       c.old = now.slice(1)
-      // When it was last seen: the relay's record of any of its keys, and what the node answering knows.
-      c.seen = Math.max(0, c.node?.seen || 0, c.runtime?.seen || 0, ...c.keys.map((k) => seen[k] || 0)) || null
+      // When it was last seen: the relay's record of any of its keys, and what the app runtime answering knows.
+      c.seen = Math.max(0, c.compute?.seen || 0, c.runtime?.seen || 0, ...c.keys.map((k) => seen[k] || 0)) || null
       // An outside program that let this device in, as the relay says: only a label, and only ever one of its own devices.
       c.letInBy = c.keys.map((k) => clients.find((p) => p.key === letIn[k] && p.platform === "cloudflare")).find(Boolean)?.name || null
       // What a device is on is its own to say: a device with an app runtime of its own says it, not the runtime.
-      c.version = (c.node && versions[deviceKey(c.node)]) || versions[c.signIn?.key] || null
-      c.icon = c.node
-        ? glyph(c.node.kind === "laptop" ? "laptop" : /apple|windows/.test(c.node.target || "") ? "desktop" : "hard-drives", osOf(c.node.target, c.name), !c.online)
+      c.version = (c.compute && versions[deviceKey(c.compute)]) || versions[c.signIn?.key] || null
+      c.icon = c.compute
+        ? glyph(c.compute.kind === "laptop" ? "laptop" : /apple|windows/.test(c.compute.target || "") ? "desktop" : "hard-drives", osOf(c.compute.target, c.name), !c.online)
         : iconOf({ ...c.signIn, name: c.signIn?.name || c.name })
     }
     // What an outside program let in, which removing it offers to take too.
     for (const c of cards) c.letIn = c.signIn?.platform === "cloudflare" ? cards.filter((o) => o !== c && o.keys.some((k) => c.keys.includes(letIn[k]))) : []
     // Theirs, and others' that run their apps: all of those for an admin, who sets where things run.
-    const shownCards = cards.filter((c) => c.user === me || (c.node && (admin || holds(c.node))))
+    const shownCards = cards.filter((c) => c.user === me || (c.compute && (admin || holds(c.compute))))
     shownCards.sort((a, b) => (a.runs ? rank(a.priority) : 2000) - (b.runs ? rank(b.priority) : 2000) || a.name.localeCompare(b.name))
     return { cards: shownCards, passkeys: passkeys.filter((p) => p.user === me), stale: stale.filter((c) => c.user === me) }
   }
@@ -169,7 +169,7 @@ function model(x, again) {
 
   /// A part as its dot shows it, from what its device says and what was asked here.
   function partNow(c, p) {
-    const k = `${deviceKey(c.node)} ${p.name}`, a = asked[k]
+    const k = `${deviceKey(c.compute)} ${p.name}`, a = asked[k]
     if (!a) return p
     // Its device did it: on or off as asked, and for Try Again, past the problem it retried.
     if (a.state !== "failed" && p.on === a.on && (!a.again || p.doing || p.problem !== a.again)) return delete asked[k], p
@@ -182,10 +182,10 @@ function model(x, again) {
   /// What a device can run, as it says (Runs apps, then its services), each as asked here, with how to switch it. One
   /// that doesn't list them yet: Runs apps as it is, and its services, on.
   function partsOf(c) {
-    if (Array.isArray(c.node?.parts)) return c.node.parts.map((p) => ({ ...partNow(c, p), part: { device: deviceKey(c.node), name: p.name } }))
+    if (Array.isArray(c.compute?.parts)) return c.compute.parts.map((p) => ({ ...partNow(c, p), part: { device: deviceKey(c.compute), name: p.name } }))
     return [
-      ...(c.node ? [{ name: "apps", on: true, fixed: true }] : []),
-      ...(c.node?.installed_services || []).map((s) => ({ name: s.name, on: true, part: { service: s.name, device: deviceKey(c.node) } })),
+      ...(c.compute ? [{ name: "apps", on: true, fixed: true }] : []),
+      ...(c.compute?.installed_services || []).map((s) => ({ name: s.name, on: true, part: { service: s.name, device: deviceKey(c.compute) } })),
     ]
   }
   /// What's wrong with a part, as one problem with what fixes it: a switch that failed or is late, or a part that
@@ -205,7 +205,7 @@ function model(x, again) {
   function board() {
     const entries = drawn.cards.filter((c) => c.runs).map((c) => ({
       id: c.id, name: c.name, icon: c.icon, whose: c.user === me ? "" : `${userName(c.user)}’s`, presence: presence(c), p: c.priority,
-      keys: [deviceKey(c.node)],
+      keys: [deviceKey(c.compute)],
     }))
     const s = state.network?.cloudflare_node
     if (s) entries.push({ id: "cloudflare", name: "Cloudflare", icon: CLOUDFLARE, whose: "", p: s.priority ?? "last", keys: ["cloudflare"] })
@@ -264,7 +264,7 @@ function Devices() {
   async function load() {
     try {
       const [state, device] = await Promise.all([api("GET", "/api/state"), one.device()])
-      // Who waits, from a node or the web client itself; one with no code to compare is an older node's, not shown.
+      // Who waits, from an app runtime or the web client itself; one with no code to compare is an older one's, not shown.
       let waiting = [], seen = null, letIn = {}, versions = {}
       const asks = [
         api("POST", "/api/devices/versions", {}).then((v) => (versions = v), () => {}),
@@ -418,7 +418,7 @@ function Devices() {
     else if (items[i].title === "Sign-Ins…") show({ signIns: signedIn, me: item.me })
     else if (items[i].title === "This Device’s Code") act(async () => one.alert({ title: "This Device’s Code", text: (await api("GET", "/api/devices/code")).code }))
     else if (item.me) signOut()
-    else remove(item.name, passkey ? [item.key] : item.removes, !passkey && item.node && item.online ? item.node.key : null, passkey ? [] : item.letIn)
+    else remove(item.name, passkey ? [item.key] : item.removes, !passkey && item.compute && item.online ? item.compute.key : null, passkey ? [] : item.letIn)
   }
 
   /// Removes a device, everything on it: it opens nothing new. One that runs oned and is on can also erase what it
@@ -449,10 +449,10 @@ function Devices() {
     setError("")
     one.tap("medium")
     for (const c of cards) {
-      setUpdating({ [c.node.key]: true })
+      setUpdating({ [c.compute.key]: true })
       try {
-        await api("POST", "/api/devices/update", { device: deviceKey(c.node) })
-        if (!(await cameBack(deviceKey(c.node)))) {
+        await api("POST", "/api/devices/update", { device: deviceKey(c.compute) })
+        if (!(await cameBack(deviceKey(c.compute)))) {
           setError(`${c.name} didn’t come back on the new version.`)
           one.tap("error")
           break
@@ -704,10 +704,10 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
   const holder = !!device.keys && !!state.network?.users?.find((u) => u.me)?.recovery_holder
   const side = scheduling || passkeys.length > 0 || recovery.length > 0 || holder
   // Those a newer version is published for and that can hear the ask, this device first: a bad version is best found on the machine in front of you.
-  const behind = mine.filter((c) => c.node && c.online && c.version?.behind).sort((a, b) => b.me - a.me)
+  const behind = mine.filter((c) => c.compute && c.online && c.version?.behind).sort((a, b) => b.me - a.me)
   // Cloudflare has one version for what's at the network's address, and its admins update it, last: it deploys with what its computer has.
   const cloudflare = data.versions.cloudflare
-  const cloudflareCard = m.admin && cloudflare?.behind ? { name: "Cloudflare", node: { key: "cloudflare" } } : null
+  const cloudflareCard = m.admin && cloudflare?.behind ? { name: "Cloudflare", compute: { key: "cloudflare" } } : null
   const all = cloudflareCard ? [...behind, cloudflareCard] : behind
   return (
     <div className={cn("grid max-w-5xl items-start gap-x-8 gap-y-8", side && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]")}>
@@ -729,7 +729,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
                   <DeviceRow icon={c.icon} title={c.name} sub={[sub, c.letInBy && `Let in by ${c.letInBy}`, versionLine(c)].filter(Boolean).join(" · ")}>
                     {behind.includes(c) && (
                       <Button variant="outline" size="sm" disabled={Object.keys(updating).length > 0} onClick={() => update([c])}>
-                        {updating[c.node.key] && <Spinner />}Update
+                        {updating[c.compute.key] && <Spinner />}Update
                       </Button>
                     )}
                     {!!problems.length && (
@@ -1096,9 +1096,9 @@ function Restore({ open, setOpen, done }) {
   )
 }
 
-/// Renames a device: its node, or its app's sign-ins.
+/// Renames a device: its compute, or its app's sign-ins.
 function Rename({ card, open, setOpen, done }) {
-  const keys = card.runs ? [deviceKey(card.node)] : card.clients.map((c) => c.key)
+  const keys = card.runs ? [deviceKey(card.compute)] : card.clients.map((c) => c.key)
   const [name, setName] = useState(card.name)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")

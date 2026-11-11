@@ -1,6 +1,6 @@
 // The window: the sidebar (routes.js's `sidebar`), the screen beside it (screens.js), and what stands before it
 // (signing in, waiting to be let in, a problem), drawn again as what it shows changes. It draws at once what it showed
-// last (the sidebar, and a still of the screen) and then what the node says now; and it keeps up with the node's events
+// last (the sidebar, and a still of the screen) and then what the app runtime says now; and it keeps up with the network's events
 // and the devices waiting to be let in.
 import { offline } from "./offline.js";
 import { platform } from "./platform.js";
@@ -118,8 +118,8 @@ export function hardwareBack() {
   return false;
 }
 
-/// The node's events: what changed, so the window and its screens keep up, only while the page shows. A node with
-/// none to say (the Cloudflare node, while no machine is on) answers 204, and it asks again in a minute.
+/// The app runtime's events: what changed, so the window and its screens keep up, only while the page shows. An app runtime with
+/// none to say (oned on Cloudflare, while no machine is on) answers 204, and it asks again in a minute.
 let events = null;
 export async function listen() {
   const mine = (events = new AbortController());
@@ -127,7 +127,7 @@ export async function listen() {
     const started = Date.now();
     try {
       const r = await api("/api/events", { raw: true, signal: mine.signal });
-      // Heard from a node again: whatever else is waiting on one is asked now, not when its turn comes.
+      // Heard from an app runtime again: whatever else is waiting on one is asked now, not when its turn comes.
       offline.done("events");
       if (offline.waiting.size) offline.now();
       if (r.status === 204) {

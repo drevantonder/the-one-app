@@ -1,5 +1,5 @@
 // The Vault: the items on each page this user keeps (theirs, their groups' as an admin, everyone's as an admin),
-// searchable, each with what it's for and the apps that use it. The node never gives a secret field's value, so this
+// searchable, each with what it's for and the apps that use it. The app runtime never gives a secret field's value, so this
 // screen never has one: replacing one sends the new value once.
 //
 // A Settings screen written in React: @one/ui's build (ui/kit, `bun run build`) makes it into dist/vault.html,
@@ -154,7 +154,7 @@ function Vault() {
 
   useEffect(() => {
     load()
-    // The node's own entries (an item changed) change no app.
+    // The core's own entries (an item changed) change no app.
     one.on("changed", (e) => e.type === "changed" && !(e.apps || []).length && load())
   }, [])
   useEffect(() => {

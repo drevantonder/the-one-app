@@ -21,7 +21,7 @@ window.oneHost = (() => {
   }
 
   /// `one.save` and `one.preview`: a download, or a tab showing it. Only what can't run script shows in a tab, as
-  /// this page's: anything else is saved. `blob(id)` gives a file the node keeps (`{ blob }`), where the page can reach
+  /// this page's: anything else is saved. `blob(id)` gives a file the app runtime keeps (`{ blob }`), where the page can reach
   /// it. `give(how, name, blob)`, where the page can't download (the native app), gives it instead.
   async function file(how, f, blob, give) {
     let data;
@@ -106,7 +106,7 @@ window.oneHost = (() => {
   /// The bridge's messages (ui/bridge.js) from a screen, answered as every web page that holds screens
   /// answers them, the web client's and a chat's alike → what it replies; what it throws, it refuses with. `h` is what
   /// each page does its own way: `frame`, the screen's; `call(tool, input)`, as its app; `open(m)`, `opening(m)` (a press that will `open` has come down, where it can start early), `close(value)` and
-  /// `title(text, m)`; `kept(tool, input)`, what that call last answered if this page keeps it (`{ answer, at }`, or null); `vault(need)` → whether it's set; `link(url)`; `icons(names)`; `blob(id)`, a file the node
+  /// `title(text, m)`; `kept(tool, input)`, what that call last answered if this page keeps it (`{ answer, at }`, or null); `vault(need)` → whether it's set; `link(url)`; `icons(names)`; `blob(id)`, a file the app runtime
   /// keeps; `give`, `copy`, `menu`, `scan` and `haptic`, where the page does those its own way (the native app); `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; `thrown(m)`, what threw in the screen (its type, message and where), for a page that reports it; and `own`, what only the client's own screens may do, by
   /// message, on a page that has them.
   async function answer(m, h) {
