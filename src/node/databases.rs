@@ -55,6 +55,12 @@ impl Node {
         Ok(Copied::moving(place, self.network_dir().join("copy"), self.0.moved.clone()))
     }
 
+    /// Whether this node is an admin's, whose endpoint alone the URL signer lets remove from the bucket: a node of
+    /// anyone else's leaves what's to go to theirs.
+    pub(super) fn removes_from_bucket(&self) -> bool {
+        self.with(|i| Ok(i.r.db().machine(&self.0.id)?.is_some_and(|m| i.r.db().may(&m.user, "invite", scopes::NETWORK)))).unwrap_or(false)
+    }
+
     /// This device as an endpoint: the key it signs with, and the key what's for it is sealed to.
     pub fn endpoint(&self) -> crate::keys::Endpoint {
         crate::keys::Endpoint::of(&self.signing_key())
@@ -365,11 +371,21 @@ impl Node {
         }
     }
 
-    /// Deletes from the bucket what no reader of each database open here needs any more (`stored::tidy`), once a day. A
-    /// device that may not delete from the bucket (only an admin's may) just finds it can't.
+    /// Deletes from the bucket what no reader of each database open here needs any more (`stored::tidy`), once a day, on
+    /// an admin's node. When it last did is kept in `network/tidied.json`, so starting again doesn't tidy them all again.
     pub(super) async fn tidy_databases(&self) {
+        if !self.removes_from_bucket() {
+            return;
+        }
         let Ok(bucket) = self.bucket() else { return };
         let now = now_ms();
+        let kept = self.network_dir().join("tidied.json");
+        {
+            let mut tidied = self.0.databases.tidied.lock().unwrap();
+            if tidied.is_empty() {
+                *tidied = std::fs::read(&kept).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+            }
+        }
         for (_, db) in self.open_dbs() {
             let Ok((prefix, keys)) = db.try_lock().map(|db| (db.prefix().to_string(), db.keys().clone())) else { continue };
             if self.0.databases.tidied.lock().unwrap().get(&prefix).is_some_and(|t| now < t + TIDY_EVERY) {
@@ -381,6 +397,10 @@ impl Node {
                 Ok(0) => {}
                 Ok(n) => tracing::info!("{prefix}: deleted {n} objects no reader needs"),
                 Err(err) => tracing::debug!("{prefix}: tidying: {err:#}"),
+            }
+            let tidied = serde_json::to_vec(&*self.0.databases.tidied.lock().unwrap()).unwrap_or_default();
+            if let Err(err) = std::fs::write(&kept, tidied) {
+                tracing::debug!("keeping when {prefix} was tidied: {err:#}");
             }
         }
     }
