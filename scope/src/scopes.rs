@@ -360,10 +360,15 @@ impl ScopeDb {
             .into_iter()
             .filter(|m| !runtimes.contains(&m.key))
             .map(|m| {
-                let named = m.runtime_of().map(|d| self.machine_ever(&d)).transpose()?.flatten().map_or_else(|| m.name.clone(), |d| d.name);
+                let named = self.device_name(&m)?;
                 Ok((m, named))
             })
             .collect()
+    }
+
+    /// What a machine is called: an app runtime goes by its device's name, which renaming the device changes.
+    pub fn device_name(&self, m: &Machine) -> Result<String> {
+        Ok(m.runtime_of().map(|d| self.machine_ever(&d)).transpose()?.flatten().map_or_else(|| m.name.clone(), |d| d.name))
     }
 
     /// A device that runs calls, as someone gives it, by its name or the start of its key: what's recorded against it (a

@@ -220,13 +220,13 @@ impl Host {
                 t if t.contains("android") => "android",
                 _ => "linux",
             };
-            let nodes: Vec<String> = m
+            let nodes = m
                 .machines()?
                 .into_iter()
                 .filter(|d| !d.removed && d.user == viewer.user && d.is(scopes::Kind::Compute))
                 .filter(|d| platforms.as_ref().is_none_or(|p| i.running(&d.key).is_some_and(|b| p.contains(&platform_of(&b.target)))))
-                .map(|d| d.name)
-                .collect();
+                .map(|d| m.device_name(&d))
+                .collect::<Result<Vec<String>>>()?;
             Ok(nodes)
         })
         .ok()

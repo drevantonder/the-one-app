@@ -482,8 +482,7 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
         devices.push(Device {
             key: hex(&s.key),
             seal: hex(&s.seal),
-            // An app runtime goes by its device's name, which renaming the device changes.
-            name: s.runtime_of().map(|d| m.machine_ever(&d)).transpose()?.flatten().map_or_else(|| s.name.clone(), |d| d.name),
+            name: m.device_name(s)?,
             user: s.user.clone(),
             roles: s.roles.clone(),
             since: s.since,
