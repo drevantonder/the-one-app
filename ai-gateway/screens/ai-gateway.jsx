@@ -77,7 +77,7 @@ function AiGateway() {
         <List>
           {["chat", "decide"].map((kind) => {
             const d = models.defaults[kind]
-            return <ListRow key={kind} title={kind === "chat" ? "Chat" : "Decide"} sub={`${modelName(d.model)} · ${WHOSE[d.whose]}`} trailing={<Icon name="caret-right" className="size-4 text-muted-foreground" />} onClick={() => setSetting(kind)} />
+            return <ListRow key={kind} title={kind === "chat" ? "Chat" : "Decide"} sub={`${modelName(d.model)} · ${WHOSE[d.whose]}`} onClick={() => setSetting(kind)} />
           })}
         </List>
       </Section>
@@ -98,7 +98,7 @@ function AiGateway() {
 
       <Section title="Spending">
         <List>
-          <ListRow title="What each call used" sub="In Insights, by app, model and person." trailing={<Icon name="caret-right" className="size-4 text-muted-foreground" />} onClick={() => one.open("insights", {})} />
+          <ListRow title="What each call used" sub="In Insights, by app, model and person." onClick={() => one.open("insights", {})} />
         </List>
       </Section>
       {setting && <SetDefault kind={setting} models={models} admin={admin} close={() => setSetting(null)} done={load} />}
@@ -134,8 +134,8 @@ function SetDefault({ kind, models, admin, close, done }) {
         <p className="px-1 text-sm text-muted-foreground">Apps that don’t name a model get this one. Leave it empty for {everyone ? "the built-in default" : "Everyone’s"}.</p>
         {admin && (
           <List>
-            <ListRow title="For everyone" trailing={everyone && <Icon name="check" className="size-4" />} onClick={() => setEveryone(true)} />
-            <ListRow title="Just for me" trailing={!everyone && <Icon name="check" className="size-4" />} onClick={() => setEveryone(false)} />
+            <ListRow title="For everyone" selected={everyone} trailing={everyone && <Icon name="check" className="size-4" />} onClick={() => setEveryone(true)} />
+            <ListRow title="Just for me" selected={!everyone} trailing={!everyone && <Icon name="check" className="size-4" />} onClick={() => setEveryone(false)} />
           </List>
         )}
         {problem && <Problem title={problem} />}

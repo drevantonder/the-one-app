@@ -31,24 +31,24 @@ var w = {
 	built_in: "Built in"
 };
 function T() {
-	let r = e(34), [s, m] = n(null), [g, x] = n(!1), [T, O] = n(null), [k, A] = n(""), [j, M] = n(null), N;
-	r[0] === Symbol.for("react.memo_cache_sentinel") ? (N = async function() {
+	let r = e(34), [o, s] = n(null), [m, g] = n(!1), [x, T] = n(null), [O, k] = n(""), [A, j] = n(null), M;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (M = async function() {
 		try {
 			let [e, t] = await Promise.all([y("POST", "/api/ai-gateway/models", {}), y("GET", "/api/state")]);
-			m(e), x(t.user?.role === "admin"), O(null);
+			s(e), g(t.user?.role === "admin"), T(null);
 		} catch (e) {
 			let t = e;
-			O(one.plain(t));
+			T(one.plain(t));
 		}
-	}, r[0] = N) : N = r[0];
-	let P = N, F, I;
-	r[1] === Symbol.for("react.memo_cache_sentinel") ? (F = () => {
-		one.on("changed", P), P();
-	}, I = [], r[1] = F, r[2] = I) : (F = r[1], I = r[2]), t(F, I);
-	let L;
-	r[3] === g ? L = r[4] : (L = async function(e) {
-		let t = g ? "global" : "user";
-		A("");
+	}, r[0] = M) : M = r[0];
+	let N = M, P, F;
+	r[1] === Symbol.for("react.memo_cache_sentinel") ? (P = () => {
+		one.on("changed", N), N();
+	}, F = [], r[1] = P, r[2] = F) : (P = r[1], F = r[2]), t(P, F);
+	let I;
+	r[3] === m ? I = r[4] : (I = async function(e) {
+		let t = m ? "global" : "user";
+		k("");
 		let n = e.id === "workers-ai" ? {
 			account_id: { secret: !1 },
 			api_key: { secret: !0 }
@@ -61,58 +61,54 @@ function T() {
 				title: `${e.title} Key`,
 				fields: n,
 				hosts: [e.host],
-				why: g ? `Pays for everyone's calls to ${e.title}'s models.` : `Pays for your calls to ${e.title}'s models.`
+				why: m ? `Pays for everyone's calls to ${e.title}'s models.` : `Pays for your calls to ${e.title}'s models.`
 			});
 			one.open("request", {
 				id: r.id,
 				scope: r.scope
 			});
 		} catch (e) {
-			A(b(e));
+			k(b(e));
 		}
-	}, r[3] = g, r[4] = L);
-	let R = L;
-	if (!s) {
+	}, r[3] = m, r[4] = I);
+	let L = I;
+	if (!o) {
 		let e;
 		r[5] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ _(c, { children: "AI Gateway" }), r[5] = e) : e = r[5];
 		let t;
-		return r[6] === T ? t = r[7] : (t = /* @__PURE__ */ v("div", {
+		return r[6] === x ? t = r[7] : (t = /* @__PURE__ */ v("div", {
 			className: "flex max-w-2xl flex-col gap-6",
-			children: [e, T ? /* @__PURE__ */ _(f, {
-				problem: T,
-				retry: P
+			children: [e, x ? /* @__PURE__ */ _(f, {
+				problem: x,
+				retry: N
 			}) : /* @__PURE__ */ _(d, { rows: 4 })]
-		}), r[6] = T, r[7] = t), t;
+		}), r[6] = x, r[7] = t), t;
 	}
-	let z, B;
-	r[8] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ _(c, { children: "AI Gateway" }), B = /* @__PURE__ */ _("p", {
+	let R, z;
+	r[8] === Symbol.for("react.memo_cache_sentinel") ? (R = /* @__PURE__ */ _(c, { children: "AI Gateway" }), z = /* @__PURE__ */ _("p", {
 		className: "-mt-4 px-1 text-muted-foreground",
 		children: "How your apps use AI models."
-	}), r[8] = z, r[9] = B) : (z = r[8], B = r[9]);
+	}), r[8] = R, r[9] = z) : (R = r[8], z = r[9]);
+	let B;
+	r[10] === O ? B = r[11] : (B = O && /* @__PURE__ */ _(p, { title: O }), r[10] = O, r[11] = B);
 	let V;
-	r[10] === k ? V = r[11] : (V = k && /* @__PURE__ */ _(p, { title: k }), r[10] = k, r[11] = V);
+	r[12] === Symbol.for("react.memo_cache_sentinel") ? (V = ["chat", "decide"], r[12] = V) : V = r[12];
 	let H;
-	r[12] === Symbol.for("react.memo_cache_sentinel") ? (H = ["chat", "decide"], r[12] = H) : H = r[12];
-	let U;
-	r[13] === s.defaults ? U = r[14] : (U = /* @__PURE__ */ _(h, {
+	r[13] === o.defaults ? H = r[14] : (H = /* @__PURE__ */ _(h, {
 		title: "Default Models",
-		children: /* @__PURE__ */ _(l, { children: H.map((e) => {
-			let t = s.defaults[e];
+		children: /* @__PURE__ */ _(l, { children: V.map((e) => {
+			let t = o.defaults[e];
 			return /* @__PURE__ */ _(u, {
 				title: e === "chat" ? "Chat" : "Decide",
 				sub: `${C(t.model)} · ${w[t.whose]}`,
-				trailing: /* @__PURE__ */ _(o, {
-					name: "caret-right",
-					className: "size-4 text-muted-foreground"
-				}),
-				onClick: () => M(e)
+				onClick: () => j(e)
 			}, e);
 		}) })
-	}), r[13] = s.defaults, r[14] = U);
-	let W;
-	if (r[15] !== R || r[16] !== g || r[17] !== s.companies) {
+	}), r[13] = o.defaults, r[14] = H);
+	let U;
+	if (r[15] !== L || r[16] !== m || r[17] !== o.companies) {
 		let e;
-		r[19] !== R || r[20] !== g ? (e = (e) => /* @__PURE__ */ _(u, {
+		r[19] !== L || r[20] !== m ? (e = (e) => /* @__PURE__ */ _(u, {
 			leading: /* @__PURE__ */ _(i, {
 				app: S(e),
 				size: 30
@@ -122,53 +118,49 @@ function T() {
 				network: e.id === "workers-ai" ? "Everyone's · your Cloudflare account" : "Everyone's",
 				user: "Yours"
 			}[e.paid] || "No key",
-			trailing: (e.paid === null || !g && e.paid === "network") && /* @__PURE__ */ _(a, {
+			trailing: (e.paid === null || !m && e.paid === "network") && /* @__PURE__ */ _(a, {
 				size: "sm",
 				variant: "outline",
-				onClick: () => R(e),
-				children: g ? "Add Key" : "Add Mine"
+				onClick: () => L(e),
+				children: m ? "Add Key" : "Add Mine"
 			})
-		}, e.id), r[19] = R, r[20] = g, r[21] = e) : e = r[21], W = s.companies.map(e), r[15] = R, r[16] = g, r[17] = s.companies, r[18] = W;
-	} else W = r[18];
-	let G;
-	r[22] === W ? G = r[23] : (G = /* @__PURE__ */ _(h, {
+		}, e.id), r[19] = L, r[20] = m, r[21] = e) : e = r[21], U = o.companies.map(e), r[15] = L, r[16] = m, r[17] = o.companies, r[18] = U;
+	} else U = r[18];
+	let W;
+	r[22] === U ? W = r[23] : (W = /* @__PURE__ */ _(h, {
 		title: "Keys",
-		children: /* @__PURE__ */ _(l, { children: W })
-	}), r[22] = W, r[23] = G);
-	let K;
-	r[24] === Symbol.for("react.memo_cache_sentinel") ? (K = /* @__PURE__ */ _(h, {
+		children: /* @__PURE__ */ _(l, { children: U })
+	}), r[22] = U, r[23] = W);
+	let G;
+	r[24] === Symbol.for("react.memo_cache_sentinel") ? (G = /* @__PURE__ */ _(h, {
 		title: "Spending",
 		children: /* @__PURE__ */ _(l, { children: /* @__PURE__ */ _(u, {
 			title: "What each call used",
 			sub: "In Insights, by app, model and person.",
-			trailing: /* @__PURE__ */ _(o, {
-				name: "caret-right",
-				className: "size-4 text-muted-foreground"
-			}),
 			onClick: E
 		}) })
-	}), r[24] = K) : K = r[24];
+	}), r[24] = G) : G = r[24];
+	let K;
+	r[25] !== m || r[26] !== o || r[27] !== A ? (K = A && /* @__PURE__ */ _(D, {
+		kind: A,
+		models: o,
+		admin: m,
+		close: () => j(null),
+		done: N
+	}), r[25] = m, r[26] = o, r[27] = A, r[28] = K) : K = r[28];
 	let q;
-	r[25] !== g || r[26] !== s || r[27] !== j ? (q = j && /* @__PURE__ */ _(D, {
-		kind: j,
-		models: s,
-		admin: g,
-		close: () => M(null),
-		done: P
-	}), r[25] = g, r[26] = s, r[27] = j, r[28] = q) : q = r[28];
-	let J;
-	return r[29] !== G || r[30] !== q || r[31] !== V || r[32] !== U ? (J = /* @__PURE__ */ v("div", {
+	return r[29] !== W || r[30] !== K || r[31] !== B || r[32] !== H ? (q = /* @__PURE__ */ v("div", {
 		className: "flex max-w-2xl flex-col gap-6",
 		children: [
+			R,
 			z,
 			B,
-			V,
-			U,
+			H,
+			W,
 			G,
-			K,
-			q
+			K
 		]
-	}), r[29] = G, r[30] = q, r[31] = V, r[32] = U, r[33] = J) : J = r[33], J;
+	}), r[29] = W, r[30] = K, r[31] = B, r[32] = H, r[33] = q) : q = r[33], q;
 }
 function E() {
 	return one.open("insights", {});
@@ -221,6 +213,7 @@ function D(t) {
 	let H;
 	r[22] !== d || r[23] !== w ? (H = d && /* @__PURE__ */ v(l, { children: [/* @__PURE__ */ _(u, {
 		title: "For everyone",
+		selected: w,
 		trailing: w && /* @__PURE__ */ _(o, {
 			name: "check",
 			className: "size-4"
@@ -228,6 +221,7 @@ function D(t) {
 		onClick: () => T(!0)
 	}), /* @__PURE__ */ _(u, {
 		title: "Just for me",
+		selected: !w,
 		trailing: !w && /* @__PURE__ */ _(o, {
 			name: "check",
 			className: "size-4"
