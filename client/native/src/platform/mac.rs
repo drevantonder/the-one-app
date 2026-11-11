@@ -1,6 +1,7 @@
-//! What's the Mac's own, beside the window: opening at login (SMAppService's main app), this Mac's oned (the bundle's
-//! launch agent `app.<cli>.mac.oned`, kept running, whose onet the window is a view of), "Let Agents Use This Mac", which Computer Use's helper reads from this app's defaults (`computerUse`),
-//! the app's menus, and the menu bar (`menubar`).
+//! What's the Mac's own, beside the window: opening at login (SMAppService's main app), setting up `<cli>` where it's
+//! missing, with oned a launch agent of the user's (`set_up`), whose onet the window is a view of, "Let Agents Use This
+//! Mac", which Computer Use's helper reads from this app's defaults (`computerUse`), the app's menus, and the menu bar
+//! (`menubar`).
 
 use std::path::PathBuf;
 
@@ -77,11 +78,18 @@ pub fn start_tray(_: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// This Mac's node kept running; the Mac app's menus, with its keys; the widgets' own items, as last kept, until the
-/// node's answer redraws them.
+/// This Mac's `<cli>` set up, if the window knows its network; the Mac app's menus, with its keys; the widgets' own
+/// items, as last kept, until onet's answer redraws them.
 pub fn start(app: &tauri::App) {
     super::desktop::start(app);
-    start_node();
+    if let Some(address) = crate::app().address() {
+        // Off the main thread: a download, and launchctl, take seconds.
+        std::thread::spawn(move || {
+            if let Err(e) = set_up(&address) {
+                one::logs::say(&format!("setting up {}: {e}", one::config::CLI));
+            }
+        });
+    }
     match app_menu(app.handle()) {
         Ok(menu) => drop(app.set_menu(menu)),
         Err(e) => one::logs::say(&format!("the app's menu: {e}")),
@@ -107,7 +115,8 @@ fn command(name: &str) {
 #[link(name = "ServiceManagement", kind = "framework")]
 unsafe extern "C" {}
 
-/// SMAppServiceStatus's enabled.
+/// SMAppServiceStatus's not registered and enabled.
+const NOT_REGISTERED: isize = 0;
 const ENABLED: isize = 1;
 
 fn status(service: &AnyObject) -> isize {
@@ -149,65 +158,73 @@ pub fn set_computer_use(on: bool) {
     defaults().setBool_forKey(on, &NSString::from_str("computerUse"));
 }
 
-/// The node's launch agent's label, in this bundle's Contents/Library/LaunchAgents.
-fn label() -> String {
-    format!("app.{}.mac.oned", one::config::CLI)
-}
-
-fn launchctl(args: &[&str]) -> String {
-    std::process::Command::new("/bin/launchctl").args(args).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
-}
-
-/// Asks launchd to run the node's agent now → whether it runs within a few seconds.
-fn kickstarted() -> bool {
-    let job = format!("gui/{}/{}", unsafe { getuid() }, label());
-    launchctl(&["kickstart", &job]);
-    (0..10).any(|_| {
-        let running = launchctl(&["print", &job]).contains("state = running");
-        if !running {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-        }
-        running
-    })
+fn launchctl(args: &[&str]) -> Result<(), String> {
+    let done = std::process::Command::new("/bin/launchctl").args(args).output().map_err(|e| e.to_string())?;
+    if done.status.success() { Ok(()) } else { Err(format!("launchctl {}: {}", args.join(" "), String::from_utf8_lossy(&done.stderr).trim())) }
 }
 
 unsafe extern "C" {
     fn getuid() -> u32;
 }
 
-/// oned, which the app carries on a Mac, running: its launch agent (`start_node`). The address is for a computer that
-/// downloads it.
-pub fn set_up(_: &str) -> Result<(), String> {
-    keep_node();
-    Ok(())
-}
-
-/// Keeps oned, this Mac as a device, running, off the main thread: launchctl takes seconds.
-fn start_node() {
-    std::thread::spawn(keep_node);
-}
-
-/// oned running: the bundle's launch agent, registered (again, if launchd won't run it, as once the app's been rebuilt
-/// since it was registered, which records this build); or, refused, a child of the app's.
-fn keep_node() {
-    {
-        let agent: Retained<AnyObject> = unsafe { msg_send![class!(SMAppService), agentServiceWithPlistName: &*NSString::from_str(&format!("{}.plist", label()))] };
-        if status(&agent) == ENABLED {
-            if kickstarted() {
-                return;
-            }
-            unregister(&agent);
+/// Sets up `<cli>` on this Mac, from the network at `address`, with no root: the newest for it where install.sh puts it
+/// on Linux (`~/.local/bin`; a throwaway network's computer's in its home, as its programs put theirs), and its oned a
+/// launch agent of the user's, which launchd starts as they log in and again whenever it stops, as `<cli> update` has
+/// it. A program there already is only started. A link there is what builds before the window carried no background
+/// program made, to the copy inside the app: it's replaced, and their launch agent, the app's own, goes.
+pub fn set_up(address: &str) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let cli = one::config::CLI;
+    let oned = format!("{cli}d");
+    // A throwaway network's computer is its own, beside the Mac's.
+    let throwaway = crate::env("THROWAWAY").is_some();
+    let user = PathBuf::from(std::env::var_os("HOME").ok_or("This user has no home folder.")?);
+    let bin = if throwaway { one::home().join("bin") } else { user.join(".local/bin") };
+    let program = bin.join(cli);
+    if !std::fs::symlink_metadata(&program).is_ok_and(|m| m.is_file()) {
+        let bytes = super::desktop::program(address)?;
+        std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
+        let part = bin.join(format!(".{cli}.part"));
+        std::fs::write(&part, bytes).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+        std::fs::rename(&part, &program).map_err(|e| e.to_string())?;
+        for name in [oned.clone(), format!("git-remote-{cli}")] {
+            let _ = std::fs::remove_file(bin.join(&name));
+            std::os::unix::fs::symlink(cli, bin.join(name)).map_err(|e| e.to_string())?;
         }
-        if register(&agent) && status(&agent) == ENABLED && kickstarted() {
-            return;
-        }
-        let Ok(exe) = std::env::current_exe() else { return };
-        let node = exe.with_file_name(format!("{}d", one::config::CLI));
-        let running = std::process::Command::new("/usr/bin/pgrep").args(["-f", &format!("{}$", node.display())]).output().is_ok_and(|o| o.status.success());
-        if node.exists() && !running {
-            let _ = std::process::Command::new(node).spawn();
-        }
+        one::logs::say(&format!("set up {} from {address}", program.display()));
     }
+    let uid = unsafe { getuid() };
+    // The launch agent the app carried before, by its id: its job and its record in Login Items go.
+    let before = format!("{}.{oned}", crate::identifier());
+    let agent: Retained<AnyObject> = unsafe { msg_send![class!(SMAppService), agentServiceWithPlistName: &*NSString::from_str(&format!("{before}.plist"))] };
+    if status(&agent) != NOT_REGISTERED {
+        unregister(&agent);
+    }
+    let _ = launchctl(&["bootout", &format!("gui/{uid}/{before}")]);
+    // A throwaway network's oned is a launch agent of its own beside the Mac's, named for its home.
+    let label = match throwaway {
+        true => format!("app.{cli}.{oned}.throwaway-{}", &data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(one::home().to_string_lossy().as_bytes()))[..8]),
+        false => format!("app.{cli}.{oned}"),
+    };
+    let plist = if throwaway { one::home() } else { user.join("Library/LaunchAgents") }.join(format!("{label}.plist"));
+    // What says which network and home it's for: the environment `one-dev throwaway` gives its programs, or a custom
+    // build's home, as the window was started with.
+    let env: String = ["HOME", "ADDR", "THROWAWAY", "RELEASE_KEY"].iter().filter_map(|k| Some(format!("<key>{}</key><string>{}</string>", one::config::env(k), crate::env(k)?))).collect();
+    let text = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array><string>{}</string></array><key>EnvironmentVariables</key><dict>{env}</dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ProcessType</key><string>Background</string></dict></plist>\n",
+        bin.join(&oned).display()
+    );
+    let job = format!("gui/{uid}/{label}");
+    if std::fs::read_to_string(&plist).ok().as_deref() != Some(text.as_str()) {
+        std::fs::create_dir_all(plist.parent().unwrap_or(&plist)).map_err(|e| e.to_string())?;
+        std::fs::write(&plist, &text).map_err(|e| e.to_string())?;
+        let _ = launchctl(&["bootout", &job]);
+    }
+    if launchctl(&["print", &job]).is_err() {
+        launchctl(&["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])?;
+    }
+    launchctl(&["kickstart", &job])
 }
 
 /// The app's menus, macOS's own with the Mac app's keys, as items of them so they work wherever the focus is (a key

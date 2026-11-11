@@ -15,12 +15,12 @@
 //! (`apps/<name>/service/`), and only a build its app's latest deploy names for this platform runs (`bundle::SERVICES`),
 //! which `<cli> deploy` builds where it's run, or, for one whose deploy names none, as a built-in app's, the newest
 //! `<cli> update` published (`crate::latest`). It's fetched, its hash checked and put at `~/.local/bin/<cli>-<name>` when
-//! it's switched on and again when another is named or a newer one's published; a Mac app carries the built-in ones in
-//! Rust inside it, built with it. What the device can run (`parts`) and each one's state (on, off, starting, stopping,
+//! it's switched on and again when another is named or a newer one's published; a Mac service in Swift is an app of its
+//! own (`helper`), unpacked in the home. What the device can run (`parts`) and each one's state (on, off, starting, stopping,
 //! failed and why) and how it runs (in its sandbox as its app declares, told to it in its folder, `declared.json`;
 //! without one and why; or as the user) its onet says to every app runtime of the network in a hello, which is what
 //! Settings' Devices shows. Removing a device removes its services, and can erase what it keeps, which the device does
-//! itself, so only while it's reachable. On a Mac the app carries oned; a phone runs none, its app is the device.
+//! itself, so only while it's reachable. A phone runs none: its app is the device.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -46,9 +46,10 @@ pub fn command(args: &[&str]) -> std::io::Result<std::process::Command> {
     Ok(command)
 }
 
-/// The program that offers the service `name`: the one this program carries (`carried`), else the one oned fetched.
+/// The program that offers the service `name`: the one built beside this program (`carried`), a Mac helper app's
+/// (`helper`), else where oned fetches one.
 pub fn program(name: &str) -> PathBuf {
-    carried(name).unwrap_or_else(|| fetched(name))
+    carried(name).or_else(|| helper(name)).unwrap_or_else(|| fetched(name))
 }
 
 /// Where oned puts a service's program it fetched (`Mode::bin`).
@@ -56,49 +57,31 @@ pub fn fetched(name: &str) -> PathBuf {
     crate::mode::here().bin().join(format!("{CLI}-{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
-/// A service's program built with this one and carried beside it, which oned runs as it is and fetches none of: the
-/// Mac app's, inside it (client/native/mac/build.sh), and a checkout's (`one-dev throwaway`), which Cargo builds beside it.
+/// A service's program built with this one and beside it, which oned runs as it is and fetches none of: a checkout's
+/// (`one-dev throwaway`), which Cargo builds beside it.
 pub fn carried(name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let path = exe.parent()?.join(format!("{CLI}-{name}{}", std::env::consts::EXE_SUFFIX));
-    (path.exists() && path != fetched(name)).then_some(path).or_else(|| helper(name))
+    (path.exists() && path != fetched(name)).then_some(path)
 }
 
-/// A Mac service's helper app the Mac app carries (`Contents/Helpers/<Title> — <App>.app`, service/mac-helpers.sh):
-/// its program, which holds its own macOS permission.
+/// Where a Mac service in Swift runs from: an app of its own (`<Title> — <App>.app`, service/mac-helpers.sh), as the
+/// record publishes it zipped and oned unpacks it (`put`), in this device's home. macOS asks for and records its
+/// permissions under its own name, and keeps them across builds, since they're the helper's by its id and team, not
+/// where it is. Its program, once it's here.
 pub fn helper(name: &str) -> Option<PathBuf> {
     let program = format!("{CLI}-{name}");
     helpers().into_iter().find(|p| p.file_name().is_some_and(|f| f.to_string_lossy() == program))
 }
 
-/// Where a helper app runs from: a copy of the one the Mac app carries (`helper`), out of the Mac app, in this device's
-/// home (`helpers/`), copied again when the Mac app's changed. macOS records the permissions of code inside an app as
-/// that app's, so only a copy outside it asks for and keeps its own, under its own name; it keeps them across builds,
-/// since they're the helper's by its id and team, not where it is. Its program.
-#[cfg(target_os = "macos")]
-pub fn placed(carried: &std::path::Path) -> anyhow::Result<PathBuf> {
-    use anyhow::Context as _;
-    let bundle = carried.ancestors().nth(3).context("a helper's program is in its app's Contents/MacOS")?;
-    let copy = crate::home().join("helpers").join(bundle.file_name().unwrap_or_default());
-    let program = copy.join(carried.strip_prefix(bundle)?);
-    let stamp = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| Ok((m.len(), m.modified()?))).ok();
-    if stamp(&program).is_none() || stamp(&program) != stamp(carried) {
-        let _ = std::fs::remove_dir_all(&copy);
-        std::fs::create_dir_all(copy.parent().unwrap_or(&copy))?;
-        let done = std::process::Command::new("/usr/bin/ditto").arg(bundle).arg(&copy).status()?;
-        anyhow::ensure!(done.success(), "copying {} failed", bundle.display());
-    }
-    Ok(program)
+/// The folder a Mac's helper apps are unpacked in.
+fn helper_apps() -> PathBuf {
+    crate::home().join("helpers")
 }
 
-/// The services whose helper apps the Mac app carries (`helper`), by name.
-pub fn carried_helpers() -> Vec<String> {
-    helpers().iter().filter_map(|p| p.file_name()?.to_string_lossy().strip_prefix(&format!("{CLI}-")).map(str::to_string)).collect()
-}
-
+/// The programs of the helper apps here.
 fn helpers() -> Vec<PathBuf> {
-    let Some(dir) = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("Helpers"))) else { return Vec::new() };
-    let apps = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path().join("Contents/MacOS"));
+    let apps = std::fs::read_dir(helper_apps()).into_iter().flatten().flatten().map(|e| e.path().join("Contents/MacOS"));
     apps.flat_map(std::fs::read_dir).flatten().flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|f| f.to_string_lossy().starts_with(&format!("{CLI}-")))).collect()
 }
 
@@ -109,11 +92,8 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     let mut names = BTreeSet::new();
     let dirs = [fetched("x"), std::env::current_exe().unwrap_or_default()].map(|p| p.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     let prefix = format!("{CLI}-");
-    for program in helpers() {
-        names.extend(program.file_name().and_then(|f| f.to_string_lossy().strip_prefix(&prefix).map(str::to_string)));
-    }
-    for entry in dirs.iter().flat_map(std::fs::read_dir).flatten().flatten() {
-        let file = entry.file_name().to_string_lossy().to_string();
+    let files = dirs.iter().flat_map(std::fs::read_dir).flatten().flatten().map(|e| e.file_name().to_string_lossy().to_string());
+    for file in files.chain(helpers().iter().filter_map(|p| Some(p.file_name()?.to_string_lossy().to_string()))) {
         let Some(name) = file.strip_suffix(std::env::consts::EXE_SUFFIX).and_then(|f| f.strip_prefix(&prefix)).filter(|n| crate::database::scopes::valid_app_name(n)) else { continue };
         if on.contains_key(name) || crate::services::part::folder(name).is_dir() {
             names.insert(name.to_string());
@@ -186,15 +166,14 @@ impl Said {
     }
 
     /// Each part, as Settings › Devices shows it: `apps`, the app runtime, and each service this device could run as
-    /// a process, with whether it's switched on (a Mac helper the Mac app carries is, unless switched off there),
-    /// what it's doing and how it runs.
+    /// a process, with whether it's switched on, what it's doing and how it runs.
     fn parts(&self, wanted: &Wanted) -> Vec<crate::state::Part> {
         use crate::database::scopes::APPS_PART;
         use crate::state::Part;
         let mut out = BTreeMap::new();
         out.insert(APPS_PART.to_string(), Part { on: !wanted.off.contains(APPS_PART), ..Part::off(APPS_PART) });
         for name in &self.offered {
-            let on = wanted.on.contains_key(name) || (helper(name).is_some() && !wanted.off.contains(name));
+            let on = wanted.on.contains_key(name);
             let now = self.now(name);
             let held = self.held.get(name);
             out.insert(name.clone(), Part { on, doing: now.doing.map(str::to_string), problem: now.problem, sandbox: held.and_then(|h| h.sandbox.clone()), user: held.is_some_and(|h| h.user), ..Part::off(name) });
@@ -255,16 +234,45 @@ fn put(onet: &Onet, address: &str, name: &str, build: &Build) -> anyhow::Result<
         Build::Deployed(hash) => (onet.ask("GET", &format!("/api/services/builds/{hash}"), None)?, format!("deploy {hash}")),
         Build::None => anyhow::bail!("its deploy names no build for this platform"),
     };
-    let path = fetched(name);
-    std::fs::create_dir_all(path.parent().unwrap_or(&path))?;
-    let new = path.with_extension("new");
-    std::fs::write(&new, bytes)?;
-    crate::os::set_mode(&new, 0o755)?;
-    std::fs::rename(&new, &path)?;
+    if bytes.starts_with(b"PK\x03\x04") {
+        put_helper(name, &bytes)?;
+    } else {
+        let path = fetched(name);
+        std::fs::create_dir_all(path.parent().unwrap_or(&path))?;
+        let new = path.with_extension("new");
+        std::fs::write(&new, bytes)?;
+        crate::os::set_mode(&new, 0o755)?;
+        std::fs::rename(&new, &path)?;
+    }
     let folder = crate::services::part::folder(name);
     std::fs::create_dir_all(&folder)?;
     std::fs::write(folder.join("release"), &kept)?;
     tracing::info!("oned put {name} {kept} in place");
+    Ok(())
+}
+
+/// A Mac helper's app, zipped as the record publishes it (`helper`): unpacked beside the one before, which is then
+/// swapped out for it by renames. (`ditto` is the Mac's own, which keeps what a signed app is made of.)
+fn put_helper(name: &str, zip: &[u8]) -> anyhow::Result<()> {
+    let apps = helper_apps();
+    let work = apps.join(format!(".{name}.new"));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work)?;
+    let (file, unpacked) = (work.join("app.zip"), work.join("app"));
+    std::fs::write(&file, zip)?;
+    let done = std::process::Command::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&file).arg(&unpacked).output()?;
+    anyhow::ensure!(done.status.success(), "couldn't unpack {name}'s app: {}", String::from_utf8_lossy(&done.stderr).trim());
+    let app = std::fs::read_dir(&unpacked)?.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "app")).with_context(|| format!("{name}'s download has no app in it"))?;
+    let at = apps.join(app.file_name().unwrap_or_default());
+    // The one before, found by its program, as its title may have changed.
+    if let Some(before) = helper(name).and_then(|p| Some(p.ancestors().nth(3)?.to_path_buf())) {
+        std::fs::rename(before, work.join("before"))?;
+    }
+    if at.exists() {
+        std::fs::remove_dir_all(&at)?;
+    }
+    std::fs::rename(&app, &at)?;
+    let _ = std::fs::remove_dir_all(&work);
     Ok(())
 }
 
@@ -335,9 +343,7 @@ fn keep_parts(kept: std::sync::Arc<std::sync::Mutex<[Kept; 2]>>, runtime: String
                 let names = offered(&released.iter().filter(|(_, b)| **b != Build::None).map(|(n, _)| n.clone()).collect(), &wanted.on);
                 said.lock().unwrap().offered = names.clone();
                 for name in &names {
-                    // A Mac service's helper the Mac app carries runs unless its user switched it off there; any other,
-                    // only where it's switched on.
-                    let on = wanted.on.contains_key(name) || (helper(name).is_some() && !wanted.off.contains(name));
+                    let on = wanted.on.contains_key(name);
                     // Switched on again while it runs fine (its record naming its scope), it goes on running.
                     let troubled = !running.contains_key(name) || said.lock().unwrap().now(name).problem.is_some();
                     if let Some(at) = wanted.on.get(name)

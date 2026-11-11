@@ -31,7 +31,7 @@ pub static PLATFORMS: [Platform; 4] = [
 pub const WINDOWS: &str = "x86_64-pc-windows-gnu";
 
 impl Platform {
-    /// What the installers download on it: the program, on a Mac the app, which holds it.
+    /// What the installers download on it: the program, on a Mac the app, which sets it up as it opens.
     pub fn asset(&self) -> String {
         match self.target {
             target if crate::latest::is_mac(target) => format!("{CLI}-macos.zip"),
@@ -438,17 +438,40 @@ pub fn release_key() -> Result<ssh_key::PrivateKey> {
     Ok(key)
 }
 
-/// What publishes a Mac's built app (dev/skills/keep-mac-current), on a Mac with the release key.
+/// What publishes what a Mac built (dev/skills/keep-mac-current), on a Mac with the release key.
 pub fn commands() -> crate::cli::Command {
     crate::cli::Command {
-        help: vec![("publish-app --zip <zip> [--config <commit>]".into(), "publish this Mac's built app, so every Mac downloads it instead of building it".into())],
+        help: vec![("publish-mac <folder> [--config <commit>]".into(), "publish what client/native/mac/build.sh made in <folder> (its window, program and services), for every Mac to take with update".into())],
         run: |g| {
-            if g.words().as_slice() != ["publish-app"] {
-                return Ok(false);
-            }
-            let zip = g.flag("zip").context("give the app with --zip")?;
-            publish_latest(g.node, &release_key()?, &[(crate::latest::Thing::app_name(TARGET), Some(PathBuf::from(zip)), Version::this(), g.flag("config").unwrap_or("-").to_string())])?;
+            let words = g.words();
+            let ["publish-mac", folder] = words.as_slice() else { return Ok(false) };
+            let folder = Path::new(folder);
+            let version = Version::of(&folder.join(CLI)).with_context(|| format!("{} has no program of this Mac's that says what it is", folder.display()))?;
+            publish_latest(g.node, &release_key()?, &mac_things(folder, &version, g.flag("config").unwrap_or("-"))?)?;
+            println!("Published {} for {}: every Mac takes it with {CLI} update.", version.commit, version.target);
             Ok(true)
         },
     }
+}
+
+/// What a Mac built for the record (client/native/mac/build.sh), as `publish_latest` takes it: in `folder`, its window
+/// zipped (`app.zip`), its program (`<cli>`), each service in Rust (`<cli>-<name>`) and each in Swift, an app of its own
+/// zipped (`<cli>-<name>.zip`), all of `version`.
+pub fn mac_things(folder: &Path, version: &Version, config: &str) -> Result<Vec<(String, Option<PathBuf>, Version, String)>> {
+    use crate::latest::Thing;
+    let target = &version.target;
+    let thing = |name: String, file: PathBuf| (name, Some(file), version.clone(), config.to_string());
+    let mut things = vec![thing(Thing::app_name(target), folder.join("app.zip")), thing(Thing::node_name(target), folder.join(CLI))];
+    for entry in std::fs::read_dir(folder)?.flatten() {
+        let file = entry.file_name().to_string_lossy().to_string();
+        let Some(service) = file.strip_prefix(&format!("{CLI}-")) else { continue };
+        let name = service.strip_suffix(".zip").unwrap_or(service);
+        ensure!(crate::database::scopes::valid_app_name(name), "{file} in {} isn't a service's", folder.display());
+        things.push(thing(Thing::service_name(name, target), entry.path()));
+    }
+    for (_, file, ..) in &things {
+        let file = file.as_ref().context("a file")?;
+        ensure!(file.is_file(), "{} isn't there", file.display());
+    }
+    Ok(things)
 }

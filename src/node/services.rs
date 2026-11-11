@@ -70,18 +70,15 @@ impl Node {
     }
 
     /// Each service switched on here before a service named the scope of the app it runs for, switched on again naming
-    /// it, once: so removing the app, or moving its service, reaches it. So is each this device carries (`carried`, a
-    /// Mac's helpers) with no record here yet, once its app is added: the app's added where this node runs it. Each
-    /// goes on running throughout.
-    pub async fn name_services_scopes(&self, carried: &[String]) {
+    /// it, once: so removing the app, or moving its service, reaches it. Each goes on running throughout.
+    pub async fn name_services_scopes(&self) {
         let Ok(caller) = Caller::local(self) else { return };
         let named = self.with(|i| {
             let m = i.r.db();
             let switches = m.switches()?;
             let unnamed = switches.iter().filter(|((k, name), s)| *k == self.0.holds.device() && s.on && s.scope.is_none() && name != scopes::APPS_PART).map(|((_, name), _)| name.clone());
-            let unrecorded = carried.iter().filter(|name| !switches.contains_key(&(self.0.holds.device(), name.to_string()))).cloned();
             let mut entries = Vec::new();
-            for name in unnamed.chain(unrecorded) {
+            for name in unnamed {
                 if let Some(scope) = added_scope(i, &caller.user, &name)?
                     && let Ok(entry) = crate::settings::service(m, &caller.user, &hex(&self.0.holds.device()), &name, true, Some(&scope))
                 {

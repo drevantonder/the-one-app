@@ -210,7 +210,7 @@ impl Node {
                 self.node_says();
                 self.renew_app_schedules("");
                 self.start_owed_keys();
-                self.name_services_scopes(&crate::oned::carried_helpers()).await;
+                self.name_services_scopes().await;
             }
             tokio::time::sleep(PRESENCE_EVERY).await;
         }

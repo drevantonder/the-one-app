@@ -1,12 +1,13 @@
 #!/bin/bash
-# Builds the Mac app (client/native) with this checkout's program inside it, which its launch agent runs as oned, signs
-# it and installs it to ~/Applications; with --release, it also notarizes it. CONFIG=path/to/config.toml builds another
-# custom build. NO_INSTALL=1 leaves it built, in client/native/target/mac/.
+# Builds what a Mac takes from the record, signed, in client/native/target/mac/built (`<cli> publish-mac` publishes it):
+# the window, zipped (app.zip), which carries no background program; the program (<cli>, which runs as oned and onet);
+# each service in Rust (<cli>-<name>); and each in Swift, an app of its own holding its own permission, zipped
+# (<cli>-<name>.zip, service/mac-helpers.sh). With --release, the window is notarized too. CONFIG=path/to/config.toml
+# builds another custom build. Nothing is installed: a Mac takes what's published with `<cli> update`.
 set -euo pipefail
 . "$(dirname "$0")/../apple.sh"
 alone "$@"
 BUNDLE_ID=app.$CONFIG_CLI.mac
-label=$BUNDLE_ID.oned
 cd "$native"
 
 # Built unstripped, so each program's symbols can be kept before it's stripped below: a stall's stacks (logs/stall.sample)
@@ -14,25 +15,24 @@ cd "$native"
 (cd "$root" && CONFIG=$config ONE_BUILD=$BUILD_COMMIT CARGO_PROFILE_RELEASE_STRIP=none cargo build --release)
 CONFIG=$config ONE_BUILD=$BUILD_COMMIT cargo build --release
 
-app=$native/target/mac/$CONFIG_NAME.app
-rm -rf "$app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Library/LaunchAgents"
-# The window, by the app's name, as the Mac app's was (what quits and finds it, below, names it so).
+out=$native/target/mac/built
+app=$out/$CONFIG_NAME.app
+rm -rf "$out"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+# The window, by the app's name, as the Mac app's was (what quits and finds it, `<cli> update`, names it so).
 cp target/release/one-native "$app/Contents/MacOS/$CONFIG_NAME"
-# Cargo names the node after the package, whatever the custom build.
-cp "$root/target/release/one" "$app/Contents/MacOS/$CONFIG_CLI"
-# Run by this name, it's oned, the Mac as a device.
-ln -sf "$CONFIG_CLI" "$app/Contents/MacOS/${CONFIG_CLI}d"
-# Its apps' services in Rust (apps/<name>/service/), which Cargo built with it: oned runs each from here.
+# Cargo names the program after the package, whatever the custom build.
+cp "$root/target/release/one" "$out/$CONFIG_CLI"
+# Its apps' services in Rust (apps/<name>/service/), which Cargo built with it.
 for m in "$root"/apps/*/service/Cargo.toml; do
 	[ -e "$m" ] || continue
 	s=$(basename "$(dirname "$(dirname "$m")")")
-	cp "$root/target/release/one-$s" "$app/Contents/MacOS/$CONFIG_CLI-$s"
+	cp "$root/target/release/one-$s" "$out/$CONFIG_CLI-$s"
 done
 
 symbols=$HOME/Library/Caches/$CONFIG_CLI/symbols
 mkdir -p "$symbols"
-for program in "$app/Contents/MacOS/$CONFIG_CLI" "$app"/Contents/MacOS/$CONFIG_CLI-*; do
+for program in "$out/$CONFIG_CLI" "$out/$CONFIG_CLI"-*; do
 	[ -e "$program" ] || continue
 	uuid=$(dwarfdump --uuid "$program" | awk '{print $2; exit}')
 	nm -n "$program" | awk '$2 ~ /^[Tt]$/ {print $1, $3}' | gzip -9 >"$symbols/$uuid.gz"
@@ -40,6 +40,9 @@ for program in "$app/Contents/MacOS/$CONFIG_CLI" "$app"/Contents/MacOS/$CONFIG_C
 done
 # A symbols file is a few MB, and a build makes one per program: the newest 200 are the last 25 or so.
 ls -1t "$symbols" | tail -n +201 | while read -r old; do rm -f "$symbols/$old"; done
+# What the record names this build: the program's word for it, with a custom build's config commit.
+build=$("$out/$CONFIG_CLI" version --json | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')
+[ -n "$build" ] || { echo "the program built doesn't say what it is"; exit 1; }
 
 # The icon is the config's as it is.
 icon=$(art icon)
@@ -50,7 +53,7 @@ for s in 16 32 128 256 512; do
 done
 iconutil -c icns target/mac/AppIcon.iconset -o "$app/Contents/Resources/AppIcon.icns"
 
-# What macOS, the node's scripts (install.sh, update) and its helpers read of it.
+# What macOS and `<cli> update` read of it: Build is what the record names this build.
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -73,28 +76,12 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>Yours</key><string>$CONFIG_YOURS</string>
   <key>NodePort</key><string>$CONFIG_PORT</string>
   <key>BuildCommit</key><string>$BUILD_COMMIT</string>
+  <key>Build</key><string>$build</string>
   <key>CFBundleURLTypes</key>
   <array><dict>
     <key>CFBundleURLName</key><string>$BUNDLE_ID</string>
     <key>CFBundleURLSchemes</key><array><string>$CONFIG_CLI</string></array>
   </dict></array>
-</dict>
-</plist>
-PLIST
-
-# Only this build's launch agent: one an earlier build left would still be registered.
-cat > "$app/Contents/Library/LaunchAgents/$label.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>$label</string>
-  <key>BundleProgram</key><string>Contents/MacOS/${CONFIG_CLI}d</string>
-  <key>ProgramArguments</key><array><string>${CONFIG_CLI}d</string></array>
-  <key>AssociatedBundleIdentifiers</key><array><string>$BUNDLE_ID</string></array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>ProcessType</key><string>Background</string>
 </dict>
 </plist>
 PLIST
@@ -107,15 +94,23 @@ identity=$(echo "$identities" | sed -n 's/.*"\(Developer ID Application: [^"]*\)
 identity=${identity:-$(echo "$identities" | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)}
 sign=(codesign --force --options runtime --sign "${identity:--}")
 [ -z "$identity" ] || sign+=(--timestamp)
-# Its Mac services in Swift, each a helper app of its own holding its own permission (service/mac-helpers.sh), which
-# oned runs a copy of (oned::placed).
-keychain env CONFIG="$config" SIGN="$identity" ICON="$app/Contents/Resources/AppIcon.icns" "$root/service/mac-helpers.sh" || { echo "couldn't build the Mac's helper apps"; exit 1; }
-[ -z "$(ls "$root/target/mac-helpers")" ] || ditto "$root/target/mac-helpers" "$app/Contents/Helpers"
-for s in "$app/Contents/MacOS/$CONFIG_CLI"-* "$app/Contents/MacOS/$CONFIG_CLI"; do
+for s in "$out/$CONFIG_CLI"-* "$out/$CONFIG_CLI"; do
 	[ -e "$s" ] || continue
 	keychain "${sign[@]}" "$s" || { echo "couldn't sign $s as ${identity:-ad hoc}"; exit 1; }
 done
+# A Mac on a build from before the window carried no background program takes its update only if the window carries the
+# program, saying what it is (that build's src/update/mac.rs): a copy, which nothing runs, so such a Mac still updates
+# to this. It goes once no Mac runs one.
+cp "$out/$CONFIG_CLI" "$app/Contents/MacOS/$CONFIG_CLI"
 keychain "${sign[@]}" "$app" || { echo "couldn't sign the app as ${identity:-ad hoc}"; exit 1; }
+# Its Mac services in Swift, each a helper app of its own holding its own permission (service/mac-helpers.sh), which
+# oned unpacks and runs where it keeps them (oned::helper).
+keychain env CONFIG="$config" SIGN="$identity" ICON="$app/Contents/Resources/AppIcon.icns" "$root/service/mac-helpers.sh" || { echo "couldn't build the Mac's helper apps"; exit 1; }
+for helper in "$root"/target/mac-helpers/*.app; do
+	[ -e "$helper" ] || continue
+	program=$(basename "$(ls -d "$helper/Contents/MacOS/$CONFIG_CLI"-*)")
+	ditto -c -k --keepParent "$helper" "$out/$program.zip"
+done
 
 # A release is notarized, with the ticket stapled to the app, so Gatekeeper lets it open wherever it's downloaded.
 # notarytool's credentials are a keychain profile named after the CLI: xcrun notarytool store-credentials <cli>-notary
@@ -130,6 +125,5 @@ if [ "${1:-}" = --release ]; then
 		echo "warning: not notarized, so it opens only where it isn't downloaded with a browser: this Mac's keychain has no notarytool profile $profile (xcrun notarytool store-credentials $profile)"
 	fi
 fi
-[ -z "${NO_INSTALL:-}" ] || { echo "Built $app"; exit 0; }
-
-CONFIG_NAME=$CONFIG_NAME CONFIG_CLI=$CONFIG_CLI bash "$native/mac/install-app.sh" "$app"
+ditto -c -k --keepParent "$app" "$out/app.zip"
+echo "Built $out"

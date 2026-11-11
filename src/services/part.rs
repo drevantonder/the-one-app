@@ -510,10 +510,10 @@ impl Service {
         // read from the switches, not the listing; whether one that's on is online, it can't know: asked, one that isn't says so.
         let listed = m.service(&self.key())?;
         let device = listed.as_ref().and_then(|s| s.device);
-        // As a node reads its own parts: a process of oned's is on by its entry; a Mac helper the app carries unless switched off.
+        // As a node reads its own parts: a process of oned's is on by its entry.
         let switched_on = |d: &Key| match m.switch(d, &self.0.name) {
             Ok(Some(s)) => s.on,
-            Ok(None) => crate::oned::helper(&self.0.name).is_some(),
+            Ok(None) => false,
             Err(_) => true,
         };
         let devices: Vec<Value> = m
@@ -757,11 +757,6 @@ pub fn run(name: &str, runtime: &str) -> Result<()> {
     lock.lock().with_context(|| name.to_string())?;
     let stop = stop_check()?;
     let program = crate::oned::program(name);
-    #[cfg(target_os = "macos")]
-    let program = match crate::oned::helper(name) {
-        Some(carried) => crate::oned::placed(&carried)?,
-        None => program,
-    };
     ensure!(program.exists(), "{name}'s program, {}, isn't there", program.display());
     let tokio = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let service = Service::open(&dir, name, runtime)?;

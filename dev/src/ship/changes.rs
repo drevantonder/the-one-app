@@ -88,8 +88,9 @@ impl Parts {
                     if !parts.services.contains(&app) {
                         parts.services.push(app);
                     }
-                    // One in Swift isn't published: the Mac app builds it into its helpers (service/mac-helpers.sh).
-                    if [".swift", "Info.plist", ".entitlements"].iter().any(|end| file.ends_with(end)) {
+                    // One in Swift or Rust a Mac builds and publishes for Macs (client/native/mac/build.sh): a helper app
+                    // of its own (service/mac-helpers.sh), or a program.
+                    if [".swift", "Info.plist", ".entitlements", ".rs", "Cargo.toml"].iter().any(|end| file.ends_with(end)) {
                         parts.mac = true;
                     }
                 }
@@ -101,9 +102,10 @@ impl Parts {
                         parts.apps.push(app);
                     }
                 }
-                // What the Mac's services in Swift are built on, which the Mac app builds (service/mac-helpers.sh).
+                // What the Mac's services in Swift are built on, which a Mac builds (service/mac-helpers.sh).
                 Some("service") if file.starts_with("service/swift/") || file == "service/mac-helpers.sh" => parts.mac = true,
-                Some("service") => parts.service = true,
+                // What every service in Rust is built on, a Mac's too.
+                Some("service") => (parts.service, parts.mac) = (true, true),
                 Some("dev") if file.starts_with("dev/skills/") => {}
                 Some("dev") => parts.dev = true,
                 // The Workers' sources but for the web client's: the Workers alone. The relay's protos only make its
@@ -144,11 +146,13 @@ mod tests {
     fn a_change_sends_out_what_is_made_of_it() {
         assert_eq!(of(&["docs/x.md", "README.md", "tests/e2e.rs", "tools/iteration/report.py", "apps/repos/tests/repos.rs", ".gitignore", "cloudflare/test/x.js", "cloudflare/relay/protos/a.proto"]), Parts::default());
         assert_eq!(of(&["apps/board/app.js", "apps/board/screen.js"]), Parts { apps: vec!["board".into()], ..Default::default() });
-        assert_eq!(of(&["apps/shell/service/main.go"]), Parts { services: vec!["shell".into()], ..Default::default() });
-        assert!(of(&["service/src/lib.rs"]).service);
+        assert_eq!(of(&["apps/whatsapp/service/main.go"]), Parts { services: vec!["whatsapp".into()], ..Default::default() });
+        assert!(of(&["service/src/lib.rs"]).service && of(&["service/src/lib.rs"]).mac);
         let swift = of(&["apps/computer/service/Computer.swift"]);
-        assert!(swift.mac && !swift.node, "a service in Swift is built into the Mac app");
-        assert!(!of(&["apps/shell/service/main.go"]).mac);
+        assert!(swift.mac && !swift.node, "a service in Swift is a Mac's to build");
+        let rust = of(&["apps/awake/service/src/main.rs"]);
+        assert!(rust.mac && rust.services == ["awake"], "a service in Rust is built on Linux and on a Mac");
+        assert!(!of(&["apps/whatsapp/service/main.go"]).mac);
         let helpers = of(&["service/swift/Helper.swift"]);
         assert!(helpers.mac && !helpers.service, "what the Swift services are built on is the Mac app's to build");
         let native = of(&["client/native/mac/build.sh"]);

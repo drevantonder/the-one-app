@@ -31,7 +31,8 @@ pub fn put_blob(dir: &Path, bytes: &[u8]) -> Result<String> {
     Ok(hash)
 }
 
-/// Whether this program runs from inside an app bundle, which updates as a whole, by what `keep-mac-current` installs.
+/// Whether this program runs from inside an app bundle: the copy of it a Mac's window carries only because builds before
+/// it check it's there as they update (`client/native/mac/build.sh`). Nothing runs it, and nothing updates it.
 pub fn in_app_bundle() -> bool {
     std::env::current_exe().and_then(|e| e.canonicalize()).is_ok_and(|e| e.to_string_lossy().contains(".app/Contents/"))
 }
@@ -43,7 +44,7 @@ pub fn install_commit(commit: &str, bytes: &[u8]) -> Result<PathBuf> {
     // Linux names a running program's file that was replaced since it started "<path> (deleted)": the path is still
     // where it's installed.
     let exe = exe.to_str().and_then(|p| p.strip_suffix(" (deleted)")).map(PathBuf::from).unwrap_or(exe).canonicalize().context("find where this program is installed")?;
-    ensure!(!in_app_bundle(), "this node lives in an app bundle, which updates with the app");
+    ensure!(!in_app_bundle(), "this is the copy of {} inside the Mac app, which runs nothing: open the app, which sets up {} on this Mac, then update with that", crate::config::CLI, crate::config::CLI);
     // Named for this process, since `one update` and a device's own check can both be installing at once.
     let tmp = exe.with_extension(format!("new.{}", std::process::id()));
     let placed = placed_at(&tmp, commit, bytes).and_then(|()| crate::os::replace_program(&tmp, &exe).context("replace the binary"));

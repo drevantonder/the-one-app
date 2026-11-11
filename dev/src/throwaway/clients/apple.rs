@@ -12,7 +12,8 @@ use super::super::network::spawn;
 /// The Mac app (client/native), or with `iphone` the iPhone app on a simulator, as this checkout builds it, on the Mac `MAC` names to ssh (`mac` if none), beside the
 /// user's own app there: a throwaway's build (its own id, folder and Keychain items), in the Mac's logged-in session,
 /// reaching the throwaway network at its address through ports ssh forwards there; the Mac app the window of a computer of
-/// its own there, whose oned this checkout's program is. Signed in as the throwaway network's
+/// its own there, which sets it up as a real Mac's does, from what this publishes at the throwaway network's address of
+/// this checkout's build for a Mac (its program and helper apps, and the window, for `<cli> update`). Signed in as the throwaway network's
 /// first user as linux() is: its Sign In pressed, the sign-in approved as them and opened there, its code approved.
 /// What it keeps stays on the Mac, so a new build is still signed in; it's started again each time.
 pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, iphone: bool, started: Instant) -> Result<()> {
@@ -60,10 +61,16 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     let key = one::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?;
     let build = format!("cd {there} && CARGO_TERM_COLOR=never PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH RELEASE_KEY={} client/native/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&key), shell_quote(&last));
     let said = build_on(&host, &build, &dir.join(format!("{script}-build.log")), started + Duration::from_secs(crate::ship::CALL - 90))?;
-    // The iPhone's says its simulator too.
-    let (sim, log) = match said.lines().last().unwrap_or_default().rsplit_once(' ') {
-        Some((sim, log)) if iphone => (sim.to_string(), log.to_string()),
-        _ => (String::new(), said.lines().last().unwrap_or_default().to_string()),
+    let last: Vec<&str> = said.lines().last().unwrap_or_default().split(' ').collect();
+    // The iPhone's says its simulator; the Mac's what to publish, and its window's launch job, started once it is.
+    let (sim, log) = match last.as_slice() {
+        [sim, log] if iphone => (sim.to_string(), log.to_string()),
+        [log, publish, job] if !iphone => {
+            publish_mac(dir, &host, publish)?;
+            ssh(&format!("launchctl bootstrap gui/$(id -u) {}", shell_quote(job)))?;
+            (String::new(), log.to_string())
+        }
+        _ => anyhow::bail!("on {host}, the build didn't say where it put what it built: {said}"),
     };
     let eval = |js: &str| ssh(&format!("curl -s -m 5 -d {} http://127.0.0.1:{control}/eval", shell_quote(js))).map(drop);
     let start = Instant::now();
@@ -124,6 +131,24 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     Ok(())
 }
 
+/// Publishes what `client/native/mac/throwaway.sh` built on `host` in `folder` for a Mac at the throwaway network's address,
+/// under its own release key, as a Mac publishes a real build (`one::build::mac_things`): the program, which the window
+/// sets up its computer from, the helper apps its oned runs, and the window, which `update` takes.
+fn publish_mac(dir: &Path, host: &str, folder: &str) -> Result<()> {
+    let here = dir.join("mac-publish");
+    let _ = std::fs::remove_dir_all(&here);
+    std::fs::create_dir_all(&here)?;
+    let copied = std::process::Command::new("sh").arg("-c").arg(format!("ssh -o BatchMode=yes {host} 'tar -c -C {} .' | tar -x -C {}", shell_quote(folder), shell_quote(&here.to_string_lossy()))).status()?;
+    anyhow::ensure!(copied.success(), "couldn't copy what {host} built for the throwaway network to publish");
+    let said = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", host, &format!("{}/{CLI} version --json", shell_quote(folder))]).output()?;
+    let version: one::release::Version = serde_json::from_slice(&said.stdout).with_context(|| format!("ask what {host} built what it is"))?;
+    let addr = std::fs::read_to_string(dir.join("addr"))?;
+    let things = one::build::mac_things(&here, &version, "-")?;
+    one::build::publish_latest(&crate::throwaway::node_at(dir, addr.trim()), &one::mode::Throwaway::own_release_key(dir)?, &things)?;
+    eprintln!("Published {} for {} at the throwaway network's address: its program, helpers and window.", version.commit, version.target);
+    Ok(())
+}
+
 /// Runs the build on `host` and gives its last line, in a session of its own that the Mac hangs up when its ssh ends, for any
 /// reason, and the build with it, so none is left running there when this is killed or the connection drops. At `deadline`,
 /// before the agent's harness would cut this call off, it ends the build the same way, saying so: what it built stays, and
@@ -179,7 +204,8 @@ pub(crate) fn stop(dir: &Path, delete: bool) {
         }
         let _ = std::fs::remove_file(dir.join(file));
     };
-    on("mac", format!("launchctl bootout gui/$(id -u)/app.{CLI}.mac.throwaway"));
+    // Its window, and its computer's oned, a launch agent named for the computer's home (`platform::set_up`).
+    on("mac", format!("launchctl bootout gui/$(id -u)/app.{CLI}.mac.throwaway; for agent in ~/Library/Caches/{CLI}/throwaway.noindex/client/native/target/throwaway-home/app.{CLI}.{CLI}d.throwaway-*.plist; do [ -e \"$agent\" ] && launchctl bootout gui/$(id -u) \"$agent\"; done; true"));
     // Every simulator of that name (a run that stopped before it said which): by its id, as a name is only what's shown.
     let name = shell_quote(&simulator_name(dir));
     on("iphone", format!("PATH=/opt/homebrew/bin:$PATH; for sim in $(xcrun simctl list devices -j | jq -r --arg n {name} '.devices[][] | select(.name == $n) | .udid'); do xcrun simctl shutdown $sim; xcrun simctl delete $sim; done"));

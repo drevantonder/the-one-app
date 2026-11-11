@@ -37,8 +37,9 @@ package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a de
 - Linux: `one-dev release` builds it, install.sh puts it on a desktop; on a desktop with no `one`, it sets it up with its
   oned a unit of the user's own systemd. Its tray item shows only its menu (Linux's tray items show no other), so it has
   no panel.
-- Mac: `mac/build.sh` (each Mac's job, through `disk.sh`), the same bundle as before: the window, the CLI,
-  oned and its launch agent, services, helpers; the window a view of that oned's onet. The menu bar is AppKit's: real menus (`mac/Sources`, a Swift package
+- Mac: `mac/build.sh` (the Mac's scheduled agent, through `disk.sh`) builds what's published for Macs: the window, which
+  carries no background program and sets up `one` and its launch agent where they're missing, the program, and the
+  services, each Swift one a helper app of its own; the window a view of that oned's onet. The menu bar is AppKit's: real menus (`mac/Sources`, a Swift package
   `build.rs` links in), with no page, which draw widgets with the iPhone's SwiftUI (`iphone/Widget`, symlinked in).
 - iPhone: `iphone/build.sh` for the simulator, the paired iPhone or TestFlight; the Swift in `Sources/` is a
   Tauri plugin of the app's own, `Widget/` the home-screen widget, `Notifications/` the notification extension.

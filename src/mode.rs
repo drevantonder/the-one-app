@@ -59,6 +59,15 @@ impl Mode {
         }
     }
 
+    /// Where a Mac's window is installed: `~/Applications/<name>.app`, but a throwaway network's computer's in its home.
+    pub fn mac_app(&self) -> PathBuf {
+        let folder = match self {
+            Mode::Throwaway(t) => t.home.join("Applications"),
+            Mode::Own => crate::user_home().join("Applications"),
+        };
+        folder.join(format!("{}.app", crate::config::NAME))
+    }
+
     /// The public half of the key what this device takes must be signed with: this build's, or a throwaway network's
     /// own, so what it publishes never needs the real one.
     pub fn release_key(&self) -> &str {

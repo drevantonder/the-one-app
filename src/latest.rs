@@ -16,8 +16,9 @@
 //! -----END SSH SIGNATURE-----
 //! ```
 //!
-//! `name` is `node/<target>`, `app/<target>` (a Mac's zip), `service/<name>/<target>`, `web` (the web client's signed
-//! bundle), `workers` (the Workers' sources, which only their home device reads), or `source` (the commit a Mac's builder builds the Mac's app from, whose `sha256` is `-`); `committed` is seconds
+//! `name` is `node/<target>` (the program: `one`, oned and onet), `app/<target>` (a Mac's window, zipped),
+//! `service/<name>/<target>` (a Mac helper's is its app, zipped), `web` (the web client's signed bundle), `workers` (the
+//! Workers' sources, which only their home device reads), or `source` (the commit a Mac's builder builds what's published for Macs from, whose `sha256` is `-`); `committed` is seconds
 //! since 1970; `config` is the custom build's config commit, `-` if it has none. The signature (the release key's, as
 //! `ssh-keygen -Y sign -n release-latest` makes it) is over everything before its first line.
 
@@ -127,13 +128,13 @@ impl Latest {
         self
     }
 
-    /// What `one update` puts on a device on `target`: a Mac's app as a whole (`app/<target>`), else its node's program.
+    /// The program `one update` puts on a device on `target` (`node/<target>`); a Mac takes its window too (`app/<target>`).
     pub fn to_update_to(&self, target: &str) -> Option<&Thing> {
-        if is_mac(target) { self.get(&Thing::app_name(target)) } else { self.get(&Thing::node_name(target)) }
+        self.get(&Thing::node_name(target))
     }
 }
 
-/// Whether `target` is a Mac's, which takes its whole app.
+/// Whether `target` is a Mac's, which a Mac builds for and takes its window with too.
 pub fn is_mac(target: &str) -> bool {
     target.ends_with("-apple-darwin")
 }
@@ -194,14 +195,6 @@ mod tests {
 
     fn thing(name: &str, commit: &str, committed: u64) -> Thing {
         Thing { name: name.into(), commit: commit.into(), committed, sha256: "a".repeat(64), size: 3, config: "-".into() }
-    }
-
-    #[test]
-    fn a_mac_updates_to_its_app_and_others_to_their_node() {
-        let record = Latest { things: vec![thing("source", "s", 3), thing("app/aarch64-apple-darwin", "app", 2), thing("node/x86_64-unknown-linux-gnu", "node", 1)] };
-        assert_eq!(record.to_update_to("aarch64-apple-darwin").unwrap().commit, "app");
-        assert_eq!(record.to_update_to("x86_64-unknown-linux-gnu").unwrap().commit, "node");
-        assert!(record.to_update_to("x86_64-apple-darwin").is_none(), "an app built for another Mac isn't its");
     }
 
     /// This text was signed once by an older build. It must read today exactly as it did: a device that can't read

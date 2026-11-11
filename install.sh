@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the latest release for this machine, if its signature is the release key's: on Linux the program, with
-# <cli>d, the device, run as a system service, and on a desktop the app; on a Mac the app, which is the Mac's <cli>d.
-# Run again to update.
+# <cli>d, the device, run as a system service, and on a desktop the app; on a Mac the app, which sets up <cli> and
+# <cli>d as it's signed in. Run again to update; on a Mac, `<cli> update` does.
 # `sh install.sh <binary>` installs a binary you built instead.
 set -eu
 # config.toml's repo, cli and release_key; a test keeps them the same.
@@ -39,13 +39,8 @@ if [ "$(uname -s)" = Darwin ]; then
 	mkdir -p "$HOME/Applications"
 	rm -rf "$HOME/Applications/$app"
 	mv "$tmp/app/$app" "$HOME/Applications/"
-	ln -sf "$HOME/Applications/$app/Contents/MacOS/$cli" "$HOME/.local/bin/$cli"
-	# Git reaches your repos' addresses through it, by this name.
-	ln -sf "$HOME/Applications/$app/Contents/MacOS/$cli" "$HOME/.local/bin/git-remote-$cli"
-	# oned already running keeps the old binary until it restarts.
-	launchctl kickstart -k "gui/$(id -u)/app.$cli.mac.oned" 2>/dev/null || true
 	open "$HOME/Applications/$app"
-	echo "Installed ~/Applications/$app, which runs ${cli}d."
+	echo "Installed ~/Applications/$app. Signing in there sets up $cli and ${cli}d, this device."
 else
 	if [ $# -gt 0 ]; then
 		bin=$1 cli=$(basename "$1")

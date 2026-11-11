@@ -222,65 +222,64 @@ fn a_build_that_isnt_what_the_record_names_changes_nothing() {
     device.unchanged(was);
 }
 
-/// A Mac: the program runs from inside its app, which `one update` replaces whole with the app the record names, by the
-/// installer that `build.sh` uses too. Everything Apple's the installer calls is a stand-in here; what's held is that
-/// the app named is the one installed, and one that isn't what the record says changes nothing.
+/// A Mac takes its program as any computer does, and its window, the app the record names beside it, which carries no
+/// background program: put in place of the one installed (`Mode::mac_app`) only once it says it's what the record names.
+/// Everything Apple's it calls is a stand-in here, and a window here is only its Info.plist, which says its build.
 #[test]
-fn a_mac_takes_the_app_the_record_names() {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("update-mac-{}", rand::random::<u64>()));
-    let (cli, name) = (one::config::CLI, one::config::NAME);
-    let user = dir.join("user");
-    let installed = user.join(format!("Applications/{name}.app/Contents/MacOS/{cli}"));
-    let home = dir.join("home");
-    let bin = dir.join("bin");
-    for folder in [installed.parent().unwrap(), &home, &bin] {
-        std::fs::create_dir_all(folder).unwrap();
-    }
-    std::fs::hard_link(env!("CARGO_BIN_EXE_one"), &installed).unwrap();
+fn a_mac_takes_its_window_beside_its_program() {
+    let device = device();
+    let bin = device.dir.join("stand-ins");
+    std::fs::create_dir_all(&bin).unwrap();
     let stub = |name: &str, body: &str| {
         std::fs::write(bin.join(name), format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(bin.join(name), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     };
-    for nothing in ["osascript", "open", "launchctl"] {
+    for nothing in ["open", "kill"] {
         stub(nothing, "exit 0");
     }
-    for none in ["pgrep", "pkill"] {
-        stub(none, "exit 1");
-    }
-    // ditto -x -k <zip> <into>: our "zip" is the program itself, put where an unpacked app has it. ditto <app> <to>: copies.
-    let inside = format!("{name}.app/Contents/MacOS");
-    stub("ditto", &format!("if [ \"$1\" = -x ]; then mkdir -p \"$4/{inside}\"; cat \"$3\" > \"$4/{inside}/{cli}\"; chmod 755 \"$4/{inside}/{cli}\"; else cp -R \"$1\" \"$2\"; fi"));
-    let key = Throwaway::own_release_key(&home).unwrap();
-    let address = Address::start();
-    one::update::keep_address(&home, &address.at).unwrap();
-    let device = Device { dir: dir.clone(), program: installed.clone(), home, key, address };
+    // No window is running.
+    stub("pgrep", "exit 1");
+    // ditto -x -k <zip> <into>: our "zip" is the build the window says it is, put where an unpacked app has its Info.plist.
+    let name = one::config::NAME;
+    stub("ditto", &format!("mkdir -p \"$4/{name}.app/Contents\" && cp \"$3\" \"$4/{name}.app/Contents/Info.plist\""));
+    // plutil -extract Build raw -o - <plist>
+    stub("plutil", "cat \"$6\"");
+    let installed = device.home.join(format!("Applications/{name}.app/Contents/Info.plist"));
+    let publish = |program: (&str, Vec<u8>), window: (&str, Vec<u8>)| {
+        let mut things = Vec::new();
+        for (thing, (commit, bytes)) in [(Thing::node_name(TARGET), program), (Thing::app_name(TARGET), window)] {
+            let sha = sha256(&bytes);
+            device.address.serve(&sha, bytes.clone());
+            things.push(Thing { name: thing, commit: commit.into(), committed: NEWER, sha256: sha, size: bytes.len() as u64, config: "-".into() });
+        }
+        device.address.serve("newest", Latest { things }.signed(&device.key).unwrap().into_bytes());
+    };
     let update = || {
-        let mut command = std::process::Command::new(&installed);
+        let mut command = std::process::Command::new(&device.program);
         Throwaway::tell(&mut command, &device.home, "127.0.0.1:1");
-        let out = command.arg("update").env("HOME", &user).env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())).output().unwrap();
+        let out = command.arg("update").env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())).output().unwrap();
         (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
     };
-    let was = std::fs::read(&installed).unwrap();
+    let was = device.inode();
 
-    // An app that says it's another build than the record names isn't installed.
-    device.published("newer", NEWER, build("another", TARGET, NEWER));
-    let (ok, _, _) = update();
-    assert!(!ok, "it says it's another commit than the record says");
-    assert_eq!(std::fs::read(&installed).unwrap(), was);
+    // A window that says it's another build than the record names isn't installed.
+    publish((one::config::BUILD, build(one::config::BUILD, TARGET, COMMITTED)), ("window", b"another".to_vec()));
+    let (ok, _, err) = update();
+    assert!(!ok, "it says it's another build than the record says");
+    assert!(err.contains("another"), "{err}");
+    assert!(!installed.exists(), "it was installed");
+    device.unchanged(was);
 
-    // The one it names is: after this returns, apart from it.
+    // The program and the window the record names are, each in one step.
     let new = build("newer", TARGET, NEWER);
-    device.published("newer", NEWER, new.clone());
+    publish(("newer", new.clone()), ("window", b"window".to_vec()));
     let (ok, said, err) = update();
     assert!(ok, "{err}");
-    assert!(said.contains("Updating this Mac"), "{said}");
-    for _ in 0..200 {
-        if std::fs::read(&installed).is_ok_and(|b| b == new) {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert_eq!(std::fs::read(&installed).unwrap(), new, "the installer didn't run");
+    assert!(said.contains("newer") && said.contains("window"), "{said}");
+    assert_eq!(std::fs::read(&device.program).unwrap(), new);
+    assert_eq!(std::fs::read_to_string(&installed).unwrap(), "window");
+    let leftovers: Vec<_> = std::fs::read_dir(device.home.join("Applications")).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(leftovers.len(), 1, "only the window is left where it's installed: {leftovers:?}");
 }
 
 /// A process named as `oned`'s program, standing in for it: `one update` tells it apart from a stranger's only by that.
@@ -360,7 +359,7 @@ fn updating_imports_nothing_of_the_network() {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let allowed: &[(&str, &[&str])] = &[
         ("src/update.rs", &["cli", "config", "home", "latest", "mode", "oned::name", "os", "release"]),
-        ("src/update/mac.rs", &["config", "latest", "release"]),
+        ("src/update/mac.rs", &["config", "latest", "mode"]),
         ("src/update/cli.rs", &["cli", "config"]),
         ("src/latest.rs", &["build::Platform", "hedge", "keys", "protocol"]),
         ("src/release.rs", &["config", "os"]),

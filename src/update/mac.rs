@@ -1,56 +1,52 @@
-//! A Mac takes its update as a whole app: `app/<target>` in the record is the zip one Mac built and published
-//! (dev/skills/keep-mac-current). It's downloaded, checked and unpacked here, so anything wrong is said at once and
-//! changes nothing; then `install-app.sh` replaces the app this program runs from and restarts it. That stops this
-//! program's oned and the window, so it runs apart from them, and this returns without waiting for it.
+//! A Mac's window: the app the record names beside the program (`app/<target>`, the zip one Mac built and published,
+//! dev/skills/keep-mac-current), installed where `Mode::mac_app` says. It carries no background program, so taking it
+//! stops nothing but the window: it's downloaded, checked and unpacked first, so anything wrong is said at once and
+//! changes nothing, then put in place of the one there, which is closed first and opened again if it was open.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
 
-use crate::config::{CLI, COMMITTED, NAME, TARGET};
+use crate::config::{CLI, COMMITTED, NAME};
 use crate::latest::{self, Thing};
-use crate::release::Version;
 
-use super::{FOLDER, WHY};
+use super::FOLDER;
 
-const INSTALLER: &str = include_str!("../../client/native/mac/install-app.sh");
-
-/// Downloads `thing`, the app's zip at `address`, checks that what's in it is the app the record names, and starts
-/// installing it. → once it's started.
-pub fn install(home: &Path, address: &str, thing: &Thing) -> Result<()> {
+/// Takes the window `thing` names, at `address`, unless it's the one installed or older than this program. → whether it
+/// put it in place.
+pub fn window(home: &Path, address: &str, thing: &Thing) -> Result<bool> {
+    let installed = crate::mode::here().mac_app();
+    if thing.committed < COMMITTED || built(&installed).is_some_and(|b| b == thing.commit) {
+        return Ok(false);
+    }
     let dir = home.join(FOLDER);
     std::fs::create_dir_all(&dir)?;
-    let _ = std::fs::remove_file(dir.join(WHY));
     let bytes = latest::download(address, thing)?;
-    // Named for this process, since the node's ask and a person can both be updating at once.
-    let unpacked = dir.join(format!("fresh-{}", std::process::id()));
+    // Named for this process, since a person and an Update pressed elsewhere can both be updating at once.
+    let unpacked = dir.join(format!("window-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&unpacked);
-    let app = unpack(&bytes, &dir.join(format!("app-{}.zip", std::process::id())), &unpacked).inspect_err(|_| {
-        let _ = std::fs::remove_dir_all(&unpacked);
-    })?;
-    check(&app, &thing.commit).inspect_err(|_| {
-        let _ = std::fs::remove_dir_all(&unpacked);
-    })?;
-    // Written out of the app that's about to be replaced, which the script itself does.
-    let installer = dir.join("install-app.sh");
-    std::fs::write(&installer, INSTALLER).context("write the installer")?;
-    let log = std::fs::File::create(dir.join("install.log")).context("write the installer's log")?;
-    let mut install = Command::new("/bin/bash");
-    install
-        .args(["-c", "/bin/bash \"$0\" \"$1\" && rm -rf \"$2\"", &installer.to_string_lossy(), &app.to_string_lossy(), &unpacked.to_string_lossy()])
-        .env("CONFIG_NAME", NAME)
-        .env("CONFIG_CLI", CLI)
-        .env("INSTALL_WHY", dir.join(WHY))
-        .current_dir(&dir)
-        .stdin(Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log);
-    // Its own process group, so what stops oned and the app doesn't stop it; the app it was unpacked from goes when it's done.
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut install, 0);
-    install.spawn().context("start the installer")?;
-    Ok(())
+    let done = (|| {
+        let app = unpack(&bytes, &dir.join(format!("window-{}.zip", std::process::id())), &unpacked)?;
+        let says = built(&app);
+        ensure!(says.as_deref() == Some(thing.commit.as_str()), "the app says it's {}, not {}", says.as_deref().unwrap_or("nothing"), thing.commit);
+        let open = !running(&installed).is_empty();
+        close(&installed);
+        replace(&app, &installed)?;
+        if open {
+            // Opened as a person would: it reads where it is and who it's for from itself.
+            let _ = Command::new("open").arg(&installed).status();
+        }
+        Ok(())
+    })();
+    let _ = std::fs::remove_dir_all(&unpacked);
+    done.map(|()| true)
+}
+
+/// The build a window says it is: `Build` in its Info.plist (client/native/mac/build.sh), what the record names it.
+fn built(app: &Path) -> Option<String> {
+    let out = Command::new("plutil").args(["-extract", "Build", "raw", "-o", "-"]).arg(app.join("Contents/Info.plist")).output().ok().filter(|o| o.status.success())?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|b| !b.is_empty())
 }
 
 /// The zip's one app, unpacked in `into`. (`ditto` is the Mac's own, which keeps what a signed app is made of.)
@@ -67,17 +63,41 @@ fn unpack(zip: &[u8], at: &Path, into: &Path) -> Result<PathBuf> {
     }
 }
 
-/// Whether the app's own program says it's `commit`, built for this Mac and no older than this one, as a replaced
-/// program is checked (`release::install_commit`): the record's word isn't signed for that.
-fn check(app: &Path, commit: &str) -> Result<()> {
-    let program = app.join("Contents/MacOS").join(CLI);
-    let version = Version::of(&program);
-    ensure!(
-        version.as_ref().is_some_and(|v| v.commit == commit && v.target == TARGET && v.committed >= COMMITTED),
-        "the app says it's {}, not {} for {}",
-        version.map_or("nothing".into(), |v| v.json()),
-        commit,
-        TARGET
-    );
+/// The ids of the window's processes running from `app`.
+fn running(app: &Path) -> Vec<String> {
+    let program = app.join("Contents/MacOS").join(NAME);
+    let out = Command::new("pgrep").arg("-f").arg(format!("^{}$", program.display())).output();
+    out.map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().map(str::to_string).collect()).unwrap_or_default()
+}
+
+/// Closes the window running from `app`: asked, then made to if it hasn't in ten seconds.
+fn close(app: &Path) {
+    for signal in ["-TERM", "-KILL"] {
+        let pids = running(app);
+        if pids.is_empty() {
+            return;
+        }
+        let _ = Command::new("kill").arg(signal).args(&pids).status();
+        for _ in 0..100 {
+            if running(app).is_empty() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    eprintln!("{CLI}: the window at {} didn't close", app.display());
+}
+
+/// Puts `new` at `at`: beside it, then swapped in by renames, so the path holds a whole app however this ends.
+fn replace(new: &Path, at: &Path) -> Result<()> {
+    let folder = at.parent().context("where the app goes")?;
+    std::fs::create_dir_all(folder)?;
+    let (fresh, old) = (folder.join(format!(".{NAME}.{}.new", std::process::id())), folder.join(format!(".{NAME}.{}.old", std::process::id())));
+    std::fs::rename(new, &fresh).with_context(|| format!("put the new app beside {}", at.display()))?;
+    if at.exists() {
+        std::fs::rename(at, &old).with_context(|| format!("move {} aside", at.display()))?;
+    }
+    std::fs::rename(&fresh, at).with_context(|| format!("put the new app at {}", at.display()))?;
+    let _ = std::fs::remove_dir_all(&old);
     Ok(())
 }
