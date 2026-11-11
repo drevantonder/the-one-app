@@ -119,6 +119,12 @@ pub trait Databases: Send + Sync {
     fn bucket_fields(&self) -> Option<BTreeMap<String, String>>;
     /// Whether this runtime is an admin's, whose endpoint alone the URL signer lets remove from the bucket.
     fn removes_from_bucket(&self) -> bool;
+    /// The network's bucket from `fields` (`bucket_fields`'s): a folder here, or S3 through the URL signer at the
+    /// network's address, signing as its device.
+    fn place(&self, fields: &BTreeMap<String, String>) -> Result<bucket::Place>;
+    /// Keeps the network's data in `to` (from `fields`) from now on, once `copy` is done, which copies there what it
+    /// reaches of the bucket it had: its writes wait until then, and it reads every database again from there.
+    fn keep_in<'a>(&'a self, to: bucket::Place, fields: BTreeMap<String, String>, copy: Fut<'a, ()>) -> Fut<'a, ()>;
 }
 
 /// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.

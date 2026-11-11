@@ -61,7 +61,6 @@ pub fn routes() -> Routes {
         .merge(calls::routes())
         .merge(tools::routes())
         .merge(openapi::routes())
-        .merge(crate::storage::routes::routes())
         .merge(crate::settings_routes())
         .merge(crate::holds_routes())
         .merge(crate::apps::routes::routes())

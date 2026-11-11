@@ -385,7 +385,6 @@ impl Host {
             self.follow_erased().await;
         }
         if handled.members {
-            self.follow_storage();
             self.follow_net();
         }
         let forgotten: Vec<(String, String)> = forgotten_now.into_iter().filter(|b| !forgotten_before.contains(b)).map(|b| ("global".to_string(), b)).collect();

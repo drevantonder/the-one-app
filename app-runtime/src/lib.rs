@@ -61,7 +61,6 @@ pub(crate) use settings::routes as settings_routes;
 pub(crate) use holds::routes as holds_routes;
 mod state;
 mod steps;
-pub mod storage;
 use ::api::trace;
 mod caller;
 pub mod runtime;
@@ -228,8 +227,6 @@ pub struct Inner {
     databases: databases::State,
     /// Steps other devices sent, waiting for the bucket to confirm them, while one ask of it is under way: none then.
     sent: Mutex<Option<Vec<sync::Sent>>>,
-    /// Whether this device is moving to the network's new storage now.
-    moving: Mutex<bool>,
     /// The network's recovery keys this device told the relay about since it started: the old ones taken out, the
     /// current one let in as a client (`follow_recovery`).
     recovery_told: Mutex<std::collections::BTreeSet<Key>>,
@@ -376,7 +373,6 @@ impl Host {
             calls: Default::default(),
             databases: Default::default(),
             sent: Mutex::new(None),
-            moving: Mutex::new(false),
             recovery_told: Mutex::new(Default::default()),
             caught_up: tokio::sync::Mutex::new(None),
             moved: Arc::default(),

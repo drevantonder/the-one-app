@@ -19,6 +19,7 @@ pub fn features() -> Vec<Runs> {
         groups_runtime::runs(),
         devices_runtime::runs(),
         database_runtime::runs(),
+        bucket_runtime::runs(),
         onboarding_runtime::runs(),
         services_runtime::runs(),
         widgets_runtime::runs(),
@@ -251,6 +252,14 @@ impl Databases for Host {
 
     fn removes_from_bucket(&self) -> bool {
         Host::removes_from_bucket(self)
+    }
+
+    fn place(&self, fields: &BTreeMap<String, String>) -> Result<::bucket::Place> {
+        self.network_place(fields)
+    }
+
+    fn keep_in<'a>(&'a self, to: ::bucket::Place, fields: BTreeMap<String, String>, copy: Fut<'a, ()>) -> Fut<'a, ()> {
+        Box::pin(Host::keep_in(self, to, fields, copy))
     }
 }
 

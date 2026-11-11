@@ -5,18 +5,15 @@ use axum::extract::State;
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
 
-use crate::api::Routes;
-use ::api::Body;
-use ::api::Reply;
-use ::api::Who;
-use crate::Host;
+use api::runtime::prelude::*;
+use api::{Body, Reply, Routes, Who};
 
-pub fn routes() -> Routes {
+pub fn routes() -> Routes<Rt> {
     Routes::default().route("/api/storage", Who::ThisMachine, get(storage).post(set))
 }
 
-async fn storage(State(host): State<Host>) -> Reply {
-    Ok(Json(host.storage()?))
+async fn storage(State(rt): State<Rt>) -> Reply {
+    Ok(Json(super::storage(&rt)))
 }
 
 /// S3-compatible storage to move the network's data to.
@@ -29,6 +26,6 @@ struct Storage {
     region: Option<String>,
 }
 
-async fn set(State(host): State<Host>, Body(body): Body<Storage>) -> Reply {
-    Ok(Json(host.set_storage(&host.caller()?, &serde_json::to_value(body)?).await?))
+async fn set(State(rt): State<Rt>, Body(body): Body<Storage>) -> Reply {
+    Ok(Json(super::set(&rt, &rt.caller()?, &serde_json::to_value(body)?).await?))
 }

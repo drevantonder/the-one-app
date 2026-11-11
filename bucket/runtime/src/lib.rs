@@ -4,13 +4,38 @@
 //! device follows: it reaches it through the URL signer, copies there what it reaches of the old one, and keeps its
 //! data there from then on. A folder is only ever a machine's own choice, never taken from what others write.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use anyhow::{Context, Result, bail, ensure};
+use serde_json::{Value, json};
+
+use ::bucket::{Place, STORAGE};
 use ::custom_build::allowed;
-use ::custom_build::config::YOURS;
-use super::*;
-use ::bucket::STORAGE;
+use api::Caller;
+use api::call::Event;
+use api::home::{NETWORK_OBJECT, bucket_root};
+use api::runtime::prelude::*;
+use api::runtime::{Happened, Runs};
+use scope::scopes::{self, Scope, ScopeDb};
 
-pub(crate) mod routes;
+mod routes;
 
+pub fn runs() -> Runs {
+    Runs { routes: routes::routes(), state: Box::new(State::default()), on: Some(on), ..Runs::named("storage") }
+}
+
+#[derive(Default)]
+pub struct State {
+    /// Whether this device is moving to the network's new storage now.
+    moving: AtomicBool,
+}
+
+/// Who's who changed: the `storage` setting may have.
+fn on(rt: &Rt, happened: &Happened) {
+    let Happened::Steps { scope: Scope::Global } = happened else { return };
+    tokio::spawn(follow(rt.clone()));
+}
 
 /// The network's bucket as its `storage` setting says, if it has one: S3's address alone, never a folder's path.
 fn storage_setting(m: &ScopeDb) -> Result<Option<BTreeMap<String, String>>> {
@@ -21,97 +46,79 @@ fn storage_setting(m: &ScopeDb) -> Result<Option<BTreeMap<String, String>>> {
     Ok(Some(fields))
 }
 
-impl Host {
-    /// Where this device keeps the network's data, as a user sees it.
-    pub fn storage(&self) -> Result<Value> {
-        self.with(|i| {
-            Ok(match &i.bucket {
-                Some((Place::Folder(path), _)) => json!({ "kind": "folder", "where": path.display().to_string(), "device": self.device_name() }),
-                Some((Place::S3(s3), _)) => json!({ "kind": "s3", "where": s3.bucket, "endpoint": s3.endpoint }),
-                None => json!({ "kind": null }),
-            })
-        })
+/// Where this device keeps the network's data, as a user sees it.
+pub fn storage(rt: &Rt) -> Value {
+    match rt.bucket() {
+        Ok(Place::Folder(path)) => json!({ "kind": "folder", "where": path.display().to_string(), "device": rt.device_name() }),
+        Ok(Place::S3(s3)) => json!({ "kind": "s3", "where": s3.bucket, "endpoint": s3.endpoint }),
+        Err(_) => json!({ "kind": null }),
     }
+}
 
-    /// The network's bucket from the fields this device keeps of it: a folder here, or S3 through the URL signer at the
-    /// network's address, signing with this device's key.
-    /// A device that joined keeps the address it joined at with them (`address`), until it has read the network's.
-    pub(super) fn network_place(&self, fields: &BTreeMap<String, String>) -> Result<Place> {
-        let host = Arc::downgrade(&self.0);
-        let joined = fields.get("address").cloned();
-        let address: bucket::Address = Arc::new(move || {
-            let host = Host(host.upgrade().context("this device stopped")?);
-            host.with(|i| Ok(i.r.db().setting("address")?))?.or_else(|| joined.clone()).with_context(|| format!("{YOURS} has no address yet, where its bucket is reached: an admin sets one with cloudflare use"))
-        });
-        Place::network(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
+/// Moves the network's data, for an admin, to S3-compatible storage (`endpoint`, `bucket`, `region`), whose key the
+/// URL signer holds: reaches it through the signer first, and makes it the network's `storage` setting if
+/// it can.
+pub async fn set(rt: &Rt, caller: &Caller, body: &Value) -> Result<Value> {
+    rt.read(|r| {
+        allowed!(r.db().may(&caller.user, "change-settings", scopes::NETWORK), "only admins move the network's data");
+        Ok(())
+    })?;
+    let fields: BTreeMap<String, String> = ["endpoint", "bucket", "region"]
+        .into_iter()
+        .filter_map(|k| Some((k.to_string(), body[k].as_str().map(str::trim).filter(|v| !v.is_empty())?.to_string())))
+        .collect();
+    let place = rt.place(&fields)?;
+    let Place::S3(_) = &place else { bail!("the network's data moves to S3-compatible storage, given its endpoint") };
+    place.can_hold_a_network()?;
+    let reached = {
+        let place = place.clone();
+        tokio::task::spawn_blocking(move || bucket_root(&place)).await?
+    };
+    let steps = vec![json!({ "step": "Reached it through the URL signer", "error": reached.as_ref().err().map(|e| format!("{e:#}")) })];
+    if reached.is_err() {
+        return Ok(json!({ "tried": steps }));
     }
+    let setting = serde_json::to_string(&fields)?;
+    rt.as_member(caller, scope::content::setting(STORAGE, Some(&setting))).await?;
+    Ok(json!({ "tried": steps, "kept": true }))
+}
 
-    /// Moves the network's data, for an admin, to S3-compatible storage (`endpoint`, `bucket`, `region`), whose key the
-    /// URL signer holds: reaches it through the signer first, and makes it the network's `storage` setting if
-    /// it can.
-    pub async fn set_storage(&self, caller: &Caller, body: &Value) -> Result<Value> {
-        self.with(|i| {
-            allowed!(i.r.db().may(&caller.user, "change-settings", scopes::NETWORK), "only admins move the network's data");
-            Ok(())
-        })?;
-        let fields: BTreeMap<String, String> = ["endpoint", "bucket", "region"]
-            .into_iter()
-            .filter_map(|k| Some((k.to_string(), body[k].as_str().map(str::trim).filter(|v| !v.is_empty())?.to_string())))
-            .collect();
-        let place = self.network_place(&fields)?;
-        let Place::S3(_) = &place else { bail!("the network's data moves to S3-compatible storage, given its endpoint") };
+/// Follows the network's `storage` setting, when this device keeps its data anywhere else.
+async fn follow(rt: Rt) {
+    let now = rt.bucket_fields();
+    let wanted = rt.read(|r| Ok(storage_setting(r.db())?.filter(|f| now.as_ref().is_none_or(|now| now.iter().filter(|(k, _)| k.as_str() != "address").ne(f.iter())))));
+    let fields = match wanted {
+        Ok(Some(fields)) => fields,
+        Ok(None) => return,
+        Err(err) => return tracing::warn!("storage: {err:#}"),
+    };
+    let moving = &rt.state::<State>().moving;
+    if moving.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    if let Err(err) = move_to(&rt, fields).await {
+        tracing::warn!("moving the network's data: {err:#}");
+    }
+    moving.store(false, Ordering::SeqCst);
+}
+
+/// Moves this device to the bucket `fields` says, once it reaches it: copies there each object of the bucket it had
+/// that the new one lacks, then keeps the network's data there.
+async fn move_to(rt: &Rt, fields: BTreeMap<String, String>) -> Result<()> {
+    let to = rt.place(&fields)?;
+    let from = rt.bucket().ok();
+    let root = rt.read(|r| r.replica.root().map(|r| r.to_hex()).context("no network"))?;
+    let (place, theirs) = (to.clone(), root.clone());
+    tokio::task::spawn_blocking(move || -> Result<()> {
         place.can_hold_a_network()?;
-        let reached = {
-            let place = place.clone();
-            tokio::task::spawn_blocking(move || bucket_root(&place)).await?
-        };
-        let steps = vec![json!({ "step": "Reached it through the URL signer", "error": reached.as_ref().err().map(|e| format!("{e:#}")) })];
-        if reached.is_err() {
-            return Ok(json!({ "tried": steps }));
+        if let Some(other) = bucket_root(&place)?.filter(|r| r != theirs.as_bytes()) {
+            bail!("that bucket holds another network's data ({})", String::from_utf8_lossy(&other));
         }
-        let setting = serde_json::to_string(&fields)?;
-        self.set_setting(caller, STORAGE, Some(&setting)).await?;
-        Ok(json!({ "tried": steps, "kept": true }))
-    }
-
-    /// Follows the network's `storage` setting, when this device keeps its data anywhere else: in the background.
-    pub(super) fn follow_storage(&self) {
-        let wanted = self.with(|i| Ok(storage_setting(i.r.db())?.filter(|f| i.bucket.as_ref().is_none_or(|(_, now)| now.iter().filter(|(k, _)| k.as_str() != "address").ne(f.iter())))));
-        let fields = match wanted {
-            Ok(Some(fields)) => fields,
-            Ok(None) => return,
-            Err(err) => return tracing::warn!("storage: {err:#}"),
-        };
-        if std::mem::replace(&mut *self.0.moving.lock().unwrap(), true) {
-            return;
-        }
-        let host = self.clone();
-        tokio::spawn(async move {
-            if let Err(err) = host.move_to(fields).await {
-                tracing::warn!("moving the network's data: {err:#}");
-            }
-            *host.0.moving.lock().unwrap() = false;
-        });
-    }
-
-    /// Moves this device to the bucket `fields` says, once it reaches it: copies there each object of the bucket it had
-    /// that the new one lacks, then keeps the network's data there.
-    async fn move_to(&self, fields: BTreeMap<String, String>) -> Result<()> {
-        let to = self.network_place(&fields)?;
-        let from = self.bucket().ok().map(|b| b.place);
-        let root = self.with(|i| i.r.root().map(|r| r.to_hex()).context("no network"))?;
-        let (place, theirs) = (to.clone(), root.clone());
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            place.can_hold_a_network()?;
-            if let Some(other) = bucket_root(&place)?.filter(|r| r != theirs.as_bytes()) {
-                bail!("that bucket holds another network's data ({})", String::from_utf8_lossy(&other));
-            }
-            Ok(())
-        })
-        .await??;
-        // Writes wait while it copies, then go to the new bucket, so none is left only in the old one.
-        let mut moved = self.0.moved.write().await;
-        let (place, theirs) = (to.clone(), root.clone());
+        Ok(())
+    })
+    .await??;
+    let place = to.clone();
+    let copy = Box::pin(async move {
         tokio::task::spawn_blocking(move || -> Result<()> {
             if let Some(from) = from.filter(|f| f.present()) {
                 for name in to_move(&from.names()?) {
@@ -122,26 +129,15 @@ impl Host {
                     }
                 }
             }
-            place.create(NETWORK_OBJECT, theirs.as_bytes())?;
+            place.create(NETWORK_OBJECT, root.as_bytes())?;
             Ok(())
         })
-        .await??;
-        let dir = self.network_dir();
-        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join(NETWORK_FILE))?)?;
-        file.bucket = Some(fields.clone());
-        self.save_network(&file)?;
-        self.with(|i| {
-            i.bucket = Some((to.clone(), fields));
-            Ok(())
-        })?;
-        *moved = Some(to);
-        drop(moved);
-        // What it read of the old bucket stays true, but is read again from the new one.
-        self.close_dbs(|_, _| true);
-        tracing::info!("the network's data is kept in {} now", self.storage()?["where"].as_str().unwrap_or(""));
-        self.emit(Event::Changed { apps: Vec::new() });
-        Ok(())
-    }
+        .await?
+    });
+    rt.keep_in(to, fields, copy).await?;
+    tracing::info!("the network's data is kept in {} now", storage(rt)["where"].as_str().unwrap_or(""));
+    rt.emit(Event::Changed { apps: Vec::new() });
+    Ok(())
 }
 
 /// Of `names`, every object of the bucket being moved from, sorted, those moving copies, in that order: each database's

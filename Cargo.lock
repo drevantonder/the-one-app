@@ -151,6 +151,7 @@ dependencies = [
  "backups-runtime",
  "blake3",
  "bucket",
+ "bucket-runtime",
  "ciborium",
  "custom-build",
  "data-encoding",
@@ -562,6 +563,22 @@ dependencies = [
  "tokio",
  "tracing",
  "ureq",
+]
+
+[[package]]
+name = "bucket-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "axum",
+ "bucket",
+ "custom-build",
+ "scope",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

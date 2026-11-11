@@ -34,6 +34,38 @@ impl Host {
         self.0.dir.join(NETWORK_DIR)
     }
 
+    /// The network's bucket from the fields this device keeps of it: a folder here, or S3 through the URL signer at the
+    /// network's address, signing with this device's key.
+    /// A device that joined keeps the address it joined at with them (`address`), until it has read the network's.
+    pub(super) fn network_place(&self, fields: &BTreeMap<String, String>) -> Result<Place> {
+        let host = Arc::downgrade(&self.0);
+        let joined = fields.get("address").cloned();
+        let address: bucket::Address = Arc::new(move || {
+            let host = Host(host.upgrade().context("this device stopped")?);
+            host.with(|i| Ok(i.r.db().setting("address")?))?.or_else(|| joined.clone()).with_context(|| format!("{YOURS} has no address yet, where its bucket is reached: an admin sets it with cloudflare use"))
+        });
+        Place::network(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
+    }
+
+    /// Keeps the network's data in `to` from now on, once `copy` is done: writes wait while it copies, then go to the
+    /// new bucket, so none is left only in the old one.
+    pub(super) async fn keep_in(&self, to: Place, fields: BTreeMap<String, String>, copy: ::api::runtime::Fut<'_, ()>) -> Result<()> {
+        let mut moved = self.0.moved.write().await;
+        copy.await?;
+        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(self.network_dir().join(NETWORK_FILE))?)?;
+        file.bucket = Some(fields.clone());
+        self.save_network(&file)?;
+        self.with(|i| {
+            i.bucket = Some((to.clone(), fields));
+            Ok(())
+        })?;
+        *moved = Some(to);
+        drop(moved);
+        // What it read of the old bucket stays true, but is read again from the new one.
+        self.close_dbs(|_, _| true);
+        Ok(())
+    }
+
     pub(super) fn open_network(&self) -> Result<()> {
         let dir = self.network_dir();
         let file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join(NETWORK_FILE))?)?;
