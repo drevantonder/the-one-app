@@ -1,5 +1,6 @@
 //! What differs on Mac, Windows and Linux: where a device keeps its files (`home`, `cache`), how its programs start and
-//! stop each other (`os`), small files written whole (`files`), and asking URLs (`hedge`, `reach`).
+//! stop each other (`os`), small files written whole (`files`), asking URLs (`hedge`, `reach`), and whether this process is the user's
+//! own network's or a throwaway's (`mode`).
 
 #[cfg(feature = "machine")]
 pub mod os;
@@ -7,6 +8,8 @@ pub mod files;
 pub mod hedge;
 #[cfg(feature = "machine")]
 pub mod reach;
+#[cfg(feature = "machine")]
+pub mod mode;
 
 use custom_build::config;
 use std::path::PathBuf;

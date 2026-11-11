@@ -1,5 +1,5 @@
 //! `one`, what the agents of a network's users and admins run: each feature's commands, asked of this machine's node over
-//! its API. Run as `<cli>d` it's the node (src/oned.rs), and as `git-remote-<cli>` git's remote helper (git_remote.rs).
+//! its API. Run as `<cli>d` it's the node (oned/), and as `git-remote-<cli>` git's remote helper (git_remote.rs).
 
 
 use anyhow::Result;
@@ -24,14 +24,14 @@ use api::{Reader, SENDS};
 fn commands() -> Vec<Command> {
     vec![
         // First: it must run with nothing else of this program working.
-        one::update::cli::commands(),
+        oned_update::update::cli::commands(),
         network::commands(),
         groups::cli::commands(),
         backups_runtime::commands(),
         devices::cli::commands(),
         apps::commands(),
         vault::cli::commands(),
-        one::cloudflare::cli::commands(),
+        oned_cloudflare::cli::commands(),
         storage::commands(),
         services::cli::commands(),
         device_logs::cli::commands(),
@@ -98,13 +98,13 @@ else. Data goes to stdout, messages to stderr.
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // A throwaway network's programs read its pages and Workers from the checkout it was started with, if it was.
-    if let one::mode::Mode::Throwaway(network) = one::mode::here()
+    if let platform::mode::Mode::Throwaway(network) = platform::mode::here()
         && let Some(folder) = network.ui()
     {
         ui::ui_folder::read_from(&folder);
     }
     // `oned apps --listen=`: this device's app runtime, as oned starts it.
-    if one::oned::invoked()
+    if oned::invoked()
         && let [part, listen] = args.as_slice()
         && part == ::scope::scopes::APPS_PART
         && let Some(listen) = listen.strip_prefix("--listen=")
@@ -115,8 +115,8 @@ fn main() {
         }
         return;
     }
-    if one::oned::invoked() {
-        if let Err(err) = one::oned::run(&args) {
+    if oned::invoked() {
+        if let Err(err) = oned::run(&args) {
             eprintln!("{}: {err:#}", ::custom_build::programs::oned());
             std::process::exit(1);
         }
@@ -196,7 +196,7 @@ fn own() -> Command {
                     Some(text) => print!("{text}"),
                     None => return Err(api::cli::Failed::Typed(one::tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
                 },
-                ["version"] if g.json => println!("{}", one::release::Version::this().json()),
+                ["version"] if g.json => println!("{}", oned_update::release::Version::this().json()),
                 ["version"] => println!("{} {} ({})", NAME, ::custom_build::config::BUILD, ::custom_build::config::TARGET),
                 _ => return Ok(false),
             }

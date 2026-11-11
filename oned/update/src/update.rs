@@ -79,7 +79,7 @@ pub fn run() -> Result<String> {
 
 fn take(home: &Path) -> Result<String> {
     let home = home.to_path_buf();
-    let key = crate::mode::here().release_key();
+    let key = platform::mode::here().release_key();
     ensure!(!key.is_empty(), "this custom build has no release key, so nothing can be released to it");
     let address = address(&home).context("this device doesn't know its network's address yet: its background program notes it once it's joined and running")?;
     let Some(text) = latest::fetch(&address)? else { return Ok(format!("Nothing has been published at {address} yet.")) };

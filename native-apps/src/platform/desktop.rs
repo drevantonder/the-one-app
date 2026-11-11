@@ -17,17 +17,17 @@ pub fn name() -> Option<String> {
     std::env::var("HOSTNAME").ok().or_else(|| std::env::var("COMPUTERNAME").ok()).or_else(|| std::fs::read_to_string("/etc/hostname").ok()).map(|h| h.trim().to_string()).filter(|h| !h.is_empty())
 }
 
-/// The newest `<cli>` for this computer, as the network at `address` publishes it (`one::latest`, the signed record a
+/// The newest `<cli>` for this computer, as the network at `address` publishes it (`oned_update::latest`, the signed record a
 /// device updates by), checked against the release key: a throwaway network's own, as it tells its programs.
 pub fn program(address: &str) -> Result<Vec<u8>, String> {
     let key = if crate::env("THROWAWAY").is_some() { crate::env("RELEASE_KEY").unwrap_or_default() } else { custom_build::config::RELEASE_KEY.to_string() };
     if key.is_empty() {
         return Err("This build has no release key, so nothing can be set up from it.".into());
     }
-    let text = one::latest::fetch(address).map_err(|e| format!("{e:#}"))?.ok_or_else(|| format!("Nothing has been published at {address} yet."))?;
-    let record = one::latest::Latest::read(&key, &text).map_err(|e| format!("The record at {address}: {e:#}"))?;
+    let text = oned_update::latest::fetch(address).map_err(|e| format!("{e:#}"))?.ok_or_else(|| format!("Nothing has been published at {address} yet."))?;
+    let record = oned_update::latest::Latest::read(&key, &text).map_err(|e| format!("The record at {address}: {e:#}"))?;
     let thing = record.to_update_to(custom_build::config::TARGET).ok_or_else(|| format!("{address} has published nothing for {}.", custom_build::config::TARGET))?;
-    one::latest::download(address, thing).map_err(|e| format!("{e:#}"))
+    oned_update::latest::download(address, thing).map_err(|e| format!("{e:#}"))
 }
 
 /// Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.

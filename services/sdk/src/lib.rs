@@ -1,4 +1,4 @@
-//! A service in Rust: a program of its own, which its device's oned starts (`oned <name>`, src/oned/part.rs) and tells
+//! A service in Rust: a program of its own, which its device's oned starts (`oned <name>`, oned/src/part.rs) and tells
 //! where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`) and where its data goes (`<NAME>_DATA`).
 //! It registers, long-polls for calls and answers each on a thread of its own, registering again whenever it's
 //! forgotten, until oned stops it. What it says to its node, and the node to it, is `services/sdk/wire.json`, which WhatsApp's service

@@ -19,6 +19,8 @@ scope = { path = "../scope" }
 key = { path = "../key" }
 custom-build = { path = "../custom-build" }
 platform = { path = "../platform", features = ["machine"] }
+# Which build of a service a device runs: the newest the record at the network's address names (`Build::Released`).
+oned-update = { path = "../oned/update" }
 anyhow = "1"
 axum = "0.8"
 blake3 = "1"

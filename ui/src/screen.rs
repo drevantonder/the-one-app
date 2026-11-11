@@ -99,7 +99,7 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
     )
 }
 
-/// A file's address, named by its content as the gateway names the files it serves (src/cloudflare/workers.rs).
+/// A file's address, named by its content as the gateway names the files it serves (oned/cloudflare/src/workers.rs).
 fn named(path: &str, text: &str) -> String {
     use sha2::Digest;
     format!("/screen/{path}?v={}", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()))[..16])

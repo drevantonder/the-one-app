@@ -4614,7 +4614,6 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "getrandom 0.2.17",
  "groups",
- "hkdf 0.13.0",
  "insights",
  "key",
  "labs",
@@ -4622,14 +4621,12 @@ dependencies = [
  "onboarding",
  "platform",
  "rand 0.8.8",
- "ring",
  "rusqlite",
  "schemars 1.2.3",
  "scope",
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "ssh-key",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "ui",
@@ -4657,6 +4654,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "one",
+ "oned-update",
  "onet",
  "platform",
  "rand 0.8.8",
@@ -4681,6 +4679,21 @@ dependencies = [
  "url",
  "windows",
  "windows-collections",
+]
+
+[[package]]
+name = "oned-update"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "custom-build",
+ "key",
+ "platform",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "ssh-key",
+ "ureq",
 ]
 
 [[package]]
@@ -5226,8 +5239,10 @@ dependencies = [
  "anyhow",
  "custom-build",
  "libc",
+ "rand 0.8.8",
  "serde",
  "serde_json",
+ "ssh-key",
  "tokio",
  "tracing",
  "ureq",

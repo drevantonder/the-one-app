@@ -51,7 +51,7 @@ pub const WORKERS: &[Worker] = &[
     Worker { name: "push", entry: "push/worker.js", classes: &["Push"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: false, bindings: notifications_bindings, cron: None },
 ];
 
-/// The Cloudflare node's Worker (`cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
+/// The Cloudflare node's Worker (`oned/cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
 /// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
 pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", classes: &["Node"], place: None, own_address: false, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings, cron: None };
 
@@ -743,7 +743,7 @@ fn node_bindings(settings: &Settings) -> Vec<Binding> {
         plain("SIGNER", "service:signer"),
         plain("TELEMETRY", "service:telemetry"),
         plain("LOADER", "loader:"),
-        // Workers AI, for AI Gateway's calls of the apps it runs, paid by the account (cloudflare/node: `ai_run`).
+        // Workers AI, for AI Gateway's calls of the apps it runs, paid by the account (oned/cloudflare/node: `ai_run`).
         plain("AI", "ai:"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", custom_build::config::NAME),
@@ -808,12 +808,12 @@ fn reaches(value: &str) -> Option<&str> {
 /// The network's Workers as one workerd runs them, the gateway serving the web client's files from `web`; and the
 /// Cloudflare node, if the network has one and this build carries it.
 pub fn served(settings: &Settings, web: &Path, sources: &Files) -> Result<Vec<Served>> {
-    served_with(settings, web, sources, crate::cloudflare::node::modules().ok())
+    served_with(settings, web, sources, crate::node::modules().ok())
 }
 
 /// `served`, with the Cloudflare node's build `cloudflare_node` (this build's, or a test's).
 pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_node: Option<Modules>) -> Result<Vec<Served>> {
-    let node = cloudflare_node.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::cloudflare::node::served(settings, modules));
+    let node = cloudflare_node.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::node::served(settings, modules));
     // A build without the Cloudflare node's WebAssembly has no remote MCP server, and nothing binds one.
     let mut served = Vec::new();
     for worker in WORKERS {
@@ -874,7 +874,7 @@ impl Settings {
         }
         files.push((".well-known/windows-app-web-link".into(), windows_links()));
         // How an AI connects itself, for anyone who has the address: never what apps the network has.
-        files.push(("llms.txt".into(), crate::skills::guide(Some(&self.address)).into_bytes()));
+        files.push(("llms.txt".into(), ::one::skills::guide(Some(&self.address)).into_bytes()));
         files
     }
 }
@@ -908,7 +908,7 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let web = web_dir(settings);
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
     let mut settings = settings.clone();
-    let mut newest = crate::cloudflare::Newest::built();
+    let mut newest = crate::Newest::built();
     #[cfg(unix)]
     let redeploys = redeploys::listen(&dir, &settings.address)?;
     loop {
@@ -958,7 +958,7 @@ mod redeploys {
 
     pub struct Redeploys {
         workerd: Arc<AtomicI32>,
-        newest: Arc<Mutex<Option<crate::cloudflare::Newest>>>,
+        newest: Arc<Mutex<Option<crate::Newest>>>,
     }
 
     /// Listens for `redeploy`'s asks on a thread of its own.
@@ -970,7 +970,7 @@ mod redeploys {
         let (pid, slot, address) = (workerd.clone(), newest.clone(), address.to_string());
         std::thread::spawn(move || {
             for mut asked in listener.incoming().flatten() {
-                let said = match crate::cloudflare::Newest::read(&address) {
+                let said = match crate::Newest::read(&address) {
                     Ok(read) => {
                         *slot.lock().unwrap() = Some(read);
                         // Not asked to stop: workerd told to waits for its open connections, and the relay's never close.
@@ -998,7 +998,7 @@ mod redeploys {
         }
 
         /// What was asked for, once the workerd it stopped has gone.
-        pub fn next(&self) -> Option<crate::cloudflare::Newest> {
+        pub fn next(&self) -> Option<crate::Newest> {
             self.workerd.store(0, Ordering::SeqCst);
             self.newest.lock().unwrap().take()
         }
@@ -1562,10 +1562,10 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
     // Cloudflare node, which reports its calls as every node does, or the telemetry Worker.
     if TRACED.contains(&worker.name) {
         meta["observability"]["traces"] = json!({ "enabled": true, "head_sampling_rate": 1 });
-        for (signal, _) in crate::cloudflare::basin::EXPORTED {
+        for (signal, _) in crate::basin::EXPORTED {
             if settings.exported(signal).is_some() {
                 meta["observability"][signal]["enabled"] = json!(true);
-                meta["observability"][signal]["destinations"] = json!([crate::cloudflare::basin::destination(signal)]);
+                meta["observability"][signal]["destinations"] = json!([crate::basin::destination(signal)]);
                 meta["observability"][signal]["persist"] = json!(true);
             }
         }
@@ -1601,7 +1601,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &
             let migration = scripts.get(&name).and_then(|s| s.migration.clone());
             let (mut meta, complete) = metadata(settings, worker, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
             let url = worker.place(settings).map(|(url, _)| url);
-            let Some(wasm) = worker.modules(sources, crate::cloudflare::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {} Worker runs: {}-dev update node builds one", worker.name, custom_build::config::CLI) };
+            let Some(wasm) = worker.modules(sources, crate::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {} Worker runs: {}-dev update node builds one", worker.name, custom_build::config::CLI) };
             let module = module_from(sources.clone(), worker.entry)?;
             let mut what = vec![meta.to_string().into_bytes(), module.clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));
@@ -1676,7 +1676,7 @@ mod observability_tests {
         let observed = |worker: &Worker| metadata(&settings, worker, None, |_| true).0["observability"].clone();
         for name in TRACED {
             let o = observed(Worker::named(name));
-            assert_eq!((&o["traces"]["enabled"], &o["traces"]["destinations"][0], &o["logs"]["destinations"][0]), (&json!(true), &json!(crate::cloudflare::basin::destination("traces")), &json!(crate::cloudflare::basin::destination("logs"))), "{name}");
+            assert_eq!((&o["traces"]["enabled"], &o["traces"]["destinations"][0], &o["logs"]["destinations"][0]), (&json!(true), &json!(crate::basin::destination("traces")), &json!(crate::basin::destination("logs"))), "{name}");
         }
         assert!(TRACED.contains(&"mcp"));
         for worker in [Worker::named("telemetry"), &NODE] {

@@ -115,7 +115,7 @@ impl Node {
             arrangements,
             features,
             guide: self.guide(),
-            throwaway: matches!(one::mode::here(), one::mode::Mode::Throwaway(_)),
+            throwaway: matches!(platform::mode::here(), platform::mode::Mode::Throwaway(_)),
             device_now: &device_now,
         };
         ::scope::state::state(network.as_ref().map(|i| i.r.db()), me, here)

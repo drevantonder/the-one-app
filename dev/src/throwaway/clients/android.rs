@@ -32,7 +32,7 @@ fn apk(dir: &Path, checkout: &Path, abi: &str) -> Result<String> {
 /// Once signed in on a device as them (a file in the throwaway network's folder says so), a new build keeps that sign-in.
 /// `early` is the app built for this machine's processor while the device was being lent (`build_here`): an emulator here
 /// has it, as copies usually are. A device of another is built for again.
-pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, user: Option<&str>, early: std::thread::JoinHandle<Result<String>>) -> Result<()> {
+pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &oned_cloudflare::Settings, user: Option<&str>, early: std::thread::JoinHandle<Result<String>>) -> Result<()> {
     let address = settings.address.as_str();
     let abi = match on_device(device, "getprop ro.product.cpu.abi")?.trim() {
         abi @ ("x86_64" | "arm64-v8a") => abi.to_string(),

@@ -34,7 +34,7 @@ pub fn link_in(dir: &std::path::Path) -> Result<()> {
 
 /// `wire`, in the background, for a device that's this computer's own: a throwaway network leaves its git as it is.
 pub fn wire_here(address: String) {
-    if matches!(crate::mode::here(), crate::mode::Mode::Own) {
+    if matches!(platform::mode::here(), platform::mode::Mode::Own) {
         std::thread::spawn(move || {
             if let Err(err) = wire(&address) {
                 tracing::warn!("{err:#}");

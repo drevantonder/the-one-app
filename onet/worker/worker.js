@@ -1,6 +1,6 @@
 // The remote MCP server: outside programs' device. ChatGPT, Claude.ai and any other program that logs in as the user
 // can't run our code, so each one a user signs in with is a device of theirs here, a client of the network like any
-// app (onet, in cloudflare/node/src/clients.rs), which the user approves like any device, removes like any device, and
+// app (onet, in oned/cloudflare/node/src/clients.rs), which the user approves like any device, removes like any device, and
 // which acts as them with nothing barred. It serves them the API at `<address>/api/*` (`/api/auth/` stays auth's, in
 // the gateway) and MCP at `<address>/mcp`: both are requests of that device, over iroh (`<cli>/http/1`), which hands
 // a node the keys each needs, sealed to that node and bound to the device's key; it sends nodes no token. MCP is
@@ -23,7 +23,7 @@
 // closes its endpoint, forgets its keys and ends itself.
 //
 // It trusts no node for who's who or for keys, as every client device: what it knows, the keys it opens and the 428s it
-// takes are onet's keyring (onet/src/keyring.rs, through cloudflare/node/src/clients.rs), which keeps what each
+// takes are onet's keyring (onet/src/keyring.rs, through oned/cloudflare/node/src/clients.rs), which keeps what each
 // tool needed in this object's storage, so a call hands only its own.
 //
 // Bindings: AUTH (auth), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), TELEMETRY, CLIENT
@@ -470,7 +470,7 @@ export class Client extends DurableObject {
     } catch {}
   }
 
-  /// What its device's keyring is handed (cloudflare/node/src/clients.rs `On`, onet's `js::On`): the network's
+  /// What its device's keyring is handed (oned/cloudflare/node/src/clients.rs `On`, onet's `js::On`): the network's
   /// address, and its URL signer, which the keyring reads the bucket through, auth, which it asks of devices waiting to
   /// join and invites, and the relay, which it tells as it takes a device out (by their bindings: a Worker can't fetch
   /// its own zone's routes); its key's signature; this object's storage; and whether the relay still lets it in.

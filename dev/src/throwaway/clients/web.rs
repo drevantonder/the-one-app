@@ -21,7 +21,7 @@ pub(crate) fn web_folder(dir: &Path, user: Option<&str>) -> PathBuf {
 /// The web client, in a browser of the throwaway network's own on this machine, with no window: drive it over the DevTools
 /// protocol. Its profile is kept with the throwaway network, so it stays signed in. As someone else, they're invited first,
 /// by the throwaway network's first user, and join in it.
-pub(crate) fn web(dir: &Path, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
+pub(crate) fn web(dir: &Path, settings: &oned_cloudflare::Settings, user: Option<&str>) -> Result<()> {
     let (port, picture) = match user {
         Some(name) => joined(dir, settings, name)?,
         None => {
@@ -49,7 +49,7 @@ pub(crate) fn web(dir: &Path, settings: &one::cloudflare::Settings, user: Option
 /// an admin's machine (keeping the secret for their first device's approval), and they open the link in their own
 /// browser, join, and sign in; then their browser, their first device, asks to join and the machine approves it. Pictures
 /// of the invite and joining are kept beside theirs. → its DevTools port, and the picture of their first screen.
-pub(crate) fn joined(dir: &Path, settings: &one::cloudflare::Settings, name: &str) -> Result<(u16, PathBuf)> {
+pub(crate) fn joined(dir: &Path, settings: &oned_cloudflare::Settings, name: &str) -> Result<(u16, PathBuf)> {
     let folder = web_folder(dir, Some(name));
     let picture = folder.with_extension("png");
     let port = browser(dir, settings, Some(name))?;
@@ -68,7 +68,7 @@ pub(crate) fn joined(dir: &Path, settings: &one::cloudflare::Settings, name: &st
 
 /// A web client that shows a code to be approved (`code`, else none) is approved by the throwaway network's machine, as its
 /// user's device or as the device of the admin who invited them; then its window is pictured.
-pub(crate) fn approve(dir: &Path, settings: &one::cloudflare::Settings, port: u16, picture: &Path, code: &str) -> Result<()> {
+pub(crate) fn approve(dir: &Path, settings: &oned_cloudflare::Settings, port: u16, picture: &Path, code: &str) -> Result<()> {
     if !code.is_empty() {
         approve_code(dir, code)?;
     }
@@ -85,7 +85,7 @@ pub(crate) fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
 }
 
 /// The throwaway network's browser for its first user or someone else, started if it isn't running: → its DevTools port.
-pub(crate) fn browser(dir: &Path, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<u16> {
+pub(crate) fn browser(dir: &Path, settings: &oned_cloudflare::Settings, user: Option<&str>) -> Result<u16> {
     // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it can't sign anyone in.
     let page = agent().get(&settings.address).call()?.body_mut().read_to_string()?;
     anyhow::ensure!(!page.contains(r#"<meta name="onet" content="">"#), "the throwaway network's program has no web client's WebAssembly: run it on this checkout's build (no --build), which builds it");

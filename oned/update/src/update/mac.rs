@@ -16,7 +16,7 @@ use super::FOLDER;
 /// Takes the window `thing` names, at `address`, unless it's the one installed or older than this program. → whether it
 /// put it in place.
 pub fn window(home: &Path, address: &str, thing: &Thing) -> Result<bool> {
-    let installed = crate::mode::here().mac_app();
+    let installed = platform::mode::here().mac_app();
     if thing.committed < COMMITTED || built(&installed).is_some_and(|b| b == thing.commit) {
         return Ok(false);
     }

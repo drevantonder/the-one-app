@@ -1,4 +1,4 @@
-//! Building and publishing: the platforms a release is for, a service built for them, the WebAssembly the node carries, and
+//! Building and publishing: a service built for the platforms a release is for (`oned_update::platform`), the WebAssembly the node carries, and
 //! the one way commands are run. `update`, `deploy` and `throwaway` all build through here.
 
 use std::path::{Path, PathBuf};
@@ -6,46 +6,9 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
 use ::custom_build::config::{CLI, TARGET};
-use crate::release::Version;
+use ::oned_update::platform::{PLATFORMS, Platform};
+use ::oned_update::release::Version;
 use serde_json::{Value, json};
-
-/// A platform a release is for: what installers and nodes name it, and what Go and a user do.
-pub struct Platform {
-    /// Rust's target triple, which a node and a release name it by.
-    pub target: &'static str,
-    /// Go's `GOOS` and `GOARCH`.
-    pub os: &'static str,
-    pub arch: &'static str,
-    pub said: &'static str,
-}
-
-/// Platforms the installer knows. A release has each one some device here can build.
-pub static PLATFORMS: [Platform; 4] = [
-    Platform { target: "x86_64-unknown-linux-gnu", os: "linux", arch: "amd64", said: "Linux" },
-    Platform { target: "aarch64-unknown-linux-gnu", os: "linux", arch: "arm64", said: "Linux on ARM" },
-    Platform { target: "aarch64-apple-darwin", os: "darwin", arch: "arm64", said: "Mac" },
-    Platform { target: WINDOWS, os: "windows", arch: "amd64", said: "Windows" },
-];
-
-/// Windows' target: only the program itself is built for it, on a Linux device that has the toolchain (`mingw-w64`).
-pub const WINDOWS: &str = "x86_64-pc-windows-gnu";
-
-impl Platform {
-    /// What the installers download on it: the program, on a Mac the app, which sets it up as it opens.
-    pub fn asset(&self) -> String {
-        match self.target {
-            target if crate::latest::is_mac(target) => format!("{CLI}-macos.zip"),
-            WINDOWS => format!("{CLI}-{WINDOWS}.exe"),
-            target => format!("{CLI}-{target}"),
-        }
-    }
-
-    /// Whether a service can run on it. A Windows computer runs apps but no services yet: the sandbox each needs isn't
-    /// made for Windows (ARCHITECTURE.md's Decided says why).
-    pub fn runs_services(&self) -> bool {
-        self.target != WINDOWS
-    }
-}
 
 /// How a service's program is built: its folder has a Go module or a Rust package.
 fn is_rust(source: &Path) -> Option<bool> {
@@ -112,8 +75,8 @@ pub fn publish(node: &::api::Client, path: &Path, key: &ssh_key::PrivateKey, ver
         bail!("that build has uncommitted changes; commit, build again, then publish");
     }
     let name = match service {
-        Some(service) => crate::latest::Thing::service_name(service, &version.target),
-        None => crate::latest::Thing::node_name(&version.target),
+        Some(service) => ::oned_update::latest::Thing::service_name(service, &version.target),
+        None => ::oned_update::latest::Thing::node_name(&version.target),
     };
     publish_latest(node, key, &[(name, Some(path.to_path_buf()), version.clone(), "-".to_string())])?;
     Ok(json!({ "commit": version.commit, "target": version.target }))
@@ -122,7 +85,7 @@ pub fn publish(node: &::api::Client, path: &Path, key: &ssh_key::PrivateKey, ver
 /// Puts `things`' files where devices take them, and adds them to the record at the network's address, signed with the
 /// release key: each `(name, file, version, config commit)`, with no file for what's built, not fetched (`source`).
 pub fn publish_latest(node: &::api::Client, key: &ssh_key::PrivateKey, things: &[(String, Option<PathBuf>, Version, String)]) -> Result<()> {
-    use crate::latest::{Latest, Thing};
+    use ::oned_update::latest::{Latest, Thing};
     let mut made = Vec::new();
     for (name, path, version, config) in things {
         let (sha256, size) = match path {
@@ -187,7 +150,7 @@ impl Wasm<'_> {
     }
 }
 
-/// Builds the Cloudflare node (`cloudflare/node/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
+/// Builds the Cloudflare node (`oned/cloudflare/node/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
 /// folder they're in. `profile` is cargo's: a release's is `release`, a throwaway network's `dev`.
 pub fn cloudflare_node(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
     let dir = if profile == "dev" { "debug" } else { profile };
@@ -273,6 +236,7 @@ fn said(cmd: &Command) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ::oned_update::platform::WINDOWS;
 
     /// mise.toml installs what the build shells out to, and three of its versions are the repo's already: a machine set up from
     /// it must build with the Bun deploys download, the wasm-bindgen the client's WebAssembly links, and the Go the service asks for.
@@ -310,7 +274,7 @@ mod tests {
         }
         for p in PLATFORMS.iter().filter(|p| p.target != WINDOWS) {
             let (arch, rest) = p.target.split_once('-').unwrap();
-            let fetched = if crate::latest::is_mac(p.target) { "$cli-macos.zip".to_string() } else { format!("$cli-$arch-{}", rest) };
+            let fetched = if ::oned_update::latest::is_mac(p.target) { "$cli-macos.zip".to_string() } else { format!("$cli-$arch-{}", rest) };
             assert!(installer.contains(&format!("fetch \"{fetched}\"")), "install.sh fetches {fetched} for {}", p.target);
             assert_eq!(p.asset(), fetched.replace("$cli", CLI).replace("$arch", arch));
             assert!(installer.contains(&format!("arch={arch}")), "install.sh knows the processor {arch}");
@@ -439,7 +403,7 @@ pub fn commands() -> ::api::cli::Command {
 /// zipped (`app.zip`), its program (`<cli>`), each service in Rust (`<cli>-<name>`) and each in Swift, an app of its own
 /// zipped (`<cli>-<name>.zip`), all of `version`.
 pub fn mac_things(folder: &Path, version: &Version, config: &str) -> Result<Vec<(String, Option<PathBuf>, Version, String)>> {
-    use crate::latest::Thing;
+    use ::oned_update::latest::Thing;
     let target = &version.target;
     let thing = |name: String, file: PathBuf| (name, Some(file), version.clone(), config.to_string());
     let mut things = vec![thing(Thing::app_name(target), folder.join("app.zip")), thing(Thing::node_name(target), folder.join(CLI))];

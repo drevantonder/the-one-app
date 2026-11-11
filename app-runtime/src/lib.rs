@@ -153,9 +153,9 @@ struct Network {
 
 impl Network {
     /// What a device runs, as it told the relay (`versions`): for an app runtime, what its device does.
-    fn running(&self, key: &Key) -> Option<one::release::Version> {
+    fn running(&self, key: &Key) -> Option<::oned_update::release::Version> {
         let (commit, committed, target) = ::custom_build::protocol::told(self.versions[hex(&self.r.db().device_of(key))].as_str()?)?;
-        Some(one::release::Version { commit: commit.into(), target: target.into(), committed })
+        Some(::oned_update::release::Version { commit: commit.into(), target: target.into(), committed })
     }
 
     /// Whether a device is on, the same answer every node gives: what the relay says.
@@ -219,8 +219,8 @@ pub struct Inner {
     sockets: ::services::carried::Parts,
     /// The asks this device's parts made of it, so none is taken twice.
     part_asks: ::services::carried::Once,
-    /// What the record at the network's address last said (`one::latest`), and why it couldn't take it, if so.
-    latest: Mutex<one::latest::Latest>,
+    /// What the record at the network's address last said (`oned_update::latest`), and why it couldn't take it, if so.
+    latest: Mutex<::oned_update::latest::Latest>,
     bundles: Mutex<BTreeMap<String, String>>,
     /// The bundle of each app this release has built in, kept as a blob: any network may add them.
     built_in: BTreeMap<String, String>,
@@ -319,7 +319,7 @@ pub async fn serve(listen: &str) -> Result<()> {
     let last = ::insights::Ended::read(&dir);
     insights_runtime::device_signal(&node.rt(), "node.start", ::insights::Attrs::default().reason(last.reason()), ::insights::Status::Unset);
     if last == ::insights::Ended::Update {
-        insights_runtime::device_signal(&node.rt(), "update.running", ::insights::Attrs::default().part(&one::latest::Thing::node_name(custom_build::config::TARGET)), ::insights::Status::Unset);
+        insights_runtime::device_signal(&node.rt(), "update.running", ::insights::Attrs::default().part(&::oned_update::latest::Thing::node_name(custom_build::config::TARGET)), ::insights::Status::Unset);
     }
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
     tracing::info!("{} app runtime {} answering {listen} from {}", ::custom_build::config::NAME, ::key::short(&node.id()), dir.display());

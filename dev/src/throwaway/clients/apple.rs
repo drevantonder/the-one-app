@@ -16,7 +16,7 @@ use super::super::network::spawn;
 /// this checkout's build for a Mac (its program and helper apps, and the window, for `<cli> update`). Signed in as the throwaway network's
 /// first user as linux() is: its Sign In pressed, the sign-in approved as them and opened there, its code approved.
 /// What it keeps stays on the Mac, so a new build is still signed in; it's started again each time.
-pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, iphone: bool, started: Instant) -> Result<()> {
+pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Settings, iphone: bool, started: Instant) -> Result<()> {
     let address = settings.address.as_str();
     let host = std::env::var("MAC").unwrap_or_else(|_| "mac".into());
     let ssh = |command: &str| -> Result<String> {
@@ -58,7 +58,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     eprintln!("Building native-apps on {host} (dev profile; the first time takes minutes)…");
     // The Mac's window is a view of a computer of its own there, whose onet answers beside its control port.
     let last = if iphone { simulator_name(dir) } else { format!("127.0.0.1:{}", control + 1) };
-    let key = one::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?;
+    let key = platform::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?;
     let build = format!("cd {there} && CARGO_TERM_COLOR=never PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH RELEASE_KEY={} native-apps/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&key), shell_quote(&last));
     let said = build_on(&host, &build, &dir.join(format!("{script}-build.log")), started + Duration::from_secs(crate::ship::CALL - 90))?;
     let last: Vec<&str> = said.lines().last().unwrap_or_default().split(' ').collect();
@@ -141,10 +141,10 @@ fn publish_mac(dir: &Path, host: &str, folder: &str) -> Result<()> {
     let copied = std::process::Command::new("sh").arg("-c").arg(format!("ssh -o BatchMode=yes {host} 'tar -c -C {} .' | tar -x -C {}", shell_quote(folder), shell_quote(&here.to_string_lossy()))).status()?;
     anyhow::ensure!(copied.success(), "couldn't copy what {host} built for the throwaway network to publish");
     let said = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", host, &format!("{}/{CLI} version --json", shell_quote(folder))]).output()?;
-    let version: one::release::Version = serde_json::from_slice(&said.stdout).with_context(|| format!("ask what {host} built what it is"))?;
+    let version: oned_update::release::Version = serde_json::from_slice(&said.stdout).with_context(|| format!("ask what {host} built what it is"))?;
     let addr = std::fs::read_to_string(dir.join("addr"))?;
     let things = one::build::mac_things(&here, &version, "-")?;
-    one::build::publish_latest(&crate::throwaway::node_at(dir, addr.trim()), &one::mode::Throwaway::own_release_key(dir)?, &things)?;
+    one::build::publish_latest(&crate::throwaway::node_at(dir, addr.trim()), &platform::mode::Throwaway::own_release_key(dir)?, &things)?;
     eprintln!("Published {} for {} at the throwaway network's address: its program, helpers and window.", version.commit, version.target);
     Ok(())
 }

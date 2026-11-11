@@ -1,4 +1,4 @@
-//! The Cloudflare node (`cloudflare/node/`) on Cloudflare: a node of the network as a Worker in the account of its other Workers, with
+//! The Cloudflare node (`oned/cloudflare/node/`) on Cloudflare: a node of the network as a Worker in the account of its other Workers, with
 //! no address of its own, and an iroh endpoint of its own key, which the relay wakes. A release carries its built
 //! WebAssembly (`update node` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the network's
 //! bucket, each at its latest deploy.
@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use serde_json::{json};
 
-use crate::cloudflare::{Cloudflare, Files, NODE, Settings, Worker, upload_hash};
+use crate::{Cloudflare, Files, NODE, Settings, Worker, upload_hash};
 
 /// The Cloudflare node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
 /// in (the apps themselves it reads from the bucket, each at its latest deploy).
@@ -24,20 +24,20 @@ pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, 
     let shim = ::api::call::shim();
     let built_js = format!("export const shim = {};\nexport const compatibilityDate = {};\n", json!(shim), json!(::deploy::build::COMPATIBILITY_DATE));
     vec![
-        ("worker.js".into(), "application/javascript+module", include_bytes!("../../cloudflare/node/worker.js").to_vec()),
+        ("worker.js".into(), "application/javascript+module", include_bytes!("../node/worker.js").to_vec()),
         ("one_cloudflare_node.js".into(), "application/javascript+module", glue),
         ("one_cloudflare_node_bg.wasm".into(), "application/wasm", wasm),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
         ("protocol.js".into(), "application/javascript+module", ::api::protocol_js::javascript().into_bytes()),
-        ("crypto.js".into(), "application/javascript+module", include_bytes!("../../cloudflare/shared/crypto.js").to_vec()),
-        ("http.js".into(), "application/javascript+module", include_bytes!("../../gateway/http.js").to_vec()),
+        ("crypto.js".into(), "application/javascript+module", include_bytes!("../../../cloudflare/shared/crypto.js").to_vec()),
+        ("http.js".into(), "application/javascript+module", include_bytes!("../../../gateway/http.js").to_vec()),
     ]
 }
 
 /// It as the workerd that runs the network's Workers here runs it, from `modules`, beside them.
-pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u8>)>) -> crate::cloudflare::Served {
+pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u8>)>) -> crate::Served {
     let (_, _, main) = modules.remove(0);
-    crate::cloudflare::Served {
+    crate::Served {
         name: NODE.name.into(),
         module: main,
         modules: modules.into_iter().map(|(name, _, bytes)| (name, bytes)).collect(),
@@ -46,7 +46,7 @@ pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u
         bindings: NODE.bindings(settings).into_iter().map(|(n, v, _)| (n, v)).collect(),
         assets: None,
         // A throwaway network's bucket is on this machine.
-        outbound: Some(crate::cloudflare::NEARBY.to_string()),
+        outbound: Some(crate::NEARBY.to_string()),
     }
 }
 
@@ -58,7 +58,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<(
     let modules = modules()?;
     let name = NODE.worker_name();
     let scripts = cf.scripts()?;
-    let (meta, _) = crate::cloudflare::metadata(settings, &NODE, scripts.get(&name).and_then(|s| s.migration.as_deref()), |other| scripts.contains_key(other));
+    let (meta, _) = crate::metadata(settings, &NODE, scripts.get(&name).and_then(|s| s.migration.as_deref()), |other| scripts.contains_key(other));
     let mut what = vec![meta.to_string().into_bytes()];
     what.extend(modules.iter().flat_map(|(n, k, b)| [n.as_bytes().to_vec(), k.as_bytes().to_vec(), b.clone()]));
     let what = upload_hash(&what);
@@ -68,5 +68,5 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<(
     }
     // Its address may have been turned on by hand.
     cf.hide(&name)?;
-    crate::cloudflare::deploy_some(cf, settings, sources, &[], &[Worker::named("relay")])
+    crate::deploy_some(cf, settings, sources, &[], &[Worker::named("relay")])
 }

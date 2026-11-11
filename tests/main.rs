@@ -14,6 +14,7 @@ mod sandbox;
 mod sealed;
 mod sim;
 mod tree;
+#[path = "../oned/update/tests/update.rs"]
 mod update;
 
 use std::path::{Path, PathBuf};

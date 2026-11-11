@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use api::client::{Answer, Client, Via};
 use ::custom_build::config::CLI;
-use one::cloudflare::Settings;
-use one::mode::{Throwaway, programs};
+use oned_cloudflare::Settings;
+use platform::mode::{Throwaway, programs};
 use serde_json::json;
 
 use crate::agent;
@@ -43,7 +43,7 @@ pub(crate) fn choose(dir: &Path, build: Option<&Path>, ui: Option<&Path>) -> Res
 pub(crate) fn read_pages_again(dir: &Path) -> Result<()> {
     let Some(ui) = Throwaway::ui_in(dir) else { return Ok(()) };
     ui::ui_folder::read_from(&ui);
-    one::cloudflare::write_web(&Settings::load_in(dir)?)
+    oned_cloudflare::write_web(&Settings::load_in(dir)?)
 }
 
 /// The program the throwaway network in `dir` runs: the one it was given, else the one beside this.
@@ -196,7 +196,7 @@ pub(crate) fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, 
         command.env(::custom_build::config::env("HOME"), dir);
     }
     let child = command.stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn().with_context(|| format!("starting {}", command.get_program().to_string_lossy()))?;
-    one::mode::record(dir, child.id(), client)?;
+    platform::mode::record(dir, child.id(), client)?;
     Ok(child.id())
 }
 
@@ -356,7 +356,7 @@ pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
     if delete {
         // Its Linux devices, borrowed or spare, are its own containers on the machine's runtime, outside its folder.
         // By Agent Devices' own program, which knows where they are.
-        let program = one::oned::program("agent-devices");
+        let program = oned::program("agent-devices");
         if dir.join("agent-devices").exists() && program.exists() {
             match std::process::Command::new(&program).arg("delete-all").arg(dir.join("agent-devices")).output() {
                 Ok(out) if out.status.success() => {}

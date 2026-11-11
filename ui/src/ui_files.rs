@@ -39,8 +39,8 @@ const AUTH_PAGES: &str = "onboarding/pages.js";
 pub fn list(root: &Path) -> Vec<(String, PathBuf)> {
     let cloudflare = root.join("cloudflare");
     let mut files = collect(&cloudflare);
-    // The Workers' tests stay in the repo, and the Cloudflare node (node/) is Rust, which ships built.
-    files.retain(|(rel, _)| !rel.starts_with("test/") && !rel.starts_with("node/"));
+    // The Workers' tests stay in the repo.
+    files.retain(|(rel, _)| !rel.starts_with("test/"));
     // Each Worker's own folder, in the source tree the Workers are built from, so their imports of each other keep working.
     for (folder, source) in WORKERS {
         for (rel, abs) in collect(&root.join(folder)) {

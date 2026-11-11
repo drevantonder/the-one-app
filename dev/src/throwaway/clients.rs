@@ -22,7 +22,7 @@ const PRESS_SIGN_IN: &str = "document.querySelector('[data-slot=welcome-action]'
 /// `throwaway client <kind> [--as <name>]`: a client of this checkout's build, signed in to the throwaway network as its first
 /// user, or as someone else they invited, and how to see and use it. Again, it's the same client, with this
 /// checkout's build as it is now.
-pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, rest: &[String]) -> Result<()> {
+pub(crate) fn client(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Settings, rest: &[String]) -> Result<()> {
     let started = Instant::now();
     // A session while it runs: a new build waits for the next command with none to start the throwaway network again.
     let _session = client_session(dir);
@@ -68,7 +68,7 @@ pub(crate) fn user_named(given: &str) -> Result<String> {
 
 /// An Android or Windows client: on a throwaway copy of the user's lasting device, borrowed for the throwaway network,
 /// which reaches the throwaway network's address at the same address; this checkout's build installed there, and signed in.
-fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, kind: &str, user: Option<&str>) -> Result<()> {
+fn device_client(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Settings, kind: &str, user: Option<&str>) -> Result<()> {
     // Android's app builds while its device is lent; Windows' is built on the device.
     let early = (kind == "android").then(|| android::build_here(dir, checkout));
     let mut borrowed = devices(dir);

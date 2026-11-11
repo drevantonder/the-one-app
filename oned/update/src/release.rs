@@ -107,7 +107,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("tmp")).unwrap();
         std::fs::write(dir.join("served/bin"), b"bin").unwrap();
         std::fs::write(dir.join("served/bin.sig"), sign(&publisher, b"bin").unwrap()).unwrap();
-        let installer = include_str!("../install.sh");
+        let installer = include_str!("../../../install.sh");
         let function = &installer[installer.find("fetch() {").unwrap()..];
         let function = &function[..function.find("\n}\n").unwrap() + 3];
         let fetch = |file: &str| {

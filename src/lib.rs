@@ -6,7 +6,7 @@ pub mod carried {
     include!(concat!(env!("OUT_DIR"), "/carried.rs"));
 }
 
-// What the Cloudflare node (cloudflare/node/) and the native apps' onet (onet/) share with nodes on machines; the rest
+// What the Cloudflare node (oned/cloudflare/node/) and the native apps' onet (onet/) share with nodes on machines; the rest
 // is only theirs (the `node` feature).
 #[cfg(feature = "node")]
 pub mod skills;
@@ -25,17 +25,5 @@ pub mod git_wire;
 pub mod watchdog;
 #[cfg(not(target_family = "wasm"))]
 pub mod loopback;
-#[cfg(feature = "node")]
-pub mod release;
-#[cfg(feature = "web-bundle")]
-pub mod latest;
-#[cfg(feature = "node")]
-pub mod update;
-#[cfg(feature = "node")]
-#[cfg(feature = "node")]
-pub mod mode;
-#[cfg(feature = "node")]
-pub mod oned;
-pub mod cloudflare;
 pub mod openapi;
 pub mod says;

@@ -14,7 +14,7 @@
 //! leaves the rest; nothing approves it by a code, since its device lists it. Its program is its app's own
 //! (`apps/<name>/service/`), and only a build its app's latest deploy names for this platform runs (`bundle::SERVICES`),
 //! which `<cli> deploy` builds where it's run, or, for one whose deploy names none, as a built-in app's, the newest
-//! `<cli> update` published (`crate::latest`). It's fetched, its hash checked and put at `~/.local/bin/<cli>-<name>` when
+//! `<cli> update` published (`oned_update::latest`). It's fetched, its hash checked and put at `~/.local/bin/<cli>-<name>` when
 //! it's switched on and again when another is named or a newer one's published; a Mac service in Swift is an app of its
 //! own (`helper`), unpacked in the home. What the device can run (`parts`) and each one's state (on, off, starting, stopping,
 //! failed and why) and how it runs (in its sandbox as its app declares, told to it in its folder, `declared.json`;
@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
-use ::services::Wanted;
+use ::services::{Build, Wanted};
 
 pub mod part;
 
@@ -53,7 +53,7 @@ pub fn program(name: &str) -> PathBuf {
 
 /// Where oned puts a service's program it fetched (`Mode::bin`).
 pub fn fetched(name: &str) -> PathBuf {
-    crate::mode::here().bin().join(format!("{CLI}-{name}{}", std::env::consts::EXE_SUFFIX))
+    platform::mode::here().bin().join(format!("{CLI}-{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// A service's program built with this one and beside it, which oned runs as it is and fetches none of: a checkout's
@@ -100,18 +100,6 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     }
     names.extend(released.iter().cloned());
     names
-}
-
-/// What a device runs of a service on its platform, as its app runtime says (`GET /api/services/builds`).
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Build {
-    /// The newest build of its program, as the record at the network's address names it.
-    Released(crate::latest::Thing),
-    /// The build, by its hash, its app's latest deploy names.
-    Deployed(String),
-    /// Nothing: its app's latest deploy names builds, none for this platform.
-    None,
 }
 
 /// What a part that runs as a process of oned's is doing now, while it isn't simply on or off: being set up (its
@@ -216,7 +204,7 @@ fn taken(name: &str) -> (Option<u64>, String) {
 /// from the device's app runtime.
 fn put(onet: &Onet, address: &str, name: &str, build: &Build) -> anyhow::Result<()> {
     let (bytes, kept) = match build {
-        Build::Released(r) => (crate::latest::download(address, r)?, format!("{} {}", r.committed, r.sha256)),
+        Build::Released(r) => (::oned_update::latest::download(address, r)?, format!("{} {}", r.committed, r.sha256)),
         Build::Deployed(hash) => (onet.ask("GET", &format!("/api/services/builds/{hash}"), None)?, format!("deploy {hash}")),
         Build::None => anyhow::bail!("its deploy names no build for this platform"),
     };
@@ -574,7 +562,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let words: Vec<&str> = args.iter().filter(|a| !a.starts_with('-')).map(String::as_str).collect();
     let flag = |prefix: &str| flags.iter().find_map(|f| f.strip_prefix(prefix));
     match (words.as_slice(), flags.as_slice()) {
-        ([], ["--version"]) => println!("{}", crate::release::Version::this().json()),
+        ([], ["--version"]) => println!("{}", ::oned_update::release::Version::this().json()),
         ([], ["--help"]) => println!("{}", usage()),
         #[cfg(target_os = "linux")]
         ([], [_]) if let Some(dir) = flag("--sandboxed=") => return ::services::sandbox::launch(std::path::Path::new(dir)),
@@ -663,8 +651,8 @@ async fn serve() -> Result<()> {
         .init();
     let dir = platform::home();
     std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
-    std::fs::write(dir.join(crate::update::PID), std::process::id().to_string())?;
-    crate::update::note_running(&dir)?;
+    std::fs::write(dir.join(::oned_update::update::PID), std::process::id().to_string())?;
+    ::oned_update::update::note_running(&dir)?;
     with_bucket_address(&dir)?;
     let at = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
     let kept = std::sync::Arc::new(std::sync::Mutex::new([
@@ -682,7 +670,7 @@ async fn serve() -> Result<()> {
         }
     });
     tracing::info!("{NAME} oned {} keeping onet and its app runtime ({at}) running, from {}", ::custom_build::config::BUILD, dir.display());
-    crate::watchdog::notify("READY=1");
+    ::one::watchdog::notify("READY=1");
     loop {
         {
             let [onet, runtime] = &mut *kept.lock().unwrap();
@@ -703,7 +691,7 @@ async fn serve() -> Result<()> {
 fn with_bucket_address(home: &std::path::Path) -> Result<()> {
     let Some(mut network) = ::api::home::NetworkFile::read(home)? else { return Ok(()) };
     let Some(bucket) = network.bucket.as_mut().filter(|b| b.contains_key("endpoint") && !b.contains_key("address")) else { return Ok(()) };
-    let Some(address) = crate::update::address(home) else { return Ok(()) };
+    let Some(address) = ::oned_update::update::address(home) else { return Ok(()) };
     bucket.insert("address".into(), address);
     network.write(home)
 }

@@ -16,7 +16,7 @@ use ::custom_build::config::{CLI, YOURS};
 use ::scope::rank::CLOUDFLARE;
 use ::scope::scopes;
 use ::key::hex;
-use one::latest::{Latest, Thing, wanted};
+use ::oned_update::latest::{Latest, Thing, wanted};
 
 use super::Node;
 use ::custom_build::now_ms;
@@ -33,7 +33,7 @@ impl Node {
         let (told, workers) = self.with_or((Value::Null, Value::Null), |i| Ok((i.versions.clone(), i.workers.clone())));
         let address = self.address().unwrap_or_default();
         // A record that's missing or doesn't read just offers no Update: the device that takes one checks it again itself.
-        let builds = tokio::task::spawn_blocking(move || one::latest::fetch(&address).ok().flatten().and_then(|text| Latest::read(one::mode::here().release_key(), &text).ok())).await?.unwrap_or_default();
+        let builds = tokio::task::spawn_blocking(move || ::oned_update::latest::fetch(&address).ok().flatten().and_then(|text| Latest::read(platform::mode::here().release_key(), &text).ok())).await?.unwrap_or_default();
         let of = |version: &str, find: Find| -> Option<Value> {
             let (commit, committed, on) = ::custom_build::protocol::told(version)?;
             let newest = find(&builds, on);

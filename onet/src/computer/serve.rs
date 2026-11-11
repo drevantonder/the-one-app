@@ -49,8 +49,8 @@ impl Routes {
 pub(super) async fn serve(onet: Arc<Onet>) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&onet.listen).await.with_context(|| format!("listen on {}", onet.listen))?;
     let mut router = axum::Router::new().fallback(answer).with_state((onet, Arc::new(Routes::new())));
-    if let one::mode::Mode::Throwaway(network) = one::mode::here() {
-        router = network.serve_beside(router);
+    if let platform::mode::Mode::Throwaway(network) = platform::mode::here() {
+        router = super::throwaway::serve_beside(network, router);
     }
     Ok(api::serve(listener, router).await?)
 }
@@ -277,7 +277,7 @@ async fn create(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     Ok(made)
 }
 
-/// What this device's oned says its services are doing (`one::oned::keep_parts`), given to its own runtime by its
+/// What this device's oned says its services are doing (`oned::keep_parts`), given to its own runtime by its
 /// loopback, which another device asks over what devices speak to each other when a screen shows it, so the relay never
 /// reads the services' names or what went wrong.
 async fn services(onet: &Arc<Onet>, req: Request) -> Result<Value> {

@@ -17,7 +17,7 @@ use crate::agent;
 /// them; and the code the computer then shows approved by the throwaway network's machine, or `user`'s browser. The
 /// computer's oned runs under this user's systemd, as a unit of the throwaway network's (`stop`), and it and what the app
 /// keeps stay with the throwaway network, so a new build is still in; the app is started again each time.
-pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
+pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Settings, user: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
     let name = user.map(|p| format!("linux-{}", p.to_lowercase().replace(' ', "-"))).unwrap_or_else(|| "linux".into());
     let home = dir.join(&name);
@@ -59,13 +59,13 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     // On a session bus of its own, with a Secret Service there (GNOME's keyring, unlocked with a password of no worth, in its
     // folder), as a desktop has; told its computer's home and address as the throwaway network's programs are.
     let mut command = std::process::Command::new("dbus-run-session");
-    one::mode::Throwaway::tell(&mut command, &computer, &addr);
+    platform::mode::Throwaway::tell(&mut command, &computer, &addr);
     let app = spawn(
         dir,
         command
             .args(["--", "sh", "-c", "printf throwaway | gnome-keyring-daemon --unlock --components=secrets >/dev/null && exec \"$0\""])
             .arg(checkout.join("native-apps/target/debug/one-native"))
-            .env(env("RELEASE_KEY"), one::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?)
+            .env(env("RELEASE_KEY"), platform::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?)
             .env("DISPLAY", &display)
             .env_remove("WAYLAND_DISPLAY")
             // What it writes of itself (its launcher entry, open at login, what opens `<cli>://`) stays in its folder.

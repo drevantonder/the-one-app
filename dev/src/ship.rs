@@ -7,13 +7,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use ::custom_build::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, REPO, TARGET};
-use one::latest::{Latest, Thing};
-use one::release::Version;
+use oned_update::latest::{Latest, Thing};
+use oned_update::release::Version;
 use ::platform::cache;
-use one::release;
+use oned_update::release;
 use serde_json::{Value, json};
 
-use one::build::{self, release_key, PLATFORMS, cargo, git, quietly, show, succeeds};
+use one::build::{self, release_key, cargo, git, quietly, show, succeeds};
+use oned_update::platform::{PLATFORMS, WINDOWS};
 
 mod apps;
 mod changes;
@@ -100,9 +101,9 @@ fn build_release(at: &At) -> Result<PathBuf> {
     let binary = src.join("target/release/one");
     let version = Version::of(&binary).context("ask the new build what it is")?;
     // Windows' too, cross-built here. A device that can't only leaves Windows behind: Linux and Macs go out regardless.
-    let windows = timed("built Windows' program", || quietly(release().args(["--target", build::WINDOWS, "--bin", "one"])))
-        .map(|()| src.join("target").join(build::WINDOWS).join("release/one.exe"))
-        .inspect_err(|err| println!("  couldn't build for Windows (rustup target add {}, and mingw-w64): {err:#}", build::WINDOWS))
+    let windows = timed("built Windows' program", || quietly(release().args(["--target", WINDOWS, "--bin", "one"])))
+        .map(|()| src.join("target").join(WINDOWS).join("release/one.exe"))
+        .inspect_err(|err| println!("  couldn't build for Windows (rustup target add {}, and mingw-w64): {err:#}", WINDOWS))
         .ok();
     let builds = cache().join("builds");
     // A day is longer than any send-out takes; each is the size of two programs.
@@ -183,7 +184,7 @@ fn github_release(tag: &str) -> Result<()> {
     assets.push("install.sh".into());
     std::fs::write(dir.join("install.ps1"), include_str!("../../install.ps1"))?;
     assets.push("install.ps1".into());
-    if let Some(windows) = PLATFORMS.iter().find(|p| p.target == build::WINDOWS)
+    if let Some(windows) = PLATFORMS.iter().find(|p| p.target == WINDOWS)
         && folder.join("one.exe").is_file()
     {
         std::fs::copy(folder.join("one.exe"), dir.join(windows.asset()))?;
@@ -209,7 +210,7 @@ fn github_release(tag: &str) -> Result<()> {
     match timed("waited for a Mac's app", || await_app(&commit, &key_address(), Duration::from_secs(30 * 60))) {
         Ok(Some((thing, address))) => {
             let zip = app_zip();
-            std::fs::write(dir.join(&zip), one::latest::download(&address, &thing)?)?;
+            std::fs::write(dir.join(&zip), oned_update::latest::download(&address, &thing)?)?;
             assets.push(zip);
         }
         Ok(None) => println!("No Mac published the app for {}, so {tag} has none.", &commit[..12]),
@@ -281,7 +282,7 @@ fn key_address() -> String {
 fn await_app(commit: &str, address: &str, limit: Duration) -> Result<Option<(Thing, String)>> {
     let deadline = Instant::now() + limit;
     while Instant::now() < deadline {
-        if let Some(text) = one::latest::fetch(address)?
+        if let Some(text) = oned_update::latest::fetch(address)?
             && let Some(thing) = Latest::read(RELEASE_KEY, &text)?.things.into_iter().find(|t| t.name.starts_with("app/") && commit.starts_with(&t.commit))
         {
             return Ok(Some((thing, address.to_string())));

@@ -16,7 +16,7 @@ use super::super::devices::{approve_code, build, didnt_sign_in, on_device};
 /// throwaway network's machine. Once signed in on a device as them (a file in the throwaway network's folder says so), a
 /// new build keeps that sign-in. The window is a view of a computer of its own there, never the copied device's: it
 /// sets up `one` from the throwaway network's address, which has a program for Windows only once one's published there.
-pub(crate) fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
+pub(crate) fn windows(dir: &Path, checkout: &Path, device: &str, settings: &oned_cloudflare::Settings, user: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
     build(dir, checkout, "native-apps/windows/build.sh", &[("DEVICE", device), ("PROFILE", "dev"), ("NO_START", "1")])?;
     let file = NAME.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
@@ -60,7 +60,7 @@ Start-Process -FilePath "$($p.InstallLocation)\{file}.exe" -RedirectStandardOutp
         addr_var = env("ADDR"),
         key_var = env("RELEASE_KEY"),
         onet = control + 1,
-        key = one::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?,
+        key = platform::mode::Throwaway::own_release_key(dir)?.public_key().to_openssh()?,
     );
     let encoded = data_encoding::BASE64.encode(&script.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>());
     on_device(

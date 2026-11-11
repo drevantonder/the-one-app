@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use ::custom_build::config::{COMMITTED, TARGET};
-use one::latest::{Latest, Thing, sha256};
-use one::mode::Throwaway;
-use one::release::Version;
+use oned_update::latest::{Latest, Thing, sha256};
+use platform::mode::Throwaway;
+use oned_update::release::Version;
 
 const NEWER: u64 = COMMITTED + 100;
 
@@ -84,7 +84,7 @@ fn device() -> Device {
     std::fs::hard_link(env!("CARGO_BIN_EXE_one"), &program).unwrap();
     let key = Throwaway::own_release_key(&home).unwrap();
     let address = Address::start();
-    one::update::keep_address(&home, &address.at).unwrap();
+    oned_update::update::keep_address(&home, &address.at).unwrap();
     Device { dir, program, home, key, address }
 }
 
@@ -308,7 +308,7 @@ fn it_makes_oned_exit_and_leaves_a_stranger_alone() {
     let device = device();
     device.published("newer", NEWER, build("newer", TARGET, NEWER));
     let mut oned = sleeping_as(&device.dir.join("as-oned"), &::custom_build::programs::oned());
-    std::fs::write(device.home.join(one::update::PID), oned.id().to_string()).unwrap();
+    std::fs::write(device.home.join(oned_update::update::PID), oned.id().to_string()).unwrap();
     let (ok, said, err) = device.update();
     assert!(ok, "{err}");
     assert!(said.contains("restarting"), "{said}");
@@ -317,7 +317,7 @@ fn it_makes_oned_exit_and_leaves_a_stranger_alone() {
     let device = self::device();
     device.published("newer", NEWER, build("newer", TARGET, NEWER));
     let mut stranger = sleeping_as(&device.dir.join("as-stranger"), "stranger");
-    std::fs::write(device.home.join(one::update::PID), stranger.id().to_string()).unwrap();
+    std::fs::write(device.home.join(oned_update::update::PID), stranger.id().to_string()).unwrap();
     let (ok, said, err) = device.update();
     assert!(ok, "{err}");
     assert!(said.contains("Nothing was running"), "{said}");
@@ -334,7 +334,7 @@ fn update_restarts_an_oned_still_on_the_build_before() {
     let build = ::custom_build::config::BUILD;
     device.published(build, COMMITTED, self::build(build, TARGET, COMMITTED));
     let mut oned = sleeping_as(&device.dir.join("as-oned"), &::custom_build::programs::oned());
-    std::fs::write(device.home.join(one::update::PID), oned.id().to_string()).unwrap();
+    std::fs::write(device.home.join(oned_update::update::PID), oned.id().to_string()).unwrap();
     std::fs::write(device.home.join("running"), "the build before").unwrap();
     let (ok, said, err) = device.update();
     assert!(ok, "{err}");
@@ -343,8 +343,8 @@ fn update_restarts_an_oned_still_on_the_build_before() {
 
     // One that began on this build is left running.
     let mut oned = sleeping_as(&device.dir.join("as-oned"), &::custom_build::programs::oned());
-    std::fs::write(device.home.join(one::update::PID), oned.id().to_string()).unwrap();
-    one::update::note_running(&device.home).unwrap();
+    std::fs::write(device.home.join(oned_update::update::PID), oned.id().to_string()).unwrap();
+    oned_update::update::note_running(&device.home).unwrap();
     let (ok, said, err) = device.update();
     assert!(ok, "{err}");
     assert!(said.contains("current"), "{said}");
@@ -353,24 +353,18 @@ fn update_restarts_an_oned_still_on_the_build_before() {
     oned.wait().unwrap();
 }
 
-/// What `one update` runs on must work with the network gone: so nothing of it may reach for the node, the relay or who's who.
+/// What `one update` runs on must work with the network gone: so nothing of it may reach for the app runtime, the relay
+/// or who's who. Its crate depends on nothing of the network but the command's shape (`api`), and only its command uses that.
 #[test]
 fn updating_imports_nothing_of_the_network() {
-    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let allowed: &[(&str, &[&str])] = &[
-        ("src/update.rs", &["cli", "config", "home", "latest", "mode", "oned::name", "os", "release"]),
-        ("src/update/mac.rs", &["config", "latest", "mode"]),
-        ("src/update/cli.rs", &["cli", "config"]),
-        ("src/latest.rs", &["build::Platform", "hedge", "keys", "protocol"]),
-        ("src/release.rs", &["config", "os"]),
-    ];
-    for (file, may) in allowed {
-        let text = std::fs::read_to_string(root.join(file)).unwrap();
-        let text: String = text.lines().filter(|l| !l.trim_start().starts_with("//") && !l.contains("#[path")).collect::<Vec<_>>().join("\n");
-        let mut rest = text.as_str();
-        while let Some(at) = rest.find("crate::") {
-            rest = &rest[at + "crate::".len()..];
-            assert!(may.iter().any(|m| rest.starts_with(m)), "{file} reaches for crate::{}, which updating must not depend on", rest.split(|c: char| !c.is_alphanumeric() && c != '_' && c != ':').next().unwrap());
-        }
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../oned/update"));
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    for line in manifest.lines().filter(|l| l.contains("path = ")) {
+        let name = line.split_whitespace().next().unwrap();
+        assert!(["custom-build", "platform", "key", "api"].contains(&name), "the update path depends on {name}, which updating must not depend on");
+    }
+    for file in ["latest.rs", "platform.rs", "release.rs", "update.rs", "update/mac.rs"] {
+        let text = std::fs::read_to_string(root.join("src").join(file)).unwrap();
+        assert!(!text.contains("api::"), "src/{file} reaches for the API, which only `one update`'s command (src/update/cli.rs) may");
     }
 }

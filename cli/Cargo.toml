@@ -22,6 +22,11 @@ path = "../tests/main.rs"
 [dependencies]
 custom-build = { path = "../custom-build" }
 platform = { path = "../platform" }
+# oned (`<cli>d`), which this program is run as; `one update`, and which build this is (`version`).
+oned = { path = "../oned" }
+oned-update = { path = "../oned/update", features = ["machine"] }
+# The network's Workers on Cloudflare: `one cloudflare`, and running them in workerd.
+oned-cloudflare = { path = "../oned/cloudflare" }
 key = { path = "../key" }
 bucket = { path = "../bucket" }
 database = { path = "../database" }

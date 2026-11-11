@@ -1,6 +1,6 @@
 //! A service's sandbox: what its program may reach, as its app declares (`service: { network, user }` in its
 //! app.js, `Declared`), and how this machine holds it to that (`How`). The service's part (`oned <name>`,
-//! src/oned/part.rs) holds its key and starts its program; the program never sees the key.
+//! oned/src/part.rs) holds its key and starts its program; the program never sees the key.
 //!
 //! - **Linux**, a service not run as the user: a unit of the template `<cli>-service@.service`, which `<cli> services
 //!   sandbox` writes once as root (install.sh runs it) with a polkit rule letting the node's user start and stop

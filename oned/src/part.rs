@@ -439,7 +439,7 @@ impl Service {
     /// scope (`limited`).
     pub async fn ask_node(&self, call: Value) -> Result<Value> {
         let owner = self.owner()?.context("this service isn't approved yet")?;
-        let mut call = limited(&self.0.name, &call)?;
+        let mut call = ::services::limited(&self.0.name, &call)?;
         call["me"] = json!({ "key": hex(&self.key()), "user": owner });
         self.ask_runtime(json!({ "call": call }), Duration::from_secs(600)).await
     }
@@ -509,27 +509,6 @@ pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str) -> R
     let own = node.user == user && (*key == *remote || m.client(key)?.is_some_and(|c| c.user == user));
     ensure!(own, "{} may not call as that user", short(remote));
     Ok(())
-}
-
-/// What a service may ask its user's node to run: only its own app (`name`), in its user's own scope, calling no
-/// other app, and naming a device only to reach itself there (Agent Devices listing every device's); until grants
-/// land, that app's database there is all it reaches. → the call.
-pub fn limited(name: &str, call: &Value) -> Result<Value> {
-    ensure!(call["app"] == name && (call["service"].is_null() || call["service"] == name), "a service asks only for its own app, {name}");
-    ensure!(call["device"].is_null() || (call["service"] == name && call["device"].is_string()), "a service names a device only to reach itself there");
-    let scopes_ok = match &call["scopes"] {
-        Value::Null => true,
-        Value::Array(s) => s.iter().all(|s| s == "user"),
-        _ => false,
-    };
-    ensure!(scopes_ok, "a service's calls reach only its user's own scope");
-    let mut asked = json!({ "app": name, "service": call["service"], "input": call["input"], "scopes": ["user"] });
-    for field in ["tool", "function", "device"] {
-        if call[field].is_string() {
-            asked[field] = call[field].clone();
-        }
-    }
-    Ok(asked)
 }
 
 /// A reader of who's who in the network `root`, from what it kept at `path`, and who's who as it read. One it can't read
@@ -717,7 +696,7 @@ pub fn run(name: &str, runtime: &str) -> Result<()> {
     // one going ends it (`die_with_oned`), even here.
     lock.lock().with_context(|| name.to_string())?;
     let stop = stop_check()?;
-    let program = crate::oned::program(name);
+    let program = crate::program(name);
     ensure!(program.exists(), "{name}'s program, {}, isn't there", program.display());
     let tokio = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let service = Service::open(&dir, name, runtime)?;
@@ -855,7 +834,7 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
         How::User => {
             let launch = Launch { name: name.into(), own_network: !declared.any_host(), ports: declared.local_ports(), data: Some(data.to_path_buf()) };
             let dir = ::services::sandbox::prepare(name, program, &launcher, service.token(), &launch)?;
-            crate::oned::command(&[&format!("--sandboxed={}", dir.display())])?
+            crate::command(&[&format!("--sandboxed={}", dir.display())])?
         }
         How::Seatbelt => {
             let token = service.0.dir.join(::api::local::LOCAL_TOKEN);
@@ -897,7 +876,7 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
         }
     }
     #[cfg(target_os = "macos")]
-    if crate::oned::helper(name).is_some() {
+    if crate::helper(name).is_some() {
         return Ok(Running::Own(disclaimed(&command).with_context(|| format!("starting {}", program.display()))?));
     }
     // What it says goes to this part's stderr as before, and to its log.

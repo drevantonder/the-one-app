@@ -1,5 +1,5 @@
 //! `throwaway`: a throwaway network, a network of its own, made as `create` makes every new one, by a node beside this machine's own with its own
-//! home and ports, so it touches nothing of the user's (`one::mode`). There's one for each checkout it's run in, from any folder in it, so threads working in different ones each have their
+//! home and ports, so it touches nothing of the user's (`platform::mode`). There's one for each checkout it's run in, from any folder in it, so threads working in different ones each have their
 //! own. Its Workers run beside it, and its auth lets its first user in with no passkey (cloudflare::Settings::throwaway_user), so a
 //! client of this checkout's build, on a device borrowed for it (`throwaway client`), signs in with nobody there; others join
 //! as anyone does, by an invite link the first makes, and again with no passkey (`throwaway client <kind> --as <name>`). It
@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use ::custom_build::config::CLI;
-use one::mode::Throwaway;
-use one::release::Version;
+use platform::mode::Throwaway;
+use oned_update::release::Version;
 
 use crate::dev;
 use serde_json::json;
@@ -117,7 +117,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     match rest.first().map(String::as_str) {
         None => return say_where(&dir, &addr),
         Some("client") => {
-            let settings = one::cloudflare::Settings::load_in(&dir)?;
+            let settings = oned_cloudflare::Settings::load_in(&dir)?;
             return clients::client(&dir, &checkout, &settings, &rest[1..]);
         }
         Some("git") => return git(&dir, &addr, &rest[1..]),
@@ -167,7 +167,7 @@ pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
     let (workers, web) = (dir.join("workers.bundle"), dir.join("web.bundle"));
     std::fs::write(&workers, bundle(ui::ui_folder::cloudflare()).packed()?)?;
     std::fs::write(&web, ui::bundle::signed(&key, &bundle(ui::web::with_client()).packed()?)?)?;
-    one::build::publish_latest(&node, &key, &[(one::latest::Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()), (one::latest::Thing::WEB.into(), Some(web), version.clone(), "-".into())])
+    one::build::publish_latest(&node, &key, &[(oned_update::latest::Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()), (oned_update::latest::Thing::WEB.into(), Some(web), version.clone(), "-".into())])
 }
 
 /// `update`, in the throwaway network: nothing supervises its oned, so what systemd or launchd does for a device's, this does
@@ -182,7 +182,7 @@ fn update(dir: &Path, addr: &str) -> Result<()> {
         std::process::exit(status.code().unwrap_or(1));
     }
     let now = Version::of(&program).context("ask the throwaway network's program what it is")?;
-    let runs = std::fs::read_to_string(dir.join(one::update::RUNNING)).unwrap_or_default();
+    let runs = std::fs::read_to_string(dir.join(oned_update::update::RUNNING)).unwrap_or_default();
     if runs.trim() == now.commit && running(dir).is_some() {
         return Ok(());
     }
@@ -245,7 +245,7 @@ fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
 /// Runs the throwaway network's Cloudflare node beside its Workers, in their workerd, as `cloudflare node deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
 fn cloudflare_node(dir: &Path) -> Result<()> {
-    let mut settings = one::cloudflare::Settings::load_in(dir)?;
+    let mut settings = oned_cloudflare::Settings::load_in(dir)?;
     if !settings.cloudflare_node {
         settings.cloudflare_node = true;
         settings.save()?;

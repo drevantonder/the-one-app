@@ -18,11 +18,13 @@ relayed = ["iroh/unstable-custom-transports", "dep:iroh-base", "dep:n0-watcher",
 # A computer's onet (src/computer/), run in the background as `<cli>t`: its loopback API, with what only a computer's
 # onet does, on the node's own code for its home, bucket, harnesses and git (`one`'s `node`), and axum, which serves
 # that API as the node serves its own.
-computer = ["one/node", "dep:app-runtime", "tokio/net", "tokio/io-util", "tokio/fs", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal", "tokio/time", "dep:axum", "dep:serde", "dep:tracing", "dep:tracing-subscriber", "dep:jsonc-parser", "dep:toml_edit", "dep:blake3"]
+computer = ["one/node", "platform/machine", "bucket/machine", "dep:jiff", "dep:oned-update", "dep:app-runtime", "tokio/net", "tokio/io-util", "tokio/fs", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal", "tokio/time", "dep:axum", "dep:serde", "dep:tracing", "dep:tracing-subscriber", "dep:jsonc-parser", "dep:toml_edit", "dep:blake3"]
 
 [dependencies]
 custom-build = { path = "../custom-build" }
 platform = { path = "../platform" }
+# A computer's onet notes the network's address where `one update` reads it (oned/update/).
+oned-update = { path = "../oned/update", features = ["machine"], optional = true }
 key = { path = "../key" }
 bucket = { path = "../bucket" }
 database = { path = "../database" }
@@ -66,6 +68,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = tr
 jsonc-parser = { version = "0.34", features = ["cst", "serde"], optional = true }
 toml_edit = { version = "0.25", optional = true }
 blake3 = { version = "1", optional = true }
+# A throwaway network's bucket lists its objects with when each was written, as S3 does (src/computer/throwaway.rs).
+jiff = { version = "0.2", optional = true }
 
 # Natively, the app is a device of its user (src/device.rs), with the node's own formats and rules (entries, members,
 # logs, keys); ureq, which that crate's node uses too, to ask auth, the relay and the URL signer at the network's

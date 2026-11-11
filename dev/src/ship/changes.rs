@@ -123,7 +123,9 @@ impl Parts {
                 Some("insights") if file.starts_with("insights/worker/") => parts.workers = true,
                 // The Cloudflare node is Rust, built with the node; the remote MCP server runs that build, so the Workers
                 // go out with it.
-                Some("cloudflare") if file.starts_with("cloudflare/node/") => (parts.node, parts.workers) = (true, true),
+                Some("oned") if file.starts_with("oned/cloudflare/node/") => (parts.node, parts.workers) = (true, true),
+                // The update path's tests stay in the repo.
+                Some("oned") if file.starts_with("oned/update/tests/") => {}
                 // What the web client is made of: the native apps' bundle, and the Workers that serve it.
                 Some("cloudflare") if file.starts_with("cloudflare/shared/") => (parts.web, parts.workers) = (true, true),
                 Some("cloudflare") => parts.workers = true,
@@ -176,7 +178,7 @@ mod tests {
         assert!(!native.node && native.mac);
         assert_eq!(of(&["native-apps/windows/build.sh"]), Parts::default());
         assert_eq!(of(&["dev/src/ship.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
-        assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
+        assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["oned/cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
         assert!(of(&["app-runtime/src/lib.rs"]).is_built_in() && of(&["onet/src/lib.rs"]).is_built_in());
         assert_eq!(of(&["auth/worker.js", "relay/worker.js", "auth/package.json", "notifications/worker/senders.js"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
         let http = of(&["gateway/http.js"]);
@@ -184,7 +186,7 @@ mod tests {
         for file in ["ui/web/web.js", "onet/web/net-worker.js", "cloudflare/shared/crypto.js", "ui/kit/dist/ui.js", "vault/screens/dist/vault.html", "ui/settings/dist/requests.html", "ui/bridge.js", "onboarding/pages.js", "onboarding/pages.tsx"] {
             assert_eq!(of(&[file]), Parts { web: true, workers: true, ..Default::default() }, "{file}: the web client and the Workers that serve it, with no node");
         }
-        let cloudflare_node = of(&["cloudflare/node/src/lib.rs"]);
+        let cloudflare_node = of(&["oned/cloudflare/node/src/lib.rs"]);
         assert!(cloudflare_node.node && cloudflare_node.workers && !cloudflare_node.mac, "the Cloudflare node is built with the node");
         for rust in ["app-runtime/src/lib.rs", "ui/src/screen.rs", "ui/vendor/phosphor/icons.json", "onboarding/src/lib.rs", "Cargo.toml", "somewhere/new.txt"] {
             let parts = of(&[rust]);

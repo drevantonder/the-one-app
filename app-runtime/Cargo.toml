@@ -44,6 +44,8 @@ devices-runtime = { path = "../devices/runtime" }
 # Services (services/): what a service's program registers on, carried asks, sandboxes and their commands, a computer's;
 # what the app runtime does for them, only a node's.
 services = { path = "../services" }
+# The signed record at the network's address it reads and publishes to, and the address `one update` reads (oned/update/).
+oned-update = { path = "../oned/update", features = ["machine"] }
 services-runtime = { path = "../services/runtime" }
 # Notifications (notifications/): a note sealed to one device and what a device registers, every build; sending them, only a node's.
 notifications = { path = "../notifications" }
@@ -68,11 +70,8 @@ data-encoding = "2"
 # A route's body in the OpenAPI document (app-runtime/src/api/openapi.rs) is derived from the struct its handler reads, so the two
 # can't disagree, and no schema of those structs is written by hand.
 schemars = "1"
-# Auth's access tokens are signed with Ed25519 (src/cloudflare.rs checks them), and devices sign what they send each
-# other through the relay with it (app-runtime/src/relay.rs).
+# Devices sign what they send each other through the relay with Ed25519 (src/relay.rs).
 ed25519-dalek = "3"
-# The Workers derive keys with HKDF-SHA256, because that's what WebCrypto in workerd has (src/cloudflare.rs).
-hkdf = "0.13"
 rand = "0.8"
 blake3 = "1"
 # A scope database's steps are kept in CBOR in the bucket (scope/src/steps.rs); the Cloudflare node reads them too.
@@ -82,13 +81,10 @@ rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serial
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 serde_json = "1"
-# The notifications Worker's VAPID key is made with ring (src/cloudflare/workers.rs), and devices check a provider's RS256 ID tokens and
-# a passkey's ES256 or RS256 assertion with it (scope/src/sign_in_proof.rs): rustls and iroh build it already, browsers' client too.
-ring = "0.17"
 tracing = "0.1"
 
-# On Workers (the Cloudflare node, cloudflare/node/), rand gets its randomness from the runtime's crypto.getRandomValues.
-# What the one crate still has that the app runtime uses: releases, updates, screens, the MCP server, skills.
+# On Workers (the Cloudflare node, oned/cloudflare/node/), rand gets its randomness from the runtime's crypto.getRandomValues.
+# What the one crate still has that the app runtime uses: screens, the MCP server, skills.
 one = { path = ".." }
 
 [target.'cfg(windows)'.dependencies]
@@ -107,8 +103,6 @@ futures-util = { version = "0.3", default-features = false }
 # (UPnP, NAT-PMP, PCP), with no n0 discovery or metrics. Pinned, since the relay runs iroh-relay's own code of this
 # version.
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "portmapper"] }
-# A file's modified time as S3 says it (src/mode.rs's stand-in bucket).
-jiff = { version = "0.2" }
 # A device applies a database step another device sent only once the bucket confirms it holds those bytes, by their
 # ETag, which for R2's single PUT is their MD5 (bucket/src/place.rs); nothing already built gives MD5.
 md-5 = { version = "0.11" }

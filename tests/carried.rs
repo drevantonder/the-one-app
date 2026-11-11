@@ -8,7 +8,7 @@ use ::key::{Endpoint, Hash, Key};
 use ::scope::content::{Content, device, first, listed_service};
 use ::scope::scopes::{Kind, Role, Scope, ScopeDb};
 use ::scope::steps;
-use one::oned::part::may_call;
+use oned::part::may_call;
 use services::carried;
 
 const ANDRE: &str = "a000000000000001";

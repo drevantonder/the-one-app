@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 
 use ::custom_build::config::COMMITTED;
-use crate::latest::{Latest, Thing};
+use ::oned_update::latest::{Latest, Thing};
 use ::ui::bundle::{Bundle, open};
 
 use super::Files;
@@ -30,7 +30,7 @@ impl Newest {
     /// What the relay says of the Workers (`DEPLOYED`, `workers` in its answer to `POST /relay/computes`): the device they
     /// were last deployed from (this one), which an ask to deploy them again is left for, and what each is on. The Cloudflare
     /// node is on what the program that deploys it is.
-    pub fn deployed(&self, settings: &crate::cloudflare::Settings) -> String {
+    pub fn deployed(&self, settings: &crate::Settings) -> String {
         serde_json::json!({
             "from": ::api::home::device_here(&settings.dir).ok().map(|(key, _)| key),
             "workers": self.workers_version,
@@ -43,9 +43,9 @@ impl Newest {
     /// The newest of each, as the record at `address` names them or as this program was built with them. Failing to read
     /// a record that's there is an error: deploying what's built in instead could take Cloudflare backwards.
     pub fn read(address: &str) -> Result<Newest> {
-        let Some(text) = crate::latest::fetch(address)? else { return Ok(Newest::built()) };
-        let record = Latest::read(crate::mode::here().release_key(), &text).context("the record at the network's address")?;
-        Newest::from_record(&record, COMMITTED, &|thing| crate::latest::download(address, thing))
+        let Some(text) = ::oned_update::latest::fetch(address)? else { return Ok(Newest::built()) };
+        let record = Latest::read(platform::mode::here().release_key(), &text).context("the record at the network's address")?;
+        Newest::from_record(&record, COMMITTED, &|thing| ::oned_update::latest::download(address, thing))
     }
 
     /// Each of the two as `record` names it, if that's at least as new as `committed`, this program's build, else as
@@ -59,7 +59,7 @@ impl Newest {
             None => (built.workers, "this build".to_string(), built.workers_version),
         };
         let (web, from_web, web_version) = match newer(Thing::WEB) {
-            Some(thing) => (open(crate::mode::here().release_key(), &get(&thing)?).context("the web client in the record")?.files, thing.commit.clone(), version(&thing)),
+            Some(thing) => (open(platform::mode::here().release_key(), &get(&thing)?).context("the web client in the record")?.files, thing.commit.clone(), version(&thing)),
             None => (built.web, "this build".to_string(), built.web_version),
         };
         Ok(Newest { workers, web, said: format!("Workers from {from_workers}, web client from {from_web}"), workers_version, web_version })

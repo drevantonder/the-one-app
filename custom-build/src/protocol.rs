@@ -88,7 +88,7 @@ pub mod message {
 /// What a database keeps in the bucket beside its steps (`<prefix>/<n>`): the newest step's hint, where its steps
 /// were deleted past (`tidied`), and the copy of its steps up to one, in a folder of its own.
 pub const NEWEST: &str = "newest";
-/// The bucket's folder of what `one-dev update` publishes, and the path it's read at from the network's address (src/latest.rs).
+/// The bucket's folder of what `one-dev update` publishes, and the path it's read at from the network's address (oned/update/src/latest.rs).
 pub const UPDATES: &str = "updates";
 pub const TIDIED: &str = "tidied";
 pub const COPY: &str = "copy";

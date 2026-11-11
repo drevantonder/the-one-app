@@ -195,7 +195,7 @@ async function urls(request, env) {
 }
 
 // What `one update` takes a device's update from, read by anyone: `GET /updates/<name>`, where only what's signed by the release key
-// sits, unsealed (src/latest.rs). A device too old to speak anything else reads this: it must never need more than a GET.
+// sits, unsealed (oned/update/src/latest.rs). A device too old to speak anything else reads this: it must never need more than a GET.
 async function update(env, url) {
   if (!env.BUCKET) return refusal(503, `${env.YOURS} has no bucket yet`);
   const name = url.pathname.slice(1);

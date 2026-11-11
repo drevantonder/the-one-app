@@ -142,7 +142,7 @@ pub fn destination(signal: &str) -> String {
 /// be a request of the gateway's for the next export to carry; a deploy that can't yet (Workers Observability Write) leaves
 /// them as they are.
 pub fn exports(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
-    let url = format!("https://{}.{}.workers.dev/telemetry/otlp", crate::cloudflare::worker_name("telemetry"), cf.subdomain()?);
+    let url = format!("https://{}.{}.workers.dev/telemetry/otlp", crate::worker_name("telemetry"), cf.subdomain()?);
     let path = format!("/accounts/{}/workers/observability/destinations", cf.account);
     for (signal, dataset) in EXPORTED {
         if settings.exported(signal) == Some(url.as_str()) {

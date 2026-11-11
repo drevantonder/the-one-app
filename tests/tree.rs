@@ -113,7 +113,7 @@ fn the_relays_wasm_is_built_from_the_sources_beside_it() {
 #[test]
 fn the_cloudflare_nodes_wasm_has_each_export_name_once() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let out = std::process::Command::new("git").args(["ls-files", "--cached", "--exclude-standard", "onet/src", "cloudflare/node/src"]).current_dir(root).output().expect("git ls-files");
+    let out = std::process::Command::new("git").args(["ls-files", "--cached", "--exclude-standard", "onet/src", "oned/cloudflare/node/src"]).current_dir(root).output().expect("git ls-files");
     let snake = |name: &str| {
         let mut out = String::new();
         for (i, c) in name.chars().enumerate() {

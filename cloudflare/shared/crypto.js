@@ -1,4 +1,4 @@
-// The Workers' formats, which nodes read too (src/cloudflare.rs; tests/contracts.rs checks they agree).
+// The Workers' formats, which nodes read too (oned/cloudflare/; tests/contracts.rs checks they agree).
 //
 // Keys are a tree per scope. A scope's key is 32 random bytes, and so is each app's key in it, kept sealed under the
 // scope's key: 1 ‖ nonce ‖ AES-256-GCM(HKDF-SHA256(scope key, "one/app\0<app>"), nonce, app key), so erasing an app (deleting

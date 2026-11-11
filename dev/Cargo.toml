@@ -16,6 +16,12 @@ doctest = false
 [dependencies]
 custom-build = { path = "../custom-build" }
 platform = { path = "../platform" }
+# Where a service's program is put (`oned::program`).
+oned = { path = "../oned" }
+# The record a release is published in, the platforms it's for, and a release's version.
+oned-update = { path = "../oned/update", features = ["machine"] }
+# The network's Workers on Cloudflare: `one cloudflare`, and running them in workerd.
+oned-cloudflare = { path = "../oned/cloudflare" }
 key = { path = "../key" }
 scope = { path = "../scope" }
 api = { path = "../api" }

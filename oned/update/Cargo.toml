@@ -1,0 +1,35 @@
+# The update path (oned/update/): the signed record at the network's address, the platforms a release is for, and
+# `one update`. It depends on nothing of the network, so a device stuck on anything else can still take the fix.
+[package]
+name = "oned-update"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+# Its tests of `one update` run the program, in the program's one test binary (tests/main.rs).
+autotests = false
+
+[lib]
+doctest = false
+
+[features]
+# What only a program on a machine does: replace its own program with a release (`release`) and `one update` (`update`).
+# Without it, only the record and the platforms, which the native apps read too.
+machine = ["platform/machine", "dep:api"]
+
+[dependencies]
+custom-build = { path = "../../custom-build" }
+platform = { path = "../../platform" }
+key = { path = "../../key" }
+# `one update`'s command (src/update/cli.rs).
+api = { path = "../../api", optional = true }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+# The record and a release are signed as OpenSSH signatures (sshsig), which install.sh checks with ssh-keygen.
+ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"] }
+ureq = { version = "3", features = ["json"] }
+
+[dev-dependencies]
+rand = "0.8"

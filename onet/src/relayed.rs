@@ -13,7 +13,7 @@ use iroh::endpoint::transports::{CustomEndpoint, CustomSender, CustomTransport, 
 use iroh_base::CustomAddr;
 
 /// This transport's kind of address: an endpoint's key, reached through the relay. The Cloudflare node's
-/// (cloudflare/node/src/net.rs) is the same.
+/// (oned/cloudflare/node/src/net.rs) is the same.
 pub const THROUGH_RELAY: u64 = 0x6f6e;
 
 /// What passes a datagram on to the relay: the key it's for, its segment size (0 for one datagram), and its bytes.

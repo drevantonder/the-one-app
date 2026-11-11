@@ -476,3 +476,36 @@ mod tests {
         assert!(services.next("s").await.unwrap().is_none(), "its caller gave up on it");
     }
 }
+
+/// What a device runs of a service on its platform, as its app runtime says (`GET /api/services/builds`).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Build {
+    /// The newest build of its program, as the record at the network's address names it.
+    Released(oned_update::latest::Thing),
+    /// The build, by its hash, its app's latest deploy names.
+    Deployed(String),
+    /// Nothing: its app's latest deploy names builds, none for this platform.
+    None,
+}
+
+/// What a service may ask its user's node to run: only its own app (`name`), in its user's own scope, calling no
+/// other app, and naming a device only to reach itself there (Agent Devices listing every device's); until grants
+/// land, that app's database there is all it reaches. → the call.
+pub fn limited(name: &str, call: &Value) -> Result<Value> {
+    ensure!(call["app"] == name && (call["service"].is_null() || call["service"] == name), "a service asks only for its own app, {name}");
+    ensure!(call["device"].is_null() || (call["service"] == name && call["device"].is_string()), "a service names a device only to reach itself there");
+    let scopes_ok = match &call["scopes"] {
+        Value::Null => true,
+        Value::Array(s) => s.iter().all(|s| s == "user"),
+        _ => false,
+    };
+    ensure!(scopes_ok, "a service's calls reach only its user's own scope");
+    let mut asked = json!({ "app": name, "service": call["service"], "input": call["input"], "scopes": ["user"] });
+    for field in ["tool", "function", "device"] {
+        if call[field].is_string() {
+            asked[field] = call[field].clone();
+        }
+    }
+    Ok(asked)
+}

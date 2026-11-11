@@ -1,4 +1,4 @@
-//! What's published at the network's address, as a node reads the signed record there (`one::latest`): the
+//! What's published at the network's address, as a node reads the signed record there (`oned_update::latest`): the
 //! services' builds, and the builds of a service a deploy names, which a device runs instead of any release. A device
 //! takes its own build only by `one update`, which reads the record itself, needing nothing of a node.
 
@@ -7,7 +7,7 @@ use ::insights::{Attrs, Status};
 
 pub(crate) mod routes;
 
-/// How often a node reads the record (`one::latest`).
+/// How often a node reads the record (`oned_update::latest`).
 const PULL_EVERY: Duration = Duration::from_secs(30);
 
 /// What each record kept in `updates/` beside the newest is named after, then its publish and when it was written (ms).
@@ -23,7 +23,7 @@ impl Node {
     /// Reads the record at the network's address now and then, for what's published for this platform and its
     /// services, and keeps the network's address in its home for `one update`, which can read nothing else.
     pub(super) async fn pull_loop(self) {
-        if one::mode::here().release_key().is_empty() {
+        if platform::mode::here().release_key().is_empty() {
             return;
         }
         loop {
@@ -36,15 +36,15 @@ impl Node {
 
     async fn pull_once(&self) -> Result<()> {
         let Ok(address) = self.address() else { return Ok(()) };
-        if let Err(err) = one::update::keep_address(&self.0.dir, &address) {
+        if let Err(err) = ::oned_update::update::keep_address(&self.0.dir, &address) {
             tracing::warn!("couldn't note the network's address for {} update: {err}", custom_build::config::CLI);
         }
         let fetched = {
             let address = address.clone();
-            tokio::task::spawn_blocking(move || one::latest::fetch(&address)).await??
+            tokio::task::spawn_blocking(move || ::oned_update::latest::fetch(&address)).await??
         };
         let Some(text) = fetched else { return Ok(()) };
-        let latest = one::latest::Latest::read(one::mode::here().release_key(), &text).context("the latest record")?;
+        let latest = ::oned_update::latest::Latest::read(platform::mode::here().release_key(), &text).context("the latest record")?;
         *self.0.latest.lock().unwrap() = latest;
         Ok(())
     }
@@ -52,11 +52,11 @@ impl Node {
     /// Whether this device couldn't update, and why, as its answers say and `status` shows: what a Mac's app's install
     /// last said.
     pub fn updating(&self) -> Option<String> {
-        one::update::why(&self.0.dir)
+        ::oned_update::update::why(&self.0.dir)
     }
 
     /// What the record last said, as this node read it.
-    pub fn latest(&self) -> one::latest::Latest {
+    pub fn latest(&self) -> ::oned_update::latest::Latest {
         self.0.latest.lock().unwrap().clone()
     }
 
@@ -64,9 +64,9 @@ impl Node {
     pub async fn publish_file(&self, path: &Path) -> Result<(String, u64)> {
         use ::bucket::Bucket;
         let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
-        let sha256 = one::latest::sha256(&bytes);
+        let sha256 = ::oned_update::latest::sha256(&bytes);
         let bucket = self.bucket()?;
-        Bucket::create(&bucket.place, &format!("{}/{sha256}", one::latest::FOLDER), &bytes).await?;
+        Bucket::create(&bucket.place, &format!("{}/{sha256}", ::oned_update::latest::FOLDER), &bytes).await?;
         Ok((sha256, bytes.len() as u64))
     }
 
@@ -74,7 +74,7 @@ impl Node {
     pub async fn latest_record(&self) -> Result<Option<(String, String)>> {
         use ::bucket::Bucket;
         let bucket = self.bucket()?;
-        Ok(Bucket::get(&bucket.place, &one::latest::newest_name()).await?.map(|o| (String::from_utf8_lossy(&o.bytes).into_owned(), o.tag)))
+        Ok(Bucket::get(&bucket.place, &::oned_update::latest::newest_name()).await?.map(|o| (String::from_utf8_lossy(&o.bytes).into_owned(), o.tag)))
     }
 
     /// Replaces the record, if it's still the one `tag` names (none: if there's none). → whether it did.
@@ -82,22 +82,22 @@ impl Node {
         use ::bucket::Bucket;
         let bucket = self.bucket()?;
         let was = self.latest();
-        let replaced = Bucket::replace(&bucket.place, &one::latest::newest_name(), text.as_bytes(), tag).await?;
-        if replaced && let Ok(new) = one::latest::Latest::read(one::mode::here().release_key(), text) {
+        let replaced = Bucket::replace(&bucket.place, &::oned_update::latest::newest_name(), text.as_bytes(), tag).await?;
+        if replaced && let Ok(new) = ::oned_update::latest::Latest::read(platform::mode::here().release_key(), text) {
             for thing in new.things.iter().filter(|t| was.get(&t.name).is_none_or(|w| w.sha256 != t.sha256)) {
                 insights_runtime::device_signal(&self.rt(), "update.sent", Attrs::default().part(&thing.name), Status::Unset);
             }
         }
         if replaced {
-            tidy(&bucket, one::mode::here().release_key(), text).await.context("the record is published, but the builds no record names weren't removed from the bucket's updates/")?;
+            tidy(&bucket, platform::mode::here().release_key(), text).await.context("the record is published, but the builds no record names weren't removed from the bucket's updates/")?;
         }
         Ok(replaced)
     }
 
     /// The build of each service a device on this platform runs: the one its app's latest deploy names
     /// (`bundle::SERVICES`), else its newest release signed with the release key, as built-in apps' services come.
-    pub async fn service_builds(&self) -> BTreeMap<String, one::oned::Build> {
-        use one::oned::Build;
+    pub async fn service_builds(&self) -> BTreeMap<String, ::services::Build> {
+        use ::services::Build;
         let mut builds: BTreeMap<String, Build> = self.service_releases().into_iter().map(|(n, r)| (n, Build::Released(r))).collect();
         let bundles = self.with_or(Default::default(), |i| Ok(i.r.db().apps()?.into_iter().filter(|a| a.deleted.is_none()).filter_map(|a| Some((a.name, a.bundle?))).collect::<Vec<_>>()));
         for (app, bundle) in bundles {
@@ -122,7 +122,7 @@ impl Node {
     }
 
     /// The newest build of each service's program for this device's platform, as the record names it.
-    pub fn service_releases(&self) -> BTreeMap<String, one::latest::Thing> {
+    pub fn service_releases(&self) -> BTreeMap<String, ::oned_update::latest::Thing> {
         let (prefix, suffix) = ("service/", format!("/{}", custom_build::config::TARGET));
         self.latest().things.into_iter().filter_map(|t| Some((t.name.strip_prefix(prefix)?.strip_suffix(&suffix)?.to_string(), t.clone()))).filter(|(n, _)| !n.contains('/')).collect()
     }
@@ -132,10 +132,10 @@ impl Node {
 /// neither the newest record nor the latest record of each of the `KEPT_PUBLISHES` publishes before it name, unless it
 /// was written in the last `UPLOADING`. → how many objects went.
 async fn tidy(bucket: &impl ::bucket::Bucket, key: &str, text: &str) -> Result<usize> {
-    use one::latest::{FOLDER, Latest};
+    use ::oned_update::latest::{FOLDER, Latest};
     let read = |text: &[u8]| Latest::read(key, &String::from_utf8_lossy(text));
     let record = read(text.as_bytes()).context("the record published doesn't verify")?;
-    let newest = bucket.get(&one::latest::newest_name()).await?.context("the record isn't there")?;
+    let newest = bucket.get(&::oned_update::latest::newest_name()).await?.context("the record isn't there")?;
     let mut keep: BTreeSet<String> = record.things.iter().chain(&read(&newest.bytes).context("the record there doesn't verify")?.things).map(|t| t.sha256.clone()).collect();
     let now = bucket.now();
     // A publish writes the record once for each thing it sends: its records are the ones whose newest thing is its commit.
@@ -166,7 +166,7 @@ async fn tidy(bucket: &impl ::bucket::Bucket, key: &str, text: &str) -> Result<u
 mod tests {
     use super::*;
     use ::bucket::Place;
-    use one::latest::{Latest, Thing};
+    use ::oned_update::latest::{Latest, Thing};
     use ssh_key::private::{Ed25519Keypair, PrivateKey};
 
     /// Publishing many times keeps what the newest record and the last record of each of the five publishes before
@@ -178,7 +178,7 @@ mod tests {
         let key = PrivateKey::from(Ed25519Keypair::from_seed(&[7; 32]));
         let public = key.public_key().to_openssh().unwrap();
         let file = |n: u8, old: bool| {
-            let name = one::latest::sha256(&[n]);
+            let name = ::oned_update::latest::sha256(&[n]);
             let path = dir.join("updates").join(&name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, [n]).unwrap();
@@ -193,8 +193,8 @@ mod tests {
             for (thing, at) in [("node/x", n), ("web", 50 + n)] {
                 record = record.merged([Thing { name: thing.into(), commit: format!("c{n}"), committed: n as u64, sha256: file(at, true), size: 1, config: "-".into() }]);
                 let text = record.signed(&key).unwrap();
-                assert!(bucket.replace(&one::latest::newest_name(), text.as_bytes(), tag.as_deref()).unwrap());
-                tag = bucket.get_object(&one::latest::newest_name()).unwrap().map(|o| o.tag);
+                assert!(bucket.replace(&::oned_update::latest::newest_name(), text.as_bytes(), tag.as_deref()).unwrap());
+                tag = bucket.get_object(&::oned_update::latest::newest_name()).unwrap().map(|o| o.tag);
                 let (unnamed, uploading) = (file(100 + n, true), file(200 + n, false));
                 tidy(&bucket, &public, &text).await.unwrap();
                 assert!(!dir.join("updates").join(unnamed).exists(), "an old file no record names goes");
@@ -202,7 +202,7 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(2)).await;
             }
         }
-        let left = |n: u8| dir.join("updates").join(one::latest::sha256(&[n])).exists();
+        let left = |n: u8| dir.join("updates").join(::oned_update::latest::sha256(&[n])).exists();
         assert!((4..10).all(|n| left(n) && left(50 + n)), "what the newest publish and the five before it sent stays");
         assert!(!(0..4).any(|n| left(n) || left(50 + n)), "what older ones sent goes");
         let past = std::fs::read_dir(dir.join("updates")).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with(PAST)).count();

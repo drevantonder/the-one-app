@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use data_encoding::BASE64URL_NOPAD as B64U;
-use one::cloudflare::{self, Served};
+use oned_cloudflare::{self as cloudflare, Served};
 use serde_json::{Value, json};
 
 /// The Workers' files as they are in this checkout, and their tests (`cloudflare/test/`), as `ui_files::list` has them.
@@ -80,7 +80,7 @@ pub(crate) fn post(url: &str, headers: &[(&str, &str)], body: Value) -> (u16, Va
 /// markers left in it) fails here, not `one-dev update workers`.
 #[test]
 fn the_web_clients_scripts_parse() {
-    one::cloudflare::parses(&ui::web::files()).unwrap();
+    oned_cloudflare::parses(&ui::web::files()).unwrap();
 }
 
 /// The page's policy allows its one inline script (start.js) by its hash: of the text the page serves, whatever that

@@ -22,8 +22,8 @@ impl Formats {
         let dir = crate::temp("formats");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap().to_string();
-        let served = one::cloudflare::Served { name: "formats".into(), module: one::cloudflare::module_from(files, "test/formats.js").unwrap(), modules: vec![], classes: vec![], listen: Some(addr.clone()), bindings: vec![], assets: None, outbound: None };
-        let child = one::cloudflare::start(&one::cloudflare::write_config(&dir, &[served]).unwrap(), vec![("formats".into(), listener)]).unwrap();
+        let served = oned_cloudflare::Served { name: "formats".into(), module: oned_cloudflare::module_from(files, "test/formats.js").unwrap(), modules: vec![], classes: vec![], listen: Some(addr.clone()), bindings: vec![], assets: None, outbound: None };
+        let child = oned_cloudflare::start(&oned_cloudflare::write_config(&dir, &[served]).unwrap(), vec![("formats".into(), listener)]).unwrap();
         Formats { addr, child, dir }
     }
 
@@ -407,7 +407,7 @@ fn auth_pages_drawn_by_hand_name_the_network_as_the_build_does() {
 #[test]
 fn telemetrys_tables_are_the_ones_basin_is_set_up_with() {
     let tables = Formats::start().js(json!({ "op": "telemetryTables" }));
-    let ours: Value = one::cloudflare::basin::TABLES.iter().map(|(table, columns)| (table.to_string(), json!(columns.iter().map(|(name, _, required)| json!([name, *required])).collect::<Vec<_>>()))).collect::<serde_json::Map<_, _>>().into();
+    let ours: Value = oned_cloudflare::basin::TABLES.iter().map(|(table, columns)| (table.to_string(), json!(columns.iter().map(|(name, _, required)| json!([name, *required])).collect::<Vec<_>>()))).collect::<serde_json::Map<_, _>>().into();
     assert_eq!(tables, ours);
 }
 
@@ -498,7 +498,7 @@ mod service_protocol {
     fn rust_and_go() -> Vec<Case> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         // Go builds the way a release does; with none installed, the build says how to get it.
-        let platforms = one::build::PLATFORMS.iter().filter(|p| p.target == ::custom_build::config::TARGET);
+        let platforms = oned_update::platform::PLATFORMS.iter().filter(|p| p.target == ::custom_build::config::TARGET);
         let out = crate::temp("go-service");
         let built = one::build::build_service(&root.join("apps/whatsapp"), "contract-test", platforms, &out).unwrap_or_else(|err| panic!("WhatsApp's service is in Go, which these tests hold to the protocol: {err:#}")).unwrap();
         let go = Command::new(one::build::go()).args(["test", "./..."]).current_dir(root.join("apps/whatsapp/service")).output().unwrap_or_else(|err| panic!("Go isn't installed ({err}): see go.dev/doc/install, or `mise use -g go`"));
@@ -640,7 +640,7 @@ fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
     };
     names("the node's widgets", &read("widgets/runtime/src/draw.rs"), &["[\"late\"] = json!(true)"]);
     names("the node's route", &read("widgets/src/says.rs"), &["kind: Option<String>"]);
-    names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
+    names("the Cloudflare node", &read("oned/cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")", ::api::path::OPENAPI]);
     names("the pages", &read("ui/home/lib/model.js"), &["w.late", "&kind="]);
     names("the native widgets", &read("native-apps/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
     names("a chat's view", &read("src/mcp/view.html"), &["w.late", "widgets_show"]);
@@ -728,7 +728,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
     let objects = [("user", names(user)), ("me", names(me)), ("device", names(device)), ("config", names(config)), ("client", names(client)), ("network", network.clone())];
 
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let mut sources = vec![root.join("cloudflare/node/worker.js"), root.join("onet/worker/worker.js")];
+    let mut sources = vec![root.join("oned/cloudflare/node/worker.js"), root.join("onet/worker/worker.js")];
     for dir in [root.join("ui/web"), root.join("onet/web")].into_iter().chain(ui::ui_files::screen_folders(root)) {
         let mut stack = vec![dir];
         while let Some(dir) = stack.pop() {
@@ -949,7 +949,7 @@ fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
         date = json!(deploy::build::COMPATIBILITY_DATE),
     );
     let at = format!("127.0.0.1:{}", crate::cloudflare::port());
-    let _running = crate::cloudflare::run(vec![one::cloudflare::Served {
+    let _running = crate::cloudflare::run(vec![oned_cloudflare::Served {
         name: "runner".into(),
         module: runner.into_bytes(),
         modules: vec![],
@@ -993,7 +993,7 @@ fn the_cloudflare_node_answers_the_asks_it_says_it_does() {
     let asked: std::collections::BTreeSet<String> = quoted(&shim, "ask(\"").union(&quoted(&shim, "post(\"")).cloned().collect();
     let unknown: Vec<&String> = asked.iter().filter(|a| !names.contains_key(a.as_str())).collect();
     assert!(unknown.is_empty(), "the shim asks what api/src/call.rs doesn't name: {unknown:?}");
-    let worker = std::fs::read_to_string(root.join("cloudflare/node/worker.js")).unwrap();
+    let worker = std::fs::read_to_string(root.join("oned/cloudflare/node/worker.js")).unwrap();
     let ask = worker.split("  async ask(name, body) {").nth(1).expect("the Cloudflare node's ForCall.ask").split("\n  }\n").next().unwrap();
     let answered = quoted(ask, "case \"");
     let said: std::collections::BTreeSet<String> = names.iter().filter(|(_, on)| **on).map(|(n, _)| n.to_string()).collect();
@@ -1291,11 +1291,11 @@ c3NoLWVkMjU1MTkAAABAUeB9U2B9jrEiyXjrLWnEvrqlbLS56VB86VjOfE1OkDAZmMhXQd
 +uZ1kk/Nq2ixRFKuLKAomwCijyssLtuhcEBg==
 -----END SSH SIGNATURE-----
 ";
-    let latest = one::latest::Latest::read(KEY, RECORD).unwrap();
+    let latest = oned_update::latest::Latest::read(KEY, RECORD).unwrap();
     assert_eq!(latest.things.len(), 2, "a line it doesn't understand is ignored");
     assert_eq!(latest.get("node/x86_64-unknown-linux-gnu").unwrap().commit, "abc123");
     assert_eq!(latest.to_update_to("x86_64-unknown-linux-gnu").unwrap().commit, "abc123", "Linux takes its own line");
-    assert_eq!(latest.to_update_to(one::build::WINDOWS).unwrap().commit, "def456", "Windows takes its own");
+    assert_eq!(latest.to_update_to(oned_update::platform::WINDOWS).unwrap().commit, "def456", "Windows takes its own");
     assert!(latest.to_update_to("aarch64-unknown-linux-gnu").is_none(), "a platform with no line has nothing, as before");
 }
 
@@ -1308,10 +1308,10 @@ fn ai_run_ask() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
     let shim = read("app-runtime/src/app/runtime/shim.js");
-    assert!(shim.contains("post(\"ai.run\", { input, retry_key: retryKey ?? null })"), "the shim's ai.run ask changed: change app-runtime/src/calls/running.rs and cloudflare/node/src/lib.rs (`ai_run`), which read input and retry_key");
+    assert!(shim.contains("post(\"ai.run\", { input, retry_key: retryKey ?? null })"), "the shim's ai.run ask changed: change app-runtime/src/calls/running.rs and oned/cloudflare/node/src/lib.rs (`ai_run`), which read input and retry_key");
     assert!(::api::call::Ask::names().any(|(name, cloudflare)| name == "ai.run" && cloudflare), "both nodes answer ai.run");
     let machine = read("app-runtime/src/calls/running.rs");
-    let cloudflare = read("cloudflare/node/src/lib.rs");
+    let cloudflare = read("oned/cloudflare/node/src/lib.rs");
     for (node, text) in [("a machine's", &machine), ("the Cloudflare", &cloudflare)] {
         assert!(text.contains("[\"input\"]") && text.contains("[\"retry_key\"]"), "{node} node reads ai.run's input and retry_key");
     }

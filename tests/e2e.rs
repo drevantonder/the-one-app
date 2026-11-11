@@ -742,7 +742,7 @@ async fn only_a_devices_user_or_an_admin_reads_its_logs() {
 /// is refused, a deploy naming none for this platform runs none, and only someone who may deploy the app names one.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_service_runs_only_the_build_its_apps_deploy_names() {
-    use one::oned::Build;
+    use services::Build;
     let dir = temp("service-build");
     std::fs::write(dir.join("device.json"), json!({ "secret": ::key::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();

@@ -271,7 +271,7 @@ pub struct DeviceNow {
     /// What it is, as it last said, for its icon: `Device::kind`.
     #[serde(skip)]
     pub kind: Option<String>,
-    /// The commit it should be on, as the record at the network's address says (`one::latest`), if it's a build it could take.
+    /// The commit it should be on, as the record at the network's address says (`oned_update::latest`), if it's a build it could take.
     #[serde(default)]
     pub latest: Option<String>,
     /// Why it hasn't taken it, if it knows: its node's words.

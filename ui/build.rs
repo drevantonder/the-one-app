@@ -15,7 +15,7 @@ fn main() {
     let get = |key: &str| config.get(key).unwrap_or_else(|| panic!("config file lacks {key}")).clone();
     let optional = |key: &str| config.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let beside_config = |file: &str| config_path.parent().unwrap().join(file);
-    // The Workers' sources, built with the pinned Bun when they're run or deployed (src/cloudflare.rs), so a
+    // The Workers' sources, built with the pinned Bun when they're run or deployed (oned/cloudflare/), so a
     // release deploys exactly the Workers it was signed with. Which files they are is `ui_files`.
     for watched in ui_files::sources(&root) {
         println!("cargo:rerun-if-changed={}", watched.display());
@@ -44,7 +44,7 @@ fn main() {
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({:?}))", abs.to_string_lossy())).collect();
     let mut out = format!("pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
     out.push_str(&client_screens(&root));
-    // The Cloudflare node's WebAssembly (cloudflare/node/) and onet's, for browsers (onet/src/wasm.rs), which `one-dev update node`
+    // The Cloudflare node's WebAssembly (oned/cloudflare/node/) and onet's, for browsers (onet/src/wasm.rs), which `one-dev update node`
     // builds into CLOUDFLARE_NODE and ONET where Rust builds for WebAssembly, so a release carries them to devices with no
     // Rust to deploy it from, and the address serves the web client. With neither set, the ones `update node`, `throwaway cloudflare
     // node deploy` and `throwaway client web` build into target/, if they're there, so every build of a checkout is the same one,

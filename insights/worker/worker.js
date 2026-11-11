@@ -53,7 +53,7 @@ const text = (most) => (v) => typeof v === "string" && v.length <= most;
 const json = (v) => typeof v === "string" && v.length <= MOST_ATTRS;
 const number = (v) => typeof v === "number" && Number.isFinite(v);
 
-/// Each table's columns, a check each and whether a row has to have it: the schema `src/cloudflare/basin.rs` makes its stream with, held to it by tests/contracts.rs.
+/// Each table's columns, a check each and whether a row has to have it: the schema `oned/cloudflare/src/basin.rs` makes its stream with, held to it by tests/contracts.rs.
 export const TABLES = {
   spans: { time: [asTime, 1], trace: [(v) => hex(v, 32), 1], span: [(v) => hex(v, 16), 1], parent: [(v) => hex(v, 16)], name: [word, 1], service: [word, 1], version: [word], instance: [(v) => hex(v, 64), 1], kind: [word, 1], status: [word, 1], duration: [count, 1], message: [text(512)], attrs: [json, 1] },
   logs: { time: [asTime, 1], trace: [(v) => hex(v, 32)], span: [(v) => hex(v, 16)], severity_number: [severity, 1], severity_text: [word, 1], body: [word, 1], service: [word, 1], version: [word], instance: [(v) => hex(v, 64), 1], attrs: [json, 1] },

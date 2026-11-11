@@ -22,6 +22,7 @@ use crate::keyring::Address;
 
 mod harnesses;
 mod serve;
+mod throwaway;
 
 pub use serve::OWN;
 
@@ -152,12 +153,12 @@ impl Onet {
         if device.address().is_empty() {
             return Ok(());
         }
-        one::update::keep_address(&self.home, device.address())?;
+        oned_update::update::keep_address(&self.home, device.address())?;
         if !self.told.load(std::sync::atomic::Ordering::Relaxed) {
             self.tell_relay_of(&device).await?;
             self.told.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        if self.listen == api::local::addr() && matches!(one::mode::here(), one::mode::Mode::Own) && !self.keeping.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        if self.listen == api::local::addr() && matches!(platform::mode::here(), platform::mode::Mode::Own) && !self.keeping.swap(true, std::sync::atomic::Ordering::Relaxed) {
             tracing::info!("{} {} answering {} from {}", name(), &device.key()[..8], self.listen, self.home.display());
             one::git_wire::wire_here(device.address().to_string());
             let asked = self.clone();

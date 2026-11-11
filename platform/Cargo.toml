@@ -18,12 +18,15 @@ tracing = "0.1"
 
 [features]
 # What only a program on a machine uses: starting and stopping programs (`os`) and asking URLs someone gave (`reach`).
-machine = ["dep:tokio", "dep:libc"]
+machine = ["dep:tokio", "dep:libc", "dep:ssh-key", "dep:rand"]
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 ureq = { version = "3", features = ["json"] }
 tokio = { version = "1", features = ["full"], optional = true }
 libc = { version = "0.2", optional = true }
+# A throwaway network's own release key (`mode`), made and kept in its home: OpenSSH's format, as install.sh checks.
+ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"], optional = true }
+rand = { version = "0.8", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
