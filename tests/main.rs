@@ -1,5 +1,7 @@
 //! Every test of the crate's, in one binary.
 
+#[path = "../ai-gateway/tests/ai_gateway.rs"]
+mod ai_gateway;
 mod cloudflare;
 mod contracts;
 mod e2e;

@@ -46,6 +46,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
+# AI Gateway's own code, run against a stand-in node (ai-gateway/tests/ai_gateway.rs).
+ai-gateway = { path = "../ai-gateway" }
+ai-gateway-runtime = { path = "../ai-gateway/runtime" }
 # What a browser's push service does with a push (RFC 8291's decryption, tests/contracts.rs): the node's own crypto.
 aes-gcm = "0.10"
 hkdf = "0.13"

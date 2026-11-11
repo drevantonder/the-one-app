@@ -1296,3 +1296,28 @@ c3NoLWVkMjU1MTkAAABAUeB9U2B9jrEiyXjrLWnEvrqlbLS56VB86VjOfE1OkDAZmMhXQd
     assert_eq!(latest.to_update_to(one::build::WINDOWS).unwrap().commit, "def456", "Windows takes its own");
     assert!(latest.to_update_to("aarch64-unknown-linux-gnu").is_none(), "a platform with no line has nothing, as before");
 }
+
+/// `ctx.ai.run` crosses from the shim's JavaScript to the node's Rust: the shim asks `ai.run` with `{ input, retry_key }`,
+/// which both nodes read by those names, and every code AI Gateway throws is one the protocol carries to `err.code`
+/// (`custom-build/src/protocol.rs`) and the shim says apps catch.
+#[test]
+fn ai_run_ask() {
+    use ::ai_gateway::Failed;
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
+    let shim = read("src/app/runtime/shim.js");
+    assert!(shim.contains("post(\"ai.run\", { input, retry_key: retryKey ?? null })"), "the shim's ai.run ask changed: change src/node/calls/running.rs and cloudflare/node/src/lib.rs (`ai_run`), which read input and retry_key");
+    assert!(::api::call::Ask::names().any(|(name, cloudflare)| name == "ai.run" && cloudflare), "both nodes answer ai.run");
+    let machine = read("src/node/calls/running.rs");
+    let cloudflare = read("cloudflare/node/src/lib.rs");
+    for (node, text) in [("a machine's", &machine), ("the Cloudflare", &cloudflare)] {
+        assert!(text.contains("[\"input\"]") && text.contains("[\"retry_key\"]"), "{node} node reads ai.run's input and retry_key");
+    }
+    let thrown = [Failed::Refused(String::new()), Failed::NoKey(String::new()), Failed::Limit { said: String::new(), retry_after: None }, Failed::RetryChanged, Failed::Uncertain, Failed::Unavailable(String::new())];
+    for failed in thrown {
+        let code = failed.code().unwrap();
+        assert!(::custom_build::protocol::code::ALL.contains(&code), "{code} isn't a code the protocol carries");
+        assert!(shim.contains(code), "the shim doesn't tell apps of {code}");
+    }
+    assert_eq!(Failed::Broke(String::new()).code(), None, "what broke has no code");
+}

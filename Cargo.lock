@@ -3071,6 +3071,8 @@ name = "one-cli"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "ai-gateway",
+ "ai-gateway-runtime",
  "anyhow",
  "api",
  "axum",
