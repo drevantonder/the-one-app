@@ -963,6 +963,9 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Step)
         super::scope::derive(&out)?;
     }
     named(&out, step)?;
+    if *scope == Scope::Global {
+        forget_old_releases(&out)?;
+    }
     Ok(Applied { db: out })
 }
 
@@ -1134,6 +1137,27 @@ fn named(db: &Connection, step: &Step) -> Result<()> {
     Ok(())
 }
 
+/// How many releases of each platform's build of the node, and of each service's, keep their builds: the newest a
+/// device behind updates to is among them.
+const RELEASES_KEPT: i64 = 5;
+
+/// Forgets the builds that only releases older than their platform's (and service's) last `RELEASES_KEPT` name: no
+/// newer release names them, and no deploy's bundle is one. A forgotten blob goes from the bucket as any other does
+/// (`Node::take_forgotten`). As each step of `global` is applied, so a database whose release steps came before this
+/// rule forgets them at its next step, where a node notes what it forgot.
+fn forget_old_releases(db: &Connection) -> Result<()> {
+    let old = format!(
+        "WITH ranked AS (
+            SELECT content, row_number() OVER (PARTITION BY json_extract(content, '$.data.target'), json_extract(content, '$.data.service') ORDER BY at DESC) AS n
+            FROM releases),
+        old AS (
+            SELECT b.value AS blob FROM ranked, json_each(ranked.content, '$.blobs') b GROUP BY b.value HAVING min(n) > {RELEASES_KEPT}
+            EXCEPT SELECT bundle FROM deploys)"
+    );
+    db.execute_batch(&format!("{old} UPDATE blobs SET pinned = 0 WHERE blob IN old; {old} INSERT OR IGNORE INTO forgotten SELECT blob FROM old;"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1179,6 +1203,35 @@ pub(crate) mod tests {
         let mut h = History { start: content::first("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)), steps: Vec::new() };
         h.write(&mac, ANDRE, device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Admin))));
         (h, mac, laptop, recovery)
+    }
+
+    /// Each platform's (and service's) last `RELEASES_KEPT` releases keep their builds; one only older releases name is
+    /// forgotten, so it goes from the bucket, unless a newer release names it too or a deploy's bundle is it.
+    #[test]
+    fn only_the_last_releases_of_each_platform_keep_their_builds() -> anyhow::Result<()> {
+        let (mut h, mac, _, _) = two_admins();
+        let blob = |n: u8| format!("{n:02x}").repeat(32);
+        let release = |kind: &str, data: Value, b: String| Content { blobs: vec![b], ..Content::new(scopes::APP, kind, data) };
+        let linux = |n: u8| release("node-release", json!({ "target": "x86_64-unknown-linux-gnu" }), blob(n));
+        h.write(&mac, ANDRE, release("service-release", json!({ "target": "x86_64-unknown-linux-gnu", "service": "whatsapp" }), blob(90)));
+        h.write(&mac, ANDRE, content::app("tracker", &format!("user:{ANDRE}")));
+        for n in 0..8 {
+            h.write(&mac, ANDRE, linux(n));
+        }
+        h.write(&mac, ANDRE, release("node-release", json!({ "target": "aarch64-apple-darwin" }), blob(80)));
+        h.write(&mac, ANDRE, content::deploy("tracker", &blob(1), []));
+        // The newest release names an old one's build again.
+        h.write(&mac, ANDRE, linux(0));
+        let db = global_of(&h);
+        let forgotten = db.state()?.forgotten;
+        for n in [2, 3] {
+            assert!(!db.names_blob(&blob(n))? && forgotten.contains(&blob(n)), "a build only releases older than the last {RELEASES_KEPT} name is forgotten");
+        }
+        assert!(db.names_blob(&blob(0))?, "one a newer release names again stays");
+        assert!(db.names_blob(&blob(1))?, "one a deploy's bundle is stays");
+        assert!((4..8).all(|n| db.names_blob(&blob(n)).unwrap()), "the last releases' builds stay");
+        assert!(db.names_blob(&blob(80))? && db.names_blob(&blob(90))?, "each platform and service counts its own releases");
+        Ok(())
     }
 
     /// Who's who is the network's first freeze: signed by the recovery key its copy names, its copy checked against the
