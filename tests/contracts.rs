@@ -709,7 +709,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
             steps: 1,
             welcome: Some("1.1.h".into()),
             settings: [("address".to_string(), "a".to_string())].into(),
-            cloudflare_node: Some(CloudflareNode { priority: ::scope::rank::Priority::Last, key: "k".into(), runs_for: vec![] }),
+            oned_on_cloudflare: Some(OnedOnCloudflare { priority: ::scope::rank::Priority::Last, key: "k".into(), runs_for: vec![] }),
         }),
         pages: vec![Page { scope: "user".into(), title: "You".into(), subtitle: "".into(), hidden: false }],
         arrangements: Default::default(),
@@ -1218,7 +1218,7 @@ fn the_relay_keeps_its_word_to_a_device_left_behind() {
     assert_eq!((status, said.as_object().unwrap().keys().cloned().collect::<Vec<_>>()), (200, ["changes", "computes", "moved", "online", "seen", "versions", "workers"].map(String::from).to_vec()));
     assert_eq!(said["versions"][&hex_device], version);
     // What a deploy says of the Workers: the device they were last deployed from, and each part's version in a version's words.
-    assert_eq!(said["workers"], json!({ "from": hex(&admin), "workers": crate::cloudflare::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null }));
+    assert_eq!(said["workers"], json!({ "from": hex(&admin), "workers": crate::cloudflare::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "oned": null }));
 
     // The ask is left whole, signed by the asker, and heard once, even by a device too old to be told anything else.
     let ask = ::key::signed_request(&signer(&admin), "one/relay", json!({ "update": hex_device }), at());

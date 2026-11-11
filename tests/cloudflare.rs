@@ -266,7 +266,7 @@ impl Workers {
         settings.ports = [port(), gateway];
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         // What a deploy says of the Workers (`Newest::deployed`), from the first of those devices, as the one they were last deployed from.
-        settings.deployed = Some(json!({ "from": devices.first(), "workers": WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null }).to_string());
+        settings.deployed = Some(json!({ "from": devices.first(), "workers": WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "oned": null }).to_string());
         // The network's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).chain(recovery.map(|key| json!({ "key": key, "role": "client", "admin": false, "recovery": true }))).collect();
         settings.root = Some(data_encoding::HEXLOWER.encode(&ROOT));
@@ -1057,7 +1057,7 @@ async fn a_fresh_oned_on_cloudflare_with_several_epochs_lets_a_device_in() {
     let key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
     let seed: [u8; 32] = data_encoding::HEXLOWER.decode(key.as_bytes()).unwrap().try_into().unwrap();
     let endpoint = data_encoding::HEXLOWER.encode(ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().as_bytes());
-    k.set_setting(&me, ::scope::scopes::CLOUDFLARE_NODE, Some(&endpoint)).await.unwrap();
+    k.set_setting(&me, ::scope::scopes::ONED_ON_CLOUDFLARE, Some(&endpoint)).await.unwrap();
     let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     crate::e2e::let_sam_in(&k, &phone).await;
     // Several epochs of Everyone's, and more than a copy's worth of steps after them.
@@ -1683,7 +1683,7 @@ mod relay {
                 for key in [&first, &phone] {
                     assert!(seen[hex(key)].as_u64().is_some_and(|t| t <= super::now()), "{} wasn't seen: {seen}", hex(key));
                 }
-                assert_eq!((status, said), (200, json!({ "computes": [hex(&first)], "moved": {}, "online": [hex(&first)], "versions": {}, "workers": { "from": hex(&first), "workers": super::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "node": null } })));
+                assert_eq!((status, said), (200, json!({ "computes": [hex(&first)], "moved": {}, "online": [hex(&first)], "versions": {}, "workers": { "from": hex(&first), "workers": super::WORKERS_ARE, "web": "bbbbbbbbbbbb 1700000000 web", "oned": null } })));
             }
             // Each request is taken once; a certificate alone, or one signed by a key it doesn't name, gets nothing; a
             // clock that's off isn't told it's out (403), so it keeps the app runtimes it knows.

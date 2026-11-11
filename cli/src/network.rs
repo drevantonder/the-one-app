@@ -130,7 +130,7 @@ fn status(api: &Client, state: &State) {
         }
     }
     // Not a device, but an app runtime like the rest: woken when asked, in its place in run priority, and named as any is.
-    if let Some(cloudflare) = &i.cloudflare_node {
+    if let Some(cloudflare) = &i.oned_on_cloudflare {
         let at = match cloudflare.priority {
             Priority::Number(n) => n.to_string(),
             Priority::Last => "last".to_string(),

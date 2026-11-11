@@ -3,7 +3,7 @@
 //! turns them into this release's names as it reads them, here and nowhere else; nothing writes the old ones. The network's table and type were `install`; app schedules' tables `keeps` and `keep_keys`, and their
 //! step `grant`; the apps added to a scope, its table `installs` (`installed`, `installed_by`, `installed_at`) and
 //! steps `install` and `uninstall`; the permission to choose which devices keep a scope's apps running, run its calls and open its Vault
-//! was `keep`. The setting that names oned on Cloudflare was `serverless`. The Vault's agents, in an item's apps and a
+//! was `keep`. The setting that names oned on Cloudflare was `serverless`, then `cloudflare_node`. The Vault's agents, in an item's apps and a
 //! request's app, were `agents`, the AGENTS.md app's name, which never used the Vault. A user, as a principal and a
 //! type of object, was a `person`.
 
@@ -33,7 +33,7 @@ pub fn database(db: &Connection) -> rusqlite::Result<()> {
         db.execute("UPDATE vault_requests SET app = ?1 WHERE app = 'agents'", [crate::scopes::AGENTS])?;
     }
     if has("settings") {
-        db.execute_batch("UPDATE OR REPLACE settings SET name = 'cloudflare_node' WHERE name = 'serverless'")?;
+        db.execute_batch("UPDATE OR REPLACE settings SET name = 'oned_on_cloudflare' WHERE name IN ('serverless', 'cloudflare_node')")?;
     }
     if has("types") && has("roles") && has("relations") {
         db.execute_batch(
@@ -101,7 +101,7 @@ pub fn content(c: &mut Content) {
     }
     match c.change() {
         Some(Change::VaultRequest) if c.data["app"] == "agents" => c.data["app"] = crate::scopes::AGENTS.into(),
-        Some(Change::Setting) if c.data["name"] == "serverless" => c.data["name"] = crate::scopes::CLOUDFLARE_NODE.into(),
+        Some(Change::Setting) if c.data["name"] == "serverless" || c.data["name"] == "cloudflare_node" => c.data["name"] = crate::scopes::ONED_ON_CLOUDFLARE.into(),
         Some(Change::Defaults) => renamed(&mut c.data),
         _ => {}
     }
@@ -159,7 +159,11 @@ mod tests {
         assert_eq!(database::stored::state_hash(&old).unwrap(), database::stored::state_hash(&new).unwrap());
         old.execute("INSERT INTO settings VALUES ('serverless', 'abc')", []).unwrap();
         database(&old).unwrap();
-        assert_eq!(old.query_row("SELECT value FROM settings WHERE name = 'cloudflare_node'", [], |r| r.get::<_, String>(0)).unwrap(), "abc");
+        assert_eq!(old.query_row("SELECT value FROM settings WHERE name = 'oned_on_cloudflare'", [], |r| r.get::<_, String>(0)).unwrap(), "abc");
+        old.execute("DELETE FROM settings", []).unwrap();
+        old.execute("INSERT INTO settings VALUES ('cloudflare_node', 'def')", []).unwrap();
+        database(&old).unwrap();
+        assert_eq!(old.query_row("SELECT value FROM settings WHERE name = 'oned_on_cloudflare'", [], |r| r.get::<_, String>(0)).unwrap(), "def");
         old.execute("INSERT INTO vault_requests VALUES ('r', 'agents', 'Key', '{}', '[]', '', NULL, 'a', NULL, 0, NULL, NULL, NULL)", []).unwrap();
         database(&old).unwrap();
         assert_eq!(old.query_row("SELECT app FROM vault_requests", [], |r| r.get::<_, String>(0)).unwrap(), crate::scopes::AGENTS);
@@ -177,9 +181,11 @@ mod tests {
             content(&mut step);
             assert!(step.is(new));
         }
-        let mut setting = crate::content::setting("serverless", Some("abc"));
-        content(&mut setting);
-        assert_eq!(setting.data["name"], crate::scopes::CLOUDFLARE_NODE);
+        for old in ["serverless", "cloudflare_node"] {
+            let mut setting = crate::content::setting(old, Some("abc"));
+            content(&mut setting);
+            assert_eq!(setting.data["name"], crate::scopes::ONED_ON_CLOUDFLARE);
+        }
         let mut request = Content::new(key::APP, "vault-request", serde_json::json!({ "id": "r", "app": "agents" }));
         content(&mut request);
         assert_eq!(request.data["app"], crate::scopes::AGENTS);

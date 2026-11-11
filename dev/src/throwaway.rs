@@ -283,7 +283,7 @@ fn oned_cloudflare(dir: &Path) -> Result<()> {
     }
     let addr = running(dir).context("the throwaway network didn't start again")?;
     let key = settings.cloudflare_node_endpoint().context("the throwaway network's Workers have no key for oned on Cloudflare")?;
-    loopback_at(dir, &addr).post("/api/settings", json!({ "name": scope::scopes::CLOUDFLARE_NODE, "value": key }))?;
+    loopback_at(dir, &addr).post("/api/settings", json!({ "name": scope::scopes::ONED_ON_CLOUDFLARE, "value": key }))?;
     println!("The throwaway network's oned on Cloudflare runs beside its Workers, its endpoint {}.", &key[..8]);
     Ok(())
 }

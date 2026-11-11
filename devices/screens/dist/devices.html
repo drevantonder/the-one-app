@@ -175,7 +175,7 @@ function Q(e, t) {
 			presence: I(e),
 			p: e.priority,
 			keys: [Z(e.compute)]
-		})), t = n.network?.cloudflare_node;
+		})), t = n.network?.oned_on_cloudflare;
 		return t && e.push({
 			id: "cloudflare",
 			name: "Cloudflare",
@@ -195,7 +195,7 @@ function Q(e, t) {
 			icon: e.icon,
 			presence: I(e),
 			parts: y(e)
-		})), t = n.network?.cloudflare_node;
+		})), t = n.network?.oned_on_cloudflare;
 		return (e.length || u) && t && e.push({
 			c: null,
 			name: "Cloudflare",
@@ -341,10 +341,10 @@ function $() {
 						...e,
 						priority: u[Z(e)]
 					} : e),
-					cloudflare_node: l.cloudflare_node && "cloudflare" in u ? {
-						...l.cloudflare_node,
+					oned_on_cloudflare: l.oned_on_cloudflare && "cloudflare" in u ? {
+						...l.oned_on_cloudflare,
 						priority: u.cloudflare
-					} : l.cloudflare_node,
+					} : l.oned_on_cloudflare,
 					settings: {
 						...l.settings,
 						priority: f
@@ -986,7 +986,7 @@ function fe(t) {
 			sub: [
 				`Version ${H.version.slice(0, 7)}`,
 				H.from && `Deployed from ${H.from}`,
-				H.node && H.node !== H.version && `Apps run on ${H.node.slice(0, 7)}`
+				H.oned && H.oned !== H.version && `Apps run on ${H.oned.slice(0, 7)}`
 			].filter(Boolean).join(" · "),
 			children: W && /* @__PURE__ */ A(o, {
 				variant: "outline",

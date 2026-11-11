@@ -24,7 +24,7 @@ struct Wasm<'a> {
 impl Wasm<'_> {
     /// → the folder it's in. It needs Rust's wasm32-unknown-unknown target, a clang that builds for it (SQLite is C), and the
     /// wasm-bindgen of the version it's built with. Its glue is only made again for what cargo built again: a build that
-    /// holds it (`CLOUDFLARE_NODE`, `ONET`) watches these files, so rewriting them would have that build done again.
+    /// holds it (`ONED_CLOUDFLARE`, `ONET`) watches these files, so rewriting them would have that build done again.
     fn build(&self, src: &Path, config: &Path) -> Result<PathBuf> {
         quietly(cargo().current_dir(src).env("CONFIG", config).args(self.cargo)).with_context(|| format!("build the {} (rustup target add wasm32-unknown-unknown)", self.what))?;
         let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();

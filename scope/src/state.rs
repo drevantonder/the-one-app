@@ -174,7 +174,7 @@ pub struct Network {
     pub welcome: Option<String>,
     pub settings: BTreeMap<String, String>,
     /// oned on Cloudflare, once an admin deployed one (`cloudflare oned deploy` sets it).
-    pub cloudflare_node: Option<CloudflareNode>,
+    pub oned_on_cloudflare: Option<OnedOnCloudflare>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -376,7 +376,7 @@ pub struct AppSchedule {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct CloudflareNode {
+pub struct OnedOnCloudflare {
     pub priority: Priority,
     pub key: String,
     pub runs_for: Vec<String>,
@@ -558,8 +558,8 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
             app_schedules.push(AppSchedule { endpoint: hex(&k), scope: s.to_string(), app: a, until: g.until, by: g.by, keys: g.hashes });
         }
     }
-    let cloudflare_node = match m.cloudflare_node()? {
-        Some(key) => Some(CloudflareNode { priority: rank::priority(&set, rank::CLOUDFLARE), key: hex(&key), runs_for: m.run_by(&key)?.iter().map(Scope::to_string).collect() }),
+    let oned_on_cloudflare = match m.oned_on_cloudflare()? {
+        Some(key) => Some(OnedOnCloudflare { priority: rank::priority(&set, rank::CLOUDFLARE), key: hex(&key), runs_for: m.run_by(&key)?.iter().map(Scope::to_string).collect() }),
         None => None,
     };
     Ok(Network {
@@ -583,7 +583,7 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
         steps: here.steps,
         welcome: here.welcome.clone(),
         settings: settings.clone(),
-        cloudflare_node,
+        oned_on_cloudflare,
     })
 }
 

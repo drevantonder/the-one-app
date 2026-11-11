@@ -57,7 +57,7 @@ fn tools() -> Vec<serde_json::Value> {
                     "name": { "type": "string", "description": "the device's name" },
                     "version": { "type": "string" }, "newest": { "type": ["string", "null"], "description": "the newest published for what it runs on, if any" },
                     "behind": { "type": "boolean", "description": "a newer version is published for it" },
-                    "node": { "type": ["string", "null"], "description": "Cloudflare's: the version its node runs, which follows the device it is deployed from" },
+                    "oned": { "type": ["string", "null"], "description": "Cloudflare's: the version oned on Cloudflare runs, which runs apps there and follows the device it is deployed from" },
                 } } },
             }),
         json!({

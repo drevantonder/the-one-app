@@ -309,7 +309,7 @@ fn built_in_source(app: &str) -> Option<String> {
 /// app runtime's key), name, online, seen (ms), problem }` each, `name` none once that device was removed, `problem` what its app runtime said went wrong.
 fn runs_on(host: &Host, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, app: &str, added: &[String], user: &str) -> Result<Vec<Value>> {
     let m = i.r.db();
-    let cloudflare = m.cloudflare_node()?;
+    let cloudflare = m.oned_on_cloudflare()?;
     let mut out = Vec::new();
     for ((k, n), s) in switches {
         let on = n == app

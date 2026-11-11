@@ -391,7 +391,7 @@ fn canonical(db: &Connection) -> Result<()> {
 /// but a user's own on oned on Cloudflare, which runs a user's own only once they chose it. Only users still in,
 /// and devices still listed, hold anything; a user's role in the network or a group is the only row a step writes.
 pub fn derive(db: &Connection) -> Result<()> {
-    let cloudflare: Option<String> = db.query_row("SELECT value FROM settings WHERE name = ?1", [crate::scopes::CLOUDFLARE_NODE], |r| r.get(0)).optional()?;
+    let cloudflare: Option<String> = db.query_row("SELECT value FROM settings WHERE name = ?1", [crate::scopes::ONED_ON_CLOUDFLARE], |r| r.get(0)).optional()?;
     let cloudflare = cloudflare.and_then(|k| ::key::unhex(&k).ok()).map(|k| hex(&k));
     db.execute_batch(&format!(
         "DELETE FROM relations WHERE NOT {RULE} AND NOT (

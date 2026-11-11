@@ -202,8 +202,8 @@ impl Host {
         if conn.alpn() == http_alpn() {
             return self.take_client(conn).await;
         }
-        if !self.is_device(&remote) && self.is_cloudflare_node(&remote) {
-            return self.take_cloudflare_node(conn).await;
+        if !self.is_device(&remote) && self.is_oned_on_cloudflare(&remote) {
+            return self.take_oned_on_cloudflare(conn).await;
         }
         if !self.is_device(&remote) {
             return self.take_joining(conn).await;
@@ -285,10 +285,10 @@ impl Host {
         }
     }
 
-    async fn take_cloudflare_node(&self, conn: Connection) {
+    async fn take_oned_on_cloudflare(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
-            if !self.is_cloudflare_node(&remote) {
+            if !self.is_oned_on_cloudflare(&remote) {
                 return conn.close(1u32.into(), b"not this network's oned on Cloudflare");
             }
             let host = self.clone();
@@ -298,7 +298,7 @@ impl Host {
                     Err(err) => return tracing::debug!("what oned on Cloudflare sent: {err:#}"),
                 };
                 let answer = match msg["kind"].as_str() {
-                    Some(M::ASK) => crate::api::call_from_cloudflare_node(&host, remote, msg["body"]["call"].clone()).await,
+                    Some(M::ASK) => crate::api::call_from_oned_on_cloudflare(&host, remote, msg["body"]["call"].clone()).await,
                     _ => json!({ "error": "oned on Cloudflare only asks for calls" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
@@ -526,8 +526,8 @@ impl Host {
     }
 
     /// Whether `key` is the network's oned on Cloudflare's endpoint, as `cloudflare oned deploy` set it.
-    pub(super) fn is_cloudflare_node(&self, key: &Key) -> bool {
-        self.with_or(false, |i| Ok(i.r.db().setting(scope::scopes::CLOUDFLARE_NODE)?.is_some_and(|k| k == hex(key))))
+    pub(super) fn is_oned_on_cloudflare(&self, key: &Key) -> bool {
+        self.with_or(false, |i| Ok(i.r.db().setting(scope::scopes::ONED_ON_CLOUDFLARE)?.is_some_and(|k| k == hex(key))))
     }
 
     /// Closes the connections of devices the network no longer lists: client devices' to the local API, and those
@@ -546,7 +546,7 @@ impl Host {
                 }
                 let mut gone_held = Vec::new();
                 for k in held {
-                    if m.compute(&k)?.is_none() && m.setting(scope::scopes::CLOUDFLARE_NODE)?.is_none_or(|s| s != hex(&k)) {
+                    if m.compute(&k)?.is_none() && m.setting(scope::scopes::ONED_ON_CLOUDFLARE)?.is_none_or(|s| s != hex(&k)) {
                         gone_held.push(k);
                     }
                 }

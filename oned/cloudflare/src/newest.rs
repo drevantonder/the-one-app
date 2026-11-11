@@ -28,14 +28,14 @@ impl Newest {
     }
 
     /// What the relay says of the Workers (`DEPLOYED`, `workers` in its answer to `POST /relay/computes`): the device they
-    /// were last deployed from (this one), which an ask to deploy them again is left for, and what each is on. The Cloudflare
-    /// app runtime is on what the program that deploys it is.
+    /// were last deployed from (this one), which an ask to deploy them again is left for, and what each is on. oned on
+    /// Cloudflare is on what the program that deploys it is.
     pub fn deployed(&self, settings: &crate::Settings) -> String {
         serde_json::json!({
             "from": ::api::home::device_here(&settings.dir).ok().map(|(key, _)| key),
             "workers": self.workers_version,
             "web": self.web_version,
-            "node": settings.cloudflare_node.then(::custom_build::protocol::version),
+            "oned": settings.cloudflare_node.then(::custom_build::protocol::version),
         })
         .to_string()
     }

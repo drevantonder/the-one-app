@@ -207,7 +207,7 @@ function model(x, again) {
       id: c.id, name: c.name, icon: c.icon, whose: c.user === me ? "" : `${userName(c.user)}’s`, presence: presence(c), p: c.priority,
       keys: [deviceKey(c.compute)],
     }))
-    const s = state.network?.cloudflare_node
+    const s = state.network?.oned_on_cloudflare
     if (s) entries.push({ id: "cloudflare", name: "Cloudflare", icon: CLOUDFLARE, whose: "", p: s.priority ?? "last", keys: ["cloudflare"] })
     const numbers = [...new Set(entries.filter((e) => e.p !== "last").map((e) => rank(e.p)))].sort((a, b) => a - b)
     return { cols: numbers.map((n) => entries.filter((e) => e.p !== "last" && rank(e.p) === n)), last: entries.filter((e) => e.p === "last") }
@@ -217,7 +217,7 @@ function model(x, again) {
   /// apps, and no service.
   function gridColumns() {
     const cols = drawn.cards.filter((c) => c.user === me && c.runs).map((c) => ({ c, name: c.name, icon: c.icon, presence: presence(c), parts: partsOf(c) }))
-    const s = state.network?.cloudflare_node
+    const s = state.network?.oned_on_cloudflare
     if ((cols.length || admin) && s) cols.push({ c: null, name: "Cloudflare", icon: CLOUDFLARE, parts: [{ name: "apps", on: true, fixed: true }] })
     return cols
   }
@@ -376,7 +376,7 @@ function Devices() {
         network: {
           ...network,
           devices: (network.devices || []).map((d) => (deviceKey(d) in set ? { ...d, priority: set[deviceKey(d)] } : d)),
-          cloudflare_node: network.cloudflare_node && "cloudflare" in set ? { ...network.cloudflare_node, priority: set.cloudflare } : network.cloudflare_node,
+          oned_on_cloudflare: network.oned_on_cloudflare && "cloudflare" in set ? { ...network.oned_on_cloudflare, priority: set.cloudflare } : network.oned_on_cloudflare,
           settings: { ...network.settings, priority: value },
         },
       },
@@ -755,7 +755,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
         )}
         {cloudflare && (
           <List>
-            <DeviceRow icon={CLOUDFLARE} title="Cloudflare" sub={[`Version ${cloudflare.version.slice(0, 7)}`, cloudflare.from && `Deployed from ${cloudflare.from}`, cloudflare.node && cloudflare.node !== cloudflare.version && `Apps run on ${cloudflare.node.slice(0, 7)}`].filter(Boolean).join(" · ")}>
+            <DeviceRow icon={CLOUDFLARE} title="Cloudflare" sub={[`Version ${cloudflare.version.slice(0, 7)}`, cloudflare.from && `Deployed from ${cloudflare.from}`, cloudflare.oned && cloudflare.oned !== cloudflare.version && `Apps run on ${cloudflare.oned.slice(0, 7)}`].filter(Boolean).join(" · ")}>
               {cloudflareCard && (
                 <Button variant="outline" size="sm" disabled={Object.keys(updating).length > 0} onClick={() => update([cloudflareCard])}>
                   {updating.cloudflare && <Spinner />}Update

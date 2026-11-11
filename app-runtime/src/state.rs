@@ -219,7 +219,7 @@ impl Host {
             for c in m.computes()? {
                 names.insert(hex(&c.key), json!(m.machine_ever(&c.key)?.map(|d| d.name.clone()).unwrap_or_else(|| short(&c.key))));
             }
-            if let Some(key) = m.cloudflare_node()? {
+            if let Some(key) = m.oned_on_cloudflare()? {
                 names.insert(hex(&key), json!(rank::CLOUDFLARE));
             }
             Ok(Value::Object(names))

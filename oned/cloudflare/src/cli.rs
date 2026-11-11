@@ -243,7 +243,7 @@ pub fn commands() -> Command {
                     }
                     // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
                     // things run in.
-                    api.post("/api/settings", json!({ "name": ::scope::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
+                    api.post("/api/settings", json!({ "name": ::scope::scopes::ONED_ON_CLOUDFLARE, "value": settings.cloudflare_node_endpoint() }))?;
                     println!("oned is on your Cloudflare account: devices ask it over iroh when none of your computers answers.");
                 }
                 ["cloudflare", "set", name, value] => {

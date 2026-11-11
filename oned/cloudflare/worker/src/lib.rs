@@ -609,7 +609,7 @@ pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsErro
             None => None,
         };
         let device = device.filter(|d| d.user == user).map(|d| d.name);
-        let cloudflare = m.cloudflare_node()?;
+        let cloudflare = m.oned_on_cloudflare()?;
         let runs: Vec<String> = scopes.iter().filter(|s| cloudflare.is_some_and(|k| m.runs_for(&k, s))).map(Scope::to_string).collect();
         let scopes: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         let removed = m.user_ever(user)?.is_some_and(|u| u.removed);
@@ -685,7 +685,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
     let state_of = |s: &Scope| states.iter().find(|(x, _)| x == s).map(|(_, st)| st);
     let read = || states.iter().map(|(s, st)| (s, st));
     let arrangements = state_of(&Scope::User(me.into())).map(|st| st.arrangements.clone()).unwrap_or_default();
-    let cloudflare = m.cloudflare_node()?;
+    let cloudflare = m.oned_on_cloudflare()?;
     // It knows of no device being on, nor of who else is looking.
     let state = ::scope::state::state(
         Some(m),

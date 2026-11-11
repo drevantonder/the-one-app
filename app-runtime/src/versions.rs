@@ -21,7 +21,7 @@ type Find = for<'a> fn(&'a Latest, &'a str) -> Option<&'a Thing>;
 
 impl Host {
     /// What each device told the relay it's on: `{ key: { version, newest, behind } }`, and the Workers as `cloudflare`, with
-    /// the version of oned on Cloudflare (`node`) if there is one, and the name of the device they were last deployed from (`from`). `newest` is the build published for what it runs on,
+    /// the version of oned on Cloudflare (`oned`) if there is one, and the name of the device they were last deployed from (`from`). `newest` is the build published for what it runs on,
     /// from the signed record, which a browser can't read for itself (a redirect to the bucket). The Workers are behind
     /// if their sources or the web client are; oned on Cloudflare is on what the device that deploys it is, so it follows that.
     pub async fn versions(&self) -> Result<Value> {
@@ -44,7 +44,7 @@ impl Host {
         if let (Some(sources), Some(web)) = (part("workers", Latest::get), part("web", Latest::get)) {
             let from = workers["from"].as_str().and_then(|k| ::key::unhex(k).ok());
             let from = from.and_then(|key| self.with_or(None, |i| Ok(i.r.db().machine(&key)?.map(|d| d.name))));
-            out.insert(CLOUDFLARE.into(), json!({ "version": sources["version"], "newest": sources["newest"], "behind": sources["behind"] == true || web["behind"] == true, "node": part("node", Latest::to_update_to).map(|n| n["version"].clone()), "from": from }));
+            out.insert(CLOUDFLARE.into(), json!({ "version": sources["version"], "newest": sources["newest"], "behind": sources["behind"] == true || web["behind"] == true, "oned": part("oned", Latest::to_update_to).map(|n| n["version"].clone()), "from": from }));
         }
         Ok(Value::Object(out))
     }

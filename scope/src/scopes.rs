@@ -268,7 +268,7 @@ impl ScopeDb {
     /// oned on Cloudflare, whose seal key is its key's twin.
     pub fn runtimes(&self) -> Result<Vec<(Key, Key)>> {
         let mut out: Vec<(Key, Key)> = self.computes()?.into_iter().map(|d| (d.key, d.seal)).collect();
-        if let Some(k) = self.cloudflare_node()?
+        if let Some(k) = self.oned_on_cloudflare()?
             && let Ok(seal) = ::key::twin_public(&k)
         {
             out.push((k, seal));
@@ -396,7 +396,7 @@ impl ScopeDb {
     /// name is `cloudflare` wherever a device is named.
     pub fn find_runner(&self, name: &str) -> Result<Key> {
         let mut nodes: Vec<(Key, String)> = self.running_machines()?.into_iter().map(|(m, named)| (m.key, named)).collect();
-        nodes.extend(self.cloudflare_node()?.map(|k| (k, crate::rank::CLOUDFLARE.to_string())));
+        nodes.extend(self.oned_on_cloudflare()?.map(|k| (k, crate::rank::CLOUDFLARE.to_string())));
         Self::find_among(nodes, name)
     }
 
@@ -681,9 +681,9 @@ impl ScopeDb {
         Ok(self.machine(k)?.map(|m| m.seal))
     }
 
-    /// oned on Cloudflare, as an admin's `CLOUDFLARE_NODE` setting names it.
-    pub fn cloudflare_node(&self) -> Result<Option<Key>> {
-        Ok(self.setting(CLOUDFLARE_NODE)?.and_then(|k| unhex(&k).ok()))
+    /// oned on Cloudflare, as an admin's `ONED_ON_CLOUDFLARE` setting names it.
+    pub fn oned_on_cloudflare(&self) -> Result<Option<Key>> {
+        Ok(self.setting(ONED_ON_CLOUDFLARE)?.and_then(|k| unhex(&k).ok()))
     }
 
     /// Where a user's own things run besides their own machines, as their own device last said, if it has.
@@ -922,7 +922,7 @@ impl ScopeDb {
 }
 
 /// The setting that names oned on Cloudflare's endpoint (its key, hex).
-pub const CLOUDFLARE_NODE: &str = "cloudflare_node";
+pub const ONED_ON_CLOUDFLARE: &str = "oned_on_cloudflare";
 /// The setting that says who holds the recovery key: a JSON list of users' ids. Only an admin changes a setting.
 pub const RECOVERY_HOLDERS: &str = "recovery_holders";
 /// The app service, as a part of a device's oned its `service` entries switch: running apps' calls.

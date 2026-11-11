@@ -227,11 +227,11 @@ export const net = {
   /// run priority (last, unless an admin moved it).
   ordered(state) {
     const runtimes = (state.network?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
-    const last = state.network?.cloudflare_node?.key;
+    const last = state.network?.oned_on_cloudflare?.key;
     if (last && !runtimes.includes(last)) runtimes.push(last);
     const rank = (p) => (p === "last" ? 0xffffffff : p);
     const ranks = Object.fromEntries((state.network?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
-    if (last) ranks[last] = rank(state.network.cloudflare_node.priority ?? "last");
+    if (last) ranks[last] = rank(state.network.oned_on_cloudflare.priority ?? "last");
     runtimes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
     if (runtimes.length) net.runtimes(state.user.id, runtimes, ranks, last);
   },

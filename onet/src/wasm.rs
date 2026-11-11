@@ -188,7 +188,7 @@ impl Keyring {
         let hex = |k: &[u8; 32]| data_encoding::HEXLOWER.encode(k);
         let ranks: serde_json::Map<String, serde_json::Value> = self.keyring.ranks().into_iter().map(|(k, r)| (hex(&k), r.into())).collect();
         let runtimes: Vec<String> = self.keyring.runtimes().keys().map(hex).collect();
-        serde_json::json!({ "runtimes": runtimes, "ranks": ranks, "wakes": self.keyring.cloudflare_node().as_ref().map(hex) }).to_string()
+        serde_json::json!({ "runtimes": runtimes, "ranks": ranks, "wakes": self.keyring.oned_on_cloudflare().as_ref().map(hex) }).to_string()
     }
 
     /// A request to its user's app runtimes (`Keyring::request`), with the keys its kind needed, handed until `until` (ms),

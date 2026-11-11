@@ -45,7 +45,7 @@ fn main() {
     let mut out = format!("pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
     out.push_str(&client_screens(&root));
     // oned on Cloudflare's WebAssembly (oned/cloudflare/worker/) and onet's, for browsers (onet/src/wasm.rs), which `one-dev update program`
-    // builds into CLOUDFLARE_NODE and ONET where Rust builds for WebAssembly, so a release carries them to devices with no
+    // builds into ONED_CLOUDFLARE and ONET where Rust builds for WebAssembly, so a release carries them to devices with no
     // Rust to deploy it from, and the address serves the web client. With neither set, the ones `update program`, `throwaway cloudflare
     // oned deploy` and `throwaway client web` build into target/, if they're there, so every build of a checkout is the same one,
     // with or without them, but not their own (they're built with `ui` in them, which would hold itself). Only a file that

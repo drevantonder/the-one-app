@@ -160,7 +160,7 @@ impl Rule<'_> {
     }
 
     fn runs_things(&self, k: &Key) -> Result<bool> {
-        Ok(self.who.compute(k)?.is_some() || self.who.has_runtime(k)? || self.who.cloudflare_node()? == Some(*k))
+        Ok(self.who.compute(k)?.is_some() || self.who.has_runtime(k)? || self.who.oned_on_cloudflare()? == Some(*k))
     }
 
     fn devices_changed(&self) -> Result<()> {
@@ -633,7 +633,7 @@ impl Rule<'_> {
         let adds = |s: &Scope| self.may("add-apps", &object(s));
         let was = self.who.switch(&device, &name)?.and_then(|s| s.scope.as_deref().map(Scope::parse)).and_then(Result::ok);
         let managed = !on && was.as_ref().is_some_and(adds);
-        if self.who.cloudflare_node()? == Some(device) {
+        if self.who.oned_on_cloudflare()? == Some(device) {
             allowed!(managed || self.may("change-settings", NETWORK), "only an admin switches what Cloudflare runs");
         } else {
             self.who.machine(&device)?.context("no such device")?;
@@ -1497,7 +1497,7 @@ mod tests {
         net.step(&mac, ANDRE, core_step("app", json!({ "name": "notes", "owner": "group:c000000000000003" })));
         net.step(&mac, ANDRE, core_step("app", json!({ "name": "tally", "owner": "admins" })));
         net.step(&bobs, BOB, core_step("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
-        net.step(&mac, ANDRE, setting(crate::scopes::CLOUDFLARE_NODE, Some(&hex(&Dev::new(14).id()))));
+        net.step(&mac, ANDRE, setting(crate::scopes::ONED_ON_CLOUDFLARE, Some(&hex(&Dev::new(14).id()))));
         let (laptop, tablet) = (Dev::new(5), Dev::new(6));
         net.step(&bobs, BOB, device(&laptop.endpoint(), BOB, "laptop", &[Kind::Client], None));
         net.step(&bobs, BOB, device(&tablet.endpoint(), BOB, "tablet", &[Kind::Client], None));
@@ -1584,7 +1584,7 @@ mod tests {
             (&phone, BOB, device(&tablet.endpoint(), BOB, "bob's tablet", &[Kind::Client], None)),
             (&phone, BOB, remove_device(&tablet.id())),
             (&phone, BOB, runs(&[linux.id()])),
-            (&mac, ANDRE, setting(crate::scopes::CLOUDFLARE_NODE, Some(&hex(&cloudflare.id())))),
+            (&mac, ANDRE, setting(crate::scopes::ONED_ON_CLOUDFLARE, Some(&hex(&cloudflare.id())))),
             (&phone, BOB, group(G, "G")),
             (&phone, BOB, invite(G, DAN, Role::Member)),
             (&dans, DAN, accept(G)),

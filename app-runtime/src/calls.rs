@@ -577,7 +577,7 @@ impl Host {
     /// oned on Cloudflare's key, if the call names it (`--device cloudflare`).
     fn names_cloudflare(&self, req: &CallRequest) -> Option<Key> {
         let found = self.with(|i| i.r.db().find_runner(req.device.as_deref().unwrap_or_default())).ok()?;
-        self.is_cloudflare_node(&found).then_some(found)
+        self.is_oned_on_cloudflare(&found).then_some(found)
     }
 
     fn cloudflare_is_asked_directly(&self) -> String {

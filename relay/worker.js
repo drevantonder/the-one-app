@@ -34,7 +34,7 @@
 // of them with a socket open here now, which a client races first and every app runtime shows as online; `seen`, when each
 // key on the list was last seen (ms), by its socket opening or closing or a Worker asking `allowed` of it; and
 // `versions`, each key's that said one, for every client to show; and `workers`, once a deploy has said it, what the
-// Workers are on (`{ from, workers, web, node }`: the device they were last deployed from, which an ask to deploy them
+// Workers are on (`{ from, workers, web, oned }`: the device they were last deployed from, which an ask to deploy them
 // again is left for, and each part's version in a version's words). 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the app runtimes it knows. A device's own request
 // that says it reads less of who's who than this build (`reads`, protocol.js's `READS`; an older build's says

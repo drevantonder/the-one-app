@@ -78,7 +78,7 @@ struct Known {
     user: String,
     /// The app runtimes it may ask, by key: their seal keys; and oned on Cloudflare, if the network has one.
     runtimes: HashMap<[u8; 32], [u8; 32]>,
-    cloudflare_node: Option<[u8; 32]>,
+    oned_on_cloudflare: Option<[u8; 32]>,
     /// Each app runtime's run priority, as the network's admins set it (scope/src/rank.rs): oned on Cloudflare's too.
     ranks: HashMap<[u8; 32], u32>,
     at: u64,
@@ -95,10 +95,10 @@ impl Known {
         let who = &reader.truth().ok_or_else(|| not_let_in("This device isn't listed yet."))?.db;
         let user = who.client(key).map_err(failed)?.map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
         // The app runtimes that run something of its user's, and oned on Cloudflare, which runs anyone's calls.
-        let cloudflare_node = who.cloudflare_node().map_err(failed)?;
+        let oned_on_cloudflare = who.oned_on_cloudflare().map_err(failed)?;
         let mut runtimes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
         for (key, seal) in who.runtimes().map_err(failed)? {
-            if Some(key) == cloudflare_node || who.serves(&key, &user).map_err(failed)? {
+            if Some(key) == oned_on_cloudflare || who.serves(&key, &user).map_err(failed)? {
                 runtimes.insert(key, seal);
             }
         }
@@ -106,11 +106,11 @@ impl Known {
         let ranks = runtimes
             .keys()
             .map(|k| {
-                let id = if Some(*k) == cloudflare_node { ::scope::rank::CLOUDFLARE.to_string() } else { hex(&who.device_of(k)) };
+                let id = if Some(*k) == oned_on_cloudflare { ::scope::rank::CLOUDFLARE.to_string() } else { hex(&who.device_of(k)) };
                 (*k, match ::scope::rank::priority(&set, &id) { ::scope::rank::Priority::Number(n) => n, ::scope::rank::Priority::Last => u32::MAX })
             })
             .collect();
-        Ok(Known { reader, steps, user, runtimes, cloudflare_node, ranks, at })
+        Ok(Known { reader, steps, user, runtimes, oned_on_cloudflare, ranks, at })
     }
 }
 
@@ -310,15 +310,15 @@ impl<O: Opens> Keyring<O> {
         Some((k.reader.at(), k.who().epoch(&Scope::Global).ok()?, k.steps.clone()))
     }
 
-    pub fn cloudflare_node(&self) -> Option<[u8; 32]> {
-        self.known.lock().unwrap().as_ref().and_then(|k| k.cloudflare_node)
+    pub fn oned_on_cloudflare(&self) -> Option<[u8; 32]> {
+        self.known.lock().unwrap().as_ref().and_then(|k| k.oned_on_cloudflare)
     }
 
     /// The app runtimes it may ask, in the order things run on them: `first`, as last said, then those it wasn't told of, the
     /// oned on Cloudflare last of them; then by run priority, which may put oned on Cloudflare first.
     pub fn ordered(&self, first: &[[u8; 32]]) -> Vec<[u8; 32]> {
         let runtimes = self.runtimes();
-        let last = self.cloudflare_node();
+        let last = self.oned_on_cloudflare();
         let ranks: HashMap<[u8; 32], u32> = self.ranks().into_iter().collect();
         let mut out: Vec<[u8; 32]> = first.iter().filter(|k| runtimes.contains_key(*k) && Some(**k) != last).copied().collect();
         let mut rest: Vec<[u8; 32]> = runtimes.keys().filter(|k| !out.contains(k) && Some(**k) != last).copied().collect();
@@ -338,7 +338,7 @@ impl<O: Opens> Keyring<O> {
             return false;
         }
         let _ = client.set_ranks(&self.ranks());
-        let _ = client.set_wakes(self.cloudflare_node());
+        let _ = client.set_wakes(self.oned_on_cloudflare());
         client.set_runtimes(&self.ordered(&[])).is_ok()
     }
 

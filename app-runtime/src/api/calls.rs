@@ -53,7 +53,7 @@ async fn call_for(host: &Host, me: Me, mut req: CallRequest, picks: bool) -> any
 /// oned on Cloudflare's key, `Credential::Passed`) for the scopes the call names alone, and never this device's own: no
 /// access token comes with it, so none of theirs reaches an app runtime on a computer, whose owner could use it as them.
 /// → `{ ok }`, or what failed as the API says it.
-pub(crate) async fn call_from_cloudflare_node(host: &Host, remote: key::Key, mut call: Value) -> Value {
+pub(crate) async fn call_from_oned_on_cloudflare(host: &Host, remote: key::Key, mut call: Value) -> Value {
     let (me, keys) = match call.as_object_mut() {
         Some(c) => (c.remove("me").unwrap_or_default(), c.remove("keys")),
         None => (Value::Null, None),

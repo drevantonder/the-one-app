@@ -125,7 +125,7 @@ impl Device {
         if let Some(client) = self.client().await {
             client.set_local(self.local());
             client.set_ranks(&self.keyring.ranks())?;
-            client.set_wakes(self.keyring.cloudflare_node())?;
+            client.set_wakes(self.keyring.oned_on_cloudflare())?;
             client.set_runtimes(&self.ordered())?;
         }
         Ok(())
@@ -276,7 +276,7 @@ impl Device {
             client.answer_with(std::sync::Arc::new(move |ask| device_logs::answer(&dir, &ask)));
         }
         client.set_ranks(&self.keyring.ranks())?;
-        client.set_wakes(self.keyring.cloudflare_node())?;
+        client.set_wakes(self.keyring.oned_on_cloudflare())?;
         client.set_online(&online)?;
         *stage = Stage::In(client);
         // Kept, with its key, so this key is known as one that was in, to its user's sign-in once the relay takes it
@@ -509,7 +509,7 @@ impl Device {
         self.keyring.reread_for(self, &said).await;
         if let Some(client) = self.client().await {
             let _ = client.set_ranks(&self.keyring.ranks());
-            let _ = client.set_wakes(self.keyring.cloudflare_node());
+            let _ = client.set_wakes(self.keyring.oned_on_cloudflare());
             let _ = client.set_runtimes(&self.ordered());
         }
     }
