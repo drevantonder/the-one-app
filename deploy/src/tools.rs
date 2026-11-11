@@ -5,16 +5,8 @@ use serde_json::json;
 
 use ::api::Feature;
 
-const GUIDE: &str = "add puts an app, and the apps it uses, on a page: yours (scope user), a group you're an admin of (by its name) or everyone's (scope global, admins only). An app with a service runs it on one of your computers it can run on (node); asked when there's a choice. remove takes it off a page: it stops running there, and what it kept stays, for when it is added back. The App Store (apps_list) lists every app and where it's added.";
-
 fn feature(name: &'static str, title: &'static str, description: &str, tool: serde_json::Value) -> Feature {
-    Feature {
-        name,
-        title,
-        description: description.into(),
-        guide: GUIDE.into(),
-        tools: vec![tool],
-    }
+    Feature { name, title, description: description.into(), guide: String::new(), tools: vec![tool] }
 }
 
 pub fn add_feature() -> Feature {

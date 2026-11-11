@@ -141,7 +141,7 @@ export default {
   icon: "squares-four",
   color: "#007aff",
   description: "Every app you can add, and its code",
-  instructions: "The App Store lists every app in this network, where each is added and its code. add adds one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
+  instructions: "The App Store lists every app in this network, where each is added and its code. add puts an app, and the apps it uses, on a page: yours (scope user), a group you're an admin of (by its name) or everyone's (scope global, admins only); one with a service runs it on one of your computers it can run on (node, from apps_devices), asked when there's a choice. remove takes it off a page: it stops running there, and what it kept stays, for when it's added back. apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
 
   // The apps whose schedule, where you may switch it, failed its last run.
   async badge(ctx) {
