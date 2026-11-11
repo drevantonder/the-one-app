@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use ::api::Client;
 use ::api::cli::{Command, Given, ago};
 use ::custom_build::config::CLI;
-use api_features::tools;
+use ::mcp::tools;
 
 pub fn commands() -> Command {
     Command {

@@ -17,7 +17,7 @@ pub(super) fn routes() -> Routes {
 
 async fn document_for(State(host): State<Host>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
     let apps = host.apps(&me.caller).await?;
-    let body = serde_json::to_string(&api_features::openapi::document(&apps, me.client.is_none()))?;
+    let body = serde_json::to_string(&onet::document(&apps, me.client.is_none()))?;
     let tag = ::ui::screen::tag(&body);
     Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
 }
@@ -31,11 +31,11 @@ mod tests {
     #[test]
     fn a_callers_document_lists_only_what_they_can_use() {
         let apps = [json!({ "name": "notes", "added": ["user:a"], "tools": [{ "name": "add", "input": { "type": "object", "properties": {} } }, { "name": "_http" }] }), json!({ "name": "gone", "deleted": { "time": 1 }, "tools": [{ "name": "run" }] })];
-        let theirs = api_features::openapi::document(&apps, false);
+        let theirs = onet::document(&apps, false);
         let paths = theirs["paths"].as_object().unwrap();
         assert!(paths.contains_key("/api/call/notes/add") && !paths.contains_key("/api/call/notes/_http"), "their app's tools, not its own");
         assert!(!paths.keys().any(|p| p.starts_with("/api/call/gone/")), "a deleted app's");
-        assert!(!paths.contains_key("/api/join") && api_features::openapi::document(&apps, true)["paths"].get("/api/join").is_some(), "only this machine's programs join");
+        assert!(!paths.contains_key("/api/join") && onet::document(&apps, true)["paths"].get("/api/join").is_some(), "only this machine's programs join");
     }
 
     /// What a command line and MCP read of a document is what the app lists: each tool whole, a file it takes still a
@@ -44,7 +44,7 @@ mod tests {
     fn the_sets_a_document_lists_are_what_was_listed() {
         let tool = json!({ "name": "send", "title": "Send", "description": "Sends", "input": { "type": "object", "required": ["to"], "properties": { "to": { "type": "string" }, "file": { "type": "object", "format": "file", "description": "it" }, "more": { "type": "array", "items": { "type": "object", "format": "file", "required": ["name"] } } } }, "output": { "type": "object" }, "confirm": true, "accounts": true, "words": ["to"] });
         let apps = [json!({ "name": "notes", "title": "Notes", "description": "d", "instructions": "i", "tagline": "t", "needs": "a Mac", "runs": "service", "uses": { "services": ["x"] }, "added": ["user:a"], "tools": [tool, { "name": "_http", "input": {} }] }), json!({ "name": "gone", "title": "Gone", "deleted": { "time": 1 }, "tools": [{ "name": "run" }] }), json!({ "name": "new", "title": "New" })];
-        let sets = ::api::openapi::sets(&api_features::openapi::document(&apps, false));
+        let sets = ::api::openapi::sets(&onet::document(&apps, false));
         let of = |name: &str| sets.iter().find(|s| s["name"] == name).unwrap();
         let notes = of("notes");
         for (key, want) in [("title", "Notes"), ("description", "d"), ("instructions", "i"), ("tagline", "t"), ("needs", "a Mac"), ("runs", "service")] {
@@ -68,8 +68,8 @@ mod tests {
     /// A route in the document says what it answers: one left to say anything is one a client can't read the shape of.
     #[test]
     fn each_route_says_what_it_answers() {
-        for (path, _, op) in api_features::says::listed() {
-            assert!(op.answer != ::api::says::Op::unsaid(), "{} {path} says what it answers (api/features/src/says.rs: `answers`, `answers_as`, `done`)", op.method);
+        for (path, _, op) in onet::said() {
+            assert!(op.answer != ::api::says::Op::unsaid(), "{} {path} says what it answers (onet/src/features.rs: `answers`, `answers_as`, `done`)", op.method);
         }
     }
 
@@ -79,7 +79,7 @@ mod tests {
     }
 
     /// A route's schema is what its handler reads, in the only place one could differ from the other: which struct each
-    /// names. What a route says (api/features/src/says.rs) names the struct of its handler's `Body` or `Query`, and what a client answers
+    /// names. What a route says (onet's `said`) names the struct of its handler's `Body` or `Query`, and what a client answers
     /// itself reads the body `settings::about` says.
     #[test]
     fn each_routes_schema_is_what_its_handler_reads() {
@@ -133,7 +133,7 @@ mod tests {
     /// What a client answers itself of a tool is that tool's body: nothing else holds the two together.
     #[test]
     fn a_tool_a_client_answers_takes_what_the_client_reads() {
-        for feature in api_features::core_tools::all() {
+        for feature in onet::features() {
             for tool in &feature.tools {
                 let at = feature.path(tool);
                 let Some((.., body)) = scope::settings::answered_routes().find(|(_, path, ..)| *path == at) else { continue };

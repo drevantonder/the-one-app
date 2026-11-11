@@ -25,8 +25,6 @@ blake3 = "1"
 data-encoding = "2"
 # Its endpoint key signs what it asks the URL signer (key/src/lib.rs).
 ed25519-dalek = "3"
-# The core's features and the OpenAPI document, made as a machine's node makes them.
-api-features = { path = "../../../api/features" }
 # An app screen's page (ui/src/screen.rs).
 ui = { path = "../../../ui" }
 serde_json = "1"

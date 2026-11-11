@@ -1,6 +1,6 @@
 //! This computer's onet (`<cli>t`), which answers its API, hooks the agent harnesses here up to it: each
 //! harness installed here gets this network's MCP server and the API's prompt hook, git sends Repos the API's token, and
-//! the built-in skills (`api/features/src/skills.rs`) go in each skills folder. A file is written only if it's missing or unchanged
+//! the built-in skills (`api/mcp/src/skills.rs`) go in each skills folder. A file is written only if it's missing or unchanged
 //! since it was last written here, so an edit made on disk is never overwritten. The user's own AGENTS.md and skills are
 //! an app's, whose service writes them beside these, and marks them as its own.
 
@@ -22,7 +22,7 @@ fn marker() -> String {
 }
 
 fn built_in(name: &str) -> bool {
-    let server = api_features::skills::server_name();
+    let server = ::mcp::skills::server_name();
     name == server || name.starts_with(&format!("{server}-"))
 }
 
@@ -48,7 +48,7 @@ fn set_up(onet_home: &Path, addr: &str, apps: &[Value]) {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return };
     let mut written = Written::load(onet_home);
     harnesses(&home, onet_home, addr, &mut written);
-    let skills: BTreeMap<String, BTreeMap<String, String>> = api_features::skills::all(apps).into_iter().map(|s| (s.name.clone(), s.all_files().into_iter().collect())).collect();
+    let skills: BTreeMap<String, BTreeMap<String, String>> = mcp::skills::all(&crate::features().iter().map(api::Feature::listed).chain(apps.iter().cloned()).collect::<Vec<_>>()).into_iter().map(|s| (s.name.clone(), s.all_files().into_iter().collect())).collect();
     for root in skill_roots(&home) {
         for (name, files) in &skills {
             if let Err(err) = write_skill(&root.join(name), files) {
@@ -145,7 +145,7 @@ fn harnesses(home: &Path, onet_home: &Path, addr: &str, written: &mut Written) {
     let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{} || true", custom_build::protocol::header::LOCAL_TOKEN, token.display(), ::api::path::HOOKS_PROMPT);
     // Another custom build's onet on this machine has a hook of its own, on its own port; an older hook of its own is replaced.
     let port = format!(":{}{}", ::api::local::port_of(addr), &HOOKS_PROMPT[..=HOOKS_PROMPT.rfind('/').unwrap_or_default()]);
-    let server = api_features::skills::server_name();
+    let server = ::mcp::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
     let installed = home.join(".local/bin").join(custom_build::config::CLI);

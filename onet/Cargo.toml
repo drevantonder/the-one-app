@@ -18,7 +18,7 @@ relayed = ["iroh/unstable-custom-transports", "dep:iroh-base", "dep:n0-watcher",
 # A computer's onet (src/computer/), run in the background as `<cli>t`: its loopback API, with what only a computer's
 # onet does (its app runtime, home, bucket, harnesses and git, and the skills it writes), and axum, which serves that API
 # as the app runtime serves its own.
-computer = ["api-features/machine", "platform/machine", "bucket/machine", "dep:jiff", "dep:oned-update", "tokio/net", "tokio/io-util", "tokio/fs", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal", "tokio/time", "dep:axum", "dep:serde", "dep:tracing", "dep:tracing-subscriber", "dep:jsonc-parser", "dep:toml_edit", "dep:blake3"]
+computer = ["dep:mcp", "platform/machine", "bucket/machine", "dep:jiff", "dep:oned-update", "tokio/net", "tokio/io-util", "tokio/fs", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal", "tokio/time", "dep:axum", "dep:serde", "dep:tracing", "dep:tracing-subscriber", "dep:jsonc-parser", "dep:toml_edit", "dep:blake3"]
 
 [dependencies]
 custom-build = { path = "../custom-build" }
@@ -46,8 +46,15 @@ n0-future = "0.3"
 httparse = "1"
 data-encoding = "2"
 tokio = { version = "1", default-features = false, features = ["sync"] }
-# The OpenAPI document and what routes say, made as a node makes them.
-api-features = { path = "../api/features" }
+# The features every client lists (src/features.rs), each defined in its own crate.
+deploy = { path = "../deploy" }
+vault = { path = "../vault" }
+backups = { path = "../backups" }
+groups = { path = "../groups" }
+widgets = { path = "../widgets" }
+ai-gateway = { path = "../ai-gateway" }
+# The skills a computer's onet writes into agents' harnesses (src/computer/harnesses.rs).
+mcp = { path = "../api/mcp", optional = true }
 rusqlite = "0.41"
 anyhow = "1"
 serde_json = "1"

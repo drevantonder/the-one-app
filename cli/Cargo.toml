@@ -52,8 +52,8 @@ backups = { path = "../backups" }
 # `backups check --folder`: a backup on a disk opened with the recovery key alone, with no network.
 backups-runtime = { path = "../backups/runtime" }
 ui = { path = "../ui", features = ["web-bundle"] }
-# Every feature's API as agents get it: MCP, code mode, the skills, each tool as a command.
-api-features = { path = "../api/features", features = ["machine"] }
+# MCP's tools and the CLI's commands, made from what the API says: MCP, code mode, the skills, each tool as a command.
+mcp = { path = "../api/mcp" }
 # The app runtime's words for a device not in a network (`not_joined`), and which paths are an app's (git's helper).
 app-runtime = { path = "../app-runtime" }
 # `<cli>t`, this computer's onet (onet/src/computer/), is this program run by that name.

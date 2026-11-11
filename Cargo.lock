@@ -137,34 +137,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "api-features"
-version = "0.1.0"
-dependencies = [
- "ai-gateway",
- "anyhow",
- "api",
- "backups",
- "custom-build",
- "data-encoding",
- "deploy",
- "device-logs",
- "devices",
- "groups",
- "insights",
- "notifications",
- "platform",
- "schemars",
- "scope",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "ui",
- "ureq",
- "vault",
- "widgets",
-]
-
-[[package]]
 name = "app-runtime"
 version = "0.1.0"
 dependencies = [
@@ -172,7 +144,6 @@ dependencies = [
  "ai-gateway-runtime",
  "anyhow",
  "api",
- "api-features",
  "app-schedules",
  "app-schedules-runtime",
  "axum",
@@ -203,11 +174,13 @@ dependencies = [
  "key",
  "labs",
  "libc",
+ "mcp",
  "md-5",
  "notifications",
  "notifications-runtime",
  "onboarding",
  "oned-update",
+ "onet",
  "platform",
  "rand 0.8.8",
  "rusqlite",
@@ -2761,6 +2734,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
+name = "mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "custom-build",
+ "data-encoding",
+ "deploy",
+ "platform",
+ "scope",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "ui",
+ "ureq",
+ "widgets",
+]
+
+[[package]]
 name = "md-5"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3438,7 +3430,6 @@ dependencies = [
  "ai-gateway",
  "anyhow",
  "api",
- "api-features",
  "app-runtime",
  "axum",
  "backups",
@@ -3463,6 +3454,7 @@ dependencies = [
  "jiff",
  "key",
  "libc",
+ "mcp",
  "notifications",
  "onboarding",
  "oned",
@@ -3495,7 +3487,6 @@ dependencies = [
  "ai-gateway",
  "anyhow",
  "api",
- "api-features",
  "blake3",
  "bucket",
  "custom-build",
@@ -3613,7 +3604,6 @@ dependencies = [
  "ai-gateway",
  "anyhow",
  "api",
- "api-features",
  "custom-build",
  "data-encoding",
  "deploy",
@@ -3621,6 +3611,7 @@ dependencies = [
  "insights",
  "key",
  "libc",
+ "mcp",
  "oned-update",
  "platform",
  "rand 0.8.8",
@@ -3654,20 +3645,23 @@ dependencies = [
 name = "onet"
 version = "0.1.0"
 dependencies = [
+ "ai-gateway",
  "anyhow",
  "api",
- "api-features",
  "axum",
+ "backups",
  "blake3",
  "bucket",
  "custom-build",
  "data-encoding",
  "database",
+ "deploy",
  "device-logs",
  "devices",
  "ed25519-dalek 3.0.0",
  "getrandom 0.2.17",
  "getrandom 0.4.3",
+ "groups",
  "httparse",
  "insights",
  "iroh",
@@ -3675,6 +3669,7 @@ dependencies = [
  "jiff",
  "jsonc-parser",
  "key",
+ "mcp",
  "n0-future",
  "n0-watcher",
  "noq-udp",
@@ -3693,8 +3688,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
+ "vault",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "widgets",
 ]
 
 [[package]]

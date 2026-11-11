@@ -1,10 +1,10 @@
-//! What the routes for files kept in the network say of themselves (api/features/src/says.rs).
+//! What the routes for files kept in the network say of themselves (onet's `listed`).
 
 use serde_json::json;
 
-use ::api::says::Op;
-use ::api::says::Said;
-use ::api::says::Who;
+use crate::says::Op;
+use crate::says::Said;
+use crate::says::Who;
 
 pub fn listed() -> Vec<Said> {
     vec![

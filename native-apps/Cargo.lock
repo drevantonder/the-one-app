@@ -106,7 +106,9 @@ dependencies = [
  "custom-build",
  "data-encoding",
  "database",
+ "ed25519-dalek 3.0.0",
  "futures-util",
+ "iroh",
  "jiff",
  "key",
  "platform",
@@ -120,32 +122,6 @@ dependencies = [
  "tokio",
  "tracing",
  "ureq",
-]
-
-[[package]]
-name = "api-features"
-version = "0.1.0"
-dependencies = [
- "ai-gateway",
- "anyhow",
- "api",
- "backups",
- "custom-build",
- "data-encoding",
- "deploy",
- "device-logs",
- "devices",
- "groups",
- "insights",
- "notifications",
- "platform",
- "schemars 1.2.3",
- "scope",
- "serde",
- "serde_json",
- "ui",
- "vault",
- "widgets",
 ]
 
 [[package]]
@@ -1485,6 +1461,7 @@ dependencies = [
  "api",
  "custom-build",
  "data-encoding",
+ "device-logs",
  "key",
  "libc",
  "platform",
@@ -4586,6 +4563,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "onboarding"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "bucket",
+ "ciborium",
+ "custom-build",
+ "data-encoding",
+ "iroh",
+ "key",
+ "platform",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4654,24 +4651,28 @@ dependencies = [
 name = "onet"
 version = "0.1.0"
 dependencies = [
+ "ai-gateway",
  "anyhow",
  "api",
- "api-features",
+ "backups",
  "bucket",
  "custom-build",
  "data-encoding",
  "database",
+ "deploy",
  "device-logs",
  "devices",
  "ed25519-dalek 3.0.0",
  "getrandom 0.2.17",
  "getrandom 0.4.3",
+ "groups",
  "httparse",
  "insights",
  "iroh",
  "key",
  "n0-future",
  "notifications",
+ "onboarding",
  "platform",
  "rand 0.8.8",
  "rusqlite",
@@ -4680,8 +4681,10 @@ dependencies = [
  "sqlite-wasm-rs",
  "tokio",
  "ureq",
+ "vault",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "widgets",
 ]
 
 [[package]]

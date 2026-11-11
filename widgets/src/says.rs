@@ -1,4 +1,4 @@
-//! What the widgets' and badges' routes say of themselves (api/features/src/says.rs).
+//! What the widgets' and badges' routes say of themselves (onet's `said`).
 
 use serde::Deserialize;
 use serde_json::json;

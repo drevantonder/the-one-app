@@ -1,11 +1,11 @@
-//! What the network's own routes say of themselves: its state, joining it, and running a call (api/features/src/says.rs).
+//! What the network's own routes say of themselves: its state, joining it, and running a call (onet's `listed`).
 
 use serde_json::json;
 
-use ::api::call::CallRequest;
-use ::api::says::Op;
-use ::api::says::Said;
-use ::api::says::Who;
+use crate::call::CallRequest;
+use crate::says::Op;
+use crate::says::Said;
+use crate::says::Who;
 
 pub fn listed() -> Vec<Said> {
     vec![

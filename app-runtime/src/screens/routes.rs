@@ -17,7 +17,7 @@ use ::api::Me;
 use ::api::Who;
 use ::api::tagged;
 use crate::Host;
-use api_features::says::screens::ScreenQuery;
+use ::api::says::screens::ScreenQuery;
 
 pub fn routes() -> Routes {
     Routes::default()

@@ -23,7 +23,7 @@ oned-update = { path = "../update" }
 # The web client's files, the Workers' sources and the Cloudflare node's WebAssembly this build carries.
 ui = { path = "../../ui" }
 # The guide the address serves (llms.txt).
-api-features = { path = "../../api/features", features = ["machine"] }
+mcp = { path = "../../api/mcp" }
 anyhow = "1"
 data-encoding = "2"
 ed25519-dalek = "3"

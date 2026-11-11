@@ -2,6 +2,13 @@
 //! it answers. Plain data, so a Worker or a browser's onet makes the document a device does. Each feature says its own,
 //! beside its routes, with the structs its handlers read.
 
+// What the app runtime's own routes say, beside the structs their handlers read: a Worker or a browser's onet makes
+// the document an app runtime does from them.
+pub mod apps;
+pub mod blobs;
+pub mod network;
+pub mod screens;
+
 use schemars::JsonSchema;
 use serde_json::{Value, json};
 

@@ -154,7 +154,7 @@ fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8])
     out.into()
 }
 
-/// The answer to an MCP client's call of a core tool that's one request the device answers itself (`api_features::core_tools`,
+/// The answer to an MCP client's call of a core tool that's one request the device answers itself (`onet::features`,
 /// `scope::settings::answered`): one that changes who can do what, which it signs as its user's, as any device does.
 /// None for any other MCP message, which goes to a node, as its user.
 async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, onet::Error>> {
@@ -164,7 +164,7 @@ async fn tool_here(keyring: &Keyring, client: &onet::Client, on: &On, body: &[u8
         return None;
     }
     let name = msg["params"]["name"].as_str()?;
-    let (feature, at) = api_features::core_tools::find(name)?;
+    let (feature, at) = onet::find(name)?;
     let mut input = msg["params"]["arguments"].as_object().cloned().unwrap_or_default();
     let confirmed = input.remove("confirm") == Some(json!(true));
     // Any other a node runs.

@@ -86,8 +86,10 @@ serde_json = "1"
 tracing = "0.1"
 
 # On Workers (the Cloudflare node, oned/cloudflare/node/), rand gets its randomness from the runtime's crypto.getRandomValues.
-# Every feature's API as clients get it: the OpenAPI document, MCP at /mcp and the skills it serves.
-api-features = { path = "../api/features", features = ["machine"] }
+# The features every client lists, which this runtime serves, and the API's document made of them.
+onet = { path = "../onet" }
+# MCP at /mcp and the skills it serves.
+mcp = { path = "../api/mcp" }
 
 [build-dependencies]
 # config.toml, read for the apps a new network starts with (build.rs).
@@ -101,7 +103,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 axum = { version = "0.8" }
-# Its join_all and BoxFuture run a node's asks of several things at once (src/core_tools.rs); axum and iroh
+# Its join_all and BoxFuture run a node's asks of several things at once ; axum and iroh
 # already build it.
 futures-util = { version = "0.3", default-features = false }
 # Devices reach each other over iroh (app-runtime/src/net.rs): QUIC between their device keys, direct where a path opens and

@@ -14,8 +14,8 @@ use super::Routes;
 use ::api::Who;
 use ::api::local::port;
 
-/// The skills for this machine's user (api/features/src/skills.rs).
-async fn skills(host: &Host) -> Vec<api_features::skills::Skill> {
+/// The skills for this machine's user (api/mcp/src/skills.rs).
+async fn skills(host: &Host) -> Vec<::mcp::skills::Skill> {
     let apps = match host.caller() {
         Ok(me) => host.apps(&me).await.map(|a| json!(a)).unwrap_or_else(|err| {
             tracing::warn!("the skills leave out apps' own: {err:#}");
@@ -24,7 +24,8 @@ async fn skills(host: &Host) -> Vec<api_features::skills::Skill> {
         // A node not in a network yet has no user whose apps they'd be.
         Err(_) => json!([]),
     };
-    api_features::skills::all(apps.as_array().map(Vec::as_slice).unwrap_or_default())
+    let sets: Vec<Value> = onet::features().iter().map(::api::Feature::listed).chain(apps.as_array().into_iter().flatten().cloned()).collect();
+    mcp::skills::all(&sets)
 }
 
 fn markdown(text: String) -> Response {
@@ -39,7 +40,7 @@ pub(super) fn routes() -> Routes {
 async fn llms(State(host): State<Host>, headers: axum::http::HeaderMap) -> Response {
     let authority = headers.get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("127.0.0.1").to_string();
     let deeper = skills(&host).await.split_off(1);
-    markdown(api_features::skills::root(&deeper, |s| format!("[{}](http://{authority}/skills/{}/SKILL.md)", s.name, s.name)).body)
+    markdown(::mcp::skills::root(&deeper, |s| format!("[{}](http://{authority}/skills/{}/SKILL.md)", s.name, s.name)).body)
 }
 
 async fn skill_file(State(host): State<Host>, Path((name, path)): Path<(String, String)>) -> Response {

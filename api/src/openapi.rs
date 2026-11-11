@@ -229,7 +229,7 @@ fn error_responses() -> Value {
     })
 }
 
-/// A tool as an app lists it (`GET /api/apps`), and the core's as `core_tools` do.
+/// A tool as an app lists it (`GET /api/apps`), and the core's as onet's `features()` do.
 pub fn tool_spec() -> Value {
     json!({
         "type": "object",

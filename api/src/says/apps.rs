@@ -1,11 +1,11 @@
-//! What the apps' routes say of themselves (api/features/src/says.rs).
+//! What the apps' routes say of themselves (onet's `listed`).
 
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use ::api::says::Op;
-use ::api::says::Said;
-use ::api::says::Who;
+use crate::says::Op;
+use crate::says::Said;
+use crate::says::Who;
 
 pub fn listed() -> Vec<Said> {
     vec![
@@ -24,7 +24,7 @@ pub fn listed() -> Vec<Said> {
                     "bundle": { "type": ["string", "null"], "description": "its latest deploy" },
                     "added": { "type": "array", "items": { "type": "string" }, "description": "the scopes the caller sees it added in" },
                     "deleted": { "type": "object", "description": "{ time, by, yours }, once deleted", "additionalProperties": true },
-                    "tools": { "type": "array", "items": ::api::openapi::tool_spec(), "description": "where it's added for the caller" },
+                    "tools": { "type": "array", "items": crate::openapi::tool_spec(), "description": "where it's added for the caller" },
                     "widgets": { "type": "array", "items": { "type": "object" } },
                     "screens": { "type": "array", "items": { "type": "object" } },
                     "schedules": { "type": "array", "items": { "type": "object" } }

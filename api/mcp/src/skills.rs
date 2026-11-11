@@ -132,14 +132,15 @@ pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
 }
 
 /// A skill's text by its name, or one of its other files as `<name>/<path>`.
-pub fn read(apps: &[Value], name: &str) -> Option<String> {
+pub fn read(sets: &[Value], name: &str) -> Option<String> {
     let (skill, file) = name.split_once('/').unwrap_or((name, "SKILL.md"));
-    all(apps).into_iter().find(|s| s.name == skill)?.file(file)
+    all(sets).into_iter().find(|s| s.name == skill)?.file(file)
 }
 
-/// The skills under the root, for `apps` (as `GET /api/apps` gives them, those added for the user having their
-/// tools): the areas of their own, then one for each of the core's features and each app with a guide.
-pub fn deeper(apps: &[Value]) -> Vec<Skill> {
+/// The skills under the root, for `sets` of tools, the core's features first, then the apps (as the API's document
+/// lists them, or onet's `features()` then `GET /api/apps`, those added for the user having their tools): the areas
+/// of their own, then one for each set with a guide.
+pub fn deeper(sets: &[Value]) -> Vec<Skill> {
     let code = match REPO.is_empty() {
         false => REPO.to_string(),
         true => format!("ask an admin of {YOURS} where it is"),
@@ -176,14 +177,13 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             .map(|(p, t)| (p.to_string(), t.to_string()))
             .collect();
     }
-    // Each set of tools with a guide: the core's, then the apps'.
-    let core: Vec<Value> = crate::core_tools::all().iter().map(::api::Feature::listed).collect();
-    skills.extend(core.iter().chain(apps).filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["tools"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
+    // Each set of tools with a guide.
+    skills.extend(sets.iter().filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["tools"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
     skills
 }
 
-pub fn all(apps: &[Value]) -> Vec<Skill> {
-    let deeper = deeper(apps);
+pub fn all(sets: &[Value]) -> Vec<Skill> {
+    let deeper = deeper(sets);
     [vec![root(&deeper, |s| format!("`{}`", s.name))], deeper].concat()
 }
 

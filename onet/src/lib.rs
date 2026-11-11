@@ -19,6 +19,8 @@ use iroh::endpoint::{Connection, RecvStream, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
 use n0_future::time::{Duration, Instant, timeout};
 
+mod features;
+pub use features::{document, features, find, said};
 mod join;
 pub mod keyring;
 mod settings;

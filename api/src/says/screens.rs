@@ -1,11 +1,11 @@
-//! What the routes for apps' screens and events say of themselves (api/features/src/says.rs).
+//! What the routes for apps' screens and events say of themselves (onet's `listed`).
 
 use serde::Deserialize;
 
-use ::api::call::Event;
-use ::api::says::Op;
-use ::api::says::Said;
-use ::api::says::Who;
+use crate::call::Event;
+use crate::says::Op;
+use crate::says::Said;
+use crate::says::Who;
 
 pub fn listed() -> Vec<Said> {
     vec![

@@ -108,9 +108,9 @@ fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bo
     (out, false)
 }
 
-/// The skills for this user: the root first (src/skills.rs).
+/// The skills for this user, of the sets of tools the API's document lists: the root first (src/skills.rs).
 pub fn skills(node: &Client) -> Vec<crate::skills::Skill> {
-    crate::skills::all(&node.apps().unwrap_or_default())
+    crate::skills::all(&node.sets().unwrap_or_default())
 }
 
 /// A skill as `skills/list` lists it: where its SKILL.md is, its frontmatter, and each of its files with its digest.

@@ -914,7 +914,7 @@ async fn a_tool_answers_what_its_output_says() {
     let bundle = a.put_blob(&deploy::bundle::pack(&[("app.js".to_string(), include_bytes!("answers/app.js").to_vec())]).unwrap()).unwrap();
     let deployed = deploy_runtime::deploy_making(&a.rt(), &me, "answers", &bundle, Some("admins"), true).await.unwrap();
     assert_eq!(deployed["lacking"], json!(["unsaid"]), "the deploy names the tool that says nothing of its answer: {deployed}");
-    let schema = &api_features::openapi::document(&[], true)["paths"]["/api/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
+    let schema = &onet::document(&[], true)["paths"]["/api/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
     api::tools::check(schema, &deployed).unwrap_or_else(|err| panic!("a deploy answers what the document doesn't say: {err:#}\n{deployed}"));
     deploy_runtime::add(&a.rt(), &me, "answers", &::scope::scopes::Scope::Global, true, None).await.unwrap();
     let call = |tool: &str| CallRequest { app: "answers".into(), tool: tool.into(), input: json!({}), ..Default::default() };
@@ -958,7 +958,7 @@ async fn a_routes_answer_is_what_the_document_says() {
     add_notes(&a).await;
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let me = api::Caller::own(a.id(), a.user().unwrap());
-    let document = api_features::openapi::document(&a.apps(&me).await.unwrap(), true);
+    let document = onet::document(&a.apps(&me).await.unwrap(), true);
     // As this machine's own programs ask: over its loopback, with the token in the node's home.
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(custom_build::protocol::header::LOCAL_TOKEN, api::local::local_token(a.dir()).unwrap().parse().unwrap());

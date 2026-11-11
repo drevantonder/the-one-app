@@ -1,10 +1,10 @@
-//! The MCP server (`api_features::mcp`) over HTTP at `/mcp`, asking this app runtime in-process as whoever sent the request.
+//! The MCP server (`::mcp::mcp`) over HTTP at `/mcp`, asking this app runtime in-process as whoever sent the request.
 
 use serde_json::{Value, json};
 
 use ::api::Client;
-use api_features::mcp::{Session, answer};
-use api_features::skills::Mode;
+use ::mcp::mcp::{Session, answer};
+use ::mcp::skills::Mode;
 
 /// MCP over Streamable HTTP, at `/mcp`: for a client device over iroh, as its user (the remote MCP server,
 /// onet/worker/, is remote MCP clients' device), or for a program on this machine, as its user. Each POST is

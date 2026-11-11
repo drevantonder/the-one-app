@@ -1,11 +1,11 @@
-//! `search` and `run` on the command line: the tools for a task, and a script that calls several (`api_features::code`).
+//! `search` and `run` on the command line: the tools for a task, and a script that calls several (`::mcp::code`).
 
 use anyhow::{Context, bail};
 use serde_json::Value;
 
 use api::Reader;
 use custom_build::config::CLI;
-use api_features::code::{catalogs, execute, search, shown};
+use ::mcp::code::{catalogs, execute, search, shown};
 
 /// `search` and `run` on the command line.
 pub fn commands() -> ::api::cli::Command {
