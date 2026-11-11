@@ -137,9 +137,10 @@ fn status(node: &Client, state: &State) {
         };
         println!("  ● {}  the Cloudflare node, run priority {at}", one::rank::CLOUDFLARE);
     }
-    // A device that's only a client (a phone, a computer, a browser) is listed with them; a passkey isn't one.
+    // A device that's only a client (a phone, a computer, a browser) is listed with them; a passkey isn't one, and a
+    // device with an app runtime of its own is listed as that runtime, above.
     let (passkeys, clients): (Vec<&one::state::Client>, Vec<&one::state::Client>) = i.clients.iter().partition(|c| c.passkey.is_some());
-    for c in &clients {
+    for c in clients.iter().filter(|c| !i.devices.iter().any(|d| d.device.as_ref() == Some(&c.key))) {
         let glyph = if is_phone(c) { "▯" } else { "▭" };
         println!("  {glyph} {}  {}'s", c.name, name(&c.user));
     }
