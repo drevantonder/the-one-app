@@ -31,3 +31,12 @@ Would be nice:
 
 - Devices in different places reach each other directly, without going through the cloud.
 - A record I can read of what my AIs did as me.
+
+Building it:
+
+- AIs do the building. They can try a change on every kind of device we support, see it running, and check their own work before calling it done.
+- I run the latest development version in my own network, so the newest changes reach my devices quickly and I can dogfood it.
+- While it runs, it shows what it's doing: what's slow, what's failing, what it costs, and anything that makes it worse to use, for a person or for an AI. No one has to dig for it.
+- The codebase follows best practices in an era where agents do the development.
+- Many AIs can work on it at once, on several machines, without getting in each other's way.
+- What slows a builder down gets written down and fixed.
