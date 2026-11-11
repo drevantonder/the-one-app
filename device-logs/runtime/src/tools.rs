@@ -14,7 +14,7 @@ pub(crate) fn served() -> Vec<(&'static str, api::runtime::Serves)> {
 }
 
 /// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the
-/// app runtime there says no unless the caller may remove that device (src/node/calls/running.rs).
+/// app runtime there says no unless the caller may remove that device (app-runtime/src/calls/running.rs).
 async fn logs(rt: Rt, me: Caller, mut input: Map<String, Value>) -> Result<Value> {
     let device = text(&input, "device")?.to_string();
     input.remove("device");

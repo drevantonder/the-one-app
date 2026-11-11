@@ -2,7 +2,7 @@
 //! handles, names, settings, removing a device or a user, the new epochs that go with it), letting devices in or
 //! turning them down, inviting someone new, and app schedules. Every device runs this one copy (`Me`): each client
 //! through its keyring (onet/src/settings.rs), and a machine with a node as its own device, which its CLI and MCP
-//! use (src/node/settings.rs). Each is asked as a node's route of the same path (`ROUTES`).
+//! use (app-runtime/src/settings.rs). Each is asked as a node's route of the same path (`ROUTES`).
 //!
 //! What it signs, it signs with what each device has (`keys::Signs`): a native app's key, a browser's WebCrypto key,
 //! which can't be read, or a node's own. Who may do what is judged by the steps' own rules wherever they're read

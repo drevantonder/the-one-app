@@ -201,7 +201,7 @@ mod tests {
             ("token=hunter2 was refused", "token=<key> was refused"),
             ("password: hunter2 was refused", "password: <key> was refused"),
             ("eyJhbGci.eyJzdWIi.c2lnbmF0dXJl expired", "<key> expired"),
-            ("attempt 3 of 5 failed with 503 at src/node/calls.rs:123", "attempt 3 of 5 failed with 503 at src/node/calls.rs:123"),
+            ("attempt 3 of 5 failed with 503 at app-runtime/src/calls.rs:123", "attempt 3 of 5 failed with 503 at app-runtime/src/calls.rs:123"),
         ] {
             assert_eq!(cleaned(said), kept, "{said}");
         }

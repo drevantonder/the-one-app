@@ -1,6 +1,6 @@
 //! The Cloudflare node's iroh endpoint (`Node` in worker.js, a Durable Object): the endpoint of its own key, as every
 //! node is, with no socket. The relay hands it the datagrams sent to its key, by RPC (`deliver`), and passes on what it
-//! sends, so to every other endpoint it's one more behind the relay. It speaks what nodes speak (src/node/net.rs): to
+//! sends, so to every other endpoint it's one more behind the relay. It speaks what nodes speak (app-runtime/src/net.rs): to
 //! client devices, HTTP/1.1 on a stream of its own per request (`<cli>/http/1`), answered by `worker.js` as a node's
 //! local API answers; to nodes on machines, an ask on a stream, its answer the same stream back (`<cli>/1`). Its
 //! connections live as long as the object, which ends itself once nobody asks (worker.js), so it holds nothing while

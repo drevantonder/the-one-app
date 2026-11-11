@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use api::Who;
 use ::custom_build::config::{CLI, YOURS};
-use one::node::NetworkFile;
+use api::home::NetworkFile;
 use ::custom_build::protocol::{Coded, code};
 use serde_json::{Value, json};
 
@@ -30,7 +30,7 @@ struct Routes(Vec<(Vec<String>, Who)>);
 
 impl Routes {
     fn new() -> Routes {
-        Routes(one::api::routes().who().iter().map(|(path, who)| (path.split('/').map(str::to_string).collect(), *who)).collect())
+        Routes(app_runtime::api::routes().who().iter().map(|(path, who)| (path.split('/').map(str::to_string).collect(), *who)).collect())
     }
 
     /// Who may ask `path`, by the route that takes it, as the API's router picks it, the one with most of its parts
@@ -125,11 +125,11 @@ async fn body<T: serde::de::DeserializeOwned>(req: Request) -> Result<T> {
 }
 
 
-/// Joins the network a pairing code is from, as this computer (`one::node::join_with`), and reaches it.
+/// Joins the network a pairing code is from, as this computer (`app_runtime::join_with`), and reaches it.
 async fn join(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     let asked: one::says::api::Join = body(req).await?;
     anyhow::ensure!(NetworkFile::read(&onet.home)?.is_none(), "this computer is in a network already");
-    let joined = one::node::join_with(&onet.key, &onet.name, &asked.code).await?;
+    let joined = app_runtime::join_with(&onet.key, &onet.name, &asked.code).await?;
     joined.network.write(&onet.home)?;
     // Its app runtime, started before there was a network, opens it now; one started later opens it as it starts.
     if let Some(runtime) = &onet.runtime {
@@ -203,7 +203,7 @@ async fn wait(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     let keyring = device.keyring();
     let user = keyring.user().context("let in, but who's who names no user for this device yet")?;
     let root = std::fs::read_to_string(onet.home.join("onet").join("root")).context("let in, but the network's root wasn't kept")?;
-    let storage = keyring.who(|db| db.setting(one::node::storage::STORAGE)).and_then(Result::ok).flatten();
+    let storage = keyring.who(|db| db.setting(app_runtime::storage::STORAGE)).and_then(Result::ok).flatten();
     let bucket = match storage {
         Some(fields) => {
             let mut fields: std::collections::BTreeMap<String, String> = serde_json::from_str(&fields).context("the storage setting isn't an S3 address")?;
@@ -289,7 +289,7 @@ async fn services(onet: &Arc<Onet>, req: Request) -> Result<Value> {
     Ok(json!({}))
 }
 
-/// What this device's own app runtime, an endpoint of its own key, asks of the device's key (`one::node::Holder`): the
+/// What this device's own app runtime, an endpoint of its own key, asks of the device's key (`app_runtime::Holder`): the
 /// device's key and seal key.
 fn held(onet: &Onet) -> Value {
     let seal = key::public_of(&key::seal_secret(&onet.key));
@@ -299,14 +299,14 @@ fn held(onet: &Onet) -> Value {
 /// The secret the device's seal key shares with the key given: what opens something sealed to the device.
 async fn shared(onet: &Onet, req: Request) -> Result<Value> {
     use data_encoding::BASE64URL_NOPAD as B64U;
-    let asked: one::node::HeldShare = body(req).await?;
+    let asked: app_runtime::HeldShare = body(req).await?;
     let share = <[u8; 32]>::try_from(B64U.decode(asked.share.as_bytes())?).map_err(|_| anyhow::anyhow!("a share is 32 bytes"))?;
     Ok(json!({ "shared": B64U.encode(&key::agree(&key::seal_secret(&onet.key), &share)) }))
 }
 
 /// A step of `global` written as the device, for its user alone, to the bucket itself.
 async fn write(onet: &Onet, req: Request) -> Result<Value> {
-    let asked: one::node::HeldWrite = body(req).await?;
+    let asked: app_runtime::HeldWrite = body(req).await?;
     let device = onet.device().await?;
     let keyring = device.keyring();
     anyhow::ensure!(keyring.user().as_deref() == Some(asked.user.as_str()), "the device writes in global only as its own user");
@@ -314,11 +314,11 @@ async fn write(onet: &Onet, req: Request) -> Result<Value> {
     Ok(json!({}))
 }
 
-/// A request to the relay or auth signed as the device (`one::node::sign_request`).
+/// A request to the relay or auth signed as the device (`app_runtime::sign_request`).
 async fn sign(onet: &Onet, req: Request) -> Result<Value> {
     use data_encoding::BASE64URL_NOPAD as B64U;
-    let asked: one::node::HeldSign = body(req).await?;
-    let signature = one::node::sign_request(&onet.key, &B64U.decode(asked.bytes.as_bytes())?)?;
+    let asked: app_runtime::HeldSign = body(req).await?;
+    let signature = app_runtime::sign_request(&onet.key, &B64U.decode(asked.bytes.as_bytes())?)?;
     Ok(json!({ "signature": B64U.encode(&signature) }))
 }
 

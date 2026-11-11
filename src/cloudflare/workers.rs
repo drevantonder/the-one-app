@@ -1296,7 +1296,7 @@ pub fn start(config: &Path, listening: Vec<(String, std::net::TcpListener)>) -> 
     command.arg("serve").arg(config).arg("--experimental").stdin(std::process::Stdio::null());
     #[cfg(not(unix))]
     ensure!(listening.is_empty(), "workerd takes listening sockets only on Unix");
-    crate::app::runtime::child(&mut command, &listening.iter().map(|(n, l)| (n.as_str(), l)).collect::<Vec<_>>());
+    platform::os::child(&mut command, &listening.iter().map(|(n, l)| (n.as_str(), l)).collect::<Vec<_>>());
     Ok(command.spawn()?)
 }
 

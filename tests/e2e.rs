@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use one::node::Node;
+use app_runtime::Node;
 use ::api::call::CallRequest;
 use serde_json::{Value, json};
 
@@ -856,7 +856,7 @@ async fn an_apps_schedules_see_its_vault_items_as_its_calls_do_while_theyre_set(
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_devices_mcp_runs_as_its_user() {
     use api::client::Via;
-    use one::api::InProcess;
+    use app_runtime::api::InProcess;
     let a = start("mcp").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
@@ -866,7 +866,7 @@ async fn a_client_devices_mcp_runs_as_its_user() {
     // Asked as the node asks its routes for a request over iroh: as the device its connection proved.
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(custom_build::protocol::header::READS, custom_build::protocol::READS.into());
-    let from = InProcess::new(a.clone(), Some(one::api::FromClient(device.verifying_key().to_bytes(), u64::MAX)), None, &headers);
+    let from = InProcess::new(a.clone(), Some(app_runtime::api::FromClient(device.verifying_key().to_bytes(), u64::MAX)), None, &headers);
     let from = std::sync::Arc::new(from);
     let mcp = async |body: Value| {
         let from = from.clone();
@@ -952,7 +952,7 @@ async fn every_built_in_apps_tools_say_what_they_answer() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_routes_answer_is_what_the_document_says() {
     use api::client::Via;
-    use one::api::InProcess;
+    use app_runtime::api::InProcess;
     let a = start("route-answers").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
@@ -1034,14 +1034,14 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     // The device's own key, held on its loopback, where its own programs ask with the token in its home.
     let holder = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let holder_at = holder.local_addr().unwrap().to_string();
-    tokio::spawn(api::serve(holder, one::api::router(k.clone())));
+    tokio::spawn(api::serve(holder, app_runtime::api::router(k.clone())));
 
     // Its runtime: a key of its own in its folder, in a home with the device's network and token, listed by the
     // device as a compute naming it, let in at the relay; then the device drops its own Compute.
     let home = crate::temp("rt-runtime");
     let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let r = ::key::Endpoint::of(&key);
-    let folder = one::node::runtime_folder(&home);
+    let folder = api::home::runtime_folder(&home);
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("key"), ::key::hex(&key.to_bytes())).unwrap();
     std::fs::create_dir_all(home.join("network")).unwrap();
@@ -1075,7 +1075,7 @@ async fn a_devices_app_runtime_of_its_own_key_runs_its_calls_and_schedules() {
     assert_eq!(ask_runtime(&at, &home_token, json!({ "app": "notes", "tool": "read", "input": {} })).await.0, 403);
     let post = json!({ "app": "notes", "tool": "post", "input": { "text": "from the runtime" } });
     polled("the runtime to run a call", &log, async || ask_runtime(&at, &token, post.clone()).await.0 == 200).await;
-    let lines = async |node: &one::node::Node| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
+    let lines = async |node: &app_runtime::Node| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("from the runtime")).await;
 
     // A call it passes on to another of its user's devices, as its device would.
@@ -1114,7 +1114,7 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
     }
     let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let r = ::key::Endpoint::of(&key);
-    let folder = one::node::runtime_folder(&home);
+    let folder = api::home::runtime_folder(&home);
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("key"), ::key::hex(&key.to_bytes())).unwrap();
     let listing = |key: &[u8; 32], seal: &[u8; 32], name: &str, roles: &[Kind], device: Option<&[u8; 32]>| {
@@ -1150,7 +1150,7 @@ async fn a_computers_onet_holds_its_device_key_for_its_own_runtime() {
         status == 200 && ran["steps"].as_array().into_iter().flatten().any(|s| s["here"] == true && s["result"] == "ran" && s["device"] == "onet-device")
     })
     .await;
-    let lines = async |node: &one::node::Node| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
+    let lines = async |node: &app_runtime::Node| node.call(notes("read", json!({}))).await.map(|v| v.to_string()).unwrap_or_default();
     eventually("its write to reach another device", &b, async || lines(&b).await.contains("through onet")).await;
 }
 
@@ -1184,7 +1184,7 @@ async fn a_computers_home_from_before_onet_is_the_same_device_with_its_runtime_l
     network["bucket"]["path"] = json!(home.join("network/bucket").display().to_string());
     std::fs::write(home.join("network/network.json"), network.to_string()).unwrap();
     let key = std::fs::read(home.join("device.json")).unwrap();
-    assert!(!one::node::runtime_folder(&home).join("key").exists(), "a home from before onet has no runtime key");
+    assert!(!api::home::runtime_folder(&home).join("key").exists(), "a home from before onet has no runtime key");
 
     let at = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
     let log = std::fs::File::create(home.join("oned.log")).unwrap();
@@ -1208,7 +1208,7 @@ async fn a_computers_home_from_before_onet_is_the_same_device_with_its_runtime_l
     assert_eq!(ask(&at, "GET", "/api/holds", &token, None).await.1["key"], ::key::hex(&k.id()), "onet holds it");
 
     // Who's who: the two listings, and nothing else.
-    let runtime = one::node::runtime_endpoint(&home).unwrap();
+    let runtime = api::home::runtime_endpoint(&home).unwrap();
     let listed = async || {
         let state = ask(&at, "GET", "/api/state", &token, None).await.1;
         let devices = state["network"]["devices"].as_array().cloned().unwrap_or_default().into_iter().chain(state["network"]["clients"].as_array().cloned().unwrap_or_default());

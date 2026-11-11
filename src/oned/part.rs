@@ -203,7 +203,7 @@ impl Service {
     async fn runtime(&self, method: &'static str, path: &str, body: Option<Value>, wait: Duration) -> Result<(u16, Value)> {
         let url = format!("http://{}{path}", self.0.runtime);
         tokio::task::spawn_blocking(move || {
-            let token = ::api::local::local_token(&crate::node::runtime_folder(&platform::home())).context("its device's app runtime has no token yet")?;
+            let token = ::api::local::local_token(&::api::home::runtime_folder(&platform::home())).context("its device's app runtime has no token yet")?;
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(wait)).build().into();
             let mut resp = match body {
                 Some(body) => agent.post(&url).header(::custom_build::protocol::header::LOCAL_TOKEN, token.trim()).send_json(body)?,

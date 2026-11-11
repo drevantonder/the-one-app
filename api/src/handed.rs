@@ -41,7 +41,7 @@ pub fn open_handoff(secret: &[u8; 32], sealed: &str) -> Result<Handoff> {
 }
 
 /// What a node (the Cloudflare node, or a machine's passing on a call it was handed keys
-/// for) asks another node to run a call with (`src/node/net.rs`): the call, naming `scopes`, the scopes it reaches,
+/// for) asks another node to run a call with (`app-runtime/src/net.rs`): the call, naming `scopes`, the scopes it reaches,
 /// the user it's for, and the keys of those scopes it was handed, sealed to that node's `seal` key for calls from
 /// its own endpoint (`from`), until `until`. Never keys of a scope the call doesn't name. The other node runs it on those keys alone, and only if `from` may run
 /// every one of `scopes`.

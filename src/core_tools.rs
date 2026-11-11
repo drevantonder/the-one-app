@@ -1,6 +1,6 @@
 //! The core's features, the one list every client lists: add's and remove's, the Vault's, Backups', Groups', Devices',
 //! Widgets', Notifications', logs', insights' and AI Gateway's, each defined beside its feature's others (`api::Feature`). They're
-//! not apps, so no list of apps has them. What serves each is its `Runs` (src/node/runtime.rs's `features()`).
+//! not apps, so no list of apps has them. What serves each is its `Runs` (app-runtime/src/runtime.rs's `features()`).
 
 use ::api::Feature;
 

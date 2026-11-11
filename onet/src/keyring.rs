@@ -248,7 +248,7 @@ impl<O: Opens> Keyring<O> {
 
 
     /// Who's who as it last read it, if the relay's count of writes to `global` (`writes`, as its computes say) is still
-    /// what it was then: else read from the bucket, keeping that count. As nodes go by it (`one::node`): only a hint, as
+    /// what it was then: else read from the bucket, keeping that count. As nodes go by it (`app_runtime`): only a hint, as
     /// the bucket is the truth, so with none it reads.
     pub async fn read_if_moved(&self, on: &(impl Address + Keep), writes: Option<u64>) -> Result<(), Error> {
         let kept = on.get(WRITES).await.and_then(|b| String::from_utf8(b).ok()?.trim().parse::<u64>().ok());

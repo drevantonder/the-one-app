@@ -585,7 +585,6 @@ pub fn run(args: &[String]) -> Result<()> {
             usual_path();
             return serve();
         }
-        ([::scope::scopes::APPS_PART], [_]) if let Some(listen) = flag("--listen=") => return crate::node::serve(listen),
         ([name], [_]) if let Some(runtime) = flag("--runtime=") => return part::run(name, runtime),
         _ => bail!("{}", usage()),
     }
@@ -702,7 +701,7 @@ async fn serve() -> Result<()> {
 /// read who's who, which names it. A computer that joined before its node kept it there has it only in the file its
 /// node kept for `one update`.
 fn with_bucket_address(home: &std::path::Path) -> Result<()> {
-    let Some(mut network) = crate::node::NetworkFile::read(home)? else { return Ok(()) };
+    let Some(mut network) = ::api::home::NetworkFile::read(home)? else { return Ok(()) };
     let Some(bucket) = network.bucket.as_mut().filter(|b| b.contains_key("endpoint") && !b.contains_key("address")) else { return Ok(()) };
     let Some(address) = crate::update::address(home) else { return Ok(()) };
     bucket.insert("address".into(), address);

@@ -32,7 +32,7 @@ impl Newest {
     /// node is on what the program that deploys it is.
     pub fn deployed(&self, settings: &crate::cloudflare::Settings) -> String {
         serde_json::json!({
-            "from": crate::node::device_here(&settings.dir).ok().map(|(key, _)| key),
+            "from": ::api::home::device_here(&settings.dir).ok().map(|(key, _)| key),
             "workers": self.workers_version,
             "web": self.web_version,
             "node": settings.cloudflare_node.then(::custom_build::protocol::version),

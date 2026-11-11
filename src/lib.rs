@@ -11,8 +11,6 @@ pub mod carried {
 #[cfg(feature = "node")]
 pub mod skills;
 #[cfg(feature = "node")]
-pub mod api;
-#[cfg(feature = "node")]
 pub mod build;
 #[cfg(feature = "node")]
 pub mod code;
@@ -21,16 +19,12 @@ pub mod mcp;
 #[cfg(feature = "node")]
 pub mod tools;
 pub mod core_tools;
-pub mod app;
 #[cfg(feature = "node")]
 pub mod git_wire;
 #[cfg(feature = "node")]
 pub mod watchdog;
 #[cfg(not(target_family = "wasm"))]
 pub mod loopback;
-#[cfg(feature = "node")]
-#[cfg(feature = "node")]
-pub mod node;
 #[cfg(feature = "node")]
 pub mod release;
 #[cfg(feature = "web-bundle")]

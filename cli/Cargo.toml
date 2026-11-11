@@ -40,6 +40,8 @@ backups = { path = "../backups" }
 backups-runtime = { path = "../backups/runtime" }
 ui = { path = "../ui", features = ["web-bundle"] }
 one = { path = ".." }
+# The app runtime, which oned starts as this program (`oned apps --listen=`).
+app-runtime = { path = "../app-runtime" }
 # `<cli>t`, this computer's onet (onet/src/computer/), is this program run by that name.
 onet = { path = "../onet", features = ["computer"] }
 anyhow = "1"

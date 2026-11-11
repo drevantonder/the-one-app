@@ -681,7 +681,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             ensure!(manages(), ::custom_build::protocol::Coded::refused("not allowed to change the Vault there"));
             let id = data["id"].as_str().filter(|id| is_id(id)).context("no id")?;
             let answered: Option<Option<String>> = out.query_row("SELECT answer FROM vault_requests WHERE id = ?", [id], |r| r.get(0)).optional()?;
-            // Answered: declined, or set once the item it asked for is in the scope's Vault (`src/node/vault.rs`).
+            // Answered: declined, or set once the item it asked for is in the scope's Vault (`app-runtime/src/vault.rs`).
             if let Some(how) = ["declined", "set"].into_iter().find(|how| data[*how] == true) {
                 ensure!(answered.context("no such request")?.is_none(), "already answered");
                 out.execute("UPDATE vault_requests SET answer = ?, answered_by = ?, answered_at = ? WHERE id = ?", params![how, user_principal(w), time, id])?;

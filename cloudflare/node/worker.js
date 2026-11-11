@@ -6,7 +6,7 @@
 // some is answered 428 with what it needs, as a node on a machine answers. Who can do what it reads from the network's
 // steps in the bucket and asks of the scope database it builds from them (src/lib.rs, the machine node's own Rust), and
 // each app's latest deploy from the bucket too, through the URL signer's URLs, keeping what it read sealed in its
-// Durable Object's storage, so a wake fetches only what's newer; it runs an app in an isolate of its own (Worker Loader, src/app/runtime/shim.js as its `ctx`) and writes
+// Durable Object's storage, so a wake fetches only what's newer; it runs an app in an isolate of its own (Worker Loader, app-runtime/src/app/runtime/shim.js as its `ctx`) and writes
 // what a call wrote as one step (database/src/stored.rs). An app's requests go out from here, filled in with the Vault's items it's
 // switched on for, read as any node reads them: each scope's `vault` database, opened with the keys handed for it.
 //
@@ -497,7 +497,7 @@ class User {
     }));
   }
 
-  /// What an app's latest deploy says it is and does (src/app/runtime/shim.js: `describe`).
+  /// What an app's latest deploy says it is and does (app-runtime/src/app/runtime/shim.js: `describe`).
   describe(who, app) {
     const id = `${app.name}-${app.bundle}`;
     if (!this.described.has(id)) {
@@ -662,7 +662,7 @@ class Call {
   }
 
   /// Whether the caller may do each permission to each object of `asks` (`[[permission, object]]`), in order: the
-  /// core's rows, and the app's own types and its rows in `scope` (src/node/calls/running.rs: `/may`).
+  /// core's rows, and the app's own types and its rows in `scope` (app-runtime/src/calls/running.rs: `/may`).
   async may(scope, asks) {
     if (!this.scopes.includes(scope)) refuse(403, `the call didn't name ${scope}`);
     const types = (await this.user.describe(this.who, this.app)).types;
@@ -692,7 +692,7 @@ class Call {
   }
 }
 
-/// A request's work, as each app it runs asks the node things (src/node/calls/running.rs: `internal`).
+/// A request's work, as each app it runs asks the node things (app-runtime/src/calls/running.rs: `internal`).
 class Run {
   constructor(user, who, view) {
     Object.assign(this, { user, who, view, env: user.env, ctx: user.ctx });
@@ -785,7 +785,7 @@ class Run {
     this.ctx.waitUntil(this.env.TELEMETRY.fetch("https://telemetry/telemetry/write", { method: "POST", body }).then((r) => r.body?.cancel()).catch((e) => console.log(`telemetry: ${e}`)));
   }
 
-  /// The apps a page shows and the scopes each reads (src/node/screens.rs: `page_contexts`): with `page` (`user`,
+  /// The apps a page shows and the scopes each reads (app-runtime/src/screens.rs: `page_contexts`): with `page` (`user`,
   /// `group:<id>` or `global`), those added there, each reaching only it; without, every app, reaching all it may.
   pages(page) {
     const at = page === "user" ? `user:${this.who.user}` : page;
@@ -795,7 +795,7 @@ class Run {
       .filter((p) => p.scopes.length);
   }
 
-  /// Every widget of a page, drawn for this user (src/node/screens.rs: `widgets`), each within `WIDGET_LIMIT_MS` so a slow
+  /// Every widget of a page, drawn for this user (app-runtime/src/screens.rs: `widgets`), each within `WIDGET_LIMIT_MS` so a slow
   /// one holds back only itself; with `kind` (`<app>.<widget>`), that one alone, however long it takes. One whose app
   /// needs a device says so.
   async widgets(page, kind) {
@@ -859,7 +859,7 @@ class Run {
     return out;
   }
 
-  /// Every app in the network, with what each does for this user where it's added for them (src/node/apps.rs:
+  /// Every app in the network, with what each does for this user where it's added for them (app-runtime/src/apps.rs:
   /// `catalog`). What it says of itself comes from its latest deploy.
   async apps() {
     return Promise.all(this.view.apps.map(async ({ reach, ...info }) => {
@@ -891,7 +891,7 @@ const servedHere = (d) => !d?.uses?.services?.length;
 
 const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and ${OFF}`;
 
-/// What the node does for an app while it runs, as it asks (src/node/calls/running.rs: `internal`): its databases, other apps'
+/// What the node does for an app while it runs, as it asks (app-runtime/src/calls/running.rs: `internal`): its databases, other apps'
 /// tools, the Vault's items it's switched on for, and its requests out, filled in from them.
 class ForCall extends RpcTarget {
   constructor(run, app, call, done, depth) {
@@ -1110,7 +1110,7 @@ async function route(p, request) {
   refuse(503, `That needs one of your devices, and ${OFF}.`);
 }
 
-/// A scope's keys as a node gives them (src/node/keys.rs: `sealed_keys`): each epoch sealed to `to` (an endpoint's
+/// A scope's keys as a node gives them (app-runtime/src/keys.rs: `sealed_keys`): each epoch sealed to `to` (an endpoint's
 /// key, or `recovery`) → `{ epoch, sealed }`, or an app's key in each epoch → `{ sealed }`, by epoch, base64url. Its
 /// epochs are those sealed to the recovery key, every one of them, numbered from 1.
 async function sealedKeys(bucket, scope, to, app) {

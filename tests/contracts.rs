@@ -785,7 +785,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
 #[test]
 fn every_path_asked_of_a_node_is_one_it_serves() {
     // Not an app's own requests (`/{app}/{*path}`), which take any path that isn't the API's.
-    let routes: Vec<Vec<String>> = one::api::routes().who().iter().map(|(path, _)| path.trim_start_matches('/').split('/').map(str::to_string).collect::<Vec<_>>()).filter(|route| !route[0].starts_with('{')).collect();
+    let routes: Vec<Vec<String>> = app_runtime::api::routes().who().iter().map(|(path, _)| path.trim_start_matches('/').split('/').map(str::to_string).collect::<Vec<_>>()).filter(|route| !route[0].starts_with('{')).collect();
     // `{app}` and `{*path}` take what's there; so does what a page or format fills in (`${id}`, `{}`).
     let matches = |routes: &[Vec<String>], asked: &[&str]| {
         routes.iter().any(|route| {
@@ -796,7 +796,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
     const UNLISTED: [&str; 10] = ["/api/keys", "/api/steps", "/api/steps/global", "/api/openapi.json", "/api/holds", "/api/holds/shared", "/api/holds/write", "/api/holds/sign", "/api/services", "/api/joined"];
     let document = one::openapi::document(&[], true);
     for (path, who, _) in one::says::listed() {
-        assert!(one::api::routes().who().iter().any(|(p, w)| *p == path && *w == who), "src/says.rs says {path} is asked by {who:?}, which no route of the node (src/api.rs) is");
+        assert!(app_runtime::api::routes().who().iter().any(|(p, w)| *p == path && *w == who), "src/says.rs says {path} is asked by {who:?}, which no route of the node (app-runtime/src/api.rs) is");
     }
     let listed: Vec<Vec<String>> = document["paths"].as_object().unwrap().keys().map(|path| path.trim_start_matches('/').split('/').map(str::to_string).collect()).collect();
     for path in document["paths"].as_object().unwrap().keys() {
@@ -854,7 +854,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
             }
         }
     }
-    assert!(unserved.is_empty(), "these paths aren't routes of the node (src/api.rs):\n{}", unserved.join("\n"));
+    assert!(unserved.is_empty(), "these paths aren't routes of the node (app-runtime/src/api.rs):\n{}", unserved.join("\n"));
     assert!(unlisted.is_empty(), "these paths aren't in the OpenAPI document (`api::openapi`): add the route to its feature's `says.rs` (src/says.rs):\n{}", unlisted.join("\n"));
 }
 
@@ -862,7 +862,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
 /// another would be taken for an app's by every client that hands keys, and by git.
 #[test]
 fn the_apis_paths_are_never_taken_for_an_apps() {
-    for (path, _) in one::api::routes().who() {
+    for (path, _) in app_runtime::api::routes().who() {
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
         if segments.len() > 1 && !segments[0].starts_with('{') {
             assert!(::api::path::ROOTS.contains(&segments[0]), "{path} would be an app's: add {} to protocol::path::ROOTS", segments[0]);
@@ -989,7 +989,7 @@ fn the_cloudflare_node_answers_the_asks_it_says_it_does() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let names: std::collections::BTreeMap<&str, bool> = ::api::call::Ask::names().collect();
     let quoted = |text: &str, before: &str| -> std::collections::BTreeSet<String> { text.split(before).skip(1).filter_map(|rest| Some(rest.split_once('"')?.0.to_string())).collect() };
-    let shim = std::fs::read_to_string(root.join("src/app/runtime/shim.js")).unwrap();
+    let shim = std::fs::read_to_string(root.join("app-runtime/src/app/runtime/shim.js")).unwrap();
     let asked: std::collections::BTreeSet<String> = quoted(&shim, "ask(\"").union(&quoted(&shim, "post(\"")).cloned().collect();
     let unknown: Vec<&String> = asked.iter().filter(|a| !names.contains_key(a.as_str())).collect();
     assert!(unknown.is_empty(), "the shim asks what api/src/call.rs doesn't name: {unknown:?}");
@@ -1307,10 +1307,10 @@ fn ai_run_ask() {
     use ::ai_gateway::Failed;
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
-    let shim = read("src/app/runtime/shim.js");
-    assert!(shim.contains("post(\"ai.run\", { input, retry_key: retryKey ?? null })"), "the shim's ai.run ask changed: change src/node/calls/running.rs and cloudflare/node/src/lib.rs (`ai_run`), which read input and retry_key");
+    let shim = read("app-runtime/src/app/runtime/shim.js");
+    assert!(shim.contains("post(\"ai.run\", { input, retry_key: retryKey ?? null })"), "the shim's ai.run ask changed: change app-runtime/src/calls/running.rs and cloudflare/node/src/lib.rs (`ai_run`), which read input and retry_key");
     assert!(::api::call::Ask::names().any(|(name, cloudflare)| name == "ai.run" && cloudflare), "both nodes answer ai.run");
-    let machine = read("src/node/calls/running.rs");
+    let machine = read("app-runtime/src/calls/running.rs");
     let cloudflare = read("cloudflare/node/src/lib.rs");
     for (node, text) in [("a machine's", &machine), ("the Cloudflare", &cloudflare)] {
         assert!(text.contains("[\"input\"]") && text.contains("[\"retry_key\"]"), "{node} node reads ai.run's input and retry_key");

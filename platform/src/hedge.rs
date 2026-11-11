@@ -6,7 +6,7 @@
 //! gets it twice is sent again on a new connection and whichever answers first is taken; one that mustn't fails then,
 //! and its connection is dropped. How often a limit passes, and which side won, is counted for insights (`take_late`).
 //! The same limit is learned of anything else a first byte is waited for by name (`limit`, `learn`): another device's
-//! "taken" (src/node/calls.rs), and a node's first answer to a client (onet).
+//! "taken" (app-runtime/src/calls.rs), and a node's first answer to a client (onet).
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;

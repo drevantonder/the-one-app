@@ -217,7 +217,7 @@ fn keep_files(node: &Client, v: &mut Value, shown: &mut Vec<Value>, depth: usize
             if ty.starts_with("image/") && bytes.len() <= MCP_FILE_LIMIT {
                 shown.push(json!({ "type": "image", "data": data_encoding::BASE64.encode(&bytes), "mimeType": ty }));
             }
-            // No link to it: a browser can't prove to the node it's one of this machine's own programs (src/api/local.rs);
+            // No link to it: a browser can't prove to the node it's one of this machine's own programs (app-runtime/src/api/local.rs);
             // `file get` saves it.
             *v = json!({ "name": name, "type": ty, "size": bytes.len(), "file": id });
         }

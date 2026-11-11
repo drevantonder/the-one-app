@@ -218,7 +218,7 @@ impl Exception {
     }
 }
 
-/// What the runtime's own frames start with: an app's (src/app/runtime/shim.js), and a screen's kit (@one/ui).
+/// What the runtime's own frames start with: an app's (app-runtime/src/app/runtime/shim.js), and a screen's kit (@one/ui).
 const RUNTIME_FRAMES: [&str; 2] = ["shim.js:", "ui.js:"];
 
 /// A frame as `file:line:col`, if it's only that: a file's name is the app's code's, in a bundle, and nothing else may be

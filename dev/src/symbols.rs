@@ -111,7 +111,7 @@ mod tests {
         std::fs::write(&file, gzip.wait_with_output().unwrap().stdout).unwrap();
         let sample = "    +   667 ???  (in one)  load address 0x1025b4000 + 0x69e94  [0x10261de94]\n    +   ??? (in libsystem)\nBinary Images:\n  0x1025b4000 -  0x10535f70b +one (0) <2FB9DA3B> /Users/x/one\n";
         let read = resolved(sample, &dir).unwrap();
-        assert!(read.contains("one::node::serve + 148  (in one)"), "{read}");
+        assert!(read.contains("app_runtime::serve + 148  (in one)"), "{read}");
         assert!(read.contains("+   ??? (in libsystem)"), "what isn't the program's stays: {read}");
         assert_eq!(demangled("__ZN4core3fmt5write17h0123456789abcdefE"), "core::fmt::write");
         assert_eq!(demangled("__RNvNtCs1234_4core3fmt5write"), "core::fmt::write");

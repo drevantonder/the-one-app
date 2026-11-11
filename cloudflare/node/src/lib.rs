@@ -110,7 +110,7 @@ pub fn handoff(seed: &str, device: &str, sealed: &str, now: f64, exp: f64) -> Re
 }
 
 /// What a sign-in needs for `wants` (JSON, `[{ scope, app, database, have: [epoch] }]`) that it wasn't handed, as a node
-/// on a machine says it (src/node/sessions.rs): every epoch from the oldest it needs (`::api::handed::oldest_needed`) to the
+/// on a machine says it (app-runtime/src/sessions.rs): every epoch from the oldest it needs (`::api::handed::oldest_needed`) to the
 /// scope's current one, as the network's signed steps say (`epochs`, JSON `{ <scope>: n }`), never what the bucket
 /// holds, where any endpoint can put a name. → `[{ scope, epoch, app, database }]`.
 #[wasm_bindgen]
@@ -297,7 +297,7 @@ pub fn vault_items(opened: &str, app: &str, user: &str) -> Result<String, JsErro
 
 /// An app's request out (JSON `{ url, headers, body }`, its body text or null) with the fields of the items it's
 /// switched on for filled in from `opened` (as `vault_items`), a secret one only if `host` is one of its item's hosts,
-/// as a node on a machine fills an app's requests (`src/app/outbound.rs`).
+/// as a node on a machine fills an app's requests (`app-runtime/src/app/outbound.rs`).
 #[wasm_bindgen]
 pub fn vault_fill(opened: &str, app: &str, user: &str, host: &str, request: &str) -> Result<String, JsError> {
     let found = lookup(opened, app, user)?;
@@ -688,7 +688,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
             }
             let mut reach = ::scope::state::reachable(m, me, |s| runs(s).then(|| state_of(s).is_some_and(|st| st.added.contains(&a.name))))?;
             // Only those this node runs, if it runs some, as a node on a machine leaves out a user's own scope that
-            // no node running the rest runs (src/node/calls.rs: `reaching`): their own, until they choose this one.
+            // no node running the rest runs (app-runtime/src/calls.rs: `reaching`): their own, until they choose this one.
             if reach.iter().any(runs) {
                 reach.retain(runs);
             }

@@ -81,7 +81,7 @@ fn status(node: &Client, state: &State) {
     let device = &state.device;
     println!("{} ({}){}", device.name, &device.key[..8.min(device.key.len())], if device.ready { "" } else { ", not ready yet" });
     let Some(i) = &state.network else {
-        println!("\n{}.", one::node::not_joined(&device.name));
+        println!("\n{}.", app_runtime::not_joined(&device.name));
         return;
     };
     let users: std::collections::HashMap<&str, &str> = i.users.iter().map(|u| (u.id.as_str(), u.name.as_str())).collect();

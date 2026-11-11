@@ -185,7 +185,7 @@ impl<O: Opens> Keyring<O> {
     /// Signs a step of `content` with `by` as `user`'s, and writes it to the bucket itself, at the next position: read
     /// again, and signed again for the one after, while another device's goes first. For the recovery key's steps, which
     /// no node takes from a device as its user's (`POST /api/steps`), and on a computer, the device's own steps its app
-    /// runtime asks it to write (`one::node::Holder`), as the runtime signs nothing as the device.
+    /// runtime asks it to write (`app_runtime::Holder`), as the runtime signs nothing as the device.
     pub(crate) async fn write_to_bucket(&self, on: &(impl Address + Keep + Signs), by: &impl Signs, user: &str, content: Content) -> Result<(), Error> {
         use ::{scope::steps, database::stored};
         for _ in 0..50 {

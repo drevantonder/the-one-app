@@ -1,4 +1,4 @@
-//! What a running call's app (`ctx`, `src/app/runtime/shim.js`) and the node that runs it say to each other, on a machine
+//! What a running call's app (`ctx`, `app-runtime/src/app/runtime/shim.js`) and the node that runs it say to each other, on a machine
 //! and on the Cloudflare node alike: what the app asks the node while it runs, and what it hands back to write when it
 //! returns. The shim and the Cloudflare node's Worker read this from what `javascript` writes, so nothing is copied by hand;
 //! `tests/contracts.rs` holds the shim's asks and the Cloudflare node's answers to it.
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// What an app asks the node for the call it runs in, by name: on a machine `POST one.internal/<name>`
-/// (`src/app/outbound.rs`), on the Cloudflare node `node.ask(name, body)`.
+/// (`app-runtime/src/app/outbound.rs`), on the Cloudflare node `node.ask(name, body)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ask {
     /// Runs a tool of an app it uses, or a function of its own service (`ctx.apps`, `ctx.services`).
@@ -44,7 +44,7 @@ pub enum Ask {
     /// Changes a device's run priority (`ctx.order` with a device).
     Priority,
     /// An app's request out, on the Cloudflare node, which has no outbound to give an app: a machine's node takes each
-    /// as it's made (`src/app/outbound.rs`).
+    /// as it's made (`app-runtime/src/app/outbound.rs`).
     Fetch,
     /// Asks an AI model, through AI Gateway (`ctx.ai.run`): it writes only the caller's own `node/ai-gateway`.
     AiRun,
@@ -160,7 +160,7 @@ pub fn shim() -> String {
         "// What api/src/call.rs says a call's app and its node say to each other, written when the shim is: never edit it.\n{}const CODE_HEADER = {};\n\n{}",
         javascript().replace("export const", "const"),
         json!(custom_build::protocol::header::CODE),
-        include_str!("../../src/app/runtime/shim.js")
+        include_str!("../../app-runtime/src/app/runtime/shim.js")
     )
 }
 

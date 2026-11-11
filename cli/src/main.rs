@@ -8,6 +8,9 @@ use api::cli::{Command, Given};
 use serde_json::Value;
 
 mod code;
+mod apps;
+mod blobs;
+mod storage;
 mod git_remote;
 mod mcp;
 mod network;
@@ -19,7 +22,6 @@ use api::{Reader, SENDS};
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
 fn commands() -> Vec<Command> {
-    use one::node::{apps, blobs, storage};
     vec![
         // First: it must run with nothing else of this program working.
         one::update::cli::commands(),
@@ -27,15 +29,15 @@ fn commands() -> Vec<Command> {
         groups::cli::commands(),
         backups_runtime::commands(),
         devices::cli::commands(),
-        apps::cli::commands(),
+        apps::commands(),
         vault::cli::commands(),
         one::cloudflare::cli::commands(),
-        storage::cli::commands(),
+        storage::commands(),
         services::cli::commands(),
         device_logs::cli::commands(),
         insights::cli::commands(),
         one::build::commands(),
-        blobs::cli::commands(),
+        blobs::commands(),
         own(),
         skills::commands(),
         code::commands(),
@@ -100,6 +102,18 @@ fn main() {
         && let Some(folder) = network.ui()
     {
         ui::ui_folder::read_from(&folder);
+    }
+    // `oned apps --listen=`: this device's app runtime, as oned starts it.
+    if one::oned::invoked()
+        && let [part, listen] = args.as_slice()
+        && part == ::scope::scopes::APPS_PART
+        && let Some(listen) = listen.strip_prefix("--listen=")
+    {
+        if let Err(err) = app_runtime::serve(listen) {
+            eprintln!("{}: {err:#}", ::custom_build::programs::oned());
+            std::process::exit(1);
+        }
+        return;
     }
     if one::oned::invoked() {
         if let Err(err) = one::oned::run(&args) {
@@ -216,7 +230,7 @@ fn connection(node: &Client) -> String {
     };
     let device = &state.device.name;
     let Some(network) = &state.network else {
-        return format!("{}.", one::node::not_joined(device));
+        return format!("{}.", app_runtime::not_joined(device));
     };
     let network = if network.name.is_empty() { format!("{YOURS} (still joining)") } else { network.name.clone() };
     let ready = if state.device.ready { "" } else { ", catching up" };

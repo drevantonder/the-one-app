@@ -177,7 +177,7 @@ mod tests {
         assert_eq!(of(&["native-apps/windows/build.sh"]), Parts::default());
         assert_eq!(of(&["dev/src/ship.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
         assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
-        assert!(of(&["src/node.rs"]).is_built_in() && of(&["onet/src/lib.rs"]).is_built_in());
+        assert!(of(&["app-runtime/src/lib.rs"]).is_built_in() && of(&["onet/src/lib.rs"]).is_built_in());
         assert_eq!(of(&["auth/worker.js", "relay/worker.js", "auth/package.json", "notifications/worker/senders.js"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
         let http = of(&["gateway/http.js"]);
         assert!(http.node && http.workers && !http.web, "the Cloudflare node carries what every Worker answers HTTP with");
@@ -186,7 +186,7 @@ mod tests {
         }
         let cloudflare_node = of(&["cloudflare/node/src/lib.rs"]);
         assert!(cloudflare_node.node && cloudflare_node.workers && !cloudflare_node.mac, "the Cloudflare node is built with the node");
-        for rust in ["src/node.rs", "ui/src/screen.rs", "ui/vendor/phosphor/icons.json", "onboarding/src/lib.rs", "Cargo.toml", "somewhere/new.txt"] {
+        for rust in ["app-runtime/src/lib.rs", "ui/src/screen.rs", "ui/vendor/phosphor/icons.json", "onboarding/src/lib.rs", "Cargo.toml", "somewhere/new.txt"] {
             let parts = of(&[rust]);
             assert!(parts.node && parts.mac && parts.workers && parts.web && parts.dev, "{rust}: anything not listed sends everything");
         }

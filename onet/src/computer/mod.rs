@@ -15,7 +15,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use ::custom_build::config::{CLI, NAME};
-use one::node::NetworkFile;
+use api::home::NetworkFile;
 
 use crate::Device;
 use crate::keyring::Address;
@@ -40,7 +40,7 @@ pub fn invoked() -> bool {
 }
 
 /// Where this device's own app runtime answers on this computer, and its folder, with the token it's asked with
-/// (`one::node::runtime_folder`), read as it's asked, as the runtime makes it as it starts.
+/// (`api::home::runtime_folder`), read as it's asked, as the runtime makes it as it starts.
 pub struct Runtime {
     pub at: String,
     pub folder: PathBuf,
@@ -133,9 +133,9 @@ impl Onet {
         if !home.join("device.json").exists() && NetworkFile::read(home)?.is_some() {
             bail!("{} says this computer is in a network, but its key (device.json) isn't there: a new one would make it a stranger to its network, so {} won't start. Put device.json back.", home.join("network").display(), name());
         }
-        let (key, name) = one::node::device_key(home)?;
-        let token = one::node::load_local_token(home)?;
-        let runtime = runtime.map(|at| Runtime { at, folder: one::node::runtime_folder(home) });
+        let (key, name) = api::home::device_key(home)?;
+        let token = api::home::load_local_token(home)?;
+        let runtime = runtime.map(|at| Runtime { at, folder: api::home::runtime_folder(home) });
         Ok(Onet { home: home.to_path_buf(), key, name, token, listen, runtime, device: Default::default(), keeping: Default::default(), told: Default::default(), asking: Default::default(), _lock: lock })
     }
 
@@ -174,7 +174,7 @@ impl Onet {
         device.connect().await.map_err(|err| anyhow::anyhow!("reaching {}'s devices: {err}", ::custom_build::config::YOURS))?;
         let asked = device.told().await.map_err(|err| anyhow::anyhow!("telling {}'s relay what this device is on: {err}", ::custom_build::config::YOURS))?;
         if !asked.is_null() {
-            device.keyring().who(|who| one::node::heard(who, &self.key.verifying_key().to_bytes(), &asked));
+            device.keyring().who(|who| app_runtime::heard(who, &self.key.verifying_key().to_bytes(), &asked));
         }
         Ok(())
     }
@@ -235,7 +235,7 @@ impl Onet {
             return Ok(());
         }
         if !has_runtime {
-            let runtime = one::node::runtime_endpoint(&self.home)?;
+            let runtime = api::home::runtime_endpoint(&self.home)?;
             self.tell(device, json!({ "add": key::hex(&runtime.key), "admin": false, "role": "compute" })).await?;
             keyring.write_to_bucket(device, &self.key, &mine.user, ::scope::content::runtime(&runtime, &mine.user, &mine.name, &me)).await.map_err(|e| anyhow::anyhow!("listing this device's app runtime: {e}"))?;
             tracing::info!("listed this device's app runtime, {}", key::short(&runtime.key));

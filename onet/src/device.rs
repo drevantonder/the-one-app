@@ -132,7 +132,7 @@ impl Device {
     }
 
     /// Tells the relay what this device is on, as each device does, and → what it left for this device (`asked`), if
-    /// anything: an ask to update, for a computer's onet to hear (`one::node::heard`).
+    /// anything: an ask to update, for a computer's onet to hear (`app_runtime::heard`).
     #[cfg(feature = "computer")]
     pub(crate) async fn told(&self) -> Result<Value, Error> {
         let asked = json!({ "computes": true, "reads": ::custom_build::protocol::READS, "version": ::custom_build::protocol::version() });

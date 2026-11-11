@@ -232,3 +232,33 @@ pub fn stop_asked() -> anyhow::Result<std::pin::Pin<Box<dyn std::future::Future<
         let _ = tokio::signal::ctrl_c().await;
     }))
 }
+
+/// Makes `command`, a workerd, serve each of `listening`, a socket already listening, as its config's socket of that
+/// name, in place of the address there: no one else can take the port before workerd does, and what reaches it waits
+/// for workerd, while it starts again too, rather than being refused. Only that child keeps them open past exec, not
+/// whatever else this process starts meanwhile. On Linux the child dies with this process.
+#[cfg_attr(windows, allow(unused_variables))]
+pub fn child(command: &mut std::process::Command, listening: &[(&str, &std::net::TcpListener)]) {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        let fds: Vec<i32> = listening.iter().map(|(_, l)| l.as_raw_fd()).collect();
+        for (name, listener) in listening {
+            command.arg(format!("--socket-fd={name}={}", listener.as_raw_fd()));
+        }
+        // SAFETY: only async-signal-safe calls, between fork and exec.
+        unsafe {
+            command.pre_exec(move || {
+                for &fd in &fds {
+                    if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                Ok(())
+            });
+        }
+    }
+}

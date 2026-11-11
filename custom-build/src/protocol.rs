@@ -254,7 +254,7 @@ impl std::fmt::Display for Coded {
 
 impl std::error::Error for Coded {}
 
-/// `T`'s JSON Schema as the OpenAPI document (src/api/openapi.rs) says it, its description at the top: a whole object, with
+/// `T`'s JSON Schema as the OpenAPI document (app-runtime/src/api/openapi.rs) says it, its description at the top: a whole object, with
 /// no `$defs` to resolve.
 pub fn schema_of<T: schemars::JsonSchema>() -> serde_json::Value {
     let mut settings = schemars::generate::SchemaSettings::draft2020_12();

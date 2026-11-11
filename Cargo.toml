@@ -1,9 +1,9 @@
 [workspace]
-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "app-runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
-default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "ui", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "backups", "backups/runtime", "app-schedules", "app-schedules/runtime", "devices", "devices/runtime", "services", "services/runtime", "app-runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 
 [package]
 name = "one"
@@ -23,7 +23,7 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:insights-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:backups-runtime", "dep:app-schedules-runtime", "dep:devices-runtime", "dep:services", "dep:services-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:image", "dep:hyper", "dep:hyper-util", "web-bundle"]
+node = ["bucket/machine", "platform/machine", "dep:services", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:image", "dep:hyper", "dep:hyper-util", "web-bundle"]
 # `web-bundle`, what the native apps take from the network: a signed release record (src/latest.rs) and the signed web
 # client (ui's `web-bundle`).
 web-bundle = ["dep:ssh-key", "ui/web-bundle"]
@@ -40,10 +40,8 @@ api = { path = "api" }
 ui = { path = "ui" }
 # Deploy (deploy/): bundles, building an app with the pinned Bun, every build; what a node does for it, only a node's.
 deploy = { path = "deploy" }
-deploy-runtime = { path = "deploy/runtime", optional = true }
 # Insights (insights/): its signals, the batch, reading rows back, every build; recording and sending them, only a node's.
 insights = { path = "insights" }
-insights-runtime = { path = "insights/runtime", optional = true }
 # The Vault (vault/): items, their sealing and filling, every build; what the app runtime does for it, only a node's.
 vault = { path = "vault" }
 # Labs (labs/): which of the network's labs are on, every build.
@@ -52,41 +50,31 @@ labs = { path = "labs" }
 onboarding = { path = "onboarding" }
 # Device logs (device-logs/): what a device's programs and services print, kept and read, every build; what the app runtime does for the tool that reads them, only a node's.
 device-logs = { path = "device-logs" }
-device-logs-runtime = { path = "device-logs/runtime", optional = true }
-vault-runtime = { path = "vault/runtime", optional = true }
 # Devices (devices/): their tools' specs, the recovery key's commands and a machine's load, every build; what the
 # app runtime does for them, only a node's.
 devices = { path = "devices" }
-devices-runtime = { path = "devices/runtime", optional = true }
 # Services (services/): what a service's program registers on, carried asks, sandboxes and their commands, a computer's;
 # what the app runtime does for them, only a node's.
 services = { path = "services", optional = true }
-services-runtime = { path = "services/runtime", optional = true }
 # Notifications (notifications/): a note sealed to one device and what a device registers, every build; sending them, only a node's.
 notifications = { path = "notifications" }
-notifications-runtime = { path = "notifications/runtime", optional = true }
 # Backups (backups/): a place's Vault item kind and the tools' specs, every build; running them and the format, only a node's.
 backups = { path = "backups" }
-backups-runtime = { path = "backups/runtime", optional = true }
 # App schedules (app-schedules/): an app's schedules as its deploy declares them, every build; running them, only a node's.
 app-schedules = { path = "app-schedules" }
-app-schedules-runtime = { path = "app-schedules/runtime", optional = true }
 # Groups (groups/): who's in the network and its groups, every build; what the app runtime does for it, only a node's.
 groups = { path = "groups" }
-groups-runtime = { path = "groups/runtime", optional = true }
 # Widgets (widgets/): the tool that shows them, every build; what the app runtime does for them, only a node's.
 widgets = { path = "widgets" }
-widgets-runtime = { path = "widgets/runtime", optional = true }
 anyhow = "1"
 # AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes, tools' specs, whose key pays and a call's flow, every build; running it on a machine, only a node's.
 ai-gateway = { path = "ai-gateway" }
-ai-gateway-runtime = { path = "ai-gateway/runtime", optional = true }
 data-encoding = "2"
-# A route's body in the OpenAPI document (src/api/openapi.rs) is derived from the struct its handler reads, so the two
+# A route's body in the OpenAPI document (app-runtime/src/api/openapi.rs) is derived from the struct its handler reads, so the two
 # can't disagree, and no schema of those structs is written by hand.
 schemars = "1"
 # Auth's access tokens are signed with Ed25519 (src/cloudflare.rs checks them), and devices sign what they send each
-# other through the relay with it (src/node/relay.rs).
+# other through the relay with it (app-runtime/src/relay.rs).
 ed25519-dalek = "3"
 # The Workers derive keys with HKDF-SHA256, because that's what WebCrypto in workerd has (src/cloudflare.rs).
 hkdf = "0.13"
@@ -120,7 +108,7 @@ axum = { version = "0.8", optional = true }
 # Its join_all and BoxFuture run a node's asks of several things at once (src/core_tools.rs); axum and iroh
 # already build it.
 futures-util = { version = "0.3", default-features = false, optional = true }
-# Devices reach each other over iroh (src/node/net.rs): QUIC between their device keys, direct where a path opens and
+# Devices reach each other over iroh (app-runtime/src/net.rs): QUIC between their device keys, direct where a path opens and
 # otherwise through the network's relay, which speaks iroh's relay protocol. Only ring's TLS and the router port mapping
 # (UPnP, NAT-PMP, PCP), with no n0 discovery or metrics. Pinned, since the relay runs iroh-relay's own code of this
 # version.
@@ -144,7 +132,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = tr
 ureq = { version = "3", features = ["json"] }
 # Agent devices' screens come as PNG or JPEG and go out as JPEG at the width asked (src/agent_devices/picture.rs).
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"], optional = true }
-# Client devices ask a node's local API over iroh, HTTP/1.1 on each stream (src/node/net.rs), which hyper's server
+# Client devices ask a node's local API over iroh, HTTP/1.1 on each stream (app-runtime/src/net.rs), which hyper's server
 # answers as axum's does over TCP (axum already builds hyper).
 hyper = { version = "1", features = ["server", "http1"], optional = true }
 hyper-util = { version = "0.1", features = ["tokio", "service"], optional = true }
