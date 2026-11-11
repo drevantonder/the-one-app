@@ -18,6 +18,7 @@
 import { checkRequest, rolesOf } from "../shared/crypto.js";
 import { Refused, answer, refusal, refuse, textOf } from "../shared/http.js";
 import { TELEMETRY } from "../shared/protocol.js";
+import { routeOf } from "../gateway/worker.js";
 import { cloudflareUsage } from "./usage.js";
 
 /// What Basin's own limit on a request (5 MB) leaves room for.
@@ -178,6 +179,17 @@ function exceptionOf(s) {
   return { type: EXCEPTIONS.includes(named) ? named : "Error", frame: frameOf(attribute(event.attributes, "exception.stacktrace")), message: plainWords(attribute(event.attributes, "exception.message")) };
 }
 
+/// A request span's path, from Cloudflare's `url.path` or `url.full`: read for its route alone, never kept.
+function pathOf(s) {
+  const path = attribute(s.attributes, "url.path");
+  if (typeof path === "string" && path.startsWith("/")) return path;
+  try {
+    return new URL(attribute(s.attributes, "url.full")).pathname;
+  } catch {
+    return null;
+  }
+}
+
 /// Which of `TRACED` a resource is, by its `service.name`, `<cli>-<name>`.
 const jobOf = (resource, cli) => String((resource.resource?.attributes ?? []).find((a) => a.key === "service.name")?.value?.stringValue ?? "").replace(`${cli}-`, "");
 
@@ -196,13 +208,19 @@ export function workerSpans(request, cli) {
   const failed = ({ s }) => s.status?.code === 2 || s.status?.code === "STATUS_CODE_ERROR";
   const took = ({ s }) => Math.max(0, nanos(s.endTimeUnixNano) - nanos(s.startTimeUnixNano));
   const server = ({ s }) => s.kind === 2 || s.kind === "SPAN_KIND_SERVER";
-  const nameOf = ({ s }) => {
+  // A Durable Object's own fetch, which its Worker's request made: Cloudflare bills it as the object's, not a request.
+  const asked = (x) => server(x) && REQUEST.test(x.s.name) && (attribute(x.s.attributes, "cloudflare.execution_model") ?? "stateless") === "stateless";
+  const nameOf = (x) => {
+    const { s } = x;
     const method = attribute(s.attributes, "jsrpc.method");
     if (token(method)) return [attribute(s.attributes, "cloudflare.entrypoint"), method].filter(token).join(".");
+    // The gateway's requests by the route it sent each to, as a node's by its route.
+    const path = pathOf(s);
+    if (x.job === "gateway" && asked(x) && path) return routeOf(path).route;
     return token(s.name) ? s.name : "span";
   };
   const counts = new Map();
-  for (const x of spans.filter((x) => server(x) && REQUEST.test(x.s.name))) {
+  for (const x of spans.filter(asked)) {
     const minute = nanos(x.s.startTimeUnixNano) - (nanos(x.s.startTimeUnixNano) % 60_000);
     const status = failed(x) ? "STATUS_CODE_ERROR" : "STATUS_CODE_UNSET";
     const key = `${minute}|${x.job}|${nameOf(x)}|${status}`;
@@ -217,7 +235,7 @@ export function workerSpans(request, cli) {
   const worth = new Set(spans.filter((x) => failed(x) || took(x) >= SLOW_MS).map(({ s }) => s.traceId));
   // A request reached through another Worker's binding has that Worker's span as its parent, and comes in an export of its
   // own: by its id alone, every export picks the same traces.
-  const requests = new Set(spans.filter((x) => server(x) && REQUEST.test(x.s.name)).map(({ s }) => s.traceId));
+  const requests = new Set(spans.filter(asked).map(({ s }) => s.traceId));
   const rows = spans.filter(({ s }) => worth.has(s.traceId) || (requests.has(s.traceId) && sampledTrace(s.traceId))).map((x) => {
     const { s, job } = x;
     const code = attribute(s.attributes, "http.response.status_code");

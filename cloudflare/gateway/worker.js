@@ -19,12 +19,26 @@ const TYPES = {
 };
 
 const under = (path, prefixes) => prefixes.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p || path.startsWith(`${p}/`)));
+const prefixOf = (path, prefixes) => prefixes.find((p) => under(path, [p]));
 
-function where(path) {
-  if (under(path, MCP)) return "mcp";
-  if (under(path, AUTH)) return "auth";
-  if (path.startsWith("/api/")) return "mcp";
-  return "web";
+/// Where a request to `path` goes (`to`), and the route it's under: a prefix of the path, never what follows it, which is
+/// what Insights names the gateway's requests by (the telemetry Worker reads this).
+export function routeOf(path) {
+  const iroh = prefixOf(path, Object.values(IROH_PATHS));
+  if (iroh) return { to: "relay", route: iroh };
+  if (path === "/urls") return { to: "signer", route: path };
+  if (path.startsWith(`/${UPDATES}/`)) return { to: "signer", route: `/${UPDATES}/` };
+  if (path.startsWith("/push/")) return { to: "push", route: "/push/" };
+  if (path.startsWith("/telemetry/")) return { to: "telemetry", route: "/telemetry/" };
+  if (GIT.test(path)) return { to: "git", route: "git" };
+  const mcp = prefixOf(path, MCP);
+  if (mcp) return { to: "mcp", route: mcp };
+  const auth = prefixOf(path, AUTH);
+  if (auth) return { to: "auth", route: auth };
+  if (path.startsWith("/api/")) return { to: "mcp", route: "/api/" };
+  if (path === "/icons") return { to: "web", route: path };
+  if (path.startsWith("/onet/")) return { to: "web", route: "/onet/" };
+  return { to: "web", route: "/" };
 }
 
 const NOSNIFF = { "x-content-type-options": "nosniff" };
@@ -124,17 +138,15 @@ export default {
 };
 
 async function route(request, env) {
-  {
-    const url = new URL(request.url);
-    if (under(url.pathname, Object.values(IROH_PATHS))) return env.IROH.fetch(request);
-    if (url.pathname === "/urls" || url.pathname.startsWith(`/${UPDATES}/`)) return env.SIGNER.fetch(request);
-    if (url.pathname.startsWith("/push/")) return env.PUSH.fetch(request);
-    if (url.pathname.startsWith("/telemetry/")) return env.TELEMETRY.fetch(request);
-    if (GIT.test(url.pathname)) return gitWithoutCli(env, url);
-    switch (where(url.pathname)) {
-      case "mcp": return env.MCP ? env.MCP.fetch(request) : refusal(503, "this network's MCP isn't set up yet", NOSNIFF);
-      case "auth": return env.AUTH.fetch(request);
-      default: return toWeb(request, env, url);
-    }
+  const url = new URL(request.url);
+  switch (routeOf(url.pathname).to) {
+    case "relay": return env.IROH.fetch(request);
+    case "signer": return env.SIGNER.fetch(request);
+    case "push": return env.PUSH.fetch(request);
+    case "telemetry": return env.TELEMETRY.fetch(request);
+    case "git": return gitWithoutCli(env, url);
+    case "mcp": return env.MCP ? env.MCP.fetch(request) : refusal(503, "this network's MCP isn't set up yet", NOSNIFF);
+    case "auth": return env.AUTH.fetch(request);
+    default: return toWeb(request, env, url);
   }
 }

@@ -16,7 +16,7 @@ struct Formats {
 impl Formats {
     fn start() -> Self {
         let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("cloudflare");
-        let mut files: Vec<(String, Vec<u8>)> = ["shared/crypto.js", "shared/token.js", "shared/http.js", "telemetry/worker.js", "telemetry/usage.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap())).to_vec();
+        let mut files: Vec<(String, Vec<u8>)> = ["shared/crypto.js", "shared/token.js", "shared/http.js", "gateway/worker.js", "telemetry/worker.js", "telemetry/usage.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap())).to_vec();
         files.push(("screen/agents.js".into(), std::fs::read(root.join("../src/screen/settings/agents.js")).unwrap()));
         let dir = crate::temp("formats");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1080,7 +1080,11 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     let mut failed = span("GET /users/anna@example.org", 'a', 2, None);
     failed["events"] = json!([{ "name": "exception", "attributes": [{ "key": "exception.type", "value": { "stringValue": "TypeError" } }, { "key": "exception.message", "value": { "stringValue": "internal error; reference = l1kprhha71iut801 for anna@example.org" } }, { "key": "exception.stacktrace", "value": { "stringValue": "    at async worker_default.ask (worker.js:474:18)" } }] }]);
     // Trace `0…` is one in 20; trace `d…` isn't.
-    let request = json!({ "resourceSpans": [of("one-gateway", vec![failed, span("GET", 'd', 0, None), span("GET", '0', 0, None)]), of("one-relay", vec![span("hibernatableWebSocket", 'e', 0, None)]), of("one-telemetry", vec![span("fetch", 'c', 2, None)]), of("one-mcp", vec![span("fetch", 'b', 2, None), span("GET", '0', 0, Some(&"2".repeat(16)))]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
+    let mut update = span("GET", 'f', 0, None);
+    update["attributes"][0] = json!({ "key": "url.path", "value": { "stringValue": "/updates/node/x86_64-unknown-linux-gnu" } });
+    let mut in_object = span("GET", 'f', 0, None);
+    in_object["attributes"][1] = json!({ "key": "cloudflare.execution_model", "value": { "stringValue": "stateful" } });
+    let request = json!({ "resourceSpans": [of("one-gateway", vec![failed, span("GET", 'd', 0, None), span("GET", '0', 0, None), update]), of("one-auth", vec![in_object]), of("one-relay", vec![span("hibernatableWebSocket", 'e', 0, None)]), of("one-telemetry", vec![span("fetch", 'c', 2, None)]), of("one-mcp", vec![span("fetch", 'b', 2, None), span("GET", '0', 0, Some(&"2".repeat(16)))]), of("one-node", vec![span("fetch", 'b', 2, None)])] });
     let read = formats.js(json!({ "op": "telemetryWorkerSpans", "request": request, "cli": "one" }));
     let rows = read["spans"].as_array().unwrap();
     assert_eq!(rows.len(), 4, "the gateway's failure, the one request in 20 wherever it's handled, and mcp's failure: not another request, a WebSocket message, nor what node or telemetry did: {rows:?}");
@@ -1090,13 +1094,13 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     let stored = rows[0].to_string();
     assert!(!stored.contains("anna") && !stored.contains("example") && !stored.contains("url.full") && !stored.contains("l1kp"), "{stored}");
     let attrs: Value = serde_json::from_str(rows[0]["attrs"].as_str().unwrap()).unwrap();
-    assert_eq!((rows[0]["name"].as_str(), rows[0]["service"].as_str(), rows[0]["duration"].as_u64(), rows[0]["status"].as_str()), (Some("span"), Some("worker.gateway"), Some(500), Some("error")));
+    assert_eq!((rows[0]["name"].as_str(), rows[0]["service"].as_str(), rows[0]["duration"].as_u64(), rows[0]["status"].as_str()), (Some("/"), Some("worker.gateway"), Some(500), Some("error")), "the gateway's request is named by its route, never its path");
     assert_eq!((&attrs["error.type"], &attrs["http.response.status_code"], &attrs["one.sampled"]), (&json!(one::insights::exception_type("TypeError")), &json!(500), &json!(1)));
     assert_eq!((rows[0]["message"].as_str(), attrs["one.fingerprint"].as_str()), (Some("internal error; reference = <value> for <value>"), Some("TypeError|worker.js:474:18|")), "an exception's plain words, and what the Errors list groups it by");
     assert_eq!((rows[1]["trace"].as_str(), serde_json::from_str::<Value>(rows[1]["attrs"].as_str().unwrap()).unwrap()["one.sampled"].as_u64()), (Some("0".repeat(32).as_str()), Some(20)), "a sampled request stands for the 20 it's one of");
     let counted: Vec<(String, String, String, u64)> = read["metrics"].as_array().unwrap().iter().map(|m| { let a: Value = serde_json::from_str(m["attrs"].as_str().unwrap()).unwrap(); (m["service"].as_str().unwrap().to_string(), a["span.name"].as_str().unwrap().to_string(), a["status.code"].as_str().unwrap().to_string(), m["count"].as_u64().unwrap()) }).collect();
     let want = |s: &str, n: &str, st: &str, c: u64| (s.to_string(), n.to_string(), st.to_string(), c);
-    assert_eq!(counted, [want("worker.gateway", "span", "STATUS_CODE_ERROR", 1), want("worker.gateway", "GET", "STATUS_CODE_UNSET", 2), want("worker.mcp", "GET", "STATUS_CODE_UNSET", 1)], "every request is counted, kept or not, and a WebSocket message isn't one");
+    assert_eq!(counted, [want("worker.gateway", "/", "STATUS_CODE_ERROR", 1), want("worker.gateway", "/", "STATUS_CODE_UNSET", 2), want("worker.gateway", "/updates/", "STATUS_CODE_UNSET", 1), want("worker.mcp", "GET", "STATUS_CODE_UNSET", 1)], "every request is counted, kept or not, as Cloudflare bills them: a WebSocket message isn't one, nor a Durable Object's own fetch");
     let program = one::insights::otlp::items(&json!({ "resourceSpans": [{ "scopeSpans": [{ "spans": [span("GET /users/anna@example.org", 'a', 2, None)] }] }] }));
     assert_eq!((program[0].name.as_str(), program[0].ms, program[0].ok, program[0].status_code), ("span", 500, false, Some(500)), "the same span reads the same on a device");
     let named: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryExceptions" }))).unwrap();
