@@ -247,15 +247,20 @@ impl Workers {
     }
 
     fn start_as(domain: Option<&str>, google: bool, devices: Vec<String>) -> Workers {
-        Workers::start_with(domain, google, devices, None)
+        Workers::start_with(domain, google, devices, None, None)
     }
 
     /// As `for_devices`, with the network's recovery key on the relay's list, as a deploy puts it there.
     fn with_recovery(devices: Vec<String>, recovery: String) -> Workers {
-        Workers::start_with(None, false, devices, Some(recovery))
+        Workers::start_with(None, false, devices, Some(recovery), None)
     }
 
-    fn start_with(domain: Option<&str>, google: bool, devices: Vec<String>, recovery: Option<String>) -> Workers {
+    /// As `for_devices`, with oned on Cloudflare beside them, as `oned` deploys it, its bucket the stand-in sites'.
+    fn with_oned(devices: Vec<String>, oned: Oned) -> Workers {
+        Workers::start_with(None, false, devices, None, Some(oned))
+    }
+
+    fn start_with(domain: Option<&str>, google: bool, devices: Vec<String>, recovery: Option<String>, oned: Option<Oned>) -> Workers {
         let gateway = port();
         let mut settings = cloudflare::Settings::new(&format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
@@ -265,13 +270,19 @@ impl Workers {
         // The network's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).chain(recovery.map(|key| json!({ "key": key, "role": "client", "admin": false, "recovery": true }))).collect();
         settings.root = Some(data_encoding::HEXLOWER.encode(&ROOT));
-        settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "network", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let sites = port();
+        // A device reads the bucket itself, at the URLs the URL signer signs: with oned, at the stand-in's own address.
+        let endpoint = if oned.is_some() { format!("http://127.0.0.1:{sites}") } else { "https://s3.test".into() };
+        settings.bucket = Some(json!({ "endpoint": endpoint, "bucket": "network", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
+        let modules = oned.map(|oned| {
+            (settings.cloudflare_node, settings.cloudflare_node_key, settings.root, settings.welcome) = (true, oned.key, Some(oned.root), oned.welcome);
+            oned.modules
+        });
         let web = crate::temp("web");
         std::fs::write(web.join("index.html"), "<!doctype html><title>The web client</title>").unwrap();
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
-        let mut served = cloudflare::served_with(&settings, &web, &ui::ui_folder::cloudflare(), None).unwrap();
-        for s in served.iter_mut().filter(|s| ["url-signer", "onet", "notifications"].contains(&s.name.as_str())) {
+        let mut served = cloudflare::served_with(&settings, &web, &ui::ui_folder::cloudflare(), modules).unwrap();
+        for s in served.iter_mut().filter(|s| ["url-signer", "onet", "notifications", "oned"].contains(&s.name.as_str())) {
             s.outbound = Some("sites".into());
         }
         // `TEST` gives auth and the relay a clock a test moves and the relay a log of what it refused: a network's
@@ -326,7 +337,7 @@ fn signed(key: &ed25519_dalek::SigningKey, route: &str, mut fields: Value) -> Va
 fn telemetry_takes_the_networks_devices_and_only_what_its_tables_hold() {
     let (device, key) = endpoint();
     let (stranger, _) = endpoint();
-    let k = Workers::start_with(None, false, vec![key.clone()], None);
+    let k = Workers::start_with(None, false, vec![key.clone()], None, None);
     let at = |path: &str| format!("{}/telemetry/{path}", k.relay_address());
     let ask = |by: &ed25519_dalek::SigningKey, path: &str, fields: Value| post(&at(path), &[], key::signed_request(by, custom_build::protocol::TELEMETRY, fields, now()));
     let span = |name: &str, status: &str, ms: u64| json!({ "time": now(), "trace": "a".repeat(32), "span": "b".repeat(16), "name": name, "service": "notes", "instance": key, "kind": "server", "status": status, "duration": ms, "attrs": json!({ "one.fingerprint": "TypeError|app.js:1:1|b1" }).to_string() });
@@ -991,6 +1002,100 @@ fn a_device_asking_to_join_is_notified_to_its_users_other_devices() {
 
 /// The network the tests' Workers are for: its root, as the device deploying them holds it.
 const ROOT: [u8; 32] = [5; 32];
+
+/// oned on Cloudflare as a deploy hands it its network: its modules, its endpoint's key (hex), the network's root and
+/// where the deploying computer had read who's who to.
+struct Oned {
+    modules: Vec<(String, &'static str, Vec<u8>)>,
+    key: String,
+    root: String,
+    welcome: Option<String>,
+}
+
+/// oned on Cloudflare's modules, built from this checkout as `one-dev update program` builds them: its WebAssembly and
+/// wasm-bindgen's glue.
+fn oned_modules() -> Vec<(String, &'static str, Vec<u8>)> {
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let built = std::process::Command::new(cargo).args(["build", "--quiet", "-p", "oned-cloudflare-worker", "--target", "wasm32-unknown-unknown"]).current_dir(root).output().expect("cargo build");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let out = crate::temp("oned-wasm");
+    let wasm = root.join("target/wasm32-unknown-unknown/debug/oned_cloudflare_worker.wasm");
+    let glued = std::process::Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm).output().expect("wasm-bindgen (cargo install wasm-bindgen-cli, the version in Cargo.lock)");
+    assert!(glued.status.success(), "{}", String::from_utf8_lossy(&glued.stderr));
+    let read = |name: &str| std::fs::read(out.join(name)).unwrap();
+    cloudflare::worker::modules_from(read("oned_cloudflare_worker.js"), read("oned_cloudflare_worker_bg.wasm"))
+}
+
+/// Puts every object of a network's bucket in a folder (`dir`) in the stand-in sites' bucket, as moving it to S3 would.
+fn put_bucket(sites: &str, dir: &Path) {
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    let mut folders = vec![dir.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(&folder).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if !path.file_name().unwrap().to_string_lossy().starts_with('.') {
+                let name = path.strip_prefix(dir).unwrap().to_string_lossy().replace('\\', "/");
+                assert_eq!(agent.put(&format!("{sites}/network/{name}")).send(&std::fs::read(&path).unwrap()).unwrap().status().as_u16(), 200, "{name}");
+            }
+        }
+    }
+}
+
+/// A fresh oned on Cloudflare lets in a device of a network whose `global` has had several epochs, the freeze and its
+/// devices under earlier ones: it reads who's who from where the computer that deployed it had read to (its Welcome,
+/// from a copy), asks for every epoch it wasn't handed, and runs the device's call, never refusing it as not let in.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fresh_oned_on_cloudflare_with_several_epochs_lets_a_device_in() {
+    use ::scope::scopes::Scope;
+    let modules = tokio::task::spawn_blocking(oned_modules).await.unwrap();
+    let k = crate::e2e::start("cf-oned").await;
+    crate::e2e::create(&k, "Home", "Andre").await;
+    let me = api::Caller::own(k.id(), k.user().unwrap());
+    let key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
+    let seed: [u8; 32] = data_encoding::HEXLOWER.decode(key.as_bytes()).unwrap().try_into().unwrap();
+    let endpoint = data_encoding::HEXLOWER.encode(ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().as_bytes());
+    k.set_setting(&me, ::scope::scopes::CLOUDFLARE_NODE, Some(&endpoint)).await.unwrap();
+    let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    crate::e2e::let_sam_in(&k, &phone).await;
+    // Several epochs of Everyone's, and more than a copy's worth of steps after them.
+    for _ in 0..3 {
+        let n = ::api::runtime::ReadExt::read_or(&k, 0, |r| Ok(r.db().epoch(&Scope::Global)?));
+        ::scope::settings::new_epoch(&k, &Scope::Global, n + 1, &[]).await.unwrap();
+    }
+    for i in 0..(::database::stored::COPY_EVERY + 10) {
+        k.rename_device(&format!("cf-oned-{}", i % 2)).await.unwrap();
+    }
+    let root = ::api::runtime::ReadExt::read_or(&k, None, |r| Ok(r.db().root()?)).unwrap().to_hex().to_string();
+    let welcome = ::scope::settings::Me::welcome(&k).map(|w| w.to_string());
+    assert!(welcome.is_some(), "the computer has read who's who");
+    let devices = vec![::key::hex(&k.id()), ::key::hex(&::key::Endpoint::of(&phone).key)];
+    let w = tokio::task::block_in_place(|| Workers::with_oned(devices, Oned { modules, key, root: root.clone(), welcome: welcome.clone() }));
+    tokio::task::block_in_place(|| put_bucket(&w.sites, &k.dir().join("network/bucket")));
+    // The steps between the freeze and the copy are gone, so only a reader that starts from the Welcome reads who's who.
+    let said = ::scope::steps::Welcome::parse(welcome.as_deref().unwrap()).unwrap();
+    let copy = said.copies().next().expect("a copy before the Welcome's step");
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    for n in said.freeze + 1..=copy {
+        let name = ::bucket::names::step_name(&::scope::steps::prefix("global"), n);
+        tokio::task::block_in_place(|| agent.delete(&format!("{}/network/{name}", w.sites)).call().unwrap());
+    }
+
+    // The device was let in with the same Welcome, as auth hands one a device that's approved.
+    let dir = crate::temp("cf-oned-phone");
+    std::fs::write(dir.join("welcome"), welcome.unwrap()).unwrap();
+    std::fs::write(dir.join("root"), &root).unwrap();
+    let device = onet::Device::new(phone.to_bytes(), &w.relay_address(), dir.to_str().unwrap());
+    // No computer is on: oned on Cloudflare answers, listing the device as theirs.
+    let answer = device.fetch("GET", "/api/state", Vec::new(), Vec::new()).await.unwrap();
+    let status = answer.status;
+    let state: Value = serde_json::from_slice(&answer.body.bytes().await.unwrap()).unwrap();
+    assert_eq!(status, 200, "{state}");
+    assert_eq!(state["device"]["name"], "Cloudflare", "{state}");
+    assert!(state["network"]["clients"].as_array().unwrap().iter().any(|c| c["key"] == ::key::hex(&::key::Endpoint::of(&phone).key)), "{state}");
+}
 
 /// iroh endpoints, as app runtimes are, through the relay at a network's address and nothing else: its relay protocol is
 /// iroh-relay's Rust as WebAssembly in a Durable Object (relay/), which must agree with iroh's own.
