@@ -1,5 +1,5 @@
 // Repos: git hosting as an ordinary app. Installed in global, so every repo is visible to everyone. Stock git clones and
-// pushes over HTTP through the node's local API (http.js), and a repo's packs are blobs. No git runs here: pages read
+// pushes over HTTP through the computer's local API (http.js), and a repo's packs are blobs. No git runs here: pages read
 // the packs themselves (browse.js, git.js).
 //
 // As on GitHub, a repo is <owner>/<name>, its owner a user, a group or Everyone, by their handle (ctx.handles), so a
@@ -634,9 +634,9 @@ const app = {
       run: (ctx) => ({ base: ctx.address ? `${ctx.address}/repos/` : null, handle: ctx.me.handle || null }),
     },
     _http: {
-      title: "Git over HTTP (for the node)",
+      title: "Git over HTTP (for onet)",
       reads: false,
-      description: "Git over HTTP, as the node passes it on: clone, fetch and push with stock git.",
+      description: "Git over HTTP, as a computer's onet passes it on: clone, fetch and push with stock git.",
       input: { type: "object", required: ["method", "path"], properties: { method: { type: "string" }, path: { type: "string" }, query: { type: "string" }, body: { type: ["string", "null"] } } },
       output: { type: "object", description: "the response git is given: status, headers and body", additionalProperties: true },
       run: (ctx, input) => http.serve(ctx, global(ctx), git, input),

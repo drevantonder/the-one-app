@@ -1,4 +1,4 @@
-// Git over HTTP, as the node's local API passes it on (`/repos/<owner>/<repo>.git/...`), so stock git clones, fetches and
+// Git over HTTP, as a computer's local API passes it on (`/repos/<owner>/<repo>.git/...`), so stock git clones, fetches and
 // pushes.
 //
 // Fetching is git's "dumb" protocol: the branches, the list of packs, and each pack and its index are files git

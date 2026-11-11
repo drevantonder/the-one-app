@@ -58,7 +58,7 @@ pub struct Thing {
 }
 
 impl Thing {
-    pub fn node_name(target: &str) -> String {
+    pub fn program_name(target: &str) -> String {
         format!("node/{target}")
     }
 
@@ -130,7 +130,7 @@ impl Latest {
 
     /// The program `one update` puts on a device on `target` (`node/<target>`); a Mac takes its window too (`app/<target>`).
     pub fn to_update_to(&self, target: &str) -> Option<&Thing> {
-        self.get(&Thing::node_name(target))
+        self.get(&Thing::program_name(target))
     }
 }
 

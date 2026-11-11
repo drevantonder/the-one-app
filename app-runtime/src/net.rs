@@ -284,20 +284,20 @@ impl Host {
         let remote = *conn.remote_id().as_bytes();
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
             if !self.is_cloudflare_node(&remote) {
-                return conn.close(1u32.into(), b"not this network's Cloudflare node");
+                return conn.close(1u32.into(), b"not this network's oned on Cloudflare");
             }
             let host = self.clone();
             tokio::spawn(async move {
                 let msg: Value = match recv.read_to_end(MESSAGE_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
                     Ok(msg) => msg,
-                    Err(err) => return tracing::debug!("what the Cloudflare node sent: {err:#}"),
+                    Err(err) => return tracing::debug!("what oned on Cloudflare sent: {err:#}"),
                 };
                 let answer = match msg["kind"].as_str() {
                     Some(M::ASK) => crate::api::call_from_cloudflare_node(&host, remote, msg["body"]["call"].clone()).await,
-                    _ => json!({ "error": "the Cloudflare node only asks for calls" }),
+                    _ => json!({ "error": "oned on Cloudflare only asks for calls" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
-                    tracing::debug!("answering the Cloudflare node: {err:#}");
+                    tracing::debug!("answering oned on Cloudflare: {err:#}");
                 }
             });
         }
@@ -520,7 +520,7 @@ impl Host {
         self.with_or(false, |i| Ok(i.r.db().service(key)?.is_some()))
     }
 
-    /// Whether `key` is the network's Cloudflare node's endpoint, as `cloudflare node deploy` set it.
+    /// Whether `key` is the network's Cloudflare node's endpoint, as `cloudflare oned deploy` set it.
     pub(super) fn is_cloudflare_node(&self, key: &Key) -> bool {
         self.with_or(false, |i| Ok(i.r.db().setting(scope::scopes::CLOUDFLARE_NODE)?.is_some_and(|k| k == hex(key))))
     }

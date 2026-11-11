@@ -174,7 +174,7 @@ pub struct Settings {
     pub address: String,
     /// Where the CLI's Cloudflare commands reach auth; users reach it at the address.
     pub auth_url: String,
-    /// Whether the network has a Cloudflare node (`cloudflare node deploy`), which the relay wakes.
+    /// Whether the network has a Cloudflare node (`cloudflare oned deploy`), which the relay wakes.
     #[serde(default)]
     pub cloudflare_node: bool,
     /// The local ports auth and the gateway listen on, when this machine runs them. The other services
@@ -209,7 +209,7 @@ pub struct Settings {
     /// The OIDC providers its users can sign in with: a button shows only for one whose client is registered.
     #[serde(default = "providers")]
     pub providers: Vec<Provider>,
-    /// The API token `cloudflare deploy` and `cloudflare node deploy` edit the Cloudflare account's Workers with, where
+    /// The API token `cloudflare deploy` and `cloudflare oned deploy` edit the Cloudflare account's Workers with, where
     /// CLOUDFLARE_API_TOKEN isn't set.
     #[serde(default, skip_serializing)]
     pub cloudflare_token: Option<String>,
@@ -279,7 +279,7 @@ OTLP_TOKEN=
 # network's usage of Cloudflare with.
 # @optional
 ANALYTICS_TOKEN=
-# The Cloudflare node's endpoint key, made by cloudflare node deploy.
+# oned on Cloudflare's endpoint key, made by cloudflare oned deploy.
 # @optional
 CLOUDFLARE_NODE_KEY=
 # The notifications Worker's: the network's VAPID key (base64url PKCS#8, P-256), made with the Workers, which browsers' notifications
@@ -1634,7 +1634,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &
             let migration = scripts.get(&name).and_then(|s| s.migration.clone());
             let (mut meta, complete) = metadata(settings, worker, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
             let url = worker.place(settings).map(|(url, _)| url);
-            let Some(wasm) = worker.modules(sources, crate::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {} Worker runs: {}-dev update node builds one", worker.name, custom_build::config::CLI) };
+            let Some(wasm) = worker.modules(sources, crate::node::modules().ok().as_ref()) else { bail!("this build has no oned for Cloudflare, which the {} Worker runs: {}-dev update program builds one", worker.name, custom_build::config::CLI) };
             let module = module_from(sources.clone(), worker.entry)?;
             let mut what = vec![meta.to_string().into_bytes(), module.clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));

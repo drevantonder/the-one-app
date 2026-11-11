@@ -276,7 +276,7 @@ pub struct Host(Arc<Inner>);
 
 impl std::fmt::Debug for Host {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Node({})", short(&self.0.id))
+        write!(f, "Host({})", short(&self.0.id))
     }
 }
 
@@ -318,7 +318,7 @@ pub async fn serve(listen: &str) -> Result<()> {
     let last = ::insights::Ended::read(&dir);
     insights_runtime::device_signal(&host.rt(), "node.start", ::insights::Attrs::default().reason(last.reason()), ::insights::Status::Unset);
     if last == ::insights::Ended::Update {
-        insights_runtime::device_signal(&host.rt(), "update.running", ::insights::Attrs::default().part(&::oned_update::latest::Thing::node_name(custom_build::config::TARGET)), ::insights::Status::Unset);
+        insights_runtime::device_signal(&host.rt(), "update.running", ::insights::Attrs::default().part(&::oned_update::latest::Thing::program_name(custom_build::config::TARGET)), ::insights::Status::Unset);
     }
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
     tracing::info!("{} app runtime {} answering {listen} from {}", ::custom_build::config::NAME, ::key::short(&host.id()), dir.display());

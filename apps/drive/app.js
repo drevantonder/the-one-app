@@ -1,5 +1,5 @@
 // Google Drive for apps: your own Drive accounts, signed in once. Each account's refresh token is a secret field of
-// its Google account item in the Vault, which the node fills in only for Google's token address, so no app or agent
+// its Google account item in the Vault, which the app runtime fills in only for Google's token address, so no app or agent
 // ever reads it; signing in is the same in every Google app. Its tools are Drive's own API (v3) by its own names
 // (files_get, files_list, files_create, files_upload, files_update, generate_ids), which agents and other apps
 // (ctx.apps.drive.<tool>) already know.

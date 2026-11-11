@@ -31,7 +31,7 @@ impl Host {
     /// connection it holds to this node, else `Elsewhere`: another node may hold it), for a user over the network
     /// (`one logs`): the one tool of the node's own a call asks.
     pub(in crate) async fn read_logs(&self, req: &CallRequest, input: &Value, me: &Caller) -> Result<Reply> {
-        ensure!(req.tool == "logs", "the node has no tool {}", req.tool);
+        ensure!(req.tool == "logs", "the app runtime has no tool {}", req.tool);
         let target = match &req.device {
             Some(name) => self.with(|i| i.r.db().find_machine(name))?,
             None => self.0.id,
@@ -42,13 +42,13 @@ impl Host {
         if target == self.0.id || target == self.0.holds.device() {
             return Ok(Reply::Ok(::device_logs::read(&self.0.dir, &::device_logs::Ask::from_json(input)?)?));
         }
-        ensure!(self.with(|i| Ok(i.r.db().client(&target)?.is_some()))?, "{name} isn't a client, and a node reads its own log");
+        ensure!(self.with(|i| Ok(i.r.db().client(&target)?.is_some()))?, "{name} isn't a client, and an app runtime reads its own log");
         match self.ask_client(&target, input).await? {
             Some(answer) => Ok(match answer.get("error") {
                 Some(e) => Reply::error(e.as_str().unwrap_or("it failed")),
                 None => Reply::Ok(answer["ok"].clone()),
             }),
-            None => Ok(Reply::Elsewhere(format!("{name} isn't connected to {}: its log is read through a node it's connected to, while its app is open", self.device_name()))),
+            None => Ok(Reply::Elsewhere(format!("{name} isn't connected to {}: its log is read through a device it's connected to, while its app is open", self.device_name()))),
         }
     }
 
@@ -163,8 +163,8 @@ impl Host {
     pub async fn internal(&self, token: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
         use ::api::call::Ask;
         use axum::response::IntoResponse;
-        let grant = &self.grant_of(token).context("only a running call asks the node")?;
-        let ask = path.strip_prefix('/').and_then(Ask::parse).with_context(|| format!("the node has no ask {path}"))?;
+        let grant = &self.grant_of(token).context("only a running call asks the app runtime")?;
+        let ask = path.strip_prefix('/').and_then(Ask::parse).with_context(|| format!("the app runtime has no ask {path}"))?;
         ensure!(!(grant.read_only && ask.writes()), "{}", ::api::call::READ_ONLY);
         let ok = |v: Value| axum::Json(v).into_response();
         Ok(match ask {

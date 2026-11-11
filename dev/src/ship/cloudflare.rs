@@ -1,4 +1,4 @@
-//! Deploying the Workers on Cloudflare and the Cloudflare node, from this machine.
+//! Deploying the Workers on Cloudflare and oned on Cloudflare, from this machine.
 
 use super::*;
 

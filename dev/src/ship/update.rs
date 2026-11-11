@@ -10,15 +10,15 @@ pub(super) enum Part {
     Apps,
     Mac,
     Services,
-    Node,
+    Program,
     Workers,
     Web,
     Dev,
 }
 
-/// What a plain `update` runs, in this order: apps first, as a build without a renamed one is about to go; the node before
+/// What a plain `update` runs, in this order: apps first, as a build without a renamed one is about to go; the program before
 /// the Workers and web client, whose deploy a change to Rust needs it for; this program last, what the rest was sent with.
-pub(super) const ORDER: [Part; 7] = [Part::Apps, Part::Mac, Part::Services, Part::Node, Part::Workers, Part::Web, Part::Dev];
+pub(super) const ORDER: [Part; 7] = [Part::Apps, Part::Mac, Part::Services, Part::Program, Part::Workers, Part::Web, Part::Dev];
 
 impl Part {
     pub(super) fn name(self) -> &'static str {
@@ -26,7 +26,7 @@ impl Part {
             Part::Apps => "apps",
             Part::Mac => "mac",
             Part::Services => "services",
-            Part::Node => "node",
+            Part::Program => "program",
             Part::Workers => "workers",
             Part::Web => "web",
             Part::Dev => "dev",
@@ -89,7 +89,7 @@ impl At {
         Version { commit: self.build_name(), target: "-".into(), committed: self.committed }
     }
 
-    /// The folder of this commit's build, if `update node` or `update dev` has made it here.
+    /// The folder of this commit's build, if `update program` or `update dev` has made it here.
     pub(super) fn build(&self) -> Option<PathBuf> {
         Some(cache().join("builds").join(self.build_name())).filter(|dir| dir.join("config").is_file())
     }
@@ -148,9 +148,9 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<At> {
     match part {
         Some(Part::Workers) => attempt("workers", front(&at, true, false)),
         Some(Part::Web) => attempt("web", front(&at, false, true)),
-        Some(Part::Node) => {
-            attempt("node", send(Part::Node, &at, release));
-            // What went out with the node is only the node; its Workers and web client follow it, as a plain update has them.
+        Some(Part::Program) => {
+            attempt("program", send(Part::Program, &at, release));
+            // What went out with the program is only the program; its Workers and web client follow it, as a plain update has them.
             attempt("workers and web", front(&at, true, true));
         }
         Some(part) => attempt(part.name(), send(part, &at, release)),
@@ -196,7 +196,7 @@ fn send(part: Part, at: &At, release: bool) -> Result<()> {
         Part::Apps => parts.all || !parts.apps.is_empty() || !parts.renamed.is_empty(),
         Part::Mac => parts.mac,
         Part::Services => !services.is_empty(),
-        Part::Node => parts.node,
+        Part::Program => parts.program,
         Part::Dev => parts.dev,
         Part::Workers | Part::Web => unreachable!("sent by `front`"),
     };
@@ -211,7 +211,7 @@ fn send(part: Part, at: &At, release: bool) -> Result<()> {
         }
         Part::Mac => publish_source(at, release)?,
         Part::Services => ensure!(publish_services(&at.src, &services, &release_key()?, &at.commit), "not every service was published"),
-        Part::Node => send_node(at)?,
+        Part::Program => send_program(at)?,
         Part::Dev => send_dev(at)?,
         Part::Workers | Part::Web => unreachable!("sent by `front`"),
     }
@@ -220,9 +220,9 @@ fn send(part: Part, at: &At, release: bool) -> Result<()> {
     Ok(())
 }
 
-/// Builds the node and everything in it, publishes it and waits for this device to run it; the built-in apps are then
+/// Builds the program and everything in it, publishes it and waits for this device to run it; the built-in apps are then
 /// deployed from its build. It is sent once all that is done, so a retry does what didn't happen.
-fn send_node(at: &At) -> Result<()> {
+fn send_program(at: &At) -> Result<()> {
     let key = release_key()?;
     let folder = match at.build() {
         Some(folder) => folder,
@@ -234,7 +234,7 @@ fn send_node(at: &At) -> Result<()> {
     let mut things = Vec::new();
     for (version, program, runtime) in [(version.clone(), "one", "one-apps"), (Version { target: oned_update::platform::WINDOWS.into(), ..version.clone() }, "one.exe", "one-apps.exe")] {
         if folder.join(program).is_file() {
-            things.push((Thing::node_name(&version.target), Some(folder.join(program)), version.clone(), "-".to_string()));
+            things.push((Thing::program_name(&version.target), Some(folder.join(program)), version.clone(), "-".to_string()));
             things.push((Thing::service_name(::scope::scopes::APPS_PART, &version.target), Some(folder.join(runtime)), version, "-".to_string()));
         }
     }
@@ -250,9 +250,9 @@ fn send_node(at: &At) -> Result<()> {
 }
 
 /// Sends the Workers and the web client, each if asked and anything of it changed, with one deploy from this device.
-/// If the node went out at this very commit, they go with its build, which holds both as they are. Otherwise this program
+/// If the program went out at this very commit, they go with its build, which holds both as they are. Otherwise this program
 /// puts them together from the checkout, with no build, and this device deploys them from the record; Rust in the change
-/// is then in the node last sent, which this device has to run first. Rust the node hasn't gone out with waits for it.
+/// is then in the program last sent, which this device has to run first. Rust the program hasn't gone out with waits for it.
 fn front(at: &At, workers: bool, web: bool) -> Result<()> {
     let started = Instant::now();
     let (w, b) = (workers && due(Part::Workers, at).workers, web && due(Part::Web, at).web);
@@ -260,13 +260,13 @@ fn front(at: &At, workers: bool, web: bool) -> Result<()> {
         println!("{}: nothing changed.", if workers && web { "workers and web" } else if workers { "workers" } else { "web" });
         return Ok(());
     }
-    let rust = (w && due(Part::Workers, at).node) || (b && due(Part::Web, at).node);
+    let rust = (w && due(Part::Workers, at).program) || (b && due(Part::Web, at).program);
     if rust {
-        ensure!(!due(Part::Node, at).node, "there's Rust in this change, and the node hasn't gone out with it: {CLI}-dev update node sends this with it");
+        ensure!(!due(Part::Program, at).program, "there's Rust in this change, and the program hasn't gone out with it: {CLI}-dev update program sends this with it");
     }
     let key = release_key()?;
-    let node = Part::Node.last_sent();
-    match at.build().filter(|_| node.as_deref() == Some(at.marked().as_str())) {
+    let program = Part::Program.last_sent();
+    match at.build().filter(|_| program.as_deref() == Some(at.marked().as_str())) {
         Some(folder) => {
             let version = Version::of(&folder.join("one")).context("ask the build what it is")?;
             deploy_cloudflare(Some(&version.commit))?;
@@ -283,7 +283,7 @@ fn front(at: &At, workers: bool, web: bool) -> Result<()> {
             if b {
                 publish_assembled_web(at, &key)?;
             }
-            deploy_cloudflare(rust.then(|| build_name_of(node.as_deref().unwrap_or(""))).as_deref())?;
+            deploy_cloudflare(rust.then(|| build_name_of(program.as_deref().unwrap_or(""))).as_deref())?;
         }
     }
     for (part, wanted) in [(Part::Workers, w), (Part::Web, b)] {
@@ -320,7 +320,7 @@ fn same_rust(at: &At) -> Result<()> {
     // change to dev/ alone doesn't, or any push to it would hold back the Workers and the web client until `update dev`.
     ensure!(!changed_since_built(at).with_context(stale)?.is_built_in(), "{}", stale());
     // A program `rebuild_if_stale` made has neither: a plain cargo build, which doesn't make them. `update dev` sends one that does.
-    ensure!(!ui::carried::ONET.is_empty() && !ui::carried::CLOUDFLARE_NODE.is_empty(), "{CLI}-dev was built without the web client's WebAssembly and the Cloudflare node, which the Workers and the web client are put together with: {CLI}-dev update dev");
+    ensure!(!ui::carried::ONET.is_empty() && !ui::carried::CLOUDFLARE_NODE.is_empty(), "{CLI}-dev was built without the web client's WebAssembly and oned on Cloudflare, which the Workers and the web client are put together with: {CLI}-dev update dev");
     Ok(())
 }
 

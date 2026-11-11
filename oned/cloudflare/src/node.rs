@@ -1,6 +1,6 @@
 //! The Cloudflare node (`oned/cloudflare/node/`) on Cloudflare: a node of the network as a Worker in the account of its other Workers, with
 //! no address of its own, and an iroh endpoint of its own key, which the relay wakes. A release carries its built
-//! WebAssembly (`update node` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the network's
+//! WebAssembly (`update program` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the network's
 //! bucket, each at its latest deploy.
 
 use anyhow::{Context, Result};
@@ -14,7 +14,7 @@ pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
     let files = ::ui::ui_folder::wasm(::ui::carried::CLOUDFLARE_NODE_FILES, ::ui::carried::CLOUDFLARE_NODE);
     let built = |name: &str| {
         let found = files.iter().find(|(n, _)| n == name).map(|(_, b)| b.clone());
-        found.with_context(|| format!("this build of {} has no Cloudflare node: {}-dev update node builds one, on a Linux device with Rust", custom_build::config::NAME, custom_build::config::CLI))
+        found.with_context(|| format!("this build of {} has no oned for Cloudflare: {}-dev update program builds one, on a Linux device with Rust", custom_build::config::NAME, custom_build::config::CLI))
     };
     Ok(modules_from(built("one_cloudflare_node.js")?, built("one_cloudflare_node_bg.wasm")?))
 }
@@ -54,7 +54,7 @@ pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u
 /// the relay again, from `sources`, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<()> {
     anyhow::ensure!(settings.throwaway_user.is_none(), "a throwaway network's Workers run only beside its throwaway network");
-    anyhow::ensure!(settings.cloudflare_node_endpoint().is_some(), "the Cloudflare node has no key: cloudflare node deploy makes one");
+    anyhow::ensure!(settings.cloudflare_node_endpoint().is_some(), "oned on Cloudflare has no key: cloudflare oned deploy makes one");
     let modules = modules()?;
     let name = NODE.worker_name();
     let scripts = cf.scripts()?;

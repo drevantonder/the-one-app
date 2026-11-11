@@ -59,7 +59,7 @@ fn holders(said: &Value) {
         println!("{}", holder["name"].as_str().unwrap_or(""));
         let devices = holder["devices"].as_array().map(Vec::as_slice).unwrap_or_default();
         if devices.is_empty() {
-            println!("  no device that can hold it: a phone, or an app on a computer without a node");
+            println!("  no device that can hold it (only a phone can)");
         }
         for device in devices {
             println!("  {}: {}", device["name"].as_str().unwrap_or(""), if device["holds"] == true { "has it" } else { "doesn't have it yet" });

@@ -66,7 +66,7 @@ pub fn commands() -> Command {
                     g.node.post("/api/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
                     let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
                     match (*how, *name == scope::scopes::APPS_PART) {
-                        _ if device.is_some_and(|d| d.eq_ignore_ascii_case(scope::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),
+                        _ if device.is_some_and(|d| d.eq_ignore_ascii_case(scope::rank::CLOUDFLARE)) => println!("{name} is switched {how} on Cloudflare."),
                         ("off", true) => println!("Apps' calls no longer run {there}."),
                         (_, true) => println!("Apps' calls run {there} again."),
                         ("off", _) => println!("{name} is switched off {there}."),

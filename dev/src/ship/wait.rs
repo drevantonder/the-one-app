@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use super::*;
 
-/// This user's own devices, as this one sees them now: none while its node restarts.
+/// This user's own devices, as this one sees them now: none while its program restarts.
 pub(super) fn devices() -> Vec<Value> {
     let state = crate::node().get("/api/state").unwrap_or_default();
     let me = state["network"]["user"].clone();
@@ -42,7 +42,7 @@ pub(super) fn limit(g: &api::cli::Given, default: u64) -> Result<Duration> {
 /// back. Why one hasn't yet is what its own node says (`updating`).
 pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     keep_history()?;
-    // Says so when no node answers, which later polls (a node restarting on the new build) never do.
+    // Says so when no program answers, which later polls (a node restarting on the new build) never do.
     crate::node().get("/api/state")?;
     let all: Vec<Value> = devices();
     ensure!(!all.is_empty(), "no devices are listed here yet");
@@ -108,7 +108,7 @@ fn goal(commit: &str, target: &str, record: Option<&Latest>, fetched: &mut std::
         return commit.to_string();
     }
     let parts = Parts::of(String::from_utf8_lossy(&out.stdout).lines());
-    if if oned_update::latest::is_mac(target) { parts.mac } else { parts.node } { commit.to_string() } else { published.commit.clone() }
+    if if oned_update::latest::is_mac(target) { parts.mac } else { parts.program } { commit.to_string() } else { published.commit.clone() }
 }
 
 /// The signed record at the network's address, if it can be read now.

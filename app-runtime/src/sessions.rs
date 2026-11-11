@@ -180,7 +180,7 @@ impl Host {
     /// a node's word alone runs no service. → the call's credential.
     pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope], service: bool) -> Result<Credential> {
         let handoff = ::api::handed::open_handoff(&self.seal_secret(), sealed)?;
-        ensure!(handoff.for_ == hex(from), "the keys handed are for another node");
+        ensure!(handoff.for_ == hex(from), "the keys handed are for another app runtime");
         ensure!(!service || !handoff.keys.is_empty(), "a service's call passed on comes with the keys its user handed");
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         ensure!(handoff.keys.iter().all(|k| named.contains(&k.scope)), "the keys handed are of a scope the call doesn't name");

@@ -133,7 +133,7 @@ pub fn dir(name: &str) -> PathBuf {
 /// The script, run as root, that lets this machine's user start services in their sandbox: the unit template and
 /// the polkit rule, and polkit itself if it's missing. `<cli> services sandbox | sudo sh`; install.sh runs it.
 pub fn setup_script() -> Result<String> {
-    let user = std::env::var("USER").ok().filter(|u| !u.is_empty() && u != "root").context("run it as the node's user, not root: <cli> services sandbox | sudo sh")?;
+    let user = std::env::var("USER").ok().filter(|u| !u.is_empty() && u != "root").context("run it as the computer's user, not root: <cli> services sandbox | sudo sh")?;
     ensure!(user.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)), "{user} isn't a user name this can write");
     let home = platform::user_home();
     let home = home.to_str().filter(|h| !h.contains(['\n', '"', '\'', '\\', '$', '`', ' '])).context("the home folder's path has characters a unit can't take")?;

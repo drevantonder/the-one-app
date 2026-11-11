@@ -69,7 +69,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     let mut ui = ui;
     let words: Vec<&str> = rest.iter().map(String::as_str).collect();
     let browser = words.first() == Some(&"client") && (words.get(1) == Some(&"web") || words.contains(&"--as"));
-    if build.is_none() && (browser || words == ["cloudflare", "node", "deploy"]) {
+    if build.is_none() && (browser || words == ["cloudflare", "oned", "deploy"]) {
         rebuild::web_client_and_cloudflare_node(&checkout)?;
         ui = ui.or_else(|| Throwaway::ui_in(&dir).is_none().then(|| checkout.clone()));
     }
@@ -101,7 +101,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     if given {
         eprintln!("Its pages and screens are read from there now, and again by each command here. Its Workers' own code is read when they start: {} throwaway restart, once you've changed that.", dev());
     }
-    if rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"]) {
+    if rest.iter().map(String::as_str).eq(["cloudflare", "oned", "deploy"]) {
         return cloudflare_node(&dir);
     }
     if rest.first().map(String::as_str) == Some("restart") {
@@ -170,7 +170,7 @@ pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
     use oned_update::latest::Thing;
     let runtime = build.with_file_name(format!("one-apps{}", std::env::consts::EXE_SUFFIX));
     let things = [
-        (Thing::node_name(&version.target), Some(build.clone()), version.clone(), "-".into()),
+        (Thing::program_name(&version.target), Some(build.clone()), version.clone(), "-".into()),
         (Thing::service_name(::scope::scopes::APPS_PART, &version.target), Some(runtime), version.clone(), "-".into()),
         (Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()),
         (Thing::WEB.into(), Some(web), version.clone(), "-".into()),
@@ -250,7 +250,7 @@ fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Runs the throwaway network's Cloudflare node beside its Workers, in their workerd, as `cloudflare node deploy` puts one in
+/// Runs the throwaway network's Cloudflare node beside its Workers, in their workerd, as `cloudflare oned deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
 fn cloudflare_node(dir: &Path) -> Result<()> {
     let mut settings = oned_cloudflare::Settings::load_in(dir)?;
@@ -261,9 +261,9 @@ fn cloudflare_node(dir: &Path) -> Result<()> {
         start(dir)?;
     }
     let addr = running(dir).context("the throwaway network didn't start again")?;
-    let key = settings.cloudflare_node_endpoint().context("the throwaway network's Workers have no Cloudflare node key")?;
+    let key = settings.cloudflare_node_endpoint().context("the throwaway network's Workers have no key for oned on Cloudflare")?;
     node_at(dir, &addr).post("/api/settings", json!({ "name": scope::scopes::CLOUDFLARE_NODE, "value": key }))?;
-    println!("The throwaway network's Cloudflare node runs beside its Workers, its endpoint {}.", &key[..8]);
+    println!("The throwaway network's oned on Cloudflare runs beside its Workers, its endpoint {}.", &key[..8]);
     Ok(())
 }
 
@@ -298,7 +298,7 @@ fn commands(mcp: &str) -> api::cli::Command {
             form("throwaway <command>", format!("any command, in it: {CLI}-dev throwaway status, {CLI}-dev throwaway apps, {CLI}-dev throwaway repos list")),
             form("throwaway mcp", format!("its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}")),
             form("throwaway git <args>", format!("git, reaching its repos at its address: {CLI}-dev throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI}-dev throwaway git push in the clone")),
-            form("throwaway cloudflare node deploy", "run its Cloudflare node beside its Workers, as Cloudflare would".into()),
+            form("throwaway cloudflare oned deploy", "run its oned on Cloudflare beside its Workers, as Cloudflare would".into()),
             form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows. mac and iphone build on the Mac and stop that build if the command is killed or takes 9 minutes: run it again to build on from what was built".into()),
             form("throwaway client <kind> --as sam", "the same, as someone else, invited by you with Add Someone's link".into()),
             form("throwaway publish", "publish this checkout's build to it under its own release key, for its device to take, and Update on Cloudflare in Devices to redeploy its Workers with; give it an older build first with --build".into()),

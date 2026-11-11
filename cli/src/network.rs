@@ -135,7 +135,7 @@ fn status(node: &Client, state: &State) {
             Priority::Number(n) => n.to_string(),
             Priority::Last => "last".to_string(),
         };
-        println!("  {}  the Cloudflare node, run priority {at}", ::scope::rank::CLOUDFLARE);
+        println!("  {}  Cloudflare, run priority {at}", ::scope::rank::CLOUDFLARE);
     }
     // A device that's only a client (a phone, a computer, a browser) is listed with them; a passkey isn't one, and a
     // device with an app runtime of its own is listed as that runtime, above.

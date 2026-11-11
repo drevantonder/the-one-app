@@ -744,17 +744,17 @@ impl Devices {
         Ok(super::picture_answer(&b, format!("{} now, {w}x{h}; its own screen is {}x{}, the pixels x and y are in.", v.name, img.width(), img.height())))
     }
 
-    /// Whose a port is, of what only this machine's own programs use on its 127.0.0.1: its node's (its local API, and
-    /// its apps' runtime and their requests out), adb's server, which drives every phone here, Agent Devices' viewer,
+    /// Whose a port is, of what only this machine's own programs use on its 127.0.0.1: its onet's (its local API, and
+    /// what it starts), adb's server, which drives every phone here, Agent Devices' viewer,
     /// and each device's controls, screen and shell. "" if it's none of those.
     fn local_only(&self, port: u16) -> String {
-        let node_port = self.host.port();
-        if node_port == port {
-            return "this machine's node's".into();
+        let onet_port = self.host.port();
+        if onet_port == port {
+            return "this computer's onet's".into();
         }
-        let node = listeners(node_port);
-        if !node.is_empty() && listeners(port).iter().any(|pid| node.contains(pid) || node.contains(&parent(*pid))) {
-            return "this machine's node's".into();
+        let onet = listeners(onet_port);
+        if !onet.is_empty() && listeners(port).iter().any(|pid| onet.contains(pid) || onet.contains(&parent(*pid))) {
+            return "this computer's onet's".into();
         }
         if port == ADB_PORT {
             return "adb's".into();

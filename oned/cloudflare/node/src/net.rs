@@ -274,7 +274,7 @@ async fn request(recv: &mut iroh::endpoint::RecvStream) -> Result<(String, Strin
 /// What `worker.js` answers a request, as an HTTP/1.1 response.
 async fn respond(remote: &str, method: &str, path: &str, headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
     let failed = |why: String| reply(503, &[("content-type".into(), "application/json".into())], json(&why).as_bytes());
-    let Some(asked) = ASKED.with(|a| a.borrow().clone()) else { return failed("the Cloudflare node isn't started".into()) };
+    let Some(asked) = ASKED.with(|a| a.borrow().clone()) else { return failed("oned on Cloudflare isn't started".into()) };
     let flat = js_sys::Array::new();
     for (name, value) in headers {
         flat.push(&name.into());

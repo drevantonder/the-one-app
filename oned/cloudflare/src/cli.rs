@@ -23,7 +23,7 @@ fn devices_here(node: &Client, settings: crate::Settings, needed: bool) -> Resul
             json!({ "key": key, "role": roles.join(" "), "admin": admin(user) })
         })
         .collect();
-    anyhow::ensure!(!needed || !devices.is_empty(), "no node of {YOURS} answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new network, whose relay takes devices once this runs again beside one");
+    anyhow::ensure!(!needed || !devices.is_empty(), "no app runtime of {YOURS} answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new network, whose relay takes devices once this runs again beside one");
     // The network's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes, as
     // an admin's if its user is one.
     devices.extend(network.as_ref().and_then(|n| n.recovery.as_ref()).map(|k| json!({ "key": k, "role": "client", "admin": false, "recovery": true })));
@@ -109,7 +109,7 @@ fn cloudflare_said(s: &crate::Settings) -> String {
         out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth)\n", s.ports[1], s.ports[0]);
     }
     if !s.resources.is_empty() {
-        out += &format!("  nodes     {}\n", s.resources.join(", "));
+        out += &format!("  resources {}\n", s.resources.join(", "));
     }
     out += &format!("  bucket    {}\n", s.bucket.as_ref().map(|b| format!("{} in {}", b["bucket"].as_str().unwrap_or("?"), b["endpoint"].as_str().unwrap_or("?"))).unwrap_or("none yet: cloudflare set bucket -".into()));
     if !s.android.is_empty() {
@@ -124,10 +124,10 @@ pub fn commands() -> Command {
         help: vec![
             ("cloudflare".into(), "the network's Workers on Cloudflare, as this machine has them: their addresses and settings".into()),
             ("cloudflare serve [--address <url>]".into(), "run the network's Workers in workerd (auth, the relay, the URL signer, and the gateway users reach at the network's address) on this machine; the first time, with that address".into()),
-            ("cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]".into(), format!("deploy the network's Workers to Cloudflare, with their settings from 1Password where they're kept there, and an API token that may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's domains ({CLI}-<service>.<domain>, the network's address {CLI}.<domain> unless --address says, for good: passkeys belong to it), or at its workers.dev address; and the Cloudflare node with it, once cloudflare node deploy put it there; beside a node of the network, whose devices its relay takes, unless --new")),
-            ("cloudflare node deploy [--account <id>]".into(), "put the network's Cloudflare node in its Workers' Cloudflare account (a node as a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over iroh when none of your machines answers".into()),
-            ("cloudflare set <setting> <value>".into(), "change one: auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or android (the SHA-256 fingerprints of the certificates the Android app is signed with, comma-separated, or -: links to the address open the app)".into()),
-            ("cloudflare use <address>".into(), "point this network at its Workers: its nodes take sign-ins made at the address".into()),
+            ("cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]".into(), format!("deploy the network's Workers to Cloudflare, with their settings from 1Password where they're kept there, and an API token that may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's domains ({CLI}-<service>.<domain>, the network's address {CLI}.<domain> unless --address says, for good: passkeys belong to it), or at its workers.dev address; and the Cloudflare node with it, once cloudflare oned deploy put it there; beside a node of the network, whose devices its relay takes, unless --new")),
+            ("cloudflare oned deploy [--account <id>]".into(), "put oned on Cloudflare in the network's Workers' Cloudflare account (an app runtime as a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over iroh when none of your computers answers".into()),
+            ("cloudflare set <setting> <value>".into(), "change one: auth-url, resources (computers' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or android (the SHA-256 fingerprints of the certificates the Android app is signed with, comma-separated, or -: links to the address open the app)".into()),
+            ("cloudflare use <address>".into(), "point this network at its Workers: its devices take sign-ins made at the address".into()),
         ],
         run: |g| {
             let node = g.node;
@@ -206,7 +206,7 @@ pub fn commands() -> Command {
                     put_up(&cf, &mut settings, newest)?;
                     settings.save()?;
                     if let Err(err) = workers_ai_key(&cf, node) {
-                        eprintln!("Apps' AI won't answer with Workers AI until a deploy makes its key, with a token that may make tokens, beside a node of the network: {err:#}");
+                        eprintln!("Apps' AI won't answer with Workers AI until a deploy makes its key, with a token that may make tokens, beside a computer of the network: {err:#}");
                     }
                     // The clients its users sign in with, signed by this admin's device: a new device's sign-in counts
                     // only for one of them (`sign_in_proof::CLIENTS`), whatever auth says.
@@ -220,7 +220,7 @@ pub fn commands() -> Command {
                     }
                     print!("Deployed.\n{}", cloudflare_said(&settings));
                 }
-                ["cloudflare", "node", "deploy"] => {
+                ["cloudflare", "oned", "deploy"] => {
                     if let Err(err) = crate::Settings::from_1password(false)
                         && !crate::Settings::path().exists()
                     {
@@ -242,7 +242,7 @@ pub fn commands() -> Command {
                     // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
                     // things run in.
                     node.post("/api/settings", json!({ "name": ::scope::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
-                    println!("The Cloudflare node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
+                    println!("oned is on your Cloudflare account: devices ask it over iroh when none of your computers answers.");
                 }
                 ["cloudflare", "set", name, value] => {
                     let mut settings = crate::Settings::load()?;
@@ -273,7 +273,7 @@ pub fn commands() -> Command {
                 }
                 ["cloudflare", "use", address] => {
                     node.post("/api/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
-                    println!("This network is at {address}: its nodes take sign-ins made there.");
+                    println!("This network is at {address}: its devices take sign-ins made there.");
                 }
                 _ => return Ok(false),
             }

@@ -93,7 +93,7 @@ impl Client {
 
     /// The network as this node says it (`GET /api/state`).
     pub fn state(&self) -> Result<scope::state::State> {
-        serde_json::from_value(self.get("/api/state")?).context("the node's answer isn't a state: it may be a different build than this one")
+        serde_json::from_value(self.get("/api/state")?).context("the answer isn't a state: the device answering may be a different build than this one")
     }
 
     pub fn post(&self, path: &str, body: Value) -> Result<Value> {

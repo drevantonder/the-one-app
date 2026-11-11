@@ -6,7 +6,7 @@ use ::api::cli::Command;
 
 pub fn commands() -> Command {
     Command {
-        help: vec![("logs <device> [--service <name>] [--since <10m>] [--grep <text>] [--lines <n>]".into(), "a device's node log, or one of its services', or an app's (what its page and app say went wrong, while it's open), read over the network, newest last, capped (the last 200 lines, at most 1000 or 48 KiB); only its user and the network's admins read them. --since takes s, m, h or d".into())],
+        help: vec![("logs <device> [--service <name>] [--since <10m>] [--grep <text>] [--lines <n>]".into(), "a device's app runtime's log, or one of its services', or an app's (what its page and app say went wrong, while it's open), read over the network, newest last, capped (the last 200 lines, at most 1000 or 48 KiB); only its user and the network's admins read them. --since takes s, m, h or d".into())],
         run: |g| {
             let words = g.words();
             let ["logs", device] = words.as_slice() else { return Ok(false) };

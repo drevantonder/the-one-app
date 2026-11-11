@@ -147,7 +147,7 @@ impl Host {
     pub fn put_blob(&self, body: impl std::io::Read + Send + 'static) -> Result<(String, u64)> {
         let resp = self.agent.post(format!("{}/api/blobs", self.node)).header("content-type", "application/octet-stream").send(ureq::SendBody::from_owned_reader(body));
         let put = answer(resp)?.unwrap_or_default();
-        let blob = put["blob"].as_str().filter(|b| !b.is_empty()).ok_or_else(|| anyhow!("the node kept no blob"))?;
+        let blob = put["blob"].as_str().filter(|b| !b.is_empty()).ok_or_else(|| anyhow!("the app runtime kept no blob"))?;
         Ok((blob.to_string(), put["size"].as_u64().unwrap_or(0)))
     }
 

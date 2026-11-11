@@ -445,7 +445,7 @@ impl Client {
     {
         let certificate = self.0.certificate.lock().unwrap().clone();
         let again = matches!(req.method.as_str(), "GET" | "HEAD");
-        let mut why = unsent("there's no node to ask");
+        let mut why = unsent("there's no device to ask");
         let mut tries = Some(Trace { start: Instant::now(), tries: Vec::new() });
         let traces = |tries: &mut Option<Trace>, node: Option<serde_json::Value>| tries.as_mut().map(|t| serde_json::json!({ "tries": std::mem::take(&mut t.tries), "node": node }));
         let (mut skipped, mut fresh, mut only, mut followed, mut reconnected, mut asked_local_again) = (Vec::new(), Vec::new(), None::<Vec<PublicKey>>, 0, false, false);
@@ -458,7 +458,7 @@ impl Client {
                 let began = Instant::now();
                 match self.ask_local(&local, &req).await {
                     Ok(mut response) => {
-                        let key = PublicKey::from_bytes(&local.key).map_err(|_| unsent("a node's key isn't a key"))?;
+                        let key = PublicKey::from_bytes(&local.key).map_err(|_| unsent("a device's key isn't a key"))?;
                         tried(&mut tries, &key, began, "answered", None);
                         let theirs = response.headers.iter().find(|h| h.0 == header::TRACE).and_then(|h| data_encoding::BASE64.decode(h.1.as_bytes()).ok()).and_then(|b| serde_json::from_slice(&b).ok());
                         response.trace = traces(&mut tries, theirs);
@@ -610,7 +610,7 @@ impl Client {
         let mut queue: VecDeque<(PublicKey, Duration)> = first.iter().enumerate().map(|(i, k)| (*k, if i > 0 && ranks.get(k).is_some_and(|r| ranks.get(&first[i - 1]) == Some(r)) { Duration::ZERO } else { STAGGER })).collect();
         queue.extend(fallback.iter().enumerate().map(|(i, k)| (*k, if i == 0 { FALLBACK } else { Duration::ZERO })));
         let (sent, mut results) = tokio::sync::mpsc::unbounded_channel();
-        let (mut racing, mut started, mut why) = (0, Instant::now(), unsent("there's no node to ask"));
+        let (mut racing, mut started, mut why) = (0, Instant::now(), unsent("there's no device to ask"));
         loop {
             // Each that's due: the first at once, the next once its wait is up, or at once if none is racing.
             while let Some((key, wait)) = queue.front().copied()
@@ -692,7 +692,7 @@ impl Client {
                 #[cfg(feature = "relayed")]
                 Way::Custom(_) => EndpointAddr::from_parts(*node, [iroh::TransportAddr::Custom(relayed::through_relay(node.as_bytes()))]),
             };
-            let conn = endpoint.connect(addr, &alpn()).await.map_err(|err| unsent(format!("the node couldn't be reached: {err}")))?;
+            let conn = endpoint.connect(addr, &alpn()).await.map_err(|err| unsent(format!("the device couldn't be reached: {err}")))?;
             self.answering(&conn);
             *held = Some(conn.clone());
             Ok((conn, false))
@@ -710,7 +710,7 @@ impl Client {
             }
             Err(_) => {
                 self.give_up(node);
-                Err(unsent("the node isn't connected"))
+                Err(unsent("the device isn't connected"))
             }
         }
     }
@@ -727,7 +727,7 @@ impl Client {
                     let answer = match (asked, recv.read_to_end(ASKED_LIMIT).await.map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string()))) {
                         (None, _) => serde_json::json!({ "error": "this device keeps no log" }),
                         (Some(asked), Ok(ask)) => asked(ask),
-                        (_, Err(err)) => serde_json::json!({ "error": format!("what the node asked didn't read: {err}") }),
+                        (_, Err(err)) => serde_json::json!({ "error": format!("what the device asked didn't read: {err}") }),
                     };
                     let _ = send.write_all(answer.to_string().as_bytes()).await;
                     let _ = send.finish();
@@ -751,14 +751,14 @@ impl Client {
     }
 
     async fn exchange(&self, node: &PublicKey, conn: &Connection, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {
-        let usual = format!("node {}", data_encoding::HEXLOWER.encode(node.as_bytes()));
+        let usual = format!("device {}", data_encoding::HEXLOWER.encode(node.as_bytes()));
         let limit = platform::hedge::limit(&usual).max(ANSWER_LEAST);
         // A connection gone quiet takes no more streams once its peer's allowance is used: nothing was sent.
         let (mut send, recv) = match timeout(limit, conn.open_bi()).await {
             Ok(opened) => opened.map_err(unsent)?,
             Err(_) => {
                 self.give_up(node);
-                return Err(unsent("the node isn't taking requests"));
+                return Err(unsent("the device isn't taking requests"));
             }
         };
         let sending = async {
@@ -779,7 +779,7 @@ impl Client {
                 }
                 Err(_) => {
                     self.give_up(node);
-                    Err(sent("the node didn't answer"))
+                    Err(sent("the device didn't answer"))
                 }
             }
         } else {
@@ -790,7 +790,7 @@ impl Client {
 }
 
 fn keys(nodes: &[[u8; 32]]) -> Result<Vec<PublicKey>, Error> {
-    nodes.iter().map(PublicKey::from_bytes).collect::<Result<Vec<_>, _>>().map_err(|_| unsent("a node's key isn't a key"))
+    nodes.iter().map(PublicKey::from_bytes).collect::<Result<Vec<_>, _>>().map_err(|_| unsent("a device's key isn't a key"))
 }
 
 struct Trace {
@@ -809,10 +809,10 @@ fn tried(trace: &mut Option<Trace>, key: &PublicKey, began: Instant, result: &st
 
 fn failure(err: &Error) -> &'static str {
     match err.message.as_str() {
-        "the node isn't connected" => "no connection",
-        "the node isn't taking requests" => "not taking requests",
-        "the node didn't answer" => "no answer",
-        m if m.starts_with("the node couldn't be reached") => "unreachable",
+        "the device isn't connected" => "no connection",
+        "the device isn't taking requests" => "not taking requests",
+        "the device didn't answer" => "no answer",
+        m if m.starts_with("the device couldn't be reached") => "unreachable",
         _ if err.sent => "lost",
         _ => "failed",
     }
@@ -900,7 +900,7 @@ async fn read_response(recv: &mut Stream, head_only: bool) -> Result<(u16, Vec<(
     loop {
         let mut list = [httparse::EMPTY_HEADER; 100];
         let mut parsed = httparse::Response::new(&mut list);
-        match parsed.parse(&buf).map_err(|e| sent(format!("the node's response: {e}")))? {
+        match parsed.parse(&buf).map_err(|e| sent(format!("the device's response: {e}")))? {
             httparse::Status::Complete(len) => {
                 let status = parsed.code.unwrap_or(0);
                 let headers: Vec<(String, String)> = parsed.headers.iter().map(|h| (h.name.to_ascii_lowercase(), String::from_utf8_lossy(h.value).into_owned())).collect();
@@ -910,17 +910,17 @@ async fn read_response(recv: &mut Stream, head_only: bool) -> Result<(u16, Vec<(
                 } else if header("transfer-encoding").is_some_and(|t| t.contains("chunked")) {
                     Framing::Size
                 } else if let Some(length) = header("content-length") {
-                    Framing::Length(length.trim().parse().map_err(|_| sent("the node's response has a bad length"))?)
+                    Framing::Length(length.trim().parse().map_err(|_| sent("the device's response has a bad length"))?)
                 } else {
                     Framing::Close
                 };
                 let body = Body { recv: None, buf: buf.split_off(len), framing };
                 return Ok((status, headers, body));
             }
-            httparse::Status::Partial if buf.len() > HEAD_LIMIT => return Err(sent("the node's response's head is too long")),
+            httparse::Status::Partial if buf.len() > HEAD_LIMIT => return Err(sent("the device's response's head is too long")),
             httparse::Status::Partial => {
                 if !more(recv, &mut buf).await? {
-                    return Err(sent("the node closed the stream without answering"));
+                    return Err(sent("the device closed the stream without answering"));
                 }
             }
         }
@@ -928,7 +928,7 @@ async fn read_response(recv: &mut Stream, head_only: bool) -> Result<(u16, Vec<(
 }
 
 async fn more(recv: &mut Stream, buf: &mut Vec<u8>) -> Result<bool, Error> {
-    match recv.read().await.map_err(|e| sent(format!("reading the node's response: {e}")))? {
+    match recv.read().await.map_err(|e| sent(format!("reading the device's response: {e}")))? {
         Some(chunk) => {
             buf.extend_from_slice(&chunk);
             Ok(true)
@@ -975,7 +975,7 @@ impl Body {
                 Framing::Length(0) => self.framing = Framing::Done,
                 Framing::Length(n) | Framing::Data(n) => {
                     if self.buf.is_empty() && !self.more().await? {
-                        return Err(sent("the node's response ended early"));
+                        return Err(sent("the device's response ended early"));
                     }
                     let take = self.buf.len().min(n.try_into().unwrap_or(usize::MAX));
                     let part: Vec<u8> = self.buf.drain(..take).collect();
@@ -998,7 +998,7 @@ impl Body {
                 Framing::DataEnd => {
                     let line = self.line().await?;
                     if !line.is_empty() {
-                        return Err(sent("the node's response is badly chunked"));
+                        return Err(sent("the device's response is badly chunked"));
                     }
                     self.framing = Framing::Size;
                 }
@@ -1012,7 +1012,7 @@ impl Body {
                             self.framing = Framing::Done;
                         }
                         Some(n) => self.framing = Framing::Data(n),
-                        None => return Err(sent("the node's response is badly chunked")),
+                        None => return Err(sent("the device's response is badly chunked")),
                     }
                 }
             }
@@ -1028,7 +1028,7 @@ impl Body {
         let mut out = Vec::new();
         while let Some(part) = self.chunk().await? {
             if out.len() + part.len() > most {
-                return Err(sent(format!("the node's response is over {most} bytes")));
+                return Err(sent(format!("the device's response is over {most} bytes")));
             }
             out.extend_from_slice(&part);
         }
@@ -1050,7 +1050,7 @@ impl Body {
                 return Ok(line);
             }
             if self.buf.len() > 4096 || !self.more().await? {
-                return Err(sent("the node's response is badly chunked"));
+                return Err(sent("the device's response is badly chunked"));
             }
         }
     }

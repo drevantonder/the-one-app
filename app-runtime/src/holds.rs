@@ -203,7 +203,7 @@ async fn write(State(host): State<Host>, Body(body): Body<HeldWrite>) -> Reply {
 
 /// Signs a request to the relay or auth as the device (`sign_request`).
 async fn sign(State(host): State<Host>, Body(body): Body<HeldSign>) -> Reply {
-    let Holds::Key(key) = &host.0.holds else { return Err(anyhow!("this node doesn't hold its device's key").into()) };
+    let Holds::Key(key) = &host.0.holds else { return Err(anyhow!("this app runtime doesn't hold its device's key").into()) };
     let signature = sign_request(key, &B64U.decode(body.bytes.as_bytes()).map_err(anyhow::Error::from)?)?;
     Ok(axum::Json(json!({ "signature": B64U.encode(&signature) })))
 }

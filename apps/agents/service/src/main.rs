@@ -22,7 +22,7 @@ fn main() -> Result<()> {
     let default = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".local/share")).join(&cli).join("agents");
     let writes = one_service::dir("agents") == default;
     if !writes {
-        eprintln!("agents: its node has a home of its own, so it leaves this machine's harnesses alone");
+        eprintln!("agents: its device has a home of its own, so it leaves this machine's harnesses alone");
     }
     let _ = HERE.set((cli, writes));
     one_service::serve(Service { name: "agents", prefer_here: &[], call, start: Some(start) })

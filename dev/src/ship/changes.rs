@@ -5,8 +5,8 @@ use super::*;
 /// What a change to the repo has to send out.
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct Parts {
-    /// The node: built, and taken by every device.
-    pub(super) node: bool,
+    /// The program: built, and taken by every device.
+    pub(super) program: bool,
     /// The Mac app, which each Mac builds.
     pub(super) mac: bool,
     /// Built-in apps, by name, each deployed on its own.
@@ -35,19 +35,19 @@ impl Parts {
 
     /// Whether the change is in what this program is built with, which the Workers and the web client are put together with
     /// (the client's WebAssembly, the config's logo and name): Rust anywhere, or the client. A change to dev/ alone is
-    /// only to this program, and the Cloudflare node's is built for the node; neither is in what it puts together.
+    /// only to this program, and oned on Cloudflare's is built for the program; neither is in what it puts together.
     pub(super) fn is_built_in(&self) -> bool {
-        self.node && self.dev
+        self.program && self.dev
     }
 
-    /// What a change to Rust, or to anything not known to be outside the node, sends: all of it.
+    /// What a change to Rust, or to anything not known to be outside the program, sends: all of it.
     fn rust() -> Parts {
-        Parts { node: true, mac: true, dev: true, workers: true, web: true, ..Default::default() }
+        Parts { program: true, mac: true, dev: true, workers: true, web: true, ..Default::default() }
     }
 
     pub(super) fn add_rust(&mut self) {
-        let Parts { node, mac, dev, workers, web, .. } = Parts::rust();
-        (self.node, self.mac, self.dev, self.workers, self.web) = (node, mac, dev, workers, web);
+        let Parts { program, mac, dev, workers, web, .. } = Parts::rust();
+        (self.program, self.mac, self.dev, self.workers, self.web) = (program, mac, dev, workers, web);
     }
 
     /// What changed from the commit `last` says (and its config's) to `this`'s.
@@ -58,7 +58,7 @@ impl Parts {
             return Parts::everything();
         };
         let mut parts = Parts::of(files.lines().filter_map(|l| l.split_once('\t')).map(|(_, f)| f));
-        // A new built-in app is in the node's next build, which adds it.
+        // A new built-in app is in the program's next build, which adds it.
         if files.lines().any(|l| l.strip_prefix("A\tapps/").is_some_and(|f| f.ends_with("/app.js") && f.matches('/').count() == 1)) {
             parts.add_rust();
         }
@@ -76,7 +76,7 @@ impl Parts {
         parts
     }
 
-    /// What changing `files` (paths in the repo) has to send out. Anything not known to be outside the node is in it.
+    /// What changing `files` (paths in the repo) has to send out. Anything not known to be outside the program is in it.
     pub(super) fn of<'a>(files: impl IntoIterator<Item = &'a str>) -> Parts {
         let mut parts = Parts::default();
         for file in files {
@@ -114,35 +114,35 @@ impl Parts {
                 // The Workers' sources but for the web client's: the Workers alone. The relay's protos only make its
                 // WebAssembly by hand.
                 Some("relay") if file.starts_with("relay/protos/") || file == "relay/build.sh" => {}
-                // What every Worker answers HTTP with, which the Cloudflare node carries too.
-                Some("gateway") if file == "gateway/http.js" => (parts.node, parts.workers) = (true, true),
+                // What every Worker answers HTTP with, which oned on Cloudflare carries too.
+                Some("gateway") if file == "gateway/http.js" => (parts.program, parts.workers) = (true, true),
                 Some("relay" | "auth" | "gateway" | "url-signer") => parts.workers = true,
                 // Notifications' Worker; the rest of the folder is Rust.
                 Some("notifications") if file.starts_with("notifications/worker/") => parts.workers = true,
                 // The telemetry Worker; the rest of the folder is Rust.
                 Some("insights") if file.starts_with("insights/worker/") => parts.workers = true,
-                // The Cloudflare node is Rust, built with the node; the remote MCP server runs that build, so the Workers
+                // oned on Cloudflare is Rust, built with the program; the remote MCP server runs that build, so the Workers
                 // go out with it.
-                Some("oned") if file.starts_with("oned/cloudflare/node/") => (parts.node, parts.workers) = (true, true),
+                Some("oned") if file.starts_with("oned/cloudflare/node/") => (parts.program, parts.workers) = (true, true),
                 // The update path's tests stay in the repo.
                 Some("oned") if file.starts_with("oned/update/tests/") => {}
                 // What the web client is made of: the native apps' bundle, and the Workers that serve it.
                 Some("key") if file == "key/crypto.js" => (parts.web, parts.workers) = (true, true),
                 Some("onet") if file.starts_with("onet/web/") => (parts.web, parts.workers) = (true, true),
-                // The screens' kit, the client's own screens (the frame's and each feature's) and the sign-in pages: nodes
+                // The screens' kit, the client's own screens (the frame's and each feature's) and the sign-in pages: devices
                 // hold a copy, but what shows is the web client's (`screens.js`). Phosphor's icons are built into the
                 // native apps' widgets too.
                 Some("ui") if !file.ends_with(".rs") && !file.ends_with("Cargo.toml") && !file.starts_with("ui/vendor/") => (parts.web, parts.workers) = (true, true),
                 Some(_) if file.split('/').nth(1) == Some("screens") => (parts.web, parts.workers) = (true, true),
                 Some("onboarding") if !file.ends_with(".rs") && !file.ends_with("Cargo.toml") => (parts.web, parts.workers) = (true, true),
-                // The native app (native-apps) is its own workspace, not in the node: the Mac app, but for Windows' and
+                // The native app (native-apps) is its own workspace, not in the program: the Mac app, but for Windows' and
                 // Android's own (native-apps/windows/, native-apps/android/), which no update sends out.
                 Some("native-apps") if file.starts_with("native-apps/windows/") || file.starts_with("native-apps/android/") => {}
                 Some("native-apps") if file.starts_with("native-apps/") => parts.mac = true,
                 // The remote MCP server's Worker; the rest of the folder is Rust.
                 Some("onet") if file.starts_with("onet/worker/") => parts.workers = true,
-                // onet is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
-                Some("onet") => (parts.node, parts.mac, parts.web, parts.dev) = (true, true, true, true),
+                // onet is the Macs', and in the program too: its WebAssembly is the web client's, and oned on Cloudflare's.
+                Some("onet") => (parts.program, parts.mac, parts.web, parts.dev) = (true, true, true, true),
                 Some("tests") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
                 _ => parts.add_rust(),
@@ -167,31 +167,31 @@ mod tests {
         assert_eq!(of(&["apps/whatsapp/service/main.go"]), Parts { services: vec!["whatsapp".into()], ..Default::default() });
         assert!(of(&["services/sdk/src/lib.rs"]).service && of(&["services/sdk/src/lib.rs"]).mac);
         let swift = of(&["apps/computer/service/Computer.swift"]);
-        assert!(swift.mac && !swift.node, "a service in Swift is a Mac's to build");
+        assert!(swift.mac && !swift.program, "a service in Swift is a Mac's to build");
         let rust = of(&["apps/awake/service/src/main.rs"]);
         assert!(rust.mac && rust.services == ["awake"], "a service in Rust is built on Linux and on a Mac");
         assert!(!of(&["apps/whatsapp/service/main.go"]).mac);
         let helpers = of(&["services/sdk/swift/Helper.swift"]);
         assert!(helpers.mac && !helpers.service, "what the Swift services are built on is the Mac app's to build");
         let native = of(&["native-apps/mac/build.sh"]);
-        assert!(!native.node && native.mac);
+        assert!(!native.program && native.mac);
         assert_eq!(of(&["native-apps/windows/build.sh"]), Parts::default());
         assert_eq!(of(&["dev/src/ship.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
         assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["oned/cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
         assert!(of(&["app-runtime/src/lib.rs"]).is_built_in() && of(&["onet/src/lib.rs"]).is_built_in());
         assert_eq!(of(&["auth/worker.js", "relay/worker.js", "auth/package.json", "notifications/worker/senders.js"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
         let http = of(&["gateway/http.js"]);
-        assert!(http.node && http.workers && !http.web, "the Cloudflare node carries what every Worker answers HTTP with");
+        assert!(http.program && http.workers && !http.web, "oned on Cloudflare carries what every Worker answers HTTP with");
         for file in ["ui/web/web.js", "onet/web/net-worker.js", "key/crypto.js", "ui/kit/dist/ui.js", "vault/screens/dist/vault.html", "ui/settings/dist/requests.html", "ui/bridge.js", "onboarding/pages.js", "onboarding/pages.tsx"] {
-            assert_eq!(of(&[file]), Parts { web: true, workers: true, ..Default::default() }, "{file}: the web client and the Workers that serve it, with no node");
+            assert_eq!(of(&[file]), Parts { web: true, workers: true, ..Default::default() }, "{file}: the web client and the Workers that serve it, with no program");
         }
-        let cloudflare_node = of(&["oned/cloudflare/node/src/lib.rs"]);
-        assert!(cloudflare_node.node && cloudflare_node.workers && !cloudflare_node.mac, "the Cloudflare node is built with the node");
+        let oned_cloudflare = of(&["oned/cloudflare/node/src/lib.rs"]);
+        assert!(oned_cloudflare.program && oned_cloudflare.workers && !oned_cloudflare.mac, "oned on Cloudflare is built with the program");
         for rust in ["app-runtime/src/lib.rs", "ui/src/screen.rs", "ui/vendor/phosphor/icons.json", "onboarding/src/lib.rs", "Cargo.toml", "somewhere/new.txt"] {
             let parts = of(&[rust]);
-            assert!(parts.node && parts.mac && parts.workers && parts.web && parts.dev, "{rust}: anything not listed sends everything");
+            assert!(parts.program && parts.mac && parts.workers && parts.web && parts.dev, "{rust}: anything not listed sends everything");
         }
         let onet = of(&["onet/src/lib.rs"]);
-        assert!(onet.node && onet.mac && onet.web && !onet.workers, "onet's WebAssembly is in the node and the web client");
+        assert!(onet.program && onet.mac && onet.web && !onet.workers, "onet's WebAssembly is in the program and the web client");
     }
 }

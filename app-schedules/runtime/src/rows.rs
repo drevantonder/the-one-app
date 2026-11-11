@@ -146,6 +146,6 @@ async fn copy_once(rt: &Rt, me: &Caller, scope: &Scope) {
     };
     match copied.await {
         Ok(()) => drop(rt.state::<State>().copied.lock().unwrap().insert(scope.clone())),
-        Err(err) => tracing::debug!("copying {scope}'s schedules' runs from the node's main database: {err:#}"),
+        Err(err) => tracing::debug!("copying {scope}'s schedules' runs from the core's main database: {err:#}"),
     }
 }

@@ -16,7 +16,7 @@ pub fn commands() -> Command {
             ("deploy <app> --version <hash>".into(), "deploy an earlier version again (deploys lists them): a rollback".into()),
             ("deploys <app>".into(), "an app's deploys, newest last".into()),
             ("source <app> [path] [--version <hash>]".into(), "an app's code as deployed: its files, or one of them".into()),
-            ("add <app> [--scope user|global|<group>] [--node <device>]".into(), "add an app, and the apps it uses, for you, a group you admin or everyone; --node is the device that runs its service, when it has one and you have more than one".into()),
+            ("add <app> [--scope user|global|<group>] [--node <device>]".into(), "add an app, and the apps it uses, for you, a group you admin or everyone; --node is the computer that runs its service, when it has one and you have more than one".into()),
             ("remove <app> [--scope user|global|<group>]".into(), "remove an app from a place: it stops running there, and what it kept there stays for if you add it back".into()),
             ("fork <app> <name> [--owner <owner>]".into(), "a new app from <app>'s code, with data of its own".into()),
             ("schedules".into(), "every schedule of the apps added for you: when, as whom, and how it last went".into()),

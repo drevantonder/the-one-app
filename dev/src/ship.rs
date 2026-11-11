@@ -40,7 +40,7 @@ pub fn commands() -> api::cli::Command {
     api::cli::Command {
         help: vec![
             form("changes [<commit>]", "what has to go out for main's tip, or <commit>, part by part, since each part was last sent".into()),
-            form("update [workers|web|apps|services|mac|node|dev] [--release]", format!("send out the part named, built and sent on its own, or, with none, each that changed, in order: apps, mac, services, node, workers, web, dev. A part with nothing changed does nothing, and each keeps the commit it sent. --release has a Mac notarize its app. Run it on a device with the release key: {CLI}-dev changes says what's due")),
+            form("update [workers|web|apps|services|mac|program|dev] [--release]", format!("send out the part named, built and sent on its own, or, with none, each that changed, in order: apps, mac, services, program, workers, web, dev. A part with nothing changed does nothing, and each keeps the commit it sent. --release has a Mac notarize its app. Run it on a device with the release key: {CLI}-dev changes says what's due")),
             form("signoff tested --ran <the tests you chose>", "sign this checkout's pushed commit off as tested: it compiles, its screens type-check and build as committed, and you say which tests you ran. Sending takes only a commit signed off this way".into()),
             form("signoff seen [<commit>] --checked <what you checked>", "sign a commit off as seen working where it went: the last thing a change needs".into()),
             form("ship [<commit>] [--timeout <9m>]", "send out what's tested, as a plain update does, press Update for every device online that's behind but the Macs, and return when every one runs it, or say which doesn't and why; run again to wait on".into()),
@@ -90,16 +90,16 @@ fn build_release(at: &At) -> Result<PathBuf> {
     ensure!(!REPO.is_empty(), "this custom build names no repo, so it has nothing to build from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     let (src, config) = (&at.src, &at.config_file);
-    // Every release carries the Cloudflare node: one without it couldn't deploy to Cloudflare.
-    let cloudflare = timed("built the Cloudflare node", || build::cloudflare_node(src, config, "release")).context("couldn't build the Cloudflare node")?;
-    // And the web client's way to nodes: one without it couldn't reach them.
+    // Every release carries oned on Cloudflare: one without it couldn't deploy to Cloudflare.
+    let cloudflare = timed("built oned on Cloudflare", || build::cloudflare_node(src, config, "release")).context("couldn't build oned on Cloudflare")?;
+    // And the web client's way to devices: one without it couldn't reach them.
     let onet = timed("built the web client's onet", || build::onet(src, config, "web")).context("couldn't build the web client's WebAssembly")?;
     let release = || {
         let mut command = cargo();
         command.current_dir(src).env("CONFIG", config).env("CLOUDFLARE_NODE", &cloudflare).env("ONET", &onet).args(["build", "--release"]);
         command
     };
-    timed("built the node", || quietly(&mut release()))?;
+    timed("built the program", || quietly(&mut release()))?;
     let binary = src.join("target/release/one");
     let version = Version::of(&binary).context("ask the new build what it is")?;
     // Windows' too, cross-built here. A device that can't only leaves Windows behind: Linux and Macs go out regardless.
@@ -147,7 +147,7 @@ fn changes(commit: Option<&str>) -> Result<()> {
             }
             Part::Mac => yes(parts.mac),
             Part::Services => list(services_due(&at, &parts)),
-            Part::Node => yes(parts.node),
+            Part::Program => yes(parts.program),
             Part::Workers => yes(parts.workers),
             Part::Web => yes(parts.web),
             Part::Dev => yes(parts.dev),

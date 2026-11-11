@@ -157,7 +157,7 @@ pub fn javascript() -> String {
 /// The shim every app runs inside, with what it reads of this module before it.
 pub fn shim() -> String {
     format!(
-        "// What api/src/call.rs says a call's app and its node say to each other, written when the shim is: never edit it.\n{}const CODE_HEADER = {};\n\n{}",
+        "// What api/src/call.rs says a call's app and its app runtime say to each other, written when the shim is: never edit it.\n{}const CODE_HEADER = {};\n\n{}",
         javascript().replace("export const", "const"),
         json!(custom_build::protocol::header::CODE),
         include_str!("../../app-runtime/src/app/runtime/shim.js")

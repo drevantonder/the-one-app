@@ -17,6 +17,6 @@ For each network, with its address and `<cli>`:
 6. **Publish it**, where this Mac has the release key, with the program just built (an older one may not know how): `native-apps/target/mac/built/<cli> publish-mac native-apps/target/mac/built --config <config commit or ->`, with `~/.profile` loaded for the password manager's sign-in. That makes it what every Mac's Update takes (`<cli> update`, from Settings › Devices or a Mac's own terminal), this one included.
 7. **The iPhone app**, only if what changed reaches it (anything but `native-apps/{mac,windows,android}/`, `services/sdk/`, `apps/` and step 3's list): `CONFIG=<config.toml> native-apps/iphone/build.sh device <dir>`, then `xcrun devicectl device install app --device <paired iPhone> <dir>/*.app`. Not reachable: try next run.
 
-A step that fails: read its output and fix the cause. `one logs <mac>` says what the node saw.
+A step that fails: read its output and fix the cause. `one logs <mac>` says what its app runtime saw.
 
 A stall on the Mac leaves every thread's stack in `logs/stall.sample` under its home. Each release keeps its programs' symbols on the Mac, by UUID: `<checkout>/target/release/<cli>-dev symbols <that file>` prints it with the `???` frames named.

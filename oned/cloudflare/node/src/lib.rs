@@ -338,11 +338,11 @@ pub fn statements(appends: &str, scopes: &str) -> Result<String, JsError> {
                     return Err(JsError::new(&format!("the call didn't name {scope}")));
                 }
                 if !blobs.is_empty() {
-                    return Err(JsError::new("a Cloudflare node doesn't keep blobs yet: use a node on one of your machines"));
+                    return Err(JsError::new("Cloudflare doesn't keep blobs yet: run this on one of your computers"));
                 }
                 out.entry(scope).or_insert_with(|| json!([])).as_array_mut().unwrap().push(json!([sql, params, check]));
             }
-            _ => return Err(JsError::new("a Cloudflare node writes only an app's own data yet: use a node on one of your machines")),
+            _ => return Err(JsError::new("Cloudflare writes only an app's own data yet: run this on one of your computers")),
         }
     }
     Ok(Value::Object(out).to_string())
@@ -707,7 +707,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
 pub async fn bundle(bucket: JsValue, keys: String, hash: String) -> Result<String, JsValue> {
     let keys = keys_of(&keys).map_err(failed)?;
     let name = ::bucket::names::blob_name("global", &hash);
-    let sealed = Js(bucket).get(&name).await.map_err(failed)?.ok_or_else(|| failed(anyhow!("{name} isn't in the bucket yet: a node on one of your machines puts it there")))?;
+    let sealed = Js(bucket).get(&name).await.map_err(failed)?.ok_or_else(|| failed(anyhow!("{name} isn't in the bucket yet: one of your computers puts it there")))?;
     let epoch = ::key::epoch_of(&sealed.bytes).map_err(failed)?;
     let key = keys.get(&epoch).ok_or_else(|| failed(::database::stored::Missing { epoch }.into()))?;
     let bytes = ::key::open(key, &name, &sealed.bytes).map_err(failed)?;
@@ -774,7 +774,7 @@ impl ai_gateway::Host for Gateway {
                 return Ok(ai_gateway::Sent { status: 200, retry_after: None, body: answer.to_string().into_bytes() });
             }
             let item = self.items.iter().find_map(|(_, items)| items.get(&key.item)).context("that AI key left the Vault as the call began: ask again")?;
-            anyhow::ensure!(item.opened, "the {} that pays is opened only by the machines its Vault's admins grant, and the Cloudflare node holds no Vault key: run this app on one of your machines, or pay with Workers AI", item.kind);
+            anyhow::ensure!(item.opened, "the {} that pays is opened only by the machines its Vault's admins grant, and Cloudflare holds no Vault key: run this app on one of your computers, or pay with Workers AI", item.kind);
             let host = out.url.split("://").nth(1).and_then(|r| r.split(['/', ':']).next()).unwrap_or_default().to_string();
             let fill = |text: &str| vault::fill(text, &host, |name| name.strip_prefix(&format!("{}:", key.item)).and_then(|field| vault::filled(item, field)));
             let url = fill(&out.url)?;

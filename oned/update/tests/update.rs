@@ -108,7 +108,7 @@ impl Device {
     }
 
     fn published(&self, commit: &str, committed: u64, bytes: Vec<u8>) {
-        self.publish(&Thing::node_name(TARGET), commit, committed, bytes, &self.key);
+        self.publish(&Thing::program_name(TARGET), commit, committed, bytes, &self.key);
     }
 
     /// Runs `update` on this device: → whether it succeeded, what it said to stdout, and to stderr.
@@ -156,7 +156,7 @@ fn a_bad_signature_changes_nothing() {
     let was = device.inode();
     let other = Throwaway::own_release_key(&device.dir.join("other")).unwrap();
     let new = build("newer", TARGET, NEWER);
-    device.publish(&Thing::node_name(TARGET), "newer", NEWER, new.clone(), &other);
+    device.publish(&Thing::program_name(TARGET), "newer", NEWER, new.clone(), &other);
     let (ok, _, err) = device.update();
     assert!(!ok, "signed by another key");
     assert!(err.contains("signed") || err.contains("key"), "{err}");
@@ -191,7 +191,7 @@ fn an_older_commit_changes_nothing() {
 fn the_wrong_target_is_refused() {
     let device = device();
     let was = device.inode();
-    device.publish(&Thing::node_name("riscv64gc-unknown-linux-gnu"), "newer", NEWER, build("newer", "riscv64gc-unknown-linux-gnu", NEWER), &device.key);
+    device.publish(&Thing::program_name("riscv64gc-unknown-linux-gnu"), "newer", NEWER, build("newer", "riscv64gc-unknown-linux-gnu", NEWER), &device.key);
     let (ok, _, err) = device.update();
     assert!(!ok, "the record has no build for this computer");
     assert!(err.contains(TARGET), "{err}");
@@ -247,7 +247,7 @@ fn a_mac_takes_its_window_beside_its_program() {
     let installed = device.home.join(format!("Applications/{name}.app/Contents/Info.plist"));
     let publish = |program: (&str, Vec<u8>), window: (&str, Vec<u8>)| {
         let mut things = Vec::new();
-        for (thing, (commit, bytes)) in [(Thing::node_name(TARGET), program), (Thing::app_name(TARGET), window)] {
+        for (thing, (commit, bytes)) in [(Thing::program_name(TARGET), program), (Thing::app_name(TARGET), window)] {
             let sha = sha256(&bytes);
             device.address.serve(&sha, bytes.clone());
             things.push(Thing { name: thing, commit: commit.into(), committed: NEWER, sha256: sha, size: bytes.len() as u64, config: "-".into() });

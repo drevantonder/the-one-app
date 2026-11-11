@@ -159,7 +159,7 @@ pub struct Network {
     /// `global`'s steps the node answering read.
     pub steps: u64,
     pub settings: BTreeMap<String, String>,
-    /// The Cloudflare node, once an admin deployed one (`cloudflare node deploy` sets it).
+    /// The Cloudflare node, once an admin deployed one (`cloudflare oned deploy` sets it).
     pub cloudflare_node: Option<CloudflareNode>,
 }
 

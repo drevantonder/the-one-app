@@ -186,7 +186,7 @@ async fn copy_once(rt: &Rt, me: &Caller) {
         rt.write(me, &Scope::Global, key::APP, DATABASE, SCHEMA, &mut change).await
     };
     if let Err(err) = copied.await {
-        tracing::warn!("copying backups' rows from the node's main database: {err:#}");
+        tracing::warn!("copying backups' rows from the core's main database: {err:#}");
     }
 }
 

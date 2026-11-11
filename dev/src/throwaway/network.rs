@@ -176,10 +176,10 @@ fn create(dir: &Path) -> Result<String> {
     node.post("/api/settings", json!({ "name": scope::sign_in_proof::CLIENTS, "value": clients }))?;
     // Its data moves to the throwaway bucket, which its node reaches only through its URL signer from then on.
     let moved = node.post("/api/storage", json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" }))?;
-    anyhow::ensure!(moved["kept"] == true, "the throwaway network's node couldn't reach its bucket through the URL signer: {moved}");
+    anyhow::ensure!(moved["kept"] == true, "the throwaway network's app runtime couldn't reach its bucket through the URL signer: {moved}");
     let started = std::time::Instant::now();
     while node.get("/api/storage")?["kind"] != "s3" {
-        anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the throwaway network's node didn't move to its bucket: node.log says why");
+        anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the throwaway network's app runtime didn't move to its bucket: node.log says why");
         std::thread::sleep(Duration::from_millis(200));
     }
     Ok(addr)

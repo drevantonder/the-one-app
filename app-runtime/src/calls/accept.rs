@@ -44,7 +44,7 @@ impl Host {
     pub(super) fn accept_service(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let me = self.check_caller(remote, request)?;
         let (name, owner) = self.with(|i| Ok(i.r.db().service(&remote)?.map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this network")?;
-        ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own user's node");
+        ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own user's computer");
         let mut req: CallRequest = serde_json::from_value(::services::limited(&name, request)?)?;
         let resolved = self.resolve(req.clone());
         ensure!(resolved.app == name, "a service asks only for its own app, {name}");

@@ -64,7 +64,7 @@ pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item 
         }
         done.made.push((platform, program));
     }
-    ensure!(!done.made.is_empty(), "its service is in Rust, which this machine ({TARGET}) builds for no platform a node runs: deploy it from Linux or a Mac");
+    ensure!(!done.made.is_empty(), "its service is in Rust, which this machine ({TARGET}) builds for no platform a computer runs: deploy it from Linux or a Mac");
     Ok(Some(done))
 }
 

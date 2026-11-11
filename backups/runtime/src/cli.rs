@@ -8,7 +8,7 @@ use api::cli::{Command, Given};
 
 pub fn commands() -> Command {
     Command {
-        help: vec![("backups check --folder <path> --recovery-key <file>".into(), "open a backup on a disk with the recovery key alone, from a file or - for stdin, and check what comes back: no node or network needed".into())],
+        help: vec![("backups check --folder <path> --recovery-key <file>".into(), "open a backup on a disk with the recovery key alone, from a file or - for stdin, and check what comes back: no device or network needed".into())],
         run,
     }
 }

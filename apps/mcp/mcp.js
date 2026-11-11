@@ -21,7 +21,7 @@ const MINE = new Set(["sign_in", "sign_out", "accounts", "refresh_tools"]);
 
 const host = (url) => new URL(url).hostname.toLowerCase();
 const TYPE = `${server.title || NAME} account`;
-// A form body, with the Vault's placeholders left as written for the node to fill (tokens are URL-safe).
+// A form body, with the Vault's placeholders left as written for the app runtime to fill (tokens are URL-safe).
 const form = (o) => Object.entries(o).filter(([, v]) => v != null && v !== "")
   .map(([k, v]) => `${encodeURIComponent(k)}=${/^\{\{[\w:.-]+\}\}$/.test(v) ? v : encodeURIComponent(v)}`).join("&");
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

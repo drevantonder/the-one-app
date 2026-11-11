@@ -18,7 +18,7 @@ impl<T> Exclusive<T> {
         let me = self as *const Self as usize;
         if HOLDING.with_borrow(|h| h.contains(&me)) {
             let at = std::backtrace::Backtrace::force_capture();
-            tracing::error!("the network was asked for on a thread that holds it, which would stop this node answering: {at}");
+            tracing::error!("the network was asked for on a thread that holds it, which would stop this app runtime answering: {at}");
             debug_assert!(false, "the network asked for on a thread that holds it: {at}");
             bail!("this device couldn't answer that: a bug in it, which its log shows");
         }

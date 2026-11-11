@@ -194,7 +194,7 @@ fn changes(node: &Client, input: &Value) -> anyhow::Result<Value> {
         // A node with none to say (the Cloudflare node, while no machine is on): the view asks again after the wait.
         std::thread::sleep(WAIT);
     } else {
-        anyhow::ensure!(resp.status == 200, "the node's events didn't open ({})", resp.status);
+        anyhow::ensure!(resp.status == 200, "the network's events didn't open ({})", resp.status);
         // Read beside the wait, which ends it: as a device, its stream has no timeout of its own, and the thread reading
         // it ends at its next line (a keep-alive at most 15 seconds on), once nobody listens.
         let (tx, lines) = std::sync::mpsc::channel();

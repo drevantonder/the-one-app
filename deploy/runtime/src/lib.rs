@@ -138,7 +138,7 @@ pub async fn add_entries(rt: &Rt, caller: &Caller, app: &str, scope: &Scope, add
             let chosen = match (n, nodes) {
                 (_, _) if !added => None,
                 (0, Some(nodes)) => match node {
-                    Some(node) => Some(listed(node).with_context(|| format!("{title} can't run on {node}: it can run on {}", if nodes.is_empty() { "none of your nodes".to_string() } else { nodes.join(", ") }))?),
+                    Some(node) => Some(listed(node).with_context(|| format!("{title} can't run on {node}: it can run on {}", if nodes.is_empty() { "none of your computers".to_string() } else { nodes.join(", ") }))?),
                     None if nodes.len() > 1 => bail!("Where should {title} run? Give node: {}.", nodes.join(" or ")),
                     None => nodes.first().cloned(),
                 },

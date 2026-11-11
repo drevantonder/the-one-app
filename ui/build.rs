@@ -44,10 +44,10 @@ fn main() {
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({:?}))", abs.to_string_lossy())).collect();
     let mut out = format!("pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
     out.push_str(&client_screens(&root));
-    // The Cloudflare node's WebAssembly (oned/cloudflare/node/) and onet's, for browsers (onet/src/wasm.rs), which `one-dev update node`
+    // The Cloudflare node's WebAssembly (oned/cloudflare/node/) and onet's, for browsers (onet/src/wasm.rs), which `one-dev update program`
     // builds into CLOUDFLARE_NODE and ONET where Rust builds for WebAssembly, so a release carries them to devices with no
-    // Rust to deploy it from, and the address serves the web client. With neither set, the ones `update node`, `throwaway cloudflare
-    // node deploy` and `throwaway client web` build into target/, if they're there, so every build of a checkout is the same one,
+    // Rust to deploy it from, and the address serves the web client. With neither set, the ones `update program`, `throwaway cloudflare
+    // oned deploy` and `throwaway client web` build into target/, if they're there, so every build of a checkout is the same one,
     // with or without them, but not their own (they're built with `ui` in them, which would hold itself). Only a file that
     // exists is watched: cargo reruns a build for one that doesn't.
     out.push_str(&wasm_constant(&root, "CLOUDFLARE_NODE", "target/cloudflare-node", ["one_cloudflare_node.js", "one_cloudflare_node_bg.wasm"]));

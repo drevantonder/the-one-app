@@ -108,7 +108,7 @@ pub fn watch() {
             // or disk: the runtime isn't stuck, and starting again would only add to the load.
             if late >= LATE {
                 counting_from = up();
-                tracing::warn!("this node was held up for {} seconds by the machine it's on", late.as_secs());
+                tracing::warn!("this app runtime was held up for {} seconds by the machine it's on", late.as_secs());
                 continue;
             }
             if in_a_row > 0 && up() >= SETTLED {
@@ -117,7 +117,7 @@ pub fn watch() {
             }
             let silent = up().saturating_sub(beat.load(std::sync::atomic::Ordering::SeqCst).max(counting_from));
             if silent >= (STUCK_FOR << in_a_row.min(3)).min(MOST_STUCK_FOR) {
-                tracing::error!("this node's runtime has done nothing for {silent} seconds: exiting, to be started again. {}", stuck_on(&runtime, up()));
+                tracing::error!("this app runtime has done nothing for {silent} seconds: exiting, to be started again. {}", stuck_on(&runtime, up()));
                 ::insights::Ended::Watchdog.write(&platform::home());
                 let _ = std::fs::write(&restarted, (in_a_row + 1).to_string());
                 std::process::exit(1);

@@ -425,7 +425,7 @@ impl<O: Opens> Keyring<O> {
             if response.status == 428 && needed < 3 {
                 needed += 1;
                 let node = response.node;
-                let answer: Value = serde_json::from_slice(&response.body.bytes().await?).map_err(|err| failed(format!("the node asked for keys in a reply that wasn't JSON: {err}")))?;
+                let answer: Value = serde_json::from_slice(&response.body.bytes().await?).map_err(|err| failed(format!("the device asked for keys in a reply that wasn't JSON: {err}")))?;
                 self.learn(client, on, &kind, &node, &answer, sent_with).await?;
                 continue;
             }

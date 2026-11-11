@@ -388,7 +388,7 @@ impl Rule<'_> {
     fn runs(&self) -> Result<()> {
         let on: BTreeSet<Key> = self.keys("on").context("on is a list of endpoints' keys")?.into_iter().collect();
         for k in &on {
-            ensure!(self.runs_things(k)?, "only the network's machines that run things, and its Cloudflare node, run someone's own");
+            ensure!(self.runs_things(k)?, "only the network's computers, and Cloudflare, run someone's own");
         }
         let me = user_principal(self.w);
         self.out.execute("INSERT OR IGNORE INTO runs_chosen VALUES (?)", [&me])?;
@@ -634,7 +634,7 @@ impl Rule<'_> {
         let was = self.who.switch(&device, &name)?.and_then(|s| s.scope.as_deref().map(Scope::parse)).and_then(Result::ok);
         let managed = !on && was.as_ref().is_some_and(adds);
         if self.who.cloudflare_node()? == Some(device) {
-            allowed!(managed || self.may("change-settings", NETWORK), "only an admin switches what the Cloudflare node runs");
+            allowed!(managed || self.may("change-settings", NETWORK), "only an admin switches what Cloudflare runs");
         } else {
             self.who.machine(&device)?.context("no such device")?;
             allowed!(managed || self.may("switch", &crate::scopes::device(&device)), "only a device's user switches what it runs");
@@ -1022,7 +1022,7 @@ mod tests {
         assert!(net.step(&mac, ANDRE, holders(&named)));
         assert_eq!(net.db.recovery_holders()?, [ANDRE.to_string(), BOB.to_string()].into());
         let keys = |user: &str, net: &Net| net.db.recovery_devices(user).unwrap().iter().map(|d| d.key).collect::<BTreeSet<_>>();
-        assert_eq!(keys(ANDRE, &net), [phone.id(), laptop.id()].into(), "not the node, browser, remote MCP, passkey or one that hasn't said what it is");
+        assert_eq!(keys(ANDRE, &net), [phone.id(), laptop.id()].into(), "not the computer, browser, remote MCP, passkey or one that hasn't said what it is");
         assert_eq!(keys(BOB, &net), [bobs.id(), bobs_phone.id()].into());
 
         assert!(net.step(&mac, ANDRE, remove_device(&phone.id())));
@@ -1512,7 +1512,7 @@ mod tests {
         net.step(&bobs, BOB, device(&said.endpoint(), BOB, "app", &[Kind::Client], None));
         let gone = |k: &Dev| node("remove", json!({ "key": hex(&k.id()), "itself": true }));
         assert!(net.step(&bobs, BOB, gone(&asked)));
-        assert!(net.owed().is_empty() && net.db.machine(&asked.id())?.is_none(), "its own node signing it out owes nothing");
+        assert!(net.owed().is_empty() && net.db.machine(&asked.id())?.is_none(), "its own app runtime signing it out owes nothing");
         assert!(net.step(&mac, ANDRE, gone(&said)));
         assert_eq!(net.owed().len(), 3, "an admin's saying it signed itself out is a removal");
         net.step(&bobs, BOB, epoch(&bob, 2, &[bob_id], &H.repeat(64)));
@@ -1673,7 +1673,7 @@ mod tests {
             ("rename linux", rename("key", &k(&linux), "server")),
             ("rename bob's box", rename("key", &k(&box_), "box")),
             ("rename bob's tablet (removed)", rename("key", &k(&tablet), "tablet")),
-            ("rename the cloudflare node", rename("key", &k(&cloudflare), "edge")),
+            ("rename cloudflare", rename("key", &k(&cloudflare), "edge")),
             ("rename bob", rename("user", BOB, "Robert")),
             ("rename andre", rename("user", ANDRE, "Andrew")),
             ("rename g", rename("group", G, "Band")),
@@ -1706,8 +1706,8 @@ mod tests {
             ("bob's box's whatsapp off", service(&box_.id(), "whatsapp", false, None)),
             ("bob's box's whatsapp on, global", service(&box_.id(), "whatsapp", true, Some(&Scope::Global))),
             ("bob's box's notes on, bob's", service(&box_.id(), "notes", true, Some(&bob))),
-            ("the cloudflare node's notes on", service(&cloudflare.id(), "notes", true, Some(&Scope::Global))),
-            ("the cloudflare node's notes off", service(&cloudflare.id(), "notes", false, None)),
+            ("cloudflare's notes on", service(&cloudflare.id(), "notes", true, Some(&Scope::Global))),
+            ("cloudflare's notes off", service(&cloudflare.id(), "notes", false, None)),
             ("a node release", node("node-release", json!({ "version": "9.9.9" }))),
             ("an unknown kind", node("frobnicate", json!({}))),
             ("an app's own", Content::new("notes", "note", json!({ "text": "hi" }))),

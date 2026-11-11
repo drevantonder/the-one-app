@@ -55,9 +55,9 @@ function namer(ctx) {
 
 const hasService = (a) => !!a.nodes;
 
-/// Where an app's service runs, and where it may: `runs_on` (each node it runs on for a place where it's added, by
-/// `name`, none once that node was removed, with `scope`, `online`, `seen` and `problem`); `nodes`, as the catalog gives them;
-/// and `problem`, its one problem box when no node it runs on is on and well, with `move` true when moving it fixes that.
+/// Where an app's service runs, and where it may: `runs_on` (each device it runs on for a place where it's added, by
+/// `name`, none once that device was removed, with `scope`, `online`, `seen` and `problem`); `nodes`, as the catalog gives them;
+/// and `problem`, its one problem box when no device it runs on is on and well, with `move` true when moving it fixes that.
 /// Null for an app with no service.
 function where(a, ctx) {
   if (!hasService(a)) return null;
@@ -116,7 +116,7 @@ async function listed(ctx, { full, gone }) {
 }
 
 const APP = { type: "string", description: "an app's name, from apps_list, like gmail" };
-const NODE = { type: "string", description: "the node that runs its service: one of yours by name, or cloudflare, as apps_devices lists them" };
+const NODE = { type: "string", description: "the device that runs its service: one of your computers by name, or cloudflare, as apps_devices lists them" };
 
 function iso(v) {
   if (Array.isArray(v)) return v.map(iso);
@@ -170,7 +170,7 @@ export default {
     _add: {
       title: "Add an app in a place (for the screens)",
       reads: false,
-      description: "For the screens: add an app in a place, as add does, on the node it already runs on or else the first it can.",
+      description: "For the screens: add an app in a place, as add does, on the device it already runs on or else the first it can.",
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       output: { type: "null" },
       async run(ctx, { app, scope }) {
@@ -179,9 +179,9 @@ export default {
       },
     },
     move: {
-      title: "Move an app's service to another node",
+      title: "Move an app's service to another device",
       reads: false,
-      description: "Move an app's service to another node, for a place it's added to (by default where it runs now): it stops on the node it ran on and starts afresh on this one. apps_devices lists the nodes it can run on.",
+      description: "Move an app's service to another device, for a place it's added to (by default where it runs now): it stops on the device it ran on and starts afresh on this one. apps_devices lists the devices it can run on.",
       input: { type: "object", required: ["app", "node"], properties: { app: APP, node: NODE, scope: placeInput } },
       output: { type: "string", description: "where it runs now, in words" },
       async run(ctx, { app, node, scope }) {
@@ -284,7 +284,7 @@ export default {
         },
       },
       async run(ctx) {
-        // The Cloudflare node doesn't know which schedules failed.
+        // oned on Cloudflare doesn't know which schedules failed.
         const failing = await ctx.failing().catch(() => []);
         return { apps: (await listed(ctx, { full: true })).apps, places: places(ctx), admin: ctx.me.role === "admin", failing: [...new Set(failing.map((s) => s.app))] };
       },
@@ -314,15 +314,15 @@ export default {
     devices: {
       title: "Where an app's service runs",
       reads: true,
-      description: "Where an app's service runs (runs_on: each node, whether it's on, and what went wrong), the nodes it can run on (nodes, for add and apps_move), and its problem when it runs on no node that's on.",
+      description: "Where an app's service runs (runs_on: each device, whether it's on, and what went wrong), the devices it can run on (nodes, for add and apps_move), and its problem when it runs on no device that's on.",
       input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "the name of an app with a service, like whatsapp" } } },
       output: {
         type: ["object", "null"],
         description: "null for an app with no service",
         properties: {
-          runs_on: { type: "array", items: { type: "object", additionalProperties: true }, description: "each node it runs on, { name, scope, online, seen (ms, when it was last seen), problem }" },
-          nodes: { type: "array", items: { type: "string" }, description: "the nodes it can run on" },
-          problem: { type: ["object", "null"], description: "{ title, text, move } when it runs on no node that's on", additionalProperties: true },
+          runs_on: { type: "array", items: { type: "object", additionalProperties: true }, description: "each device it runs on, { name, scope, online, seen (ms, when it was last seen), problem }" },
+          nodes: { type: "array", items: { type: "string" }, description: "the devices it can run on" },
+          problem: { type: ["object", "null"], description: "{ title, text, move } when it runs on no device that's on", additionalProperties: true },
         },
       },
       async run(ctx, { app }) {

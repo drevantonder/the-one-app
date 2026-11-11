@@ -121,7 +121,7 @@ export default {
   color: "#ff2d55",
   advanced: true,
   description: "Your agents' instructions and skills, on every device",
-  instructions: "agents_get and agents_set read and replace the AGENTS.md every agent harness on every device gets (Claude Code as its CLAUDE.md, Codex, Amp, OpenCode). Skills live in every harness's skills folder: agents_skills lists them, agents_skill reads one, agents_skill_set adds or replaces one (all its files), agents_skill_remove removes one. agents_history lists AGENTS.md's revisions (or a skill's), and agents_restore brings an old one back. Every device's harnesses also get apps' prompt hooks and this network's MCP server from its node.",
+  instructions: "agents_get and agents_set read and replace the AGENTS.md every agent harness on every device gets (Claude Code as its CLAUDE.md, Codex, Amp, OpenCode). Skills live in every harness's skills folder: agents_skills lists them, agents_skill reads one, agents_skill_set adds or replaces one (all its files), agents_skill_remove removes one. agents_history lists AGENTS.md's revisions (or a skill's), and agents_restore brings an old one back. Every device's harnesses also get apps' prompt hooks and this network's MCP server from its onet.",
   service: { user: true, platforms: ["linux", "mac"] },
   schema: {
     user: [`

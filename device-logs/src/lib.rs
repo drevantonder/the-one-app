@@ -189,7 +189,7 @@ pub fn read(home: &Path, ask: &Ask) -> Result<Value> {
     match std::fs::read_to_string(&path) {
         Ok(now) => stored.push_str(&now),
         Err(_) if stored.is_empty() => bail!("{name} has no log here{}", match name {
-            NODE => " (this node started before it kept one)",
+            NODE => " (this app runtime started before it kept one)",
             CLIENT => " (this app hasn't written one yet)",
             _ => ": it hasn't run on this device",
         }),

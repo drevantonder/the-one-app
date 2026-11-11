@@ -46,7 +46,7 @@ const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host",
 /// home the program read its token from, so the program says that (`token_refused`) where it can.
 pub fn not_this_machine() -> String {
     let name = custom_build::config::NAME;
-    format!("{name} on this machine didn't take this request as from one of its own programs: it needs the token in the node's home, which only this machine's user can read.")
+    format!("{name} on this machine didn't take this request as from one of its own programs: it needs the token in its home, which only this machine's user can read.")
 }
 
 /// `not_this_machine` as the program refused tells it, which knows the `home` it read its token from: whether that was
@@ -57,7 +57,7 @@ pub fn token_refused(home: &std::path::Path) -> String {
     let how = if std::env::var_os(&var).is_some() { format!("{var} sets it") } else { format!("{var} isn't set, so it is the default") };
     let found = if local_token(home).is_some() { "the token in" } else { "no token in" };
     let file = home.join(LOCAL_TOKEN);
-    format!("{name} on this machine didn't take this program as one of its own: it read {found} {} ({how}). If that isn't the folder where {name} keeps its data on this machine, set {var} to it. If the node was updated after this program started, start it again: an agent reconnects its {name} MCP server (/mcp in Claude Code) or starts a new session.", file.display())
+    format!("{name} on this machine didn't take this program as one of its own: it read {found} {} ({how}). If that isn't the folder where {name} keeps its data on this machine, set {var} to it. If {name} was updated after this program started, start it again: an agent reconnects its {name} MCP server (/mcp in Claude Code) or starts a new session.", file.display())
 }
 
 /// Whether a request is from one of this machine's own programs: over a connection from this machine (its loopback),

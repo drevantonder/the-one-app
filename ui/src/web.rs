@@ -85,7 +85,7 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
 }
 
 /// onet's build, as the web client fetches it (`/onet/<version>/`): what its files hash to, so a browser
-/// keeps one for good. None if this build has no onet (`update node` builds it, where Rust builds for WebAssembly).
+/// keeps one for good. None if this build has no onet (`update program` builds it, where Rust builds for WebAssembly).
 pub fn onet_version() -> Option<String> {
     version_of(&onet())
 }

@@ -79,7 +79,7 @@ pub fn mac_things(folder: &Path, version: &Version, config: &str) -> Result<Vec<
     use oned_update::latest::Thing;
     let target = &version.target;
     let thing = |name: String, file: PathBuf| (name, Some(file), version.clone(), config.to_string());
-    let mut things = vec![thing(Thing::app_name(target), folder.join("app.zip")), thing(Thing::node_name(target), folder.join(CLI))];
+    let mut things = vec![thing(Thing::app_name(target), folder.join("app.zip")), thing(Thing::program_name(target), folder.join(CLI))];
     for entry in std::fs::read_dir(folder)?.flatten() {
         let file = entry.file_name().to_string_lossy().to_string();
         let Some(service) = file.strip_prefix(&format!("{CLI}-")) else { continue };

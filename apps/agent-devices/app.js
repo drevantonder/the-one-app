@@ -3,7 +3,7 @@
 // device can run them (the service says which kinds each one can). Its page shows them;
 // Computer Use (apps/computer) is what agents use them with. A browser profile a device starts with is a Vault item
 // of type Browser profile: the service keeps it as an encrypted blob, and only it, never this app, holds its key,
-// which the node fills into the calls this app makes ({{<item id>:_profile_key}}). Its screens are React, in screens/,
+// which the app runtime fills into the calls this app makes ({{<item id>:_profile_key}}). Its screens are React, in screens/,
 // built into dist/ when it's deployed (one deploy apps/agent-devices).
 
 import mainHtml from "./dist/main.html" with { type: "text" };
@@ -39,7 +39,7 @@ async function profile(ctx, name) {
   throw Object.assign(new Error(`No browser profile ${name}: ${all.length ? `there's ${all.map((i) => i.title).join(", ")}` : "there are none yet"}. The user adds them in the Vault.`), { code: "no_profile" });
 }
 
-/// A profile as the service takes it: its key is a placeholder the node fills in, for the service only.
+/// A profile as the service takes it: its key is a placeholder the app runtime fills in, for the service only.
 const given = (p) => ({ item: p.id, name: p.title, key: `{{${p.id}:_profile_key}}`, blob: p.fields._blob?.value || "", salt: p.fields._salt?.value || "" });
 
 const kindArg = { type: "string", enum: ["linux", "chrome", "windows", "android", "iphone"], description: "linux (with a browser, in a container; the default), chrome (Chrome straight on one of your devices: quicker, where its owner allows it), windows, android or iphone: kinds says which of your devices run each" };

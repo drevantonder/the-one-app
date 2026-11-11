@@ -513,7 +513,7 @@ impl Host {
             return custom_build::protocol::Coded::new(custom_build::protocol::code::RESTARTING, format!("{title} is starting: try again in a moment."));
         }
         let text = match &info {
-            Some(a) => format!("{title} isn't on any of your devices yet.{} add {app} adds it, on a node you choose (apps_devices {app} lists them).", a["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()),
+            Some(a) => format!("{title} isn't on any of your devices yet.{} add {app} adds it, on a computer you choose (apps_devices {app} lists them).", a["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()),
             None => format!("{title} isn't on any of your devices yet."),
         };
         custom_build::protocol::Coded::new(custom_build::protocol::code::NOT_ADDED, text)
@@ -539,7 +539,7 @@ impl Host {
             (Some(host), false, _) => ::api::cli::off(host, r["seen"].as_u64()),
             (Some(host), true, problem) => format!("on {host}, {}", problem.unwrap_or("it isn't running")),
         };
-        Some(format!("{title} needs a device that's on: {why}. Turn it on, or move it with apps_move {app} <node> (apps_devices {app} lists them)."))
+        Some(format!("{title} needs a device that's on: {why}. Turn it on, or move it with apps_move {app} <computer> (apps_devices {app} lists them)."))
     }
 
     /// Runs a service's call on every device that runs it for the caller, all at once: `{ <device>: answer }`, or
@@ -579,7 +579,7 @@ impl Host {
     }
 
     fn cloudflare_is_asked_directly(&self) -> String {
-        format!("{} is asked by a device of yours itself, not through {}, which runs a node: from the web app, a phone, or the command line of a computer that runs no node of its own (one <command> --device {}). From this one, leave --device off and the nearest device that can runs it", scope::rank::CLOUDFLARE, self.device_name(), scope::rank::CLOUDFLARE)
+        format!("{} is asked by a device of yours itself, not through {}'s app runtime: from the web app, a phone, or a computer's command line (one <command> --device {}). From this one, leave --device off and the nearest device that can runs it", scope::rank::CLOUDFLARE, self.device_name(), scope::rank::CLOUDFLARE)
     }
 
     /// The devices that might run a call, in the order it tries them (`rank::order`). A service about its own machine

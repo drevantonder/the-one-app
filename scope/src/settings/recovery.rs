@@ -275,7 +275,7 @@ pub async fn seal(m: &impl Me, to: &str, copy: &str) -> Result<()> {
     let recovery = m.who(|db| {
         allowed!(db.may(&me, "change-settings", scopes::NETWORK), "only an admin seals the recovery key to someone who holds it");
         let may_hold = db.recovery_holders()?.into_iter().try_fold(false, |found, user| Ok::<_, anyhow::Error>(found || db.recovery_devices(&user)?.iter().any(|d| d.key == key)))?;
-        ensure!(may_hold, "the recovery key is sealed only to a device of someone an admin named, and not to a browser, a node or a passkey");
+        ensure!(may_hold, "the recovery key is sealed only to a device of someone an admin named, and not to a browser, a computer or a passkey");
         db.recovery()?.context("this network has no recovery key to seal")
     })?;
     ensure!(::key::held_sealed(&recovery, to, &copy).is_some(), "that copy isn't signed by the recovery key");
