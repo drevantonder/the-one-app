@@ -22,3 +22,10 @@ A bare one, joined with a pairing code, in a home and port of its own (`$H` the 
 It's listed by this machine's name with the next number (its `one status` says it). A service's program goes beside its
 `one` (`cp target/debug/one-shell $C/bin/`), then `one services on shell --device "<that name>"`. `systemctl --user stop one-throwaway-third` when you're done: `one-dev
 throwaway stop` doesn't know it.
+
+A Windows one is the same on a borrowed copy (`one agent-devices borrow --kind windows --copy`): `one agent-devices
+reach` each of the throwaway's ports (its address, auth and bucket: `cloudflare/settings.json`, `bucket-addr`), its
+`one.exe` and `one-apps.exe` cross-built in release (`cargo build --release --target x86_64-pc-windows-gnu --bin one
+--bin one-apps`: a debug build doesn't link) and copied over with scp, `oned.exe` a hard link to `one.exe`, and oned
+started by a scheduled task (what SSH starts dies with its session). `one-dev throwaway publish --windows` gives it an
+update to take.

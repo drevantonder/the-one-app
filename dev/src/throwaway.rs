@@ -10,10 +10,11 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use ::custom_build::config::CLI;
 use platform::mode::Throwaway;
 use oned_update::release::Version;
+use oned_update::platform::WINDOWS;
 
 use crate::dev;
 use serde_json::json;
@@ -111,7 +112,7 @@ pub fn run(rest: &[String]) -> Result<()> {
         return Ok(());
     }
     match rest.first().map(String::as_str) {
-        Some("publish") => return publish(&dir, &addr),
+        Some("publish") => return publish(&dir, &checkout, &addr, rest.get(1).map(String::as_str) == Some("--windows")),
         Some("update") => return update(&dir, &addr),
         _ => {}
     }
@@ -148,19 +149,31 @@ fn chosen(rest: &[String]) -> Result<(Option<PathBuf>, Option<PathBuf>, &[String
 
 /// Publishes this checkout's build at the throwaway network's address, under its own release key, for its devices to
 /// take: its own computer with `update`, once `--build` started it on another commit, and any other computer of it (a
-/// client's, one joined by hand) with Update.
-fn publish(dir: &Path, addr: &str) -> Result<()> {
+/// client's, one joined by hand) with Update; with `windows`, Windows' programs too, cross-built in release, as `ship`
+/// builds them (mingw-w64 can't link a debug build).
+fn publish(dir: &Path, checkout: &Path, addr: &str, windows: bool) -> Result<()> {
     let version = Version::of(&crate::program()?).context("ask this checkout's build what it is")?;
     let runs = Version::of(&network::program(dir)?).context("ask the throwaway network's program what it is")?;
-    publish_build(dir, addr)?;
+    let windows = if windows { Some(windows_programs(checkout, &version)?) } else { None };
+    publish_build(dir, addr, windows.as_deref())?;
     let own = if version.commit == runs.commit { format!("Its own computer runs it already: {} throwaway --build <program> starts it on another, for {} throwaway update to take it.", dev(), dev()) } else { format!("{} throwaway update takes it.", dev()) };
     println!("Published {} under this throwaway network's own release key. {own} Its other computers take it with Update in Devices, and Cloudflare's Update there its Workers.", version.commit);
     Ok(())
 }
 
+/// Windows' `one` and `one-apps` of the checkout, which must be the commit `version` is: → the folder they're in.
+fn windows_programs(checkout: &Path, version: &Version) -> Result<PathBuf> {
+    let head = std::process::Command::new("git").current_dir(checkout).args(["rev-parse", "HEAD"]).output()?;
+    ensure!(String::from_utf8_lossy(&head.stdout).starts_with(&version.commit), "this checkout's build isn't of its commit: cargo build, then publish");
+    eprintln!("Building Windows' programs in release…");
+    let built = std::process::Command::new("cargo").current_dir(checkout).args(["build", "-q", "--release", "--target", WINDOWS, "--bin", "one", "--bin", "one-apps"]).status()?;
+    ensure!(built.success(), "couldn't build for Windows (rustup target add {WINDOWS}, and mingw-w64)");
+    Ok(checkout.join("target").join(WINDOWS).join("release"))
+}
+
 /// This checkout's build, published at the throwaway network's address under its own release key: what its devices
-/// update to, and what a computer the desktop app sets up takes.
-pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
+/// update to, and what a computer the desktop app sets up takes; with Windows' programs in `windows`, theirs too.
+pub(crate) fn publish_build(dir: &Path, addr: &str, windows: Option<&Path>) -> Result<()> {
     let build = crate::program()?;
     let version = Version::of(&build).context("ask this checkout's build what it is")?;
     let (node, key) = (loopback_at(dir, addr), Throwaway::own_release_key(dir)?);
@@ -172,12 +185,17 @@ pub(crate) fn publish_build(dir: &Path, addr: &str) -> Result<()> {
     std::fs::write(&web, ui::bundle::signed(&key, &bundle(ui::web::with_client()).packed()?)?)?;
     use oned_update::latest::Thing;
     let runtime = build.with_file_name(format!("one-apps{}", std::env::consts::EXE_SUFFIX));
-    let things = [
+    let mut things = vec![
         (Thing::program_name(&version.target), Some(build.clone()), version.clone(), "-".into()),
         (Thing::service_name(::scope::scopes::APPS_PART, &version.target), Some(runtime), version.clone(), "-".into()),
         (Thing::WORKERS.into(), Some(workers), version.clone(), "-".into()),
         (Thing::WEB.into(), Some(web), version.clone(), "-".into()),
     ];
+    if let Some(windows) = windows {
+        let on = Version { target: WINDOWS.into(), ..version.clone() };
+        things.push((Thing::program_name(WINDOWS), Some(windows.join("one.exe")), on.clone(), "-".into()));
+        things.push((Thing::service_name(::scope::scopes::APPS_PART, WINDOWS), Some(windows.join("one-apps.exe")), on, "-".into()));
+    }
     oned::publish::publish_latest(&node, &key, &things)
 }
 
@@ -304,7 +322,7 @@ fn commands(mcp: &str) -> api::cli::Command {
             form("throwaway cloudflare oned deploy", "run its oned on Cloudflare beside its Workers, as Cloudflare would".into()),
             form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows. mac and iphone build on the Mac and stop that build if the command is killed or takes 9 minutes: run it again to build on from what was built".into()),
             form("throwaway client <kind> --as sam", "the same, as someone else, invited by you with Add Someone's link".into()),
-            form("throwaway publish", "publish this checkout's build to it under its own release key, for its device to take, and Update on Cloudflare in Devices to redeploy its Workers with; give it an older build first with --build".into()),
+            form("throwaway publish [--windows]", "publish this checkout's build to it under its own release key, for its device to take, and Update on Cloudflare in Devices to redeploy its Workers with; give it an older build first with --build. --windows adds Windows' programs, cross-built in release".into()),
             form("throwaway update", format!("take what's published, as {CLI} update does on a device, and start it again on it")),
             form("throwaway stop", format!("stop and delete it, and give back its devices; {CLI}-dev throwaway then starts a new one")),
         ],

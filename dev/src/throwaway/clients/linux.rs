@@ -38,7 +38,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &oned_cloudflare::Set
     let older = installed.exists() && oned_update::release::Version::of(&installed).map(|v| v.commit) != this;
     if !installed.exists() || older {
         eprintln!("Publishing this build at the throwaway network's address, for the app to set up its computer from…");
-        crate::throwaway::publish_build(dir, std::fs::read_to_string(dir.join("addr"))?.trim())?;
+        crate::throwaway::publish_build(dir, std::fs::read_to_string(dir.join("addr"))?.trim(), None)?;
     }
     if older {
         eprintln!("Its computer takes this build…");
