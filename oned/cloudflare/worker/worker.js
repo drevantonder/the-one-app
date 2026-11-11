@@ -320,6 +320,8 @@ class User {
     this.handed = new Map();
     /// When each scope's steps were last read here, and with which keys.
     this.scopesRead = new Map();
+    /// Each scope's read underway, and the keys it reads with.
+    this.reading = new Map();
     /// Databases it has open, by where they are in the bucket, each brought up to what the bucket has when a call
     /// reaches it again: `{ handle, keys, queue, used, users }`. A call uses one only if it was handed exactly the keys
     /// it was opened with.
@@ -428,12 +430,21 @@ class User {
 
   /// Reads `scopes`' steps for a request, each with the keys its user handed: a scope whose they didn't hand is
   /// asked for with 428, so its steps are never shown to someone who can't open them.
+  /// Requests that come together read once: the first after a deploy reads `global` from its first step.
   async readScopes(who, scopes) {
     await Promise.all(scopes.map((scope) => this.withKeys(who, scope, NODE_APP, LOG, async (keys) => {
       const last = this.scopesRead.get(scope);
       if (last?.keys === keys && Date.now() - last.at < 2000) return;
-      await read_scope(this.owner, this.bucket, scope, keys);
-      this.scopesRead.set(scope, { keys, at: Date.now() });
+      const reading = this.reading.get(scope);
+      if (reading?.keys === keys) return reading.read;
+      const read = read_scope(this.owner, this.bucket, scope, keys);
+      this.reading.set(scope, { keys, read });
+      try {
+        await read;
+        this.scopesRead.set(scope, { keys, at: Date.now() });
+      } finally {
+        if (this.reading.get(scope)?.read === read) this.reading.delete(scope);
+      }
     })));
   }
 
