@@ -2,6 +2,7 @@
 
 #[path = "../ai-gateway/tests/ai_gateway.rs"]
 mod ai_gateway;
+mod carried;
 mod cloudflare;
 mod contracts;
 mod e2e;

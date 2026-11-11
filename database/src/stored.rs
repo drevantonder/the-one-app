@@ -1179,7 +1179,7 @@ mod tests {
         rt().block_on(async {
             let bucket = Memory::default();
             let key = keys(&[(1, rand::random())]);
-            let prefix = scope::steps::prefix("global");
+            let prefix = ::bucket::names::core_prefix(::key::CoreDb::Scope, "global");
             assert!(keeps_every_step(&prefix) && !keeps_every_step("global/notes/main") && !keeps_every_step("global/node/main"));
             let mut a = Db::open(&bucket, &prefix, key.clone()).await.unwrap().older();
             a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));

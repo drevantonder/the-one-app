@@ -1345,43 +1345,6 @@ mod tests {
         Ok(())
     }
 
-    /// A service carried by its device's runtime takes only asks sealed to it and signed by a node of the network, each
-    /// once, and a node calls it only as its own user: a hacked runtime carrying it can't forge, replay or read an ask,
-    /// nor call as anyone else.
-    #[test]
-    fn a_carried_ask_is_taken_once_from_whoever_signed_it_and_only_as_their_own_user() -> anyhow::Result<()> {
-        use services::carried;
-        use one::oned::part::may_call;
-        let (mac, mut net) = setup();
-        let (bobs, linux, bobs_linux, part) = (Dev::new(3), Dev::new(4), Dev::new(6), Dev::new(8));
-        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
-        net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", BOTH, None));
-        net.step(&bobs, BOB, device(&bobs_linux.endpoint(), BOB, "bob's linux", BOTH, None));
-        assert!(net.step(&linux, ANDRE, listed_service(&part.endpoint(), ANDRE, "linux", "shell", &linux.id())));
-        let once = carried::Once::default();
-        let call = json!({ "function": "run" });
-
-        // Andre's mac asks it: opened, as the mac's, once.
-        let (sealed, _) = carried::ask(&mac.0, &part.endpoint(), json!({ "call": call }))?;
-        let (by, body, _) = carried::open_ask(&part.0, &sealed, &once)?;
-        assert_eq!((by, &body["call"]), (mac.id(), &call));
-        assert!(carried::open_ask(&part.0, &sealed, &once).is_err(), "a replayed ask was taken");
-        // A byte changed, or sealed to someone else: refused.
-        let (mut forged, _) = carried::ask(&mac.0, &part.endpoint(), json!({ "call": call }))?;
-        let last = forged.len() - 1;
-        forged[last] ^= 1;
-        assert!(carried::open_ask(&part.0, &forged, &once).is_err(), "a changed ask was taken");
-        let (elsewhere, _) = carried::ask(&mac.0, &bobs.endpoint(), json!({ "call": call }))?;
-        assert!(carried::open_ask(&part.0, &elsewhere, &once).is_err(), "an ask sealed to another was opened");
-
-        // Andre's node calls as Andre; Bob's node, carrying it or not, never as Andre, and Andre's shell serves only him.
-        may_call(&net.db, &part.id(), &mac.id(), &mac.id(), ANDRE)?;
-        assert!(may_call(&net.db, &part.id(), &bobs_linux.id(), &mac.id(), ANDRE).is_err(), "Bob's node called as Andre");
-        assert!(may_call(&net.db, &part.id(), &bobs_linux.id(), &bobs_linux.id(), BOB).is_err(), "Andre's own service served Bob");
-        assert!(may_call(&net.db, &part.id(), &bobs.id(), &bobs.id(), BOB).is_err(), "a client that isn't a node was answered");
-        Ok(())
-    }
-
     #[test]
     fn a_client_says_what_it_is_once_and_keeps_what_it_was_let_in_with() -> anyhow::Result<()> {
         let (mac, mut net) = setup();
