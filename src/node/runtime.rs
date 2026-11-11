@@ -177,6 +177,14 @@ impl ScopeDatabase for Node {
     fn append<'a>(&'a self, scope: &'a Scope, user: &'a str, content: Content) -> Fut<'a, ()> {
         Box::pin(self.append_as(scope, user, content))
     }
+
+    fn as_member<'a>(&'a self, caller: &'a Caller, content: Content) -> Fut<'a, ()> {
+        Box::pin(self.member_content(caller, content))
+    }
+
+    fn read_callers_scopes<'a>(&'a self, caller: &'a Caller) -> Fut<'a, ()> {
+        Box::pin(Node::read_callers_scopes(self, caller))
+    }
 }
 
 impl Databases for Node {
@@ -208,6 +216,18 @@ impl Databases for Node {
 
     fn object<'a>(&'a self, name: &'a str) -> Fut<'a, Option<Vec<u8>>> {
         Box::pin(async move { Ok(::bucket::Bucket::get(&self.bucket()?, name).await?.map(|o| o.bytes)) })
+    }
+
+    fn blob<'a>(&'a self, hash: &'a str) -> Fut<'a, Vec<u8>> {
+        Box::pin(Node::blob(self, hash))
+    }
+
+    fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String> {
+        Node::put_blob_for(self, caller, bytes)
+    }
+
+    fn may_read_blob(&self, caller: &Caller, hash: &str) -> Result<bool> {
+        Ok(self.this_machine(caller) || Node::may_read_blob(self, &caller.user, hash)?)
     }
 }
 
@@ -248,6 +268,34 @@ impl Apps for Node {
             draws: Arc::new(Drawn { node: self.clone(), app: app.clone(), ctx, _granted: granted }),
             app,
         }).collect())
+    }
+
+    fn describe_any<'a>(&'a self, app: &'a str) -> Fut<'a, Value> {
+        Box::pin(self.0.apps.describe_any(app))
+    }
+
+    fn title<'a>(&'a self, app: &'a str) -> Fut<'a, String> {
+        Box::pin(async move { Ok(Node::title(self, app).await) })
+    }
+
+    fn built_in(&self, app: &str) -> Option<String> {
+        self.0.built_in.get(app).cloned()
+    }
+
+    fn bring_in<'a>(&'a self, caller: &'a Caller, app: &'a str) -> Fut<'a, ()> {
+        Box::pin(Node::bring_in(self, caller, app))
+    }
+
+    fn uses<'a>(&'a self, app: &'a str) -> Fut<'a, (Vec<String>, Vec<String>)> {
+        Box::pin(async move { Ok(Node::uses(self, app).await) })
+    }
+
+    fn runs_latest<'a>(&'a self, app: &'a str, within: Duration) -> Fut<'a, bool> {
+        Box::pin(async move { Ok(Node::runs_latest(self, app, within).await) })
+    }
+
+    fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
+        Node::nodes_for(self, viewer, described)
     }
 }
 

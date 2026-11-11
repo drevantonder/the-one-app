@@ -208,7 +208,7 @@ impl Node {
     /// Where an app that `described` itself runs its service for `viewer`, if it has one (its own, or one it uses): the
     /// names of their own nodes on a platform the service is built for, and `cloudflare` for an admin when it's built
     /// for that.
-    fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
+    pub(super) fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
         let platforms: Option<Vec<&str>> = described["service"]["platforms"].as_array().map(|p| p.iter().filter_map(Value::as_str).collect());
         let uses_service = described["uses"]["services"].as_array().is_some_and(|s| !s.is_empty());
         if described["service"].is_null() && !uses_service {
@@ -304,7 +304,7 @@ impl Node {
         self.uses_here(app).await
     }
 
-    async fn runs_latest(&self, app: &str, within: Duration) -> bool {
+    pub(super) async fn runs_latest(&self, app: &str, within: Duration) -> bool {
         let runs = || {
             let latest = self.with_or(None, |i| Ok(i.r.db().app(app)?.and_then(|a| a.bundle.clone())));
             latest.is_none() || self.0.bundles.lock().unwrap().get(app) == latest.as_ref()

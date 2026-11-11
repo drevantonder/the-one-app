@@ -57,6 +57,12 @@ pub trait ScopeDatabase: Send + Sync {
     fn read_dyn(&self, f: &mut dyn FnMut(&Read<'_>) -> Result<()>) -> Result<()>;
     /// Signs a step of `scope`'s as `user`, and waits for it to be taken.
     fn append<'a>(&'a self, scope: &'a Scope, user: &'a str, content: Content) -> Fut<'a, ()>;
+    /// Signs a step of `global`'s for `caller` with this device, which counts only if the device is theirs, and runs
+    /// here what it changed (a deploy, an app added) before it's done.
+    fn as_member<'a>(&'a self, caller: &'a Caller, content: Content) -> Fut<'a, ()>;
+    /// Reads the scope databases of the scopes `caller` uses that this device runs but doesn't open, with the keys they
+    /// hand (428, `handed::Needs`, when they didn't): what their calls are checked by, and written after.
+    fn read_callers_scopes<'a>(&'a self, caller: &'a Caller) -> Fut<'a, ()>;
 }
 
 /// `read` and `read_or`, for every `ScopeDatabase`: its closure is sync, so nothing waits while who's who is held.
@@ -98,6 +104,13 @@ pub trait Databases: Send + Sync {
     fn needs<'a>(&'a self, caller: &'a Caller, wants: &'a [(Scope, &'a str, &'a str)]) -> Fut<'a, ()>;
     /// An object of the network's bucket, by its name (`database::keys` names them): none if it has none.
     fn object<'a>(&'a self, name: &'a str) -> Fut<'a, Option<Vec<u8>>>;
+    /// A blob, by its hash: from this device, else from the bucket, in a scope whose database names it.
+    fn blob<'a>(&'a self, hash: &'a str) -> Fut<'a, Vec<u8>>;
+    /// Keeps `bytes` as a blob `caller` put, which they may then read back: → its hash.
+    fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String>;
+    /// Whether `caller` may read the blob `hash`: this machine's own programs, whoever put it, or someone a scope they
+    /// may use names it for.
+    fn may_read_blob(&self, caller: &Caller, hash: &str) -> Result<bool>;
 }
 
 /// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
@@ -135,6 +148,22 @@ pub trait Apps: Send + Sync {
     /// The apps a page shows for `viewer`: with `scope`, those added there, each reaching only it; without, every app,
     /// reaching all it may.
     fn page_apps(&self, viewer: &Caller, scope: Option<&str>) -> Result<Vec<PageApp>>;
+    /// What `app` says of itself: one added here, or a built-in app no one has added, which touches no data.
+    fn describe_any<'a>(&'a self, app: &'a str) -> Fut<'a, Value>;
+    /// What users call `app`: its title, or its service's, else its name.
+    fn title<'a>(&'a self, app: &'a str) -> Fut<'a, String>;
+    /// The bundle this release has of the built-in app `app`, if it's one.
+    fn built_in(&self, app: &str) -> Option<String>;
+    /// Adds the built-in app `app` if the network doesn't have it yet, as this release has it, and runs it here.
+    /// Admins only.
+    fn bring_in<'a>(&'a self, caller: &'a Caller, app: &'a str) -> Fut<'a, ()>;
+    /// What `app`'s latest deploy says it uses, (apps, services), once this device runs it, or a while.
+    fn uses<'a>(&'a self, app: &'a str) -> Fut<'a, (Vec<String>, Vec<String>)>;
+    /// Whether this device runs `app`'s latest deploy, waiting up to `within` for it.
+    fn runs_latest<'a>(&'a self, app: &'a str, within: Duration) -> Fut<'a, bool>;
+    /// Where an app that `described` itself can run its service for `viewer`, if it has one: their own devices'
+    /// names, and `cloudflare` for an admin when it's built for that.
+    fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>>;
 }
 
 /// An app a page shows, as it draws for who's looking.
