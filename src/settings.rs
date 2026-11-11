@@ -959,6 +959,13 @@ async fn invites(m: &impl Me) -> Result<BTreeMap<String, Invited>> {
     Ok(kept.into_iter().filter(|(_, i)| i.until > now).collect())
 }
 
+/// Whether an invite could let someone in with no tap now: one by email not yet used, or a link this device made, each
+/// still in date. With none, asking auth who waits finds no one this device lets in by itself.
+pub async fn invite_open(m: &impl Me) -> bool {
+    let now = m.now();
+    m.who(|who| Ok(who.email_invites()?.iter().any(|i| !i.used && i.until > now))).unwrap_or(true) || invites(m).await.map_or(true, |i| !i.is_empty())
+}
+
 async fn keep_invites(m: &impl Me, invites: &BTreeMap<String, Invited>) -> Result<()> {
     m.keep(INVITES, &serde_json::to_vec(invites)?).await
 }

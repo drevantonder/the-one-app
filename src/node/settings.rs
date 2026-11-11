@@ -187,13 +187,13 @@ impl Node {
         });
     }
 
-    /// Every few seconds, on a client of the network's, lets in each newcomer an invite already said yes to
-    /// (`settings::requests`). Everyone else waits for someone to tap Approve.
+    /// Every few seconds, on a client of the network's, while an invite is open, lets in each newcomer it already said
+    /// yes to (`settings::requests`). Everyone else waits for someone to tap Approve.
     pub(super) async fn invites_loop(self) {
         loop {
             tokio::time::sleep(INVITES_EVERY).await;
             let client = self.with(|i| Ok(i.r.db().client(&self.0.holds.device())?.is_some_and(|c| c.user == i.user)));
-            if !client.unwrap_or(false) || Node::address(&self).is_err() {
+            if !client.unwrap_or(false) || Node::address(&self).is_err() || !crate::settings::invite_open(&self).await {
                 continue;
             }
             if let Err(err) = crate::settings::requests(&self).await {
