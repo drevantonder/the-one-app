@@ -57,7 +57,7 @@ pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", classes
 
 /// The Workers traced at 100% (`metadata`), their logs exported too: all but the telemetry Worker and the Cloudflare node.
 /// The web client is the gateway's assets.
-const TRACED: [&str; 6] = crate::insights::TRACED;
+const TRACED: [&str; 6] = ::insights::TRACED;
 
 impl Worker {
     pub fn named(name: &str) -> &'static Worker {
@@ -843,7 +843,7 @@ pub fn served_with(settings: &Settings, web: &Path, sources: &Files, cloudflare_
 }
 
 /// Where telemetry goes in Workers that run on one machine, in Basin's place: Basin is only on Cloudflare
-/// (`cloudflare/telemetry/stand-in.js`).
+/// (`insights/worker/stand-in.js`).
 const STAND_IN: &str = "telemetry-store";
 
 fn stand_in(sources: &Files) -> Result<Served> {

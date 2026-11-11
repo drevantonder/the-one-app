@@ -129,7 +129,7 @@ impl Urls {
     /// What it read, if it's been a minute, to the telemetry Worker, which nothing waits for.
     fn say(&self) {
         let now = crate::keyring::now();
-        let Some(rows) = one::insights::bucket_reads(&self.reads, now, &key::hex(&self.me.key), &self.client) else { return };
+        let Some(rows) = insights::bucket_reads(&self.reads, now, &key::hex(&self.me.key), &self.client) else { return };
         let me = self.me.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let Ok(signed) = key::signed_request_by(&me, custom_build::protocol::TELEMETRY, rows, key::next_at(now)).await else { return };

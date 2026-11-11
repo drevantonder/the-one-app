@@ -35,7 +35,7 @@ impl<'a> Gateway<'a> {
     }
 
     fn service(&self) -> &str {
-        self.app.unwrap_or(crate::insights::own())
+        self.app.unwrap_or(::insights::own())
     }
 
     fn scope(&self, whose: Whose) -> Scope {
@@ -128,7 +128,7 @@ impl Host for Gateway<'_> {
     }
 
     fn record(&self, span: Span) {
-        self.node.record_gen_ai(self.trace, self.service(), &self.caller.user, span);
+        insights_runtime::record_gen_ai(&self.node.rt(), self.trace, self.service(), &self.caller.user, span);
     }
 
     fn now(&self) -> u64 {
@@ -194,7 +194,7 @@ impl Node {
         let answer = match tool {
             "run" => {
                 let retry_key = input.remove("retry_key").and_then(|k| k.as_str().map(str::to_string));
-                ai_gateway_runtime::run(&gateway, crate::insights::own(), Value::Object(input), retry_key.as_deref()).await
+                ai_gateway_runtime::run(&gateway, ::insights::own(), Value::Object(input), retry_key.as_deref()).await
             }
             "models" => ai_gateway_runtime::models(&gateway).await,
             "set" => {

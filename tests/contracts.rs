@@ -16,7 +16,7 @@ impl Formats {
     fn start() -> Self {
         let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
         // Each as the Workers are built from them: its name there, and where it is in the repo.
-        let sources = [("shared/crypto.js", "cloudflare/shared/crypto.js"), ("shared/token.js", "auth/token.js"), ("shared/http.js", "gateway/http.js"), ("gateway/worker.js", "gateway/worker.js"), ("telemetry/worker.js", "cloudflare/telemetry/worker.js"), ("telemetry/usage.js", "cloudflare/telemetry/usage.js"), ("test/formats.js", "cloudflare/test/formats.js")];
+        let sources = [("shared/crypto.js", "cloudflare/shared/crypto.js"), ("shared/token.js", "auth/token.js"), ("shared/http.js", "gateway/http.js"), ("gateway/worker.js", "gateway/worker.js"), ("telemetry/worker.js", "insights/worker/worker.js"), ("telemetry/usage.js", "insights/worker/usage.js"), ("test/formats.js", "cloudflare/test/formats.js")];
         let mut files: Vec<(String, Vec<u8>)> = sources.map(|(name, path)| (name.to_string(), std::fs::read(root.join(path)).unwrap())).to_vec();
         files.push(("screen/agents.js".into(), std::fs::read(root.join("src/screen/settings/agents.js")).unwrap()));
         let dir = crate::temp("formats");
@@ -422,12 +422,12 @@ fn insights_on_the_screen_and_for_agents_agree_on_a_p95() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let screen: Vec<f64> = serde_json::from_slice(&out.stdout).unwrap();
     let rows: Vec<&serde_json::Value> = rows.as_array().unwrap().iter().collect();
-    let agents: Vec<f64> = [0.0, 0.5, 0.95, 1.0].iter().map(|q| one::insights::view::quantile(&rows, *q).unwrap()).collect();
+    let agents: Vec<f64> = [0.0, 0.5, 0.95, 1.0].iter().map(|q| insights::view::quantile(&rows, *q).unwrap()).collect();
     assert_eq!(screen, agents);
     let worker = Formats::start().js(json!({ "op": "telemetryBounds" }));
-    let bounds: Vec<f64> = one::insights::BOUNDS.iter().map(|b| *b as f64).chain([60000.0]).collect();
-    assert_eq!(bounds.as_slice(), one::insights::view::BOUNDS.as_slice(), "a histogram's bounds are the same on a device and where they're read");
-    assert_eq!(worker, json!(one::insights::BOUNDS), "and in the telemetry Worker");
+    let bounds: Vec<f64> = insights::BOUNDS.iter().map(|b| *b as f64).chain([60000.0]).collect();
+    assert_eq!(bounds.as_slice(), insights::view::BOUNDS.as_slice(), "a histogram's bounds are the same on a device and where they're read");
+    assert_eq!(worker, json!(insights::BOUNDS), "and in the telemetry Worker");
 }
 
 /// A service answers its node in the words of `services/sdk/wire.json`, in whatever language it's written: started as its
@@ -805,7 +805,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
     }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut files = Vec::new();
-    for dir in ["cloudflare", "auth", "gateway", "url-signer", "src/screen", "onet/src", "client/native/src", "apps"] {
+    for dir in ["cloudflare", "auth", "gateway", "url-signer", "insights/worker", "src/screen", "onet/src", "client/native/src", "apps"] {
         let mut stack = vec![root.join(dir)];
         while let Some(dir) = stack.pop() {
             let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
@@ -1052,11 +1052,11 @@ fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let said = String::from_utf8(out.stdout).unwrap();
     let said: Vec<Value> = serde_json::from_str(&said).unwrap();
-    let kept: Vec<_> = said.iter().map(|e| one::insights::Exception::from_json(e).unwrap()).collect();
-    let stored = kept.iter().map(|e| one::insights::Attrs::default().exception(e).json().to_string()).collect::<String>();
+    let kept: Vec<_> = said.iter().map(|e| insights::Exception::from_json(e).unwrap()).collect();
+    let stored = kept.iter().map(|e| insights::Attrs::default().exception(e).json().to_string()).collect::<String>();
     assert!(!stored.contains("anna") && !stored.contains("SECRET:") && !stored.contains("example"), "{stored}");
     assert!(kept.iter().all(|e| e.frames.iter().all(|f| !f.contains("SECRET") && !f.contains("leak"))), "{kept:?}");
-    assert_eq!(one::insights::message::cleaned(kept[0].message.as_deref().unwrap()), "<email>");
+    assert_eq!(insights::message::cleaned(kept[0].message.as_deref().unwrap()), "<email>");
     assert_eq!(kept[0].kind, "TypeError");
     assert_eq!(kept[0].frames, ["a.js:12:3", "srcdoc:2:5"]);
     assert_eq!(kept[1].kind, "Error", "a name of the program's own is `Error`");
@@ -1073,7 +1073,7 @@ fn a_screens_error_crosses_from_the_bridge_and_what_it_said_is_cleaned() {
 fn a_workers_traces_are_clamped_as_a_programs_are() {
     let formats = Formats::start();
     let traced: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryTraced" }))).unwrap();
-    assert_eq!(traced, one::insights::TRACED, "the telemetry Worker keeps the Workers the deploy exports, never its own");
+    assert_eq!(traced, insights::TRACED, "the telemetry Worker keeps the Workers the deploy exports, never its own");
     let start = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() * 1_000_000;
     let span = |name: &str, trace: char, status: i64, parent: Option<&str>| json!({ "name": name, "traceId": trace.to_string().repeat(32), "spanId": "1".repeat(16), "parentSpanId": parent, "startTimeUnixNano": start.to_string(), "endTimeUnixNano": (start + 500_000_000).to_string(), "status": { "code": status }, "kind": 2, "attributes": [{ "key": "url.full", "value": { "stringValue": "https://x/anna@example.org" } }, { "key": "http.response.status_code", "value": { "intValue": "500" } }] });
     let of = |worker: &str, spans: Vec<Value>| json!({ "resource": { "attributes": [{ "key": "service.name", "value": { "stringValue": worker } }] }, "scopeSpans": [{ "spans": spans }] });
@@ -1095,16 +1095,16 @@ fn a_workers_traces_are_clamped_as_a_programs_are() {
     assert!(!stored.contains("anna") && !stored.contains("example") && !stored.contains("url.full") && !stored.contains("l1kp"), "{stored}");
     let attrs: Value = serde_json::from_str(rows[0]["attrs"].as_str().unwrap()).unwrap();
     assert_eq!((rows[0]["name"].as_str(), rows[0]["service"].as_str(), rows[0]["duration"].as_u64(), rows[0]["status"].as_str()), (Some("/"), Some("worker.gateway"), Some(500), Some("error")), "the gateway's request is named by its route, never its path");
-    assert_eq!((&attrs["error.type"], &attrs["http.response.status_code"], &attrs["one.sampled"]), (&json!(one::insights::exception_type("TypeError")), &json!(500), &json!(1)));
+    assert_eq!((&attrs["error.type"], &attrs["http.response.status_code"], &attrs["one.sampled"]), (&json!(insights::exception_type("TypeError")), &json!(500), &json!(1)));
     assert_eq!((rows[0]["message"].as_str(), attrs["one.fingerprint"].as_str()), (Some("internal error; reference = <value> for <value>"), Some("TypeError|worker.js:474:18|")), "an exception's plain words, and what the Errors list groups it by");
     assert_eq!((rows[1]["trace"].as_str(), serde_json::from_str::<Value>(rows[1]["attrs"].as_str().unwrap()).unwrap()["one.sampled"].as_u64()), (Some("0".repeat(32).as_str()), Some(20)), "a sampled request stands for the 20 it's one of");
     let counted: Vec<(String, String, String, u64)> = read["metrics"].as_array().unwrap().iter().map(|m| { let a: Value = serde_json::from_str(m["attrs"].as_str().unwrap()).unwrap(); (m["service"].as_str().unwrap().to_string(), a["span.name"].as_str().unwrap().to_string(), a["status.code"].as_str().unwrap().to_string(), m["count"].as_u64().unwrap()) }).collect();
     let want = |s: &str, n: &str, st: &str, c: u64| (s.to_string(), n.to_string(), st.to_string(), c);
     assert_eq!(counted, [want("worker.gateway", "/", "STATUS_CODE_ERROR", 1), want("worker.gateway", "/", "STATUS_CODE_UNSET", 2), want("worker.gateway", "/updates/", "STATUS_CODE_UNSET", 1), want("worker.mcp", "GET", "STATUS_CODE_UNSET", 1)], "every request is counted, kept or not, as Cloudflare bills them: a WebSocket message isn't one, nor a Durable Object's own fetch");
-    let program = one::insights::otlp::items(&json!({ "resourceSpans": [{ "scopeSpans": [{ "spans": [span("GET /users/anna@example.org", 'a', 2, None)] }] }] }));
+    let program = insights::otlp::items(&json!({ "resourceSpans": [{ "scopeSpans": [{ "spans": [span("GET /users/anna@example.org", 'a', 2, None)] }] }] }));
     assert_eq!((program[0].name.as_str(), program[0].ms, program[0].ok, program[0].status_code), ("span", 500, false, Some(500)), "the same span reads the same on a device");
     let named: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryExceptions" }))).unwrap();
-    assert!(named.iter().all(|n| one::insights::exception_type(n) == n) && one::insights::exception_type("Nope") == "Error", "a Worker's exception is named as a program's is: {named:?}");
+    assert!(named.iter().all(|n| insights::exception_type(n) == n) && insights::exception_type("Nope") == "Error", "a Worker's exception is named as a program's is: {named:?}");
 }
 
 /// Cloudflare's export of the Workers' logs keeps only what broke, an error-level line or an exception, and of it only what
@@ -1145,7 +1145,7 @@ fn a_workers_logs_keep_only_what_broke_cleaned() {
     assert_eq!(rows[1]["severity_number"], 17);
 }
 
-/// The Workers' cleaner keeps a message's plain words alone, so it hides at least what the node's (src/insights/message.rs)
+/// The Workers' cleaner keeps a message's plain words alone, so it hides at least what the node's (insights/src/message.rs)
 /// does: no word the node's would hide survives it.
 #[test]
 fn a_workers_cleaner_hides_what_a_nodes_does() {
@@ -1153,7 +1153,7 @@ fn a_workers_cleaner_hides_what_a_nodes_does() {
     let said = ["couldn't mail anna.lee@example.org, try again", "fetching https://x.example/a?token=abc failed", "no file at /home/anna/taxes.pdf", "connecting to 10.0.0.12:8080: refused", "connecting to 2001:db8::1 timed out", "call +61 400 123 456 back", "call (02) 9876 5432 back", "order 123456789 isn't there", "bad key ab12cd34ef56ab12cd34ef56ab12", "(mac: 1fcdd729 isn't connected)", "token=hunter was refused", "token = hunter was refused", "password: hunter was refused", "Authorization: Bearer abcdefgh", "eyJhbGci.eyJzdWIi.c2lnbmF0dXJl expired", "no device deadbeefcafebabedead here"];
     let cleaned: Vec<String> = serde_json::from_value(formats.js(json!({ "op": "telemetryPlainWords", "said": said }))).unwrap();
     for (said, worker) in said.iter().zip(&cleaned) {
-        let node = one::insights::message::cleaned(said);
+        let node = insights::message::cleaned(said);
         for hidden in said.split_whitespace().filter(|w| !node.contains(w.trim_end_matches([',', '.', ':', ')']))) {
             assert!(!worker.contains(hidden.trim_end_matches([',', '.', ':', ')'])), "{hidden:?} of {said:?} is in {worker:?}, and the node's hides it: {node:?}");
         }
@@ -1186,9 +1186,9 @@ fn cloudflare_usage_is_only_the_networks_and_priced() {
     }
     assert!(query.contains(r#"scriptName_in: ["one-gateway"]"#) && query.contains(r#"namespaceId_in: ["n1"]"#), "only the network's own: {query}");
     let rows = said["rows"].as_array().unwrap();
-    assert!(rows.iter().all(|r| r["service"] == one::insights::cost::CLOUDFLARE && !r.to_string().contains("someone-elses")), "{rows:?}");
+    assert!(rows.iter().all(|r| r["service"] == insights::cost::CLOUDFLARE && !r.to_string().contains("someone-elses")), "{rows:?}");
     let attrs = |r: &Value| serde_json::from_str::<Value>(r["attrs"].as_str().unwrap()).unwrap();
-    for price in one::insights::cost::PRICES {
+    for price in insights::cost::PRICES {
         assert!(rows.iter().any(|r| r["name"] == price.metric && (price.counts)(&attrs(r)) > 0.0), "{} is priced as nothing that's recorded", price.metric);
     }
     let cpu = rows.iter().find(|r| r["name"] == "cloudflare.workers.cpu_time").unwrap();

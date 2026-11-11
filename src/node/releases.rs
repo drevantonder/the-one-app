@@ -3,7 +3,7 @@
 //! takes its own build only by `one update`, which reads the record itself, needing nothing of a node.
 
 use super::*;
-use crate::insights::{Attrs, Status};
+use ::insights::{Attrs, Status};
 
 pub(crate) mod routes;
 
@@ -85,7 +85,7 @@ impl Node {
         let replaced = Bucket::replace(&bucket.place, &crate::latest::newest_name(), text.as_bytes(), tag).await?;
         if replaced && let Ok(new) = crate::latest::Latest::read(crate::mode::here().release_key(), text) {
             for thing in new.things.iter().filter(|t| was.get(&t.name).is_none_or(|w| w.sha256 != t.sha256)) {
-                self.device_signal("update.sent", Attrs::default().part(&thing.name), Status::Unset);
+                insights_runtime::device_signal(&self.rt(), "update.sent", Attrs::default().part(&thing.name), Status::Unset);
             }
         }
         if replaced {

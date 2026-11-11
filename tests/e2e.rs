@@ -691,7 +691,7 @@ async fn a_refusals_words_never_reach_what_insights_keeps_and_a_failures_are_cle
     assert!(format!("{refused:#}").contains("a private thought"), "the caller still reads it: {refused:#}");
     let failed = a.call(notes("fail", json!({ "text": "couldn't mail anna@example.org" }))).await.unwrap_err();
     assert!(format!("{failed:#}").contains("anna@example.org"), "the caller still reads it: {failed:#}");
-    let batch = a.take_insights();
+    let batch = insights_runtime::take(&a.rt());
     let sent = batch.rows();
     let said = sent.to_string();
     let spans = sent["spans"].as_array().unwrap();

@@ -216,7 +216,7 @@ async fn no_prompt_or_answer_in_insights() {
     let broke = Stand::new(vault, Some("notes"), "u1", |_| Sent { status: 500, retry_after: None, body: b"{\"error\":\"overloaded\"}".to_vec() });
     let _ = ai_gateway_runtime::run(&broke, "notes", input, None).await;
 
-    let mut batch = one::insights::Batch::default();
+    let mut batch = insights::Batch::default();
     for stand in [&ok, &broke] {
         for span in stand.spans.lock().unwrap().drain(..) {
             for (key, _) in &span.attrs {

@@ -1,0 +1,34 @@
+# Insights, as every build has it, WebAssembly too: its signals and their closed sets, the batch a device sends, reading
+# rows back as lines (view, cost), its tool's spec, what its route says and its command. What records and serves it is
+# the runtime's (runtime/); the telemetry Worker that keeps it is worker/.
+[package]
+name = "insights"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+api = { path = "../api" }
+custom-build = { path = "../custom-build" }
+bucket = { path = "../bucket" }
+key = { path = "../key" }
+scope = { path = "../scope" }
+# An AI Gateway call's span and the attributes it keeps (`Batch::gen_ai`).
+ai-gateway = { path = "../ai-gateway" }
+anyhow = "1"
+# What AI Gateway's calls cost, priced when Insights is read (cost.rs): Pydantic's table of every AI company's list
+# prices by date and tier, kept current from the companies' own pages, embedded at its release (`cargo update -p
+# genai-prices` takes newer prices). Builds for WebAssembly too.
+genai-prices = "0.2.3"
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+# OTLP in protobuf, which Go's exporter sends by default, read as its JSON (otlp.rs).
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "trace", "logs", "metrics", "with-serde"] }
+prost = "0.14"

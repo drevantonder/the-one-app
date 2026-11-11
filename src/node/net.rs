@@ -538,7 +538,7 @@ impl Node {
     /// at `at` and `sig` the signature beside it, base64.
     fn changed_from(&self, changed: &Value) {
         if let Some(sent) = changed["sent"].as_u64() {
-            self.write_seen(sent);
+            insights_runtime::write_seen(&self.rt(), sent);
         }
         let Ok(scope) = Scope::parse(changed["scope"].as_str().unwrap_or("")) else { return };
         let wrote = changed["app"].as_str().zip(changed["database"].as_str()).map(|(app, db)| (app, db, changed["at"].as_u64().unwrap_or(0)));
@@ -905,7 +905,7 @@ impl Node {
             if let Some(was) = was {
                 // One whose socket opened again since is tried again at once.
                 node.0.net.down.lock().unwrap().retain(|k, _| was.contains(k) || !connected.contains(k));
-                node.relay_says(&was, &connected);
+                insights_runtime::relay_says(&node.rt(), &was, &connected);
                 node.emit(Event::Devices);
             }
         });

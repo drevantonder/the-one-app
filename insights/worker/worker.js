@@ -4,7 +4,7 @@
 // (`TABLES`) are few and stable and everything else is in `attrs`, a JSON string.
 //
 // It opens nothing: what's here is operational and unsealed, each value a closed-set name or a number but for a failure's
-// cleaned message (src/insights/message.rs).
+// cleaned message (insights/src/message.rs).
 //
 //   POST /telemetry/write { spans, logs, metrics, at, by, sig } → 204
 //   POST /telemetry/otlp  Cloudflare's export of the Workers' own traces and logs (`otlp`), gzipped or not → 204
@@ -107,7 +107,7 @@ async function signed(request, env, most) {
 const STREAMS = { spans: "SPANS", logs: "LOGS", metrics: "METRICS" };
 
 /// The Workers whose own traces and logs are kept: never `node`, which reports its calls as every node does, whatever a
-/// request says of itself, and not this one, as an export of what it did would be the next thing it was handed (src/insights.rs).
+/// request says of itself, and not this one, as an export of what it did would be the next thing it was handed (insights/src/lib.rs).
 export const TRACED = ["gateway", "auth", "relay", "signer", "push", "mcp"];
 const token = (v) => typeof v === "string" && /^[A-Za-z0-9_.+-]{1,72}$/.test(v);
 const nanos = (v) => Number(BigInt(v ?? 0) / 1000000n);
@@ -115,7 +115,7 @@ const OTLP_PATH = "/telemetry/otlp";
 /// Who it's from isn't a device, so a Worker's own spans have no device of their own.
 const NOBODY = "0".repeat(64);
 /// As OTEL's tail sampling does: a trace is kept whole if it failed or was slow, or is one in 20 of a Worker's requests
-/// (src/insights.rs). Every request is counted first, kept or not, so rates come from counts.
+/// (insights/src/lib.rs). Every request is counted first, kept or not, so rates come from counts.
 const SLOW_MS = 1000;
 const SAMPLED_ONE_IN = 20;
 /// What a Worker answers as a request. Its other events (each WebSocket message the relay takes is one, some 130,000 an hour,
@@ -127,15 +127,15 @@ const SPAN_METRIC = "traces.span.metrics.duration";
 /// How Cloudflare says an invocation that failed ended (`cloudflare.outcome`), kept as its `error.type` when it threw nothing:
 /// what tells running out of memory or CPU, or being cut off, from a bug. Any other is `_OTHER`.
 const OUTCOMES = ["exceededCpu", "exceededMemory", "canceled", "responseStreamDisconnected", "scriptNotFound", "loadShed", "killSwitch", "daemonDown"];
-/// The errors a JavaScript engine names (src/insights.rs's `EXCEPTIONS`): any other name is `Error`.
+/// The errors a JavaScript engine names (insights/src/lib.rs's `EXCEPTIONS`): any other name is `Error`.
 export const EXCEPTIONS = ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "AggregateError"];
 
-/// Words that say the next one is a secret, as in `password: hunter` or `Bearer abc` (src/insights/message.rs).
+/// Words that say the next one is a secret, as in `password: hunter` or `Bearer abc` (insights/src/message.rs).
 const NAMES_A_SECRET = ["token", "key", "secret", "password", "passwd", "pwd", "auth", "authorization", "bearer", "apikey", "api_key", "cookie", "session"];
 
 /// What a Worker said of a failure, kept to its plain words: Cloudflare's own ("internal error; reference = …", "Network
 /// connection lost.") are what explains a failure there. Any other word, a value of any kind, is `<value>`, as are a word
-/// all of hex, one a word naming a secret goes before, and so anything src/insights/message.rs would hide, which also
+/// all of hex, one a word naming a secret goes before, and so anything insights/src/message.rs would hide, which also
 /// makes failures that differ only by one read the same. It never passes through a node, so this is its cleaner.
 export function plainWords(said) {
   // `named`: the word before named a secret, and an `=` or `:` would say this one is it; `secret`: this one is.

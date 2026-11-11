@@ -76,7 +76,7 @@ impl Node {
         if body["call"].is_object() {
             return Ok(self.accept_service_call(by, &body["call"]).await.json());
         }
-        self.service_said(&by, &body["insights"]).await;
+        insights_runtime::service_said(&self.rt(), &by, &body["insights"]).await;
         Ok(json!({}))
     }
 

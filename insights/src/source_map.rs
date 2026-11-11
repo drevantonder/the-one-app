@@ -1,21 +1,7 @@
-//! Where a frame of built code came from: the app's `app.js.map`, each screen's `<name>.html.map`. What's kept of a map is
+//! Where a frame of built code came from, by its map: the app's `app.js.map`, each screen's `<name>.html.map`. What's kept of a map is
 //! its files and lines, none of the code; and a frame stays only ever a location.
 
 use serde_json::Value;
-
-/// The map of the file a frame is in: an app's module's from its bundle's `files`, or a screen's, an app's own or, with no
-/// bundle, the client's.
-pub fn of(file: &str, files: &[(String, Vec<u8>)]) -> Option<String> {
-    let in_bundle = |name: &str| files.iter().find(|(path, _)| path == name).and_then(|(_, bytes)| String::from_utf8(bytes.clone()).ok());
-    if file == "app.js" {
-        return in_bundle(::deploy::bundle::BUILT);
-    }
-    let screen = file.strip_suffix(".screen.js")?;
-    if files.is_empty() {
-        return crate::screen::client_map(screen).map(str::to_string);
-    }
-    in_bundle(&format!("src/dist/{screen}.html.map"))
-}
 
 /// What `map` says line `line`, column `col` of the built file came from: a file and where in it, each from 1.
 pub fn located(map: &str, line: u64, col: u64) -> Option<(String, u64, u64)> {

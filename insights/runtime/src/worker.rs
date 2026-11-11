@@ -1,12 +1,12 @@
-//! The telemetry Worker (`cloudflare/telemetry/worker.js`), as a device reaches it: a request signed by its own key.
+//! The telemetry Worker (`insights/worker/worker.js`), as a device reaches it: a request signed by its own key.
 
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
-use ed25519_dalek::SigningKey;
+use key::SigningKey;
 use serde_json::{Value, json};
 
-use super::{Ask, Batch};
+use insights::{Ask, Batch};
 use ::platform::hedge::Twice;
 
 /// How long a request may take: a device has more to do, and telemetry may be lost.

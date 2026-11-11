@@ -45,7 +45,7 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
     let began = std::time::Instant::now();
     let mut resp = trace::within(Some(t.clone()), next.run(req)).await;
     if let (Some(failed), Some(route)) = (resp.extensions_mut().remove::<::api::RouteFailed>(), route) {
-        node.finish_route_request(&t, &route, began.elapsed(), &failed);
+        insights_runtime::finish_route_request(&node.rt(), &t, &route, began.elapsed(), &failed);
     }
     if !asked {
         return resp;

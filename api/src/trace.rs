@@ -1,7 +1,7 @@
 //! What a request did on this device, step by step with how long each took, for a caller that asks for it: it asks
 //! with `x-one-trace` and gets it back in the same header (the runtime's guard), and another device asked for a call adds its
 //! own, in its answer (`trace` beside `ok`). Steps hold timings, device, app and tool
-//! names, never data or keys. Every call has one, asked for or not: it's the span insights keeps of a call (`src/insights`)
+//! names, never data or keys. Every call has one, asked for or not: it's the span insights keeps of a call (`insights/`)
 //! as well as what `--trace` shows.
 
 use std::sync::atomic::{AtomicBool, Ordering};

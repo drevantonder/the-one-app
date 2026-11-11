@@ -1,0 +1,32 @@
+# What the app runtime does for Insights: records how its calls, routes, hops and schedule runs went, what clients and
+# services report, sends it to the telemetry Worker and reads it back, through `api::AppRuntime`.
+[package]
+name = "insights-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+insights = { path = ".." }
+api = { path = "../../api" }
+scope = { path = "../../scope" }
+database = { path = "../../database" }
+bucket = { path = "../../bucket" }
+key = { path = "../../key" }
+custom-build = { path = "../../custom-build" }
+platform = { path = "../../platform" }
+# An app's bundle and the source map it keeps, where a frame that threw was written (`located`).
+deploy = { path = "../../deploy" }
+# What `since` says (10m, 2h), as `logs` reads it.
+device-logs = { path = "../../device-logs" }
+ai-gateway = { path = "../../ai-gateway" }
+anyhow = "1"
+axum = "0.8"
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "rt"] }
+tracing = "0.1"
+ureq = { version = "3", features = ["json"] }

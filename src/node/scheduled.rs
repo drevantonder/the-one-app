@@ -89,7 +89,7 @@ impl Node {
             }
         })
         .await;
-        self.finish_schedule(app, &schedule.name, user, started.elapsed(), &traced, ran.as_ref().err());
+        insights_runtime::finish_schedule(&self.rt(), app, &schedule.name, user, started.elapsed(), &traced, ran.as_ref().err());
         let error = ran.as_ref().err().map(|e| format!("{e:#}").chars().take(500).collect::<String>());
         let said = status::Run { slot, time: now_ms(), device: self.0.id, user: user.to_string(), ok: error.is_none(), error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
         // The scope's own rows open only with its epochs, which a machine that only runs the app's schedules hasn't.

@@ -128,7 +128,7 @@ fn numeric(v: &Value) -> Option<f64> {
 }
 
 /// The OTLP/JSON of a protobuf request to `path` (`/v1/traces`, `/v1/logs` or `/v1/metrics`), if it is one.
-#[cfg(feature = "node")]
+#[cfg(not(target_family = "wasm"))]
 pub fn from_protobuf(path: &str, body: &[u8]) -> Option<Value> {
     use opentelemetry_proto::tonic::collector::{logs::v1::ExportLogsServiceRequest, metrics::v1::ExportMetricsServiceRequest, trace::v1::ExportTraceServiceRequest};
     use prost::Message;
@@ -159,7 +159,7 @@ mod tests {
     use serde_json::json;
 
     /// Protobuf from a program, as Go's exporter sends it, reads as its JSON does, ids as hex, held to the same closed sets.
-    #[cfg(feature = "node")]
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn protobuf_is_read_as_the_same_message() {
         use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;

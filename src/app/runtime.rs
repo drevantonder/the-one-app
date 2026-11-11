@@ -186,7 +186,7 @@ impl Apps {
             }
         })
         .await??;
-        for span in reply["spans"].as_array().into_iter().flatten().take(crate::insights::MOST_APP_SPANS) {
+        for span in reply["spans"].as_array().into_iter().flatten().take(::insights::MOST_APP_SPANS) {
             ::api::trace::note(json!({ "step": "span", "name": span["name"], "began": span["began"], "failed": span["failed"], "attrs": span["attrs"] }), Duration::from_millis(span["ms"].as_u64().unwrap_or(0)));
         }
         if let Some(err) = reply.get("error") {

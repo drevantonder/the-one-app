@@ -186,3 +186,10 @@ pub mod exit {
     /// "try again", EX_TEMPFAIL).
     pub const NOT_YET: i32 = 75;
 }
+
+/// Prints a call's trace (`--trace`), after its answer, to stderr, so what's on stdout stays the answer.
+pub fn print_trace(lines: Option<&[String]>) {
+    if let Some(lines) = lines.filter(|l| !l.is_empty()) {
+        eprintln!("\ntrace:\n  {}", lines.join("\n  "));
+    }
+}

@@ -3,7 +3,7 @@
 // namespaces and pipelines), grouped by those, the hour, and the kind of operation where that's what's billed (an R2
 // operation's, a Durable Object invocation's), never by who asked or what: there's no request data in it to leave out. It
 // runs at ten past each hour, by when Cloudflare's analytics have the hour before whole. Usage, never dollars:
-// src/insights/cost.rs prices it when it's read.
+// insights/src/cost.rs prices it when it's read.
 //
 // A product is one entry of `PRODUCTS`: its dataset, which of the network's resources it's filtered and named by, and its
 // metrics, each OTEL's name and unit and how to read it from a group. Checked against the account's GraphQL schema on

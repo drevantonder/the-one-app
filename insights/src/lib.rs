@@ -3,7 +3,7 @@
 //!
 //! It speaks OpenTelemetry's data model and field names (`service.name`, `error.type`, W3C trace and span ids) without its
 //! SDK. Each device keeps one batch in memory and sends it to the telemetry Worker every minute or so (`worker.rs` here),
-//! which keeps it in Cloudflare Basin (`cloudflare/telemetry/`): spans, logs and metrics. Every server span is sent, since
+//! which keeps it in Cloudflare Basin (`worker/`): spans, logs and metrics. Every server span is sent, since
 //! a service's rates are read from them; a call's steps and its hops only for failures, slow calls and one trace in 20.
 //! Telemetry may be lost.
 //!
@@ -21,17 +21,14 @@ use ::api::traceparent::{TIMEOUT, UNREACHABLE, stage};
 
 pub mod cost;
 pub mod message;
+pub mod otlp;
+pub mod says;
 pub mod source_map;
 pub mod tools;
 pub mod view;
 
-#[cfg(feature = "node")]
+#[cfg(not(target_family = "wasm"))]
 pub mod cli;
-#[cfg(feature = "node")]
-pub(crate) mod worker;
-#[cfg(feature = "node")]
-pub mod routes;
-pub mod otlp;
 
 /// Why this node's last process ended, kept in its home so the next one can say: what it said when it stopped. A crash can't
 /// say (`panic = "abort"`), so none there, after a run that started, is `Abort`.
@@ -737,10 +734,10 @@ pub struct Ask {
 /// fields), once it's been a minute since it last said.
 pub fn bucket_reads(reads: &bucket::Reads, now: u64, instance: &str, client: &str) -> Option<serde_json::Value> {
     let read = reads.due(now)?;
-    let mut batch = crate::insights::Batch::default();
+    let mut batch = crate::Batch::default();
     for (kind, found, n) in read {
-        let attrs = crate::insights::Attrs::default().reached(kind).outcome(if found { "found" } else { "missing" }).client(client).scope("everyone").build(::custom_build::config::BUILD);
-        batch.metric(now, crate::insights::BUCKET_READS, crate::insights::own(), instance, &attrs, n);
+        let attrs = crate::Attrs::default().reached(kind).outcome(if found { "found" } else { "missing" }).client(client).scope("everyone").build(::custom_build::config::BUILD);
+        batch.metric(now, crate::BUCKET_READS, crate::own(), instance, &attrs, n);
     }
     (!batch.is_empty()).then(|| batch.rows())
 }

@@ -14,15 +14,12 @@ pub fn commands() -> Command {
             let schema = super::tools::feature().tools.remove(0)["input"].clone();
             let input = ::api::tools::input(&schema, &[], vec![], g.flags.clone(), &[]).map_err(|e| ::api::cli::Failed::Typed(format!("{e:#}")))?;
             let ran = g.node.route(g.agent, "/api/insights/insights", &Value::Object(input), g.trace);
-            let said = ran.ok.map_err(|e| {
-                crate::tools::print_trace(ran.trace.as_deref());
-                crate::tools::in_cli_error(g.node, e)
-            })?;
+            let said = ran.ok.inspect_err(|_| ::api::cli::print_trace(ran.trace.as_deref()))?;
             match &said {
                 Value::String(text) => println!("{text}"),
                 rows => println!("{}", serde_json::to_string_pretty(rows)?),
             }
-            crate::tools::print_trace(ran.trace.as_deref());
+            ::api::cli::print_trace(ran.trace.as_deref());
             Ok(true)
         },
     }

@@ -121,20 +121,20 @@ pub fn run(g: &::api::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
         Ok(ok) => ok,
         Err(e) => {
             // The trace matters most when it failed.
-            print_trace(ran.trace.as_deref());
+            ::api::cli::print_trace(ran.trace.as_deref());
             return Err(in_cli_error(node, e));
         }
     };
     if let Some(none) = none_said(node, a, o, &ok, Reader::Cli).filter(|_| !g.json) {
         println!("{none}");
-        print_trace(ran.trace.as_deref());
+        ::api::cli::print_trace(ran.trace.as_deref());
         return Ok(());
     }
     if let Some(text) = ok.as_str() {
         ok = json!(in_cli_words(node, text));
     }
     let shown = show(app, tool, &ok, out.as_deref(), g.json);
-    print_trace(ran.trace.as_deref());
+    ::api::cli::print_trace(ran.trace.as_deref());
     shown
 }
 
@@ -146,13 +146,6 @@ pub fn in_cli_error(node: &Client, e: anyhow::Error) -> anyhow::Error {
         Ok(Failed::Refused(_)) => Failed::Refused(said).into(),
         Ok(Failed::Typed(_)) => Failed::Typed(said).into(),
         Err(e) => ::custom_build::protocol::Coded::or_plain(::custom_build::protocol::Coded::of(&e), said),
-    }
-}
-
-/// Prints a call's trace (`--trace`), after its answer, to stderr, so what's on stdout stays the answer.
-pub fn print_trace(lines: Option<&[String]>) {
-    if let Some(lines) = lines.filter(|l| !l.is_empty()) {
-        eprintln!("\ntrace:\n  {}", lines.join("\n  "));
     }
 }
 

@@ -1,5 +1,5 @@
 //! What the network's use of Cloudflare costs, estimated when it's read from the usage the telemetry Worker records each
-//! hour (cloudflare/telemetry/usage.js). The one place Cloudflare's prices are.
+//! hour (insights/worker/usage.js). The one place Cloudflare's prices are.
 
 use std::collections::BTreeMap;
 
@@ -149,7 +149,7 @@ fn ai_price(model: &str, tier: Option<&str>, hour: u64, input: f64, output: f64)
 /// `metrics`' AI token rows (any service's), priced: one entry for each app, user and model, most spent first.
 pub fn ai(metrics: &[Value]) -> Vec<AiSpend> {
     let mut by: BTreeMap<(String, String, String), AiSpend> = BTreeMap::new();
-    for row in metrics.iter().filter(|r| r["name"] == crate::insights::GEN_AI_TOKENS.name) {
+    for row in metrics.iter().filter(|r| r["name"] == crate::GEN_AI_TOKENS.name) {
         let attrs = &row["attrs"];
         let text = |key: &str| attrs[key].as_str().unwrap_or("").to_string();
         let (app, user, model) = (row["service"].as_str().unwrap_or("").to_string(), text("enduser.id"), text("gen_ai.request.model"));

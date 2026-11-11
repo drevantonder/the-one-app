@@ -2035,6 +2035,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "insights"
+version = "0.1.0"
+dependencies = [
+ "ai-gateway",
+ "anyhow",
+ "api",
+ "bucket",
+ "custom-build",
+ "genai-prices",
+ "key",
+ "opentelemetry-proto",
+ "prost",
+ "schemars",
+ "scope",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "insights-runtime"
+version = "0.1.0"
+dependencies = [
+ "ai-gateway",
+ "anyhow",
+ "api",
+ "axum",
+ "bucket",
+ "custom-build",
+ "database",
+ "deploy",
+ "device-logs",
+ "insights",
+ "key",
+ "platform",
+ "scope",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "ureq",
+]
+
+[[package]]
 name = "ipconfig"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3158,7 +3200,6 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "flate2",
  "futures-util",
- "genai-prices",
  "getrandom 0.2.17",
  "groups",
  "groups-runtime",
@@ -3166,6 +3207,8 @@ dependencies = [
  "hyper",
  "hyper-util",
  "image",
+ "insights",
+ "insights-runtime",
  "iroh",
  "jiff",
  "jsonc-parser",
@@ -3176,9 +3219,7 @@ dependencies = [
  "notifications",
  "notifications-runtime",
  "onboarding",
- "opentelemetry-proto",
  "platform",
- "prost",
  "rand 0.8.8",
  "ring",
  "rusqlite",
@@ -3285,6 +3326,8 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "groups",
  "hkdf",
+ "insights",
+ "insights-runtime",
  "iroh",
  "jiff",
  "key",
@@ -3328,6 +3371,7 @@ dependencies = [
  "getrandom 0.3.4",
  "getrandom 0.4.3",
  "httparse",
+ "insights",
  "iroh",
  "iroh-base",
  "js-sys",
@@ -3413,6 +3457,7 @@ dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.4.3",
  "httparse",
+ "insights",
  "iroh",
  "iroh-base",
  "key",

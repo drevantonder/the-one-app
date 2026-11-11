@@ -290,10 +290,10 @@ impl Node {
     /// elsewhere, or (an app's call) hasn't started it in its usual time.
     pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let req = self.identified(req)?;
-        let span = self.begin_call();
+        let span = insights_runtime::begin_call();
         let mut run_says = false;
         let ended = trace::within(Some(span.trace.clone()), Box::pin(self.try_devices(&req, &me, &mut run_says))).await;
-        self.finish_route(span, &req, &me, &ended, run_says).await;
+        insights_runtime::finish_route(&self.rt(), span, &req, &me, &ended, run_says).await;
         ended
     }
 
@@ -305,7 +305,7 @@ impl Node {
         let req = self.reaching(req.clone(), me)?;
         let me = me.clone();
         let mut why = Vec::new();
-        let mut kind = crate::insights::UNAVAILABLE;
+        let mut kind = ::insights::UNAVAILABLE;
         let began = Instant::now();
         let limit = self.limit(&req).await;
         let candidates = self.candidates_or_starting(&req, &me, limit).await?;
@@ -424,7 +424,7 @@ impl Node {
                 }
                 Ok((Reply::Elsewhere(w), theirs)) => {
                     tried("elsewhere", json!({ "here": here, "why": w, "trace": theirs }));
-                    kind = crate::insights::UNAVAILABLE;
+                    kind = ::insights::UNAVAILABLE;
                     why.push(format!("{name}: {w}"))
                 }
                 // The keys it lacks are its caller's to hand this device, which passes on to it those of the scopes
@@ -442,7 +442,7 @@ impl Node {
                         self.set_down(device, true);
                     }
                     let result;
-                    (kind, result) = super::insights::asking_failed(&err);
+                    (kind, result) = insights_runtime::asking_failed(&err);
                     tried(result, json!({}));
                     self.with_or(None, |n| Ok(n.nearest.insert(device, Duration::MAX)));
                     // A device that can't be reached says why itself, by its name.
@@ -745,7 +745,7 @@ impl Node {
             false => self.ask(device, request, limit + Duration::from_secs(5), taken).await,
         };
         if service {
-            self.finish_hop(&resolved, me, device, hop.elapsed(), &asked);
+            insights_runtime::finish_hop(&self.rt(), &resolved, me, device, hop.elapsed(), &asked);
         }
         let mut reply = asked?;
         if let Some(ok) = reply.get_mut("ok") {
@@ -804,7 +804,7 @@ impl Node {
         let req = &self.resolve(req.clone());
         let limit = self.limit(req).await;
         let writing = AtomicBool::new(false);
-        let call = self.begin_call();
+        let call = insights_runtime::begin_call();
         let result = trace::within(Some(call.trace.clone()), unless_writing(tokio::time::Instant::now() + limit, &writing, Box::pin(self.run_here(req, me, limit, &writing)))).await;
         let reply = match result {
             Some(Ok(reply)) => reply,
@@ -822,7 +822,11 @@ impl Node {
                 if may_go_on(reads, at) { Reply::Elsewhere(stopped(limit)) } else { Reply::error(stopped(limit)) }
             }
         };
-        self.finish_call(call, req, me, &reply).await;
+        match &reply {
+            Reply::Ok(answer) => insights_runtime::finish_call(&self.rt(), call, req, me, insights_runtime::Ran::Answered(answer)).await,
+            Reply::Error(said, code) => insights_runtime::finish_call(&self.rt(), call, req, me, insights_runtime::Ran::Failed(said, code.clone())).await,
+            Reply::Elsewhere(_) | Reply::Needs(_) => call.leave(),
+        }
         Ok(reply)
     }
 

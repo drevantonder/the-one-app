@@ -50,8 +50,6 @@ pub(crate) mod releases;
 mod scheduled;
 pub(crate) mod screens;
 mod sessions;
-#[path = "insights/node.rs"]
-mod insights;
 use ::api::runtime::NotGiven;
 pub use net::{Endpoints, alpn, relay};
 pub use calls::Grant;
@@ -245,7 +243,6 @@ pub struct Inner {
     /// The port apps' requests go out through.
     outbound: u16,
     calls: calls::State,
-    insights: insights::State,
     backups: backups::State,
     blobs: blobs::State,
     databases: databases::State,
@@ -318,9 +315,10 @@ pub async fn serve(listen: &str) -> Result<()> {
     let (ready_node, node_ready) = tokio::sync::oneshot::channel::<Node>();
     tokio::spawn(async move {
         stop.await;
-        crate::insights::Ended::Signal.write(&platform::home());
+        ::insights::Ended::Signal.write(&platform::home());
         if let Ok(Ok(node)) = tokio::time::timeout(LAST_SAY, node_ready).await {
-            let _ = tokio::time::timeout(LAST_SAY, async { tokio::join!(node.close_net(), node.flush_insights()) }).await;
+            let rt = node.rt();
+            let _ = tokio::time::timeout(LAST_SAY, async { tokio::join!(node.close_net(), insights_runtime::flush(&rt)) }).await;
         }
         crate::app::runtime::stop_all();
         std::process::exit(0)
@@ -329,7 +327,13 @@ pub async fn serve(listen: &str) -> Result<()> {
     let token = ::api::local::local_token(&dir).with_context(|| format!("{} has no token for this device's own programs: its onet makes it as it starts", dir.display()))?;
     let node = Node::runtime(&dir, Holder { at: ::api::local::addr(), token }).await?;
     let _ = ready_node.send(node.clone());
-    node.node_started(crate::insights::Ended::read(&dir));
+    // This runtime starting, and why the last one ended: what it said when it stopped, or `abort` if it didn't (panics
+    // abort, so a crash can't say), or `first` if there was none before it. An update's new one says so too.
+    let last = ::insights::Ended::read(&dir);
+    insights_runtime::device_signal(&node.rt(), "node.start", ::insights::Attrs::default().reason(last.reason()), ::insights::Status::Unset);
+    if last == ::insights::Ended::Update {
+        insights_runtime::device_signal(&node.rt(), "update.running", ::insights::Attrs::default().part(&crate::latest::Thing::node_name(custom_build::config::TARGET)), ::insights::Status::Unset);
+    }
     let listener = tokio::net::TcpListener::bind(listen).await.with_context(|| format!("listen on {listen}"))?;
     tracing::info!("{} app runtime {} answering {listen} from {}", ::custom_build::config::NAME, ::key::short(&node.id()), dir.display());
     tokio::spawn(crate::api::serve_guide(node.clone()));
@@ -392,7 +396,6 @@ impl Node {
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             calls: Default::default(),
-            insights: Default::default(),
             backups: Default::default(),
             blobs: Default::default(),
             databases: Default::default(),
@@ -430,7 +433,6 @@ impl Node {
         tokio::spawn(node.clone().tick_loop());
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
-        tokio::spawn(node.clone().insights_loop());
         node.start_features(starts);
         let worker = node.clone();
         tokio::spawn(async move {

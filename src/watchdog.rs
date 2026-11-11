@@ -140,7 +140,7 @@ pub fn watch() {
             let silent = up().saturating_sub(beat.load(std::sync::atomic::Ordering::SeqCst).max(counting_from));
             if silent >= (STUCK_FOR << in_a_row.min(3)).min(MOST_STUCK_FOR) {
                 tracing::error!("this node's runtime has done nothing for {silent} seconds: exiting, to be started again. {}", stuck_on(&runtime, up()));
-                crate::insights::Ended::Watchdog.write(&platform::home());
+                ::insights::Ended::Watchdog.write(&platform::home());
                 let _ = std::fs::write(&restarted, (in_a_row + 1).to_string());
                 std::process::exit(1);
             }

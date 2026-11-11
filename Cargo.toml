@@ -1,9 +1,9 @@
 [workspace]
-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "cloudflare/node", "onet", "ai-gateway", "ai-gateway/runtime", "onet/ffi", "services/sdk", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 # `cargo build` here builds the program (cli/), as target/debug/one, `one-dev`, and the services in Rust
 # (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one-dev throwaway`'s) runs.
 # `cargo test` builds only the program, for the tests that run it.
-default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
+default-members = [".", "custom-build", "platform", "key", "bucket", "database", "scope", "api", "labs", "onboarding", "device-logs", "device-logs/runtime", "groups", "groups/runtime", "widgets", "widgets/runtime", "deploy", "deploy/runtime", "insights", "insights/runtime", "vault", "vault/runtime", "notifications", "notifications/runtime", "devices", "devices/runtime", "services", "services/runtime", "cli", "dev", "onet", "apps/shell/service", "apps/models/service", "apps/ai-usage/service", "apps/agent-devices/service", "apps/agents/service", "apps/awake/service"]
 
 [package]
 name = "one"
@@ -23,7 +23,7 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:devices-runtime", "dep:services", "dep:services-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:opentelemetry-proto", "dep:prost", "web-bundle"]
+node = ["bucket/machine", "platform/machine", "dep:deploy-runtime", "dep:insights-runtime", "dep:ai-gateway-runtime", "dep:groups-runtime", "dep:widgets-runtime", "dep:vault-runtime", "dep:notifications-runtime", "dep:devices-runtime", "dep:services", "dep:services-runtime", "dep:device-logs-runtime", "dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "web-bundle"]
 # `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
 web-bundle = ["dep:ssh-key", "dep:flate2"]
 
@@ -38,6 +38,9 @@ api = { path = "api" }
 # Deploy (deploy/): bundles, building an app with the pinned Bun, every build; what a node does for it, only a node's.
 deploy = { path = "deploy" }
 deploy-runtime = { path = "deploy/runtime", optional = true }
+# Insights (insights/): its signals, the batch, reading rows back, every build; recording and sending them, only a node's.
+insights = { path = "insights" }
+insights-runtime = { path = "insights/runtime", optional = true }
 # The Vault (vault/): items, their sealing and filling, every build; what the app runtime does for it, only a node's.
 vault = { path = "vault" }
 # Labs (labs/): which of the network's labs are on, every build.
@@ -69,10 +72,6 @@ anyhow = "1"
 # AI Gateway (ai-gateway/): `ctx.ai.run`'s shapes and tools' specs, every build; what a node does for it, only a node's.
 ai-gateway = { path = "ai-gateway" }
 ai-gateway-runtime = { path = "ai-gateway/runtime", optional = true }
-# What AI Gateway's calls cost, priced when Insights is read (src/insights/cost.rs): Pydantic's table of every AI company's
-# list prices by date and tier, kept current from the companies' own pages, embedded at its release (`cargo update -p
-# genai-prices` takes newer prices). Builds for WebAssembly too.
-genai-prices = "0.2.3"
 # Backups encrypt what leaves for a place with AES-256-GCM, and seal each scope's key to the recovery key with X25519
 # (src/backups.rs).
 aes-gcm = "0.10"
@@ -113,8 +112,6 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 # the Cloudflare node and the native apps' client share.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 axum = { version = "0.8", optional = true }
-opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "trace", "logs", "metrics", "with-serde"], optional = true }
-prost = { version = "0.14", optional = true }
 # Its join_all and BoxFuture run a node's asks of several things at once (src/core_tools.rs); axum and iroh
 # already build it.
 futures-util = { version = "0.3", default-features = false, optional = true }

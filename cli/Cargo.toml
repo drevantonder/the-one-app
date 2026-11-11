@@ -33,6 +33,7 @@ devices = { path = "../devices" }
 services = { path = "../services" }
 device-logs = { path = "../device-logs" }
 deploy = { path = "../deploy" }
+insights = { path = "../insights" }
 notifications = { path = "../notifications" }
 one = { path = ".." }
 # `<cli>t`, this computer's onet (onet/src/computer/), is this program run by that name.
@@ -62,6 +63,8 @@ vault-runtime = { path = "../vault/runtime" }
 devices-runtime = { path = "../devices/runtime" }
 # Deploying and adding apps as the tests' devices run it (tests/e2e.rs).
 deploy-runtime = { path = "../deploy/runtime" }
+# What a test device recorded, taken before it's sent (tests/e2e.rs).
+insights-runtime = { path = "../insights/runtime" }
 # What a browser's push service does with a push (RFC 8291's decryption, tests/contracts.rs): the node's own crypto.
 aes-gcm = "0.10"
 hkdf = "0.13"

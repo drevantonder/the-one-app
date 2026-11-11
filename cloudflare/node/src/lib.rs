@@ -63,14 +63,14 @@ static READS: ::bucket::Reads = ::bucket::Reads::new();
 #[wasm_bindgen]
 pub fn bucket_read(name: &str, found: bool, instance: &str, now: f64) -> Option<String> {
     READS.count(name, found);
-    one::insights::bucket_reads(&READS, now as u64, instance, "cloudflare-node").map(|rows| rows.to_string())
+    insights::bucket_reads(&READS, now as u64, instance, "cloudflare-node").map(|rows| rows.to_string())
 }
 
 /// A call this node ran for `user` (their id), as the rows the telemetry Worker takes: one server span, by the same rules as any node's. `code` is
 /// what it failed with, and `said` what it said; a refusal keeps none of that.
 #[wasm_bindgen]
 pub fn call_span(app: &str, tool: &str, user: &str, instance: &str, time: f64, ms: f64, failed: bool, code: Option<String>, said: Option<String>, traceparent: Option<String>) -> String {
-    use one::insights::{Attrs, Batch, Failure, Span, SpanKind, Status, message, own, token};
+    use insights::{Attrs, Batch, Failure, Span, SpanKind, Status, message, own, token};
     let failure = failed.then(|| Failure::of(code.as_deref(), None, ::api::traceparent::stage::RUN));
     let name = if token(tool) { tool } else { "_unknown" };
     let mut attrs = Attrs::default().client("api").user(user).rpc(app, name).build(custom_build::config::BUILD);
@@ -860,9 +860,9 @@ pub async fn ai_run(bucket: JsValue, own: u32, everyone: u32, vault: String, app
         Ok(answer) => json!({ "ok": answer }),
         Err(err) => json!({ "error": format!("{err:#}"), "code": err.downcast_ref::<ai_gateway::Failed>().and_then(ai_gateway::Failed::code) }),
     };
-    let mut batch = one::insights::Batch::default();
+    let mut batch = insights::Batch::default();
     let parent = traceparent.as_deref().and_then(::api::traceparent::parent_of).map(|(t, s)| (t, Some(s)));
-    let service = if one::insights::token(&app) { app.as_str() } else { one::insights::own() };
+    let service = if insights::token(&app) { app.as_str() } else { insights::own() };
     for span in gateway.spans.take() {
         batch.gen_ai(js_sys::Date::now() as u64, parent.clone(), service, &instance, &user, span);
     }

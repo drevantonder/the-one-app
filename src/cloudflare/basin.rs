@@ -103,7 +103,7 @@ const ANALYTICS_PERMISSIONS: [&str; 1] = ["b89a480218d04ceb98b4fe57ca29dc1f"];
 
 /// What of the Cloudflare account is the network's (`settings.usage`), each as Cloudflare's analytics filter it, to what
 /// it's called: its Workers, buckets, Durable Object namespaces, pipelines and Basin's catalog, which the telemetry Worker
-/// reads the hourly usage of (cloudflare/telemetry/usage.js). The token it reads with is made the first time, which a
+/// reads the hourly usage of (insights/worker/usage.js). The token it reads with is made the first time, which a
 /// deploy's token may not, and kept beside the Workers' secrets.
 pub fn usage(cf: &Cloudflare, settings: &mut Settings) -> Result<()> {
     let telemetry = settings.telemetry.clone().context("telemetry isn't in Basin yet")?;

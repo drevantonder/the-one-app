@@ -69,7 +69,6 @@ pub fn routes() -> Routes {
         .merge(crate::node::releases::routes::routes())
         .merge(crate::node::blobs::routes::routes())
         .merge(crate::node::screens::routes::routes())
-        .merge(crate::insights::routes::routes())
         .merge(crate::node::runtime::routes())
 }
 

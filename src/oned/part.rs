@@ -574,14 +574,14 @@ async fn state(State(s): State<Service>, headers: HeaderMap) -> Response {
 }
 
 /// OTLP from the program, JSON or protobuf: passed to its node, which keeps what closed sets allow
-/// (`crate::insights::otlp`), said back as taken whatever happens to it, as an exporter would only retry. A program's
+/// (`::insights::otlp`), said back as taken whatever happens to it, as an exporter would only retry. A program's
 /// metrics aren't kept: what's a metric is the node's own to say.
 async fn otlp(State(s): State<Service>, uri: axum::http::Uri, headers: HeaderMap, body: axum::body::Bytes) -> Response {
     if let Err(r) = s.0.registry.ours(&headers) {
         return r;
     }
     let protobuf = headers.get(axum::http::header::CONTENT_TYPE).is_some_and(|t| t.as_bytes().starts_with(b"application/x-protobuf"));
-    let request = if protobuf { crate::insights::otlp::from_protobuf(uri.path(), &body) } else { serde_json::from_slice::<Value>(&body).ok() };
+    let request = if protobuf { ::insights::otlp::from_protobuf(uri.path(), &body) } else { serde_json::from_slice::<Value>(&body).ok() };
     if let Some(request) = request.filter(|r| r.get("resourceMetrics").is_none()) {
         s.tell_node(json!({ "otlp": request }), &tokio::runtime::Handle::current());
     }

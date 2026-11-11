@@ -132,7 +132,7 @@ impl Reached {
     /// What it read, if it's been a minute: sent on a thread of its own, as telemetry may be lost and nothing waits for it.
     fn say(&self) {
         let Some(address) = self.address.clone() else { return };
-        let Some(rows) = one::insights::bucket_reads(&self.reads, crate::keyring::now(), &key::hex(&self.key.verifying_key().to_bytes()), self.client) else { return };
+        let Some(rows) = insights::bucket_reads(&self.reads, crate::keyring::now(), &key::hex(&self.key.verifying_key().to_bytes()), self.client) else { return };
         let body = key::signed_request(&self.key, ::custom_build::protocol::TELEMETRY, rows, key::next_at(crate::keyring::now()));
         std::thread::spawn(move || {
             let sent = ureq::http::Request::post(format!("{address}/telemetry/write")).header("content-type", "application/json").body(serde_json::to_vec(&body).unwrap_or_default());

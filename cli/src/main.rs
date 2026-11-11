@@ -30,7 +30,7 @@ fn commands() -> Vec<Command> {
         storage::cli::commands(),
         services::cli::commands(),
         device_logs::cli::commands(),
-        one::insights::cli::commands(),
+        insights::cli::commands(),
         one::build::commands(),
         blobs::cli::commands(),
         own(),

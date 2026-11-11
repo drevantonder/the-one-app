@@ -1,24 +1,8 @@
-//! How each app's calls went here: loop guards that stop an app, and what telemetry says of the app.
+//! How each app's calls went here: loop guards that stop an app.
 
 use super::*;
 
 impl Node {
-    /// What a call's telemetry says of `app`: that it's an app, and its owner's kind of scope. `None` for no such app, as
-    /// what a caller typed is theirs and may be anything.
-    pub(in crate::node) fn destination(&self, app: &str) -> Option<Destination> {
-        self.with(|i| {
-            let Some(owner) = i.r.db().app(app)?.map(|a| a.owner) else { return Ok(None) };
-            let kind = match owner {
-                Principal::User(_) => "user",
-                Principal::Group(_) => "group",
-                _ => "everyone",
-            };
-            Ok(Some(Destination { named: true, kind }))
-        })
-        .ok()
-        .flatten()
-    }
-
     /// Counts one of `app`'s calls of other apps, or one run of its schedules (`kind`). Past `RATE_LIMIT` this minute,
     /// the app is stopped here: it's looping.
     pub(in crate::node) async fn count(&self, app: &str, kind: &'static str) -> Result<()> {
@@ -56,14 +40,6 @@ impl Node {
         g.stopped.remove(app);
         None
     }
-}
-
-/// What a call's telemetry says of its app.
-pub(in crate::node) struct Destination {
-    /// Whether there's an app to name: every member can list every app's name, so only a call of no such app has none.
-    pub named: bool,
-    /// The kind of the app's owner's scope.
-    pub kind: &'static str,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this

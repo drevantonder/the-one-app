@@ -28,6 +28,7 @@ bucket = { path = "../bucket" }
 database = { path = "../database" }
 scope = { path = "../scope" }
 api = { path = "../api" }
+insights = { path = "../insights" }
 # What Devices' routes take (devices/): the recovery key's, which a computer's onet answers itself.
 devices = { path = "../devices" }
 device-logs = { path = "../device-logs" }
