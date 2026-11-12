@@ -39,8 +39,8 @@
 - A client that's signed in reaches everything its user may, except encrypted artifacts. Those need something that
   already holds the key to let it in.
 - Signing in needs a server up. Clients already signed in keep working from their copies.
-- Plugins, apps, tools and services aren't forced to behave a certain way. The platform gives them the freedom to do what's
-  best, and gives guidance to the agents that build them so they make wise decisions.
+- A plugin, and anything it provides, isn't forced to behave a certain way. The platform gives it the freedom to do
+  what's best, and gives guidance to the agents that build it so they make wise decisions.
 - A service runs for a user or a group, as the rest of its plugin does, and reaches artifacts by the same rule. One
   instance serves everyone its server acts for.
 - A service keeps its data where its plugin chooses: in artifacts, on its machine, or both. In artifacts, a user or a
