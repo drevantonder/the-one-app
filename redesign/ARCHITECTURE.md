@@ -57,3 +57,8 @@
 - A server without a connection to the bucket isn't in a normal state. Nothing is designed around it.
 - Adding an app to a home page puts it on the clients of everyone who sees that page.
 - An app opened from a group's home page works with the group's artifacts.
+- One visual language across platforms, with no platform's own look. What a device does itself still follows the
+  device: scrolling, the keyboard, the back gesture, its pickers and its share sheet.
+- It runs on Mac, Linux, Windows, iPhone, Android and the web.
+- It costs a family of four about one coffee a month, and an organisation less per person than that.
+- Every tool is also a CLI command and an MCP tool.
