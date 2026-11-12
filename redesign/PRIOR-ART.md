@@ -4,13 +4,15 @@ Read this before designing anything here, so we don't build what exists, look ag
 again what's decided. Add to it whenever something turns up that nobody in the conversation knew or remembered.
 Everything is as of November 2026, and from reading, not running, unless it says otherwise.
 
-## Leaning on
+## Exists, and close to what's designed here
+
+None of these is chosen. Each is named so it's weighed before anything like it is built.
 
 - **celld** (celld.dev, Deno, Apache-2.0, v0.6.2, beta): runs a Cloudflare Workers application, Durable Objects
   included, on your own machines. Each cell is a SQLite database shipped to your bucket in Litestream's format. One node
   serves a cell at a time, claimed by a conditional write of a small record to the bucket. Each turn as writer ships to
-  its own numbered folder, and a write is confirmed only while the record still names that node. That is this
-  redesign's database and lease, already built. Its limits: one application per fleet, unencrypted traffic between
+  its own numbered folder, and a write is confirmed only while the record still names that node. That is nearly this
+  redesign's database and lease. Not chosen as the server. Its limits: one application per fleet, unencrypted traffic between
   nodes, no Windows, clients only query a node, and upgrades that need every node stopped.
 - **Litestream**: ships a SQLite database's log to a bucket. One writer, no takeover, and no check before an upload, so
   by itself it doesn't stop a server that lost its turn from writing.
