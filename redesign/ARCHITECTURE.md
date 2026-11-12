@@ -8,7 +8,7 @@
 - Only the signer holds the bucket's credentials. It hands servers and clients short-lived access to what they may
   reach, so removing a server changes nothing for the others.
 - A client asks a server, and keeps a copy of what its user may read.
-- Everything a relation tuple is about is an artifact: the network, a group, a server, an app.
+- Everything a relation tuple is about is an artifact: the network, a group, a server, a plugin.
 - A network is an artifact: the top `parent` of everything in it, holding its relation tuples. Its first owner is the
   first user to sign in.
 - A network's owner owns every artifact in it, but reads an encrypted one only with its key. Users have the privacy
@@ -25,12 +25,13 @@
 - A server takes an encrypted database's lease only if it holds its key.
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
   connects.
-- An app always runs for a user or a group: whoever is using it, or, with nobody there, the one it was set up for.
-- An app reaches an artifact only if both it and the user or group it runs for have a relation to it. It reaches what
-  it makes without asking.
-- What an app makes is owned by the user or group it was made for, not by the app. Removing an app leaves its data.
-- An app's code reaches nothing except through the platform.
-- Everyone using an app runs its newest version.
+- A plugin always runs for a user or a group: whoever is using it, or, with nobody there, the one it was set up for.
+- A plugin reaches an artifact only if both it and the user or group it runs for have a relation to it. It reaches
+  what it makes without asking.
+- What a plugin makes is owned by the user or group it was made for, not by the plugin. Removing a plugin leaves its data.
+- A plugin's code reaches nothing except through the platform, apart from a service, which runs only on a server whose
+  owner chose to install it.
+- Everyone using a plugin runs its newest version.
 - Signing in only says who a user is. No key comes from it, so how a network signs in can change.
 - A client that's signed in reaches everything its user may, except encrypted artifacts. Those need something that
   already holds the key to let it in.
