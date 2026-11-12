@@ -3,10 +3,13 @@
 - Data loss is prevented by storage in the cloud, not necessarily compute in the cloud.
 - An artifact's blobs are read, written only if absent, replaced only if unchanged, and listed. Nothing else is asked
   of a bucket.
-- A database is an artifact holding a snapshot, a log and a lease. One writer at a time holds the lease and writes its
-  blobs. Someone with `write` asks the writer, which checks the relation tuples.
-- Relation tuples are kept in a database artifact, a network's first. Whoever holds the bucket's credentials checks
-  them. Taking access away takes a few seconds to reach every runner.
-- Encryption wraps blobs, so it works for anything built on them. An encrypted database's writers must hold its key.
-- Two machines can take over from each other only on a bucket with conditional writes. A network checks this when it
+- A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
+  blobs. Someone with `write` asks that server, which checks the relation tuples.
+- Only servers hold the bucket's credentials. A client asks a server, and keeps a copy of what its user may read.
+- Relation tuples are kept in a database artifact, a network's first. Servers check them. Taking access away takes a
+  few seconds to reach every server.
+- With no server up, nothing is lost: clients keep their copies and wait.
+- Encryption wraps blobs, so it works for anything built on them, a database too. A server writes an encrypted
+  database only if it holds its key.
+- Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
   connects.
