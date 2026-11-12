@@ -255,7 +255,7 @@ fn send_program(at: &At) -> Result<()> {
     for (name, _, version, _) in &things {
         println!("Published {name} {}.", version.commit);
     }
-    let here = devices().into_iter().find(|d| d["me"] == true).and_then(|d| d["name"].as_str().map(str::to_string)).context("this device isn't listed")?;
+    let here = this_device()?;
     update_here()?;
     wait_until(&version.commit, &[here], Duration::from_secs(600))?;
     deploy_built_in()?;
@@ -396,7 +396,7 @@ fn send_dev(at: &At) -> Result<()> {
     let built = folder.join("one-dev");
     install(&built)?;
     let name = format!("{CLI}-dev");
-    for device in devices().iter().filter(|d| d["online"] == true && d["here"] != true && d["target"] == TARGET) {
+    for device in devices().iter().filter(|d| d["online"] == true && d["me"] != true && d["target"] == TARGET) {
         let host = device["name"].as_str().unwrap_or("");
         // Over ssh's own channel: not every device's ssh server takes scp's.
         let copied = std::fs::File::open(&built).is_ok_and(|program| {

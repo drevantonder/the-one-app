@@ -8,7 +8,7 @@ use super::*;
 /// folder is named), it first waits for this device to run it: a change to Rust needs the program deploying to be that build.
 pub(super) fn deploy_cloudflare(build: Option<&str>) -> Result<()> {
     if let Some(build) = build {
-        let here = devices().into_iter().find(|d| d["me"] == true).and_then(|d| d["name"].as_str().map(str::to_string)).context("this device isn't listed")?;
+        let here = this_device()?;
         wait_until(build, &[here], Duration::from_secs(600))?;
     }
     println!("  deploying to Cloudflare from this device");

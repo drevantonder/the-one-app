@@ -4,6 +4,11 @@ use std::collections::BTreeSet;
 
 use super::*;
 
+/// This device's name, as its program says: whichever device's app runtime answers.
+pub(super) fn this_device() -> Result<String> {
+    crate::loopback().get("/api/state")?["me"]["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).context("this device isn't listed")
+}
+
 /// This user's own devices, as this one sees them now: none while its program restarts.
 pub(super) fn devices() -> Vec<Value> {
     let state = crate::loopback().get("/api/state").unwrap_or_default();
