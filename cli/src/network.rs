@@ -79,11 +79,13 @@ pub fn commands() -> Command {
 
 fn status(api: &Client, state: &State) {
     let device = &state.device;
-    println!("{} ({}){}", device.name, &device.key[..8.min(device.key.len())], if device.ready { "" } else { ", not ready yet" });
     let Some(i) = &state.network else {
-        println!("\n{}.", ::onboarding::not_joined(&device.name));
+        println!("{} ({})\n\n{}.", device.name, &device.key[..8.min(device.key.len())], ::onboarding::not_joined(&device.name));
         return;
     };
+    // The device this is typed on: any of the network's app runtimes may answer.
+    let me = &state.me;
+    println!("{} ({}){}", me.name, &me.key[..8.min(me.key.len())], if device.ready { "" } else { ", not ready yet" });
     let users: std::collections::HashMap<&str, &str> = i.users.iter().map(|u| (u.id.as_str(), u.name.as_str())).collect();
     let name = |id: &str| users.get(id).copied().unwrap_or(id).to_string();
     println!("\n{}  {} changes", if i.name.is_empty() { "(joining)" } else { &i.name }, i.steps);
@@ -104,7 +106,7 @@ fn status(api: &Client, state: &State) {
     println!("\nDevices");
     for s in &i.devices {
         let presence = Some(api::cli::presence(s.now.online, s.now.seen)).filter(|p| !p.is_empty()).map(|p| format!("  {p}")).unwrap_or_default();
-        let here = if s.now.here { " (this one)" } else { "" };
+        let here = if s.me { " (this one)" } else { "" };
         let serves = if s.serves_me { "" } else { ", doesn't run yours" };
         let build = s.now.build.as_ref().map(|b| format!("  {b}")).unwrap_or_default();
         println!("  {}{here}  {}'s{serves}{build}{presence}", s.name, name(&s.user));

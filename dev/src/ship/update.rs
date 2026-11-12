@@ -255,7 +255,7 @@ fn send_program(at: &At) -> Result<()> {
     for (name, _, version, _) in &things {
         println!("Published {name} {}.", version.commit);
     }
-    let here = devices().into_iter().find(|d| d["here"] == true).and_then(|d| d["name"].as_str().map(str::to_string)).context("this device isn't listed")?;
+    let here = devices().into_iter().find(|d| d["me"] == true).and_then(|d| d["name"].as_str().map(str::to_string)).context("this device isn't listed")?;
     update_here()?;
     wait_until(&version.commit, &[here], Duration::from_secs(600))?;
     deploy_built_in()?;

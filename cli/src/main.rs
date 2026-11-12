@@ -216,13 +216,13 @@ fn connection(api: &Client) -> String {
         Ok(state) => state,
         Err(err) => return format!("{err:#}"),
     };
-    let device = &state.device.name;
     let Some(network) = &state.network else {
-        return format!("{}.", ::onboarding::not_joined(device));
+        return format!("{}.", ::onboarding::not_joined(&state.device.name));
     };
     let network = if network.name.is_empty() { format!("{YOURS} (still joining)") } else { network.name.clone() };
     let ready = if state.device.ready { "" } else { ", catching up" };
-    format!("You're {} in {network}, on {device}{ready}.", state.looking())
+    // The device this is typed on, not whichever app runtime answered.
+    format!("You're {} in {network}, on {}{ready}.", state.looking(), state.me.name)
 }
 
 /// How the CLI asks this machine's onet, as one of its own programs: again while it starts again (`api::loopback`),

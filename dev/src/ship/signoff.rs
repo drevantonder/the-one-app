@@ -54,7 +54,7 @@ impl Signed {
 /// Signs `commit` off at `stage`, saying `said`. It's already on main.
 pub(super) fn record(stage: Stage, commit: &str, said: &str) -> Result<()> {
     keep_history()?;
-    let by = devices().into_iter().find(|d| d["here"] == true).and_then(|d| d["name"].as_str().map(str::to_string)).unwrap_or_else(|| "a device".into());
+    let by = devices().into_iter().find(|d| d["me"] == true).and_then(|d| d["name"].as_str().map(str::to_string)).unwrap_or_else(|| "a device".into());
     let message = format!("{}\n\n{said}\nBy: {by}\n", stage.name());
     let history = history();
     // Nothing reads who made this commit, and a builder has no name of its own in git.

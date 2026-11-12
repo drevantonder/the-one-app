@@ -247,7 +247,7 @@ pub struct Device {
     pub runs_for: Vec<String>,
     /// Services its user switched off there.
     pub off_services: Vec<Switched>,
-    /// Whether the viewer is looking from it.
+    /// Whether the viewer is looking from it, or from the device it's the app runtime of.
     pub me: bool,
     /// What only the app runtime answering knows of it.
     #[serde(flatten)]
@@ -257,7 +257,7 @@ pub struct Device {
 /// What the app runtime answering knows of a device that the scope database doesn't: nothing, for oned on Cloudflare.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeviceNow {
-    /// The app runtime answering.
+    /// The app runtime answering, which for a device's own CLI may be another device's (`me` is the device looking).
     #[serde(default)]
     pub here: bool,
     /// Its socket is open at the relay.
@@ -508,7 +508,7 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
             serves_me: m.serves(&s.key, me)?,
             runs_for: m.run_by(&s.key)?.iter().map(|scope| scope.to_string()).collect(),
             off_services: switches.iter().filter(|((k, _), d)| *k == m.device_of(&s.key) && !d.on).map(|((_, name), d)| Switched { name: name.clone(), time: d.time }).collect(),
-            me: Some(s.key) == here.looking,
+            me: Some(m.device_of(&s.key)) == here.looking,
             now,
         });
     }
