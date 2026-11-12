@@ -15,3 +15,7 @@
 - A server takes an encrypted database's lease only if it holds its key.
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
   connects.
+- An app reaches an artifact only if both it and the user running it have a relation to it. It reaches what it makes
+  without asking.
+- What an app makes is owned by the user or group it was made for, not by the app. Removing an app leaves its data.
+- An app's code reaches nothing except through the platform.

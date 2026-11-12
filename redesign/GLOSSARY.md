@@ -10,7 +10,9 @@
 - **Artifact**: a couple of blobs together in the bucket, with who may do what to them. Everything a network keeps is
   built on top of one: files, a database, a git repo. Avoid: space.
 - **Relation tuple**: one line of who may do what, as in Zanzibar: an artifact, a relation (`owner`, `editor`,
-  `viewer`, `parent`) and who. An owner is an editor, and an editor is a viewer. A user, a group, everyone, a server
-  and the holder of a link are all a who. Avoid: fact, grant.
+  `viewer`, `parent`) and who. An owner is an editor, and an editor is a viewer. A user, a group, everyone, a server,
+  an app and the holder of a link are all a who. Avoid: fact, grant.
 - **Encrypted artifact**: an artifact whose blobs are encrypted before they're stored, so only holders of its key read
   it. For passwords and the keys that reach devices. Avoid: sealed.
+- **App**: an artifact whose blobs are code: what a server runs and what a client shows. It uses other artifacts, and
+  is a who. A git repo can be where its code comes from, but needn't be.
