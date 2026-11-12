@@ -21,3 +21,7 @@
 - What an app makes is owned by the user or group it was made for, not by the app. Removing an app leaves its data.
 - An app's code reaches nothing except through the platform.
 - Everyone using an app runs its newest version.
+- Signing in only says who a user is. No key comes from it, so how a network signs in can change.
+- A client that's signed in reaches everything its user may, except encrypted artifacts. Those need something that
+  already holds the key to let it in.
+- Signing in needs a server up. Clients already signed in keep working from their copies.
