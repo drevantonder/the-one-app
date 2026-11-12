@@ -39,7 +39,7 @@
 - A client that's signed in reaches everything its user may, except encrypted artifacts. Those need something that
   already holds the key to let it in.
 - Signing in needs a server up. Clients already signed in keep working from their copies.
-- Plugins, tools and services aren't forced to behave a certain way. The platform gives them the freedom to do what's
+- Plugins, apps, tools and services aren't forced to behave a certain way. The platform gives them the freedom to do what's
   best, and gives guidance to the agents that build them so they make wise decisions.
 - A service runs for a user or a group, as the rest of its plugin does, and reaches artifacts by the same rule. One
   instance serves everyone its server acts for.
@@ -55,3 +55,5 @@
 - That piece also signs access to the bucket and serves the web client. Nothing at the network's address keeps state
   or holds a connection open.
 - A server without a connection to the bucket isn't in a normal state. Nothing is designed around it.
+- Adding an app to a home page puts it on the clients of everyone who sees that page.
+- An app opened from a group's home page works with the group's artifacts.
