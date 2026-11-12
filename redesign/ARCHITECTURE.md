@@ -4,7 +4,7 @@
 - An artifact's blobs are read, written only if absent, replaced only if unchanged, and listed. Nothing else is asked
   of a bucket.
 - A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
-  blobs. Someone with `write` asks that server, which checks the relation tuples.
+  blobs. An `editor` asks that server, which checks the relation tuples.
 - Only servers hold the bucket's credentials. A client asks a server, and keeps a copy of what its user may read.
 - Relation tuples are kept in a database artifact, a network's first. Servers check them. Taking access away takes a
   few seconds to reach every server.
