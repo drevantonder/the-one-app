@@ -10,8 +10,8 @@
   few seconds to reach every server.
 - With no server up, nothing is lost: clients keep their copies and wait.
 - Encryption wraps blobs, so it works for anything built on them, a database too.
-- A server is for a user or a group, and holds that one's keys. It opens the encrypted artifacts they may read, and no
-  others.
+- A server opens no encrypted artifact unless the user it belongs to, or the group's owner, chose to let it. That
+  choice is a relation tuple naming the server, and gives the server the key.
 - A server takes an encrypted database's lease only if it holds its key.
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
   connects.
