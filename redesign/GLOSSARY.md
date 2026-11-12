@@ -21,8 +21,9 @@
   it. For passwords and the keys that reach devices. Avoid: sealed.
 - **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs and services.
   It uses other artifacts, and is a who. A git repo can be where its code comes from, but needn't be. Avoid: module.
-- **App**: a screen a plugin provides, which a user opens from a home screen.
-- **Tool**: a named function a plugin defines, which the plugin's code runs on a server. Screens, agents and scheduled
+- **App**: something with UI that goes on a home screen. A plugin provides it. It can have a server part if it needs
+  one, which is its plugin's tools.
+- **Tool**: a named function a plugin defines, which the plugin's code runs on a server. Apps, agents and scheduled
   jobs all call the same tools. Avoid: action.
 - **Service**: native code a plugin provides, for what the sandbox can't do or what has no API on the internet. An
   instance runs on each server whose owner installed it, as its own process. It and the rest of its plugin call each

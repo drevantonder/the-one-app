@@ -9,5 +9,5 @@ of this repo is the app as it runs today, and its GLOSSARY.md and ARCHITECTURE.m
 - `PRIOR-ART.md`: what exists already, what was set aside and why, and decisions that are easy to miss. Read it
   before designing anything.
 
-Not designed yet: how a client's offline writes reach a server, what signs users in, and what a plugin's code is
-written in and how it's kept in.
+Not designed yet: how a client's offline writes reach a server, what signs users in, and what a plugin's code and
+its apps are written in.

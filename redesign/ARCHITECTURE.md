@@ -7,7 +7,7 @@
   blobs. An `editor` asks that server, which checks the relation tuples.
 - Only the signer holds the bucket's credentials. It hands servers and clients short-lived access to what they may
   reach, so removing a server changes nothing for the others.
-- A client changes an artifact only by calling a tool, which goes straight to a server. Whatever a screen can do, an
+- A client changes an artifact only by calling a tool, which goes straight to a server. Whatever an app can do, an
   agent can.
 - A client keeps what servers have answered, shows it at once, and asks again behind it.
 - A server confirms a write only once losing that server couldn't lose the write.
