@@ -24,3 +24,6 @@
 - **App**: a screen a plugin provides, which a user opens from a home screen.
 - **Tool**: a named function a plugin defines, which the plugin's code runs on a server. Screens, agents and scheduled
   jobs all call the same tools. Avoid: action.
+- **Service**: native code a plugin provides, for what the sandbox can't do or what has no API on the internet. An
+  instance runs on each server whose owner installed it, as its own process. Only its plugin calls it, and the plugin
+  decides which instance.
