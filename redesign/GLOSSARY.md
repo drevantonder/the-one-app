@@ -22,3 +22,5 @@
 - **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs and services.
   It uses other artifacts, and is a who. A git repo can be where its code comes from, but needn't be. Avoid: module.
 - **App**: a screen a plugin provides, which a user opens from a home screen.
+- **Tool**: a named function a plugin defines, which the plugin's code runs on a server. Screens, agents and scheduled
+  jobs all call the same tools. Avoid: action.

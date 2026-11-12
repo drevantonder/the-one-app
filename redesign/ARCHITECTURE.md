@@ -7,7 +7,10 @@
   blobs. An `editor` asks that server, which checks the relation tuples.
 - Only the signer holds the bucket's credentials. It hands servers and clients short-lived access to what they may
   reach, so removing a server changes nothing for the others.
-- A client asks a server, and keeps a copy of what its user may read.
+- A client changes an artifact only by calling a tool, which goes straight to a server. Whatever a screen can do, an
+  agent can.
+- A client's copy holds only what a server wrote. Screens read it directly.
+- A client copies an artifact when an app first opens it.
 - Everything a relation tuple is about is an artifact: the network, a group, a server, a plugin.
 - A network is an artifact: the top `parent` of everything in it, holding its relation tuples. Its first owner is the
   first user to sign in.
