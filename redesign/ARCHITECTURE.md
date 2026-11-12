@@ -9,8 +9,8 @@
   reach, so removing a server changes nothing for the others.
 - A client changes an artifact only by calling a tool, which goes straight to a server. Whatever a screen can do, an
   agent can.
-- A client's copy holds only what a server wrote. Screens read it directly.
-- A client copies an artifact when an app first opens it.
+- A client keeps what servers have answered, shows it at once, and asks again behind it.
+- A server confirms a write only once losing that server couldn't lose the write.
 - Everything a relation tuple is about is an artifact: the network, a group, a server, a plugin.
 - A network is an artifact: the top `parent` of everything in it, holding its relation tuples. Its first owner is the
   first user to sign in.
