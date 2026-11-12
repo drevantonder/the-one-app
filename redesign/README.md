@@ -7,5 +7,5 @@ of this repo is the app as it runs today, and its GLOSSARY.md and ARCHITECTURE.m
 - `GLOSSARY.md`: the redesign's words.
 - `ARCHITECTURE.md`: the redesign's rules.
 
-Not designed yet: what checks access to files when every home server is off, and how a device's offline writes
-reach the writer.
+Not designed yet: how a client's offline writes reach a server, what signs users in, and what an app's code is
+written in and how it's kept in.

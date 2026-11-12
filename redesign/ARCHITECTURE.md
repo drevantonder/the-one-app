@@ -5,9 +5,19 @@
   of a bucket.
 - A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
   blobs. An `editor` asks that server, which checks the relation tuples.
-- Only servers hold the bucket's credentials. A client asks a server, and keeps a copy of what its user may read.
-- Relation tuples are kept in a database artifact, a network's first. Servers check them. Taking access away takes a
-  few seconds to reach every server.
+- Only the signer holds the bucket's credentials. It hands servers and clients short-lived access to what they may
+  reach, so removing a server changes nothing for the others.
+- A client asks a server, and keeps a copy of what its user may read.
+- Everything a relation tuple is about is an artifact: the network, a group, a server, an app.
+- A network is an artifact: the top `parent` of everything in it, holding its relation tuples. Its first owner is the
+  first user to sign in.
+- A network's owner owns every artifact in it, but reads an encrypted one only with its key. Users have the privacy
+  they need, and the owner isn't responsible for keeping their credentials safe.
+- Servers and the signer check relation tuples. Taking access away takes a few seconds to reach every server.
+- Any user can bring a server.
+- A server's owner chooses its members, and each agrees. A new one is for its owner alone.
+- A server acts for its members and reaches what they can. A viewer's server can keep a copy and read it. An editor's
+  can hold a database's lease.
 - With no server up, nothing is lost: clients keep their copies and wait.
 - Encryption wraps blobs, so it works for anything built on them, a database too.
 - A server opens no encrypted artifact unless the user it belongs to, or the group's owner, chose to let it. That
@@ -16,8 +26,8 @@
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
   connects.
 - An app always runs for a user or a group: whoever is using it, or, with nobody there, the one it was set up for.
-- An app reaches an artifact only if both it and the user or group it runs for have a relation to it. It reaches what it makes
-  without asking.
+- An app reaches an artifact only if both it and the user or group it runs for have a relation to it. It reaches what
+  it makes without asking.
 - What an app makes is owned by the user or group it was made for, not by the app. Removing an app leaves its data.
 - An app's code reaches nothing except through the platform.
 - Everyone using an app runs its newest version.
