@@ -46,3 +46,5 @@
 - A service keeps its data where its plugin chooses: in artifacts, on its machine, or both. In artifacts, a user or a
   group owns it and relation tuples say who else may use it.
 - A service says what it needs of a machine, and its owner sees that before installing it.
+- A call from a service into its plugin says which user or group it's for, and its server must act for them.
+- A service follows its plugin's newest version.
