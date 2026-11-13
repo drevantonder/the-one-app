@@ -17,7 +17,7 @@ So:
 - One place reaches everything I have.
 - Whatever is made here gets what software ordinarily needs without building it: it keeps data, uses my accounts, notifies me, and works while I'm away. It opens only the data of whoever it's for: me, one group, or everyone.
 - It's for personal and internal tools, not for serving the public. That's what keeps it small.
-- The core stays small. Anything heavier, like a phone emulator for someone building apps, is added the same way as anything else made here.
+- One Core stays small. Anything heavier, like a phone emulator for someone building apps, is added the same way as anything else made here.
 - Whatever is kept here belongs to someone: a person, a group, or everyone. Whoever it belongs to can share it with one person, a group or everyone, to use or to change, and it stays theirs. Only what belongs to everyone is looked after by whoever looks after the whole thing. It has a history, so any change can be undone.
 - What's made is open to everyone inside unless whoever it belongs to keeps it private: anyone can see how it's made and how it's doing, and take their own copy. What people put in it is not open. What's mine and not shared is mine alone, and a group's is its members'.
 - All of it belongs to our family or organisation. Whoever looks after the whole thing can get into anything when it's needed, such as for support, moving it or an audit, and only on purpose.

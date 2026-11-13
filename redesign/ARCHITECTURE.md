@@ -27,13 +27,13 @@
 - A deleted artifact can be brought back for 30 days. Deleting hides it, and its blobs are removed after that.
 - Putting a database back to an earlier moment is the database plugin's to offer, from its log. It isn't built early.
 
-## The core and its packages
+## One Core and the packages
 
-- The core knows blobs. Every kind of artifact built on them, a database too, is something a plugin provides.
+- One Core knows blobs. Every kind of artifact built on them, a database too, is something a plugin provides.
 - The server is one package, and each client is its own: the CLI, MCP, the web client, and the apps for phones and
   computers.
 - Each plugin is its own package too, the ones The One App ships with included. Those differ only in shipping with it.
-- The core works with no plugins. With none that decides who may reach what, everything in a network is shared.
+- One Core works with no plugins. With none that decides who may reach what, everything in a network is shared.
 - The One App ships with these plugins: signing in, relation tuples, the database, encryption, home pages and Insights.
 - Plugins are written against one published interface, and reach nothing else of a server's or a client's.
 - A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts meant
@@ -75,7 +75,7 @@
 - A scheduled job is a tool call made by the clock. The server holding the lease of the database its schedule is kept in
   makes the call.
 - A plugin can use this same way of choosing a server for its own calls, a service's included, or choose its own.
-- A server takes the newest release by itself, so none lags behind. The core is small and stable, so that's seldom.
+- A server takes the newest release by itself, so none lags behind. One Core is small and stable, so that's seldom.
 
 ## Clients
 
@@ -94,7 +94,7 @@
 
 ## Signing in
 
-- Signing in is a plugin. It tells the core who a request is from. With none, everyone who reaches a network is the same
+- Signing in is a plugin. It tells One Core who a request is from. With none, everyone who reaches a network is the same
   one user.
 - Signing in only says who a user is. No key comes from it, so how a network signs in can change.
 - A client that's signed in reaches everything its user may, except encrypted artifacts. Those need something that
@@ -139,8 +139,7 @@
   shapes. It may be lost, and it holds no user data.
 - The Vault is a plugin. Its secrets are encrypted artifacts, and a tool of its uses one on a server and hands back only
   the answer.
-- Getting a notification onto a device is the core's. What to send, an inbox and what a user wants to hear about are a
-  plugin's.
+- Notifications are a plugin: getting one onto a device, what to send, an inbox, and what a user wants to hear about.
 
 ## Services
 
