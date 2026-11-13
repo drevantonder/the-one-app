@@ -150,7 +150,8 @@
 
 - Plugins reach clients from a server, default plugins included, so they update without a store release. Store releases
   are kept few, so iterating stays fast and cheap.
-- A custom build has its own name, its own icon and its own default plugins. Anything more is a fork, and forks should
-  be few and far between.
+- The One App itself is made the way anyone's is: a name, an icon and a choice of default plugins, on top of our
+  packages. Someone who wants their own installs the same packages and builds theirs on them.
+- Anything more than that is a fork, and forks should be few and far between.
 - Starting a network to build or test with is cheap, fast and repeatable: a whole network on one machine, with a folder
   as its bucket.
