@@ -59,6 +59,8 @@
   owner.
 - Making a sharing link writes a relation tuple naming it as `viewer` or `editor`. Whoever holds the link gets that,
   without signing in, until the tuple is removed. A sharing link opens in the web client, where there is one.
+- Undo follows what people ordinarily expect of an app. A plugin that wants more keeps its own history. What a tool did
+  outside the network isn't ours to undo.
 - A history of who changed what, relation tuples included, is a plugin's to keep, through plugin hooks.
 
 ## Servers
