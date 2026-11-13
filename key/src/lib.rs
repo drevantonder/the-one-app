@@ -373,14 +373,13 @@ pub fn signed_request(key: &SigningKey, domain: &str, mut fields: Value, at: u64
 }
 
 /// When to sign a request that something takes once by its `at` (the relay): `now` (milliseconds), or one more than
-/// the last this process signed, so two of its requests in one millisecond are never the same.
+/// the last this process signed, so two of its requests in one millisecond are never the same. A clock set back by more
+/// than `FRESH` since the last starts again from `now`: the requests signed in the wrong time are refused anyway.
 pub fn next_at(now: u64) -> u64 {
-    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let last = LAST.fetch_max(now, std::sync::atomic::Ordering::SeqCst);
-    if last < now {
-        return now;
-    }
-    LAST.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    static LAST: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+    let mut last = LAST.lock().unwrap();
+    *last = if now > *last || *last - now > FRESH { now } else { *last + 1 };
+    *last
 }
 
 /// How long to wait before signing again a request (signed `at`) the relay refused as `replayed`: a few milliseconds that
@@ -673,6 +672,16 @@ mod tests {
         let mut changed = req.clone();
         changed["read"] = json!(["a/c"]);
         assert!(check_request("one/urls", &changed, 1_000_000).is_err(), "nothing in it changes");
+    }
+
+    #[test]
+    fn requests_are_signed_when_it_is_even_after_the_clock_is_set_back() {
+        let ten_hours = 10 * 3_600_000;
+        let at = 5_000_000_000_000;
+        assert_eq!(next_at(at), at);
+        assert_eq!(next_at(at), at + 1, "never the same twice");
+        assert_eq!(next_at(at - 10_000), at + 2, "a clock a little back stays unique");
+        assert_eq!(next_at(at - ten_hours), at - ten_hours, "a clock corrected after being fast signs by the right time");
     }
 
     #[test]

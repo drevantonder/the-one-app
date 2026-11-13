@@ -200,9 +200,11 @@ export const rolesOf = (text) => String(text || "").split(" ");
 
 let lastAt = 0;
 
-/// When to sign what the relay takes once by its `at`: now, or one more than the last this page or Worker signed.
+/// When to sign what the relay takes once by its `at`: now, or one more than the last this page or Worker signed. A clock
+/// set back by more than `FRESH` since the last starts again from now: what was signed in the wrong time is refused anyway.
 function nextAt() {
-  lastAt = Math.max(Date.now(), lastAt + 1);
+  const now = Date.now();
+  lastAt = now > lastAt || lastAt - now > FRESH ? now : lastAt + 1;
   return lastAt;
 }
 
