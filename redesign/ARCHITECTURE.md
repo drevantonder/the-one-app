@@ -43,6 +43,9 @@
 - Plugins are written against one published interface, and reach nothing else of a server's or a client's.
 - A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts meant
   for it.
+- A plugin's parts needn't be written in the same language. A service already isn't.
+- A plugin can also have a part that runs at the network's address. That's how a plugin that decides for the signer
+  answers it. Like everything there, that part keeps no state.
 
 ## Who may do what
 
