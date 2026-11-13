@@ -72,3 +72,13 @@
   agent, a scheduled job, another plugin's tool.
 - A plugin says which other plugins it uses, so adding it brings them along.
 - A plugin's deployed code is open to everyone in the network. A git repo it came from can be private.
+- The server is one package, and each client is its own: the CLI, MCP, the web client, and the apps for phones and
+  computers.
+- Each plugin is its own package too, built-in ones included. A built-in plugin differs only in shipping with every
+  server.
+- Plugins are written against one published interface, and reach nothing else of a server's or a client's.
+- A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts
+  meant for it.
+- A client has little of its own: it signs in, keeps what servers answered, keeps secrets safe on its device, and
+  runs and draws what plugins give it.
+- Encryption is a built-in plugin, with a part on the server and a part in each client.
