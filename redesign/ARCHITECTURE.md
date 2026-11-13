@@ -66,8 +66,8 @@
   are a plugin's.
 - The Vault is a plugin. Its secrets are encrypted artifacts, and a tool of its uses one on a server and hands back
   only the answer.
-- The platform records what every tool, service and server did and how long it took, in OpenTelemetry's shapes. It
-  may be lost, and it holds no user data.
+- Insights is a built-in plugin. It keeps what every tool, service and server did and how long it took, in
+  OpenTelemetry's shapes. It may be lost, and it holds no user data.
 - A plugin's tools are its only public part. Anything may call one for the user or group it runs for: an app, an
   agent, a scheduled job, another plugin's tool.
 - A plugin says which other plugins it uses, so adding it brings them along.
@@ -82,3 +82,7 @@
 - A client has little of its own: it signs in, keeps what servers answered, keeps secrets safe on its device, and
   runs and draws what plugins give it.
 - Encryption is a built-in plugin, with a part on the server and a part in each client.
+- The core knows blobs and relation tuples. Every kind of artifact built on them, a database too, is something a
+  plugin provides.
+- The database is a built-in plugin.
+- Home pages are a built-in plugin. How they split between a server and the UI the clients share isn't worked out.

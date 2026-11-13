@@ -19,7 +19,7 @@
   server, a plugin and the holder of a link are all a who. Avoid: fact, grant.
 - **Encrypted artifact**: an artifact whose blobs are encrypted before they're stored, so only holders of its key read
   it. For passwords and the keys that reach devices. Avoid: sealed.
-- **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs and services.
+- **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services and kinds of artifact.
   It uses other artifacts, and is a who. A git repo can be where its code comes from, but needn't be. Avoid: module.
 - **App**: something with UI that goes on a home screen. A plugin provides it. It can have a server part if it needs
   one, which is its plugin's tools.
