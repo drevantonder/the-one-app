@@ -1,7 +1,7 @@
 # Glossary
 
 - **Network**: one user's, one family's or one workplace's whole: its users, its bucket, its servers and its clients.
-  A trusted boundary, not a social network. It is an artifact, holding its relation tuples.
+  A trusted boundary, not a social network. It is an artifact.
 - **User**: someone in the network, as relation tuples name them. How they sign in is not part of who they are.
 - **Group**: an artifact whose members share other artifacts. Being in one is a relation tuple: the group, `member`,
   and a user or another group.

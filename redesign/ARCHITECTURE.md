@@ -14,11 +14,10 @@
 - A server can also tell a client that something changed, and the client asks again. A plugin is free to do more.
 - A server confirms a write only once losing that server couldn't lose the write.
 - Everything a relation tuple is about is an artifact: the network, a group, a server, a plugin.
-- A network is an artifact: the top `parent` of everything in it, holding its relation tuples. Its first owner is the
-  first user to sign in.
+- A network is an artifact: the top `parent` of everything in it. Its first owner is the first user to sign in.
 - A network's owner owns every artifact in it, but reads an encrypted one only with its key. Users have the privacy
   they need, and the owner isn't responsible for keeping their credentials safe.
-- Servers and the signer check relation tuples. Taking access away takes a few seconds to reach every server.
+- Servers and the signer ask the relation tuples plugin. Taking access away takes a few seconds to reach every server.
 - Any user can bring a server.
 - A server's owner chooses its members, and each agrees. A new one is for its owner alone.
 - A server acts for its members and reaches what they can. A viewer's server can keep a copy and read it. An editor's
@@ -85,8 +84,7 @@
 - A client has little of its own: it signs in, keeps what servers answered, keeps secrets safe on its device, and
   runs and draws what plugins give it.
 - Encryption is a built-in plugin, with a part on the server and a part in each client.
-- The core knows blobs and relation tuples. Every kind of artifact built on them, a database too, is something a
-  plugin provides.
+- The core knows blobs. Every kind of artifact built on them, a database too, is something a plugin provides.
 - The database is a built-in plugin.
 - Home pages are a built-in plugin. How they split between a server and the UI the clients share isn't worked out.
 - Hooks are part of the interface plugins are written against. A plugin hooks into a moment, such as a tool being
@@ -119,3 +117,8 @@
 - Every tool has a name, a description and its inputs. A plugin may also provide a guide: text for agents on when and
   how to use its tools. The CLI and MCP hand both over.
 - Relation tuples are kept through the database plugin, which is why it always ships.
+- Every plugin has an artifact of its own in the network. Only that plugin reaches it, and it needs no relation
+  tuple, because it's always that one plugin's.
+- Relation tuples are a built-in plugin. It keeps them in its own artifact, and decides whether anything may reach
+  any other, on the server and for the signer.
+- Leases are a built-in plugin. The database plugin uses it, and any plugin can.
