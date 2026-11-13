@@ -86,3 +86,10 @@
   plugin provides.
 - The database is a built-in plugin.
 - Home pages are a built-in plugin. How they split between a server and the UI the clients share isn't worked out.
+- Hooks are part of the interface plugins are written against. A plugin hooks into a moment, such as a tool being
+  called, an artifact changing or a server joining, and is called when it happens.
+- Each hook states whether a plugin only hears about it, can change it, or decides it.
+- A hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
+- A plugin writes a relation tuple only where the user or group it runs for may.
+- Sharing by link writes a relation tuple naming the link as `viewer` or `editor`. Whoever holds the link gets that,
+  without signing in, until the tuple is removed.
