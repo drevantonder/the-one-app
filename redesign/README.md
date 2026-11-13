@@ -19,3 +19,6 @@ These docs name no technology on purpose, to avoid overfitting or getting distra
 Claims is the pressing need, but a bad platform would mean another rebuild, so the platform comes first.
 
 Later, and not critical: bringing data across from the app as it runs today and from the old PTC app.
+
+Parked, to keep in mind: the public as a who, anyone at all and not signed in, as a `viewer` of what an owner makes
+public. Filling in something like a form, and visitors without an account, come after that.

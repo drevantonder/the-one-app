@@ -92,4 +92,6 @@
 - A hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
 - A plugin writes a relation tuple only where the user or group it runs for may.
 - Sharing by link writes a relation tuple naming the link as `viewer` or `editor`. Whoever holds the link gets that,
-  without signing in, until the tuple is removed.
+  without signing in, until the tuple is removed. A link opens in the web client, where there is one.
+- An `owner` or an `editor` of an artifact can share it, up to their own relation. Only an owner adds or removes an
+  owner.
