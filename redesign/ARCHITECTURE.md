@@ -104,6 +104,9 @@
 
 ## Encryption
 
+- Whoever runs the bucket can read what's in it, as with any cloud provider. An encrypted artifact is for what should be
+  safe even from them. Encrypting everything ourselves isn't built: a mistake there would lose everything, where a
+  mistake with an encrypted artifact loses something small.
 - Encryption is a plugin, with a part on the server and a part in each client. It wraps blobs, so it works for anything
   built on them, a database too.
 - A server opens no encrypted artifact unless the user it belongs to, or the group's owner, chose to let it. That choice
@@ -133,6 +136,8 @@
 - The database is a plugin.
 - A plugin provides a kind of artifact as functions other plugins call. They run as the calling plugin, for the user or
   group it runs for.
+- An app is free in what it shows. A widget is as free as the platform it sits on allows, and we pass on as much of that
+  freedom as we can.
 - Home pages are a plugin. How they split between a server and the UI the clients share isn't worked out.
 - Adding an app to a home page puts it on the clients of everyone who sees that page.
 - An app opened from a group's home page works with the group's artifacts.
