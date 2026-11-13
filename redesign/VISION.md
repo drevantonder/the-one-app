@@ -7,7 +7,7 @@ I want:
 3. Nothing to belong to one AI provider. If I switch, or use several at once, nothing is lost.
 4. Whatever software we need, by asking for it. My AI makes it, and any of us can have it changed when it doesn't fit. Each device has one app, installed once, and everything we make appears inside it, with nothing more to install. It's for everyone in my family or organisation and the groups inside it, and for our AIs. What we make can also sit where I already look on a device, in whatever places that kind of device has for it, like a phone's home screen, a Mac's menu bar or Windows' widgets, not only in a window I have to open, with real freedom over what it shows there.
 5. Where something has no other way in, my AI to use a screen the way I would: a browser or a computer today, and a phone once that's possible. It can work on a screen of its own, kept on a device we already have or in the cloud when there isn't one, or on mine when I want its help there.
-6. Anyone to be able to run their own for about one coffee a month for a family of roughly four. The more people use it, the less it costs each of them. That's the cost when our own devices do the work. Choosing the cloud instead costs more, is our own choice to pay for, and is still kept low. Setting it up is simple, and never so much that it would overwhelm someone. One general version is in the app stores, built to stay within their rules, and works for any group. A group that wants its own name and look can make its own. A group can also take its own copy and change how it works, and keeping that copy up to date is easy.
+6. Anyone to be able to run their own for about one coffee a month for a family of roughly four. The more people use it, the less it costs each of them. That's the cost when our own devices do the work. Choosing the cloud instead costs more, is our own choice to pay for, and is still kept low. Setting it up is simple, and never so much that it would overwhelm someone. A group that wants its own name and look can make its own. A group can also take its own copy and change how it works, and keeping that copy up to date is easy.
 7. It to feel familiar. Where people already know how something works, it works that way here. People sign in the way their family or organisation already does.
 8. Not to lose things. A mistake can be undone where people would ordinarily expect to undo it, and losing every device, or the place it's all stored, loses nothing.
 9. What's made here to get better. It reports how it's doing, so the AI that made it, or whoever looks after the whole thing, can improve it. Everything made keeps its history, and AIs have what they need to build, test and fix it.
@@ -29,6 +29,7 @@ Everything above this line is the thing. None of it is left out.
 
 Would be nice:
 
+- One general version in the app stores, built to stay within their rules, that works for any group.
 - Devices in different places reach each other directly, without going through the cloud.
 - A record I can read of what my AIs did as me.
 

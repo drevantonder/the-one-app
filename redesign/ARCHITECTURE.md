@@ -6,8 +6,11 @@
 - One visual language across platforms, with no platform's own look. What a device does itself still follows the device:
   scrolling, the keyboard, the back gesture, its pickers and its share sheet.
 - It runs on Mac, Linux, Windows, iPhone, Android and the web.
-- It's built for networks of up to about 20,000 users.
-- Speed should feel like quality: fast and well-tuned, never the slowness people put up with in workplace software.
+- It's built for networks of up to about 20,000 users, all in one network with many servers: more than half its users
+  bring their own, about one group in eight has one, and the network runs about one for every 50 to 100 users.
+- Speed should feel like quality: fast and well-tuned, never the slowness people put up with in workplace software. It
+  opens, scrolls, types and goes back as well as the best apps on a mid-priced phone, and a CLI command or an MCP call
+  is held to the same standard.
 - It costs a family of four about one coffee a month, and an organisation less per person than that.
 - A plugin, and anything it provides, isn't forced to behave a certain way. The platform gives it the freedom to do
   what's best, and gives guidance to the agents that build it so they make wise decisions.
@@ -38,6 +41,8 @@
   computers.
 - Each plugin is its own package too, the ones The One App ships with included. Those differ only in shipping with it.
 - One Core works with no plugins. With none that decides who may reach what, everything in a network is shared.
+- Every plugin runs the same way. The ones The One App ships with are no more special than anyone's. Whether that way is
+  a sandbox isn't decided.
 - The One App ships with these plugins: signing in, relation tuples, the database, encryption, home pages, Insights,
   repos, the Vault and notifications.
 - Plugins are written against one published interface, and reach nothing else of a server's or a client's.
@@ -58,8 +63,11 @@
 - More than one plugin can decide whether something may be reached. Any of them can say no, and that blocks it.
 - Servers and the signer ask the relation tuples plugin. Taking access away takes a few seconds to reach every server.
 - The relation tuples plugin uses the database plugin.
-- Every plugin has an artifact of its own in the network. Only that plugin reaches it, and it needs no relation tuple,
-  because it's always that one plugin's.
+- A plugin is added for a user, for a group or for the network.
+- Every plugin has an artifact of its own for each one it was added for. Only that plugin reaches it, and it needs no
+  relation tuple, because it's always that one plugin's.
+- That artifact belongs to whoever the plugin was added for, so only a server its owner chose holds its lease. What's
+  added for the network is safe from its members, and what's added for a group is safe from that group's members.
 - Any user can add a plugin. It's an artifact they own, and relation tuples say who else may use it.
 - A plugin writes a relation tuple only where the user or group it runs for may.
 - An `owner` or an `editor` of an artifact can share it, up to their own relation. Only an owner adds or removes an
@@ -98,6 +106,7 @@
 - A client keeps what servers have answered, shows it at once, and asks again behind it.
 - A client asks again when its user opens or returns to an app, and after its own tool calls, as most apps do.
 - A server can also tell a client that something changed, and the client asks again. A plugin is free to do more.
+- MCP can also be hosted where an assistant running somewhere else reaches it, signing in with OAuth.
 - A client has little of its own: it keeps what servers answered, keeps secrets safe on its device, and runs and draws
   what plugins give it.
 - A client on the same local network as a server sends its requests straight to it. Otherwise it sends them to the
@@ -135,6 +144,8 @@
   data.
 - A plugin's code reaches nothing except through the interface plugins are written against, apart from a service, which
   runs only on a server whose owner chose to install it.
+- A plugin is code that runs as written. An agent can write one and deploy it with no developer tools, on any ordinary
+  machine. Tools to check it first are recommended, not needed.
 - Everyone using a plugin runs its newest version.
 - A plugin's tools are its only public part. Anything may call one for the user or group it runs for: an app, an agent,
   a scheduled job, another plugin's tool.
@@ -169,6 +180,7 @@
 - A service says what it needs of a machine, and its owner sees that before installing it.
 - A call from a service into its plugin says which user or group it's for, and its server must act for them.
 - A service follows its plugin's newest version.
+- Services run on computers. A phone can't be called on demand, so it runs none. Services on phones stay open for later.
 
 ## Updates and builds
 
@@ -176,6 +188,8 @@
   Store releases are kept few, so iterating stays fast and cheap.
 - The One App itself is made the way anyone's is: a name, an icon and a choice of plugins to ship with, on top of our
   packages. Someone who wants their own installs the same packages and builds theirs on them.
+- Nothing is shared between networks. Whoever wants an app on phones publishes their own, built on our packages, and
+  sends its notifications. One general app that we run for every network may come later.
 - Anything more than that is a fork, and forks should be few and far between.
 - Starting a network to build or test with is cheap, fast and repeatable: a whole network on one machine, with a folder
   as its bucket.
