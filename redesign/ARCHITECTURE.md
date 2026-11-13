@@ -6,6 +6,8 @@
 - One visual language across platforms, with no platform's own look. What a device does itself still follows the device:
   scrolling, the keyboard, the back gesture, its pickers and its share sheet.
 - It runs on Mac, Linux, Windows, iPhone, Android and the web.
+- It's built for networks of up to about 20,000 users.
+- Speed should feel like quality: fast and well-tuned, never the slowness people put up with in workplace software.
 - It costs a family of four about one coffee a month, and an organisation less per person than that.
 - A plugin, and anything it provides, isn't forced to behave a certain way. The platform gives it the freedom to do
   what's best, and gives guidance to the agents that build it so they make wise decisions.
@@ -17,8 +19,10 @@
 - A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
   blobs. An `editor` asks that server, which checks the relation tuples.
 - A server confirms a write only once losing that server couldn't lose the write.
-- Only the signer holds the bucket's credentials. It hands servers and clients short-lived access to what they may
-  reach, so removing a server changes nothing for the others.
+- Only the signer holds the bucket's credentials. It hands servers short-lived access to what they may reach, so
+  removing a server changes nothing for the others.
+- A client reads the bucket only through a server. For something large, a server asks the signer for a short-lived link
+  and hands it to the client.
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
   connects.
 - A server without a connection to the bucket isn't in a normal state. Nothing is designed around it.
@@ -77,6 +81,10 @@
   If it writes a database whose lease another server holds, that server passes it on to the one holding it.
 - A scheduled job is a tool call made by the clock. The server holding the lease of the database its schedule is kept in
   makes the call.
+- A scheduled job runs when a server is up. A network that has a cloud server uses it, started when there's work and
+  stopped after. Nothing sets one up by itself, and with no server available nothing runs.
+- A cloud server that's always ready is its owner's choice to pay for. Otherwise it should start fast without costing a
+  fortune.
 - A plugin can use this same way of choosing a server for its own calls, a service's included, or choose its own.
 - A server takes the newest release by itself, so none lags behind. One Core is small and stable, so that's seldom.
 
