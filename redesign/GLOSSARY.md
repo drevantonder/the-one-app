@@ -9,7 +9,7 @@
   at home, a colleague's, or a cloud machine started when needed. A network has one or more. It is an artifact, holding
   its key and how to reach it, and is a who.
 - **Client**: what a user or their agent uses, on a phone, a computer or in a browser, or as the CLI or MCP. It asks
-  a server, keeps a copy of what its user may read, and holds the keys of the encrypted artifacts its user may read.
+  a server, keeps what servers answered, and keeps secrets safe on its device.
 - **Signer**: the only holder of the bucket's credentials. It hands servers and clients short-lived access to what they
   may reach.
 - **Artifact**: a couple of blobs together in the bucket, with who may do what to them. Everything a network keeps is
