@@ -62,3 +62,9 @@
 - It runs on Mac, Linux, Windows, iPhone, Android and the web.
 - It costs a family of four about one coffee a month, and an organisation less per person than that.
 - Every tool is also a CLI command and an MCP tool.
+- Getting a notification onto a device is the platform's. What to send, an inbox and what a user wants to hear about
+  are a plugin's.
+- The Vault is a plugin. Its secrets are encrypted artifacts, and a tool of its uses one on a server and hands back
+  only the answer.
+- The platform records what every tool, service and server did and how long it took, in OpenTelemetry's shapes. It
+  may be lost, and it holds no user data.
