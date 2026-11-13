@@ -95,3 +95,8 @@
   without signing in, until the tuple is removed. A link opens in the web client, where there is one.
 - An `owner` or an `editor` of an artifact can share it, up to their own relation. Only an owner adds or removes an
   owner.
+- A tool call, a scheduled job and a call to a service all go to a server that acts for the user or group they're
+  for. If it writes a database whose lease another server holds, that server passes it on to the one holding it.
+- A scheduled job is a tool call made by the clock. The server holding the lease of the database its schedule is kept
+  in makes the call.
+- A plugin can use this same way of choosing a server for its own calls, a service's included, or choose its own.
