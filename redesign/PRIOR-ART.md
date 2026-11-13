@@ -26,6 +26,25 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 - **Conditional writes**: Amazon S3, Cloudflare R2, Tigris, Google Cloud Storage and Azure Blob have them. Backblaze B2,
   Hetzner and DigitalOcean Spaces don't, by celld's own tests.
 
+## Plugin systems to learn from
+
+None of these is chosen. All three run plugins inside the host with its full access, which a network where any user
+adds a plugin can't copy.
+
+- **Nuxt modules** (Nuxt 4): pages, components and imports are modules on the same list as anyone's, but five core
+  ones are exempt from being switched off. One kind of hook: handlers run in the order they registered and change what
+  they're handed, with no way to refuse and no record of who changed what. Order between modules is the standing
+  complaint. Nuxt 4.1 added dependencies a module declares, with versions, resolved before any module runs.
+- **OpenCode's plugins, version 2** (`@opencode/plugin`, 2.0 in September 2026): about sixty of its own features, every
+  tool and provider among them, are plugins on the public interface. Three separate things where version 1 had one:
+  registering what a plugin provides, hooks that change a running operation, and events that are only heard. A plugin
+  has a stable id, storage of its own, and a typed contract between its parts. The plugin's context is the public
+  client plus a little. Version 1 plugins all broke at once.
+- **DeepSeek Harness** (`dsh`, developer preview, built on Cordis): "no privileged core"; the agent loop and tool
+  registry are plugins. A plugin provides a service under a key and others ask for the key, never the plugin, so one
+  can be swapped. Each hook's contract says how it's called: heard only, wrapped, or decided by the first to answer.
+  Its most reported trap is a wrapping hook that forgets to pass the call on and so blocks it silently.
+
 ## Not checked yet
 
 - That a Worker can pass requests, and a live connection, to a home server through a tunnel without keeping state.
