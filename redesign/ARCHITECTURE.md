@@ -11,7 +11,7 @@
 - Speed should feel like quality: fast and well-tuned, never the slowness people put up with in workplace software. It
   opens, scrolls, types and goes back as well as the best apps on a mid-priced phone, and a CLI command or an MCP call
   is held to the same standard.
-- It costs a family of four about one coffee a month, and an organisation less per person than that.
+- It costs a family of four about one coffee a month, which is about $5, and an organisation less per person than that.
 - A plugin, and anything it provides, isn't forced to behave a certain way. The platform gives it the freedom to do
   what's best, and gives guidance to the agents that build it so they make wise decisions.
 
@@ -19,6 +19,7 @@
 
 - An artifact's blobs are read, written only if absent, replaced only if unchanged, and listed. Nothing else is asked of
   a bucket.
+- The database needs only one thing of the bucket to stay safe: writing a blob only if it's absent.
 - A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
   blobs. An `editor` asks that server, which checks the relation tuples.
 - A server confirms a write only once losing that server couldn't lose the write.
@@ -29,8 +30,8 @@
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
   connects.
 - A server without a connection to the bucket isn't in a normal state. Nothing is designed around it.
-- Backups are what the bucket's provider offers: keeping older versions of blobs, and copying them to a second place.
-  Nothing of ours is built for it.
+- Backups are flexible. They're what the bucket's provider offers where it offers it, such as keeping older versions of
+  blobs and copying them to a second place, and otherwise whatever is simplest.
 - A deleted artifact can be brought back for 30 days. Deleting hides it, and its blobs are removed after that.
 - Putting a database back to an earlier moment is the database plugin's to offer, from its log. It isn't built early.
 
@@ -43,6 +44,10 @@
 - One Core works with no plugins. With none that decides who may reach what, everything in a network is shared.
 - Every plugin runs the same way. The ones The One App ships with are no more special than anyone's. Whether that way is
   a sandbox isn't decided.
+- What plugins run in can give them things to import, such as cryptography or a database engine. One Core itself still
+  holds no database code, so that stays flexible.
+- A network is trusted, and its users aren't assumed to be malicious. Keeping plugins apart is wise, but it's a bonus:
+  other things decide what plugins run in first.
 - The One App ships with these plugins: signing in, relation tuples, the database, encryption, home pages, Insights,
   repos, the Vault and notifications.
 - Plugins are written against one published interface, and reach nothing else of a server's or a client's.
@@ -61,7 +66,8 @@
 - Relation tuples are a plugin. It keeps them in its own artifact, and decides whether anything may reach any other, on
   the server and for the signer.
 - More than one plugin can decide whether something may be reached. Any of them can say no, and that blocks it.
-- Servers and the signer ask the relation tuples plugin. Taking access away takes a few seconds to reach every server.
+- Servers and the signer ask the relation tuples plugin. Taking access away reaches every server eventually. No time is
+  promised.
 - The relation tuples plugin uses the database plugin.
 - A plugin is added for a user, for a group or for the network.
 - Every plugin has an artifact of its own for each one it was added for. Only that plugin reaches it, and it needs no
@@ -81,6 +87,8 @@
 ## Servers
 
 - Any user can bring a server.
+- A server runs on Windows as well as Mac and Linux. On Windows it may run through WSL, if that doesn't weigh on the
+  computer and an agent can set it up.
 - A server's owner chooses its members, and each agrees. A new one is for its owner alone.
 - A server acts for its members and reaches what they can. A viewer's server can keep a copy and read it. An editor's
   can hold a database's lease.
@@ -144,8 +152,8 @@
   data.
 - A plugin's code reaches nothing except through the interface plugins are written against, apart from a service, which
   runs only on a server whose owner chose to install it.
-- A plugin is code that runs as written. An agent can write one and deploy it with no developer tools, on any ordinary
-  machine. Tools to check it first are recommended, not needed.
+- An agent can write a plugin and deploy it with no developer tools, on any ordinary machine. A server may compile it
+  when it's deployed, and keeps the source beside it. Tools to check it first are recommended, not needed.
 - Everyone using a plugin runs its newest version.
 - A plugin's tools are its only public part. Anything may call one for the user or group it runs for: an app, an agent,
   a scheduled job, another plugin's tool.
@@ -160,6 +168,7 @@
 - The database is a plugin.
 - A plugin provides a kind of artifact as functions other plugins call. They run as the calling plugin, for the user or
   group it runs for.
+- MCP Apps are supported from the start.
 - An app is free in what it shows. A widget is as free as the platform it sits on allows, and we pass on as much of that
   freedom as we can.
 - Home pages are a plugin. How they split between a server and the UI the clients share isn't worked out.
