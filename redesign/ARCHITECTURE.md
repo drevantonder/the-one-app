@@ -34,7 +34,8 @@
   computers.
 - Each plugin is its own package too, the ones The One App ships with included. Those differ only in shipping with it.
 - One Core works with no plugins. With none that decides who may reach what, everything in a network is shared.
-- The One App ships with these plugins: signing in, relation tuples, the database, encryption, home pages and Insights.
+- The One App ships with these plugins: signing in, relation tuples, the database, encryption, home pages, Insights and
+  repos.
 - Plugins are written against one published interface, and reach nothing else of a server's or a client's.
 - A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts meant
   for it.
