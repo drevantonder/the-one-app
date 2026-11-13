@@ -103,3 +103,10 @@
 - A scheduled job is a tool call made by the clock. The server holding the lease of the database its schedule is kept
   in makes the call.
 - A plugin can use this same way of choosing a server for its own calls, a service's included, or choose its own.
+- Plugins reach clients from a server, built-in ones included, so they update without a store release. Store releases
+  are kept few, so iterating stays fast and cheap.
+- A server takes the newest release by itself, so none lags behind. The core is small and stable, so that's seldom.
+- A custom build has its own name, its own icon and its own built-in plugins. Anything more is a fork, and forks
+  should be few and far between.
+- Starting a network to build or test with is cheap, fast and repeatable: a whole network on one machine, with a
+  folder as its bucket.
