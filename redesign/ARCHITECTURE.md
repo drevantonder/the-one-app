@@ -68,3 +68,7 @@
   only the answer.
 - The platform records what every tool, service and server did and how long it took, in OpenTelemetry's shapes. It
   may be lost, and it holds no user data.
+- A plugin's tools are its only public part. Anything may call one for the user or group it runs for: an app, an
+  agent, a scheduled job, another plugin's tool.
+- A plugin says which other plugins it uses, so adding it brings them along.
+- A plugin's deployed code is open to everyone in the network. A git repo it came from can be private.
