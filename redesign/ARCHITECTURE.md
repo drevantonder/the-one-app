@@ -12,6 +12,7 @@
   opens, scrolls, types and goes back as well as the best apps on a mid-priced phone, and a CLI command or an MCP call
   is held to the same standard.
 - It costs a family of four about one coffee a month, which is about $5, and an organisation less per person than that.
+  That isn't rigid: $10 a month is also fine.
 - A plugin, and anything it provides, isn't forced to behave a certain way. The platform gives it the freedom to do
   what's best, and gives guidance to the agents that build it so they make wise decisions.
 
