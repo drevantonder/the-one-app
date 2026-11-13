@@ -35,9 +35,7 @@
   instance runs on each server whose owner installed it, as its own process. It and the rest of its plugin call each
   other's functions, which nothing else can call. The plugin decides which instance it calls.
 - **Core**: what every plugin stands on: blobs, each plugin's own artifact, running plugins, and the interface they're
-  written against. Small on purpose.
-- **Default plugin**: a plugin that ships with every server. Written against the same interface as anyone's, and it can
-  be switched off. Avoid: built-in plugin, core plugin.
+  written against. Small on purpose, and it works with no plugins.
 - **Package**: one piece built separately: the server, a client, or a plugin.
 - **Plugin hook**: a moment a plugin can be called at, such as a tool being called or an artifact changing. Each states
   whether a plugin only hears about it, can change it, or decides it.

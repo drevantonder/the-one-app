@@ -32,8 +32,9 @@
 - The core knows blobs. Every kind of artifact built on them, a database too, is something a plugin provides.
 - The server is one package, and each client is its own: the CLI, MCP, the web client, and the apps for phones and
   computers.
-- Each plugin is its own package too, default plugins included. A default plugin differs only in shipping with every
-  server.
+- Each plugin is its own package too, the ones The One App ships with included. Those differ only in shipping with it.
+- The core works with no plugins. With none that decides who may reach what, everything in a network is shared.
+- The One App ships with these plugins: relation tuples, the database, encryption, home pages and Insights.
 - Plugins are written against one published interface, and reach nothing else of a server's or a client's.
 - A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts meant
   for it.
@@ -44,13 +45,14 @@
 - A network is an artifact: the top `parent` of everything in it. Its first owner is the first user to sign in.
 - A network's owner owns every artifact in it, but reads an encrypted one only with its key. Users have the privacy they
   need, and the owner isn't responsible for keeping their credentials safe.
-- Relation tuples are a default plugin. It keeps them in its own artifact, and decides whether anything may reach any
-  other, on the server and for the signer.
+- Relation tuples are a plugin. It keeps them in its own artifact, and decides whether anything may reach any other, on
+  the server and for the signer.
 - More than one plugin can decide whether something may be reached. Any of them can say no, and that blocks it.
 - Servers and the signer ask the relation tuples plugin. Taking access away takes a few seconds to reach every server.
-- Relation tuples are kept through the database plugin, which is why it always ships.
+- The relation tuples plugin uses the database plugin.
 - Every plugin has an artifact of its own in the network. Only that plugin reaches it, and it needs no relation tuple,
   because it's always that one plugin's.
+- Any user can add a plugin. It's an artifact they own, and relation tuples say who else may use it.
 - A plugin writes a relation tuple only where the user or group it runs for may.
 - An `owner` or an `editor` of an artifact can share it, up to their own relation. Only an owner adds or removes an
   owner.
@@ -99,8 +101,8 @@
 
 ## Encryption
 
-- Encryption is a default plugin, with a part on the server and a part in each client. It wraps blobs, so it works for
-  anything built on them, a database too.
+- Encryption is a plugin, with a part on the server and a part in each client. It wraps blobs, so it works for anything
+  built on them, a database too.
 - A server opens no encrypted artifact unless the user it belongs to, or the group's owner, chose to let it. That choice
   is a relation tuple naming the server, and gives the server the key.
 - A server takes an encrypted database's lease only if it holds its key.
@@ -125,14 +127,14 @@
   called, an artifact changing or a server joining, and is called when it happens.
 - Each plugin hook states whether a plugin only hears about it, can change it, or decides it.
 - A plugin hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
-- The database is a default plugin.
+- The database is a plugin.
 - A plugin provides a kind of artifact as functions other plugins call. They run as the calling plugin, for the user or
   group it runs for.
-- Home pages are a default plugin. How they split between a server and the UI the clients share isn't worked out.
+- Home pages are a plugin. How they split between a server and the UI the clients share isn't worked out.
 - Adding an app to a home page puts it on the clients of everyone who sees that page.
 - An app opened from a group's home page works with the group's artifacts.
-- Insights is a default plugin. It keeps what every tool, service and server did and how long it took, in
-  OpenTelemetry's shapes. It may be lost, and it holds no user data.
+- Insights is a plugin. It keeps what every tool, service and server did and how long it took, in OpenTelemetry's
+  shapes. It may be lost, and it holds no user data.
 - The Vault is a plugin. Its secrets are encrypted artifacts, and a tool of its uses one on a server and hands back only
   the answer.
 - Getting a notification onto a device is the core's. What to send, an inbox and what a user wants to hear about are a
@@ -150,9 +152,9 @@
 
 ## Updates and builds
 
-- Plugins reach clients from a server, default plugins included, so they update without a store release. Store releases
-  are kept few, so iterating stays fast and cheap.
-- The One App itself is made the way anyone's is: a name, an icon and a choice of default plugins, on top of our
+- Plugins reach clients from a server, the ones The One App ships with included, so they update without a store release.
+  Store releases are kept few, so iterating stays fast and cheap.
+- The One App itself is made the way anyone's is: a name, an icon and a choice of plugins to ship with, on top of our
   packages. Someone who wants their own installs the same packages and builds theirs on them.
 - Anything more than that is a fork, and forks should be few and far between.
 - Starting a network to build or test with is cheap, fast and repeatable: a whole network on one machine, with a folder
