@@ -34,7 +34,7 @@
   computers.
 - Each plugin is its own package too, the ones The One App ships with included. Those differ only in shipping with it.
 - The core works with no plugins. With none that decides who may reach what, everything in a network is shared.
-- The One App ships with these plugins: relation tuples, the database, encryption, home pages and Insights.
+- The One App ships with these plugins: signing in, relation tuples, the database, encryption, home pages and Insights.
 - Plugins are written against one published interface, and reach nothing else of a server's or a client's.
 - A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts meant
   for it.
@@ -84,8 +84,8 @@
 - A client keeps what servers have answered, shows it at once, and asks again behind it.
 - A client asks again when its user opens or returns to an app, and after its own tool calls, as most apps do.
 - A server can also tell a client that something changed, and the client asks again. A plugin is free to do more.
-- A client has little of its own: it signs in, keeps what servers answered, keeps secrets safe on its device, and runs
-  and draws what plugins give it.
+- A client has little of its own: it keeps what servers answered, keeps secrets safe on its device, and runs and draws
+  what plugins give it.
 - A client on the same local network as a server sends its requests straight to it. Otherwise it sends them to the
   network's address, where a small on-demand piece passes them to the server holding the lease. Going direct between
   different local networks would be nice, and stays open.
@@ -94,6 +94,8 @@
 
 ## Signing in
 
+- Signing in is a plugin. It tells the core who a request is from. With none, everyone who reaches a network is the same
+  one user.
 - Signing in only says who a user is. No key comes from it, so how a network signs in can change.
 - A client that's signed in reaches everything its user may, except encrypted artifacts. Those need something that
   already holds the key to let it in.
