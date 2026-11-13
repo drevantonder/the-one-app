@@ -126,6 +126,8 @@
 - Each plugin hook states whether a plugin only hears about it, can change it, or decides it.
 - A plugin hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
 - The database is a default plugin.
+- A plugin provides a kind of artifact as functions other plugins call. They run as the calling plugin, for the user or
+  group it runs for.
 - Home pages are a default plugin. How they split between a server and the UI the clients share isn't worked out.
 - Adding an app to a home page puts it on the clients of everyone who sees that page.
 - An app opened from a group's home page works with the group's artifacts.
