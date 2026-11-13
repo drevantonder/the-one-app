@@ -118,3 +118,4 @@
   plugin's to keep, through hooks.
 - Every tool has a name, a description and its inputs. A plugin may also provide a guide: text for agents on when and
   how to use its tools. The CLI and MCP hand both over.
+- Relation tuples are kept through the database plugin, which is why it always ships.
