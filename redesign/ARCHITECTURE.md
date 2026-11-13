@@ -122,3 +122,4 @@
 - Relation tuples are a built-in plugin. It keeps them in its own artifact, and decides whether anything may reach
   any other, on the server and for the signer.
 - Leases are a built-in plugin. The database plugin uses it, and any plugin can.
+- More than one plugin can decide whether something may be reached. Any of them can say no, and that blocks it.
