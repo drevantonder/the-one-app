@@ -10,6 +10,8 @@
 - A client changes an artifact only by calling a tool, which goes straight to a server. Whatever an app can do, an
   agent can.
 - A client keeps what servers have answered, shows it at once, and asks again behind it.
+- A client asks again when its user opens or returns to an app, and after its own tool calls, as most apps do.
+- A server can also tell a client that something changed, and the client asks again. A plugin is free to do more.
 - A server confirms a write only once losing that server couldn't lose the write.
 - Everything a relation tuple is about is an artifact: the network, a group, a server, a plugin.
 - A network is an artifact: the top `parent` of everything in it, holding its relation tuples. Its first owner is the
@@ -48,7 +50,8 @@
 - A service says what it needs of a machine, and its owner sees that before installing it.
 - A call from a service into its plugin says which user or group it's for, and its server must act for them.
 - A service follows its plugin's newest version.
-- A server has a URL the network's address can reach. How is its owner's choice.
+- A server has a URL the network's address can reach. A server at home gets one by connecting out, so nothing at
+  home is opened to the internet. How is its owner's choice.
 - A client on the same local network as a server sends its requests straight to it. Otherwise it sends them to the
   network's address, where a small on-demand piece passes them to the server holding the lease. Going direct between
   different local networks would be nice, and stays open.
