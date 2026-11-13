@@ -26,6 +26,13 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 - **Conditional writes**: Amazon S3, Cloudflare R2, Tigris, Google Cloud Storage and Azure Blob have them. Backblaze B2,
   Hetzner and DigitalOcean Spaces don't, by celld's own tests.
 
+## What the clients could be built with
+
+Not chosen, and neither is ruled out.
+
+- **Expo**: phone apps, and it can send them updates without a store release. No desktop apps.
+- **Tauri**: desktop and phone apps from one codebase. What the app as it runs today uses.
+
 ## Plugin systems to learn from
 
 None of these is chosen. All three run plugins inside the host with its full access, which a network where any user
@@ -62,7 +69,6 @@ adds a plugin can't copy.
   unreleased or archived. **iroh-blobs and iroh-docs**: a way to copy blobs between devices, not a store.
 - **Jazz**: its encrypted design is frozen and its makers wrote up why they left it; Jazz 2 is rows a server is
   trusted with, in alpha.
-- **Expo**: no desktop apps, so the shell stays Tauri.
 - **iroh for how devices link**: its strength is direct links across the internet, which isn't required here.
 
 ## Decided earlier, and easy to miss
