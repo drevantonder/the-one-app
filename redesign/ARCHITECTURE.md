@@ -32,8 +32,7 @@
 - The core knows blobs. Every kind of artifact built on them, a database too, is something a plugin provides.
 - The server is one package, and each client is its own: the CLI, MCP, the web client, and the apps for phones and
   computers.
-- Each plugin is its own package too, built-in ones included. A built-in plugin differs only in shipping with every
-  server.
+- Each plugin is its own package too, core plugins included. A core plugin differs only in shipping with every server.
 - Plugins are written against one published interface, and reach nothing else of a server's or a client's.
 - A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts meant
   for it.
@@ -44,7 +43,7 @@
 - A network is an artifact: the top `parent` of everything in it. Its first owner is the first user to sign in.
 - A network's owner owns every artifact in it, but reads an encrypted one only with its key. Users have the privacy they
   need, and the owner isn't responsible for keeping their credentials safe.
-- Relation tuples are a built-in plugin. It keeps them in its own artifact, and decides whether anything may reach any
+- Relation tuples are a core plugin. It keeps them in its own artifact, and decides whether anything may reach any
   other, on the server and for the signer.
 - More than one plugin can decide whether something may be reached. Any of them can say no, and that blocks it.
 - Servers and the signer ask the relation tuples plugin. Taking access away takes a few seconds to reach every server.
@@ -54,9 +53,9 @@
 - A plugin writes a relation tuple only where the user or group it runs for may.
 - An `owner` or an `editor` of an artifact can share it, up to their own relation. Only an owner adds or removes an
   owner.
-- Sharing by link writes a relation tuple naming the link as `viewer` or `editor`. Whoever holds the link gets that,
-  without signing in, until the tuple is removed. A link opens in the web client, where there is one.
-- A history of who changed what, relation tuples included, is a plugin's to keep, through hooks.
+- Making a sharing link writes a relation tuple naming it as `viewer` or `editor`. Whoever holds the link gets that,
+  without signing in, until the tuple is removed. A sharing link opens in the web client, where there is one.
+- A history of who changed what, relation tuples included, is a plugin's to keep, through plugin hooks.
 
 ## Servers
 
@@ -67,7 +66,7 @@
 - With no server up, nothing is lost: clients keep what servers answered and wait.
 - A server has a URL the network's address can reach. A server at home gets one by connecting out, so nothing at home is
   opened to the internet. How is its owner's choice.
-- Leases are a built-in plugin. The database plugin uses it, and any plugin can.
+- Leases are part of the database plugin.
 - A tool call, a scheduled job and a call to a service all go to a server that acts for the user or group they're for.
   If it writes a database whose lease another server holds, that server passes it on to the one holding it.
 - A scheduled job is a tool call made by the clock. The server holding the lease of the database its schedule is kept in
@@ -99,7 +98,7 @@
 
 ## Encryption
 
-- Encryption is a built-in plugin, with a part on the server and a part in each client. It wraps blobs, so it works for
+- Encryption is a core plugin, with a part on the server and a part in each client. It wraps blobs, so it works for
   anything built on them, a database too.
 - A server opens no encrypted artifact unless the user it belongs to, or the group's owner, chose to let it. That choice
   is a relation tuple naming the server, and gives the server the key.
@@ -120,17 +119,17 @@
 - A plugin says which other plugins it uses, so adding it brings them along.
 - A plugin's deployed code is open to everyone in the network. A git repo it came from can be private.
 - Every tool has a name, a description and its inputs, and is also a CLI command and an MCP tool. A plugin may also
-  provide a guide: text for agents on when and how to use its tools. The CLI and MCP hand both over.
-- Hooks are part of the interface plugins are written against. A plugin hooks into a moment, such as a tool being
+  provide a tool guide: text for agents on when and how to use its tools. The CLI and MCP hand both over.
+- Plugin hooks are part of the interface plugins are written against. A plugin hooks into a moment, such as a tool being
   called, an artifact changing or a server joining, and is called when it happens.
-- Each hook states whether a plugin only hears about it, can change it, or decides it.
-- A hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
-- The database is a built-in plugin.
-- Home pages are a built-in plugin. How they split between a server and the UI the clients share isn't worked out.
+- Each plugin hook states whether a plugin only hears about it, can change it, or decides it.
+- A plugin hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
+- The database is a core plugin.
+- Home pages are a core plugin. How they split between a server and the UI the clients share isn't worked out.
 - Adding an app to a home page puts it on the clients of everyone who sees that page.
 - An app opened from a group's home page works with the group's artifacts.
-- Insights is a built-in plugin. It keeps what every tool, service and server did and how long it took, in
-  OpenTelemetry's shapes. It may be lost, and it holds no user data.
+- Insights is a core plugin. It keeps what every tool, service and server did and how long it took, in OpenTelemetry's
+  shapes. It may be lost, and it holds no user data.
 - The Vault is a plugin. Its secrets are encrypted artifacts, and a tool of its uses one on a server and hands back only
   the answer.
 - Getting a notification onto a device is the core's. What to send, an inbox and what a user wants to hear about are a
@@ -148,9 +147,9 @@
 
 ## Updates and builds
 
-- Plugins reach clients from a server, built-in ones included, so they update without a store release. Store releases
-  are kept few, so iterating stays fast and cheap.
-- A custom build has its own name, its own icon and its own built-in plugins. Anything more is a fork, and forks should
-  be few and far between.
+- Plugins reach clients from a server, core plugins included, so they update without a store release. Store releases are
+  kept few, so iterating stays fast and cheap.
+- A custom build has its own name, its own icon and its own core plugins. Anything more is a fork, and forks should be
+  few and far between.
 - Starting a network to build or test with is cheap, fast and repeatable: a whole network on one machine, with a folder
   as its bucket.

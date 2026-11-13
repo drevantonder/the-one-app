@@ -5,7 +5,7 @@
 - **User**: someone in the network, as relation tuples name them. How they sign in is not part of who they are.
 - **Group**: an artifact whose members share other artifacts. Being in one is a relation tuple: the group, `member`,
   and a user or another group.
-- **Server**: a machine that answers a network's clients: it checks relation tuples and writes databases. A computer
+- **Server**: a machine that runs a network's plugins and answers its clients. A computer
   at home, a colleague's, or a cloud machine started when needed. A network has one or more. It is an artifact, holding
   its key and how to reach it, and is a who.
 - **Client**: what a user or their agent uses, on a phone, a computer or in a browser, or as the CLI or MCP. It asks
@@ -16,7 +16,7 @@
   built on top of one: files, a database, a git repo. Avoid: space.
 - **Relation tuple**: one line of who may do what, as in Zanzibar: an artifact, a relation (`owner`, `editor`,
   `viewer`, `parent`, `member`) and who. An owner is an editor, and an editor is a viewer. A user, a group, everyone, a
-  server, a plugin and the holder of a link are all a who. Avoid: fact, grant.
+  server, a plugin and the holder of a sharing link are all a who. Avoid: fact, grant.
 - **Encrypted artifact**: an artifact whose blobs are encrypted before they're stored, so only holders of its key read
   it. For passwords and the keys that reach devices. Avoid: sealed.
 - **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services and kinds of artifact.
@@ -33,3 +33,15 @@
 - **Service**: native code a plugin provides, for what the sandbox can't do or what has no API on the internet. An
   instance runs on each server whose owner installed it, as its own process. It and the rest of its plugin call each
   other's functions, which nothing else can call. The plugin decides which instance it calls.
+- **Core**: what every plugin stands on: blobs, each plugin's own artifact, running plugins, and the interface they're
+  written against. Small on purpose.
+- **Core plugin**: a plugin that ships with every server. Written against the same interface as anyone's, and it can be
+  switched off. Avoid: built-in plugin.
+- **Package**: one piece built separately: the server, a client, or a plugin.
+- **Plugin hook**: a moment a plugin can be called at, such as a tool being called or an artifact changing. Each states
+  whether a plugin only hears about it, can change it, or decides it.
+- **Lease**: the record of which server writes a database for now. One server holds it at a time. Part of the database
+  plugin.
+- **Sharing link**: a who that is whoever holds it, without signing in. Making one writes a relation tuple naming it.
+- **Scheduled job**: a tool call made by the clock.
+- **Tool guide**: text a plugin provides for agents, on when and how to use its tools.
