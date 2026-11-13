@@ -110,3 +110,11 @@
   should be few and far between.
 - Starting a network to build or test with is cheap, fast and repeatable: a whole network on one machine, with a
   folder as its bucket.
+- Backups are what the bucket's provider offers: keeping older versions of blobs, and copying them to a second place.
+  Nothing of ours is built for it.
+- A deleted artifact can be brought back for 30 days. Deleting hides it, and its blobs are removed after that.
+- Putting a database back to an earlier moment is the database plugin's to offer, from its log. It isn't built early.
+- Changes to relation tuples are kept for good: who gave what to whom, and when. A history of anything else is a
+  plugin's to keep, through hooks.
+- Every tool has a name, a description and its inputs. A plugin may also provide a guide: text for agents on when and
+  how to use its tools. The CLI and MCP hand both over.
