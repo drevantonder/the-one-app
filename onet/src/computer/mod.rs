@@ -143,8 +143,7 @@ impl Onet {
     /// start: a new key there would make it a stranger to its own network.
     fn open(home: &Path, listen: String, runtime: Option<String>) -> Result<Onet> {
         std::fs::create_dir_all(home).with_context(|| format!("make {}", home.display()))?;
-        let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(home.join("onet.lock"))?;
-        lock.try_lock().map_err(|_| anyhow::anyhow!("another {} runs for {} already: only one signs as this device", name(), home.display()))?;
+        let lock = platform::os::alone(home, "onet.lock")?.with_context(|| format!("another {} runs for {} already: only one signs as this device", name(), home.display()))?;
         if !home.join("device.json").exists() && NetworkFile::read(home)?.is_some() {
             bail!("{} says this computer is in a network, but its key (device.json) isn't there: a new one would make it a stranger to its network, so {} won't start. Put device.json back.", home.join("network").display(), name());
         }

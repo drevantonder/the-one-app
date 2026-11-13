@@ -688,6 +688,8 @@ async fn serve() -> Result<()> {
         .init();
     let dir = platform::home();
     std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
+    // Held until it ends: a second one would keep the ports and the running build an update meant to replace.
+    let _alone = platform::os::alone(&dir, "oned.lock")?.with_context(|| format!("another {} runs for {} already: stop it first, as only one keeps this device's onet and app runtime", ::custom_build::programs::oned(), dir.display()))?;
     std::fs::write(dir.join(::oned_update::update::PID), std::process::id().to_string())?;
     ::oned_update::update::note_running(&dir)?;
     with_bucket_address(&dir)?;

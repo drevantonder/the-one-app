@@ -1,6 +1,6 @@
 //! What differs between the operating systems this program runs on, so the rest of it doesn't have to know: which name
 //! it was started by, stopping what it started, private files, links, replacing the running program, a disk's space,
-//! telling systemd it's ready, and running the tools a build uses (cargo, Go, git) wherever this machine has them.
+//! one process of a home at a time, telling systemd it's ready, and running the tools a build uses (cargo, Go, git) wherever this machine has them.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -33,6 +33,17 @@ pub fn named(name: &str) -> std::io::Result<Command> {
         std::fs::hard_link(&exe, &link)?;
     }
     Ok(Command::new(link))
+}
+
+/// Takes the lock `name` in `home`, which this process holds until it ends, so no other process of this home holds it:
+/// → None if one does already.
+pub fn alone(home: &Path, name: &str) -> std::io::Result<Option<std::fs::File>> {
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(home.join(name))?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(err)) => Err(err),
+    }
 }
 
 /// Asks a process this one started to stop, for it to end what it runs first.

@@ -155,24 +155,25 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<At> {
         }
         Some(Part::Mac) => {
             attempt("mac", send(Part::Mac, &at, release));
-            attempt("mac's app", super::mac::build_and_publish(started + Duration::from_secs(CALL) - super::mac::AFTER));
+            attempt("mac's app", super::mac::build(started + Duration::from_secs(CALL) - super::mac::AFTER).and_then(super::mac::publish));
         }
         Some(part) => attempt(part.name(), send(part, &at, release)),
         None => {
             let mut mac = None;
             for part in ORDER.into_iter().filter(|p| !matches!(p, Part::Workers | Part::Web | Part::Dev)) {
                 attempt(part.name(), send(part, &at, release));
-                // Built on the Mac while the rest is built and sent here.
+                // Built on the Mac while the rest is built and sent here, and published after it: sending the program restarts this
+                // device's onet, which a publish under way would lose.
                 if part == Part::Mac {
                     let deadline = started + Duration::from_secs(CALL) - super::mac::AFTER;
-                    mac = Some(std::thread::spawn(move || super::mac::build_and_publish(deadline)));
+                    mac = Some(std::thread::spawn(move || super::mac::build(deadline)));
                 }
             }
             // Together: one deploy, not one for each.
             attempt("workers and web", front(&at, true, true));
             attempt("dev", send(Part::Dev, &at, release));
             if let Some(mac) = mac {
-                attempt("mac's app", mac.join().unwrap_or_else(|_| Err(anyhow::anyhow!("its build stopped unexpectedly"))));
+                attempt("mac's app", mac.join().unwrap_or_else(|_| Err(anyhow::anyhow!("its build stopped unexpectedly"))).and_then(super::mac::publish));
             }
         }
     }
