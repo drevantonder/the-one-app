@@ -3,6 +3,10 @@ html {
   -webkit-text-size-adjust: 100%;
   scrollbar-gutter: stable;
 }
+/* What's scrolled to (a field the keyboard reached, a part a link names) stops below a screen's bar, not under it. */
+html:has(ui-screen) {
+  scroll-padding-top: calc(var(--control) + 1.25rem + env(safe-area-inset-top));
+}
 body {
   margin: 0;
   background: var(--background);

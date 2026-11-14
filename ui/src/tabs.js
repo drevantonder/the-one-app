@@ -37,7 +37,7 @@ class Tabs extends Element {
       <div class="tabs" ${part(api?.getListProps())}>
         ${this.tabs.map((tab) => {
           const value = tab.getAttribute("value")
-          return html`<button class="press ring ${value === this.value ? "chosen" : ""}" ${part(api?.getTriggerProps({ value }))}>${tab.getAttribute("label")}</button>`
+          return html`<button class="press ring reach ${value === this.value ? "chosen" : ""}" ${part(api?.getTriggerProps({ value }))}>${tab.getAttribute("label")}</button>`
         })}
         ${api ? html`<div class="indicator" ${part(api.getIndicatorProps())}></div>` : nothing}
       </div>

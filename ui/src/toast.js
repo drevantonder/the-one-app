@@ -63,7 +63,7 @@ class Toast extends Element {
       <div class="toast" ${part(api.getRootProps())}>
         <span ${part(api.getGhostBeforeProps())}></span>
         <p ${part(api.getTitleProps())}>${api.title}</p>
-        ${this.toast.action ? html`<button class="press ring" ${part(api.getActionTriggerProps())}>${this.toast.action.label}</button>` : nothing}
+        ${this.toast.action ? html`<button class="press ring reach" ${part(api.getActionTriggerProps())}>${this.toast.action.label}</button>` : nothing}
         <span ${part(api.getGhostAfterProps())}></span>
       </div>
     `

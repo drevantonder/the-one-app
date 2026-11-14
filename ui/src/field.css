@@ -55,7 +55,7 @@ input.box {
   appearance: none;
 }
 input::-webkit-search-cancel-button, input::-webkit-search-decoration {
-  appearance: none;
+  display: none;
 }
 textarea.box {
   display: block;

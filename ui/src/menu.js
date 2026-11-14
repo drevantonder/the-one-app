@@ -5,7 +5,10 @@ import { behaviour, over, part } from "./zag.js"
 import button from "./button.css"
 import css from "./menu.css"
 
-const positioning = { strategy: "fixed", placement: "bottom-end", gutter: 4 }
+// Under an icon the menu opens back along the line from it, where there's room: an icon sits at the end of things.
+// Under a button that says what it is, it opens along the line, as a select does.
+const fromIcon = { strategy: "fixed", placement: "bottom-end", gutter: 4 }
+const fromWords = { strategy: "fixed", placement: "bottom-start", gutter: 4 }
 
 /// `<ui-menu label="More"><ui-menu-item>Rename</ui-menu-item><hr><ui-menu-item destructive>Delete</ui-menu-item></ui-menu>`:
 /// a button that opens a few things to do. The button is an icon (`icon`, three dots unless said), named by
@@ -21,14 +24,19 @@ class Menu extends Element {
     super()
     this.watchChildren()
     behaviour(this, "menu", () => ({
-      positioning,
+      positioning: this.says ? fromWords : fromIcon,
       onSelect: ({ value }) => this.children[value].click(),
     }))
   }
 
+  /// Whether its button says its label, not only shows an icon.
+  get says() {
+    return !!this.variant && this.size !== "icon"
+  }
+
   render() {
     const api = this.machine?.api
-    const says = this.variant && this.size !== "icon"
+    const { says } = this
     const shown = says ? this.icon : (this.icon ?? "dots-three")
     return html`
       <button class="trigger press ring" data-variant=${this.variant ?? "ghost"} data-size=${says ? nothing : "icon"}

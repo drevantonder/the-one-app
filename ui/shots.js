@@ -95,6 +95,12 @@ for (const [size, options] of Object.entries(sizes)) {
     await settled()
     await shot("gallery-split")
 
+    // The whole gallery the other way round, as Arabic and Hebrew read.
+    await page.keyboard.press("Escape")
+    await page.evaluate(() => (document.documentElement.dir = "rtl"))
+    await settled()
+    await whole("gallery-rtl")
+
     await page.goto(`${server.url}example/`)
     await page.waitForFunction(() => !document.querySelector("#empty").hidden)
     await shot("example-empty")

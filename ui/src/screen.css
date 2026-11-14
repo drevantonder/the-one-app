@@ -42,6 +42,10 @@ button {
     background: var(--accent);
   }
 }
+/* An icon with no edge of its own at the end of the bar lines up with what's under it, as Back does. */
+::slotted(ui-menu:not([variant])), ::slotted(ui-button[variant="ghost"][size="icon"]) {
+  margin-inline-end: calc((var(--icon) - var(--control)) / 2);
+}
 main {
   display: grid;
   align-content: start;

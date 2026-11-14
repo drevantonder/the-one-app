@@ -28,11 +28,13 @@ class Button extends Element {
     this.type = "button"
     // A button that can't be pressed says nothing to the page, whatever inside it was pressed.
     this.addEventListener("click", (event) => (this.disabled || this.loading) && event.stopImmediatePropagation(), true)
+    // Pressed, or clicked by a script as `click()` clicks a `<button>`.
+    this.addEventListener("click", () => this.pressed())
   }
 
   render() {
     return html`
-      <button class="press ring" data-variant=${this.variant} data-size=${ifDefined(this.size ?? undefined)} ?disabled=${this.disabled || this.loading} aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-busy=${this.loading ? "true" : nothing} @click=${this.pressed}>
+      <button class="press ring" data-variant=${this.variant} data-size=${ifDefined(this.size ?? undefined)} ?disabled=${this.disabled || this.loading} aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-busy=${this.loading ? "true" : nothing}>
         ${this.loading ? html`<ui-spinner></ui-spinner>` : nothing}
         <slot></slot>
       </button>

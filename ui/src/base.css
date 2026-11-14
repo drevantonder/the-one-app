@@ -91,6 +91,23 @@
   }
 }
 
+/* Under a finger, what's drawn smaller than a fingertip is still pressed over a fingertip's room. */
+@media (pointer: coarse) {
+  .item {
+    min-height: var(--control);
+  }
+  .reach {
+    position: relative;
+  }
+  .reach::after {
+    content: "";
+    position: absolute;
+    inset: 50% 0 auto;
+    height: var(--control);
+    translate: 0 -50%;
+  }
+}
+
 [hidden], :host([hidden]) {
   display: none !important;
 }
