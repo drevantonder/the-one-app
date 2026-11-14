@@ -28,7 +28,7 @@ defmodule OneCore.Plugins do
          {:ok, version, warnings} <- Version.load(files) do
       case keep(name, files) do
         {:ok, number} ->
-          GenServer.call(__MODULE__, {:run, name, version})
+          GenServer.call(__MODULE__, {:newest, name, number, version})
           {:ok, number, warnings}
 
         {:error, why} ->
@@ -40,9 +40,9 @@ defmodule OneCore.Plugins do
 
   @doc "Removes a plugin. What it kept stays."
   def remove(name) do
-    with {:ok, _files} <- kept(name),
-         {:ok, _number} <- keep(name, %{}) do
-      GenServer.call(__MODULE__, {:stop, name})
+    with {:ok, _number, _files} <- kept(name),
+         {:ok, number} <- keep(name, %{}) do
+      GenServer.call(__MODULE__, {:newest, name, number, nil})
     end
   end
 
@@ -106,17 +106,19 @@ defmodule OneCore.Plugins do
     end
   end
 
-  # The files of a plugin's newest version.
+  # A plugin's newest version: its number and its files.
   defp kept(name) do
     plugin = artifact(name)
 
     with version when version != nil <- List.last(Artifact.list(plugin, "versions/")),
          {:ok, code, _} when code != "" <- Artifact.read(plugin, version) do
-      {:ok,
-       for path <- Artifact.list(plugin, "code/#{code}/"), into: %{} do
-         {:ok, text, _} = Artifact.read(plugin, path)
-         {String.replace_prefix(path, "code/#{code}/", ""), text}
-       end}
+      files =
+        for path <- Artifact.list(plugin, "code/#{code}/"), into: %{} do
+          {:ok, text, _} = Artifact.read(plugin, path)
+          {String.replace_prefix(path, "code/#{code}/", ""), text}
+        end
+
+      {:ok, String.to_integer(Path.basename(version)), files}
     else
       _ -> {:error, "There's no plugin named #{name}"}
     end
@@ -128,29 +130,33 @@ defmodule OneCore.Plugins do
     names =
       Enum.uniq(for key <- Artifact.list(%Artifact{prefix: @anyone <> "plugins/"}), do: hd(String.split(key, "/")))
 
-    running =
-      for name <- names, {:ok, files} <- [kept(name)], reduce: %{} do
-        running ->
+    state =
+      for name <- names, {:ok, number, files} <- [kept(name)], reduce: %{running: %{}, newest: %{}, calls: %{}} do
+        state ->
           case Version.load(files) do
             {:ok, version, _warnings} ->
-              Map.put(running, name, version)
+              %{state | running: Map.put(state.running, name, version), newest: Map.put(state.newest, name, number)}
 
             {:error, why} ->
               Logger.error("#{name} isn't running, because it doesn't compile:\n#{why}")
-              running
+              state
           end
       end
 
-    {:ok, %{running: running, calls: %{}}}
+    {:ok, state}
   end
 
+  # A plugin's newest version takes over: one to run, or none once it's removed. Deploys that finish out of order
+  # still leave the one with the highest number, as the bucket has it.
   @impl true
-  def handle_call({:run, name, version}, _from, state) do
-    {:reply, :ok, replace(state, name, &Map.put(&1, name, version))}
-  end
-
-  def handle_call({:stop, name}, _from, state) do
-    {:reply, :ok, replace(state, name, &Map.delete(&1, name))}
+  def handle_call({:newest, name, number, version}, _from, state) do
+    if number > Map.get(state.newest, name, 0) do
+      was = state.running[name]
+      running = if version, do: Map.put(state.running, name, version), else: Map.delete(state.running, name)
+      {:reply, :ok, unload_unused(%{state | running: running, newest: Map.put(state.newest, name, number)}, was)}
+    else
+      {:reply, :ok, unload_unused(state, version)}
+    end
   end
 
   # The caller is watched, so a call that dies has ended too.
@@ -174,11 +180,6 @@ defmodule OneCore.Plugins do
 
   @impl true
   def handle_info({:DOWN, call, :process, _, _}, state), do: {:noreply, ended(state, call)}
-
-  defp replace(state, name, change) do
-    was = state.running[name]
-    unload_unused(%{state | running: change.(state.running)}, was)
-  end
 
   defp ended(state, call) do
     {version, calls} = Map.pop(state.calls, call)
