@@ -2,9 +2,12 @@
 # Proves, on a whole network with a spare (`./network <folder> --spare`), who may do what and that the clock calls
 # a scheduled job once. As users of a network being built: what one made is read by another only once a relation
 # tuple says so, by a group's member, and by a sharing link's holder until its tuple is removed. A plugin reaches
-# only what both it and its user may, a plugin that decides refuses a call with its reason, Claims' approver is
-# a tuple, and a job that's being called when the server calling it is killed is called once by the spare. It
-# says what a check costs a call.
+# only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
+# user, group and the network it's added for. One Core's own tools are whoever's may. Anyone brings a server, which
+# acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on the
+# rest. A plugin that decides refuses a call with its reason, and one that breaks is undone. Claims' approver is a
+# tuple, and a job that's being called when the server calling it is killed is called once by the spare. It says
+# what a check costs a call.
 #
 #     mise exec -- server/test/who.sh [--address]
 #
@@ -362,6 +365,8 @@ fi
 may as alice add_member --server "${key[alices]}" --who users/bob
 may as bob add_server --key "${key[alices]}"
 may via alices as bob diary write --text "At alice's"
+may as bob remove_server --key "${key[alices]}"
+refused via alices as bob diary write --text "At alice's again"
 
 say "A hook that decides refuses a call with its reason"
 may as alice notes write --id diary --text "My password is hunter2"

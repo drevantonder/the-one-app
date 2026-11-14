@@ -2,7 +2,7 @@ defmodule OneCore.Tools do
   @moduledoc """
   One Core's own tools: what adds, updates and removes plugins, servers and services.
 
-  They're called as a plugin's tools are, through the same hooks (`OneCore.Plugins.tool/5`): the plugins that
+  They're called as a plugin's tools are, through the same hooks (`OneCore.Plugins.tool/6`): the plugins that
   change a call's inputs change theirs, the ones that decide a call decide theirs, and the ones that hear are
   told. What each changes it reaches as a plugin reaches an artifact, so the plugins that decide `reach` say
   whether whoever asked may: an `editor` of a plugin deploys over it, a `viewer` adds it, and only an `owner` of
@@ -83,6 +83,18 @@ defmodule OneCore.Tools do
       inputs: %{
         type: "object",
         properties: %{key: %{type: "string", description: "The server's key, which it says when it's started"}},
+        required: ["key"]
+      }
+    },
+    %{
+      name: "remove_server",
+      description: """
+      Takes a server off your list: asked for a group or for the network, off theirs.
+      It no longer acts for you, and is handed nothing of yours.
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{key: %{type: "string", description: "The server's key"}},
         required: ["key"]
       }
     },
@@ -221,17 +233,25 @@ defmodule OneCore.Tools do
     reaches!(asked, who, "owner")
 
     Servers.forget()
+    members = Servers.members(key)
 
-    if Servers.members(key) != [] and who not in Servers.members(key),
-      do:
-        raise(
-          "That server is #{hd(Servers.members(key))}'s, who hasn't chosen #{who}. Its owner does, with add_member."
-        )
+    if members != [] and who not in members,
+      do: raise("That server is #{hd(members)}'s, who hasn't chosen #{who}. Its owner does, with add_member.")
 
     with {:error, why} <- Servers.add(key, who), do: raise(why)
     Hooks.heard("joined", %{"server" => key, "for" => who, "by" => Server.key()}, asked)
     Server.tell_servers([who])
     "That server acts for #{who} now, once it's started for them or its owner has chosen them."
+  end
+
+  # The server taken off is told too, so that it stops acting for them at once.
+  defp run("remove_server", %{"key" => key}, {_by, who} = asked, pass) do
+    at(who, pass)
+    reaches!(asked, who, "owner")
+    acting = Servers.acting(who)
+    with {:error, why} <- Servers.remove(key, who), do: raise(why)
+    Server.tell(acting, [who])
+    "That server no longer acts for #{who}."
   end
 
   defp run("add_member", %{"who" => member} = inputs, asked, _pass) do

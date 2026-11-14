@@ -253,6 +253,21 @@ defmodule OneCore.RelationsTest do
     assert {:ok, _} = tool.("add_server", %{"key" => Server.key()}, {@bob, @bob})
     assert OneCore.Servers.acts_for(Server.key()) == ["network", @bob]
 
+    # Whoever let a server act for them takes it off their list again. The network keeps one.
+    assert {:error, "users/alice isn't an owner of users/bob" <> _} =
+             tool.("remove_server", %{"key" => Server.key()}, {@alice, @bob})
+
+    assert {:ok, "That server no longer acts for users/bob."} =
+             tool.("remove_server", %{"key" => Server.key()}, {@bob, @bob})
+
+    assert OneCore.Servers.acts_for(Server.key()) == ["network"] and OneCore.Servers.listed(@bob) == []
+
+    assert tool.("remove_server", %{"key" => Server.key()}, {@bob, @bob}) ==
+             {:error, "That server isn't on users/bob's list"}
+
+    assert tool.("remove_server", %{"key" => Server.key()}, {User.anyone(), "network"}) ==
+             {:error, "The network keeps a server. Add another before this one goes."}
+
     # The network's owner does all of it, and so recovers anything.
     assert {:ok, _} = tool.("remove", %{"name" => "diary"}, {User.anyone(), "groups/family"})
 

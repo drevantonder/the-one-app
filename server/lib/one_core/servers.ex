@@ -102,6 +102,26 @@ defmodule OneCore.Servers do
     end
   end
 
+  @doc """
+  Takes a server off `owner`'s list, which only this server, acting for them, may: it no longer acts for them,
+  and the signer hands it nothing of theirs. The network keeps a server, since its list is only ever begun once.
+  """
+  def remove(key, owner) do
+    blob = "#{owner}/servers"
+
+    with {:ok, keys, tag} <- Bucket.read(blob),
+         keys = JSON.decode!(keys),
+         true <- key in keys do
+      cond do
+        owner == @network and keys == [key] -> {:error, "The network keeps a server. Add another before this one goes."}
+        Bucket.replace(blob, JSON.encode!(keys -- [key]), tag) == :ok -> forget()
+        true -> remove(key, owner)
+      end
+    else
+      _ -> {:error, "That server isn't on #{owner}'s list"}
+    end
+  end
+
   @doc "This server acts for `member` too from now on, once they have it on their list: its owner chose them."
   def choose(member) do
     blob = "servers/#{Server.key()}/members"
