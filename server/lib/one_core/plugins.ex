@@ -94,7 +94,7 @@ defmodule OneCore.Plugins do
         nil ->
           {:error, "#{name} has no tool named #{tool}. It has: #{Enum.map_join(version.tools, ", ", & &1.name)}"}
 
-        %{inputs: takes} ->
+        %{takes: takes} ->
           ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
 
           with :ok <- given(takes, inputs),
@@ -105,9 +105,7 @@ defmodule OneCore.Plugins do
 
   # Whether `inputs` are what a tool says it takes, its JSON Schema, so a tool is only ever called with them.
   defp given(takes, inputs) do
-    schema = ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(takes)))
-
-    with {:error, wrong} <- ExJsonSchema.Validator.validate(schema, inputs) do
+    with {:error, wrong} <- ExJsonSchema.Validator.validate(takes, inputs) do
       # Each says which input it's about, if it's about one, by its path in the inputs: `expenses/0`.
       {:error,
        Enum.map_join(wrong, "\n", fn

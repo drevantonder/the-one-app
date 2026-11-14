@@ -164,6 +164,11 @@ defmodule OneCore.Plugins.Version do
 
           true ->
             services = for module <- services, do: %{name: own_name(module), needs: module.needs()}
+            # What each tool takes is read once here, as the schema its inputs are checked against on every call.
+            tools =
+              for tool <- tools,
+                  do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
+
             {:ok, %{version(under, plugin, tools, guide, apps, Enum.sort(services), client) | uses: uses}}
         end
 
