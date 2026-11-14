@@ -9,8 +9,6 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - **A service is a part of a plugin's Elixir that names the machines it needs.** Code in another language is a program
   the plugin brings and starts as a child of the server.
 - **The bucket is Cloudflare R2**, unless measured write times say otherwise.
-- **Everything at the network's address is a Cloudflare Worker**: the gateway, the signer, the relay, the web client's
-  files and the way in for outsiders. The relay is a Durable Object that sleeps while idle.
 - **Each client is one Tauri shell per platform**, drawing in the device's web view.
 
 ## Not chosen yet

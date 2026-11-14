@@ -1,0 +1,17 @@
+{
+  "name": "address",
+  "description": "What sits at a network's address: the gateway, the relay, the signer, the web client's files and the way in for outsiders.",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@noble/hashes": "^2.0.0",
+    "aws4fetch": "^1.0.20"
+  },
+  "devDependencies": {
+    "wrangler": "^4.161.0"
+  },
+  "scripts": {
+    "dev": "wrangler dev -c gateway/wrangler.jsonc -c relay/wrangler.jsonc -c signer/wrangler.jsonc -c way-in/wrangler.jsonc -c web/wrangler.jsonc",
+    "deploy": "for piece in web signer relay way-in gateway; do wrangler deploy -c $piece/wrangler.jsonc || exit; done"
+  }
+}

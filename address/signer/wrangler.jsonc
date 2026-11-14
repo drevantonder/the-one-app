@@ -1,0 +1,8 @@
+{
+  "name": "one-signer",
+  "main": "signer.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false
+  // Its secrets, which only it holds: BUCKET (the bucket's S3 address, with the bucket's name as its path),
+  // ACCESS_KEY_ID and SECRET_ACCESS_KEY.
+}

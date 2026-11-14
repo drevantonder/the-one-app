@@ -20,14 +20,9 @@
 
 - A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
   blobs. An `editor` asks that server, which checks the relation tuples.
-- Only the signer holds the bucket's credentials. It hands a server short-lived access to the blobs of the users and
-  groups it acts for, so removing a server changes nothing for the others.
 - Each user's and group's blobs sit under a prefix of their own in the bucket, so a blob's path says whose it is.
 - One Core keeps, for each user and group, the list of servers that act for them, under that prefix. A server on the
   list can add another. The first is written by a server acting for the network, and only if the list is absent.
-- A server acting for the network reaches every user's and group's blobs.
-- The signer checks which server is asking and whether it's on the list, and signs. It also tells a client which
-  servers act for a user or group. It's small, keeps no state and runs no plugin code.
 - A client reads the bucket only through a server. For something large, a server asks the signer for a short-lived link
   and hands it to the client.
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
@@ -114,10 +109,6 @@
 
 - A network has one address. A few small pieces sit behind it, each named by its job: the gateway, the signer, the
   relay, the web client's files and the way in for outsiders. None runs plugin code, and none keeps what users make.
-- The gateway only sends each request where its path says.
-- The relay passes on what it can't read. It holds a connection while it's open and sleeps while it's idle. Nothing
-  else at the address holds a connection.
-- The relay admits only the network's own servers and clients.
 - An assistant running somewhere else, a sharing link and a call from an outside service come in at the address over
   the web, and are passed to a server by its key.
 

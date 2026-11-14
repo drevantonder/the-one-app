@@ -1,0 +1,9 @@
+{
+  "name": "one-relay",
+  "main": "relay.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "services": [{ "binding": "SIGNER", "service": "one-signer" }],
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "one-gateway",
+  "main": "gateway.js",
+  "compatibility_date": "2026-11-01",
+  "services": [
+    { "binding": "RELAY", "service": "one-relay" },
+    { "binding": "SIGNER", "service": "one-signer" },
+    { "binding": "WAY_IN", "service": "one-way-in" },
+    { "binding": "WEB", "service": "one-web" }
+  ]
+}
