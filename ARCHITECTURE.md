@@ -59,22 +59,15 @@
 - A network is an artifact: the top `parent` of everything in it. Its first owner is the first user to sign in.
 - A network's owner owns every artifact in it, but reads an encrypted one only with its key. Users have the privacy they
   need, and the owner isn't responsible for keeping their credentials safe.
-- Relation tuples are a plugin. It keeps them in its own artifact, and decides on a server whether anything may reach
-  any other.
 - Servers ask the relation tuples plugin. The signer doesn't: it only knows which servers act for whom. Taking access
   away reaches every server eventually. No time is promised.
-- The relation tuples plugin uses the database plugin.
 - A plugin is added for a user, for a group or for the network.
 - Every plugin has an artifact of its own for each one it was added for. Only that plugin reaches it, and it needs no
   relation tuple, because it's always that one plugin's.
 - That artifact belongs to whoever the plugin was added for, so only a server its owner chose holds its lease. What's
   added for the network is safe from its members, and what's added for a group is safe from that group's members.
 - Any user can add a plugin. It's an artifact they own, and relation tuples say who else may use it.
-- A plugin writes a relation tuple only where the user or group it runs for may.
-- An `owner` or an `editor` of an artifact can share it, up to their own relation. Only an owner adds or removes an
-  owner.
-- Making a sharing link writes a relation tuple naming it as `viewer` or `editor`. Whoever holds the link gets that,
-  without signing in, until the tuple is removed. A sharing link opens in the web client, where there is one.
+- A sharing link opens in the web client, where there is one.
 - Undo follows what people ordinarily expect of an app. A plugin that wants more keeps its own history. What a tool did
   outside the network isn't ours to undo.
 - A history of who changed what, relation tuples included, is a plugin's to keep, through plugin hooks.
@@ -144,8 +137,6 @@
 ## Plugins
 
 - A plugin always runs for a user or a group: whoever is using it, or, with nobody there, the one it was set up for.
-- What a plugin makes is owned by the user or group it was made for, not by the plugin. Removing a plugin leaves its
-  data.
 - A plugin's code on a server is free, and nothing checks it. Agents are intelligent, and a network is trusted.
 - Letting a computer be a server for a user or a group means trusting the plugins they add with that computer.
 - Nothing on a server keeps one plugin's code from what another's can reach there. What keeps users and groups apart is
