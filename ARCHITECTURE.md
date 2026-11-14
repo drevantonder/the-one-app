@@ -100,7 +100,6 @@
 - With no server up, nothing is lost: clients keep what servers answered and wait.
 - Every server and client has a key, and one reaches another by its key: straight to it where a path can be found, and
   through the relay otherwise. Nothing at home is opened to the internet.
-- A user or group needs only one server at a time. Their others are spares that take over when it stops.
 - Leases are part of the database plugin.
 - A tool call and a scheduled job go to the server acting for the user or group they're for. If it writes a database
   whose lease another server holds, that server passes it on to the one holding it.
@@ -174,15 +173,12 @@
 - Everyone using a plugin runs its newest version.
 - A plugin's tools are its only public part. Anything may call one for the user or group it runs for: an app, an agent,
   a scheduled job, another plugin's tool.
-- A plugin says which other plugins it uses, so adding it brings them along.
 - A plugin's deployed code is open to everyone in the network. A git repo it came from can be private.
 - Plugin hooks are part of the interface plugins are written against. A plugin hooks into a moment, such as a tool being
   called, an artifact changing or a server joining, and is called when it happens.
 - Each plugin hook states whether a plugin only hears about it, can change it, or decides it.
 - A plugin hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
 - The database is a plugin.
-- A plugin provides a kind of artifact as functions other plugins call. They run as the calling plugin, for the user or
-  group it runs for.
 - MCP Apps are supported from the start.
 - An app is free in what it shows. A widget is as free as the platform it sits on allows, and we pass on as much of that
   freedom as we can.

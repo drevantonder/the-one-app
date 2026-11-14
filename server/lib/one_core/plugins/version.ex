@@ -10,8 +10,8 @@ defmodule OneCore.Plugins.Version do
   the whole set, so a client can tell one version's files from the next's.
   """
 
-  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :code, :files]
-  defstruct [:under, :plugin, :tools, :guide, :apps, :code, :files]
+  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :code, :files]
+  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :code, :files]
 
   @doc "The name of a set of files: the same files have the same name, on any server."
   def code(files),
@@ -114,9 +114,10 @@ defmodule OneCore.Plugins.Version do
         {:ok, version(under, nil, [], nil, [], client)}
 
       [plugin] ->
-        tools = plugin.tools()
+        tools = if function_exported?(plugin, :tools, 0), do: plugin.tools(), else: []
         guide = if function_exported?(plugin, :guide, 0), do: plugin.guide()
         apps = if function_exported?(plugin, :apps, 0), do: plugin.apps(), else: []
+        uses = if function_exported?(plugin, :uses, 0), do: plugin.uses(), else: []
 
         cond do
           not (is_list(tools) and Enum.all?(tools, &tool?/1) and (is_nil(guide) or is_binary(guide))) ->
@@ -125,15 +126,18 @@ defmodule OneCore.Plugins.Version do
           not (is_list(apps) and Enum.all?(apps, &app?(&1, client))) ->
             {:error, "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page and icon are files here"}
 
+          not (is_list(uses) and Enum.all?(uses, &is_binary/1)) ->
+            {:error, "uses/0 gives a list of plugins' names"}
+
           true ->
-            {:ok, version(under, plugin, tools, guide, apps, client)}
+            {:ok, %{version(under, plugin, tools, guide, apps, client) | uses: uses}}
         end
 
       found ->
         {:error, "One module of a plugin says `@behaviour OneCore.Plugin`, and #{length(found)} do"}
     end
   rescue
-    error -> {:error, "tools/0, guide/0 or apps/0 raised: " <> Exception.message(error)}
+    error -> {:error, "tools/0, guide/0, apps/0 or uses/0 raised: " <> Exception.message(error)}
   end
 
   # An app's icon goes to clients with its name, as a `data:` address, so a home screen asks for nothing more.
@@ -149,6 +153,7 @@ defmodule OneCore.Plugins.Version do
       tools: tools,
       guide: guide,
       apps: apps,
+      uses: [],
       code: nil,
       files: Enum.sort(Map.keys(client))
     }

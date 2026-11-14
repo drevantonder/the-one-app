@@ -1,10 +1,11 @@
 defmodule OneCore.Server do
   @moduledoc """
-  A server on its machine: it holds its key, in the folder that is its `:home` setting, and answers what clients
-  ask, each message apart from the others. It can also tell the clients connected to it something.
+  A server on its machine: it holds its key, in the folder that is its `:home` setting, answers what clients and
+  other servers ask, each message apart from the others, and asks other servers. It can also tell the clients
+  connected to it something.
   """
   use GenServer
-  alias OneCore.{Iroh, Mcp}
+  alias OneCore.{Iroh, Mcp, Servers}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -14,10 +15,46 @@ defmodule OneCore.Server do
   @doc "Tells every connected client `notification`, in MCP's JSON-RPC. With no server started, nobody is told."
   def tell(notification), do: GenServer.cast(__MODULE__, {:tell, JSON.encode!(notification)})
 
+  @doc "This server's key, or `nil` where no server is running."
+  def key, do: elem(:persistent_term.get(__MODULE__, {nil, nil}), 0)
+
+  @doc "The JSON-RPC error a server answers a call that was passed on to it and that it would pass on in turn."
+  def passed_back, do: -32001
+
+  @doc """
+  Asks the server whose key is `server` one message. Gives `{:ok, answer}`; `:unreachable` if it couldn't be
+  reached, so it was asked nothing; or `:stopped` if it stopped answering after it was asked.
+  """
+  def ask(server, message) do
+    {_key, endpoint} = :persistent_term.get(__MODULE__)
+
+    # A connection is opened when there's none, to where the server says it is now.
+    with :closed <- told(&Iroh.ask_server(endpoint, server, message, self(), &1)),
+         {:ok, address} <- Servers.address(server),
+         :ok <- told(&Iroh.connect(endpoint, address, self(), &1)),
+         :closed <- told(&Iroh.ask_server(endpoint, server, message, self(), &1)) do
+      :unreachable
+    else
+      :absent -> :unreachable
+      outcome -> outcome
+    end
+  end
+
+  defp told(ask) do
+    reference = make_ref()
+    ask.(reference)
+
+    receive do
+      {^reference, outcome} -> outcome
+    end
+  end
+
   @impl true
   def init(nil) do
-    key = Path.join(Application.fetch_env!(:one_core, :home), "key")
-    {:ok, {endpoint, address}} = Iroh.start(key, self())
+    {:ok, {endpoint, address}} = Iroh.start(Path.join(Application.fetch_env!(:one_core, :home), "key"), self())
+    key = JSON.decode!(address)["id"]
+    :persistent_term.put(__MODULE__, {key, endpoint})
+    Servers.started(key, address)
     {:ok, %{endpoint: endpoint, address: address}}
   end
 

@@ -15,10 +15,11 @@ use std::time::{Duration, Instant};
 use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow, bail};
-use iroh::endpoint::{Connection, presets};
+use iroh::endpoint::{Connection, QuicTransportConfig, presets};
 use iroh::{Endpoint, EndpointAddr, NetReportConfig, SecretKey};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, broadcast};
+use tokio::task::JoinSet;
 
 pub use kept::Shown;
 
@@ -28,6 +29,10 @@ pub const ALPN: &[u8] = b"one/mcp/1";
 pub const LIMIT: usize = 64 << 20;
 /// How long reaching a server may take.
 const CONNECT: Duration = Duration::from_secs(10);
+/// How often an open connection is checked, and how long without an answer before it counts as gone. A server that
+/// stops is noticed this soon, so its spare can take over.
+const ALIVE: Duration = Duration::from_secs(1);
+const GONE: Duration = Duration::from_secs(5);
 
 /// An endpoint holding the key kept in `key_file`, which is made on first use. It reaches others, and is reached, by
 /// key at the addresses it's told: with no relay, no address lookup and no probes, nothing about a network goes to
@@ -36,6 +41,9 @@ pub async fn endpoint(key_file: &Path) -> Result<Endpoint> {
     Endpoint::builder(presets::Minimal)
         .secret_key(key(key_file)?)
         .alpns(vec![ALPN.to_vec()])
+        .transport_config(
+            QuicTransportConfig::builder().keep_alive_interval(ALIVE).max_idle_timeout(Some(GONE.try_into()?)).build(),
+        )
         .net_report_config(NetReportConfig::minimal())
         .bind()
         .await
@@ -76,15 +84,15 @@ pub fn home() -> Result<PathBuf> {
 /// this one is `one` and `The One App` there, and this is neither.
 pub const NAME: &str = "app.theone.client";
 
-/// The connection to the server, once one is open, and when trying to open one last failed.
+/// The connection to a server, once one is open, and when trying to open one last failed.
 #[derive(Default)]
 struct Reach {
     open: Option<Connection>,
     failed: Option<Instant>,
 }
 
-/// A client, kept in its home folder: its `key`, the address of the `server` it asks, and what servers answered
-/// (`kept`).
+/// A client, kept in its home folder: its `key`, the addresses of the `servers` acting for its user, and what
+/// servers answered (`kept`).
 pub struct Client {
     home: PathBuf,
     endpoint: Endpoint,
@@ -109,7 +117,7 @@ impl Client {
         let (mut send, mut receive) = self.connection().await?.open_bi().await?;
         send.write_all(message).await?;
         send.finish()?;
-        Ok(receive.read_to_end(LIMIT).await?)
+        receive.read_to_end(LIMIT).await.context("the server stopped answering, so this may or may not have been done")
     }
 
     /// Asks the server for `method`, and gives its result.
@@ -130,8 +138,9 @@ impl Client {
         }
     }
 
-    /// The connection to the server, made when there's none open. Its address is read each time, since a server
-    /// that starts again may be somewhere else.
+    /// The connection to a server, made when there's none open: to whichever of the servers acting for this client's
+    /// user answers first. Their addresses are read each time, since a server that starts again may be somewhere
+    /// else.
     async fn connection(&self) -> Result<Connection> {
         let asked = Instant::now();
         let mut reach = self.reach.lock().await;
@@ -142,19 +151,24 @@ impl Client {
         if reach.failed.is_some_and(|failed| failed > asked) {
             bail!("No server answered")
         }
-        let file = self.home.join("server");
-        let address = fs::read(&file).with_context(|| format!("{} doesn't say which server to ask", file.display()))?;
-        let address: EndpointAddr =
-            serde_json::from_slice(&address).with_context(|| format!("{} isn't a server's address", file.display()))?;
-        let open = match tokio::time::timeout(CONNECT, self.endpoint.connect(address, ALPN)).await {
-            Ok(Ok(open)) => open,
-            _ => {
-                reach.failed = Some(Instant::now());
-                bail!("No server answered")
+        let file = self.home.join("servers");
+        let servers =
+            fs::read(&file).with_context(|| format!("{} doesn't say which servers to ask", file.display()))?;
+        let servers: Vec<EndpointAddr> =
+            serde_json::from_slice(&servers).with_context(|| format!("{} isn't servers' addresses", file.display()))?;
+        let mut connecting = JoinSet::new();
+        for server in servers {
+            let endpoint = self.endpoint.clone();
+            connecting.spawn(async move { tokio::time::timeout(CONNECT, endpoint.connect(server, ALPN)).await });
+        }
+        while let Some(connected) = connecting.join_next().await {
+            if let Ok(Ok(Ok(open))) = connected {
+                tokio::spawn(hear(open.clone(), self.told.clone()));
+                return Ok(reach.open.insert(open).clone());
             }
-        };
-        tokio::spawn(hear(open.clone(), self.told.clone()));
-        Ok(reach.open.insert(open).clone())
+        }
+        reach.failed = Some(Instant::now());
+        bail!("No server answered")
     }
 }
 

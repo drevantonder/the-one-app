@@ -1,29 +1,37 @@
 //! The server's add-on for being reached by key: it opens the server's endpoint, hands what clients ask to the
 //! server's Elixir, and sends its answers back. A client asks one message a stream (`client`), and is told
-//! something the same way: one message on a stream the server opens.
+//! something the same way: one message on a stream the server opens. A server asks another as a client does.
 
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
 
-use iroh::Endpoint;
-use iroh::endpoint::SendStream;
-use rustler::{Atom, Binary, LocalPid, NewBinary, OwnedEnv, Resource, ResourceArc};
+use iroh::endpoint::{Connection, SendStream};
+use iroh::{Endpoint, EndpointAddr};
+use rustler::{Atom, Binary, Encoder, Env, LocalPid, NewBinary, OwnedEnv, Resource, ResourceArc, Term};
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast;
 
 mod atoms {
-    rustler::atoms! { ok, ask }
+    rustler::atoms! { ok, ask, closed, stopped, unreachable }
 }
+
+/// How long reaching another server may take before it counts as not answering. A spare waits this long before it
+/// takes over, so it's short.
+const CONNECT: Duration = Duration::from_secs(2);
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("tokio starts"));
 
-/// A server's endpoint, open for as long as the server holds this, and where what it tells its clients is sent
-/// from. Nothing looks inside it after a panic, which is what Rustler needs to hear before it hands one to Elixir.
+/// A server's endpoint, open for as long as the server holds this, where what it tells its clients is sent from,
+/// and its open connections to other servers by their keys. Nothing looks inside it after a panic, which is what
+/// Rustler needs to hear before it hands one to Elixir.
 struct Reached {
     endpoint: AssertUnwindSafe<Endpoint>,
     told: AssertUnwindSafe<broadcast::Sender<Vec<u8>>>,
+    servers: Mutex<HashMap<String, Connection>>,
 }
 
 #[rustler::resource_impl]
@@ -58,7 +66,11 @@ fn start(key_file: String, asked: LocalPid) -> Result<(ResourceArc<Reached>, Str
         // A client that falls this many messages behind misses some, and hears the next.
         let (told, _) = broadcast::channel(64);
         tokio::spawn(accept(endpoint.clone(), asked, told.clone()));
-        let reached = Reached { endpoint: AssertUnwindSafe(endpoint), told: AssertUnwindSafe(told) };
+        let reached = Reached {
+            endpoint: AssertUnwindSafe(endpoint),
+            told: AssertUnwindSafe(told),
+            servers: Mutex::new(HashMap::new()),
+        };
         Ok((ResourceArc::new(reached), address))
     })
 }
@@ -124,6 +136,82 @@ fn answer(ask: ResourceArc<Ask>, message: Binary) -> Atom {
         });
     }
     atoms::ok()
+}
+
+/// Connects to the server at `address`, the JSON a client is told it in, and sends `to` the message
+/// `{reference, :ok}`, or `{reference, :unreachable}` if it doesn't answer in time.
+#[rustler::nif]
+fn connect(reached: ResourceArc<Reached>, address: &str, to: LocalPid, reference: Term) -> Atom {
+    let address = serde_json::from_str::<EndpointAddr>(address);
+    let reference = Reference::keep(reference);
+    RUNTIME.spawn(async move {
+        let connected = async {
+            let address = address.ok()?;
+            let key = address.id.to_string();
+            let connecting = reached.endpoint.connect(address, client::ALPN);
+            let connection = tokio::time::timeout(CONNECT, connecting).await.ok()?.ok()?;
+            reached.servers.lock().expect("no connection panics").insert(key, connection.clone());
+            // What that server tells its clients isn't for this one, and is read so that it can go on telling.
+            tokio::spawn(async move {
+                while let Ok(mut told) = connection.accept_uni().await {
+                    let _ = told.read_to_end(client::LIMIT).await;
+                }
+            });
+            Some(atoms::ok())
+        };
+        let outcome = connected.await.unwrap_or(atoms::unreachable());
+        reference.send(&to, |env| outcome.encode(env));
+    });
+    atoms::ok()
+}
+
+/// Asks the server whose key is `server` one message over its open connection, and sends `to` the message
+/// `{reference, outcome}`: `{:ok, answer}`; `:closed` if no connection to it is open, so it was asked nothing; or
+/// `:stopped` if it stopped answering after it was asked, so it may have done what was asked.
+#[rustler::nif]
+fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to: LocalPid, reference: Term) -> Atom {
+    let open = reached.servers.lock().expect("no connection panics").get(&server).cloned();
+    let message = message.as_slice().to_vec();
+    let reference = Reference::keep(reference);
+    RUNTIME.spawn(async move {
+        let asked = async {
+            let connection = open.filter(|open| open.close_reason().is_none())?;
+            let (mut send, receive) = connection.open_bi().await.ok()?;
+            send.write_all(&message).await.ok()?;
+            send.finish().ok()?;
+            Some(receive)
+        };
+        let answer = match asked.await {
+            Some(mut receive) => receive.read_to_end(client::LIMIT).await.map_err(|_| atoms::stopped()),
+            None => Err(atoms::closed()),
+        };
+        reference.send(&to, |env| match answer {
+            Ok(answer) => {
+                let mut binary = NewBinary::new(env, answer.len());
+                binary.as_mut_slice().copy_from_slice(&answer);
+                (atoms::ok(), Binary::from(binary)).encode(env)
+            }
+            Err(why) => why.encode(env),
+        });
+    });
+    atoms::ok()
+}
+
+/// A reference Elixir made, kept to mark the one message that answers it.
+struct Reference(OwnedEnv, rustler::env::SavedTerm);
+
+impl Reference {
+    fn keep(reference: Term) -> Self {
+        let env = OwnedEnv::new();
+        let saved = env.save(reference);
+        Self(env, saved)
+    }
+
+    // The server's Elixir going away is the only way this fails, and then nobody is left to tell.
+    fn send(mut self, to: &LocalPid, outcome: impl for<'a> FnOnce(Env<'a>) -> Term<'a>) {
+        let saved = self.1;
+        let _ = self.0.send_and_clear(to, |env| (saved.load(env), outcome(env)));
+    }
 }
 
 rustler::init!("Elixir.OneCore.Iroh");

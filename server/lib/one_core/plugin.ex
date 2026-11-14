@@ -46,6 +46,12 @@ defmodule OneCore.Plugin do
     unchanged) and `list/2`.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
+  - `uses/0`, if the plugin has one, names the other plugins it uses. Deploying it brings along the ones the
+    server ships with, and `OneCore.Call.plugin(call, "database")` gives one of them: its module, whose functions
+    take the call and run as this plugin, for whoever it runs for. A plugin that keeps more than a few blobs uses
+    `database`, whose guide says how.
+  - A plugin's module is what other plugins call, so its public functions besides these are what it provides
+    them. One that only provides functions leaves out `tools/0` and `call/3`.
   - Every module is a `defmodule` at the top of a file, and a plugin can have as many files and modules as it
     likes. The code is free to use the machine it runs on.
 
@@ -74,5 +80,6 @@ defmodule OneCore.Plugin do
   @callback call(tool :: String.t(), inputs :: map, OneCore.Call.t()) :: term
   @callback guide() :: String.t()
   @callback apps() :: [%{name: String.t(), page: String.t(), icon: String.t()}]
-  @optional_callbacks guide: 0, apps: 0
+  @callback uses() :: [String.t()]
+  @optional_callbacks tools: 0, call: 3, guide: 0, apps: 0, uses: 0
 end

@@ -1,14 +1,14 @@
 defmodule OneCore.Mcp do
   @moduledoc """
   Answers what a client asks, in MCP's JSON-RPC: a message in, and its answer out. So a server is an MCP server to
-  whatever reaches it, and the tools it lists are One Core's own two and every running plugin's.
+  whatever reaches it, and the tools it lists are One Core's own and every running plugin's.
 
   The parts of a plugin that run in a client are MCP resources: `ui://<plugin>/<code>/<path>`, where `code` names
   the set of files a version runs, so a file at an address never changes. A plugin's app is one of them, as an MCP
   App is.
   """
   require Logger
-  alias OneCore.{Plugin, Plugins}
+  alias OneCore.{Plugin, Plugins, Server, Servers}
   alias OneCore.Plugins.Version
 
   # Tools are all a server speaks of MCP, and they are the same in each of these.
@@ -40,6 +40,15 @@ defmodule OneCore.Mcp do
         properties: %{name: %{type: "string", description: "The plugin's name"}},
         required: ["name"]
       }
+    },
+    %{
+      name: "add_server",
+      description: "Lets another server act for you too, as a spare that takes over when this one stops.",
+      inputSchema: %{
+        type: "object",
+        properties: %{key: %{type: "string", description: "The server's key, which it shows when it starts"}},
+        required: ["key"]
+      }
     }
   ]
 
@@ -57,6 +66,11 @@ defmodule OneCore.Mcp do
             Logger.error(Exception.format(:error, error, __STACKTRACE__))
             JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: Exception.message(error)}})
         end
+
+      # Another server saying a plugin has a new version, or was removed.
+      {:ok, %{"method" => "notifications/plugin", "params" => %{"name" => name}}} ->
+        Plugins.look(name)
+        ""
 
       {:ok, %{"method" => _notification}} ->
         ""
@@ -98,13 +112,13 @@ defmodule OneCore.Mcp do
   end
 
   defp result("tools/call", %{"name" => name} = params) do
-    case call(name, Map.get(params, "arguments", %{})) do
-      {:ok, text} ->
-        if not reads?(name), do: OneCore.Server.tell(%{jsonrpc: "2.0", method: "notifications/one/changed"})
-        {:ok, %{content: [%{type: "text", text: text}]}}
-
-      {:error, why} ->
-        {:ok, %{content: [%{type: "text", text: why}], isError: true}}
+    case call(name, Map.get(params, "arguments", %{}), params["_meta"]["passed_on"] == true) do
+      {:ok, text} -> changed(name, %{content: [%{type: "text", text: text}]})
+      {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
+      # Another server ran it, and told its own clients.
+      {:passed_on, %{"isError" => true} = result} -> {:ok, result}
+      {:passed_on, result} -> changed(name, result)
+      :passed_back -> {:error, Server.passed_back(), "This server would pass #{name} on in turn"}
     end
   end
 
@@ -133,7 +147,7 @@ defmodule OneCore.Mcp do
 
   defp result(method, _), do: {:error, -32601, "This server has no method #{method}"}
 
-  defp call("deploy", %{"name" => name, "files" => files}) do
+  defp call("deploy", %{"name" => name, "files" => files}, _passed_on) do
     case Plugins.deploy(name, files) do
       {:ok, number, ""} -> {:ok, "#{name} is running, at version #{number}."}
       {:ok, number, warnings} -> {:ok, "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"}
@@ -141,21 +155,31 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp call("remove", %{"name" => name}) do
+  defp call("remove", %{"name" => name}, _passed_on) do
     with :ok <- Plugins.remove(name), do: {:ok, "#{name} is removed."}
   end
 
-  defp call(name, inputs) do
+  defp call("add_server", %{"key" => key}, _passed_on) do
+    with :ok <- Servers.add(key, Server.key()), do: {:ok, "That server acts for you too now."}
+  end
+
+  defp call(name, inputs, passed_on) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
-         {:ok, answer} <- Plugins.call(plugin, tool, inputs) do
+         {:ok, answer} <- Plugins.call(plugin, tool, inputs, passed_on) do
       if is_binary(answer), do: {:ok, answer}, else: {:ok, JSON.encode!(answer)}
     else
       [_] -> {:error, "#{name} takes other inputs, or isn't a tool. tools/list says what each takes."}
-      {:error, why} -> {:error, why}
+      other -> other
     end
   end
 
-  # Whether calling a tool only reads. One Core's own two don't.
+  # After a tool that doesn't only read, every client connected here is told that something changed.
+  defp changed(name, result) do
+    if not reads?(name), do: Server.tell(%{jsonrpc: "2.0", method: "notifications/one/changed"})
+    {:ok, result}
+  end
+
+  # Whether calling a tool only reads. One Core's own don't.
   defp reads?(name) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
          %{^plugin => version} <- Plugins.running() do
