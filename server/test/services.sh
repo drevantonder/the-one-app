@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Proves, with two real servers on this machine and a folder as their bucket, that a plugin's service runs on the
 # machine it's installed on and is called from wherever the rest of its plugin runs. The services are the two
-# plugins': `inbox`, which watches a folder, and `load`, which brings a program in Rust. They're installed on
+# plugins': `folder`, a test plugin that watches a folder, and `load`, which brings a program in Rust. They're installed on
 # server b only, and called through server a.
 #
 #     cargo build --release && mise exec -- server/test/services.sh
@@ -93,6 +93,7 @@ EOF
 say "Two servers on one folder as the bucket, and two plugins that each have a service"
 start a
 start b
+ONE_FOR=network ask a deploy --name folder --files-from test/plugins/folder
 ONE_FOR=network ask a deploy --name proof --files-from "$folder/proof"
 echo "What each service needs, which its machine's owner reads before installing it:"
 ask a services
@@ -100,25 +101,25 @@ echo "Called before any server runs them:"
 ask a load now || true
 
 say "Each service is installed on server b only, by asking server a"
-ask a install_service --plugin inbox --service Inbox.Watcher --server "${key[b]}"
+ask a install_service --plugin folder --service Folder.Watcher --server "${key[b]}"
 ask a install_service --plugin load --service Load.Meter --server "${key[b]}"
 ask a services
 
 say "The plugin's tools, called through server a, reach the services on server b"
-mkdir "$folder/inbox"
-ask a inbox watch --folder "$folder/inbox"
-touch "$folder/inbox/first.pdf"
+mkdir "$folder/watched"
+ask a folder watch --folder "$folder/watched"
+touch "$folder/watched/first.pdf"
 began=$(now)
-until ask a inbox list | grep -q first.pdf; do :; done
-echo "a file put in the folder was listed through a $(since "$began") later: $(ask a inbox list | sed "s|$folder|...|g")"
-ask a inbox watching | sed "s|$folder|...|g"
+until ask a folder list | grep -q first.pdf; do :; done
+echo "a file put in the folder was listed through a $(since "$began") later: $(ask a folder list | sed "s|$folder|...|g")"
+ask a folder watching | sed "s|$folder|...|g"
 ask a load now
 
 say "What a call to a service adds, over one connection: the median of 200 calls of each, in ms"
 timed b proof_ping ping-b
-timed b inbox_watching watching-b
+timed b folder_watching watching-b
 timed a proof_ping ping-a
-timed a inbox_watching watching-a
+timed a folder_watching watching-a
 timed b load_now load-b
 timed a load_now load-a
 echo "$(median "$folder/ping-b")  a tool that calls nothing, through b"
@@ -129,16 +130,16 @@ echo "$(median "$folder/load-b")  a tool that calls a service that asks its prog
 echo "$(median "$folder/load-a")  the same on the other server, through a"
 
 say "The plugins are updated while their services hold what they hold"
-before=$(ask a inbox watching | grep -o '"since":"[^"]*"')
-cp -r ../plugins/inbox "$folder/inbox-2"
-sed -i 's/"arrived" => watch.arrived}/"arrived" => watch.arrived, "updated" => true}/' "$folder/inbox-2/inbox/watcher.ex"
-ONE_FOR=network ask a deploy --name inbox --files-from "$folder/inbox-2"
-ask a inbox watching | sed "s|$folder|...|g"
-[ "$(ask a inbox watching | grep -o '"since":"[^"]*"')" = "$before" ] || { echo "inbox lost what it held"; exit 1; }
-echo "inbox: the new code answers, watching since the same moment, with the 1 arrival it had counted"
-touch "$folder/inbox/second.pdf"
-until ask a inbox list | grep -q second.pdf; do :; done
-echo "and a file that arrives after the update is listed: $(ask a inbox list | grep -o '"name":"[^"]*"' | tr '\n' ' ')"
+before=$(ask a folder watching | grep -o '"since":"[^"]*"')
+cp -r test/plugins/folder "$folder/folder-2"
+sed -i 's/"arrived" => watch.arrived}/"arrived" => watch.arrived, "updated" => true}/' "$folder/folder-2/folder/watcher.ex"
+ONE_FOR=network ask a deploy --name folder --files-from "$folder/folder-2"
+ask a folder watching | sed "s|$folder|...|g"
+[ "$(ask a folder watching | grep -o '"since":"[^"]*"')" = "$before" ] || { echo "folder lost what it held"; exit 1; }
+echo "folder: the new code answers, watching since the same moment, with the 1 arrival it had counted"
+touch "$folder/watched/second.pdf"
+until ask a folder list | grep -q second.pdf; do :; done
+echo "and a file that arrives after the update is listed: $(ask a folder list | grep -o '"name":"[^"]*"' | tr '\n' ' ')"
 
 before=$(ask a load now | grep -o '"since":[0-9]*')
 cp -r ../plugins/load "$folder/load-2"
@@ -166,14 +167,14 @@ echo "it answered again $(since "$began") after the update began: $(ask a proof 
 
 say "The service's process is killed, and then its program: both come back, and the server stays up"
 echo "A service that stops is started again at once, or 5 seconds after it last started if that's later."
-before=$(ask a inbox watching | grep -o '"since":"[^"]*"')
-ask b proof kill --plugin inbox --service Inbox.Watcher
+before=$(ask a folder watching | grep -o '"since":"[^"]*"')
+ask b proof kill --plugin folder --service Folder.Watcher
 began=$(now)
-until ask a inbox watching 2>&1 | grep -q '"since"'; do :; done
-echo "inbox answered again $(since "$began") later, watching the folder it's told at its start: $(ask a inbox watching | sed "s|$folder|...|g")"
-touch "$folder/inbox/third.pdf"
-until ask a inbox list | grep -q third.pdf; do :; done
-echo "and lists a file that arrives after it: $(ask a inbox list | grep -o '"name":"[^"]*"' | tr '\n' ' ')"
+until ask a folder watching 2>&1 | grep -q '"since"'; do :; done
+echo "folder answered again $(since "$began") later, watching the folder it's told at its start: $(ask a folder watching | sed "s|$folder|...|g")"
+touch "$folder/watched/third.pdf"
+until ask a folder list | grep -q third.pdf; do :; done
+echo "and lists a file that arrives after it: $(ask a folder list | grep -o '"name":"[^"]*"' | tr '\n' ' ')"
 
 program() { pgrep -f "$folder/b/services/network/plugins/load/" || true; }
 echo "load's program is the process $(program)"
@@ -192,15 +193,15 @@ echo "server b is the process it was all along, and answers: $(ask b proof ping)
 say "The server that runs the services is stopped, and the caller is told"
 stop b
 began=$(now)
-echo "asked at once, on the connection a still had to b: $(ask a inbox watching || true) ($(since "$began"))"
+echo "asked at once, on the connection a still had to b: $(ask a folder watching || true) ($(since "$began"))"
 began=$(now)
-echo "asked again: $(ask a inbox watching || true) ($(since "$began"))"
+echo "asked again: $(ask a folder watching || true) ($(since "$began"))"
 began=$(now)
 echo "and again: $(ask a load now || true) ($(since "$began"))"
-echo "what arrived is still listed, through a: $(ask a inbox list | grep -o '"name":"[^"]*"' | tr '\n' ' ')"
+echo "what arrived is still listed, through a: $(ask a folder list | grep -o '"name":"[^"]*"' | tr '\n' ' ')"
 echo "nothing of b is left running: $(program | wc -l) programs"
 
 say "The server comes back, and its services with it"
 start b
-ask a inbox watching | sed "s|$folder|...|g"
+ask a folder watching | sed "s|$folder|...|g"
 ask a load now

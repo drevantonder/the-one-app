@@ -285,29 +285,34 @@ defmodule OneCore.RelationsTest do
   end
 
   @tag :tmp_dir
-  test "Claims' approver is whoever a tuple says is an editor of its claims, and everyone else sees only their own" do
-    assert {:ok, 1, ""} = Plugins.deploy("network", "claims", shipped("claims"))
-    claims = "network/own/claims"
-    assert {:ok, %{"id" => expense}} = call("claims_record", %{"amount" => 12.5}, @alice)
-    assert {:ok, %{"id" => claim}} = call("claims_gather", %{"expenses" => [expense], "title" => "Taxi"}, @alice)
-    assert {:ok, %{"status" => "sent"}} = call("claims_send", %{"claim" => claim}, @alice)
+  test "a plugin's tool for some users only is for whoever a tuple says is an editor of the plugin's own artifact" do
+    approvals = """
+    defmodule Approvals do
+      @behaviour OneCore.Plugin
 
-    # Neither whoever made the claim nor anyone else approves it, or sees it wait.
-    for who <- [@alice, @bob] do
-      assert call("claims_approve", %{"claim" => claim}, who) ==
-               {:error, "Only an approver does that: an editor of #{claims}, which #{who} isn't."}
+      @impl true
+      def tools, do: [%{name: "approve", description: "Approves", inputs: %{type: "object"}}]
 
-      assert call("claims_waiting", %{}, who) == {:ok, []}
+      @impl true
+      def call("approve", _inputs, call) do
+        own = OneCore.Artifact.name(call.own)
+        if not OneCore.Call.reaches?(call, own, "editor"), do: raise("Only an editor of \#{own} approves.")
+        "Approved."
+      end
     end
+    """
 
-    assert {:error, "There's no claim" <> _} = call("claims_show", %{"claim" => claim}, @bob)
+    assert {:ok, 1, ""} = Plugins.deploy("network", "approvals", %{"approvals.ex" => approvals})
+    own = "network/own/approvals"
 
-    # Only an owner of the claims says who approves.
-    assert {:error, "users/alice isn't an editor of" <> _} = share(claims, "editor", @alice, @alice)
-    assert {:ok, _} = share(claims, "editor", @bob, OneCore.Test.owner())
-    assert {:ok, [%{"id" => ^claim}]} = call("claims_waiting", %{}, @bob)
-    assert {:ok, %{"status" => "approved"}} = call("claims_approve", %{"claim" => claim}, @bob)
-    assert {:ok, _} = unshare(claims, "editor", @bob, OneCore.Test.owner())
-    assert {:error, "Only an approver" <> _} = call("claims_pay", %{"claim" => claim}, @bob)
+    for who <- [@alice, @bob],
+        do: assert(call("approvals_approve", %{}, who) == {:error, "Only an editor of #{own} approves."})
+
+    # Only an owner of the plugin's own artifact says who approves.
+    assert {:error, "users/alice isn't an editor of" <> _} = share(own, "editor", @alice, @alice)
+    assert {:ok, _} = share(own, "editor", @bob, OneCore.Test.owner())
+    assert {:ok, "Approved."} = call("approvals_approve", %{}, @bob)
+    assert {:ok, _} = unshare(own, "editor", @bob, OneCore.Test.owner())
+    assert {:error, "Only an editor" <> _} = call("approvals_approve", %{}, @bob)
   end
 end

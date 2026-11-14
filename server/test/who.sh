@@ -6,7 +6,7 @@
 # user, group and the network it's added for, and its skill is seen by whoever it's added for. One Core's own tools
 # are whoever's may. Anyone brings a server, which acts for them alone until its owner chooses who else and they
 # agree, runs only their plugins and passes on the rest. A plugin that decides refuses a call with its reason, and
-# one that breaks is undone. Claims' approver is a tuple, and a job that's being called when the server calling it
+# one that breaks is undone. Who may approve is a tuple, and a job that's being called when the server calling it
 # is killed is called once by the spare. It says what a check costs a call.
 #
 #     mise exec -- server/test/who.sh [--address]
@@ -80,14 +80,14 @@ may() { said=$("$@" 2>&1) && shown "may    " "$@" || { echo "this was refused, a
 # The skills someone is listed, by name, as MCP lists them: `skills as alice`.
 skills() {
   echo '{"jsonrpc":"2.0","id":1,"method":"skills/list","params":{}}' | "$@" mcp |
-    { grep -o '"uri":"skill://[^"]*"' || true; } | sort -u | cut -d/ -f3 | paste -sd' '
+    { grep -o '"uri":"skill://[^"]*"' || true; } | cut -d/ -f3 | sort -u | paste -sd' '
 }
 refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $said" && exit 1; }; }
 
 # The plugins this proves with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
 # due and which server made it.
-mkdir -p "$folder"/{notes,reader,gate,ticker,diary,stuck,lost}
+mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost}
 # Two plugins that decide and are broken: one decides every call, and one who reaches what.
 for broken in "Stuck call" "Lost reach"; do
   set -- $broken
@@ -172,6 +172,21 @@ defmodule Reader do
   def call("read", %{"note" => note}, call) do
     {:ok, text, _tag} = OneCore.Artifact.read(OneCore.Call.reach(call, note), "text")
     text
+  end
+end
+EOF
+cat >"$folder/approvals/approvals.ex" <<'EOF'
+defmodule Approvals do
+  @behaviour OneCore.Plugin
+
+  @impl true
+  def tools, do: [%{name: "approve", description: "Approves, for an editor of the plugin's own artifact", inputs: %{type: "object"}}]
+
+  @impl true
+  def call("approve", _inputs, call) do
+    own = OneCore.Artifact.name(call.own)
+    if not OneCore.Call.reaches?(call, own, "editor"), do: raise("Only an editor of #{own} approves.")
+    "Approved."
   end
 end
 EOF
@@ -286,7 +301,7 @@ echo "  alice made a link, whose holder the tuple names $holder"
 may as link "$link" notes read --note "$note"
 refused as link "${link}x" notes read --note "$note"
 refused as link "$link" notes change --note "$note" --text "Buy nothing"
-refused as link "$link" tracker list
+refused as link "$link" relations shared --artifact "$note"
 if [[ ${#at_address[@]} -gt 0 ]]; then
   echo "  the same holder comes in at the network's address over the web, with no signing in, at /link/<the link>:"
   may web link "$link" notes_read "{\"note\":\"$note\"}"
@@ -316,10 +331,10 @@ link=$(as alice relations link --artifact "$note" | grep -o '"link":"[^"]*"' | c
 may as link "$link" notes read --note "$note"
 listed=$(skills as alice)
 echo "  alice is listed: $listed"
-[[ " $listed " == *" diary "* && " $listed " == *" tracker "* && " $listed " == *" building-plugins "* ]]
+[[ " $listed " == *" diary "* && " $listed " == *" relations "* && " $listed " == *" building-plugins "* ]]
 listed=$(skills as bob)
 echo "  bob is listed: $listed"
-[[ " $listed " != *" diary "* && " $listed " == *" tracker "* && " $listed " == *" building-plugins "* ]]
+[[ " $listed " != *" diary "* && " $listed " == *" relations "* && " $listed " == *" building-plugins "* ]]
 listed=$(skills as link "$link")
 echo "  the holder of alice's link is listed: ${listed:-none}"
 [[ -z $listed ]]
@@ -357,7 +372,7 @@ refused as carol for groups/family remove --name diary
 refused as bob for network deploy --name notes --files-from "$folder/notes"
 refused as bob for network remove --name relations
 refused as bob for network add_server --key "$(printf 'ab%.0s' {1..32})"
-refused as bob install_service --plugin inbox --service Inbox.Watcher
+refused as bob install_service --plugin load --service Load.Meter
 may as alice for groups/family remove --name diary
 
 say "Anyone brings a server, which is theirs alone until they choose who else it acts for, and each agrees"
@@ -411,16 +426,12 @@ refused as alice notes write --id secrets --text "My password is hunter2"
 may as alice notes write --id plans --text "Go for a walk"
 as owner for network remove --name gate >/dev/null
 
-say "Claims' approver is whoever a tuple says"
-expense=$(as alice claims record --amount 12.5 --note Taxi | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
-as alice claims gather --expenses "[$expense]" --title Sydney >/dev/null
-claim=$(as alice claims list | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
-as alice claims send --claim "$claim" >/dev/null
-echo "  alice sent claim $claim"
-refused as bob claims approve --claim "$claim"
-refused as alice relations share --artifact network/own/claims --relation editor --who users/alice
-may as owner relations share --artifact network/own/claims --relation editor --who users/bob
-said=$(as bob claims approve --claim "$claim" | grep -o '"status":"[a-z_]*"') && echo "  may      as bob claims approve --claim $claim" && echo "           -> $said"
+say "Who may approve is whoever a tuple says"
+as owner for network deploy --name approvals --files-from "$folder/approvals" >/dev/null
+refused as bob approvals approve
+refused as alice relations share --artifact network/own/approvals --relation editor --who users/alice
+may as owner relations share --artifact network/own/approvals --relation editor --who users/bob
+may as bob approvals approve
 
 say "What a check costs a call, over one connection as an agent's MCP session keeps"
 # Each server has a client that asks it and no other. The server writing the relation tuples' database answers a

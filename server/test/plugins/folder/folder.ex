@@ -1,7 +1,7 @@
-defmodule Inbox do
+defmodule Folder do
   @moduledoc "Folders on a network's machines, watched for the files that arrive in them."
   @behaviour OneCore.Plugin
-  alias Inbox.Watcher
+  alias Folder.Watcher
 
   @schema [
     "create table watched (server text primary key, folder text not null)",

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proves, with real servers on this machine and a folder as their bucket, that a database outlives the server
-# writing it. Writes go through the tracker while servers are stopped with `kill -9`, frozen and started again, and
+# writing it. Writes go through a test plugin's database while servers are stopped with `kill -9`, frozen and started again, and
 # after each of those every write that was answered must be there, once.
 #
 #     cargo build --release && mise exec -- server/test/takeover.sh
@@ -25,7 +25,7 @@ said() {
 # One write through a client, numbered so that it can be found afterwards. Says so if it wasn't answered.
 number=0
 attempt() {
-  if ONE_HOME=$folder/$1 "$one" tracker add --tracker proof --note "write $2" >/dev/null 2>"$folder/refused-$2"; then
+  if ONE_HOME=$folder/$1 "$one" tally add --note "write $2" >/dev/null 2>"$folder/refused-$2"; then
     echo "$2" >>"$answered"
   else
     echo "write $2 wasn't answered: $(head -c 120 "$folder/refused-$2")"
@@ -44,8 +44,8 @@ stream() {
     number=$((number + 1))
     local began answer
     began=$(now)
-    echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tracker_add","arguments":' \
-      "{\"tracker\":\"proof\",\"note\":\"write $number\"}}}" >&"${MCP[1]}"
+    echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tally_add","arguments":' \
+      "{\"note\":\"write $number\"}}}" >&"${MCP[1]}"
     read -r answer <&"${MCP[0]}"
     echo $(($(now) - began)) >>"$3"
     [[ $answer == *'"result"'* && $answer != *isError* ]] && echo "$number" >>"$answered"
@@ -56,7 +56,7 @@ stream() {
 
 # What's in the database, read through a client, against what was answered.
 check() {
-  ONE_HOME=$folder/$1 "$one" tracker list --tracker proof |
+  ONE_HOME=$folder/$1 "$one" tally list |
     grep -o '"write [0-9]*"' | grep -o '[0-9]*' | sort >"$folder/there"
   local lost twice
   lost=$(comm -23 <(sort "$answered") "$folder/there" | wc -l)
@@ -67,6 +67,7 @@ check() {
 
 say "Two servers on one folder as the bucket"
 start a
+ONE_FOR=network ONE_HOME=$folder/client "$one" deploy --name tally --files-from test/plugins/tally >/dev/null
 write client
 start b
 echo "a ran the first write, so it holds the lease"
@@ -135,6 +136,6 @@ said b c >/dev/null
 stop b
 stop c
 until write only-d; do :; done
-echo "snapshots: $(ls "$bucket"/network/own/tracker/snapshot | sed 's/^0*//' | tr '\n' ' ')"
+echo "snapshots: $(ls "$bucket"/network/own/tally/snapshot | sed 's/^0*//' | tr '\n' ' ')"
 said d
 check only-d

@@ -1,5 +1,5 @@
 //! The CLI. Every tool is a command: the words before the first `--` input, joined by `_`, are the tool's name, so
-//! `one tracker add --tracker water` calls `tracker_add`. `one tracker` shows the plugin's skill and its tools, and
+//! `one notes add --text milk` calls `notes_add`. `one notes` shows the plugin's skill and its tools, and
 //! `one mcp` serves MCP over stdio instead.
 
 use std::io::Write;

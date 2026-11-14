@@ -37,5 +37,5 @@ plugin deciding, nobody but the network's first owner does anything.
 
 In a plugin, nothing of this is called: `OneCore.Call.reach(call, name, "editor")` gives the artifact or
 raises with the reason, and `OneCore.Call.reaches?/3` asks. A plugin whose own tools are for some users only
-asks for a relation to its own artifact, as Claims does for who may approve:
+asks for a relation to its own artifact, such as who may approve:
 `OneCore.Call.reaches?(call, OneCore.Artifact.name(call.own), "editor")`.

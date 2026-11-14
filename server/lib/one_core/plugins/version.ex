@@ -3,7 +3,7 @@ defmodule OneCore.Plugins.Version do
   One version of a plugin's code, compiled and loaded.
 
   The VM keeps only two versions of a module, so each version loaded gets module names of its own: its modules
-  sit under a name no other loaded version has (`OneCore.Plugins.Load7.Tracker`), by an alias put before each
+  sit under a name no other loaded version has (`OneCore.Plugins.Load7.Notes`), by an alias put before each
   file. A version is unloaded by removing every module under that name, which the next version loaded then takes,
   so a server that's updated for years makes no more names than it ever ran versions at once.
 

@@ -101,13 +101,15 @@ start_server server --first "$first"
 at client ping -c1 -W1 10.1.0.2 >/dev/null && echo "the client reaches the server" || echo "the client can't reach the server at 10.1.0.2"
 echo "the server is told the address and the first server's secret, and nothing of the bucket's credentials. Its client is told the address and no server: its home holds $(ls "$work/network/client" | tr '\n' ' ')"
 
+ONE_FOR=network one deploy --name tally --files-from "$root/server/test/plugins/tally" >/dev/null
+
 say "A tool call through the relay, which can't read it"
 note=relayed-$(random 8)
 before=$(carried) woke=$(woken)
-one tracker add --tracker water --amount 2 --note "$note"
+one tally add --note "$note"
 echo "the relay was woken $(($(woken) - woke)) times to pass that on"
 echo "the note in the call ($note) is in $(tail -c +$((before + 1)) "$work/wire" | grep -a -c "$note" || true) lines of the $(($(carried) - before)) bytes the wire to the address carried meanwhile"
-one tracker list --tracker water
+one tally list
 
 say "A machine on no list"
 # The list a real client's pass names, which the stranger says it's on too.
@@ -116,7 +118,7 @@ on_list=$(bun -e 'const { pass } = await Bun.file(process.argv[1]).json(); conso
 mkdir "$work/stranger"
 printf '{"address":"%s","pass":"%s"}' $at_address "$(printf '{"list":"%s"}' "$on_list" | base64 -w0)" >"$work/stranger/network"
 echo "a client with a pass no server signed, asking which servers to reach:"
-ONE_HOME=$work/stranger at client "$root/target/release/one" tracker list 2>&1 || true
+ONE_HOME=$work/stranger at client "$root/target/release/one" tally list 2>&1 || true
 echo "a server with a key of its own, starting on this network with the first server's secret: $(cd "$root/server" && at server mix network "$work/stranger-server" --address $at_address --first "$first" 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
 
 say "A spare is let in by one step, as on a folder: started, it says how, and started again, it acts"
@@ -136,7 +138,7 @@ say "The relay sleeps with its connections open"
 # Nothing an idle network says reaches it, so after a quiet while it's asleep, and a call wakes it.
 sleep 20
 echo "a call gets through them:"
-one tracker list
+one tally list
 wait_for '"woke","connections":[1-9]' "$work/address.log"
 grep -E 'relay.*woke' "$work/address.log" | tail -3
 
@@ -183,23 +185,23 @@ told() {
   fi
 }
 echo "through the relay, with nothing between the three but this machine:"
-told tracker add --tracker water
+told tally add --note water
 sleep 5
-told tracker add --tracker water
+told tally add --note water
 
 say "An app that's hidden is told nothing, and asks nothing of the relay"
 window windowunmap && sleep 5
-told tracker add --tracker water
+told tally add --note water
 echo "with the app open and hidden, and nothing changing: $(hourly)"
 window windowmap && sleep 5
 echo "on screen again:"
-told tracker add --tracker water
+told tally add --note water
 
-# `ping` is a call that only goes there and back, and `tracker_list` a tool's, which reads the bucket twice.
+# `ping` is a call that only goes there and back, and `tally_list` a tool's, which reads the bucket twice.
 timings() {
   local woke=$(woken)
   timed ping
-  timed tools/call tracker_list
+  timed tools/call tally_list
   echo "the relay was woken $(($(woken) - woke)) times by those 102 calls"
 }
 far() {
@@ -215,7 +217,7 @@ say "Timings through the relay, with the address 10 ms from each of the two"
 far=add far
 timings
 sleep 5
-told tracker add --tracker water
+told tally add --note water
 
 say "The same pair with a wire between them: the call goes direct, with neither told"
 wire server client 10.3.0

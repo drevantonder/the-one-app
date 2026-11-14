@@ -39,7 +39,7 @@ async function ask(method, path, body) {
   console.log(`the signer, asked to ${method} ${path} ${body}: signs it, and the bucket answers ${put.status} ${code}`);
 }
 await ask("POST", "/signer/sign", JSON.stringify({ read: `${list}servers` }));
-await ask("POST", "/signer/sign", JSON.stringify({ write: `${list}own/tracker/stolen` }));
+await ask("POST", "/signer/sign", JSON.stringify({ write: `${list}own/tally/stolen` }));
 await ask("POST", "/signer/sign", JSON.stringify({ remove: `${list}added` }));
 await ask("POST", "/signer/sign", JSON.stringify({ write: `servers/${key}/address` }));
 await ask("POST", "/signer/sign", JSON.stringify({ write: "network/servers" }));
