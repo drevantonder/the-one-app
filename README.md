@@ -18,15 +18,17 @@ again in the same folder carries on with what's there. In another terminal, use 
     export ONE_HOME=/tmp/one-network/client
     target/release/one deploy --name ui --files-from ui/dist
     target/release/one deploy --name tracker --files-from plugins/tracker
+    target/release/one deploy --name claims --files-from plugins/claims
     target/release/one tracker add --tracker water --amount 2
     target/release/one tracker list
     target/release/one --help
     target/release/one
 
 `--help` lists every tool, each of which is a command, and `target/release/one mcp` is the same tools as MCP over
-stdio. The last, asked nothing, is the app: a home screen with the tracker's app on it. Deploying a plugin again
-updates it while the server runs, and its app loads again where it's open. Without `ONE_HOME`, a client is kept where
-the system keeps an app's data.
+stdio. The last, asked nothing, is the app: a home screen with the tracker's app and Claims on it. Deploying a plugin
+again updates it while the server runs, and its app loads again where it's open. Without `ONE_HOME`, a client is kept
+where the system keeps an app's data. Where there's no desktop, as under `xvfb-run`, start the app inside
+`dbus-run-session`: GTK otherwise waits half a minute for a desktop that isn't there.
 
 `mix network /tmp/one-network spare` starts a second server on the same bucket, as a spare: stop the first, and the
 tracker carries on with nothing lost. `cd server && mix test` runs the tests, and `server/test/takeover.sh` stops

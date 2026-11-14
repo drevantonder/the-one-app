@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Claims</title>
+  <link rel="stylesheet" href="../ui/ui.css">
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="../ui/ui.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <ui-split id="split">
+    <ui-screen heading="Claims" back id="home">
+      <ui-button slot="action" id="add"><ui-icon name="plus"></ui-icon>Expense</ui-button>
+      <ui-skeleton id="loading"></ui-skeleton>
+      <ui-problem id="problem" heading="Couldn't load your claims" hidden>
+        <ui-button slot="action" variant="outline" id="retry">Try again</ui-button>
+      </ui-problem>
+      <ui-tabs id="tabs" hidden>
+        <ui-tab value="mine" label="Mine">
+          <ui-empty id="none" hidden>No expenses yet.</ui-empty>
+          <ui-section heading="Not claimed yet" id="unclaimed-part" hidden>
+            <ui-list id="unclaimed"></ui-list>
+            <ui-button variant="secondary" id="gather">Make a claim</ui-button>
+          </ui-section>
+          <ui-section heading="Claims" id="claims-part" hidden>
+            <ui-list id="claims"></ui-list>
+          </ui-section>
+        </ui-tab>
+        <ui-tab value="approve" label="To approve">
+          <ui-empty id="none-waiting" hidden>Nothing is waiting.</ui-empty>
+          <ui-section heading="To approve" id="sent-part" hidden>
+            <ui-list id="sent"></ui-list>
+          </ui-section>
+          <ui-section heading="To pay" id="approved-part" hidden>
+            <ui-list id="approved"></ui-list>
+          </ui-section>
+        </ui-tab>
+      </ui-tabs>
+    </ui-screen>
+
+    <ui-screen slot="detail" back id="claim">
+      <ui-menu slot="action" id="claim-menu" hidden>
+        <ui-menu-item id="discard" icon="trash" destructive>Delete claim</ui-menu-item>
+      </ui-menu>
+      <p class="sum"><strong id="total"></strong><span id="where"></span></p>
+      <ui-problem id="sent-back" heading="Sent back" warn hidden></ui-problem>
+      <ui-list id="claim-expenses"></ui-list>
+      <ui-problem id="refused" heading="That didn't work" hidden></ui-problem>
+      <div class="actions">
+        <ui-button id="send" hidden>Send for approval</ui-button>
+        <ui-button id="approve" hidden>Approve</ui-button>
+        <ui-button id="pay" hidden>Mark as paid</ui-button>
+        <ui-button id="send-back" variant="outline" hidden>Send back</ui-button>
+        <ui-button id="add-to" variant="outline" hidden>Add expenses</ui-button>
+      </div>
+    </ui-screen>
+  </ui-split>
+
+  <ui-sheet id="expense-sheet">
+    <form id="expense-form">
+      <ui-number label="Amount" name="amount" currency="AUD" decimals="2" min="0.01" required></ui-number>
+      <ui-file label="Receipt" name="receipts" accept="image/*" fit="2000" placeholder="Add a photo" multiple></ui-file>
+      <ui-input label="What it was" name="note" placeholder="Taxi to the airport"></ui-input>
+      <ui-select label="Category" name="category">
+        <option value="travel">Travel</option>
+        <option value="meals">Meals</option>
+        <option value="accommodation">Accommodation</option>
+        <option value="supplies">Supplies</option>
+        <option value="phone">Phone and internet</option>
+        <option value="other">Other</option>
+      </ui-select>
+      <ui-date-picker label="Date" name="date" required></ui-date-picker>
+      <ui-problem id="expense-refused" heading="Couldn't save it" hidden></ui-problem>
+      <ui-button type="submit" id="save">Save</ui-button>
+      <ui-button variant="ghost" id="take-out" hidden>Take out of the claim</ui-button>
+      <ui-button variant="ghost" id="remove" hidden>Delete</ui-button>
+    </form>
+  </ui-sheet>
+
+  <ui-sheet id="looking-sheet">
+    <p class="grey" id="looking-at"></p>
+    <div class="receipts" id="receipts"></div>
+  </ui-sheet>
+
+  <ui-sheet id="gather-sheet">
+    <form id="gather-form">
+      <ui-input label="Name" name="title" placeholder="Sydney trip" required id="gather-title"></ui-input>
+      <ui-section heading="Expenses" id="gather-expenses"></ui-section>
+      <ui-problem id="gather-refused" heading="That didn't work" hidden></ui-problem>
+      <ui-button type="submit" id="gather-save"></ui-button>
+    </form>
+  </ui-sheet>
+
+  <ui-sheet id="back-sheet" heading="Send back">
+    <form id="back-form">
+      <ui-textarea label="What needs to change?" name="reason" rows="3" required autofocus></ui-textarea>
+      <ui-problem id="back-refused" heading="Couldn't send it back" hidden></ui-problem>
+      <ui-button type="submit" id="back-save">Send back</ui-button>
+    </form>
+  </ui-sheet>
+</body>
+</html>

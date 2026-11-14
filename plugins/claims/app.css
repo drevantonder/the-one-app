@@ -1,0 +1,63 @@
+/* What's Claims' own on its pages: a claim's total, a receipt's picture, and where its buttons stop. */
+.grey {
+  color: var(--muted-foreground);
+}
+.sum {
+  display: grid;
+  color: var(--muted-foreground);
+}
+.sum strong {
+  color: var(--foreground);
+  font-size: var(--text-title);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+.actions {
+  display: grid;
+  gap: 0.5rem;
+}
+/* What a list is beside stops where the list does. */
+.actions, #gather {
+  max-width: var(--readable);
+}
+.thumb {
+  display: grid;
+  place-content: center;
+  width: var(--control);
+  height: var(--control);
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  object-fit: cover;
+}
+.owed {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.owed ui-icon {
+  color: var(--warning);
+}
+.receipts {
+  display: grid;
+  gap: var(--gap);
+}
+/* A receipt fits the sheet, and pressed it's big enough to read, moved about under a finger. */
+.receipt {
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  overflow: auto;
+  cursor: zoom-in;
+}
+.receipt img {
+  display: block;
+  width: 100%;
+}
+.receipt[data-close] {
+  max-height: 70dvh;
+  cursor: zoom-out;
+}
+.receipt[data-close] img {
+  width: 250%;
+}
