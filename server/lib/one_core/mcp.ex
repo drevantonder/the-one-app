@@ -17,8 +17,8 @@ defmodule OneCore.Mcp do
   App is.
 
   Skills are served as MCP's Skills Extension says (SEP-2640), in the shapes it gives for the protocol versions a
-  server speaks: `skills/list` lists them, `skills/get` gives one by its address, and each is a resource too,
-  `skill://<name>/SKILL.md`, which `resources/read` reads (`OneCore.Skills`).
+  server speaks: `skills/list` lists them, `skills/get` gives one by its address, and each of a skill's files is
+  a resource too, `skill://<name>/<path>`, which `resources/read` reads (`OneCore.Skills`).
   """
   require Logger
   alias OneCore.{Artifact, Hooks, Plugins, Server, Services, Skills, Tools, User}

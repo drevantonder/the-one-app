@@ -139,12 +139,30 @@ defmodule OneCore.McpTest do
     # A SKILL.md that isn't a skill of the plugin's name fails the deploy, with how to put it right.
     deploy = &Plugins.deploy("users/alice", "notes", %{"SKILL.md" => &1})
 
-    assert {:error, "SKILL.md names its skill \"diary\". A plugin's skill has the plugin's name: `name: notes`."} =
+    assert {:error,
+            "SKILL.md names its skill \"diary\". A skill is named as its folder is, the plugin's at its root: `name: notes`."} =
              deploy.(String.replace(skill, "name: notes", "name: diary"))
 
     assert {:error, "SKILL.md starts with its skill's name" <> _} = deploy.("Use `add` to keep one.")
     assert {:error, "SKILL.md starts with its skill's name" <> _} = deploy.("---\nname: notes\n---\n")
     assert {:error, "SKILL.md's first lines" <> _} = deploy.("---\nname: notes\ndescription: Read: now\n---\n")
     assert %{"skill" => ^notes} = ask("skills/get", %{uri: uri}, alice)
+
+    # A plugin offers more skills in folders of skills/, each with the files it points to.
+    more = "---\nname: notes-by-voice\ndescription: Read before keeping a note said aloud.\n---\n\nSee WORDS.md.\n"
+
+    files = %{
+      "SKILL.md" => skill,
+      "skills/notes-by-voice/SKILL.md" => more,
+      "skills/notes-by-voice/WORDS.md" => "Say it."
+    }
+
+    assert {:ok, 2, ""} = Plugins.deploy("users/alice", "notes", files)
+    assert %{"skills" => [^core, ^notes, voice]} = ask("skills/list", %{}, alice)
+    {voice_uri, words} = {"skill://notes-by-voice/SKILL.md", "skill://notes-by-voice/WORDS.md"}
+
+    assert %{"uri" => ^voice_uri, "resources" => [%{"uri" => ^voice_uri}, %{"uri" => ^words, "size" => 7}]} = voice
+    assert %{"contents" => [%{"text" => "Say it."}]} = ask("resources/read", %{uri: words}, alice)
+    refute Enum.any?(Plugins.running("users/alice")["notes"].files, &String.starts_with?(&1, "skills/"))
   end
 end

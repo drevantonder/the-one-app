@@ -7,11 +7,11 @@ defmodule OneCore.Plugins.Version do
   file. A version is unloaded by removing every module under that name, which the next version loaded then takes,
   so a server that's updated for years makes no more names than it ever ran versions at once.
 
-  A version's files that aren't Elixir or its skill are its parts that run in a client (`files`, by their paths), and
+  A version's files that aren't Elixir or its skills are its parts that run in a client (`files`, by their paths), and
   `code` names the whole set, so a client can tell one version's files from the next's. `hashes` names each of those
   files by what's in it, so a service can tell whether a program it brings changed.
 
-  `skill` is what its `SKILL.md` says of itself, as `OneCore.Skills.read/2` gives it, or `nil` for a plugin with none.
+  `skills` are its skills, as `OneCore.Skills.found/2` gives them.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
   `needs` of a machine. `hooks` names the hooks it hooks into, and `jobs` lists its scheduled jobs: each one's
@@ -20,8 +20,23 @@ defmodule OneCore.Plugins.Version do
   """
   alias OneCore.{Hooks, Server, Skills}
 
-  @enforce_keys [:under, :plugin, :tools, :skill, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
-  defstruct [:under, :plugin, :tools, :skill, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes, :artifact]
+  @enforce_keys [:under, :plugin, :tools, :skills, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
+  defstruct [
+    :under,
+    :plugin,
+    :tools,
+    :skills,
+    :apps,
+    :uses,
+    :services,
+    :hooks,
+    :jobs,
+    :code,
+    :files,
+    :hashes,
+    :kit,
+    :artifact
+  ]
 
   # The names versions are loaded under: each is free, or taken by the one version loaded under it.
   @names 4096
@@ -44,12 +59,14 @@ defmodule OneCore.Plugins.Version do
     if free == nil, do: raise("#{@names} versions of plugins are loaded, which is as many as a server runs at once")
     under = Module.concat(OneCore.Plugins, "Load#{free}")
     {sources, client} = Enum.split_with(files, fn {path, _} -> String.ends_with?(path, ".ex") end)
-    {skill, client} = Map.pop(Map.new(client), "SKILL.md")
 
-    with {:ok, skill} <- if(skill, do: Skills.read(name, skill), else: {:ok, nil}),
+    {skills, client} =
+      Map.split_with(Map.new(client), fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
+
+    with {:ok, skills} <- Skills.found(name, skills),
          {:ok, modules, warnings} <- compile(under, sources),
          {:ok, version} <- describe(under, modules, client) do
-      {:ok, %{version | code: code(files), skill: skill}, warnings}
+      {:ok, %{version | code: code(files), skills: skills}, warnings}
     else
       {:error, why} ->
         unload(under)
@@ -235,7 +252,7 @@ defmodule OneCore.Plugins.Version do
       under: under,
       plugin: plugin,
       tools: tools,
-      skill: nil,
+      skills: [],
       apps: apps,
       uses: [],
       services: services,
