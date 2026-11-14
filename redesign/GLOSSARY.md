@@ -42,6 +42,8 @@
 - **Lease**: the record of which server writes a database for now. One server holds it at a time. Part of the database
   plugin.
 - **Sharing link**: a who that is whoever holds it, without signing in. Making one writes a relation tuple naming it.
-- **Name**: the address of a user, a group or a server, under the network's.
+- **Gateway**: sends each request at the network's address where its path says.
+- **Relay**: passes traffic between a network's servers and clients when they can't reach each other directly. It
+  can't read it.
 - **Scheduled job**: a tool call made by the clock.
 - **Tool guide**: text a plugin provides for agents, on when and how to use its tools.

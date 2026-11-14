@@ -69,13 +69,15 @@ adds a plugin can't copy.
   unreleased or archived. **iroh-blobs and iroh-docs**: a way to copy blobs between devices, not a store.
 - **Jazz**: its encrypted design is frozen and its makers wrote up why they left it; Jazz 2 is rows a server is
   trusted with, in alpha.
-- **iroh for how devices link**: its strength is direct links across the internet, which isn't required here.
+- **iroh**: reaching a machine by its key, directly where possible and through a relay otherwise. Today's app links
+  its devices this way, with the relay as a Worker. The likely way servers and clients reach each other here.
 
 ## Decided earlier, and easy to miss
 
 - **How devices link.** Five options were compared in a table earlier in November 2026: A, everything through the
   network's address; B, A plus direct on the same local network; C, B plus one simple attempt across the internet;
   D, C plus WebRTC for browsers; E, iroh. The choice was B, with C held back until streaming a screen across the internet
-  is common. Most traffic is small requests, and the case to make fastest is an AI on its user's own computer.
+  is common. Most traffic is small requests, and the case to make fastest is an AI on its user's own computer. On 14
+  November 2026 the choice moved to E: every server and client is reached by its key.
 - **"Without needing the internet"** in the vision means two devices on one local network can reach each other. It
   never meant a network works with its bucket unreachable.

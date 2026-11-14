@@ -30,8 +30,8 @@
 - One Core keeps, for each user and group, the list of servers that act for them, under that prefix. A server on the
   list can add another. The first is written by a server acting for the network, and only if the list is absent.
 - A server acting for the network reaches every user's and group's blobs.
-- The signer is the only piece that isn't a server, a client or a service. It checks which server is asking and whether
-  it's on the list, and signs. It's small, keeps no state and runs no plugin code.
+- The signer checks which server is asking and whether it's on the list, and signs. It also tells a client which
+  servers act for a user or group. It's small, keeps no state and runs no plugin code.
 - A client reads the bucket only through a server. For something large, a server asks the signer for a short-lived link
   and hands it to the client.
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
@@ -100,14 +100,13 @@
   anything else they may reach. It can keep a copy of what it was answered.
 - Only a server acting for an artifact's owner holds its lease.
 - With no server up, nothing is lost: clients keep what servers answered and wait.
-- Every user and group has a name under the network's, and a request to it reaches a server acting for them. Every
-  server has a name of its own too. A server at home answers by connecting out, so nothing at home is opened to the
-  internet. How is its owner's choice.
+- Every server and client has a key, and one reaches another by its key: straight to it where a path can be found, and
+  through the relay otherwise. Nothing at home is opened to the internet.
 - A user or group needs only one server at a time. Their others are spares that take over when it stops.
 - Leases are part of the database plugin.
 - A tool call and a scheduled job go to the server acting for the user or group they're for. If it writes a database
   whose lease another server holds, that server passes it on to the one holding it.
-- A call to a service goes to the machine that runs it, at that machine's name, and that machine checks the caller.
+- A call to a service goes to the machine that runs it, by that machine's key, and that machine checks the caller.
 - A scheduled job is a tool call made by the clock. The server holding the lease of the database its schedule is kept in
   makes the call.
 - A scheduled job runs when a server is up. A network that has a cloud server uses it, started when there's work and
@@ -119,6 +118,17 @@
 - A plugin is added, updated and removed while a server keeps running. Nothing else on that server stops or restarts
   for it. A call already running finishes on the old version, and the next gets the new one.
 
+## The network's address
+
+- A network has one address. A few small pieces sit behind it, each named by its job: the gateway, the signer, the
+  relay, the web client's files and the way in for outsiders. None runs plugin code, and none keeps what users make.
+- The gateway only sends each request where its path says.
+- The relay passes on what it can't read. It holds a connection while it's open and sleeps while it's idle. Nothing
+  else at the address holds a connection.
+- The relay admits only the network's own servers and clients.
+- An assistant running somewhere else, a sharing link and a call from an outside service come in at the address over
+  the web, and are passed to a server by its key.
+
 ## Clients
 
 - A client changes an artifact only by calling a tool, which goes straight to a server. Whatever an app can do, an agent
@@ -129,9 +139,9 @@
 - MCP can also be hosted where an assistant running somewhere else reaches it, signing in with OAuth.
 - A client has little of its own: it keeps what servers answered, keeps secrets safe on its device, and runs and draws
   what plugins give it.
-- A client on the same local network as a server sends its requests straight to it. Otherwise it sends them to the name
-  of the user or group they're for. Going direct between different local networks would be nice, and stays open.
-- The web client is static files, and can be served from anywhere.
+- A client holds the keys of the servers acting for a user or group, and asks the first that answers. On the same local
+  network that goes straight to the server, and often between different local networks too.
+- The web client is static files, served at the network's address.
 
 ## Signing in
 
