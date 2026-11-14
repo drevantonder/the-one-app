@@ -2,7 +2,7 @@
 # Proves signing in, on a whole network on this machine that people sign in to (`./network <folder> --address
 # --owner alice`), with nothing deployed. Two people join with a passkey, in a real browser each, and each sees
 # only their own. A device is nobody's until its person signs in for it, a second one is let in from where they're
-# already signed in with nothing typed, and one that's removed is refused the next thing it asks. A stranger who
+# already signed in with nothing typed, and one that's removed is refused the next thing it asks, by every server. A stranger who
 # knows a server's key and where it is, and dials it with a key of their own, is refused. An assistant somewhere
 # else is let in at /mcp as MCP's authorization says, acts as whoever let it in, and is one of their devices. A
 # network without the plugin that decides who may is its first owner's alone, and one without the plugin that
@@ -122,7 +122,7 @@ window windowfocus
 timeout 30 grep -q -m1 "home opened" <(tail -f -n +1 "$folder/app.log")
 echo "  alice comes back to the window, and it says: $(grep -o -m1 "home opened" "$folder/app.log")"
 
-say "A device that's removed is refused the next thing it asks, on every server"
+say "A device that's removed is refused the next thing it asks"
 may device laptop sign-in remove_device --device "$(grep -o 'device=[0-9a-f]*' <<<"$link" | cut -d= -f2)"
 refused device desktop sign-in devices
 may device laptop sign-in devices
@@ -184,6 +184,28 @@ exec {MCP[1]}>&-
 wait "$MCP_PID"
 [[ $answer == *'"result"'* && $answer != *isError* ]] || { echo "ping wasn't answered: $answer"; exit 1; }
 echo "  $(sort -n "$folder/times" | awk '{ all[NR] = $1 } END { printf "%.3f ms", all[int((NR + 1) / 2)] / 1000 }')  a tool that does nothing, called by a device that signed in"
+
+say "With a second server, a device that's removed is nobody's at both, the next thing it asks of each"
+# The spare is let in as any server is, by the network's owner from a device of hers, and started again. The
+# device alice just let in is asked through each server alone: the same key, told where one server is.
+spare() {
+  (cd "$root/server" && exec mix network "$folder" spare --address "$address") >"$folder/spare.log" 2>&1 &
+  spare=$!
+  started+=("$spare")
+  disown "$spare"
+  grep -q -m1 -E "A server is running|isn't one of" <(tail -f --pid="$spare" -n +1 "$folder/spare.log")
+}
+spare
+ONE_FOR=network may device laptop $(grep -o 'add_server --key [0-9a-f]*' "$folder/spare.log")
+spare
+cp "$folder/only-server/key" "$folder/only-spare/key"
+through() { ONE_HOME=$folder/only-$1 "$one" "${@:2}"; }
+may through server ping ping
+may through spare ping ping
+may device laptop sign-in remove_device --device "$direct"
+refused through server ping ping
+refused through spare ping ping
+kill -9 "$spare"
 
 say "Without the plugin that decides who may, the network is its first owner's alone"
 restart --without relations
