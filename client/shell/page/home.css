@@ -78,6 +78,10 @@ iframe {
   border: 0;
   background: var(--background);
 }
+/* An app behind the home screen stays laid out, so it's back in one frame. */
+iframe[inert] {
+  visibility: hidden;
+}
 [hidden] {
   display: none !important;
 }

@@ -2,8 +2,9 @@
 //! plugin's, drawn in a frame of its own, which reaches nothing here but the bridge the home screen's page gives it:
 //! what an app asks comes to `ask`, as what the home screen asks does.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use client::{Client, Shown};
 use serde_json::{Value, json};
@@ -21,6 +22,9 @@ struct Views {
     client: Arc<Client>,
     app: AppHandle,
     shown: Mutex<HashMap<String, Arc<Shown>>>,
+    /// The files each open app's page has loaded, by the app's name.
+    loaded: Mutex<HashMap<String, HashSet<String>>>,
+    started: Instant,
 }
 
 impl Views {
@@ -43,38 +47,84 @@ impl Views {
         }
     }
 
-    /// One file of a plugin, for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the
-    /// newest files of `plugin` this client knows of. A set of files never changes, so one that's kept is never
-    /// asked for again.
-    async fn file(&self, address: &Uri) -> anyhow::Result<(String, String)> {
-        let file = address.path().trim_start_matches('/');
-        let listed = self.shown("home").ask("resources/list", json!({})).await?;
-        let resources =
-            listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str());
-        let resource = resources
-            .filter(|resource| {
-                let mut parts = resource.trim_start_matches("ui://").splitn(3, '/');
-                let (plugin, _code, path) = (parts.next(), parts.next(), parts.next());
-                plugin.zip(path).is_some_and(|(plugin, path)| file.strip_prefix(plugin) == Some(&format!("/{path}")))
-            })
-            .next();
-        let asked = json!({"uri": resource.ok_or_else(|| anyhow::anyhow!("no plugin here has {file}"))?});
+    /// The files of every plugin a server lists, as MCP lists resources.
+    async fn listed(&self) -> anyhow::Result<Value> {
+        self.shown("home").ask("resources/list", json!({})).await
+    }
+
+    /// One file a server listed: what kind it is, and its text. A set of a plugin's files never changes, so a file
+    /// that's kept is never asked for again.
+    async fn read(&self, resource: &str) -> anyhow::Result<(String, String)> {
+        let asked = json!({"uri": resource});
         let read = match self.client.kept("resources/read", &asked) {
             Some(read) => read,
             None => self.client.fresh("resources/read", &asked).await?,
         };
         let file = &read["contents"][0];
-        Ok((
-            file["mimeType"].as_str().unwrap_or_default().to_owned(),
-            file["text"].as_str().unwrap_or_default().to_owned(),
-        ))
+        let text = |part: &str| file[part].as_str().unwrap_or_default().to_owned();
+        Ok((text("mimeType"), text("text")))
     }
+
+    /// One file of a plugin, for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the
+    /// newest files of `plugin` this client knows of.
+    async fn file(&self, address: &Uri) -> anyhow::Result<(String, String)> {
+        let file = address.path().trim_start_matches('/');
+        let listed = self.listed().await?;
+        let resource = resources(&listed).find(|resource| {
+            let mut parts = resource.trim_start_matches("ui://").splitn(3, '/');
+            let (plugin, _version, path) = (parts.next(), parts.next(), parts.next());
+            plugin.zip(path).is_some_and(|(plugin, path)| file.strip_prefix(plugin) == Some(&format!("/{path}")))
+        });
+        let resource = resource.ok_or_else(|| anyhow::anyhow!("no plugin here has {file}"))?;
+        let app = address.host().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
+        // Android's and Windows' web views name the app after the scheme, in a host's name.
+        let app = app.strip_prefix("oneapp.").unwrap_or(app);
+        self.loaded.lock().expect("no view panics").entry(app.to_owned()).or_default().insert(resource.to_owned());
+        self.read(resource).await
+    }
+
+    /// The open apps that loaded a file a server no longer lists: one of their plugins has a new version. They
+    /// have loaded nothing once this has named them.
+    fn outdated(&self, listed: &Value) -> Vec<String> {
+        let listed: HashSet<&str> = resources(listed).collect();
+        let mut loaded = self.loaded.lock().expect("no view panics");
+        let outdated: Vec<String> = loaded
+            .iter()
+            .filter(|(_, files)| files.iter().any(|file| !listed.contains(file.as_str())))
+            .map(|(app, _)| app.clone())
+            .collect();
+        loaded.retain(|app, _| !outdated.contains(app));
+        outdated
+    }
+}
+
+/// The address of each file in a list of them.
+fn resources(listed: &Value) -> impl Iterator<Item = &str> {
+    listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str())
+}
+
+/// The apps on the home screen: the files a server lists, of which an app is a page, and with them the open apps
+/// that are `outdated` and load again. Every file listed is kept behind this, so with no server up an app opens
+/// whole, even one that was never opened, or whose plugins have changed since.
+#[tauri::command]
+async fn apps(app: AppHandle, views: State<'_, Views>) -> Result<Value, String> {
+    let mut listed = views.listed().await.map_err(|error| format!("{error:#}"))?;
+    listed["outdated"] = views.outdated(&listed).into();
+    let keep = listed.clone();
+    tauri::async_runtime::spawn(async move {
+        for resource in resources(&keep) {
+            // With no server answering, what's missing is asked for when an app loads it.
+            let _ = app.state::<Views>().read(resource).await;
+        }
+    });
+    Ok(listed)
 }
 
 /// Answers what a view asks, in MCP's words: the result of `method`.
 #[tauri::command]
 async fn ask(views: State<'_, Views>, view: String, method: String, params: Value) -> Result<Value, String> {
-    views.shown(&view).ask(&method, params).await.map_err(|error| format!("{error:#}"))
+    // A person is told what went wrong, and not what was behind it.
+    views.shown(&view).ask(&method, params).await.map_err(|error| error.to_string())
 }
 
 /// Asks again for what a view was answered: its user returned to it.
@@ -88,25 +138,34 @@ async fn again(views: State<'_, Views>, view: String) -> Result<(), ()> {
 #[tauri::command]
 fn close(views: State<'_, Views>, view: String) {
     views.shown.lock().expect("no view panics").remove(&view);
+    views.loaded.lock().expect("no view panics").remove(&view);
 }
 
-/// Says how long an app took to open, from the tap on its icon to its content on screen.
+/// Says how long a view took to open: an app from the tap on its icon to its content on screen, and the home
+/// screen from when its page began to load, which the time since the program started is beside.
 #[tauri::command]
-fn opened(view: String, ms: u32) {
-    eprintln!("{view} opened in {ms} ms");
+fn opened(views: State<'_, Views>, view: String, ms: u32) {
+    eprintln!("{view} opened in {ms} ms, {} ms after the app started", views.started.elapsed().as_millis());
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let started = Instant::now();
     tauri::Builder::default()
-        .setup(|app| {
+        .setup(move |app| {
             // A phone gives each app a folder of its own, which only the app is told.
             #[cfg(mobile)]
             let home = app.path().app_data_dir()?;
             #[cfg(desktop)]
             let home = client::home()?;
             let client = Arc::new(tauri::async_runtime::block_on(Client::open(home))?);
-            app.manage(Views { client: client.clone(), app: app.handle().clone(), shown: Mutex::default() });
+            app.manage(Views {
+                client: client.clone(),
+                app: app.handle().clone(),
+                shown: Mutex::default(),
+                loaded: Mutex::default(),
+                started,
+            });
 
             // A server said something changed, so every view asks again.
             let handle = app.handle().clone();
@@ -141,7 +200,7 @@ pub fn run() {
                 responder.respond(response.expect("these headers are valid"))
             });
         })
-        .invoke_handler(tauri::generate_handler![ask, again, close, opened])
+        .invoke_handler(tauri::generate_handler![apps, ask, again, close, opened])
         .run(tauri::generate_context!())
         .expect("the app runs");
 }

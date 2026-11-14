@@ -7,9 +7,9 @@ const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event
 
 const home = document.getElementById("home")
-/// The apps a server listed, by their plugin's name: `{ plugin, name, icon, page, version }`.
+/// The apps a server listed, by their plugin's name: `{ plugin, name, icon, page }`.
 let apps = new Map()
-/// The apps that are open, by their plugin's name: `{ plugin, version, frame, tapped }`. An app stays open behind
+/// The apps that are open, by their plugin's name: `{ plugin, frame, tapped, drawn }`. An app stays open behind
 /// the home screen once it's been opened, as on a phone, so going back to it shows it as it was.
 const open = new Map()
 
@@ -18,23 +18,25 @@ const open = new Map()
 const address = ({ plugin, page }) =>
   `${location.protocol === "tauri:" ? "oneapp://" : "http://oneapp."}${plugin}.localhost/${plugin}/${page}`
 
-/// Draws the home screen from the apps a server listed. An open app whose plugin has a new version loads again.
+/// Draws the home screen from the apps a server listed. An open app whose plugins have a new version loads again.
 async function list() {
   let listed
   try {
-    listed = (await invoke("ask", { view: "home", method: "resources/list", params: {} })).resources
+    listed = await invoke("apps")
   } catch {
-    listed = []
+    listed = { resources: [], outdated: [] }
   }
   // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
-  apps = new Map(listed.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app").map(({ uri, name, icons }) => {
-    const [plugin, version, ...page] = uri.slice("ui://".length).split("/")
-    return [plugin, { plugin, version, page: page.join("/"), name, icon: icons?.[0]?.src }]
+  apps = new Map(listed.resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app").map(({ uri, name, icons }) => {
+    const [plugin, _version, ...page] = uri.slice("ui://".length).split("/")
+    return [plugin, { plugin, page: page.join("/"), name, icon: icons?.[0]?.src }]
   }))
   document.getElementById("empty").hidden = apps.size > 0
   document.getElementById("apps").replaceChildren(...[...apps.values()].map((app) => {
     const tile = document.createElement("button")
     tile.append(Object.assign(new Image(), { src: app.icon, alt: "" }), Object.assign(document.createElement("span"), { textContent: app.name }))
+    // An app starts as a finger lands on its icon, and shows as the finger lifts.
+    tile.addEventListener("pointerdown", () => load(app))
     tile.addEventListener("click", () => {
       history.pushState(app.plugin, "")
       show(app.plugin, performance.now())
@@ -43,35 +45,44 @@ async function list() {
   }))
   for (const view of open.values()) {
     const app = apps.get(view.plugin)
-    if (app?.version === view.version) continue
+    if (app && !listed.outdated.includes(view.plugin)) continue
     post(view, { id: "teardown", method: "ui/resource-teardown", params: { reason: "A new version" } })
     await invoke("close", { view: view.plugin })
-    if (app) Object.assign(view, { version: app.version }).frame.src = address(app)
+    view.drawn = false
+    // Loaded again in place, so the way back still leads out of the app.
+    if (app) view.frame.contentWindow.location.replace(address(app))
     else view.frame.remove(), open.delete(view.plugin)
   }
+  // The app that was showing is gone, so the home screen shows.
+  if (history.state && !apps.has(history.state)) history.back()
+}
+
+/// Starts an app: its page loads in a frame of its own, behind the home screen until it's shown.
+function load(app) {
+  if (open.has(app.plugin)) return
+  const frame = Object.assign(document.createElement("iframe"), { src: address(app), title: app.name, inert: true })
+  frame.sandbox = "allow-scripts allow-same-origin allow-forms"
+  open.set(app.plugin, { plugin: app.plugin, frame })
+  document.body.append(frame)
 }
 
 /// Shows an app over the home screen, or the home screen with no app named. `tapped` is when its icon was tapped.
 function show(plugin, tapped) {
-  for (const view of open.values()) view.frame.hidden = view.plugin !== plugin
   const app = apps.get(plugin)
+  if (app) load(app)
+  for (const view of open.values()) view.frame.inert = view.plugin !== plugin
   home.inert = Boolean(app)
   if (!app) return
   const view = open.get(plugin)
-  if (view) {
-    // Its user returned to it.
-    invoke("again", { view: plugin })
-    view.tapped = tapped
-    return opened(view)
-  }
-  const frame = Object.assign(document.createElement("iframe"), { src: address(app), title: app.name })
-  frame.sandbox = "allow-scripts allow-same-origin allow-forms"
-  open.set(plugin, { plugin, version: app.version, frame, tapped })
-  document.body.append(frame)
+  view.tapped = tapped
+  if (!view.drawn) return
+  // Its user returned to it.
+  invoke("again", { view: plugin })
+  opened(view)
 }
 
-/// Says how long an app took from the tap on its icon to its content on screen: the second frame after it had
-/// what it drew with.
+/// Says how long an app took from the tap on its icon to its content on screen: the second frame after it's
+/// showing with what it drew from.
 function opened(view) {
   if (view.tapped === undefined) return
   const tapped = view.tapped
@@ -115,7 +126,7 @@ addEventListener("message", async ({ source, data }) => {
   const { id, method, params = {} } = data
   if (id === undefined) {
     // The app's user went back out of it. The app stays open behind the home screen.
-    if (method === "ui/notifications/request-teardown" && !view.frame.hidden) history.back()
+    if (method === "ui/notifications/request-teardown" && !view.frame.inert) history.back()
     return
   }
   try {
@@ -123,7 +134,10 @@ addEventListener("message", async ({ source, data }) => {
   } catch (error) {
     post(view, { id, error: { code: error.code ?? -32000, message: error.message ?? String(error) } })
   }
-  if (!method.startsWith("ui/")) opened(view)
+  // It has what it draws from once the client has answered it something.
+  if (method.startsWith("ui/")) return
+  view.drawn = true
+  if (!view.frame.inert) opened(view)
 })
 
 listen("changed", ({ payload: view }) => {
@@ -145,3 +159,4 @@ addEventListener("focus", returned)
 
 await list()
 show(history.state)
+requestAnimationFrame(() => requestAnimationFrame(() => invoke("opened", { view: "home", ms: Math.round(performance.now()) })))
