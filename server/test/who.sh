@@ -79,7 +79,23 @@ refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answ
 # The plugins this proves with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
 # due and which server made it.
-mkdir -p "$folder"/{notes,reader,gate,ticker,diary}
+mkdir -p "$folder"/{notes,reader,gate,ticker,diary,stuck,lost}
+# Two plugins that decide and are broken: one decides every call, and one who reaches what.
+for broken in "Stuck call" "Lost reach"; do
+  set -- $broken
+  cat >"$folder/${1,,}/${1,,}.ex" <<EOF
+defmodule $1 do
+  @behaviour OneCore.Plugin
+
+  @impl true
+  def hooks, do: ["$2"]
+
+  @impl true
+  def hook("$2", _about, _call), do: raise("$1 is broken.")
+end
+EOF
+done
+set --
 cat >"$folder/notes/notes.ex" <<'EOF'
 defmodule Notes do
   @behaviour OneCore.Plugin
@@ -393,6 +409,26 @@ for server in server spare; do
   echo "    $(timed $server bob notes_read "$reads")  bob reads it: one check, of bob"
   echo "    $(timed $server bob reader_read "$reads")  bob reads it with reader: two checks, of bob and of reader"
 done
+
+say "A plugin that decides and breaks has refused, for whoever it was added for, and has no say in its own removal"
+may as alice deploy --name stuck --files-from "$folder/stuck"
+refused as alice notes read --note "$note"
+refused as alice remove --name diary
+may as bob notes read --note "$note"
+may as alice remove --name stuck
+may as alice notes read --note "$note"
+
+say "When what broke is what says who may, whoever runs a server for them starts it without that plugin"
+may as anyone for network deploy --name lost --files-from "$folder/lost"
+refused as bob notes read --note "$note"
+may as alice notes read --note "$note"
+refused as anyone for network remove --name lost
+pkill -9 -f "network $folder server "
+(cd "$root/server" && exec mix network "$folder" server --development "${at_address[@]}" --without lost) >"$folder/server.log" 2>&1 &
+started+=($!)
+grep -q -m1 "A server is running" <(tail -f --pid=$! -n +1 "$folder/server.log")
+echo "  the server is killed and started again with --without lost, and says: $(grep -o "lost is removed.*" "$folder/server.log")"
+may as bob notes read --note "$note"
 
 say "A scheduled job is called once across a takeover"
 # The job is due every 5 seconds, and its call takes a second. The server making the calls is killed in the middle

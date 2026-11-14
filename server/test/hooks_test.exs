@@ -131,5 +131,45 @@ defmodule OneCore.HooksTest do
              OneCore.Tools.call("services", %{}, {User.link("x"), User.link("x")})
 
     assert OneCore.Tools.call("nothing", %{}, {anyone, anyone}) == :none
+
+    # A plugin that breaks has refused, for whoever it was added for and nobody else, and One Core's own tools
+    # with the rest. It has no say in its own removal or in being deployed over, which is how it's undone.
+    broken = fn what ->
+      """
+      defmodule Refused do
+        @behaviour OneCore.Plugin
+
+        @impl true
+        def hooks, do: ["call"]
+
+        @impl true
+        def hook("call", _about, _call), do: #{what}
+      end
+      """
+    end
+
+    assert :ok = Plugins.remove("network", "refused")
+    assert {:ok, 1, ""} = Plugins.deploy("users/alice", "echo", %{"echo.ex" => @echo})
+    assert {:ok, 1, ""} = Plugins.deploy("users/alice", "refused", %{"refused.ex" => broken.("raise(\"Broken.\")")})
+    alice = {"users/alice", "users/alice"}
+
+    assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") ==
+             {:error, "refused couldn't decide it: Broken."}
+
+    assert OneCore.Tools.call("services", %{}, alice) == {:error, "refused couldn't decide it: Broken."}
+    assert OneCore.Tools.call("remove", %{"name" => "echo"}, alice) == {:error, "refused couldn't decide it: Broken."}
+    assert {:ok, 1, ""} = Plugins.deploy("users/bob", "echo", %{"echo.ex" => @echo})
+    assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/bob") == {:ok, "hi"}
+
+    assert {:ok, "refused is running, at version 2."} =
+             OneCore.Tools.call(
+               "deploy",
+               %{"name" => "refused", "files" => %{"refused.ex" => broken.("{:refuse, \"Still broken.\"}")}},
+               alice
+             )
+
+    assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") == {:error, "Still broken."}
+    assert {:ok, _} = OneCore.Tools.call("remove", %{"name" => "refused"}, alice)
+    assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") == {:ok, "hi"}
   end
 end

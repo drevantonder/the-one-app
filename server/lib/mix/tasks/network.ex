@@ -30,6 +30,12 @@ defmodule Mix.Tasks.Network do
   starts a server of a network being built, which lets a request say which user it's from (`OneCore.User`). No
   network anyone relies on is started with it.
 
+      mix network <folder> <server> --without <plugin>
+
+  starts a server after removing that plugin from what's added for whoever the server is for. It's the way back
+  for whoever runs one of their servers, when a plugin that decides who may do what has broken and so refuses
+  its own removal: nothing is asked of any plugin.
+
   `./network`, at the root, starts a whole network with this.
   """
   use Mix.Task
@@ -42,7 +48,9 @@ defmodule Mix.Tasks.Network do
 
   @impl true
   def run(args) do
-    case OptionParser.parse!(args, strict: [address: :string, first: :string, development: :boolean, for: :string]) do
+    case OptionParser.parse!(args,
+           strict: [address: :string, first: :string, development: :boolean, for: :string, without: :string]
+         ) do
       {options, [folder | server]} when length(server) <= 1 ->
         start(Path.expand(folder), List.first(server, "server"), options)
 
@@ -80,6 +88,13 @@ defmodule Mix.Tasks.Network do
 
             one add_server --key #{key}
         """)
+    end
+
+    if without = options[:without] do
+      case Plugins.remove(options[:for] || "network", without) do
+        :ok -> Mix.shell().info("#{without} is removed from what's added for #{options[:for] || "the network"}.")
+        {:error, why} -> Mix.shell().error("#{without} wasn't removed: #{why}")
+      end
     end
 
     # The plugins The One App ships with are the network's, so a server acting for it deploys them.

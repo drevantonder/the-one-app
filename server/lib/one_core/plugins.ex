@@ -158,13 +158,14 @@ defmodule OneCore.Plugins do
   `about` is what the call is about, and `fun` is the tool: it's given the inputs, and raises to refuse. The
   inputs are what the tool takes, the plugins that change a call's inputs are asked and the ones that decide it,
   and the ones that hear are told how it went. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is
-  told.
+  told. `apart` is the plugin the call removes or deploys over, as who it was added for and its name there, which
+  isn't asked.
   """
-  def tool(tool, about, asked, version \\ nil, fun) do
+  def tool(tool, about, asked, version \\ nil, fun, apart \\ nil) do
     held(nil, List.wrap(version), fn ->
       with :ok <- open_to(tool, about, asked),
            :ok <- given(tool.takes, about["inputs"]),
-           {:ok, about} <- hooked(about, tool.takes, asked) do
+           {:ok, about} <- hooked(about, tool.takes, asked, apart) do
         heard(about, version, asked, fn -> fun.(about["inputs"]) end)
       end
     end)
@@ -181,11 +182,11 @@ defmodule OneCore.Plugins do
   end
 
   # What a call is about once the plugins that change its inputs have, if the ones that decide it agree to it.
-  defp hooked(about, takes, asked) do
-    with {:ok, changes, by} <- Hooks.change("inputs", about, asked),
+  defp hooked(about, takes, asked, apart) do
+    with {:ok, changes, by} <- Hooks.change("inputs", about, asked, apart),
          about = Map.put(%{about | "inputs" => Map.merge(about["inputs"], changes)}, "changed", by),
          :ok <- if(changes == %{}, do: :ok, else: changed(takes, about)),
-         :ok <- Hooks.decide("call", about, asked) do
+         :ok <- Hooks.decide("call", about, asked, apart) do
       {:ok, about}
     else
       {:refuse, why} -> {:error, why}

@@ -16,6 +16,11 @@ defmodule OneCore.Hooks do
   by the plugins added for them and by the ones added for the network, and by nobody else's: what one user adds
   decides nothing for another.
 
+  A plugin that can't answer, because it raised or its server couldn't be reached, has refused: nothing is let
+  through for want of an answer. So a plugin that breaks blocks what it changes or decides, for whoever it was
+  added for and nobody else, until it's removed or deployed again, and it has no say in either: a call that
+  removes a plugin or deploys over it isn't that plugin's to change or decide.
+
   A hook may be asked more than once for one moment, as a tool may run more than once: a call passed on to
   another server is decided on both.
   """
@@ -153,10 +158,10 @@ defmodule OneCore.Hooks do
   @doc """
   Asks each plugin that changes `hook` what it changes of what it's about, for `asked`. Gives `{:ok, changes, by}`:
   what's changed by name, and the plugin that changed each. `{:refuse, why}` if two don't agree, or one couldn't
-  say.
+  say. `apart` is a plugin that isn't asked, as who it was added for and its name there.
   """
-  def change(hook, about, {_by, who} = asked) do
-    Enum.reduce_while(hooking(hook, who), {:ok, %{}, %{}}, fn {_at, plugin} = added, {:ok, changes, by} ->
+  def change(hook, about, {_by, who} = asked, apart \\ nil) do
+    Enum.reduce_while(hooking(hook, who) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = added, {:ok, changes, by} ->
       with {:ok, changed} <- answered(added, hook, about, asked),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, plugin} end), by)
@@ -171,9 +176,12 @@ defmodule OneCore.Hooks do
     end)
   end
 
-  @doc "Asks each plugin that decides `hook` about it, for `asked`. Gives `:ok`, or `{:refuse, why}` from the first to refuse."
-  def decide(hook, about, {_by, who} = asked) do
-    Enum.find_value(hooking(hook, who), :ok, fn {_at, plugin} = added ->
+  @doc """
+  Asks each plugin that decides `hook` about it, for `asked`. Gives `:ok`, or `{:refuse, why}` from the first to
+  refuse. `apart` is a plugin that isn't asked, as who it was added for and its name there.
+  """
+  def decide(hook, about, {_by, who} = asked, apart \\ nil) do
+    Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = added ->
       case answered(added, hook, about, asked) do
         {:ok, "ok"} ->
           nil

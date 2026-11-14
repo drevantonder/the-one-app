@@ -159,7 +159,10 @@ defmodule OneCore.Tools do
       tool ->
         # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
         pass = &Call.pass_to({"tools/call", %{name: name, arguments: inputs}}, asked, passed_on, &1)
-        Plugins.tool(tool, %{"plugin" => nil, "tool" => name, "inputs" => inputs}, asked, &run(name, &1, asked, pass))
+        about = %{"plugin" => nil, "tool" => name, "inputs" => inputs}
+        # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
+        apart = if name in ["deploy", "remove"], do: {User.owner(elem(asked, 1)), inputs["name"]}
+        Plugins.tool(tool, about, asked, nil, &run(name, &1, asked, pass), apart)
     end
   end
 
