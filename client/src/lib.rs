@@ -302,8 +302,9 @@ pub struct Client {
     network: Option<Network>,
     reach: Mutex<Reach>,
     told: broadcast::Sender<Value>,
-    /// What every request says of who it's from, where the environment says: `ONE_LINK` is a sharing link, whose
-    /// holder asks, and `ONE_AS` names a user to act as, which only a server of a network being built allows.
+    /// What every request says of who it's from and for, where the environment says: `ONE_LINK` is a sharing link,
+    /// whose holder asks, `ONE_AS` names a user to act as, which only a server of a network being built allows, and
+    /// `ONE_FOR` names the group it's for (`groups/family`), or `network`.
     says: Vec<(&'static str, String)>,
     /// Whether an app of this client's is on screen, so its servers are to tell it what changes.
     watching: AtomicBool,
@@ -320,7 +321,7 @@ impl Client {
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
         let endpoint = endpoint(&home.join("key"), network.as_ref()).await?;
-        let says = [("as", "ONE_AS"), ("link", "ONE_LINK")];
+        let says = [("as", "ONE_AS"), ("link", "ONE_LINK"), ("for", "ONE_FOR")];
         let says = says.into_iter().filter_map(|(says, variable)| Some((says, env::var(variable).ok()?))).collect();
         let told = broadcast::channel(16).0;
         // A server with something to say connects to this client to say it. Only one of the network's own reaches

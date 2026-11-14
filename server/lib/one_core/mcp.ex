@@ -119,8 +119,8 @@ defmodule OneCore.Mcp do
         params = Map.get(request, "params", %{})
 
         try do
-          with {:ok, who} <- User.asking(from, said(params)),
-               {:ok, result} <- result(method, params, from, who) do
+          with {:ok, asked, passed_on} <- User.asking(from, said(params)),
+               {:ok, result} <- result(method, params, from, asked, passed_on) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
           else
             {:error, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32000, message: why}})
@@ -154,27 +154,27 @@ defmodule OneCore.Mcp do
   defp said(%{"_meta" => %{} = said}), do: said
   defp said(_params), do: %{}
 
-  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, from, _who) do
+  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, from, _asked, _passed_on) do
     between(from, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
   end
 
-  defp result("plugins/call", %{"plugin" => plugin, "function" => function, "arguments" => arguments}, from, who) do
-    with {:ok, result} <- between(from, fn -> Plugins.function(plugin, function, arguments, who, true) end) do
+  defp result("plugins/call", %{"plugin" => plugin, "function" => function} = params, from, asked, _passed_on) do
+    with {:ok, result} <- between(from, fn -> Plugins.function(plugin, function, params["arguments"], asked, true) end) do
       Server.changed()
       {:ok, result}
     end
   end
 
-  defp result("plugins/schedule", %{"plugin" => plugin}, from, _who) do
+  defp result("plugins/schedule", %{"plugin" => plugin}, from, _asked, _passed_on) do
     between(from, fn -> Plugins.schedule(plugin, true) end)
   end
 
-  defp result("hooks/call", %{"plugin" => plugin, "hook" => hook, "about" => about}, from, who) do
-    between(from, fn -> Plugins.hook(plugin, hook, about, who, true) end)
+  defp result("hooks/call", %{"plugin" => plugin, "hook" => hook, "about" => about}, from, asked, _passed_on) do
+    between(from, fn -> Plugins.hook(plugin, hook, about, asked, true) end)
   end
 
-  defp result("tools/call", %{"name" => name} = params, _from, who) do
-    case call(name, Map.get(params, "arguments", %{}), who, said(params)["passed_on"] == true) do
+  defp result("tools/call", %{"name" => name} = params, _from, asked, passed_on) do
+    case call(name, Map.get(params, "arguments", %{}), asked, passed_on) do
       {:ok, answer} -> changed(name, %{content: content(name, answer)})
       {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
       # Another server ran it, and told its own clients.
@@ -184,7 +184,7 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result(method, params, _from, _who), do: result(method, params)
+  defp result(method, params, _from, _asked, _passed_on), do: result(method, params)
 
   # What one server asks of another is run only for a server acting for the same user, by one that acts for them
   # too.
@@ -259,7 +259,7 @@ defmodule OneCore.Mcp do
   defp result(method, _), do: {:error, -32601, "This server has no method #{method}"}
 
   # One Core's own tools are for the network's users.
-  defp call(name, _inputs, "links/" <> _, _passed_on) when name in @own,
+  defp call(name, _inputs, {"links/" <> _, _for}, _passed_on) when name in @own,
     do: {:error, "#{name} isn't a tool that a sharing link's holder calls"}
 
   defp call("deploy", %{"name" => name, "files" => files}, _who, _passed_on) do
@@ -285,9 +285,9 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp call("add_server", %{"key" => key}, who, _passed_on) do
+  defp call("add_server", %{"key" => key}, asked, _passed_on) do
     with :ok <- Servers.add(key, Server.key()) do
-      Hooks.heard("joined", %{"server" => key, "by" => Server.key()}, who)
+      Hooks.heard("joined", %{"server" => key, "by" => Server.key()}, asked)
       Server.tell_servers()
       {:ok, "That server acts for you too now. Start it, and it's a spare."}
     end
@@ -297,22 +297,22 @@ defmodule OneCore.Mcp do
     {:ok, JSON.encode!(%{asked: Server.key(), servers: Servers.acting(), services: Services.list()})}
   end
 
-  defp call("install_service", %{"plugin" => plugin, "service" => service} = inputs, who, _passed_on) do
-    on(inputs["server"], "install_service", inputs, who, fn ->
+  defp call("install_service", %{"plugin" => plugin, "service" => service} = inputs, asked, _passed_on) do
+    on(inputs["server"], "install_service", inputs, asked, fn ->
       with :ok <- Services.install(plugin, service), do: {:ok, "#{service} is running on the server #{Server.key()}."}
     end)
   end
 
-  defp call("remove_service", %{"plugin" => plugin, "service" => service} = inputs, who, _passed_on) do
-    on(inputs["server"], "remove_service", inputs, who, fn ->
+  defp call("remove_service", %{"plugin" => plugin, "service" => service} = inputs, asked, _passed_on) do
+    on(inputs["server"], "remove_service", inputs, asked, fn ->
       with :ok <- Services.remove(plugin, service),
            do: {:ok, "#{service} no longer runs on the server #{Server.key()}."}
     end)
   end
 
-  defp call(name, inputs, who, passed_on) do
+  defp call(name, inputs, asked, passed_on) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
-         {:ok, answer} <- Plugins.call(plugin, tool, inputs, who, passed_on) do
+         {:ok, answer} <- Plugins.call(plugin, tool, inputs, asked, passed_on) do
       case answer do
         text when is_binary(text) -> {:ok, text}
         {:blob, _kind, _data} -> {:ok, answer}
@@ -326,11 +326,11 @@ defmodule OneCore.Mcp do
   end
 
   # Runs what a tool does on the server it names: here, or by asking that server to, for whoever asked.
-  defp on(server, tool, inputs, who, here) do
+  defp on(server, tool, inputs, {by, who}, here) do
     if server in [nil, Server.key()] do
       here.()
     else
-      case Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: %{who: who}}) do
+      case Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: %{who: by, for: who}}) do
         {:ok, result} -> {:passed_on, result}
         {:error, _code, why} -> {:error, why}
         down -> {:error, Server.said(down)}

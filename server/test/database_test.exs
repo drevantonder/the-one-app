@@ -379,6 +379,7 @@ defmodule OneCore.DatabaseTest do
       folder: Path.join(run.home, server),
       server: server,
       for: User.anyone(),
+      by: User.anyone(),
       plugin: "simulated",
       ask: {"tools/call", %{name: "simulated_write", arguments: %{}}},
       uses: %{"database" => run.database},

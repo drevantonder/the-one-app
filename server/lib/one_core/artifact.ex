@@ -27,8 +27,8 @@ defmodule OneCore.Artifact do
   @enforce_keys [:prefix]
   defstruct [:prefix, :reached]
 
-  @typedoc "`reached` is the plugin that reached it, who for and as what, or `nil` for a plugin's own."
-  @type t :: %__MODULE__{prefix: String.t(), reached: {String.t(), String.t(), String.t()} | nil}
+  @typedoc "`reached` is the plugin that reached it, who asked and who for, and as what, or `nil` for a plugin's own."
+  @type t :: %__MODULE__{prefix: String.t(), reached: {String.t(), {String.t() | nil, String.t()}, String.t()} | nil}
 
   @doc "An artifact's name."
   def name(%__MODULE__{prefix: prefix}), do: String.trim_trailing(prefix, "/")
@@ -51,13 +51,13 @@ defmodule OneCore.Artifact do
     for key <- Bucket.list(prefix <> starting), do: String.replace_prefix(key, prefix, "")
   end
 
-  defp writes(%__MODULE__{reached: {_plugin, _who, "viewer"}} = artifact),
+  defp writes(%__MODULE__{reached: {_plugin, _asked, "viewer"}} = artifact),
     do: raise("#{name(artifact)} was reached as a viewer, which only reads it")
 
   defp writes(%__MODULE__{prefix: prefix}), do: prefix
 
-  defp changed(%__MODULE__{reached: {plugin, who, _as}} = artifact, blob, :ok) do
-    Hooks.heard("changed", %{"artifact" => name(artifact), "blob" => blob, "by" => plugin}, who)
+  defp changed(%__MODULE__{reached: {plugin, asked, _as}} = artifact, blob, :ok) do
+    Hooks.heard("changed", %{"artifact" => name(artifact), "blob" => blob, "by" => plugin}, asked)
   end
 
   defp changed(_artifact, _blob, outcome), do: outcome

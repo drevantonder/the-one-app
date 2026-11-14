@@ -69,9 +69,11 @@ defmodule OneCore.Plugin do
     is reached only if both the plugin and whoever it runs for have that relation to it, which the plugins that
     decide `reach` say. `relations` is the one The One App ships with, and its guide says how something is
     shared. With none, everything in a network is shared.
-  - A tool runs for whoever asked, and every plugin is added for the network's users. A tool that the holder of
-    a sharing link may call too says `by_link: true`: it then runs for someone who is no user, so it keeps to
-    what `reach` gives it.
+  - A tool runs for whoever asked, `call.for`, and every plugin is added for the network's users. Whoever asks
+    can ask for a group they're a member of, or for the network: `call.for` is then the group, what the tool
+    makes is the group's, it reaches what the group may, and `call.by` is who asked. A tool that the holder of a
+    sharing link may call too says `by_link: true`: it then runs for someone who is no user, so it keeps to what
+    `reach` gives it.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
   - A tool whose answer to the same inputs is never different, such as a photo by its id, says `fixed: true` too.

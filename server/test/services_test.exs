@@ -93,7 +93,7 @@ defmodule OneCore.ServicesTest do
   test "only a server acting for the same user calls a service's functions and the functions it calls" do
     stranger = String.duplicate("ab", 32)
     service = %{plugin: "counter", service: "Counter.Kept", function: "add", arguments: []}
-    plugin = %{plugin: "counter", function: "counted", arguments: [7], _meta: %{who: User.anyone()}}
+    plugin = %{plugin: "counter", function: "counted", arguments: [7], _meta: %{who: User.anyone(), for: User.anyone()}}
 
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", service, stranger)
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", plugin, stranger)

@@ -86,11 +86,14 @@ defmodule OneCore.Plugins do
   end
 
   @doc """
-  Calls a plugin's tool for `who`. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is told. A call
-  another server ran instead gives `{:passed_on, result}`, that server's result. `passed_on` says another server
-  passed this call on to this one, and `:passed_back` that this one would pass it on in turn.
+  Calls a plugin's tool for `asked`: who asked and who it's for, `{by, for}`, or one who that is both. Gives
+  `{:ok, answer}`, or `{:error, why}` with what the caller is told. A call another server ran instead gives
+  `{:passed_on, result}`, that server's result. `passed_on` says another server passed this call on to this one,
+  and `:passed_back` that this one would pass it on in turn.
   """
-  def call(name, tool, inputs, who, passed_on \\ false) do
+  def call(name, tool, inputs, asked, passed_on \\ false) do
+    asked = asked(asked)
+
     run(name, fn versions ->
       version = versions[name]
 
@@ -100,12 +103,12 @@ defmodule OneCore.Plugins do
 
         %{takes: takes} = found ->
           # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
-          call = called(name, versions, {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}, who, passed_on)
+          call = called(name, versions, {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}, asked, passed_on)
 
-          with :ok <- open_to(found, name, who),
+          with :ok <- open_to(found, name, asked),
                :ok <- given(takes, inputs),
-               {:ok, about} <- hooked(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, takes, who) do
-            heard(about, version, who, fn -> version.plugin.call(tool, about["inputs"], call) end)
+               {:ok, about} <- hooked(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, takes, asked) do
+            heard(about, version, asked, fn -> version.plugin.call(tool, about["inputs"], call) end)
           end
       end
     end)
@@ -113,18 +116,18 @@ defmodule OneCore.Plugins do
 
   # A plugin is added for users. A sharing link's holder is none, and calls only a tool that says they may: one
   # that keeps to what the link reaches.
-  defp open_to(tool, name, who) do
-    if User.link?(who) and tool[:by_link] != true,
+  defp open_to(tool, name, {by, _for}) do
+    if by != nil and User.link?(by) and tool[:by_link] != true,
       do: {:error, "#{name}_#{tool.name} isn't a tool that a sharing link's holder calls"},
       else: :ok
   end
 
   # What a call is about once the plugins that change its inputs have, if the ones that decide it agree to it.
-  defp hooked(about, takes, who) do
-    with {:ok, changes, by} <- Hooks.change("inputs", about, who),
+  defp hooked(about, takes, asked) do
+    with {:ok, changes, by} <- Hooks.change("inputs", about, asked),
          about = Map.put(%{about | "inputs" => Map.merge(about["inputs"], changes)}, "changed", by),
          :ok <- if(changes == %{}, do: :ok, else: changed(takes, about)),
-         :ok <- Hooks.decide("call", about, who) do
+         :ok <- Hooks.decide("call", about, asked) do
       {:ok, about}
     else
       {:refuse, why} -> {:error, why}
@@ -141,7 +144,7 @@ defmodule OneCore.Plugins do
   end
 
   # Runs a call, and tells the plugins that hear calls how it went. One passed on is heard where it ran.
-  defp heard(about, version, who, call) do
+  defp heard(about, version, asked, call) do
     began = System.monotonic_time(:microsecond)
     took = fn error -> Map.merge(about, %{"took" => System.monotonic_time(:microsecond) - began, "error" => error}) end
 
@@ -153,11 +156,11 @@ defmodule OneCore.Plugins do
 
       kind, reason ->
         error = Version.own_names(Exception.format_banner(kind, reason, __STACKTRACE__), version)
-        Hooks.heard("called", took.(error), who)
+        Hooks.heard("called", took.(error), asked)
         :erlang.raise(kind, reason, __STACKTRACE__)
     else
       answer ->
-        Hooks.heard("called", took.(nil), who)
+        Hooks.heard("called", took.(nil), asked)
         {:ok, answer}
     end
   end
@@ -220,10 +223,12 @@ defmodule OneCore.Plugins do
   end
 
   @doc """
-  Calls one of a plugin's functions for a service of its own, with a call for `who` and then `arguments`. Gives
-  what `call/5` does.
+  Calls one of a plugin's functions for a service of its own, with a call for `asked` and then `arguments`.
+  Gives what `call/5` does.
   """
-  def function(name, function, arguments, who, passed_on \\ false) do
+  def function(name, function, arguments, asked, passed_on \\ false) do
+    asked = asked(asked)
+
     run(name, fn versions ->
       plugin = versions[name].plugin
 
@@ -233,20 +238,22 @@ defmodule OneCore.Plugins do
 
         function ->
           ask = {"plugins/call", %{plugin: name, function: function, arguments: arguments}}
-          {:ok, apply(plugin, function, [called(name, versions, ask, who, passed_on) | arguments])}
+          {:ok, apply(plugin, function, [called(name, versions, ask, asked, passed_on) | arguments])}
       end
     end)
   end
 
   @doc """
-  Calls a plugin's `hook/3` at a hook it hooks into, for `who`. Gives `{:ok, answer}` with its answer as
+  Calls a plugin's `hook/3` at a hook it hooks into, for `asked`. Gives `{:ok, answer}` with its answer as
   `OneCore.Hooks.answer/2` gives it, and otherwise what `call/5` does. A plugin that no longer hooks into it has
   nothing to say.
   """
-  def hook(name, hook, about, who, passed_on \\ false) do
+  def hook(name, hook, about, asked, passed_on \\ false) do
+    asked = asked(asked)
+
     run(name, fn versions ->
       version = versions[name]
-      call = called(name, versions, {"hooks/call", %{plugin: name, hook: hook, about: about}}, who, passed_on)
+      call = called(name, versions, {"hooks/call", %{plugin: name, hook: hook, about: about}}, asked, passed_on)
 
       if hook in version.hooks,
         do: {:ok, Hooks.answer(hook, version.plugin.hook(hook, about, call))},
@@ -257,16 +264,17 @@ defmodule OneCore.Plugins do
   @doc """
   Has a plugin's scheduled jobs that are due called: the plugin it uses that keeps schedules is given its jobs, as
   the plugin, and a function that makes one's call here. That plugin has one server make each call, once. The call
-  runs for the user the plugin was added for, and is never passed on: it's made where the schedule is kept.
+  runs for the user the plugin was added for, asked by nobody, and is never passed on: it's made where the
+  schedule is kept.
   """
   def schedule(name, passed_on \\ false) do
-    who = User.anyone()
+    clock = {nil, User.anyone()}
 
     run(name, fn versions ->
-      asked = called(name, versions, {"plugins/schedule", %{plugin: name}}, who, passed_on)
+      asked = called(name, versions, {"plugins/schedule", %{plugin: name}}, clock, passed_on)
 
       fire = fn job ->
-        with {:error, why} <- call(name, job.tool, job.inputs, who, true),
+        with {:error, why} <- call(name, job.tool, job.inputs, clock, true),
              do: Logger.error("#{name}'s scheduled #{job.tool} failed: #{why}")
 
         Server.changed()
@@ -370,7 +378,7 @@ defmodule OneCore.Plugins do
 
   # What a function of a plugin is called with: who it runs for, and what was asked, to pass on. The plugin's own
   # artifact is the one for whoever it was added for, which is the one user every plugin is added for.
-  defp called(name, versions, ask, who, passed_on) do
+  defp called(name, versions, ask, {by, who}, passed_on) do
     own = own(name)
 
     %Call{
@@ -378,12 +386,17 @@ defmodule OneCore.Plugins do
       folder: Path.join(Server.home(), own),
       server: Server.key(),
       for: who,
+      by: by,
       plugin: name,
       ask: ask,
       uses: Map.new(Map.delete(versions, name), fn {used, version} -> {used, version.plugin} end),
       passed_on: passed_on
     }
   end
+
+  # Who asked and who for: one who is both.
+  defp asked({_by, _for} = asked), do: asked
+  defp asked(who) when is_binary(who), do: {who, who}
 
   # A call holds the newest version of its plugin and of each plugin that one uses, however far that goes. A
   # plugin this server doesn't run is looked for first.

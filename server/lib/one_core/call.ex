@@ -6,8 +6,11 @@ defmodule OneCore.Call do
   - `folder`: a folder on the machine running this call that is the plugin's own for whoever it runs for, for what
     it keeps there. It may not be there yet, and another server has another.
   - `server`: the key of the server running this call.
-  - `for`: who this call runs for, as relation tuples name them: the user who asked, or a sharing link's holder.
-    A scheduled job runs for the user its plugin was added for.
+  - `for`: who this call runs for, as relation tuples name them: the user who asked, or a sharing link's holder,
+    or the group or the network they asked for. What it makes is theirs, and it reaches what they may. A
+    scheduled job runs for whoever its plugin was added for.
+  - `by`: who asked: a user, or a sharing link's holder. They're a member of whoever the call is for. A scheduled
+    job is called by the clock, so by nobody: `nil`.
 
   The rest is One Core's: which plugin this is, what was asked of it, the plugins it uses, and whether another
   server passed it on.
@@ -15,8 +18,8 @@ defmodule OneCore.Call do
   alias OneCore.{Artifact, Hooks, Plugins, Server, User}
   alias OneCore.Plugins.Version
 
-  @enforce_keys [:own, :folder, :server, :for, :plugin, :ask, :uses, :passed_on]
-  defstruct [:own, :folder, :server, :for, :plugin, :ask, :uses, :passed_on]
+  @enforce_keys [:own, :folder, :server, :for, :by, :plugin, :ask, :uses, :passed_on]
+  defstruct [:own, :folder, :server, :for, :by, :plugin, :ask, :uses, :passed_on]
 
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), for: String.t()}
 
@@ -43,10 +46,10 @@ defmodule OneCore.Call do
       OneCore.Artifact.name(note)
       #=> "users/anyone/made/notes/7"
   """
-  def make(%__MODULE__{for: who, plugin: plugin}, id) do
+  def make(%__MODULE__{for: who, by: by, plugin: plugin}, id) do
     if User.link?(who), do: raise("A sharing link's holder makes nothing: nothing in a network is theirs")
     if not (is_binary(id) and id =~ ~r/^[A-Za-z0-9_-]+$/), do: raise(ArgumentError, "an id is letters, digits, _ and -")
-    %Artifact{prefix: "#{who}/made/#{plugin}/#{id}/", reached: {plugin, who, "owner"}}
+    %Artifact{prefix: "#{who}/made/#{plugin}/#{id}/", reached: {plugin, {by, who}, "owner"}}
   end
 
   @doc """
@@ -61,33 +64,36 @@ defmodule OneCore.Call do
       note = OneCore.Call.reach(call, "users/alice/made/notes/7")
       {:ok, text, _tag} = OneCore.Artifact.read(note, "text")
   """
-  def reach(%__MODULE__{for: who, plugin: plugin}, name, relation \\ "viewer") do
-    case refused(plugin, who, name, relation) do
-      nil -> %Artifact{prefix: name <> "/", reached: {plugin, who, relation}}
+  def reach(%__MODULE__{for: who, by: by, plugin: plugin}, name, relation \\ "viewer") do
+    case refused(plugin, {by, who}, name, relation) do
+      nil -> %Artifact{prefix: name <> "/", reached: {plugin, {by, who}, relation}}
       why -> raise why
     end
   end
 
   @doc "Whether `reach/3` would give the artifact: whether this call may reach it as `relation`."
-  def reaches?(%__MODULE__{for: who, plugin: plugin}, name, relation \\ "viewer"),
-    do: refused(plugin, who, name, relation) == nil
+  def reaches?(%__MODULE__{for: who, by: by, plugin: plugin}, name, relation \\ "viewer"),
+    do: refused(plugin, {by, who}, name, relation) == nil
 
-  @doc "Why a plugin running for `who` may not reach the artifact `name` as `relation`, or `nil` if it may."
-  def refused(plugin, who, name, relation) when relation in ["viewer", "editor", "owner"] do
+  @doc """
+  Why a plugin in a call asked by `by`, running for `who`, may not reach the artifact `name` as `relation`, or
+  `nil` if it may.
+  """
+  def refused(plugin, {_by, who} = asked, name, relation) when relation in ["viewer", "editor", "owner"] do
     if not Enum.all?(String.split(name, "/"), &(&1 =~ ~r/^[^.]/)),
       do: raise(ArgumentError, "an artifact's name is parts joined by /, none empty or starting with a dot")
 
     made = match?([_, _, "made", ^plugin | _], String.split(name, "/"))
 
-    asked =
+    about =
       cond do
         made and String.starts_with?(name, who <> "/") -> []
         made or name == Plugins.own(plugin) -> [who]
         true -> [who, Plugins.who(plugin)]
       end
 
-    Enum.find_value(asked, fn asked ->
-      case Hooks.decide("reach", %{"who" => asked, "relation" => relation, "artifact" => name}, who) do
+    Enum.find_value(about, fn about ->
+      case Hooks.decide("reach", %{"who" => about, "relation" => relation, "artifact" => name}, asked) do
         :ok -> nil
         {:refuse, why} -> why
       end
@@ -119,10 +125,10 @@ defmodule OneCore.Call do
   """
   def pass_on(%__MODULE__{passed_on: true}, _server), do: throw({__MODULE__, :passed_back})
 
-  def pass_on(%__MODULE__{ask: {method, params}, for: who}, server) do
+  def pass_on(%__MODULE__{ask: {method, params}, for: who, by: by}, server) do
     passed_back = Server.passed_back()
 
-    case Server.request(server, method, Map.put(params, :_meta, %{passed_on: true, who: who})) do
+    case Server.request(server, method, Map.put(params, :_meta, %{passed_on: true, who: by, for: who})) do
       {:ok, result} -> throw({__MODULE__, {:passed_on, result}})
       {:error, ^passed_back, _why} -> :no_answer
       {:error, _code, why} -> raise why

@@ -17,7 +17,8 @@ defmodule OneCore.WhoTest do
     end
 
     @impl true
-    def call(_tool, _inputs, call), do: call.for
+    def call(_tool, _inputs, %{for: who, by: who}), do: who
+    def call(_tool, _inputs, call), do: "\#{call.by} for \#{call.for}"
   end
   """
 
@@ -127,15 +128,28 @@ defmodule OneCore.WhoTest do
     assert {:refused, "services isn't a tool" <> _} = ask(%{link: "a-secret"}, nil, "services")
 
     # Only a server acting here is believed about who it asks for.
-    assert ask(%{who: "users/alice"}, Server.key()) == "users/alice"
-    assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice"}, stranger)
-    assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice"})
+    assert ask(%{who: "users/alice", for: "users/alice"}, Server.key()) == "users/alice"
+    assert ask(%{who: nil, for: "groups/family"}, Server.key()) == " for groups/family"
+    assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice", for: "users/alice"}, stranger)
+    assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice", for: "users/alice"})
 
     # Acting as another user is refused, unless the network is one being built.
     assert {:refused, "Acting as another user" <> _} = ask(%{as: "alice"})
     Application.put_env(:one_core, :development, true)
     assert ask(%{as: "alice"}) == "users/alice"
     assert {:refused, "A user's name" <> _} = ask(%{as: "../network"})
+
+    # A request is for whoever it's from, or for the group or the network it names. With nothing deciding who
+    # is whose member, everything is shared. A link's holder asks for nobody else.
+    assert ask(%{as: "alice", for: "groups/family"}) == "users/alice for groups/family"
+    assert ask(%{as: "alice", for: "network"}) == "users/alice for network"
+    assert {:refused, "A request is for" <> _} = ask(%{as: "alice", for: "groups/../network"})
+    assert {:refused, "A sharing link's holder asks for nobody else"} = ask(%{link: "a-secret", for: "groups/family"})
+    Process.register(self(), :who_test)
+    deploy("door", decides("Door", "users/bob"))
+    assert ask(%{as: "alice", for: "groups/family"}) == "users/alice for groups/family"
+    assert {:refused, "Door keeps users/bob out."} = ask(%{as: "bob", for: "groups/family"})
+    assert %{"who" => "users/bob", "relation" => "member", "artifact" => "groups/family"} = List.last(asked())
   end
 
   @tag :tmp_dir

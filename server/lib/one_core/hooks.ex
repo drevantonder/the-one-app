@@ -1,7 +1,8 @@
 defmodule OneCore.Hooks do
   @moduledoc """
   The moments a plugin can hook into, and the one way each is run. A plugin names the hooks it hooks into
-  (`hooks/0`), and its `hook/3` is called at each, as that plugin, for whoever the moment is about.
+  (`hooks/0`), and its `hook/3` is called at each, as that plugin, for whoever the moment is about. That's
+  `asked` below: who asked for what brought the moment on, and who it runs for.
 
   A hook is one of three kinds, and how a kind is run is what keeps plugins from getting in each other's way:
 
@@ -49,6 +50,8 @@ defmodule OneCore.Hooks do
      A plugin is about to reach an artifact that isn't its own. It's about `who` would reach it, the `relation`
      they need to it (`viewer`, `editor` or `owner`) and the `artifact`'s name. It's asked about whoever the
      plugin runs for, and about the plugin, by its artifact's name, where the plugin didn't make the artifact.
+     It's also asked whether whoever asks is a `member` of the group or the network they ask for: then `who` is
+     them, the `relation` is `member` and the `artifact` is the group, or `network`.
      """},
     {"called", :hears,
      """
@@ -128,32 +131,32 @@ defmodule OneCore.Hooks do
     end
   end
 
-  @doc "Tells each plugin that hears `hook` what it's about, for `who`."
-  def heard(hook, about, who) do
-    for plugin <- hooking(hook), do: tell(plugin, hook, about, who)
+  @doc "Tells each plugin that hears `hook` what it's about, for `asked`."
+  def heard(hook, about, asked) do
+    for plugin <- hooking(hook), do: tell(plugin, hook, about, asked)
     :ok
   end
 
-  defp tell(plugin, hook, about, who) do
+  defp tell(plugin, hook, about, asked) do
     Task.Supervisor.start_child(__MODULE__, fn ->
-      if hears?(plugin, about, who), do: Plugins.hook(plugin, hook, about, who)
+      if hears?(plugin, about, asked), do: Plugins.hook(plugin, hook, about, asked)
     end)
   end
 
   # A hook gives no access of its own: a plugin hears about an artifact only if it could already reach it.
-  defp hears?(plugin, %{"artifact" => artifact, "by" => by}, who),
-    do: plugin != by and Call.refused(plugin, who, artifact, "viewer") == nil
+  defp hears?(plugin, %{"artifact" => artifact, "by" => by}, asked),
+    do: plugin != by and Call.refused(plugin, asked, artifact, "viewer") == nil
 
-  defp hears?(_plugin, _about, _who), do: true
+  defp hears?(_plugin, _about, _asked), do: true
 
   @doc """
-  Asks each plugin that changes `hook` what it changes of what it's about, for `who`. Gives `{:ok, changes, by}`:
+  Asks each plugin that changes `hook` what it changes of what it's about, for `asked`. Gives `{:ok, changes, by}`:
   what's changed by name, and the plugin that changed each. `{:refuse, why}` if two don't agree, or one couldn't
   say.
   """
-  def change(hook, about, who) do
+  def change(hook, about, asked) do
     Enum.reduce_while(hooking(hook), {:ok, %{}, %{}}, fn plugin, {:ok, changes, by} ->
-      with {:ok, changed} <- asked(plugin, hook, about, who),
+      with {:ok, changed} <- answered(plugin, hook, about, asked),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, plugin} end), by)
         {:cont, {:ok, Map.merge(changes, changed), by}}
@@ -167,10 +170,10 @@ defmodule OneCore.Hooks do
     end)
   end
 
-  @doc "Asks each plugin that decides `hook` about it, for `who`. Gives `:ok`, or `{:refuse, why}` from the first to refuse."
-  def decide(hook, about, who) do
+  @doc "Asks each plugin that decides `hook` about it, for `asked`. Gives `:ok`, or `{:refuse, why}` from the first to refuse."
+  def decide(hook, about, {_by, who} = asked) do
     Enum.find_value(hooking(hook), :ok, fn plugin ->
-      case asked(plugin, hook, about, who) do
+      case answered(plugin, hook, about, asked) do
         {:ok, "ok"} ->
           nil
 
@@ -185,8 +188,8 @@ defmodule OneCore.Hooks do
   end
 
   # A hook whose plugin keeps what it needs in a database another server writes is answered there.
-  defp asked(plugin, hook, about, who) do
-    case Plugins.hook(plugin, hook, about, who) do
+  defp answered(plugin, hook, about, asked) do
+    case Plugins.hook(plugin, hook, about, asked) do
       {:ok, answer} -> {:ok, answer}
       {:passed_on, %{"answer" => answer}} -> {:ok, answer}
       {:error, why} -> {:error, why}

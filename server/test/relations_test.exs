@@ -116,6 +116,26 @@ defmodule OneCore.RelationsTest do
     assert {:ok, _} = unshare("groups/family", "member", @bob, @alice)
     assert not reads?(note, @bob) and reads?(note, @carol)
 
+    # A member has a call run for the group: what it makes is the group's, and it reaches what the group may.
+    for_family = fn who ->
+      OneCore.User.asking(nil, %{"as" => String.replace(who, "users/", ""), "for" => "groups/family"})
+    end
+
+    Application.put_env(:one_core, :development, true)
+    assert {:ok, {@alice, "groups/family"} = alice_for_family, false} = for_family.(@alice)
+    assert {:ok, {@carol, "groups/family"}, false} = for_family.(@carol)
+
+    assert for_family.(@bob) ==
+             {:error, "users/bob isn't a member of groups/family. Whoever owns it adds them, with relations_share."}
+
+    assert {:ok, {@bob, "network"}, false} = OneCore.User.asking(nil, %{"as" => "bob", "for" => "network"})
+
+    assert {:ok, "groups/family/made/notes/shared" = shared} =
+             call("notes_write", %{"id" => "shared"}, alice_for_family)
+
+    assert reads?(shared, @carol) and reads?(note, alice_for_family) and not reads?(shared, @bob)
+    assert not reads?(write("mine", @carol), alice_for_family)
+
     # What's shared on a parent is shared on what names it as one, which only an owner does.
     folder = write("folder", @alice)
     inside = write("inside", @alice)

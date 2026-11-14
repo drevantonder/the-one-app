@@ -52,7 +52,9 @@ defmodule Relations do
     - `share` writes a tuple and `unshare` removes one. An owner or an editor shares with viewers and editors and
       adds a group's members, and only an owner adds an owner or a parent. `shared` lists an artifact's tuples,
       and `check` says whether someone may reach it.
-    - `group` makes a group, with whoever asks as its owner and first member.
+    - `group` makes a group, with whoever asks as its owner and first member. A member has a call run for the
+      group, with the group's artifacts: `ONE_FOR=groups/family` before a command, and an app opened from the
+      group's home page. Every user is a member of the network.
     - `link` makes a sharing link to an artifact, as a viewer or an editor. Whoever holds the link reaches the
       artifact without signing in, through the tools that take a link's holder, until its tuple is removed with
       `unshare`. The link is answered once and kept nowhere, so pass it on then.
@@ -132,6 +134,12 @@ defmodule Relations do
   def hooks, do: ["reach"]
 
   @impl true
+  def hook("reach", %{"who" => who, "relation" => "member", "artifact" => of}, call) do
+    if transaction(call, &member?(&1, who, of)),
+      do: :ok,
+      else: {:refuse, "#{who} isn't a member of #{of}. Whoever owns it adds them, with relations_share."}
+  end
+
   def hook("reach", %{"who" => who, "relation" => relation, "artifact" => artifact}, call) do
     if transaction(call, &may?(&1, who, relation, artifact)),
       do: :ok,
@@ -228,6 +236,12 @@ defmodule Relations do
     Enum.any?(followed(db, @parents, [artifact, "network"], []), fn artifact ->
       Enum.any?(whos, &(String.starts_with?(artifact, &1 <> "/") or query(db, @tuple, [artifact, &1 | enough]) != []))
     end)
+  end
+
+  # Whether `who` is in a group, themselves or through a group that is, or is a user asking about the network,
+  # which every user is in.
+  defp member?(db, who, of) do
+    (of == "network" and String.starts_with?(who, "users/")) or of in (followed(db, @groups, [who], []) -- [who])
   end
 
   # Everything reached from `from` by following `next`, each once.
