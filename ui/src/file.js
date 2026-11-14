@@ -1,6 +1,6 @@
 import { html, nothing } from "lit"
 import { ifDefined } from "lit/directives/if-defined.js"
-import { more } from "./element.js"
+import { more, said } from "./element.js"
 import { Field, missing } from "./field.js"
 import { icon } from "./icon.js"
 import css from "./file.css"
@@ -86,13 +86,13 @@ class FileField extends Field {
                 ? html`<img src=${this.preview(file)} alt="" @error=${() => (this.undrawn.add(file), this.requestUpdate())}>`
                 : html`<span class="thumb">${paper}</span>`}
               <span class="words"><span>${file.name}</span><small>${size(file.size)}</small></span>
-              <button class="press ring" type="button" aria-label="Remove ${file.name}" ?disabled=${this.disabled} @click=${() => this.remove(file)}>${x}</button>
+              <button class="press ring" type="button" aria-label="${said.remove} ${file.name}" ?disabled=${this.disabled} @click=${() => this.remove(file)}>${x}</button>
             </li>
           `)}
         </ul>
       ` : nothing}
       <div class="picker" ?hidden=${!this.multiple && this.files.length > 0}>
-        <div class="box" aria-hidden="true" ?data-disabled=${this.disabled} ?data-invalid=${!!message}>${clip}<span>${this.placeholder ?? "Choose a file"}</span></div>
+        <div class="box" aria-hidden="true" ?data-disabled=${this.disabled} ?data-invalid=${!!message}>${clip}<span>${this.placeholder ?? said.file}</span></div>
         <input id="control" class="native" type="file" accept=${ifDefined(this.accept)} capture=${ifDefined(this.capture)}
           ?multiple=${this.multiple} ?disabled=${this.disabled}
           aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-invalid=${message ? "true" : "false"} aria-describedby="message"

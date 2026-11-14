@@ -1,5 +1,6 @@
 import { html, nothing } from "lit"
 import { ifDefined } from "lit/directives/if-defined.js"
+import { said } from "./element.js"
 import { Field } from "./field.js"
 import { icon } from "./icon.js"
 
@@ -48,7 +49,7 @@ class Search extends Input {
       <div class="search" @keydown=${this.escape}>
         ${glass}
         ${super.control(message)}
-        ${this.value && !this.disabled ? html`<button class="press ring" type="button" aria-label="Clear" @click=${this.clear}>${x}</button>` : nothing}
+        ${this.value && !this.disabled ? html`<button class="press ring" type="button" aria-label=${said.clear} @click=${this.clear}>${x}</button>` : nothing}
       </div>
     `
   }

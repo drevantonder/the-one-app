@@ -1,6 +1,6 @@
 import { html, nothing } from "lit"
 import { ifDefined } from "lit/directives/if-defined.js"
-import { more, touch } from "./element.js"
+import { more, said, touch } from "./element.js"
 import { Field } from "./field.js"
 import { icon } from "./icon.js"
 import { behaviour, over, part } from "./zag.js"
@@ -121,7 +121,7 @@ class DatePicker extends Field {
           ${bar("year", `${decade.start} – ${decade.end}`)}
           ${grid("year", api.getYearsGrid({ columns: 4 }), api.getYearTableCellProps, api.getYearTableCellTriggerProps)}
         </div>
-        ${this.value && !this.required ? html`<button class="clear press ring" ${part(api.getClearTriggerProps())}>Clear</button>` : nothing}
+        ${this.value && !this.required ? html`<button class="clear press ring" ${part(api.getClearTriggerProps())}>${said.clear}</button>` : nothing}
       </div>
     `
   }

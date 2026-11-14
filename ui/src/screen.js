@@ -1,5 +1,5 @@
 import { html, nothing } from "lit"
-import { Element, look, reduced } from "./element.js"
+import { Element, look, reduced, said } from "./element.js"
 import { icon } from "./icon.js"
 import css from "./screen.css"
 
@@ -43,7 +43,7 @@ class Screen extends Element {
     return html`
       <header>
         ${this.back ? html`
-          <button class="press ring" aria-label="Back" @click=${this.goBack}>
+          <button class="press ring" aria-label=${said.back} @click=${this.goBack}>
             <svg viewBox="0 0 256 256" aria-hidden="true">${icon("caret-left")}</svg>
           </button>
         ` : nothing}

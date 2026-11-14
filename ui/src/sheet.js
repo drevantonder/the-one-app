@@ -1,5 +1,5 @@
 import { html, nothing } from "lit"
-import { Element, look } from "./element.js"
+import { Element, look, said } from "./element.js"
 import { icon } from "./icon.js"
 import { hold } from "./toast.js"
 import css from "./sheet.css"
@@ -79,7 +79,7 @@ class Sheet extends Dialog {
         <div class="panel">
           <header>
             <h2 id="heading">${this.heading}</h2>
-            <button class="press ring" aria-label="Close" @click=${this.close}>
+            <button class="press ring" aria-label=${said.close} @click=${this.close}>
               <svg viewBox="0 0 256 256" aria-hidden="true">${icon("x")}</svg>
             </button>
           </header>
@@ -145,8 +145,8 @@ class Alert extends Dialog {
           <h2 id="heading">${this.heading}</h2>
           ${this.text ? html`<p id="text">${this.text}</p>` : nothing}
           <footer>
-            <ui-button variant="outline" autofocus @click=${answer(false)}>Cancel</ui-button>
-            <ui-button variant=${this.destructive ? "destructive" : "default"} @click=${answer(true)}>${this.action}</ui-button>
+            <ui-button variant="outline" autofocus @click=${answer(false)}>${said.cancel}</ui-button>
+            <ui-button variant=${this.destructive ? "destructive" : "default"} @click=${answer(true)}>${this.action || said.ok}</ui-button>
           </footer>
         </div>
       </dialog>
@@ -158,8 +158,9 @@ customElements.define("ui-alert", Alert)
 const alert = document.createElement("ui-alert")
 
 /// `await confirm({ heading: "Delete this expense?", text: "It can't be brought back.", action: "Delete", destructive: true })`:
-/// asks before doing what can't be undone. → whether `action` was chosen; Cancel, Escape and a press outside are no.
-export async function confirm({ heading, text = "", action = "OK", destructive = false }) {
+/// asks before doing what can't be undone. → whether `action` (OK unless said) was chosen; Cancel, Escape and a
+/// press outside are no.
+export async function confirm({ heading, text = "", action = "", destructive = false }) {
   if (!alert.isConnected) document.body.append(alert)
   Object.assign(alert, { heading, text, action, destructive, answer: false })
   // Its buttons are drawn before it opens, so focus starts on Cancel.

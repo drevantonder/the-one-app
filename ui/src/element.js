@@ -16,6 +16,27 @@ const here = new Set()
 /// Draws them all again, when something they all draw from has changed: the pointer, or a part that arrived late.
 export const redraw = () => here.forEach((element) => element.requestUpdate())
 
+/// The few words the kit says itself, in English until a page says otherwise with `words`.
+export const said = {
+  back: "Back",
+  cancel: "Cancel",
+  clear: "Clear",
+  close: "Close",
+  file: "Choose a file",
+  loading: "Loading",
+  more: "More",
+  ok: "OK",
+  remove: "Remove",
+}
+
+/// `words({ back: "Zurück", cancel: "Abbrechen", close: "Schließen" })`: says the kit's own words in the user's
+/// language, once, for every element on the page. `said` above lists them.
+export function words(theirs) {
+  for (const name in theirs) if (!(name in said)) throw new Error(`The kit has no word "${name}". It has: ${Object.keys(said).join(", ")}`)
+  Object.assign(said, theirs)
+  redraw()
+}
+
 /// What every element of the kit is: a custom element drawn in its own shadow root, so an app's children stay the
 /// app's (a framework can keep changing them) and an app's styles can't reach in.
 export class Element extends LitElement {

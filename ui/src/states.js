@@ -1,5 +1,5 @@
 import { html, nothing } from "lit"
-import { Element, look } from "./element.js"
+import { Element, look, said } from "./element.js"
 import { icon } from "./icon.js"
 import css from "./states.css"
 
@@ -20,9 +20,10 @@ class Skeleton extends Element {
   static styles = look(css)
   static properties = { rows: { type: Number } }
 
-  internals = Object.assign(this.attachInternals(), { role: "status", ariaBusy: "true", ariaLabel: "Loading" })
+  internals = Object.assign(this.attachInternals(), { role: "status", ariaBusy: "true" })
 
   render() {
+    this.internals.ariaLabel = said.loading
     return html`<div class="skeleton">${Array.from({ length: this.rows ?? 3 }, () => html`<div><i></i><i></i></div>`)}</div>`
   }
 }

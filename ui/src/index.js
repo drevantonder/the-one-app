@@ -17,6 +17,7 @@ import "./tabs.js"
 import "./states.js"
 
 export { call, changed, leave } from "./bridge.js"
+export { words } from "./element.js"
 export { go } from "./screen.js"
 export { confirm } from "./sheet.js"
 export { toast } from "./toast.js"

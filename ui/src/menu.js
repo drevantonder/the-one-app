@@ -1,5 +1,5 @@
 import { html, nothing } from "lit"
-import { Element, delegatesFocus, look, more } from "./element.js"
+import { Element, delegatesFocus, look, more, said } from "./element.js"
 import { icon } from "./icon.js"
 import { behaviour, over, part } from "./zag.js"
 import button from "./button.css"
@@ -32,7 +32,7 @@ class Menu extends Element {
     const shown = says ? this.icon : (this.icon ?? "dots-three")
     return html`
       <button class="trigger press ring" data-variant=${this.variant ?? "ghost"} data-size=${says ? nothing : "icon"}
-        ${part(api?.getTriggerProps())} aria-label=${says ? nothing : (this.label ?? "More")}>
+        ${part(api?.getTriggerProps())} aria-label=${says ? nothing : (this.label ?? said.more)}>
         ${shown ? html`<svg viewBox="0 0 256 256" aria-hidden="true">${icon(shown)}</svg>` : nothing}
         ${says ? this.label : nothing}
       </button>
