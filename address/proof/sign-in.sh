@@ -114,8 +114,10 @@ printf '#!/bin/sh\necho "$1" >"%s"\n' "$folder/opened" >"$folder/browser/xdg-ope
 PATH=$folder/browser:$PATH ONE_HOME=$folder/tablet dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
   echo "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY" >"$1/screen"
   exec "$0" 2>"$1/app.log"' "$one" "$folder" >/dev/null 2>&1 &
-started+=($!)
-grep -q -m1 DISPLAY <(tail -f --pid=$! -n +1 "$folder/screen")
+app=$!
+started+=("$app")
+disown "$app"
+grep -q -m1 DISPLAY <(tail -f --pid="$app" -n +1 "$folder/screen")
 window() { env $(cat "$folder/screen") xdotool search --sync --onlyvisible --name "The One App" "$@" >/dev/null; }
 window
 echo "  the app's window is open on a device that isn't in, and its home screen has opened $(grep -c "home opened" "$folder/app.log") times"
@@ -128,6 +130,7 @@ browser alice "$(cat "$folder/opened")"
 window windowfocus
 timeout 30 grep -q -m1 "home opened" <(tail -f -n +1 "$folder/app.log")
 echo "  alice comes back to the window, and it says: $(grep -o -m1 "home opened" "$folder/app.log")"
+kill -- "-$app"
 
 say "A device that's removed is refused the next thing it asks"
 may device laptop sign-in remove_device --device "$(grep -o 'device=[0-9a-f]*' <<<"$link" | cut -d= -f2)"
