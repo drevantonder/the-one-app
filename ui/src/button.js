@@ -32,7 +32,7 @@ class Button extends Element {
 
   render() {
     return html`
-      <button class="press ring" ?disabled=${this.disabled || this.loading} aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-busy=${this.loading ? "true" : nothing} @click=${this.pressed}>
+      <button class="press ring" data-variant=${this.variant} data-size=${ifDefined(this.size ?? undefined)} ?disabled=${this.disabled || this.loading} aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-busy=${this.loading ? "true" : nothing} @click=${this.pressed}>
         ${this.loading ? html`<ui-spinner></ui-spinner>` : nothing}
         <slot></slot>
       </button>

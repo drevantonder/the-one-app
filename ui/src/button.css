@@ -34,41 +34,39 @@ button:disabled {
   button:hover:not(:disabled) {
     background: color-mix(in oklab, var(--primary) 90%, transparent);
   }
-  :host([variant="secondary"]) button:hover:not(:disabled) {
+  button[data-variant="secondary"]:hover:not(:disabled) {
     background: color-mix(in oklab, var(--secondary) 80%, transparent);
   }
-  :host(:is([variant="outline"], [variant="ghost"])) button:hover:not(:disabled) {
+  button:is([data-variant="outline"], [data-variant="ghost"]):hover:not(:disabled) {
     background: var(--accent);
     color: var(--accent-foreground);
   }
-  :host([variant="destructive"]) button:hover:not(:disabled) {
+  button[data-variant="destructive"]:hover:not(:disabled) {
     background: color-mix(in oklab, var(--destructive) 90%, transparent);
   }
 }
 
-:host([variant="secondary"]) button {
+button[data-variant="secondary"] {
   background: var(--secondary);
   color: var(--secondary-foreground);
 }
-:host([variant="outline"]) button {
+button[data-variant="outline"] {
   border-color: var(--input);
   background: light-dark(var(--background), color-mix(in oklab, var(--input) 30%, transparent));
   color: var(--foreground);
   box-shadow: var(--shadow-xs);
 }
-:host([variant="ghost"]) button {
+button[data-variant="ghost"] {
   background: none;
   color: var(--foreground);
 }
-:host([variant="destructive"]) button {
+button[data-variant="destructive"] {
+  --ring-color: var(--destructive);
   background: light-dark(var(--destructive), color-mix(in oklab, var(--destructive) 60%, transparent));
   color: white;
 }
-:host([variant="destructive"]) button {
-  --ring-color: var(--destructive);
-}
 
-:host([size="icon"]) button {
+button[data-size="icon"] {
   flex: none;
   width: var(--control);
   padding: 0;

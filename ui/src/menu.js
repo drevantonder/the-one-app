@@ -1,18 +1,21 @@
 import { html, nothing } from "lit"
-import { Element, delegatesFocus, look } from "./element.js"
+import { Element, delegatesFocus, look, more } from "./element.js"
 import { icon } from "./icon.js"
 import { behaviour, over, part } from "./zag.js"
+import button from "./button.css"
 import css from "./menu.css"
 
 const positioning = { strategy: "fixed", placement: "bottom-end", gutter: 4 }
 
 /// `<ui-menu label="More"><ui-menu-item>Rename</ui-menu-item><hr><ui-menu-item destructive>Delete</ui-menu-item></ui-menu>`:
 /// a button that opens a few things to do. The button is an icon (`icon`, three dots unless said), named by
-/// `label`. Choosing an item clicks it: listen for `click` on the item. An `<hr>` is a line between groups.
+/// `label`. With `variant`, a `<ui-button>`'s, it's a button of that weight that says `label`, after its `icon`
+/// if it has one; `size="icon"` keeps that one to its icon. Choosing an item clicks it: listen for `click` on the
+/// item. An `<hr>` is a line between groups.
 class Menu extends Element {
-  static styles = look(css)
+  static styles = [...look(button), more(css)]
   static shadowRootOptions = delegatesFocus
-  static properties = { label: {}, icon: {} }
+  static properties = { label: {}, icon: {}, variant: { reflect: true }, size: { reflect: true } }
 
   constructor() {
     super()
@@ -25,9 +28,13 @@ class Menu extends Element {
 
   render() {
     const api = this.machine?.api
+    const says = this.variant && this.size !== "icon"
+    const shown = says ? this.icon : (this.icon ?? "dots-three")
     return html`
-      <button class="trigger press ring" ${part(api?.getTriggerProps())} aria-label=${this.label ?? "More"}>
-        <svg viewBox="0 0 256 256" aria-hidden="true">${icon(this.icon ?? "dots-three")}</svg>
+      <button class="trigger press ring" data-variant=${this.variant ?? "ghost"} data-size=${says ? nothing : "icon"}
+        ${part(api?.getTriggerProps())} aria-label=${says ? nothing : (this.label ?? "More")}>
+        ${shown ? html`<svg viewBox="0 0 256 256" aria-hidden="true">${icon(shown)}</svg>` : nothing}
+        ${says ? this.label : nothing}
       </button>
       ${api ? this.popup(api) : nothing}
     `

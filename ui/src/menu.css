@@ -2,21 +2,10 @@
   display: inline-flex;
   vertical-align: middle;
 }
-.trigger {
-  display: grid;
-  place-content: center;
-  width: var(--control);
-  height: var(--control);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-}
-.trigger[data-state="open"] {
+/* Its button is a button (button.css). While its menu is open, one with no fill of its own shows it's the one. */
+.trigger[data-state="open"]:is([data-variant="outline"], [data-variant="ghost"]) {
   background: var(--accent);
-}
-@media (hover: hover) {
-  .trigger:hover {
-    background: var(--accent);
-  }
+  color: var(--accent-foreground);
 }
 .popup {
   min-width: 10rem;
