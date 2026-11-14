@@ -3,9 +3,10 @@
 //! fast with no server up as with one.
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::{fs, process};
 
 use anyhow::Result;
 use futures_util::future::join_all;
@@ -20,8 +21,10 @@ impl Client {
         let answer = self.request(method, params.clone()).await?;
         let file = self.kept_file(method, params);
         fs::create_dir_all(self.home.join("kept"))?;
-        // Written whole, then given its name: another program of this client may be reading it.
-        let writing = file.with_extension(std::process::id().to_string());
+        // Written whole, under a name no other write has, then given its name: another ask, or another program of
+        // this client, may be reading it or keeping the same answer.
+        static WRITES: AtomicU64 = AtomicU64::new(0);
+        let writing = file.with_extension(format!("{}-{}", process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
         fs::write(&writing, answer.to_string())?;
         fs::rename(writing, file)?;
         Ok(answer)

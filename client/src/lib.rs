@@ -11,7 +11,7 @@ pub mod mcp;
 
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -76,12 +76,19 @@ pub fn home() -> Result<PathBuf> {
 /// this one is `one` and `The One App` there, and this is neither.
 pub const NAME: &str = "app.theone.client";
 
+/// The connection to the server, once one is open, and when trying to open one last failed.
+#[derive(Default)]
+struct Reach {
+    open: Option<Connection>,
+    failed: Option<Instant>,
+}
+
 /// A client, kept in its home folder: its `key`, the address of the `server` it asks, and what servers answered
 /// (`kept`).
 pub struct Client {
     home: PathBuf,
     endpoint: Endpoint,
-    connection: Mutex<Option<Connection>>,
+    reach: Mutex<Reach>,
     told: broadcast::Sender<Value>,
 }
 
@@ -89,7 +96,7 @@ impl Client {
     pub async fn open(home: impl Into<PathBuf>) -> Result<Self> {
         let home = home.into();
         let endpoint = endpoint(&home.join("key")).await?;
-        Ok(Self { home, endpoint, connection: Mutex::new(None), told: broadcast::channel(16).0 })
+        Ok(Self { home, endpoint, reach: Mutex::default(), told: broadcast::channel(16).0 })
     }
 
     /// What the server tells this client while it's connected: each a JSON-RPC notification.
@@ -118,7 +125,7 @@ impl Client {
 
     /// Ends the connection, if one was made, and waits until the server has been told.
     pub async fn close(&self) {
-        if self.connection.lock().await.is_some() {
+        if self.reach.lock().await.open.is_some() {
             self.endpoint.close().await
         }
     }
@@ -126,20 +133,28 @@ impl Client {
     /// The connection to the server, made when there's none open. Its address is read each time, since a server
     /// that starts again may be somewhere else.
     async fn connection(&self) -> Result<Connection> {
-        let mut connection = self.connection.lock().await;
-        if let Some(open) = connection.as_ref().filter(|open| open.close_reason().is_none()) {
+        let asked = Instant::now();
+        let mut reach = self.reach.lock().await;
+        if let Some(open) = reach.open.as_ref().filter(|open| open.close_reason().is_none()) {
             return Ok(open.clone());
+        }
+        // Many asks at once share one try: no server answered while this one waited its turn.
+        if reach.failed.is_some_and(|failed| failed > asked) {
+            bail!("No server answered")
         }
         let file = self.home.join("server");
         let address = fs::read(&file).with_context(|| format!("{} doesn't say which server to ask", file.display()))?;
         let address: EndpointAddr =
             serde_json::from_slice(&address).with_context(|| format!("{} isn't a server's address", file.display()))?;
-        let open = tokio::time::timeout(CONNECT, self.endpoint.connect(address, ALPN))
-            .await
-            .context("no server answered")?
-            .context("no server answered")?;
+        let open = match tokio::time::timeout(CONNECT, self.endpoint.connect(address, ALPN)).await {
+            Ok(Ok(open)) => open,
+            _ => {
+                reach.failed = Some(Instant::now());
+                bail!("No server answered")
+            }
+        };
         tokio::spawn(hear(open.clone(), self.told.clone()));
-        Ok(connection.insert(open).clone())
+        Ok(reach.open.insert(open).clone())
     }
 }
 
