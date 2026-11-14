@@ -11,6 +11,8 @@ defmodule OneCore.Plugins.Version do
   `code` names the whole set, so a client can tell one version's files from the next's. `hashes` names each of those
   files by what's in it, so a service can tell whether a program it brings changed.
 
+  `kit` is the code of the kit its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
+
   `skills` are its skills, as `OneCore.Skills.found/2` gives them.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
@@ -18,7 +20,7 @@ defmodule OneCore.Plugins.Version do
   `tool`, the `inputs` it's called with, and `every` how many seconds. `artifact` is the plugin it's a version of,
   which whatever loaded it says.
   """
-  alias OneCore.{Hooks, Server, Skills}
+  alias OneCore.{App, Hooks, Server, Skills}
 
   @enforce_keys [:under, :plugin, :tools, :skills, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
   defstruct [
@@ -66,7 +68,7 @@ defmodule OneCore.Plugins.Version do
     with {:ok, skills} <- Skills.found(name, skills),
          {:ok, modules, warnings} <- compile(under, sources),
          {:ok, version} <- describe(under, modules, client) do
-      {:ok, %{version | code: code(files), skills: skills}, warnings}
+      {:ok, %{version | code: code(files), skills: skills, kit: App.kit(files)}, warnings}
     else
       {:error, why} ->
         unload(under)

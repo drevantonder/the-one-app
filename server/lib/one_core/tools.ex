@@ -21,9 +21,10 @@ defmodule OneCore.Tools do
       name: "deploy",
       description: """
       Adds a plugin for you, or updates it, from its files.
-      The server compiles them and runs the plugin at once, with its tools listed and called as <name>_<tool>. If
-      they don't compile, it says why, and the version already running stays. The skill `building-plugins` says how
-      to write a plugin. It's yours, and is added for you: asked for a group or for the network, it's theirs.
+      The server builds its app from its source in app/, compiles the rest and runs the plugin at once, with its
+      tools listed and called as <name>_<tool>. If either fails, it says why, and the version already running stays.
+      The skill `building-plugins` says how to write a plugin. It's yours, and is added for you: asked for a group
+      or for the network, it's theirs.
       """,
       inputs: %{
         type: "object",
@@ -32,6 +33,19 @@ defmodule OneCore.Tools do
           files: %{type: "object", description: "The plugin's files: each one's text, by its path in the plugin"}
         },
         required: ["name", "files"]
+      }
+    },
+    %{
+      name: "code",
+      description: """
+      Gives a plugin's files as they were deployed, its app's source among them, by their paths: what `deploy`
+      takes, to change and deploy again.
+      """,
+      read_only: true,
+      inputs: %{
+        type: "object",
+        properties: %{name: %{type: "string", description: "The plugin's name"}},
+        required: ["name"]
       }
     },
     %{
@@ -193,6 +207,18 @@ defmodule OneCore.Tools do
       {:ok, number, ""} -> "#{name} is running, at version #{number}."
       {:ok, number, warnings} -> "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"
       {:error, why} -> raise why
+    end
+  end
+
+  # A plugin's deployed code is open to whoever may see the plugin.
+  defp run("code", %{"name" => name}, {_by, who} = asked, _pass) do
+    case Plugins.running(who) do
+      %{^name => version} ->
+        reaches!(asked, version.artifact, "viewer")
+        Plugins.source(version.artifact, version.code)
+
+      _ ->
+        raise "There's no plugin named #{name}"
     end
   end
 

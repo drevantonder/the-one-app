@@ -2,10 +2,10 @@
 // source as it was deployed, and serves what it writes to <out>. Each `.html` in <source> is a page. What every app
 // shares (Solid, and the kit) is left out of it, and imported from the plugin `ui`, which the network serves once.
 // A build that fails says why on stderr, a problem to a line with its file and line, and exits with 1.
-import { readdirSync } from "node:fs"
-import { join, relative } from "node:path"
+import { readdirSync, readFileSync } from "node:fs"
+import { extname, join, relative } from "node:path"
 import solid from "@solidjs/vite-plugin"
-import { build } from "vite"
+import { build, parseAst } from "vite"
 
 const [source, out] = process.argv.slice(2)
 
@@ -39,10 +39,27 @@ try {
     },
   })
 } catch (error) {
-  // The compiler's own words, with where: the file as the app's source names it, its line and column.
-  const at = error.loc ?? {}
-  const file = at.file ?? error.id
-  const where = file ? `${relative(source, file)}${at.line ? `:${at.line}:${at.column}` : ""}: ` : ""
-  console.error(`${where}${error.message.replace(`${file}: `, "").replaceAll(source + "/", "")}${error.frame ? `\n${error.frame}` : ""}`)
+  for (const problem of error.errors ?? [error]) console.error(said(problem))
   process.exit(1)
+}
+
+/// A problem as the compiler says it, with where: the file as the app's source names it, its line and column, and
+/// the lines around it. Solid's compiler says only what's wrong, so a file it couldn't read is read again by Vite's
+/// own parser, which says where.
+function said(problem) {
+  let { message, loc: at = {}, frame } = problem
+  const file = at.file ?? problem.id
+  if (file && !at.line) {
+    try {
+      parseAst(readFileSync(file, "utf8"), { lang: extname(file).slice(1) }, file)
+    } catch (parsed) {
+      if (parsed.loc) {
+        at = parsed.loc
+        frame = parsed.frame
+        message = parsed.message.split("\n")[1] ?? message
+      }
+    }
+  }
+  const where = file ? `${relative(source, file)}${at.line ? `:${at.line}:${at.column}` : ""}: ` : ""
+  return `${where}${message.replace(`${file}: `, "").replaceAll(source + "/", "")}${frame ? `\n${frame}` : ""}`
 }

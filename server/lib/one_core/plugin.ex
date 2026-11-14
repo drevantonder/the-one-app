@@ -141,19 +141,41 @@ defmodule OneCore.Plugin do
     that user, and one added for the network decides for everyone.
   #{OneCore.Hooks.listed()}
 
-  A plugin's files that aren't Elixir or its skill reach each client from the server: they are its parts that run
-  in a client, and the source of any program a service of its brings. `apps/0`, if the plugin has one, names its
-  apps:
+  A plugin's files that aren't Elixir or its skills reach each client from the server: they are its parts that
+  run in a client, and the source of any program a service of its brings. `apps/0`, if the plugin has one, names
+  its apps:
 
       @impl true
-      def apps, do: [%{name: "Hello", page: "app.html", icon: "icon.svg"}]
+      def apps, do: [%{name: "Hello", page: "app/index.html", icon: "icon.svg"}]
 
-  - An app is a page of HTML, drawn in the client's web view on a home screen under its `name` and `icon`. It
-    loads the plugin's other files by their paths beside it (`app.js`), and another plugin's by that plugin's
-    name (`../ui/ui.js`). It needs no build step.
-  - The kit, the plugin `ui`, is what an app's UI is written with, so every app looks and moves the same. Its
-    skill lists its elements, and it speaks to the client for the app: its `call` and `changed` are the next two
-    lines, done.
+  - An app is drawn in the client's web view on a home screen under its `name` and `icon`. It's written in Solid
+    2.0 with the kit, and its source is the folder `app/`: each `.html` there is a page, whose script is the
+    app's, and the rest is whatever the app's made of. The kit gives every page its look, so a page is no more
+    than this:
+
+        app/index.html    <!doctype html><title>Hello</title><script type="module" src="./app.jsx"></script>
+        app/app.jsx       import { render } from "@solidjs/web"; import { Screen } from "ui"; ...
+        app/app.css       the app's own look, if it has any, imported by app.jsx
+        app/package.json  packages of its own, if it needs any, under "dependencies"
+
+  - The source is what's deployed, and the server builds it (`OneCore.App`): what a client is served at `app/` is
+    what it built, with sourcemaps. The `code` tool gives the source back, to change and deploy again. A build
+    that fails fails the deploy, which answers with the compiler's words, a problem to a line: `app.jsx:3:30:
+    Unexpected token`, then the lines around it with a `^` under the place.
+  - Solid and the kit are on the server and every client already, so an app leaves them out and is small; an app
+    that needs nothing more installs nothing. Packages of its own are installed as it's built.
+  - Read Solid's skills before writing one: `solid-2.0`, then `solid-2.0-cheatsheet`
+    (skill://solid-2.0-cheatsheet/SKILL.md), and `reactivity-diagnostics` for a problem Solid names by its code.
+    They're Solid's own, from the version apps are built with. Solid 2.0 isn't 1.x, and isn't React. What it renders
+    with is `@solidjs/web`, not `solid-js/web`, and `Dynamic` is `dynamic` there.
+  - The kit, the plugin `ui`, is what an app's UI is written with, so every app looks and moves the same. Its skill,
+    `ui`, has every component with an example. It speaks to the client for the app: its `call` and `changed` are
+    how an app asks and hears, done.
+  - The kit's menu, select, date picker, number input and tabs are Ark UI's, with Ark's parts and props, over Zag.
+    For something the kit lacks, Zag's docs for Solid are https://v2.zagjs.com/llms-solid.txt and Ark's are
+    https://ark-ui.com/llms-solid.txt: an app adds `@zag-js/<component>` and `@zag-js/solid` to its package.json
+    and draws the component as Zag says, styling it with the kit's custom properties. Zag's docs import from
+    `solid-js/web`, which is `@solidjs/web`; and Zag's props set `id`, so one written before them is replaced.
   - An app reaches nothing but its client, and speaks to it as an MCP App does: JSON-RPC messages posted to
     `window.parent`, which answers with a message to the page. It sends `ui/initialize` first and then
     `ui/notifications/initialized`, calls a tool with `tools/call` (`{name: "hello_greet", arguments: {...}}`),

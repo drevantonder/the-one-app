@@ -3,7 +3,8 @@ defmodule OneCore.Plugins do
   Runs a network's plugins on this server, and adds, updates and removes them while it keeps running.
 
   A plugin is an artifact whose blobs are code, and it's whoever's deployed it: `<theirs>/plugins/<name>`. Each
-  set of files deployed is kept at `code/<its hash>/`, and its `newest` says which set it runs now, with that
+  set of files deployed is kept at `code/<its hash>/`, and where the server built some of them (an app), the files
+  as they were deployed are kept at `source/<the same hash>/`. Its `newest` says which set it runs now, with that
   version's number. A deploy replaces `newest` only if it's unchanged, so two deploys at once can't both be the
   plugin's next version, and first writes the version it replaces to `versions/<number>`, so a plugin keeps its
   history.
@@ -29,7 +30,7 @@ defmodule OneCore.Plugins do
   use GenServer
   require Logger
   alias ExJsonSchema.Validator.Error
-  alias OneCore.{Artifact, Bucket, Call, Hooks, Iroh, Jobs, Server, Servers, Services, User}
+  alias OneCore.{App, Artifact, Bucket, Call, Hooks, Iroh, Jobs, Server, Servers, Services, User}
   alias OneCore.Plugins.Version
 
   @network "network"
@@ -48,19 +49,20 @@ defmodule OneCore.Plugins do
 
   @doc """
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
-  if there's none it's a new plugin of theirs, added for them. Gives its version's number and the compiler's
-  warnings.
+  if there's none it's a new plugin of theirs, added for them. Its app, if it has one, is built first
+  (`OneCore.App`). Gives its version's number and the compiler's warnings.
   """
   def deploy(owner, name, files) do
     artifact = plugin(owner, name) || "#{owner}/plugins/#{name}"
 
     with :ok <- check(name, files),
-         {:ok, version, warnings} <- Version.load(Path.basename(artifact), files) do
+         {:ok, kept} <- built(owner, files),
+         {:ok, version, warnings} <- Version.load(Path.basename(artifact), kept) do
       version = %{version | artifact: artifact}
 
       with :ok <- bring(owner, name, version.uses),
            :ok <- scheduled(owner, name, version),
-           {:ok, number} <- keep(artifact, name, files),
+           {:ok, number} <- keep(artifact, name, kept, files),
            :ok <- note(owner, &{:ok, Map.put(&1, name, artifact)}) do
         looked(owner, [{artifact, number, {:ok, version}}])
         Server.tell_servers([owner])
@@ -507,6 +509,7 @@ defmodule OneCore.Plugins do
       Jobs.look()
     end
 
+    if Enum.any?(changed, &(Path.basename(&1) == "ui")), do: Task.start(&rebuild/0)
     any
   end
 
@@ -546,6 +549,40 @@ defmodule OneCore.Plugins do
       if missing == name,
         do: {:error, "There's no plugin named #{name}"},
         else: {:error, "#{name} needs #{missing}, which isn't added for #{Enum.join(owners, " or ")} or the network"}
+    end
+  end
+
+  # A plugin's app is built against the kit that runs for whoever it's deployed for.
+  defp built(owner, files) do
+    cond do
+      not App.app?(files) -> {:ok, files}
+      kit = running(owner)["ui"] -> App.build(files, kit.code)
+      true -> {:error, "An app is built with the kit, the plugin ui, which isn't added for #{owner} or the network."}
+    end
+  end
+
+  # An app built against a kit that has changed since is built again from its source, by a server acting for
+  # whoever the plugin is, as they would deploy it again.
+  defp rebuild do
+    for {owner, added} <- GenServer.call(__MODULE__, :added),
+        {name, artifact} <- added,
+        %Version{kit: built_with} = version <- [version(artifact)],
+        built_with != nil,
+        kit = running(owner)["ui"],
+        kit != nil and kit.code != built_with,
+        whose = String.replace_suffix(artifact, "/plugins/" <> Path.basename(artifact), ""),
+        Servers.here?(whose) and plugin(whose, Path.basename(artifact)) == artifact,
+        uniq: true do
+      with {:error, why} <- deploy(whose, Path.basename(artifact), source(artifact, version.code)),
+           do: Logger.error("#{name}'s app wasn't built again against the kit that changed: #{why}")
+    end
+  end
+
+  @doc "The files the plugin `artifact`'s set of files named `code` was deployed with: its source."
+  def source(artifact, code) do
+    case files(artifact, code, "source") do
+      deployed when deployed == %{} -> files(artifact, code)
+      deployed -> deployed
     end
   end
 
@@ -630,9 +667,13 @@ defmodule OneCore.Plugins do
 
   # Writes a set of files, and makes it the plugin's next version. The version being replaced goes to the
   # plugin's history first, so every version but the newest is there.
-  defp keep(artifact, name, files) do
+  defp keep(artifact, name, files, deployed) do
     code = Version.code(files)
     for {path, text} <- files, do: Bucket.write("#{artifact}/code/#{code}/#{path}", text)
+
+    if deployed != files,
+      do: for({path, text} <- deployed, do: Bucket.write("#{artifact}/source/#{code}/#{path}", text))
+
     was = newest(artifact)
     number = if was, do: elem(was, 0) + 1, else: 1
     next = JSON.encode!(%{number: number, code: code})
@@ -665,18 +706,21 @@ defmodule OneCore.Plugins do
     end)
   end
 
+  # A set of files of a plugin, by their paths. Read at once: a bucket at an address is asked for each over the
+  # internet.
+  defp files(artifact, code, kept \\ "code") do
+    paths = Bucket.list("#{artifact}/#{kept}/#{code}/")
+
+    paths
+    |> Task.async_stream(&Bucket.read/1, max_concurrency: 16, timeout: :infinity)
+    |> Enum.zip_with(paths, fn {:ok, {:ok, text, _tag}}, path ->
+      {String.replace_prefix(path, "#{artifact}/#{kept}/#{code}/", ""), text}
+    end)
+    |> Map.new()
+  end
+
   defp loaded(artifact, code) do
-    paths = Bucket.list("#{artifact}/code/#{code}/")
-
-    files =
-      paths
-      |> Task.async_stream(&Bucket.read/1, max_concurrency: 16, timeout: :infinity)
-      |> Enum.zip_with(paths, fn {:ok, {:ok, text, _tag}}, path ->
-        {String.replace_prefix(path, "#{artifact}/code/#{code}/", ""), text}
-      end)
-      |> Map.new()
-
-    case Version.load(Path.basename(artifact), files) do
+    case Version.load(Path.basename(artifact), files(artifact, code)) do
       {:ok, version, _warnings} ->
         {:ok, %{version | artifact: artifact}}
 
@@ -714,6 +758,7 @@ defmodule OneCore.Plugins do
 
   def handle_call(:newest, _from, state), do: {:reply, state.newest, state}
   def handle_call(:owners, _from, state), do: {:reply, Map.keys(state.added), state}
+  def handle_call(:added, _from, state), do: {:reply, state.added, state}
   def handle_call({:version, artifact}, _from, state), do: {:reply, state.running[artifact], state}
 
   def handle_call({:added_for, artifact}, _from, state) do

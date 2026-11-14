@@ -66,4 +66,45 @@ defmodule OneCore.PluginsTest do
     send(last_call, :finish)
     assert Task.await(last) == {:ok, 3}
   end
+
+  @tag :tmp_dir
+  test "an app is built from its source as it's deployed, gives its source back, and is built again when the kit changes",
+       %{tmp_dir: folder} do
+    OneCore.Test.server(folder)
+    Application.put_env(:one_core, :kit, Path.expand("../ui"))
+    on_exit(fn -> Application.delete_env(:one_core, :kit) end)
+    assert {:ok, 1, ""} = Plugins.deploy("network", "ui", %{"ui.js" => "export const kit = 1"})
+
+    page = ~s(<!doctype html><title>Notes</title><script type="module" src="./app.jsx"></script>)
+
+    app = """
+    import { render } from "@solidjs/web"
+    import { Screen } from "ui"
+    render(() => <Screen heading="Notes" />, document.body)
+    """
+
+    source = %{"app/index.html" => page, "app/app.jsx" => app, "icon.svg" => "<svg/>"}
+    assert {:ok, 1, ""} = Plugins.deploy("network", "notes", source)
+
+    version = Plugins.running("network")["notes"]
+    assert "app/index.html" in version.files and "icon.svg" in version.files
+    assert Enum.any?(version.files, &(&1 =~ ~r{^app/assets/.*\.js$}))
+    refute "app/app.jsx" in version.files or Enum.any?(version.files, &String.starts_with?(&1, "."))
+    {:ok, built} = Plugins.file(version.artifact, version.code, "app/index.html")
+    assert built =~ "/ui/ui.css"
+    assert Plugins.source(version.artifact, version.code) == source
+
+    broken =
+      Map.put(source, "app/app.jsx", String.replace(app, "<Screen heading=\"Notes\" />", "<Screen heading=\"Notes\">"))
+
+    assert {:error, why} = Plugins.deploy("network", "notes", broken)
+    assert why =~ "app.jsx:3:"
+
+    # A new kit: the app is built again against it, from the source it was deployed with.
+    assert {:ok, 2, ""} = Plugins.deploy("network", "ui", %{"ui.js" => "export const kit = 2"})
+    kit = Plugins.running("network")["ui"].code
+    rebuilt = Enum.find_value(1..100, fn _ -> Process.sleep(50) && Plugins.running("network")["notes"].kit == kit end)
+    assert rebuilt
+    assert Plugins.source(version.artifact, Plugins.running("network")["notes"].code) == source
+  end
 end
