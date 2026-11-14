@@ -3,6 +3,7 @@ defmodule OneCore.Mcp do
   Answers what a client asks, in MCP's JSON-RPC: a message in, and its answer out. So a server is an MCP server to
   whatever reaches it, and the tools it lists are One Core's own two and every running plugin's.
   """
+  require Logger
   alias OneCore.{Plugin, Plugins}
 
   # Tools are all a server speaks of MCP, and they are the same in each of these.
@@ -41,9 +42,15 @@ defmodule OneCore.Mcp do
   def answer(message) do
     case JSON.decode(message) do
       {:ok, %{"method" => method, "id" => id} = request} ->
-        case result(method, Map.get(request, "params", %{})) do
-          {:ok, result} -> JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
-          {:error, code, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why}})
+        try do
+          case result(method, Map.get(request, "params", %{})) do
+            {:ok, result} -> JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
+            {:error, code, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why}})
+          end
+        rescue
+          error ->
+            Logger.error(Exception.format(:error, error, __STACKTRACE__))
+            JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: Exception.message(error)}})
         end
 
       {:ok, %{"method" => _notification}} ->
@@ -104,7 +111,7 @@ defmodule OneCore.Mcp do
   defp call(name, inputs) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
          {:ok, answer} <- Plugins.call(plugin, tool, inputs) do
-      {:ok, if(is_binary(answer), do: answer, else: JSON.encode!(answer))}
+      if is_binary(answer), do: {:ok, answer}, else: {:ok, JSON.encode!(answer)}
     else
       [_] -> {:error, "#{name} takes other inputs, or isn't a tool. tools/list says what each takes."}
       {:error, why} -> {:error, why}
