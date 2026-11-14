@@ -19,19 +19,23 @@ const address = ({ plugin, page }) =>
   `${location.protocol === "tauri:" ? "oneapp://" : "http://oneapp."}${plugin}.localhost/${plugin}/${page}`
 
 /// Draws the home screen from the apps a server listed. An open app whose plugins have a new version loads again.
+/// With no server answering and nothing kept from one, it says so.
 async function list() {
-  let listed
+  let listed, why
   try {
     listed = await invoke("apps")
-  } catch {
+  } catch (error) {
+    why = `${error}.`
     listed = { resources: [], outdated: [] }
   }
+  document.getElementById("problem").hidden = !why
+  document.getElementById("why").textContent = why ?? ""
   // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
   apps = new Map(listed.resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app").map(({ uri, name, icons }) => {
     const [plugin, _version, ...page] = uri.slice("ui://".length).split("/")
     return [plugin, { plugin, page: page.join("/"), name, icon: icons?.[0]?.src }]
   }))
-  document.getElementById("empty").hidden = apps.size > 0
+  document.getElementById("empty").hidden = apps.size > 0 || Boolean(why)
   document.getElementById("apps").replaceChildren(...[...apps.values()].map((app) => {
     const tile = document.createElement("button")
     tile.append(Object.assign(new Image(), { src: app.icon, alt: "" }), Object.assign(document.createElement("span"), { textContent: app.name }))
@@ -151,9 +155,12 @@ listen("changed", ({ payload: view }) => {
 // The device's own way back, and this page's, both end here.
 addEventListener("popstate", ({ state }) => show(state, performance.now()))
 
+document.getElementById("retry").addEventListener("click", list)
+
 /// The user returned to the window, so what's showing asks again.
 function returned() {
   if (document.hidden) return
+  if (!document.getElementById("problem").hidden) list()
   invoke("again", { view: "home" })
   if (apps.has(history.state)) invoke("again", { view: history.state })
 }

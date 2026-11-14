@@ -108,7 +108,8 @@ fn resources(listed: &Value) -> impl Iterator<Item = &str> {
 /// whole, even one that was never opened, or whose plugins have changed since.
 #[tauri::command]
 async fn apps(app: AppHandle, views: State<'_, Views>) -> Result<Value, String> {
-    let mut listed = views.listed().await.map_err(|error| format!("{error:#}"))?;
+    // A person is told what went wrong, and not what was behind it.
+    let mut listed = views.listed().await.map_err(|error| error.to_string())?;
     listed["outdated"] = views.outdated(&listed).into();
     let keep = listed.clone();
     tauri::async_runtime::spawn(async move {
@@ -123,7 +124,6 @@ async fn apps(app: AppHandle, views: State<'_, Views>) -> Result<Value, String> 
 /// Answers what a view asks, in MCP's words: the result of `method`.
 #[tauri::command]
 async fn ask(views: State<'_, Views>, view: String, method: String, params: Value) -> Result<Value, String> {
-    // A person is told what went wrong, and not what was behind it.
     views.shown(&view).ask(&method, params).await.map_err(|error| error.to_string())
 }
 
