@@ -23,6 +23,11 @@ defmodule OneCore.Hooks do
 
   A hook may be asked more than once for one moment, as a tool may run more than once: a call passed on to
   another server is decided on both.
+
+  That something may be reached is kept by the server that asked, so that it asks once: until a tool that doesn't
+  only read is called of a plugin that decides it, which that server and the ones it tells forget at once, and
+  for a few seconds anywhere else. A refusal is never kept. So taking access away reaches every server, and
+  giving it is seen at once.
   """
   require Logger
   alias OneCore.Plugins
@@ -59,6 +64,8 @@ defmodule OneCore.Hooks do
      A plugin is about to reach an artifact that isn't its own. It's about `who` would reach it, the `relation`
      they need to it (`viewer`, `editor` or `owner`) and the `artifact`'s name. It's asked about whoever the
      plugin runs for, and about the plugin, by its artifact's name, where the plugin didn't make the artifact.
+     An `:ok` is kept for a few seconds, and until a tool of the plugin is called that doesn't only read: so
+     what it decides from is what its own tools change.
      It's also asked whether whoever asks is a `member` of the group or the network they ask for: then `who` is
      them, the `relation` is `member` and the `artifact` is the group, or `network`.
      """},
@@ -91,6 +98,23 @@ defmodule OneCore.Hooks do
   end
 
   defp flat(text), do: text |> String.split() |> Enum.join(" ")
+
+  # How long a server keeps that something may be reached, in milliseconds, where nothing told it to forget.
+  @kept_for 10_000
+  @allowed __MODULE__.Allowed
+
+  @doc "Makes where which plugins hook into what is kept, and what was decided. Whatever calls this owns both."
+  def keep do
+    :ets.new(__MODULE__, [:named_table, read_concurrency: true])
+    :ets.new(@allowed, [:named_table, :public, read_concurrency: true])
+  end
+
+  @doc "Forgets what was decided, so that it's asked again: who may reach what may have changed."
+  def forget do
+    :ets.update_counter(@allowed, :forgotten, 1, {:forgotten, 0})
+    :ets.match_delete(@allowed, {{:_, :_}, :_})
+    :ok
+  end
 
   @doc """
   The plugins that hook into `hook` for a moment that runs for `who`: each as who it was added for, and its name
@@ -181,19 +205,42 @@ defmodule OneCore.Hooks do
   refuse. `apart` is a plugin that isn't asked, as who it was added for and its name there.
   """
   def decide(hook, about, {_by, who} = asked, apart \\ nil) do
-    Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = added ->
-      case answered(added, hook, about, asked) do
-        {:ok, "ok"} ->
-          nil
+    # Who decides is whoever's plugins they are, so what's kept is what they decided.
+    kept = if hook == "reach", do: {about, Plugins.chain(who)}
+    forgotten = :ets.lookup_element(@allowed, :forgotten, 2, 0)
 
-        {:ok, %{"refuse" => why}} ->
-          Logger.info("#{plugin} refused #{hook} for #{who}: #{why}")
-          {:refuse, why}
+    if kept != nil and kept?(kept) do
+      :ok
+    else
+      decided =
+        Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = added ->
+          case answered(added, hook, about, asked) do
+            {:ok, "ok"} ->
+              nil
 
-        {:error, why} ->
-          {:refuse, "#{plugin} couldn't decide it: #{why}"}
-      end
-    end)
+            {:ok, %{"refuse" => why}} ->
+              Logger.info("#{plugin} refused #{hook} for #{who}: #{why}")
+              {:refuse, why}
+
+            {:error, why} ->
+              {:refuse, "#{plugin} couldn't decide it: #{why}"}
+          end
+        end)
+
+      # Kept only if nothing was forgotten meanwhile: it may have been decided from what has since changed.
+      if kept != nil and decided == :ok and forgotten == :ets.lookup_element(@allowed, :forgotten, 2, 0),
+        do: :ets.insert(@allowed, {kept, System.monotonic_time(:millisecond) + @kept_for})
+
+      decided
+    end
+  end
+
+  # Whether it's kept that this may be reached, and not for too long. The clock it's kept by starts anywhere.
+  defp kept?(kept) do
+    case :ets.lookup(@allowed, kept) do
+      [{^kept, until}] -> until > System.monotonic_time(:millisecond)
+      [] -> false
+    end
   end
 
   # A hook whose plugin keeps what it needs in a database another server writes is answered there.

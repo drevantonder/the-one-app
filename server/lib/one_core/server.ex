@@ -8,7 +8,7 @@ defmodule OneCore.Server do
   Everything a server keeps on its machine is in its home.
   """
   use GenServer
-  alias OneCore.{Address, Iroh, Mcp, Plugins, Servers, Services}
+  alias OneCore.{Address, Hooks, Iroh, Mcp, Plugins, Servers, Services}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -57,13 +57,14 @@ defmodule OneCore.Server do
   def said(:stopped), do: "That server stopped answering after it was asked, so this may or may not have been done"
 
   @doc """
-  Tells the other servers acting for `owners` that there's something new of theirs in the bucket to look for: a
-  plugin's version, a server, a service installed. Each has looked, or couldn't be reached, when this returns.
+  Tells the other servers acting for `owners` that there's something new of theirs in the bucket to `look` for: a
+  plugin's version, a server, a service installed. Or that who may reach what of theirs was `decided` from what
+  has since changed. Each has looked or forgotten, or couldn't be reached, when this returns.
   """
-  def tell_servers(owners) do
-    look = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/look", params: %{for: owners}})
+  def tell_servers(owners, what \\ "look") do
+    told = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/" <> what, params: %{for: owners}})
     servers = Enum.uniq(Enum.flat_map(owners, &Servers.acting/1)) -- [key()]
-    Stream.run(Task.async_stream(servers, &ask(&1, look), timeout: :infinity))
+    Stream.run(Task.async_stream(servers, &ask(&1, told), timeout: :infinity))
   end
 
   @doc """
@@ -72,6 +73,7 @@ defmodule OneCore.Server do
   are told if a plugin changed.
   """
   def look(owners \\ []) do
+    Hooks.forget()
     Services.look()
     if Enum.any?(Enum.map(owners, &Plugins.look/1) ++ [Plugins.look()]), do: changed()
     :ok

@@ -17,7 +17,7 @@ defmodule OneCore.Mcp do
   App is.
   """
   require Logger
-  alias OneCore.{Artifact, Plugin, Plugins, Server, Services, Tools, User}
+  alias OneCore.{Artifact, Hooks, Plugin, Plugins, Server, Services, Tools, User}
   alias OneCore.Plugins.Version
 
   # Tools are all a server speaks of MCP, and they are the same in each of these.
@@ -49,6 +49,11 @@ defmodule OneCore.Mcp do
         ""
 
       # Another server saying there's something new in the bucket.
+      # Another server saying that who may reach what was decided from what has since changed.
+      {:ok, %{"method" => "notifications/one/decided"}} ->
+        Hooks.forget()
+        ""
+
       {:ok, %{"method" => "notifications/one/look"} = said} ->
         Server.look(for(owner <- List.wrap(said["params"]["for"]), User.owner?(owner), do: owner))
         ""

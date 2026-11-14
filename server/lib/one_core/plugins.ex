@@ -146,9 +146,19 @@ defmodule OneCore.Plugins do
         found ->
           # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
           ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
-          call = called(at, name, versions, ask, asked, passed_on)
           about = %{"plugin" => name, "tool" => tool, "inputs" => inputs}
-          tool(found, about, asked, version, &version.plugin.call(tool, &1, call))
+          # A plugin that decides who reaches what decides it from what its tools change. So after one of those
+          # that doesn't only read, what was decided is forgotten: here, and by the servers this one tells.
+          decides = "reach" in version.hooks and found[:read_only] != true
+
+          try do
+            call = called(at, name, versions, ask, asked, passed_on)
+            answered = tool(found, about, asked, version, &version.plugin.call(tool, &1, call))
+            if decides, do: Server.tell_servers(Enum.uniq([at | chain(who)]), "decided")
+            answered
+          after
+            if decides, do: Hooks.forget()
+          end
       end
     end)
   end
@@ -491,7 +501,11 @@ defmodule OneCore.Plugins do
       Services.start(artifact)
     end
 
-    if any, do: Jobs.look()
+    if any do
+      Hooks.forget()
+      Jobs.look()
+    end
+
     any
   end
 
@@ -674,7 +688,7 @@ defmodule OneCore.Plugins do
   # the versions each call holds.
   @impl true
   def init(nil) do
-    :ets.new(Hooks, [:named_table, read_concurrency: true])
+    Hooks.keep()
     {:ok, key} = Iroh.key(Server.key_file())
 
     state =

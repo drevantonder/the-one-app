@@ -58,11 +58,18 @@ defmodule OneCore.WhoTest do
   end
   """
 
-  # A plugin that decides who reaches what, by a rule of its own, and says what it was asked.
+  # A plugin that decides who reaches what, by a rule of its own, and says what it was asked. Its tool changes
+  # nothing, which only it knows.
   defp decides(name, refused) do
     """
     defmodule #{name} do
       @behaviour OneCore.Plugin
+
+      @impl true
+      def tools, do: for(name <- ["change", "look"], do: %{name: name, read_only: name == "look", description: name, inputs: %{}})
+
+      @impl true
+      def call(_tool, _inputs, _call), do: "Done."
 
       @impl true
       def hooks, do: ["reach"]
@@ -263,7 +270,25 @@ defmodule OneCore.WhoTest do
     # More than one plugin decides, and any of them says no.
     deploy("lock", decides("Lock", "users/carol"))
     assert call("notes_read", %{"note" => note}, "users/carol") == {:error, "Lock keeps users/carol out."}
+    asked()
     assert call("notes_read", %{"note" => note}, "users/dave") == {:ok, "Buy milk"}
+    assert [%{"who" => "users/dave"}, %{"who" => "users/dave"}] = asked()
+
+    # That someone may reach something is kept, so it's asked once: until a tool that doesn't only read is called
+    # of a plugin that decides it, which may have changed what it decides from. A refusal is never kept.
+    assert call("notes_read", %{"note" => note}, "users/dave") == {:ok, "Buy milk"}
+    assert asked() == []
+    assert {:ok, "Done."} = call("lock_look", %{}, alice)
+    assert call("notes_read", %{"note" => note}, "users/dave") == {:ok, "Buy milk"}
+    assert asked() == []
+    assert {:ok, "Done."} = call("lock_change", %{}, alice)
+    assert call("notes_read", %{"note" => note}, "users/dave") == {:ok, "Buy milk"}
+    assert [_door, _lock] = asked()
+
+    for _ <- 1..2 do
+      assert call("notes_read", %{"note" => note}, "users/carol") == {:error, "Lock keeps users/carol out."}
+      assert [_ | _] = asked()
+    end
   end
 
   @tag :tmp_dir

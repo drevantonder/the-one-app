@@ -161,6 +161,8 @@ defmodule OneCore.Call do
       {:error, ^passed_back, _why} -> :no_answer
       {:error, _code, why} -> raise why
       :unreachable -> :no_answer
+      # A hook may be asked more than once for one moment, so one a server stopped answering is asked again.
+      :stopped when method == "hooks/call" -> :no_answer
       :stopped -> raise Server.said(:stopped)
     end
   end

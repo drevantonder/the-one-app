@@ -384,7 +384,8 @@ said=$(as bob claims approve --claim "$claim" | grep -o '"status":"[a-z_]*"') &&
 
 say "What a check costs a call, over one connection as an agent's MCP session keeps"
 # Each server has a client that asks it and no other. The server writing the relation tuples' database answers a
-# check itself, and the other passes the check on to it.
+# check itself, and the other passes the check on to it. That someone may is kept by the server that asked, so the
+# first call of each asks and the rest don't: each line is the median of 300 calls.
 # A tool called 300 times as a user through one server, each call timed.
 timed() {
   local times=$folder/times-$1-$2-$3 began answer
@@ -404,10 +405,12 @@ reads="{\"note\":\"$note\"}"
 for server in server spare; do
   if grep -q "own/relations/: holds its lease" "$folder/$server.log"; then where="writes the tuples' database"; else where="passes each check on"; fi
   echo "  through the $server, which $where:"
+  # Something else is shared, so what either server kept of who may is forgotten.
+  as alice relations share --artifact "$note" --relation viewer --who users/erin >/dev/null
   echo "    $(timed $server alice notes_ping "{}")  a tool that does nothing"
   echo "    $(timed $server alice notes_read "$reads")  alice reads her own note: nothing is asked"
-  echo "    $(timed $server bob notes_read "$reads")  bob reads it: one check, of bob"
-  echo "    $(timed $server bob reader_read "$reads")  bob reads it with reader: two checks, of bob and of reader"
+  echo "    $(timed $server bob notes_read "$reads")  bob reads it: one check, of bob, asked once"
+  echo "    $(timed $server bob reader_read "$reads")  bob reads it with reader: a check of reader too, asked once"
 done
 
 say "A plugin that decides and breaks has refused, for whoever it was added for, and has no say in its own removal"
