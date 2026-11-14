@@ -3,6 +3,7 @@
 Read `VISION.md`, `GLOSSARY.md`, `ARCHITECTURE.md`, `STACK.md` and `PRIOR-ART.md` first. Where they leave something open, ask
 before choosing.
 
+- Consider yourself the owner of this codebase, and treat it as its maintainer would.
 - Dumb beats clever. Delete before adding.
 - Choose the simplest implementation that fully meets the requirements. Prefer well-maintained libraries over custom
   code.
