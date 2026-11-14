@@ -21,8 +21,6 @@
 - A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
   blobs. An `editor` asks that server, which checks the relation tuples.
 - Each user's and group's blobs sit under a prefix of their own in the bucket, so a blob's path says whose it is.
-- One Core keeps, for each user and group, the list of servers that act for them, under that prefix. A server on the
-  list can add another. The first is written by a server acting for the network, and only if the list is absent.
 - A client reads the bucket only through a server.
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
   connects.
@@ -60,8 +58,6 @@
   need, and the owner isn't responsible for keeping their credentials safe.
 - Servers ask the relation tuples plugin. The signer doesn't: it only knows which servers act for whom. Taking access
   away reaches every server eventually. No time is promised.
-- That artifact belongs to whoever the plugin was added for, so only a server its owner chose holds its lease. What's
-  added for the network is safe from its members, and what's added for a group is safe from that group's members.
 - A sharing link opens in the web client, where there is one.
 - Undo follows what people ordinarily expect of an app. A plugin that wants more keeps its own history. What a tool did
   outside the network isn't ours to undo.
@@ -69,18 +65,12 @@
 
 ## Servers
 
-- Any user can bring a server.
 - A server runs on Windows as well as Mac and Linux. On Windows it may run through WSL, if that doesn't weigh on the
   computer and an agent can set it up.
-- A server's owner chooses its members, and each agrees. A new one is for its owner alone.
-- A server acts for its members. It reads and writes their own blobs, and asks a server acting for the owner for
-  anything else they may reach. It can keep a copy of what it was answered.
-- Only a server acting for an artifact's owner holds its lease.
+- A server can keep a copy of what a server acting for an artifact's owner answered it.
 - With no server up, nothing is lost: clients keep what servers answered and wait.
 - Every server and client has a key, and one reaches another by its key: straight to it where a path can be found, and
   through the relay otherwise. Nothing at home is opened to the internet.
-- A tool call and a scheduled job go to the server acting for the user or group they're for. If it writes a database
-  whose lease another server holds, that server passes it on to the one holding it.
 - A scheduled job runs when a server is up. A network that has a cloud server uses it, started when there's work and
   stopped after. Nothing sets one up by itself, and with no server available nothing runs.
 - A cloud server that's always ready is its owner's choice to pay for. Otherwise it should start fast without costing a

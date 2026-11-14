@@ -7,7 +7,7 @@ defmodule OneCore.Mcp do
   Every request is from someone and for someone, which `OneCore.User.asking/2` says, and a plugin's tool runs for
   them.
 
-  Servers ask each other the same way, and four things only a server acting for the same user may ask: to call a
+  Servers ask each other the same way, and four things only a server acting for whoever it asks for may ask: to call a
   function of a plugin's service running here (`services/call`), and to run what was passed on of a service's
   call into its plugin (`plugins/call`), of a plugin's hook (`hooks/call`) or of having a plugin's scheduled jobs
   called (`plugins/schedule`).
@@ -30,7 +30,7 @@ defmodule OneCore.Mcp do
         params = Map.get(request, "params", %{})
 
         try do
-          with {:ok, asked, passed_on} <- User.asking(from, said(params)),
+          with {:ok, asked, passed_on} <- User.asking(from, said(params), method == "hooks/call"),
                {:ok, result} <- result(method, params, from, asked, passed_on) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
           else
@@ -49,8 +49,8 @@ defmodule OneCore.Mcp do
         ""
 
       # Another server saying there's something new in the bucket.
-      {:ok, %{"method" => "notifications/one/look"}} ->
-        Server.look()
+      {:ok, %{"method" => "notifications/one/look"} = said} ->
+        Server.look(for(owner <- List.wrap(said["params"]["for"]), User.owner?(owner), do: owner))
         ""
 
       {:ok, %{"method" => _notification}} ->
@@ -65,25 +65,25 @@ defmodule OneCore.Mcp do
   defp said(%{"_meta" => %{} = said}), do: said
   defp said(_params), do: %{}
 
-  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, from, _asked, _passed_on) do
-    between(from, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
+  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, _from, _asked, passed_on) do
+    between(passed_on, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
   end
 
-  defp result("plugins/call", %{"added" => at, "plugin" => plugin} = params, from, asked, _passed_on) do
+  defp result("plugins/call", %{"added" => at, "plugin" => plugin} = params, _from, asked, passed_on) do
     function = fn -> Plugins.function(at, plugin, params["function"], params["arguments"], asked, true) end
 
-    with {:ok, result} <- between(from, function) do
+    with {:ok, result} <- between(passed_on, function) do
       Server.changed()
       {:ok, result}
     end
   end
 
-  defp result("plugins/schedule", %{"added" => at, "plugin" => plugin}, from, _asked, _passed_on) do
-    between(from, fn -> Plugins.schedule(at, plugin, true) end)
+  defp result("plugins/schedule", %{"added" => at, "plugin" => plugin}, _from, _asked, passed_on) do
+    between(passed_on, fn -> Plugins.schedule(at, plugin, true) end)
   end
 
-  defp result("hooks/call", %{"added" => at, "plugin" => plugin, "hook" => hook} = params, from, asked, _passed_on) do
-    between(from, fn -> Plugins.hook(at, plugin, hook, params["about"], asked, true) end)
+  defp result("hooks/call", %{"added" => at, "plugin" => plugin, "hook" => hook} = params, _from, asked, passed_on) do
+    between(passed_on, fn -> Plugins.hook(at, plugin, hook, params["about"], asked, true) end)
   end
 
   defp result("tools/call", %{"name" => name} = params, _from, asked, passed_on) do
@@ -160,24 +160,22 @@ defmodule OneCore.Mcp do
   defp result(method, _params, _from, _asked, _passed_on),
     do: {:error, -32601, "This server has no method #{method}"}
 
-  # What one server asks of another is run only for a server acting for the same user, by one that acts for them
-  # too.
-  defp between(from, run) do
-    if Services.acting?(from) and Services.acting?(Server.key()) do
-      case run.() do
-        {:ok, answer} -> {:ok, %{answer: answer}}
-        {:error, why} -> {:error, -32000, why}
-        {:passed_on, result} -> {:ok, result}
-        :passed_back -> {:error, Server.passed_back(), "This server would pass that on in turn"}
-      end
-    else
-      {:error, -32000, "Only a server acting for the same user may ask that"}
+  # What one server asks of another is run only for a server that says who it asks for, which only one acting
+  # for them is believed about. This server runs it if it acts for whoever it's for too.
+  defp between(true, run) do
+    case run.() do
+      {:ok, answer} -> {:ok, %{answer: answer}}
+      {:error, why} -> {:error, -32000, why}
+      {:passed_on, result} -> {:ok, result}
+      :passed_back -> {:error, Server.passed_back(), "This server would pass that on in turn"}
     end
   end
 
+  defp between(_passed_on, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
+
   # A tool is one of One Core's own, or a plugin's by its name and the plugin's.
   defp call(name, inputs, asked, passed_on) do
-    with :none <- Tools.call(name, inputs, asked),
+    with :none <- Tools.call(name, inputs, asked, passed_on),
          [plugin, tool] <- String.split(name, "_", parts: 2),
          {:ok, answer} <- Plugins.call(plugin, tool, inputs, asked, passed_on) do
       case answer do

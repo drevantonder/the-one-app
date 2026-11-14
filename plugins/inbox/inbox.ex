@@ -67,7 +67,7 @@ defmodule Inbox do
   def call("watch", %{"folder" => folder} = inputs, call) do
     database = OneCore.Call.plugin(call, "database")
     server = inputs["server"] || List.first(OneCore.Service.servers(call, Watcher))
-    folder = OneCore.Service.call(call, Watcher, :watch, [call.for, folder], server)
+    folder = OneCore.Service.call(call, Watcher, :watch, [call.added, folder], server)
 
     database.transaction(call, @schema, fn db ->
       database.query(
@@ -82,7 +82,7 @@ defmodule Inbox do
 
   def call("watching", _inputs, call) do
     for server <- OneCore.Service.servers(call, Watcher),
-        watching = OneCore.Service.call(call, Watcher, :watching, [call.for], server) do
+        watching = OneCore.Service.call(call, Watcher, :watching, [call.added], server) do
       Map.put(watching, "server", server)
     end
   end

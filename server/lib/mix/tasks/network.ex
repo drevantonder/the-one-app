@@ -6,13 +6,18 @@ defmodule Mix.Tasks.Network do
       mix network <folder>
 
   The folder's `bucket` is the network's bucket, `server` is the server's home, and `client` is a client's home,
-  told where its servers are. A new network starts with the plugins The One App ships with, as this repo has
+  told where its servers are. `only-server` is a client that asks that one server and no other. A new network starts with the plugins The One App ships with, as this repo has
   them. Starting it again in the same folder carries on with what's there.
 
       mix network <folder> <server>
 
-  starts another server of that network, whose home is the folder's `<server>`. It doesn't start until a server
-  of the network has let it in, and says how.
+  starts another server of that network, whose home is the folder's `<server>`. It doesn't start until whoever
+  it's for has let it in, and says how.
+
+      mix network <folder> <server> --for users/alice
+
+  starts a server that is that user's, or that group's, and acts for them alone. Without it a server is the
+  network's, and acts for everyone in it.
 
       mix network <folder> --address <address> --first <secret>
 
@@ -37,7 +42,7 @@ defmodule Mix.Tasks.Network do
 
   @impl true
   def run(args) do
-    case OptionParser.parse!(args, strict: [address: :string, first: :string, development: :boolean]) do
+    case OptionParser.parse!(args, strict: [address: :string, first: :string, development: :boolean, for: :string]) do
       {options, [folder | server]} when length(server) <= 1 ->
         start(Path.expand(folder), List.first(server, "server"), options)
 
@@ -59,6 +64,7 @@ defmodule Mix.Tasks.Network do
     Application.put_env(:one_core, :address, address)
     Application.put_env(:one_core, :first, options[:first])
     Application.put_env(:one_core, :development, options[:development] == true)
+    Application.put_env(:one_core, :for, options[:for] || "network")
     Application.put_env(:one_core, :home, Path.join(folder, server))
     Application.put_env(:one_core, :shipped, shipped())
     Mix.Task.run("app.config")
@@ -69,25 +75,42 @@ defmodule Mix.Tasks.Network do
 
       {:error, {:one_core, {{:not_joined, key}, _start}}} ->
         Mix.raise("""
-        This server isn't one of the network's yet. Let it in from one of the network's clients, then start it again:
+        This server isn't one of #{options[:for] || "the network"}'s yet. Whoever owns them lets it in from a client, asking for them
+        (ONE_FOR=#{options[:for] || "network"}), and then it's started again:
 
             one add_server --key #{key}
         """)
     end
 
-    for {name, {:error, why}} <- Plugins.ship(), do: Mix.shell().error("#{name} wasn't deployed: #{why}")
+    # The plugins The One App ships with are the network's, so a server acting for it deploys them.
+    if Servers.here?("network"),
+      do: for({name, {:error, why}} <- Plugins.ship(), do: Mix.shell().error("#{name} wasn't deployed: #{why}"))
 
-    # A client of a network with an address asks there which servers to reach. Without one, it's told here.
+    # A client of a network with an address asks there which servers to reach. Without one, it's told here: the
+    # ones acting for the network, which is everyone. A server's pass for a client says the server's list, so the
+    # one a network's own server gives lets a client in whoever its user is.
     client = Path.join(folder, "client")
     File.mkdir_p!(client)
 
-    if address do
-      {:ok, key} = Iroh.key(Path.join(client, "key"))
-      pass = Address.pass(key, System.system_time(:millisecond) + @pass_for)
-      File.write!(Path.join(client, "network"), JSON.encode!(%{address: address, pass: pass}))
-    else
-      File.write!(Path.join(client, "servers"), "[#{Enum.join(Servers.addresses(), ",")}]")
+    cond do
+      not Servers.here?("network") ->
+        :ok
+
+      address ->
+        {:ok, key} = Iroh.key(Path.join(client, "key"))
+        pass = Address.pass(key, System.system_time(:millisecond) + @pass_for)
+        File.write!(Path.join(client, "network"), JSON.encode!(%{address: address, pass: pass}))
+
+      true ->
+        addresses = for key <- Servers.listed("network"), {:ok, address} <- [Servers.address(key)], do: address
+        File.write!(Path.join(client, "servers"), "[#{Enum.join(addresses, ",")}]")
     end
+
+    # A client that asks this server and no other, to test with.
+    only = Path.join(folder, "only-" <> server)
+    File.mkdir_p!(only)
+    {:ok, reached} = Servers.address(Server.key())
+    File.write!(Path.join(only, "servers"), "[#{reached}]")
 
     Mix.shell().info("A server is running in #{folder}: #{Server.key()}. Its client: ONE_HOME=#{client}")
     System.no_halt(true)

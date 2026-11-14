@@ -16,6 +16,12 @@ const NETWORK = "network/";
  * they learn where it is.
  */
 const SERVER = /^servers\/([0-9a-f]{64})\//;
+/**
+ * What every server of the network reads, whoever's it is: a plugin's code, which is open to everyone in the
+ * network, what's added for whom, and which servers act for whom. That's how a server runs a plugin someone else
+ * deployed, and finds the server to pass a call on to.
+ */
+const OPEN = /^(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|added|servers)$/;
 /** A blob's key says whose it is by how it starts: a user's or a group's prefix, or the network's. */
 const OWNER = /^(?:(?:users|groups)\/[^/]+\/|network\/)/;
 const owner = (key) => OWNER.exec(key)?.[0];
@@ -55,7 +61,9 @@ export default class extends WorkerEntrypoint {
     if (pathname === "/signer/sign" && request.method === "POST") return this.sign(by, request.headers.get("one-pass"), body);
     if (pathname === "/signer/servers" && request.method === "GET") {
       if (!(await this.admits(by, request.headers.get("one-pass")))) return refuse(403, "This network doesn't know you");
-      return Response.json({ servers: await this.servers(searchParams.get("of")) });
+      // Whoever's servers are asked for, the ones acting for the network act for them too.
+      const servers = [...(await this.servers(searchParams.get("of"))), ...(await this.servers(NETWORK))];
+      return Response.json({ servers: [...new Set(servers)] });
     }
     return refuse(404, "The signer signs at /signer/sign and lists servers at /signer/servers");
   }
@@ -82,8 +90,9 @@ export default class extends WorkerEntrypoint {
     // list. The secret opens nothing after that, since the bucket lets only the first write land.
     const first = ask.write === NETWORK + "servers" && same(said(pass).first, this.env.FIRST_SERVER);
     const server = SERVER.exec(key)?.[1];
-    const own = server && (server === by || ask.read !== undefined) && (await this.admits(by, pass));
-    if (!listed && !first && !own) return refuse(403, "You aren't on its list of servers");
+    const reads = ask.read !== undefined || ask.list !== undefined;
+    const open = (server === by || (server && ask.read !== undefined) || (OPEN.test(key) && reads)) && (await this.admits(by, pass));
+    if (!listed && !first && !open) return refuse(403, "You aren't on its list of servers");
 
     const url = new URL(this.env.BUCKET);
     const headers = {};

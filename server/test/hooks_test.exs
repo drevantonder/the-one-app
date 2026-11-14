@@ -65,10 +65,7 @@ defmodule OneCore.HooksTest do
   test "plugins change, decide and hear a call, and neither their order nor a forgotten answer lets one through", %{
     tmp_dir: folder
   } do
-    Application.put_env(:one_core, :bucket, {OneCore.Bucket.Folder, Path.join(folder, "bucket")})
-    Application.put_env(:one_core, :home, Path.join(folder, "server"))
-    start_supervised!(Plugins)
-    start_supervised!(OneCore.Services)
+    OneCore.Test.server(folder)
     Process.register(self(), :hooks_test)
     anyone = User.anyone()
 

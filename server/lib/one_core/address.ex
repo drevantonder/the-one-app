@@ -3,10 +3,10 @@ defmodule OneCore.Address do
   A server at its network's address: it signs what it asks there with its key, and shows a pass that says why it's
   one of the network's own. The pieces at the address check both (`address/ask.js`, `address/signer/signer.js`).
   """
-  alias OneCore.{Iroh, Server, User}
+  alias OneCore.{Iroh, Server}
 
-  # The list this server is on: the one user's, whom every server acts for.
-  @list User.anyone() <> "/"
+  # The list this server is on: its owner's, whom it was started for.
+  defp list, do: Application.get_env(:one_core, :for, "network") <> "/"
 
   @doc "The headers of an ask of `path` there, with `body`: this server's signature of it, and its pass."
   def signed(path, body) do
@@ -21,14 +21,14 @@ defmodule OneCore.Address do
   """
   def pass do
     case Application.get_env(:one_core, :first) do
-      nil -> encode(%{list: @list})
-      first -> encode(%{list: @list, first: first})
+      nil -> encode(%{list: list()})
+      first -> encode(%{list: list(), first: first})
     end
   end
 
   @doc "A pass for the client whose key is `client`, until `until` in milliseconds: this server's word for it."
   def pass(client, until) do
-    encode(%{list: @list, by: key(), until: until, signature: sign("one/pass/1\n#{client}\n#{@list}\n#{until}")})
+    encode(%{list: list(), by: key(), until: until, signature: sign("one/pass/1\n#{client}\n#{list()}\n#{until}")})
   end
 
   defp encode(pass), do: Base.url_encode64(JSON.encode!(pass), padding: false)

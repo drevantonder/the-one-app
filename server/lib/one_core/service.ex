@@ -5,7 +5,7 @@ defmodule OneCore.Service do
   A service is a module of its plugin that says `use GenServer` and `@behaviour OneCore.Service`. Its process runs
   on each server whose owner installed it, and its public functions are what the rest of its plugin calls there.
   """
-  alias OneCore.{Call, Plugins, Server, Services}
+  alias OneCore.{Call, Plugins, Server, Servers, Services}
   alias OneCore.Plugins.Version
 
   @doc "What the service needs of a machine, for its owner to read before installing it."
@@ -23,13 +23,14 @@ defmodule OneCore.Service do
   """
   def call(%Call{} = call, service, function, arguments \\ [], server \\ nil) when is_list(arguments) do
     service = Version.own_name(service)
-    servers = if server, do: [server], else: Services.servers(call.who, service)
+    servers = if server, do: [server], else: Services.servers(call.who, service, call.for)
 
     if servers == [] do
       raise "No server runs #{call.plugin}'s #{service}. `services` says what it needs, and `install_service` runs it on one."
     end
 
-    ask = %{plugin: call.who, service: service, function: "#{function}", arguments: json(arguments)}
+    said = %{who: call.by, for: call.for, passed_on: true}
+    ask = %{plugin: call.who, service: service, function: "#{function}", arguments: json(arguments), _meta: said}
 
     case ask(servers, call.server, ask) do
       {:ok, answer} -> answer
@@ -38,18 +39,16 @@ defmodule OneCore.Service do
   end
 
   @doc "The keys of the servers that run a service of this call's plugin, for a plugin that chooses which to call."
-  def servers(%Call{who: plugin}, service), do: Services.servers(plugin, Version.own_name(service))
+  def servers(%Call{who: plugin, for: who}, service), do: Services.servers(plugin, Version.own_name(service), who)
 
   @doc """
   Calls a function of the service's plugin, for the user or group `who`, asked by nobody, and gives its answer.
   `service` is the
   service's process: `self()` in its callbacks, and what its functions are called with. The function is called
-  with an `OneCore.Call` for `who` and then `arguments`, on a server acting for them, which this server must be:
-  one on the network's one list acts for every user in it.
+  with an `OneCore.Call` for `who` and then `arguments`, on a server acting for whoever the plugin was added for.
   """
   def plugin(service, who, function, arguments \\ []) when is_pid(service) and is_list(arguments) do
     {plugin, _name, _version} = which(service)
-    if Services.acts_for() == [], do: raise("This server doesn't act for #{who}")
 
     {added, name} =
       Plugins.added(who, plugin) || raise "#{plugin} isn't added for #{who}, or for the network"
@@ -65,8 +64,14 @@ defmodule OneCore.Service do
     answer
   end
 
-  @doc "The users and groups a service's server acts for, each as `plugin/4` takes it."
-  def acts_for, do: Services.acts_for()
+  @doc """
+  Who the service that asks runs for on its server, each as `plugin/4` takes it: everyone its plugin was added
+  for, a user, a group or the network, that its server acts for.
+  """
+  def acts_for do
+    {plugin, _name, _version} = which(self())
+    Enum.filter(Plugins.added_for(plugin), &Servers.here?/1)
+  end
 
   @doc "The key of the server a service runs on, as `call/5` takes it."
   def server, do: Server.key()

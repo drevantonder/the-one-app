@@ -78,9 +78,7 @@ defmodule OneCore.DatabaseTest do
   # A server of this network that runs the database plugin, so that its processes, and asking another server, are
   # what they are anywhere: here none of the others answers.
   setup %{tmp_dir: home} do
-    Application.put_env(:one_core, :home, home)
-    Application.put_env(:one_core, :bucket, {OneCore.Bucket.Folder, Path.join(home, "bucket")})
-    for child <- [Plugins, OneCore.Server, OneCore.Services], do: start_supervised!(child)
+    OneCore.Test.server(home)
     folder = Path.expand("../../plugins/database", __DIR__)
 
     files =
@@ -376,6 +374,7 @@ defmodule OneCore.DatabaseTest do
   defp call(run, server) do
     %Call{
       own: %Artifact{prefix: @prefix},
+      added: User.anyone(),
       folder: Path.join(run.home, server),
       server: server,
       for: User.anyone(),

@@ -147,13 +147,9 @@ defmodule OneCore.WhoTest do
   end
 
   setup %{tmp_dir: folder} do
-    Application.put_env(:one_core, :bucket, {OneCore.Bucket.Folder, Path.join(folder, "bucket")})
-    Application.put_env(:one_core, :home, Path.join(folder, "server"))
     Application.put_env(:one_core, :development, false)
     on_exit(fn -> Application.delete_env(:one_core, :development) end)
-    {:ok, key} = OneCore.Iroh.key(Server.key_file())
-    assert OneCore.Servers.joined?(key)
-    for child <- [Plugins, Server, Services], do: start_supervised!(child)
+    OneCore.Test.server(folder)
     assert {:ok, 1, ""} = Plugins.deploy("network", "asked", %{"asked.ex" => @plugin})
     :ok
   end
@@ -176,7 +172,10 @@ defmodule OneCore.WhoTest do
     # Only a server acting here is believed about who it asks for.
     assert ask(%{who: "users/alice", for: "users/alice"}, Server.key()) == "users/alice"
     assert ask(%{who: nil, for: "groups/family"}, Server.key()) == " for groups/family"
-    assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice", for: "users/alice"}, stranger)
+
+    assert {:refused, "Only a server acting for users/alice says it asks for them"} =
+             ask(%{who: "users/alice", for: "users/alice"}, stranger)
+
     assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice", for: "users/alice"})
     # What it passes on it has decided, so a group's member isn't asked about again, nor a link's holder refused.
     assert ask(%{who: "users/bob", for: "groups/family", passed_on: true}, Server.key()) ==

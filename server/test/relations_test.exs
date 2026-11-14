@@ -55,11 +55,7 @@ defmodule OneCore.RelationsTest do
   defp unshare(artifact, relation, who, by), do: call("relations_unshare", tuple(artifact, relation, who), by)
 
   setup %{tmp_dir: folder} do
-    Application.put_env(:one_core, :bucket, {OneCore.Bucket.Folder, Path.join(folder, "bucket")})
-    Application.put_env(:one_core, :home, Path.join(folder, "server"))
-    {:ok, key} = OneCore.Iroh.key(Server.key_file())
-    assert OneCore.Servers.joined?(key)
-    for child <- [Plugins, Server, Services], do: start_supervised!(child)
+    OneCore.Test.server(folder)
     for name <- ["database", "relations"], do: assert({:ok, 1, ""} = Plugins.deploy("network", name, shipped(name)))
     assert {:ok, 1, ""} = Plugins.deploy("network", "notes", %{"notes.ex" => @notes})
     assert {:ok, 1, ""} = Plugins.deploy("network", "peek", %{"peek.ex" => String.replace(@notes, "Notes", "Peek")})
@@ -224,11 +220,30 @@ defmodule OneCore.RelationsTest do
       assert {:error, "users/alice isn't an " <> _} = tool.(name, inputs, {@alice, "network"})
     end
 
-    for name <- ["add_server", "install_service"],
-        inputs = %{"key" => String.duplicate("ab", 32), "plugin" => "notes", "service" => "Notes.None"} do
-      assert tool.(name, inputs, {@alice, @alice}) ==
-               {:error, "users/alice isn't an owner of network. Whoever owns it shares it, with relations_share."}
-    end
+    # Which servers act for the network is its owner's to say, and so is what the network's own server runs and
+    # who else it acts for. Anyone brings a server of their own.
+    key = String.duplicate("ab", 32)
+    not_theirs = {:error, "users/alice isn't an owner of network. Whoever owns it shares it, with relations_share."}
+    assert tool.("add_server", %{"key" => key}, {@alice, "network"}) == not_theirs
+    assert tool.("install_service", %{"plugin" => "notes", "service" => "Notes.None"}, {@alice, @alice}) == not_theirs
+    assert tool.("add_member", %{"who" => @alice}, {@alice, @alice}) == not_theirs
+    assert {:ok, _} = tool.("add_server", %{"key" => key}, {@alice, @alice})
+    assert OneCore.Servers.listed(@alice) == [key]
+
+    assert {:error, "users/bob isn't an owner of users/alice" <> _} =
+             tool.("add_server", %{"key" => key}, {@bob, @alice})
+
+    # A server acts for whoever its owner chose, and nobody else puts it on their list.
+    :ok = OneCore.Bucket.write("servers/#{key}/members", JSON.encode!([@alice]))
+    OneCore.Servers.forget()
+
+    assert tool.("add_server", %{"key" => key}, {@bob, @bob}) ==
+             {:error, "That server is users/alice's, who hasn't chosen users/bob. Its owner does, with add_member."}
+
+    assert {:ok, _} = tool.("add_member", %{"who" => @bob}, {User.anyone(), User.anyone()})
+    assert OneCore.Servers.members(Server.key()) == ["network", @bob]
+    assert {:ok, _} = tool.("add_server", %{"key" => Server.key()}, {@bob, @bob})
+    assert OneCore.Servers.acts_for(Server.key()) == ["network", @bob]
 
     # The network's owner does all of it, and so recovers anything.
     assert {:ok, _} = tool.("remove", %{"name" => "diary"}, {User.anyone(), "groups/family"})

@@ -6,19 +6,25 @@
 # a tuple, and a job that's being called when the server calling it is killed is called once by the spare. It
 # says what a check costs a call.
 #
-#     mise exec -- server/test/who.sh
+#     mise exec -- server/test/who.sh [--address]
 #
+# With --address the network has its address on this machine too, so its servers reach the bucket only through the
+# signer there, which is what refuses a server the blobs of someone it doesn't act for.
 set -euo pipefail
-set -m # The network is a job with a process group of its own.
+set -m # The network is a job with a process group of its own, and so is each server started here.
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 folder=$(mktemp -d)
-"$root/network" "$folder" --spare >"$folder/network.log" 2>&1 &
+"$root/network" "$folder" --spare "$@" >"$folder/network.log" 2>&1 &
 network=$!
+started=("$network")
 # `./network` stops what it started when it's stopped.
-trap 'kill "$network" 2>/dev/null || true; wait "$network" 2>/dev/null || true; rm -rf "$folder"' EXIT
+trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
 grep -q -m1 "A network is running" <(tail -f --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 one=$root/target/release/one
+# The network's address, if it has one, as each of its servers is started with it.
+at_address=()
+[[ ! -e $folder/client/network ]] || at_address=(--address "$(grep -o '"address":"[^"]*"' "$folder/client/network" | cut -d'"' -f4)")
 
 say() { printf '\n== %s\n' "$*"; }
 now() { echo "${EPOCHREALTIME/[.,]/}"; }
@@ -35,11 +41,28 @@ as() {
     ONE_LINK=$who ONE_HOME=$folder/client "$one" "$@"
   else
     [[ $1 == for ]] && asked=$2 && shift 2
-    ${asked:+env ONE_FOR=$asked} env ONE_AS=$who ONE_HOME=$folder/client "$one" "$@"
+    ${asked:+env ONE_FOR=$asked} env ONE_AS=$who ONE_HOME=${home:-$folder/client} "$one" "$@"
   fi
 }
+# The same through one server and no other: `via alices as alice diary write ...`.
+via() { home=$folder/only-$1 "${@:2}"; }
+# Each server's key by its name, which is how it's said here.
+declare -A key
+key_of() { key[$1]=$(grep -o -E "(running in [^ ]*: |add_server --key )[0-9a-f]{64}" "$folder/$1.log" | head -1 | grep -o -E "[0-9a-f]{64}$"); }
+named() { local names=() server; for server in "${!key[@]}"; do names+=(-e "s/${key[$server]}/the $server/g"); done; sed "${names[@]}"; }
+key_of server && key_of spare
+# Starts a server that is someone's own, and returns once it's running or has said it isn't theirs yet.
+start_for() {
+  (cd "$root/server" && exec mix network "$folder" "$1" --for "$2" --development "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  started+=($!)
+  grep -q -m1 -E "A server is running|isn't one of" <(tail -f --pid=$! -n +1 "$folder/$1.log")
+  key_of "$1"
+}
 # What a command says is shown with it. `may` is one that has to be answered, and `refused` one that mustn't be.
-shown() { echo "  $1  $(echo "${*:2}" | sed -e "s|$folder|<folder>|g" -e 's/\(link [A-Za-z0-9_-]\{6\}\)[A-Za-z0-9_-]*/\1…/')" && echo "           -> $said"; }
+shown() {
+  echo "  $1  $(echo "${*:2}" | sed -e "s|$folder|<folder>|g" -e 's/\(link [A-Za-z0-9_-]\{6\}\)[A-Za-z0-9_-]*/\1…/' | named)"
+  echo "           -> $(named <<<"$said")"
+}
 may() { said=$("$@" 2>&1) && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $said" && exit 1; }; }
 refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $said" && exit 1; }; }
 
@@ -147,7 +170,7 @@ defmodule Diary do
   @impl true
   def call("write", %{"text" => text}, %{own: own} = call) do
     Artifact.write(own, "#{length(Artifact.list(own)) + 1}", text)
-    "#{Artifact.name(own)} has #{length(Artifact.list(own))}, and this ran for #{call.for}, asked by #{call.by}"
+    "#{Artifact.name(own)} has #{length(Artifact.list(own))}: ran for #{call.for}, asked by #{call.by}, on #{call.server}"
   end
 end
 EOF
@@ -256,9 +279,50 @@ refused as bob deploy --name diary --files-from "$folder/diary"
 refused as carol for groups/family remove --name diary
 refused as bob for network deploy --name notes --files-from "$folder/notes"
 refused as bob for network remove --name relations
-refused as bob add_server --key "$(printf 'ab%.0s' {1..32})"
+refused as bob for network add_server --key "$(printf 'ab%.0s' {1..32})"
 refused as bob install_service --plugin inbox --service Inbox.Watcher
 may as alice for groups/family remove --name diary
+
+say "Anyone brings a server, which is theirs alone until they choose who else it acts for, and each agrees"
+start_for alices users/alice
+echo "  a server started for alice says: $(grep -o "This server isn't one of users/alice's yet" "$folder/alices.log")"
+refused as bob for users/alice add_server --key "${key[alices]}"
+may as alice add_server --key "${key[alices]}"
+start_for alices users/alice
+grep -q "A server is running" "$folder/alices.log" && echo "  started again, it's running"
+may via alices as alice diary write --text "At home"
+may via alices as alice journal write --text "With everyone"
+refused via alices as bob diary write --text "At alice's"
+refused as bob add_server --key "${key[alices]}"
+refused as bob add_member --server "${key[alices]}" --who users/bob
+refused as bob install_service --plugin load --service Load.Meter --server "${key[alices]}"
+if [[ ${#at_address[@]} -gt 0 ]]; then
+  echo "  alice's server has no credentials for the bucket, and asks the signer for each of these:"
+  (cd "$root/server" && mix run --no-start -e '
+    [folder, address | blobs] = System.argv()
+    Application.put_env(:one_core, :home, Path.join(folder, "alices"))
+    Application.put_env(:one_core, :for, "users/alice")
+    Application.put_env(:one_core, :bucket, {OneCore.Bucket.S3, address})
+    Application.ensure_all_started(:req)
+    for blob <- blobs do
+      said = try do
+        case OneCore.Bucket.read(blob) do
+          {:ok, data, _tag} -> "read, #{byte_size(data)} bytes"
+          :absent -> "allowed, and there is none"
+        end
+      rescue
+        refused in OneCore.Bucket.Refused -> String.replace(refused.message, ~r/^.*refused: /, "refused by the signer: ")
+      end
+      IO.puts("    #{blob}: #{said}")
+    end' "$folder" "${at_address[1]}" users/alice/own/diary/1 users/alice/added users/bob/own/diary/1 \
+    users/bob/made/notes/list/text network/own/relations/log/0000000000000001 groups/family/own/diary/1 \
+    users/bob/added network/plugins/notes/newest 2>&1 | grep -v "^$")
+else
+  echo "  (on a folder nothing stands between a server and the bucket: with --address, the signer refuses it the rest)"
+fi
+may as alice add_member --server "${key[alices]}" --who users/bob
+may as bob add_server --key "${key[alices]}"
+may via alices as bob diary write --text "At alice's"
 
 say "A hook that decides refuses a call with its reason"
 may as alice notes write --id diary --text "My password is hunter2"
@@ -282,12 +346,6 @@ said=$(as bob claims approve --claim "$claim" | grep -o '"status":"[a-z_]*"') &&
 say "What a check costs a call, over one connection as an agent's MCP session keeps"
 # Each server has a client that asks it and no other. The server writing the relation tuples' database answers a
 # check itself, and the other passes the check on to it.
-declare -A key
-for server in server spare; do
-  key[$server]=$(grep -o "running in [^ ]*: [0-9a-f]*" "$folder/$server.log" | grep -o "[0-9a-f]*$")
-  mkdir -p "$folder/only-$server"
-  echo "[$(cat "$folder/bucket/servers/${key[$server]}/address")]" >"$folder/only-$server/servers"
-done
 # A tool called 300 times as a user through one server, each call timed.
 timed() {
   local times=$folder/times-$1-$2-$3 began answer

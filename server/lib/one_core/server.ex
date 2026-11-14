@@ -57,21 +57,23 @@ defmodule OneCore.Server do
   def said(:stopped), do: "That server stopped answering after it was asked, so this may or may not have been done"
 
   @doc """
-  Tells the other servers acting that there's something new in the bucket to look for: a plugin's version, a
-  server, a service installed. Each has looked, or couldn't be reached, when this returns.
+  Tells the other servers acting for `owners` that there's something new of theirs in the bucket to look for: a
+  plugin's version, a server, a service installed. Each has looked, or couldn't be reached, when this returns.
   """
-  def tell_servers do
-    look = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/look"})
-    Stream.run(Task.async_stream(Servers.acting() -- [key()], &ask(&1, look), timeout: :infinity))
+  def tell_servers(owners) do
+    look = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/look", params: %{for: owners}})
+    servers = Enum.uniq(Enum.flat_map(owners, &Servers.acting/1)) -- [key()]
+    Stream.run(Task.async_stream(servers, &ask(&1, look), timeout: :infinity))
   end
 
   @doc """
-  Looks in the bucket for what other servers put there: plugins' newer versions, the servers acting and the
-  services they run. Its clients are told if a plugin changed.
+  Looks in the bucket for what other servers put there: the servers acting and the services they run, and the
+  newer versions of the plugins added for `owners` and for everyone this server has looked at before. Its clients
+  are told if a plugin changed.
   """
-  def look do
+  def look(owners \\ []) do
     Services.look()
-    if Plugins.look(), do: changed()
+    if Enum.any?(Enum.map(owners, &Plugins.look/1) ++ [Plugins.look()]), do: changed()
     :ok
   end
 
@@ -116,7 +118,7 @@ defmodule OneCore.Server do
     {:ok, {endpoint, address}} = Iroh.start(key_file(), network, self())
     key = JSON.decode!(address)["id"]
     :persistent_term.put(__MODULE__, {key, endpoint})
-    Servers.started(key, address)
+    Servers.started(key, address, Application.get_env(:one_core, :for, "network"))
     {:ok, %{endpoint: endpoint}}
   end
 

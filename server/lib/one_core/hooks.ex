@@ -70,8 +70,8 @@ defmodule OneCore.Hooks do
      """},
     {"joined", :hears,
      """
-     A server was let into the network. It's about the `server`'s key and `by`, the key of the server that let it
-     in.
+     A server was let act for someone. It's about the `server`'s key, who it's `for`, and `by`, the key of the
+     server that added it.
      """}
   ]
 

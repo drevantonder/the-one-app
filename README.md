@@ -20,8 +20,10 @@ there.
 
 `cd server && mix test` runs the tests. The proofs run real servers and the real app and say what happened:
 `server/test/takeover.sh` stops servers in the middle of writes, `server/test/services.sh` runs services on one of
-two servers, `server/test/who.sh` shows who may reach what as several users and a scheduled job across a takeover, `address/proof/proof.sh` runs a whole address with nothing deployed, and
-`client/shell/test/isolation.sh` has an app try everything it mustn't reach.
+two servers, `server/test/who.sh` shows who may do what as several users, each with their own plugins and servers,
+and a scheduled job across a takeover, on a folder or with `--address` through the signer,
+`address/proof/proof.sh` runs a whole address with nothing deployed, and `client/shell/test/isolation.sh` has an
+app try everything it mustn't reach.
 
 To put a network's address on Cloudflare, make an R2 bucket and an S3 API token for it, and write the signer's
 secrets to `address/signer/secrets`, a line each: `BUCKET`, the bucket's S3 address with its name on the end

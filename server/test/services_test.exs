@@ -52,11 +52,7 @@ defmodule OneCore.ServicesTest do
   end
 
   setup %{tmp_dir: folder} do
-    Application.put_env(:one_core, :bucket, {OneCore.Bucket.Folder, Path.join(folder, "bucket")})
-    Application.put_env(:one_core, :home, Path.join(folder, "server"))
-    {:ok, key} = OneCore.Iroh.key(Server.key_file())
-    assert OneCore.Servers.joined?(key)
-    for child <- [Plugins, Server, Services], do: start_supervised!(child)
+    OneCore.Test.server(folder)
     # What an earlier test loaded stays loaded, since nothing unloads a server's plugins as it stops.
     earlier = loaded()
     assert {:ok, 1, ""} = Plugins.deploy("network", "counter", %{"counter.ex" => counter(1, self())})
@@ -67,8 +63,8 @@ defmodule OneCore.ServicesTest do
   @tag :tmp_dir
   test "a service keeps what it holds through its plugin's updates, in the newest code", %{earlier: earlier} do
     assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [1, 1]}
-    anyone = User.anyone()
-    assert_receive {:counted, ^anyone, 1}
+    # The plugin was added for the network, so that's who its service has it run for.
+    assert_receive {:counted, "network", 1}
     service = Plugins.Process.whereis("network/plugins/counter", "Counter.Kept")
 
     # More updates than the two versions of a module the VM keeps.
@@ -93,17 +89,15 @@ defmodule OneCore.ServicesTest do
   end
 
   @tag :tmp_dir
-  test "only a server acting for the same user calls a service's functions and the functions it calls" do
+  test "only a server acting for whoever it asks for calls a service's functions and the functions it calls" do
     stranger = String.duplicate("ab", 32)
-    service = %{plugin: "network/plugins/counter", service: "Counter.Kept", function: "add", arguments: []}
+    said = %{who: User.anyone(), for: User.anyone(), passed_on: true}
+    service = %{plugin: "network/plugins/counter", service: "Counter.Kept", function: "add", arguments: [], _meta: said}
+    plugin = %{added: "network", plugin: "counter", function: "counted", arguments: [7], _meta: said}
 
-    plugin = %{
-      added: "network",
-      plugin: "counter",
-      function: "counted",
-      arguments: [7],
-      _meta: %{who: User.anyone(), for: User.anyone()}
-    }
+    # A client asks neither, whoever it says it is.
+    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", Map.delete(service, :_meta), nil)
+    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", Map.delete(plugin, :_meta), nil)
 
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", service, stranger)
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", plugin, stranger)

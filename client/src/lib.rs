@@ -74,12 +74,10 @@ impl Network {
         ])
     }
 
-    /// The servers acting for whoever this machine's pass is for, as the signer at the address says: each one's key,
-    /// reached through the relay there until a straighter path is found.
-    async fn servers(&self, key: &SecretKey) -> Result<Vec<EndpointAddr>> {
-        let pass = data_encoding::BASE64URL_NOPAD.decode(self.pass.as_bytes()).context("the pass isn't a pass")?;
-        let pass: Value = serde_json::from_slice(&pass).context("the pass isn't a pass")?;
-        let of = pass["list"].as_str().context("the pass names no list")?;
+    /// The servers acting for `of`, a user's or a group's prefix, as the signer at the address says: the ones on their
+    /// list and then the ones acting for the network, which act for everyone. Each is its key, reached through the
+    /// relay there until a straighter path is found.
+    async fn servers(&self, key: &SecretKey, of: &str) -> Result<Vec<EndpointAddr>> {
         let mut ask = web()?
             .get(format!("{}/signer/servers", self.address.trim_end_matches('/')))
             .timeout(CONNECT)
@@ -494,12 +492,16 @@ impl Client {
                 .with_context(|| format!("{} isn't servers' addresses", file.display()));
             return servers.map(Some);
         };
-        let asked = (SERVERS, json!({}));
+        // Until signing in says who this client's user is, it's who it says it acts as, or the one user a network
+        // has without it.
+        let user = self.says.iter().find(|(says, _)| *says == "as").map_or("anyone", |(_, user)| user);
+        let of = format!("users/{user}/");
+        let asked = (SERVERS, json!({"of": of}));
         if !now {
             return Ok(self.kept(asked.0, &asked.1).and_then(|kept| serde_json::from_value(kept).ok()));
         }
         let servers = network
-            .servers(self.endpoint.secret_key())
+            .servers(self.endpoint.secret_key(), &of)
             .await
             .with_context(|| format!("Couldn't ask {} which servers to reach", network.address))?;
         self.keep(asked.0, &asked.1, &serde_json::to_value(&servers)?)?;

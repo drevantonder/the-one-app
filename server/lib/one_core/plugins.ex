@@ -21,14 +21,15 @@ defmodule OneCore.Plugins do
   Adding a plugin brings along the ones it uses that the server ships with: its `:shipped` setting, each one's
   folder by its name. Those are added for the network.
 
-  A server looks in the bucket at what's added for the network when it starts, and at what's added for anyone
-  else when it's first asked for them. It looks again when it's told to, when it's asked for a plugin it doesn't
+  A server looks in the bucket at what's added for the network and for whoever it acts for when it starts, and at
+  what's added for anyone else when it's first asked for them. Only a server acting for whoever a plugin was added
+  for runs it for them: another passes the call on to one that does. It looks again when it's told to, when it's asked for a plugin it doesn't
   run, and every so often (`OneCore.Server.look/0`).
   """
   use GenServer
   require Logger
   alias ExJsonSchema.Validator.Error
-  alias OneCore.{Artifact, Bucket, Call, Hooks, Jobs, Server, Services, User}
+  alias OneCore.{Artifact, Bucket, Call, Hooks, Iroh, Jobs, Server, Servers, Services, User}
   alias OneCore.Plugins.Version
 
   @network "network"
@@ -61,7 +62,7 @@ defmodule OneCore.Plugins do
            {:ok, number} <- keep(artifact, name, files),
            :ok <- note(owner, &{:ok, Map.put(&1, name, artifact)}) do
         looked(owner, [{artifact, number, {:ok, version}}])
-        Server.tell_servers()
+        Server.tell_servers([owner])
         {:ok, number, warnings}
       else
         {:error, why} ->
@@ -109,7 +110,7 @@ defmodule OneCore.Plugins do
   # What's added for an owner changed: it's looked at here, and the other servers are told to.
   defp told(owner) do
     look(owner)
-    Server.tell_servers()
+    Server.tell_servers([owner])
   end
 
   @doc """
@@ -452,6 +453,9 @@ defmodule OneCore.Plugins do
     end)
   end
 
+  @doc "Everyone this server has looked at that the plugin `artifact` is added for."
+  def added_for(artifact), do: GenServer.call(__MODULE__, {:added_for, artifact})
+
   @doc "The version running here of the plugin `artifact`, or `nil`."
   def version(artifact), do: GenServer.call(__MODULE__, {:version, artifact})
 
@@ -491,12 +495,14 @@ defmodule OneCore.Plugins do
   end
 
   # What a function of a plugin is called with: who asked, who it runs for, and what was asked, to pass on. The
-  # plugin's own artifact is the one for whoever it was added for.
+  # plugin's own artifact is the one for whoever it was added for, so the call is run by a server acting for them:
+  # this one, or one that it's passed on to.
   defp called(at, name, versions, ask, {by, who}, passed_on) do
     own = "#{at}/own/#{name}"
 
-    %Call{
+    call = %Call{
       own: %Artifact{prefix: own <> "/"},
+      added: at,
       folder: Path.join(Server.home(), own),
       server: Server.key(),
       for: who,
@@ -507,6 +513,8 @@ defmodule OneCore.Plugins do
       uses: for({used, version} <- versions, used != name, into: %{}, do: {used, {version.artifact, version.plugin}}),
       passed_on: passed_on
     }
+
+    if Servers.here?(at), do: call, else: Call.pass_to(call, at)
   end
 
   # Who asked and who for: one who is both.
@@ -660,15 +668,23 @@ defmodule OneCore.Plugins do
     end
   end
 
-  # A server starts with the newest version of every plugin added for the network. `added` is what's added for
-  # each owner it has looked at, `running` and `newest` are by plugin, and `calls` are the versions each call
-  # holds.
+  # A server starts with the newest version of every plugin added for the network and for whoever it acts for.
+  # `added` is what's added for each owner it has looked at, `running` and `newest` are by plugin, and `calls` are
+  # the versions each call holds.
   @impl true
   def init(nil) do
     :ets.new(Hooks, [:named_table, read_concurrency: true])
-    {added, _tag} = added(@network)
-    state = %{added: %{}, running: %{}, newest: %{}, calls: %{}}
-    {state, _changed, _any} = took_over(state, @network, added, newer(Enum.uniq(Map.values(added)), %{}))
+    {:ok, key} = Iroh.key(Server.key_file())
+
+    state =
+      for owner <- Enum.uniq([@network | Servers.acts_for(key)]),
+          reduce: %{added: %{}, running: %{}, newest: %{}, calls: %{}} do
+        state ->
+          {added, _tag} = added(owner)
+          {state, _changed, _any} = took_over(state, owner, added, newer(Enum.uniq(Map.values(added)), state.newest))
+          state
+      end
+
     {:ok, state}
   end
 
@@ -681,6 +697,10 @@ defmodule OneCore.Plugins do
   def handle_call(:newest, _from, state), do: {:reply, state.newest, state}
   def handle_call(:owners, _from, state), do: {:reply, Map.keys(state.added), state}
   def handle_call({:version, artifact}, _from, state), do: {:reply, state.running[artifact], state}
+
+  def handle_call({:added_for, artifact}, _from, state) do
+    {:reply, for({owner, added} <- state.added, artifact in Map.values(added), do: owner), state}
+  end
 
   def handle_call({:running, owners}, _from, state) do
     if Enum.all?(owners, &is_map_key(state.added, &1)) do

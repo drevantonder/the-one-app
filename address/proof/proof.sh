@@ -139,7 +139,7 @@ echo "a server with a key of its own, starting on this network with the first se
 say "A spare is let in by one step, as on a folder: started, it says how, and started again, it acts"
 start_server spare
 let_in=$(grep -o 'add_server --key [0-9a-f]*' "$work/spare.log")
-one $let_in
+ONE_FOR=network one $let_in
 start_server spare
 one services | grep -o '"servers":\[[^]]*\]' | tail -1
 

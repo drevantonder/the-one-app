@@ -79,7 +79,7 @@ start() {
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
-    ONE_HOME=$folder/client "$one" $let_in
+    ONE_FOR=network ONE_HOME=$folder/client "$one" $let_in
     start "$1"
   fi
 }

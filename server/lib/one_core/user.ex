@@ -10,16 +10,18 @@ defmodule OneCore.User do
   A request is for whoever it's from, unless it says who else: a group, or the network. It then runs for them,
   with their artifacts, once the plugins that decide `reach` say whoever asked is their `member`.
   """
-  alias OneCore.{Hooks, Services}
+  alias OneCore.{Hooks, Servers}
 
   @doc "The one user of a network that signs nobody in."
   def anyone, do: "users/anyone"
 
   @doc """
   Who a request is by and who it's for: `{:ok, {by, for}, passed_on}`, or `{:error, why}`. `from` is the key of
-  whatever sent it, and `said` is what the request says of itself, its `_meta`:
+  whatever sent it, and `said` is what the request says of itself, its `_meta`. `hook` is whether it asks a
+  plugin's hook: a moment on any of the network's servers is about whoever it's about, so each of them is
+  believed about that, where only one acting for someone is believed about what they asked for.
 
-  - `who` and `for`, from a server acting here, are who that server was asked by and for: it passes on what it
+  - `who` and `for`, from a server acting for whoever asked, are who that server was asked by and for: it passes on what it
     was asked, having decided it, and `passed_on` says so. A scheduled job is asked by nobody, so its `who` is
     `nil`.
   - `link` is a sharing link, and whoever shows one is its holder.
@@ -27,16 +29,26 @@ defmodule OneCore.User do
     signs in, and is refused unless the server's `:development` setting is on.
   - `for` names who else the request is for: a group, or the network.
   """
-  def asking(from, %{"who" => by} = said) when is_binary(by) or is_nil(by) do
+  def asking(from, said, hook \\ false)
+
+  def asking(from, %{"who" => by} = said, hook) when is_binary(by) or is_nil(by) do
+    whose = owner(by || said["for"] || "") || "network"
+
     cond do
-      not Services.acting?(from) -> {:error, "Only a server acting here says who it asks for"}
-      is_binary(said["for"]) -> {:ok, {by, said["for"]}, said["passed_on"] == true}
-      true -> {:error, "A server says who it asks for too"}
+      not (Servers.acts_for?(from, whose) or (hook and is_binary(from) and Servers.acts_for(from) != [])) ->
+        {:error, "Only a server acting for #{whose} says it asks for them"}
+
+      is_binary(said["for"]) ->
+        {:ok, {by, said["for"]}, said["passed_on"] == true}
+
+      true ->
+        {:error, "A server says who it asks for too"}
     end
   end
 
-  def asking(_from, said) do
+  def asking(_from, said, _hook) do
     with {:ok, by} <- by(said),
+         :ok <- here(by),
          asked = Map.get(said, "for", by),
          :ok <- acts(by, asked),
          do: {:ok, {by, asked}, false}
@@ -58,6 +70,15 @@ defmodule OneCore.User do
   end
 
   defp by(_said), do: {:ok, anyone()}
+
+  # A server answers whoever it acts for. A sharing link's holder is nobody's.
+  defp here(by) do
+    owner = owner(by)
+
+    if owner == nil or Servers.here?(owner),
+      do: :ok,
+      else: {:error, "This server doesn't act for #{owner}. The ones that do are the ones to ask."}
+  end
 
   # Whether a request by `by` runs for `asked`: themselves, or whoever the plugins that decide say they're a
   # member of. With none deciding, everything in a network is shared.

@@ -58,7 +58,7 @@ defmodule Proof do
   def call("ping", _inputs, _call), do: "pong"
 
   def call("kill", %{"plugin" => plugin, "service" => service}, _call) do
-    Process.exit(OneCore.Plugins.Process.whereis(plugin, service), :kill)
+    Process.exit(OneCore.Plugins.Process.whereis("network/plugins/" <> plugin, service), :kill)
     "Killed #{service}'s process."
   end
 
@@ -93,7 +93,7 @@ EOF
 say "Two servers on one folder as the bucket, and two plugins that each have a service"
 start a
 start b
-ask a deploy --name proof --files-from "$folder/proof"
+ONE_FOR=network ask a deploy --name proof --files-from "$folder/proof"
 echo "What each service needs, which its machine's owner reads before installing it:"
 ask a services
 echo "Called before any server runs them:"
@@ -132,7 +132,7 @@ say "The plugins are updated while their services hold what they hold"
 before=$(ask a inbox watching | grep -o '"since":"[^"]*"')
 cp -r ../plugins/inbox "$folder/inbox-2"
 sed -i 's/"arrived" => watch.arrived}/"arrived" => watch.arrived, "updated" => true}/' "$folder/inbox-2/inbox/watcher.ex"
-ask a deploy --name inbox --files-from "$folder/inbox-2"
+ONE_FOR=network ask a deploy --name inbox --files-from "$folder/inbox-2"
 ask a inbox watching | sed "s|$folder|...|g"
 [ "$(ask a inbox watching | grep -o '"since":"[^"]*"')" = "$before" ] || { echo "inbox lost what it held"; exit 1; }
 echo "inbox: the new code answers, watching since the same moment, with the 1 arrival it had counted"
@@ -143,15 +143,15 @@ echo "and a file that arrives after the update is listed: $(ask a inbox list | g
 before=$(ask a load now | grep -o '"since":[0-9]*')
 cp -r ../plugins/load "$folder/load-2"
 sed -i 's/right now/at this moment/' "$folder/load-2/load.ex"
-ask a deploy --name load --files-from "$folder/load-2"
+ONE_FOR=network ask a deploy --name load --files-from "$folder/load-2"
 [ "$(ask a load now | grep -o '"since":[0-9]*')" = "$before" ] || { echo "load's program didn't carry on"; exit 1; }
 echo "load: its Elixir changed, and its program carried on: measured $before"
 sed -i 's/{{\\"processors\\"/{{\\"built\\":2,\\"processors\\"/' "$folder/load-2/meter/main.rs"
 began=$(now)
-ask a deploy --name load --files-from "$folder/load-2"
+ONE_FOR=network ask a deploy --name load --files-from "$folder/load-2"
 echo "load: its program's source changed, so it was built and started again, in the $(since "$began") the deploy took:"
 ask a load now
-echo "and the folder it was built in before is gone: $(ls "$folder/b/services/load/Load.Meter/meter" | wc -l) is left"
+echo "and the folder it was built in before is gone: $(ls "$folder/b/services/network/plugins/load/Load.Meter/meter" | wc -l) is left"
 
 say "A service that has stopped answering doesn't hold up its plugin's update"
 ask a install_service --plugin proof --service Proof.Stuck --server "${key[b]}"
@@ -159,7 +159,7 @@ ask a proof version
 ask a proof hang >/dev/null
 sed -i 's/{:reply, 1, state}/{:reply, 2, state}/' "$folder/proof/proof.ex"
 began=$(now)
-ask a deploy --name proof --files-from "$folder/proof"
+ONE_FOR=network ask a deploy --name proof --files-from "$folder/proof"
 echo "the update took $(since "$began"): the service had 5 seconds to move to it, and was stopped"
 until ask a proof version 2>&1 | grep -q "version 2"; do :; done
 echo "it answered again $(since "$began") after the update began: $(ask a proof version)"
@@ -175,7 +175,7 @@ touch "$folder/inbox/third.pdf"
 until ask a inbox list | grep -q third.pdf; do :; done
 echo "and lists a file that arrives after it: $(ask a inbox list | grep -o '"name":"[^"]*"' | tr '\n' ' ')"
 
-program() { pgrep -f "$folder/b/services/load/" || true; }
+program() { pgrep -f "$folder/b/services/network/plugins/load/" || true; }
 echo "load's program is the process $(program)"
 ask b proof kill --plugin load --service Load.Meter
 began=$(now)

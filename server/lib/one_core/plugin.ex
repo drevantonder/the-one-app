@@ -193,8 +193,8 @@ defmodule OneCore.Plugin do
     running the call if the service runs there, and otherwise the first that's up. `OneCore.Service.server()`
     gives a service the key of its own.
   - A service calls the plugin's functions with `OneCore.Service.plugin(self(), who, :rang, [4])`, which runs
-    `Hello.rang(call, 4)` for the user or group `who`: one of `OneCore.Service.acts_for()`, or one the plugin
-    passed it as `call.for`. That function has the call, so it's where a service keeps anything in the plugin's
+    `Hello.rang(call, 4)` for `who`: one of `OneCore.Service.acts_for()`, which are who the plugin was added
+    for that this server acts for, or one the plugin passed it, as `call.added` or `call.for`. That function has the call, so it's where a service keeps anything in the plugin's
     artifact or its database. In a function of the service, `service` goes where `self()` does.
   - When the plugin is updated, the service's process carries on in the new code with what it holds, and
     whatever it has open stays open. `code_change/3` is given the state, if the new code keeps it in another

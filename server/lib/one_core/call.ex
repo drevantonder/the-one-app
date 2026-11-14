@@ -2,8 +2,10 @@ defmodule OneCore.Call do
   @moduledoc """
   What a tool is called with besides its inputs.
 
-  - `own`: the plugin's own `OneCore.Artifact` for whoever it runs for. Only this plugin reaches it.
-  - `folder`: a folder on the machine running this call that is the plugin's own for whoever it runs for, for what
+  - `own`: the plugin's own `OneCore.Artifact` for whoever it was added for. Only this plugin reaches it.
+  - `added`: who the plugin was added for, whose `own` is: a user, a group or the network. It's who the plugin
+    runs for with nobody there, as a scheduled job and a service do.
+  - `folder`: a folder on the machine running this call that is the plugin's own for whoever it was added for, for what
     it keeps there. It may not be there yet, and another server has another.
   - `server`: the key of the server running this call.
   - `for`: who this call runs for, as relation tuples name them: the user who asked, or a sharing link's holder,
@@ -15,11 +17,11 @@ defmodule OneCore.Call do
   The rest is One Core's: the plugin's name where it was added and the plugin as a who, what was asked of it, the
   plugins it uses, and whether another server passed it on.
   """
-  alias OneCore.{Artifact, Hooks, Plugins, Server, User}
+  alias OneCore.{Artifact, Hooks, Plugins, Server, Servers, User}
   alias OneCore.Plugins.Version
 
-  @enforce_keys [:own, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
-  defstruct [:own, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
+  @enforce_keys [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
+  defstruct [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
 
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), for: String.t()}
 
@@ -65,10 +67,11 @@ defmodule OneCore.Call do
       {:ok, text, _tag} = OneCore.Artifact.read(note, "text")
   """
   def reach(%__MODULE__{for: who, by: by} = call, name, relation \\ "viewer") do
-    case refused(call, name, relation) do
-      nil -> %Artifact{prefix: name <> "/", reached: {call.who, {by, who}, relation}}
-      why -> raise why
-    end
+    if why = refused(call, name, relation), do: raise(why)
+    # Its blobs are whoever's it is, whom this server may not act for. One that does runs the call.
+    owner = User.owner(name) || "network"
+    if not Servers.here?(owner), do: pass_to(call, owner)
+    %Artifact{prefix: name <> "/", reached: {call.who, {by, who}, relation}}
   end
 
   @doc "Whether `reach/3` would give the artifact: whether this call may reach it as `relation`."
@@ -123,6 +126,23 @@ defmodule OneCore.Call do
   end
 
   @doc """
+  Has a server acting for `owner` run this call instead, since this one doesn't act for them. The call ends here
+  with that server's answer, and raises if none of them is up, or none acts for whoever the plugin was added for
+  too.
+  """
+  def pass_to(%__MODULE__{} = call, owner), do: pass_to(call.ask, {call.by, call.for}, call.passed_on, owner)
+
+  @doc """
+  Has a server acting for `owner` run what was asked of this one instead, as `pass_to/2` does for a call: `ask` is
+  its method and what it was asked with, for `asked`.
+  """
+  def pass_to(ask, asked, passed_on, owner) do
+    if passed_on, do: throw({__MODULE__, :passed_back})
+    for server <- Servers.acting(owner) -- [Server.key()], do: :no_answer = asks(ask, asked, server)
+    raise "No server acting for #{owner} answered"
+  end
+
+  @doc """
   Asks another server to run this call instead, for when what it needs is there: a database's lease, say. If that
   server runs it, the call ends here with its answer, and nothing after `pass_on` runs.
 
@@ -131,7 +151,9 @@ defmodule OneCore.Call do
   """
   def pass_on(%__MODULE__{passed_on: true}, _server), do: throw({__MODULE__, :passed_back})
 
-  def pass_on(%__MODULE__{ask: {method, params}, for: who, by: by}, server) do
+  def pass_on(%__MODULE__{ask: ask, for: who, by: by}, server), do: asks(ask, {by, who}, server)
+
+  defp asks({method, params}, {by, who}, server) do
     passed_back = Server.passed_back()
 
     case Server.request(server, method, Map.put(params, :_meta, %{passed_on: true, who: by, for: who})) do

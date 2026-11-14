@@ -19,7 +19,7 @@ since() { echo "$((($(now) - $1) / 1000)) ms"; }
 
 # Starts a server, and returns once it says it's running. A server after the first isn't one of the network's
 # until a server that is lets it in, which is asked here as the server itself says to. The client `only-<server>`
-# asks it and no other, and the client `client` asks every server, as `mix network` leaves it. `seen` is how much
+# asks it and no other, and the client `client` asks every server, as `mix network` leaves them. `seen` is how much
 # of the server's log a proof has read. `options` is what a proof starts its servers with besides.
 start() {
   mix network "$folder" "$1" ${options:-} >"$folder/$1.log" 2>&1 &
@@ -27,14 +27,12 @@ start() {
   if ! grep -q -m1 "A server is running" <(tail -f --pid=$! -n +1 "$folder/$1.log"); then
     local let_in
     let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log"; exit 1; }
-    ONE_HOME=$folder/client "$one" $let_in >/dev/null
+    ONE_FOR=network ONE_HOME=$folder/client "$one" $let_in >/dev/null
     start "$1"
     return
   fi
   key[$1]=$(grep -o "running in [^ ]*: [0-9a-f]*" "$folder/$1.log" | grep -o "[0-9a-f]*$")
   seen[$1]=0
-  mkdir -p "$folder/only-$1"
-  echo "[$(cat "$bucket/servers/${key[$1]}/address")]" >"$folder/only-$1/servers"
   echo "server $1 is running"
 }
 
