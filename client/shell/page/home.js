@@ -9,8 +9,8 @@ const { listen } = window.__TAURI__.event
 const home = document.getElementById("home")
 /// The apps a server listed, by their plugin's name: `{ plugin, name, icon, page }`.
 let apps = new Map()
-/// The apps that are open, by their plugin's name: `{ plugin, frame, tapped, drawn }`. An app stays open behind
-/// the home screen once it's been opened, as on a phone, so going back to it shows it as it was.
+/// The apps that are open, by their plugin's name: `{ plugin, frame, loaded, tapped, drawn }`. An app stays open
+/// behind the home screen once it's been opened, as on a phone, so going back to it shows it as it was.
 const open = new Map()
 
 /// Where an app's page is. Android's and Windows' web views load only http, so there the app's own scheme is the
@@ -38,8 +38,10 @@ async function list() {
     // An app starts as a finger lands on its icon, and shows as the finger lifts.
     tile.addEventListener("pointerdown", () => load(app))
     tile.addEventListener("click", () => {
-      history.pushState(app.plugin, "")
       show(app.plugin, performance.now())
+      // The way back out of an app is an entry in this window's history, made once the app's page has loaded: a
+      // browser takes a frame back through its own screens only from an entry that knew the frame's page.
+      open.get(app.plugin).loaded.then(() => history.pushState(app.plugin, ""))
     })
     return tile
   }))
@@ -62,7 +64,8 @@ function load(app) {
   if (open.has(app.plugin)) return
   const frame = Object.assign(document.createElement("iframe"), { src: address(app), title: app.name, inert: true })
   frame.sandbox = "allow-scripts allow-same-origin allow-forms"
-  open.set(app.plugin, { plugin: app.plugin, frame })
+  const loaded = new Promise((loaded) => frame.addEventListener("load", loaded, { once: true }))
+  open.set(app.plugin, { plugin: app.plugin, frame, loaded })
   document.body.append(frame)
 }
 
