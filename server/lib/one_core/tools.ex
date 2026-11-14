@@ -215,7 +215,7 @@ defmodule OneCore.Tools do
     case Plugins.running(who) do
       %{^name => version} ->
         reaches!(asked, version.artifact, "viewer")
-        Plugins.source(version.artifact, version.code)
+        JSON.encode!(Plugins.source(version.artifact, version.code))
 
       _ ->
         raise "There's no plugin named #{name}"
