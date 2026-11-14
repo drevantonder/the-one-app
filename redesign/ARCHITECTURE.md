@@ -45,8 +45,9 @@
 ## One Core and the packages
 
 - One Core knows blobs. Every kind of artifact built on them, a database too, is something a plugin provides.
-- The server is one package, and each client is its own: the CLI, MCP, the web client, and the apps for phones and
-  computers.
+- The server is one package, and each client is its own: the web client, and the apps for phones and computers.
+- The CLI and MCP are the app for computers without its window. A computer with the app has both, and a machine with no
+  screen installs the same program.
 - Each plugin is its own package too, the ones The One App ships with included. Those differ only in shipping with it.
 - One Core works with no plugins. With none that decides who may reach what, everything in a network is shared.
 - Every plugin runs the same way. The ones The One App ships with are no more special than anyone's. That way isn't a

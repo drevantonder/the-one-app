@@ -19,10 +19,11 @@ exists and what was set aside is in `PRIOR-ART.md`.
   files and the way in for outsiders. The relay is a Durable Object that sleeps while idle.
 - **Each client is one Tauri shell per platform**, drawing in the device's web view.
 - **A plugin's app is web content, written in JavaScript.**
+- **The CLI and MCP are the Rust half of the Tauri shell, run without a window.** That half already holds the key,
+  reaches servers and keeps what they answered.
 
 ## Not chosen yet
 
-- What the CLI is written in.
 - What the UI that clients share is built on. Vercel's UI SDK is being considered.
 - What starts a network's cloud server.
 - What signs users in.
