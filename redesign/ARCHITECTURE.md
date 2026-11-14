@@ -49,19 +49,20 @@
   computers.
 - Each plugin is its own package too, the ones The One App ships with included. Those differ only in shipping with it.
 - One Core works with no plugins. With none that decides who may reach what, everything in a network is shared.
-- Every plugin runs the same way. The ones The One App ships with are no more special than anyone's. Whether that way is
-  a sandbox isn't decided.
+- Every plugin runs the same way. The ones The One App ships with are no more special than anyone's. That way isn't a
+  sandbox: a plugin's code on a server is free to use the machine it runs on.
 - What plugins run in can give them things to import, such as cryptography or a database engine. One Core itself still
   holds no database code, so that stays flexible.
 - A network is trusted, and its users aren't assumed to be malicious. Keeping plugins apart is wise, but it's a bonus:
   other things decide what plugins run in first.
 - The One App ships with these plugins: signing in, relation tuples, the database, encryption, home pages, Insights,
   repos, the Vault and notifications.
-- Plugins are written against one published interface, and reach nothing else of a server's or a client's.
+- Plugins are written against one published interface for everything One Core gives them. In a client they reach
+  nothing else. On a server they're also free to use the machine: its files, its programs and its network.
 - A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts meant
   for it.
-- A plugin's parts needn't be written in the same language. A service already isn't.
-- A plugin's code runs on servers, in clients and as services, and nowhere else.
+- A plugin's parts needn't be written in the same language. Its server part and its client part already aren't.
+- A plugin's code runs on servers and in clients, and nowhere else.
 
 ## Who may do what
 
@@ -139,6 +140,8 @@
 - MCP can also be hosted where an assistant running somewhere else reaches it, signing in with OAuth.
 - A client has little of its own: it keeps what servers answered, keeps secrets safe on its device, and runs and draws
   what plugins give it.
+- A plugin's app is web content, as an MCP App is. Every client draws it in the device's web view, so an app is written
+  once.
 - A client holds the keys of the servers acting for a user or group, and asks the first that answers. On the same local
   network that goes straight to the server, and often between different local networks too.
 - The web client is static files, served at the network's address.
@@ -170,8 +173,10 @@
   it makes without asking.
 - What a plugin makes is owned by the user or group it was made for, not by the plugin. Removing a plugin leaves its
   data.
-- A plugin's code reaches nothing except through the interface plugins are written against, apart from a service, which
-  runs only on a server whose owner chose to install it.
+- A plugin's code on a server is free, and nothing checks it. Agents are intelligent, and a network is trusted.
+- Letting a computer be a server for a user or a group means trusting the plugins they add with that computer.
+- Nothing on a server keeps one plugin's code from what another's can reach there. What keeps users and groups apart is
+  which servers act for whom.
 - An agent can write a plugin and deploy it with no developer tools, on any ordinary machine. A server may compile it
   when it's deployed, and keeps the source beside it. Tools to check it first are recommended, not needed.
 - Everyone using a plugin runs its newest version.
@@ -202,6 +207,10 @@
 
 ## Services
 
+- A service is a part of a plugin's server code that runs only on machines that have what it needs. It's written,
+  deployed, updated and removed as the rest of its plugin is.
+- A service keeps running between calls, so it can hold a connection open or watch for something.
+- A service can bring a program written in another language and start it. If that program stops, the server doesn't.
 - A service runs for a user or a group, as the rest of its plugin does, and reaches artifacts by the same rule. One
   instance serves everyone its server acts for.
 - A service keeps its data where its plugin chooses: in artifacts, on its machine, or both. In artifacts, a user or a

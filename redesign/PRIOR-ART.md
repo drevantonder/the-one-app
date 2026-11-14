@@ -13,7 +13,8 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   serves a cell at a time, claimed by a conditional write of a small record to the bucket. Each turn as writer ships to
   its own numbered folder, and a write is confirmed only while the record still names that node. That is nearly this
   redesign's database and lease. Not chosen as the server. Its limits: one application per fleet, unencrypted traffic between
-  nodes, no Windows, clients only query a node, and upgrades that need every node stopped.
+  nodes, no Windows, clients only query a node, and upgrades that need every node stopped. Its ideas are being merged
+  into open-source workerd, unreleased as of 14 November 2026, so workerd may matter more later.
 - **Litestream**: ships a SQLite database's log to a bucket. One writer, no takeover, and no check before an upload, so
   by itself it doesn't stop a server that lost its turn from writing.
 - **Zanzibar**: where relation tuples and the relations' names come from. SpiceDB and OpenFGA are services that
@@ -28,15 +29,18 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 
 ## What the clients could be built with
 
-Not chosen, and neither is ruled out.
-
-- **Expo**: phone apps, and it can send them updates without a store release. No desktop apps.
-- **Tauri**: desktop and phone apps from one codebase. What the app as it runs today uses.
+- **Expo**: phone apps, and it can send them updates without a store release. No desktop apps. Not chosen.
+- **Tauri**: desktop and phone apps from one codebase. What the app as it runs today uses. Chosen on 14 November 2026.
+- **Vercel's UI SDK** (`@ui-sdk`, Apache-2.0, 0.1.0 beta, 12 November 2026): behaviours with no look of their own
+  (popups, selection, keyboard, focus) for React, Vue, Svelte, Solid and Web Components, made for agents to build
+  with. Considered for the UI the clients share, and not chosen.
+- **Asuka** (`egoist/asuka`, MIT, v0.1.0, 13 November 2026): apps in Go drawn with each platform's own widgets. Set
+  aside: it's compiled, so a plugin's app couldn't arrive from a server, and its widgets are each platform's own look.
 
 ## Plugin systems to learn from
 
-None of these is chosen. All three run plugins inside the host with its full access, which a network where any user
-adds a plugin can't copy.
+None of these is chosen. All three run plugins inside the host with its full access. On 14 November 2026 this redesign
+chose the same: a plugin's code on a server is free, and which servers act for whom is what keeps users apart.
 
 - **Nuxt modules** (Nuxt 4): pages, components and imports are modules on the same list as anyone's, but five core
   ones are exempt from being switched off. One kind of hook: handlers run in the order they registered and change what
@@ -69,8 +73,22 @@ adds a plugin can't copy.
   unreleased or archived. **iroh-blobs and iroh-docs**: a way to copy blobs between devices, not a store.
 - **Jazz**: its encrypted design is frozen and its makers wrote up why they left it; Jazz 2 is rows a server is
   trusted with, in alpha.
+- **What a plugin's server part could run in**, weighed on 14 November 2026 before Elixir was chosen:
+  - **QuickJS-NG inside the server**: smallest, with limits per plugin, but no Web APIs of its own and no way to reach
+    the machine, so services would stay a separate thing.
+  - **V8 inside the server** (`deno_core`): fast, but it leans on Deno's crates, whose team moved to Cloudflare.
+  - **workerd beside the server**: a second program to run, loading code at run time behind an experimental flag, and
+    every database call crossing a socket.
+  - **Wasm components**: any language, but the heaviest path for JavaScript and a compile step on the server.
+  - **Each plugin as its own process**: any language and every package, at 20 to 60 MB each.
+- **Elixir WebRTC** for reaching by key: browsers would reach a home server directly and shells would need no
+  networking code. Set aside: reaching by key would be ours to add, its relay can't be a Worker, the first connection
+  is slower, and large transfers over data channels are its weak spot.
+
+## Chosen
+
 - **iroh**: reaching a machine by its key, directly where possible and through a relay otherwise. Today's app links
-  its devices this way, with the relay as a Worker. The likely way servers and clients reach each other here.
+  its devices this way, with the relay as a Worker. Chosen on 14 November 2026: see `STACK.md`.
 
 ## Decided earlier, and easy to miss
 

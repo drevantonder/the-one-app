@@ -1,6 +1,6 @@
 # Building the redesign
 
-Read `VISION.md`, `GLOSSARY.md`, `ARCHITECTURE.md` and `PRIOR-ART.md` first. Where they leave something open, ask
+Read `VISION.md`, `GLOSSARY.md`, `ARCHITECTURE.md`, `STACK.md` and `PRIOR-ART.md` first. Where they leave something open, ask
 before choosing.
 
 - Dumb beats clever. Delete before adding.

@@ -31,9 +31,10 @@
   an agent as text. A control in one calls a tool.
 - **Tool**: a named function a plugin defines, which the plugin's code runs on a server. Apps, agents and scheduled jobs
   all call the same tools. Avoid: action.
-- **Service**: native code a plugin provides, for what the sandbox can't do or what has no API on the internet. An
-  instance runs on each server whose owner installed it, as its own process. It and the rest of its plugin call each
-  other's functions, which nothing else can call. The plugin decides which instance it calls.
+- **Service**: a part of a plugin's server code that must run on particular machines, for what is only there: a Mac's
+  messages, a signed-in browser, a GPU. An instance runs on each server whose owner installed it, and keeps running
+  between calls. It and the rest of its plugin call each other's functions, which nothing else can call. The plugin
+  decides which instance it calls.
 - **One Core**: what every plugin stands on: blobs, each plugin's own artifact, running plugins, and the interface
   they're written against. Small on purpose, and it works with no plugins. Avoid: the core.
 - **Package**: one piece built separately: the server, a client, or a plugin.
