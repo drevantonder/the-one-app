@@ -8,7 +8,8 @@ defmodule OneCore.Plugins do
   can't both be the next version.
 
   A call runs on the version that was newest when it began. That version stays loaded until its last call ends,
-  however many versions follow it.
+  however many versions follow it. A plugin's services hold a version the same way, and move to the newest
+  (`OneCore.Services`).
 
   A plugin says which other plugins it uses, and a call holds the versions of those too. Adding a plugin brings
   along the ones it uses that the server ships with, from the folder that is its `:shipped` setting.
@@ -21,10 +22,10 @@ defmodule OneCore.Plugins do
   """
   use GenServer
   require Logger
-  alias OneCore.{Artifact, Call, Server, Servers}
+  alias OneCore.{Artifact, Call, Server, Servers, Services}
   alias OneCore.Plugins.Version
 
-  @anyone "users/anyone/"
+  @anyone "users/anyone"
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -34,7 +35,7 @@ defmodule OneCore.Plugins do
          {:ok, version, warnings} <- Version.load(files) do
       with :ok <- bring(name, version.uses),
            {:ok, number} <- keep(name, files) do
-        GenServer.call(__MODULE__, {:newest, name, number, version})
+        takes_over(name, number, version)
         tell(name)
         {:ok, number, warnings}
       else
@@ -52,7 +53,7 @@ defmodule OneCore.Plugins do
     with [] <- used_by,
          {:ok, _number, _files} <- kept(name),
          {:ok, number} <- keep(name, %{}) do
-      GenServer.call(__MODULE__, {:newest, name, number, nil})
+      takes_over(name, number, nil)
       tell(name)
     else
       [_ | _] -> {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}
@@ -67,26 +68,52 @@ defmodule OneCore.Plugins do
   this call on to this one, and `:passed_back` that this one would pass it on in turn.
   """
   def call(name, tool, inputs, passed_on \\ false) do
-    with {:ok, call, versions} <- begin(name) do
+    run(name, fn versions ->
       version = versions[name]
 
-      try do
-        if Enum.any?(version.tools, &(&1.name == tool)) do
-          uses = Map.new(versions, fn {used, version} -> {used, version.plugin} end)
+      if Enum.any?(version.tools, &(&1.name == tool)) do
+        ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
+        {:ok, version.plugin.call(tool, inputs, called(name, versions, ask, passed_on))}
+      else
+        {:error, "#{name} has no tool named #{tool}. It has: #{Enum.map_join(version.tools, ", ", & &1.name)}"}
+      end
+    end)
+  end
 
-          {:ok,
-           version.plugin.call(tool, inputs, %Call{
-             own: %Artifact{prefix: @anyone <> "own/#{name}/"},
-             server: Server.key(),
-             plugin: name,
-             tool: tool,
-             inputs: inputs,
-             uses: Map.delete(uses, name),
-             passed_on: passed_on
-           })}
-        else
-          {:error, "#{name} has no tool named #{tool}. It has: #{Enum.map_join(version.tools, ", ", & &1.name)}"}
-        end
+  @doc """
+  Calls one of a plugin's functions for a service of its own, with a call and then `arguments`. Gives what `call/4`
+  does.
+  """
+  def function(name, function, arguments, passed_on \\ false) do
+    run(name, fn versions ->
+      plugin = versions[name].plugin
+
+      case plugin && exported(plugin, function, length(arguments) + 1) do
+        nil ->
+          {:error, "#{name} has no function #{function} that takes a call and #{length(arguments)} more"}
+
+        function ->
+          ask = {"plugins/call", %{plugin: name, function: function, arguments: arguments, for: @anyone}}
+          {:ok, apply(plugin, function, [called(name, versions, ask, passed_on) | arguments])}
+      end
+    end)
+  end
+
+  @doc "The function of `module` named by the text `name` that takes `arity` arguments, or `nil` if it has none."
+  def exported(module, name, arity) do
+    Enum.find_value(module.__info__(:functions), fn {function, takes} ->
+      if takes == arity and Atom.to_string(function) == name, do: function
+    end)
+  end
+
+  @doc """
+  Runs `fun` with the newest version of a plugin, and of each plugin it uses, by their names. Those versions stay
+  loaded until it returns. Gives what `fun` does, or `{:error, why}` with what it raised, as its caller is told it.
+  """
+  def run(name, fun) do
+    with {:ok, held, versions} <- begin(name) do
+      try do
+        fun.(versions)
       catch
         :throw, {Call, outcome} ->
           outcome
@@ -97,10 +124,20 @@ defmodule OneCore.Plugins do
           why = if kind == :error, do: Exception.message(blamed), else: Exception.format_banner(kind, blamed)
           {:error, Enum.reduce(Map.values(versions), why, &Version.own_names(&2, &1))}
       after
-        GenServer.call(__MODULE__, {:end, call})
+        release(held)
       end
     end
   end
+
+  @doc """
+  Holds the newest version of a plugin, and of each plugin it uses, loaded: `{:ok, held, versions}`, with the
+  versions by their plugins' names, or `{:absent, name}` for the first that isn't running here. They stay loaded
+  until `release(held)`, or until the process that asked ends.
+  """
+  def hold(name), do: GenServer.call(__MODULE__, {:begin, name})
+
+  @doc "Lets go of the versions that `hold/1` held, which are unloaded once nothing runs or holds them."
+  def release(held), do: GenServer.call(__MODULE__, {:end, held})
 
   @doc "The plugins running, by name: each one's `Version`, which holds its tools, its guide and its apps."
   def running, do: GenServer.call(__MODULE__, :running)
@@ -116,15 +153,37 @@ defmodule OneCore.Plugins do
          {number, files} <- newest(name),
          true <- number > GenServer.call(__MODULE__, {:number, name}),
          {:ok, version} <- loaded(name, files) do
-      GenServer.call(__MODULE__, {:newest, name, number, version})
+      takes_over(name, number, version)
     end
 
     is_map_key(running(), name)
   end
 
-  # A call holds the newest version of its plugin and of each plugin that one uses, however far that goes.
+  # A plugin's newest version takes over here, and its services follow it.
+  defp takes_over(name, number, version) do
+    GenServer.call(__MODULE__, {:newest, name, number, version})
+    Services.follow(name)
+  end
+
+  # What a function of a plugin is called with: who it runs for, and what was asked, to pass on.
+  defp called(name, versions, ask, passed_on) do
+    uses = Map.new(versions, fn {used, version} -> {used, version.plugin} end)
+
+    %Call{
+      own: %Artifact{prefix: "#{@anyone}/own/#{name}/"},
+      server: Server.key(),
+      for: @anyone,
+      plugin: name,
+      ask: ask,
+      uses: Map.delete(uses, name),
+      passed_on: passed_on
+    }
+  end
+
+  # A call holds the newest version of its plugin and of each plugin that one uses, however far that goes. A
+  # plugin this server doesn't run is looked for first.
   defp begin(name) do
-    case GenServer.call(__MODULE__, {:begin, name}) do
+    case hold(name) do
       {:absent, missing} ->
         cond do
           look(missing) -> begin(name)
@@ -180,7 +239,7 @@ defmodule OneCore.Plugins do
 
   defp path?(path), do: is_binary(path) and Enum.all?(String.split(path, "/"), &(&1 =~ ~r/^[^.]/))
 
-  defp artifact(name), do: %Artifact{prefix: @anyone <> "plugins/#{name}/"}
+  defp artifact(name), do: %Artifact{prefix: "#{@anyone}/plugins/#{name}/"}
 
   # Writes a set of files and the next version naming it. No files is the version that removes the plugin.
   defp keep(name, files) do
@@ -236,7 +295,7 @@ defmodule OneCore.Plugins do
   @impl true
   def init(nil) do
     names =
-      Enum.uniq(for key <- Artifact.list(%Artifact{prefix: @anyone <> "plugins/"}), do: hd(String.split(key, "/")))
+      Enum.uniq(for key <- Artifact.list(%Artifact{prefix: "#{@anyone}/plugins/"}), do: hd(String.split(key, "/")))
 
     state =
       for name <- names,

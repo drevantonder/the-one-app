@@ -56,8 +56,8 @@ defmodule OneCore.Servers do
     end
   end
 
-  # Only the one server writes its own blob, so what's there is its own from before.
-  defp say(blob, data) do
+  @doc "Writes one of a server's own blobs. Only that server writes it, so what's there is its own from before."
+  def say(blob, data) do
     case Bucket.read(blob) do
       {:ok, _was, tag} -> :ok = Bucket.replace(blob, data, tag)
       :absent -> :ok = Bucket.write(blob, data)

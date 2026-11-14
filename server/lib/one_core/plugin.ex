@@ -55,8 +55,8 @@ defmodule OneCore.Plugin do
   - Every module is a `defmodule` at the top of a file, and a plugin can have as many files and modules as it
     likes. The code is free to use the machine it runs on.
 
-  A plugin's files that aren't Elixir are its parts that run in a client, and reach each client from the server.
-  `apps/0`, if the plugin has one, names its apps:
+  A plugin's files that aren't Elixir reach each client from the server: they are its parts that run in a client,
+  and the source of any program a service of its brings. `apps/0`, if the plugin has one, names its apps:
 
       @impl true
       def apps, do: [%{name: "Hello", page: "app.html", icon: "icon.svg"}]
@@ -70,6 +70,63 @@ defmodule OneCore.Plugin do
     and sends `ui/notifications/request-teardown` when its user goes back out of it.
   - The client sends an app `notifications/one/changed` when what it was answered has changed. The app asks
     again and draws what it's answered.
+
+  A service is a part of the plugin that runs only on the machines that have what it needs, and keeps running
+  between calls: to watch for something, hold a connection open or keep a program going. It's a module of the
+  plugin that is a GenServer, and says what it needs of a machine:
+
+      defmodule Hello.Door do
+        use GenServer
+        @behaviour OneCore.Service
+
+        @impl OneCore.Service
+        def needs, do: "A doorbell plugged into the machine, which writes a line to /dev/ttyUSB0 when it's pressed"
+
+        def rings(service), do: GenServer.call(service, :rings)
+
+        @impl GenServer
+        def init(_), do: {:ok, %{bell: Port.open({:spawn, "cat /dev/ttyUSB0"}, [:binary, line: 80]), rings: 0}}
+
+        @impl GenServer
+        def handle_call(:rings, _from, state), do: {:reply, state.rings, state}
+
+        @impl GenServer
+        def handle_info({bell, {:data, _line}}, %{bell: bell} = state) do
+          for who <- OneCore.Service.acts_for(), do: OneCore.Service.plugin(self(), who, :rang, [state.rings + 1])
+          {:noreply, %{state | rings: state.rings + 1}}
+        end
+      end
+
+  - A service runs on each server whose owner installed it there: the `services` tool lists every service with
+    what it needs, and `install_service` runs one on a server. The server starts it, starts it again whenever it
+    stops, and stops it when the plugin is removed. `init/1` is given nothing, and raises if the machine lacks
+    what the service needs.
+  - Its public functions are what the rest of the plugin calls, and nothing else can. In a tool,
+    `OneCore.Service.call(call, Hello.Door, :rings)` runs `Hello.Door.rings(service)` on a machine that runs the
+    service and gives its answer, where `service` is the service's process there. More arguments follow it:
+    `OneCore.Service.call(call, Hello.Door, :mute, [30])` runs `mute(service, 30)`. Arguments and answers are what
+    JSON can hold. The function runs on that machine for each call, apart from the others, so only what needs
+    the service's state has to go through its process.
+  - The plugin decides which machine it calls: `OneCore.Service.servers(call, Hello.Door)` gives the keys of the
+    servers that run the service, and `OneCore.Service.call/5` takes one of them last. Left out, it's the server
+    running the call if the service runs there, and otherwise the first that's up. `OneCore.Service.server()`
+    gives a service the key of its own.
+  - A service calls the plugin's functions with `OneCore.Service.plugin(self(), who, :rang, [4])`, which runs
+    `Hello.rang(call, 4)` for the user or group `who`: one of `OneCore.Service.acts_for()`, or one the plugin
+    passed it as `call.for`. That function has the call, so it's where a service keeps anything in the plugin's
+    artifact or its database. In a function of the service, `service` goes where `self()` does.
+  - When the plugin is updated, the service's process carries on in the new code with what it holds, and
+    whatever it has open stays open. `code_change/3` is given the state, if the new code keeps it in another
+    shape. A service that can't carry on starts afresh in the new code: one whose `code_change/3` refuses, one
+    that takes over 5 seconds to get to it, and one whose state holds a function, so keep only data there.
+  - A service can bring a program in another language, as source in a folder of the plugin's files.
+    `OneCore.Service.folder(self(), "meter")` gives a folder on the machine holding the files under `meter/`,
+    which is the service's to build the program in, with what the machine has, and to start it from as a
+    `Port`. The folder is a new one only when those files change, so a service that kept it can tell in
+    `code_change/3` whether to build and start the program again. `needs/0` says what building and running it
+    takes. The program stops when its input closes, which is when the service's process ends, and a program
+    that stops by itself should stop the service, so that both are started again. The plugin `load` does all of
+    this.
   """
   @moduledoc "The interface a plugin's server part is written against.\n\n" <> @guide
 

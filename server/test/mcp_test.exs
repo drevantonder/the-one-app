@@ -24,13 +24,14 @@ defmodule OneCore.McpTest do
   """
 
   defp ask(method, params) do
-    JSON.decode!(Mcp.answer(JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})))["result"]
+    JSON.decode!(Mcp.answer(JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params}), nil))["result"]
   end
 
   @tag :tmp_dir
   test "a plugin's app and its other client files are resources, and its tools say which only read", %{tmp_dir: folder} do
     Application.put_env(:one_core, :bucket, {OneCore.Bucket.Folder, folder})
     start_supervised!(Plugins)
+    start_supervised!(OneCore.Services)
     files = %{"notes.ex" => @plugin, "app.html" => "<p>Notes</p>", "app.js" => "1", "icon.svg" => "<svg/>"}
     assert {:ok, 1, ""} = Plugins.deploy("notes", files)
 

@@ -1,6 +1,7 @@
 //! The server's add-on for being reached by key: it opens the server's endpoint, hands what clients ask to the
-//! server's Elixir, and sends its answers back. A client asks one message a stream (`client`), and is told
-//! something the same way: one message on a stream the server opens. A server asks another as a client does.
+//! server's Elixir with the key of whoever asked, and sends its answers back. A client asks one message a stream
+//! (`client`), and is told something the same way: one message on a stream the server opens. A server asks another
+//! as a client does.
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -69,9 +70,9 @@ fn sign(key_file: String, message: Binary) -> Result<String, String> {
 }
 
 /// Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
-/// `{:ask, ask, message}`. With a `network`, its address and the pass shown there, it's reached through the relay
-/// at that address too, and hears what outsiders ask there. Gives the endpoint and its address, as the JSON a client
-/// is told it in.
+/// `{:ask, ask, from, message}`, where `from` is the key of whoever asked. With a `network`, its address and the pass
+/// shown there, it's reached through the relay at that address too, and hears what outsiders ask there, whose `from`
+/// is `nil`. Gives the endpoint and its address, as the JSON a client is told it in.
 #[rustler::nif(schedule = "DirtyIo")]
 fn start(
     key_file: String,
@@ -105,14 +106,15 @@ fn start(
     })
 }
 
-/// Hands `message` to the server's Elixir, and waits for its answer. There's none if the Elixir is gone.
-async fn ask(asked: &LocalPid, message: &[u8]) -> Option<Vec<u8>> {
+/// Hands `message` to the server's Elixir, with the key of whoever asked it if they have one, and waits for its
+/// answer. There's none if the Elixir is gone.
+async fn ask(asked: &LocalPid, from: Option<&str>, message: &[u8]) -> Option<Vec<u8>> {
     let (answer, answered) = oneshot::channel();
     let ask = ResourceArc::new(Ask(Mutex::new(Some(answer))));
     let sent = OwnedEnv::new().send_and_clear(asked, |env| {
         let mut binary = NewBinary::new(env, message.len());
         binary.as_mut_slice().copy_from_slice(message);
-        (atoms::ask(), ask, Binary::from(binary))
+        (atoms::ask(), ask, from, Binary::from(binary))
     });
     sent.ok()?;
     answered.await.ok()
@@ -123,13 +125,15 @@ async fn accept(endpoint: Endpoint, asked: LocalPid, told: broadcast::Sender<Vec
         let mut told = told.subscribe();
         tokio::spawn(async move {
             let Ok(connection) = incoming.await else { return };
+            let from = connection.remote_id().to_string();
             loop {
                 tokio::select! {
                     stream = connection.accept_bi() => {
                         let Ok((mut send, mut receive)) = stream else { return };
+                        let from = from.clone();
                         tokio::spawn(async move {
                             let Ok(message) = receive.read_to_end(client::LIMIT).await else { return };
-                            if let Some(answer) = ask(&asked, &message).await
+                            if let Some(answer) = ask(&asked, Some(&from), &message).await
                                 && send.write_all(&answer).await.is_ok()
                             {
                                 let _ = send.finish();

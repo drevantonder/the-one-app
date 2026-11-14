@@ -3,12 +3,16 @@ defmodule OneCore.Mcp do
   Answers what a client asks, in MCP's JSON-RPC: a message in, and its answer out. So a server is an MCP server to
   whatever reaches it, and the tools it lists are One Core's own and every running plugin's.
 
+  Servers ask each other the same way, and two things only a server acting for the same user may ask: to call a
+  function of a plugin's service running here (`services/call`), and to run a service's call into its plugin that
+  was passed on (`plugins/call`).
+
   The parts of a plugin that run in a client are MCP resources: `ui://<plugin>/<code>/<path>`, where `code` names
   the set of files a version runs, so a file at an address never changes. A plugin's app is one of them, as an MCP
   App is.
   """
   require Logger
-  alias OneCore.{Plugin, Plugins, Server, Servers}
+  alias OneCore.{Plugin, Plugins, Server, Servers, Services}
   alias OneCore.Plugins.Version
 
   # Tools are all a server speaks of MCP, and they are the same in each of these.
@@ -49,15 +53,53 @@ defmodule OneCore.Mcp do
         properties: %{key: %{type: "string", description: "The server's key, which it shows when it starts"}},
         required: ["key"]
       }
+    },
+    %{
+      name: "services",
+      description: """
+      Lists the services this network's plugins have, what each needs of a machine, and the servers that run it.
+      A service is a part of a plugin that runs on particular machines, for what is only there.
+      """,
+      inputSchema: %{type: "object", properties: %{}},
+      annotations: %{readOnlyHint: true}
+    },
+    %{
+      name: "install_service",
+      description: """
+      Runs a plugin's service on a server from now on.
+      That is the server's owner's to decide, knowing what the service needs of the machine, which `services` says.
+      """,
+      inputSchema: %{
+        type: "object",
+        properties: %{
+          plugin: %{type: "string", description: "The plugin's name"},
+          service: %{type: "string", description: "The service's name, as `services` lists it"},
+          server: %{type: "string", description: "The server's key. The server that answers, if left out"}
+        },
+        required: ["plugin", "service"]
+      }
+    },
+    %{
+      name: "remove_service",
+      description: "Stops running a plugin's service on a server.",
+      inputSchema: %{
+        type: "object",
+        properties: %{
+          plugin: %{type: "string", description: "The plugin's name"},
+          service: %{type: "string", description: "The service's name, as `services` lists it"},
+          server: %{type: "string", description: "The server's key. The server that answers, if left out"}
+        },
+        required: ["plugin", "service"]
+      }
     }
   ]
 
-  @doc "The answer to one message, as JSON. A notification's is empty."
-  def answer(message) do
+  @doc "The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty."
+  def answer(message, from) do
     case JSON.decode(message) do
       {:ok, %{"method" => method, "id" => id} = request} ->
         try do
-          case result(method, Map.get(request, "params", %{})) do
+          case result(method, Map.get(request, "params", %{}), from) do
             {:ok, result} -> JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
             {:error, code, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why}})
           end
@@ -72,11 +114,44 @@ defmodule OneCore.Mcp do
         Plugins.look(name)
         ""
 
+      # Another server saying which services it runs has changed.
+      {:ok, %{"method" => "notifications/services"}} ->
+        Services.look()
+        ""
+
       {:ok, %{"method" => _notification}} ->
         ""
 
       _ ->
         JSON.encode!(%{jsonrpc: "2.0", id: nil, error: %{code: -32700, message: "That isn't a JSON-RPC request"}})
+    end
+  end
+
+  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, from) do
+    between(from, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
+  end
+
+  defp result("plugins/call", %{"plugin" => plugin, "function" => function, "arguments" => arguments}, from) do
+    with {:ok, result} <- between(from, fn -> Plugins.function(plugin, function, arguments, true) end) do
+      Server.tell(%{jsonrpc: "2.0", method: "notifications/one/changed"})
+      {:ok, result}
+    end
+  end
+
+  defp result(method, params, _from), do: result(method, params)
+
+  # What one server asks of another is run only for a server acting for the same user, by one that acts for them
+  # too.
+  defp between(from, run) do
+    if Services.acting?(from) and Services.acting?(Server.key()) do
+      case run.() do
+        {:ok, answer} -> {:ok, %{answer: answer}}
+        {:error, why} -> {:error, -32000, why}
+        {:passed_on, result} -> {:ok, result}
+        :passed_back -> {:error, Server.passed_back(), "This server would pass that on in turn"}
+      end
+    else
+      {:error, -32000, "Only a server acting for the same user may ask that"}
     end
   end
 
@@ -163,6 +238,23 @@ defmodule OneCore.Mcp do
     with :ok <- Servers.add(key, Server.key()), do: {:ok, "That server acts for you too now."}
   end
 
+  defp call("services", _inputs, _passed_on) do
+    {:ok, JSON.encode!(%{asked: Server.key(), servers: Servers.acting(), services: Services.list()})}
+  end
+
+  defp call("install_service", %{"plugin" => plugin, "service" => service} = inputs, _passed_on) do
+    on(inputs["server"], "install_service", inputs, fn ->
+      with :ok <- Services.install(plugin, service), do: {:ok, "#{service} is running on the server #{Server.key()}."}
+    end)
+  end
+
+  defp call("remove_service", %{"plugin" => plugin, "service" => service} = inputs, _passed_on) do
+    on(inputs["server"], "remove_service", inputs, fn ->
+      with :ok <- Services.remove(plugin, service),
+           do: {:ok, "#{service} no longer runs on the server #{Server.key()}."}
+    end)
+  end
+
   defp call(name, inputs, passed_on) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
          {:ok, answer} <- Plugins.call(plugin, tool, inputs, passed_on) do
@@ -173,19 +265,42 @@ defmodule OneCore.Mcp do
     end
   end
 
+  # Runs what a tool does on the server it names: here, or by asking that server to.
+  defp on(server, tool, inputs, here) do
+    if server in [nil, Server.key()] do
+      here.()
+    else
+      params = %{name: tool, arguments: inputs}
+
+      case Server.ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: "tools/call", params: params})) do
+        {:ok, answer} ->
+          case JSON.decode!(answer) do
+            %{"result" => result} -> {:passed_on, result}
+            %{"error" => %{"message" => why}} -> {:error, why}
+          end
+
+        :unreachable ->
+          {:error, "That server isn't up"}
+
+        :stopped ->
+          {:error, "That server stopped answering after it was asked, so this may or may not have been done"}
+      end
+    end
+  end
+
   # After a tool that doesn't only read, every client connected here is told that something changed.
   defp changed(name, result) do
     if not reads?(name), do: Server.tell(%{jsonrpc: "2.0", method: "notifications/one/changed"})
     {:ok, result}
   end
 
-  # Whether calling a tool only reads. One Core's own don't.
+  # Whether calling a tool only reads: one of One Core's own that says so, or a plugin's.
   defp reads?(name) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
          %{^plugin => version} <- Plugins.running() do
       Enum.any?(version.tools, &(&1.name == tool and &1[:read_only] == true))
     else
-      _ -> false
+      _ -> Enum.any?(@tools, &(&1.name == name and &1[:annotations][:readOnlyHint] == true))
     end
   end
 

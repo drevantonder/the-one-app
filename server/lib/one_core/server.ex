@@ -72,8 +72,8 @@ defmodule OneCore.Server do
   end
 
   @impl true
-  def handle_info({:ask, ask, message}, server) do
-    Task.Supervisor.start_child(OneCore.Asks, fn -> Iroh.answer(ask, Mcp.answer(message)) end)
+  def handle_info({:ask, ask, from, message}, server) do
+    Task.Supervisor.start_child(OneCore.Asks, fn -> Iroh.answer(ask, Mcp.answer(message, from)) end)
     {:noreply, server}
   end
 end

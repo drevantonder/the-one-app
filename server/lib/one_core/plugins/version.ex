@@ -7,11 +7,15 @@ defmodule OneCore.Plugins.Version do
   version is unloaded by removing every module under that name.
 
   A version's files that aren't Elixir are its parts that run in a client (`files`, by their paths), and `code` names
-  the whole set, so a client can tell one version's files from the next's.
+  the whole set, so a client can tell one version's files from the next's. `hashes` names each of those files by
+  what's in it, so a service can tell whether a program it brings changed.
+
+  `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
+  `needs` of a machine.
   """
 
-  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :code, :files]
-  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :code, :files]
+  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :services, :code, :files, :hashes]
+  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :services, :code, :files, :hashes]
 
   @doc "The name of a set of files: the same files have the same name, on any server."
   def code(files),
@@ -103,21 +107,30 @@ defmodule OneCore.Plugins.Version do
     end)
   end
 
+  @doc "A version's service named `name`: its module, or `nil` if it has none by that name."
+  def service(%__MODULE__{under: under, services: services}, name) do
+    if Enum.any?(services, &(&1.name == name)), do: Module.concat(under, name)
+  end
+
+  @doc "The name of a version's module as its plugin wrote it: what follows the name the version's modules sit under."
+  def own_name(module), do: module |> Module.split() |> Enum.drop(3) |> Enum.join(".")
+
   @doc "`text` with a version's module names as its plugin wrote them."
   def own_names(text, %__MODULE__{under: under}), do: own_names(text, under)
   def own_names(text, under), do: String.replace(text, inspect(under) <> ".", "")
 
   # A plugin with no Elixir has only parts that run in a client: it provides no tools and names no apps.
   defp describe(under, modules, client) do
-    case Enum.filter(modules, &(OneCore.Plugin in Keyword.get(&1.module_info(:attributes), :behaviour, []))) do
+    case Enum.filter(modules, &(OneCore.Plugin in behaviours(&1))) do
       [] when modules == [] ->
-        {:ok, version(under, nil, [], nil, [], client)}
+        {:ok, version(under, nil, [], nil, [], [], client)}
 
       [plugin] ->
         tools = if function_exported?(plugin, :tools, 0), do: plugin.tools(), else: []
         guide = if function_exported?(plugin, :guide, 0), do: plugin.guide()
         apps = if function_exported?(plugin, :apps, 0), do: plugin.apps(), else: []
         uses = if function_exported?(plugin, :uses, 0), do: plugin.uses(), else: []
+        services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
 
         cond do
           not (is_list(tools) and Enum.all?(tools, &tool?/1) and (is_nil(guide) or is_binary(guide))) ->
@@ -129,19 +142,26 @@ defmodule OneCore.Plugins.Version do
           not (is_list(uses) and Enum.all?(uses, &is_binary/1)) ->
             {:error, "uses/0 gives a list of plugins' names"}
 
+          not Enum.all?(services, &(GenServer in behaviours(&1) and is_binary(&1.needs()))) ->
+            {:error, "A service says `use GenServer`, and its needs/0 gives what it needs of a machine, as text"}
+
           true ->
-            {:ok, %{version(under, plugin, tools, guide, apps, client) | uses: uses}}
+            services = for module <- services, do: %{name: own_name(module), needs: module.needs()}
+            {:ok, %{version(under, plugin, tools, guide, apps, Enum.sort(services), client) | uses: uses}}
         end
 
       found ->
         {:error, "One module of a plugin says `@behaviour OneCore.Plugin`, and #{length(found)} do"}
     end
   rescue
-    error -> {:error, "tools/0, guide/0, apps/0 or uses/0 raised: " <> Exception.message(error)}
+    error -> {:error, "tools/0, guide/0, apps/0, uses/0 or a service's needs/0 raised: " <> Exception.message(error)}
   end
 
+  # A module has one `behaviour` attribute for each behaviour it says it follows.
+  defp behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
+
   # An app's icon goes to clients with its name, as a `data:` address, so a home screen asks for nothing more.
-  defp version(under, plugin, tools, guide, apps, client) do
+  defp version(under, plugin, tools, guide, apps, services, client) do
     apps =
       for %{name: name, page: page, icon: icon} <- apps do
         %{name: name, page: page, icon: "data:#{kind(icon)};base64,#{Base.encode64(client[icon])}"}
@@ -154,8 +174,10 @@ defmodule OneCore.Plugins.Version do
       guide: guide,
       apps: apps,
       uses: [],
+      services: services,
       code: nil,
-      files: Enum.sort(Map.keys(client))
+      files: Enum.sort(Map.keys(client)),
+      hashes: Map.new(client, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
     }
   end
 

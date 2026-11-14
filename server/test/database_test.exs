@@ -289,9 +289,9 @@ defmodule OneCore.DatabaseTest do
     %Call{
       own: %Artifact{prefix: "users/anyone/own/simulated/"},
       server: server,
+      for: "users/anyone",
       plugin: "simulated",
-      tool: "write",
-      inputs: %{},
+      ask: {"tools/call", %{name: "simulated_write", arguments: %{}}},
       uses: %{},
       passed_on: false
     }

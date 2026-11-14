@@ -4,16 +4,17 @@ defmodule OneCore.Call do
 
   - `own`: the plugin's own `OneCore.Artifact` for whoever it runs for. Only this plugin reaches it.
   - `server`: the key of the server running this call.
+  - `for`: the user or group this call runs for.
 
-  The rest is One Core's: which tool this is, its inputs, the plugins it uses, and whether another server passed it
-  on.
+  The rest is One Core's: which plugin this is, what was asked of it, the plugins it uses, and whether another
+  server passed it on.
   """
   alias OneCore.Server
 
-  @enforce_keys [:own, :server, :plugin, :tool, :inputs, :uses, :passed_on]
-  defstruct [:own, :server, :plugin, :tool, :inputs, :uses, :passed_on]
+  @enforce_keys [:own, :server, :for, :plugin, :ask, :uses, :passed_on]
+  defstruct [:own, :server, :for, :plugin, :ask, :uses, :passed_on]
 
-  @type t :: %__MODULE__{own: OneCore.Artifact.t(), server: String.t()}
+  @type t :: %__MODULE__{own: OneCore.Artifact.t(), server: String.t(), for: String.t()}
 
   @doc """
   A plugin this call's plugin uses, or that one of those uses: its module, whose functions take this call and run
@@ -37,10 +38,10 @@ defmodule OneCore.Call do
   """
   def pass_on(%__MODULE__{passed_on: true}, _server), do: throw({__MODULE__, :passed_back})
 
-  def pass_on(%__MODULE__{} = call, server) do
-    params = %{name: "#{call.plugin}_#{call.tool}", arguments: call.inputs, _meta: %{passed_on: true}}
+  def pass_on(%__MODULE__{ask: {method, params}}, server) do
+    params = Map.put(params, :_meta, %{passed_on: true})
 
-    case Server.ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: "tools/call", params: params})) do
+    case Server.ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
       {:ok, answer} ->
         case JSON.decode!(answer) do
           %{"result" => result} ->

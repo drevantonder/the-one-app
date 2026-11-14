@@ -95,7 +95,6 @@
   through the relay otherwise. Nothing at home is opened to the internet.
 - A tool call and a scheduled job go to the server acting for the user or group they're for. If it writes a database
   whose lease another server holds, that server passes it on to the one holding it.
-- A call to a service goes to the machine that runs it, by that machine's key, and that machine checks the caller.
 - A scheduled job is a tool call made by the clock. The server holding the lease of the database its schedule is kept in
   makes the call.
 - A scheduled job runs when a server is up. A network that has a cloud server uses it, started when there's work and
@@ -180,17 +179,11 @@
 
 ## Services
 
-- A service is a part of a plugin's server code that runs only on machines that have what it needs. It's written,
-  deployed, updated and removed as the rest of its plugin is.
-- A service keeps running between calls, so it can hold a connection open or watch for something.
-- A service can bring a program written in another language and start it. If that program stops, the server doesn't.
 - A service runs for a user or a group, as the rest of its plugin does, and reaches artifacts by the same rule. One
   instance serves everyone its server acts for.
 - A service keeps its data where its plugin chooses: in artifacts, on its machine, or both. In artifacts, a user or a
   group owns it and relation tuples say who else may use it.
 - A service says what it needs of a machine, and its owner sees that before installing it.
-- A call from a service into its plugin says which user or group it's for, and its server must act for them.
-- A service follows its plugin's newest version.
 - Services run on computers. A phone can't be called on demand, so it runs none. Services on phones stay open for later.
 
 ## Updates and builds

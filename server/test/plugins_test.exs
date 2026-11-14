@@ -33,6 +33,7 @@ defmodule OneCore.PluginsTest do
   test "a call running through updates finishes on its own version, and the next gets the newest", %{tmp_dir: folder} do
     Application.put_env(:one_core, :bucket, {OneCore.Bucket.Folder, folder})
     start_supervised!(Plugins)
+    start_supervised!(OneCore.Services)
     test = self()
     wait = fn -> Task.async(fn -> Plugins.call("slow", "wait", %{"test" => test}) end) end
 

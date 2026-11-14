@@ -61,7 +61,7 @@ async fn heard(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result<(
                     tokio::spawn(async move {
                         let Ok(call) = serde_json::from_str::<Value>(call.as_str()) else { return };
                         let Some(message) = call["message"].as_str() else { return };
-                        if let Some(answer) = crate::ask(&asked, message.as_bytes()).await {
+                        if let Some(answer) = crate::ask(&asked, None, message.as_bytes()).await {
                             let answer = json!({"call": call["call"], "answer": String::from_utf8_lossy(&answer)});
                             let _ = answers.send(answer.to_string());
                         }
