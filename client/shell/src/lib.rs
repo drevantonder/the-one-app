@@ -9,6 +9,7 @@ use std::time::Instant;
 use client::{Client, Shown};
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, Uri, header};
+use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 /// What an app's page may load, which is what an MCP App may by default: its own plugin's files and the files of
@@ -155,10 +156,15 @@ async fn watch(views: State<'_, Views>, watching: bool) -> Result<(), ()> {
 /// Sends a file an app's page chose, which is the request's body, to where the network keeps it, for a tool of
 /// the app's plugin. Gives the name that tool takes for it.
 #[tauri::command]
-async fn upload(views: State<'_, Views>, request: tauri::ipc::Request<'_>) -> Result<Value, String> {
+async fn upload(views: State<'_, Views>, request: Request<'_>) -> Result<Value, String> {
     let plugin = request.headers().get("plugin").and_then(|plugin| plugin.to_str().ok()).unwrap_or_default().to_owned();
-    let tauri::ipc::InvokeBody::Raw(file) = request.body() else { return Err("An upload is a file".into()) };
-    let sent = views.client.upload(&plugin, file.clone()).await;
+    let file = match request.body() {
+        InvokeBody::Raw(file) => file.clone(),
+        // Android's web view shows nothing a request's body, so there the file comes as a list of its bytes.
+        InvokeBody::Json(Value::Array(bytes)) => bytes.iter().filter_map(|byte| Some(byte.as_u64()? as u8)).collect(),
+        InvokeBody::Json(_) => return Err("An upload is a file".into()),
+    };
+    let sent = views.client.upload(&plugin, file).await;
     sent.map(|upload| json!({"upload": upload})).map_err(|error| error.to_string())
 }
 
