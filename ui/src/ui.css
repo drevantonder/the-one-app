@@ -491,6 +491,9 @@ button.ui-box {
   scale: 0;
   transition: scale var(--move-quick) var(--ease-quick);
 }
+.ui-choice input[type="radio"]:checked::before {
+  scale: 1;
+}
 
 /* Files: what's chosen, one group, a file to a line, and the button that chooses more. */
 .ui-file {
