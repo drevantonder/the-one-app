@@ -79,7 +79,7 @@ defmodule OneCore.Plugin do
     asks without raising. What the plugin made for whoever it runs for is reached without asking. Anything else
     is reached only if both the plugin and whoever it runs for have that relation to it, which the plugins that
     decide `reach` say. `relations` is the one The One App ships with, and its skill says how something is
-    shared. With none, everything in a network is shared.
+    shared. With none, nothing is reached but by the network's first owner.
   - A tool runs for whoever asked, `call.for`. Whoever asks
     can ask for a group they're a member of, or for the network: `call.for` is then the group, what the tool
     makes is the group's, it reaches what the group may, and `call.by` is who asked. A tool that the holder of a

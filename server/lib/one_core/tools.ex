@@ -8,8 +8,8 @@ defmodule OneCore.Tools do
   whether whoever asked may: an `editor` of a plugin deploys over it, a `viewer` adds it, and only an `owner` of
   a user, a group or the network changes what's added for them and which servers act for them. A server is its
   owner's: who it was started for, and only their `owner` says who else it acts for and what it runs. Nothing is
-  asked about what's whoever's asked, which is what their name starts. With no plugin deciding, everything in a
-  network is shared.
+  asked about what's whoever's asked, which is what their name starts. With no plugin deciding, they're the
+  network's first owner's alone.
 
   What a tool changes is whoever's it is, so a server acting for them runs it: the one asked, or one it passes
   the call on to.

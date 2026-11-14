@@ -97,8 +97,8 @@
 
 ## Signing in
 
-- Signing in is a plugin. It tells One Core who a request is from. With none, everyone who reaches a network is the same
-  one user.
+- Signing in is a plugin. It tells One Core who a request is from. With none, a request is from nobody, and nobody
+  gets nothing.
 - Signing in only says who a user is. No key comes from it, so how a network signs in can change.
 - A client that's signed in reaches everything its user may, except encrypted artifacts. Those need something that
   already holds the key to let it in.

@@ -5,30 +5,36 @@ defmodule OneCore.User do
   without its last `/`. The holder of a sharing link is `users/<name>/links/<the link's name>`, after whoever the
   link leads to, and is nobody else.
 
-  Signing in is a plugin, which will tell One Core who each request is from: `asking/3` is the one place that's
-  decided. With none, everyone who reaches a network is the same one user, `anyone/0`.
+  Signing in is a plugin, which tells One Core whose device a request came from: `asking/3` is the one place
+  that's decided, and it asks the plugins that change `device` (`OneCore.Hooks.whose/1`). A device no plugin
+  places is nobody's, and nobody is refused everything: so with no plugin signing anyone in, a network answers
+  nobody.
 
   A request is for whoever it's from, unless it says who else: a group, or the network. It then runs for them,
   with their artifacts, once the plugins that decide `reach` say whoever asked is their `member`.
   """
-  alias OneCore.{Hooks, Servers}
+  alias OneCore.{Bucket, Hooks, Server, Servers}
 
-  @doc "The one user of a network that signs nobody in."
-  def anyone, do: "users/anyone"
+  @nobody "This device is nobody's here. Sign in on it, or let it in from a device that's yours."
 
   @doc """
   Who a request is by and who it's for: `{:ok, {by, for}, passed_on}`, or `{:error, why}`. `from` is the key of
-  whatever sent it, and `said` is what the request says of itself, its `_meta`. `hook` is whether it asks a
-  plugin's hook: a moment on any of the network's servers is about whoever it's about, so each of them is
-  believed about that, where only one acting for someone is believed about what they asked for.
+  whatever sent it, which its connection proved, or `nil` for what came in at the network's address over the
+  web. `said` is what the request says of itself, its `_meta`. `hook` is whether it asks a plugin's hook: a
+  moment on any of the network's servers is about whoever it's about, so each of them is believed about that,
+  where only one acting for someone is believed about what they asked for.
 
   - `who` and `for`, from a server acting for whoever asked, are who that server was asked by and for: it passes on
     what it was asked, having decided it, and `passed_on` says so. A scheduled job is asked by nobody, so its `who` is
     `nil`.
   - `link` is a sharing link, and whoever shows one is its holder.
-  - `as` names another user to act as. It's for a network being built, to show who may do what before anyone
-    signs in, and is refused unless the server's `:development` setting is on.
+  - `as` names a user to act as. It's for a network being built, to show who may do what with nobody signing
+    in, and is refused unless the server's `:development` setting is on.
+  - `device`, in what came in at the network's address, is the device the address says it's from: it proved
+    that there, as a connection proves a key here.
   - `for` names who else the request is for: a group, or the network.
+
+  Otherwise it's from whoever's device `from` is.
   """
   def asking(from, said, hook \\ false)
 
@@ -47,20 +53,20 @@ defmodule OneCore.User do
     end
   end
 
-  def asking(_from, said, _hook) do
-    with {:ok, by} <- by(said),
+  def asking(from, said, _hook) do
+    with {:ok, by} <- by(from, said),
          :ok <- here(by),
          asked = Map.get(said, "for", by),
          :ok <- acts(by, asked),
          do: {:ok, {by, asked}, false}
   end
 
-  defp by(%{"link" => link}) when is_binary(link), do: {:ok, link(link)}
+  defp by(_from, %{"link" => link}) when is_binary(link), do: {:ok, link(link)}
 
-  defp by(%{"as" => name}) when is_binary(name) do
+  defp by(_from, %{"as" => name}) when is_binary(name) do
     cond do
       not Application.get_env(:one_core, :development, false) ->
-        {:error, "Acting as another user is for a network being built, and this one wasn't started as one"}
+        {:error, "Acting as a user is for a network being built, and this one wasn't started as one"}
 
       name =~ ~r/^[a-z][a-z0-9-]*$/ ->
         {:ok, "users/" <> name}
@@ -70,7 +76,16 @@ defmodule OneCore.User do
     end
   end
 
-  defp by(_said), do: {:ok, anyone()}
+  defp by(nil, %{"device" => device}) when is_binary(device), do: whose(device)
+  defp by(from, _said) when is_binary(from), do: whose(from)
+  defp by(_from, _said), do: {:error, @nobody}
+
+  defp whose(device) do
+    case Hooks.whose(device) do
+      nil -> {:error, @nobody}
+      who -> {:ok, who}
+    end
+  end
 
   # A server answers whoever it acts for, and the holder of a link that leads to them.
   defp here(by) do
@@ -82,7 +97,7 @@ defmodule OneCore.User do
   end
 
   # Whether a request by `by` runs for `asked`: themselves, or whoever the plugins that decide say they're a
-  # member of. With none deciding, everything in a network is shared.
+  # member of.
   defp acts(by, by), do: :ok
 
   defp acts(by, asked) do
@@ -97,6 +112,37 @@ defmodule OneCore.User do
         with {:refuse, why} <-
                Hooks.decide("reach", %{"who" => by, "relation" => "member", "artifact" => asked}, {by, asked}),
              do: {:error, why}
+    end
+  end
+
+  @doc """
+  The network's first owner, or `nil` while it has none. One Core keeps who that is itself, in the blob
+  `network/owner`, since it's who may do anything where no plugin decides who may (`OneCore.Hooks.decide/4`).
+  """
+  def first_owner do
+    Servers.kept(:first_owner, fn ->
+      with {:ok, who, _tag} <- Bucket.read("network/owner"), do: who, else: (:absent -> nil)
+    end)
+  end
+
+  @doc """
+  Makes the user `who` the network's first owner, which a network gets once: `:ok`, or `{:error, why}`. The
+  plugins that decide `owner` are asked, and the one that keeps who may do what writes it down then. Doing it
+  again for the same user finishes what an earlier try left undone.
+  """
+  def make_first_owner(who) do
+    if is_binary(who) and who =~ ~r/^users\/[a-z][a-z0-9-]*$/ do
+      wrote = Bucket.write("network/owner", who)
+      Servers.forget()
+
+      if wrote == :ok or first_owner() == who do
+        Server.tell_servers(["network"])
+        with {:refuse, why} <- Hooks.decide("owner", %{"who" => who}, {nil, "network"}), do: {:error, why}
+      else
+        {:error, "The network's first owner is #{first_owner()}"}
+      end
+    else
+      {:error, "The network's first owner is a user: users/<name>, in lowercase letters, digits and hyphens"}
     end
   end
 

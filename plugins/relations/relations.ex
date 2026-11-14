@@ -11,16 +11,13 @@ defmodule Relations do
   # An owner is an editor, and an editor is a viewer: what each relation is enough for.
   @enough %{"viewer" => ~w(viewer editor owner), "editor" => ~w(editor owner owner), "owner" => ~w(owner owner owner)}
 
-  # The network is the top parent of every artifact, and its first owner is the one user a network has before
-  # anyone signs in.
   @schema [
     """
     create table tuples (
       artifact text not null, relation text not null, who text not null, primary key (artifact, relation, who)
     ) without rowid
     """,
-    "create index tuples_by_who on tuples (who, relation)",
-    "insert into tuples (artifact, relation, who) values ('network', 'owner', 'users/anyone')"
+    "create index tuples_by_who on tuples (who, relation)"
   ]
 
   # What's followed from one who or artifact to the next: the groups a who is a member of, and an artifact's
@@ -94,9 +91,19 @@ defmodule Relations do
   end
 
   @impl true
-  def hooks, do: ["reach"]
+  def hooks, do: ["reach", "owner"]
 
+  # The network is the top parent of every artifact, and its first owner's tuple is the one nobody shares: it's
+  # written as One Core makes them.
   @impl true
+  def hook("owner", %{"who" => who}, call) do
+    transaction(call, fn db ->
+      query(db, "insert or ignore into tuples (artifact, relation, who) values ('network', 'owner', ?)", [who])
+    end)
+
+    :ok
+  end
+
   def hook("reach", %{"who" => who, "relation" => "member", "artifact" => of}, call) do
     if transaction(call, &member?(&1, who, of)),
       do: :ok,

@@ -52,12 +52,13 @@ defmodule OneCore.Mcp do
         Server.watch(from, said["params"]["address"])
         ""
 
-      # Another server saying there's something new in the bucket.
-      # Another server saying that who may reach what was decided from what has since changed.
-      {:ok, %{"method" => "notifications/one/decided"}} ->
-        Hooks.forget()
+      # Another server, or a plugin's part at the network's address, saying that what this one kept of some hooks
+      # was decided from what has since changed.
+      {:ok, %{"method" => "notifications/one/decided"} = said} ->
+        Hooks.forget(for hook <- List.wrap(said["params"]["hooks"]), is_binary(hook), do: hook)
         ""
 
+      # Another server saying there's something new in the bucket.
       {:ok, %{"method" => "notifications/one/look"} = said} ->
         Server.look(for(owner <- List.wrap(said["params"]["for"]), User.owner?(owner), do: owner))
         ""

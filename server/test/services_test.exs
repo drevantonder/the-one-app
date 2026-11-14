@@ -62,7 +62,7 @@ defmodule OneCore.ServicesTest do
 
   @tag :tmp_dir
   test "a service keeps what it holds through its plugin's updates, in the newest code", %{earlier: earlier} do
-    assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [1, 1]}
+    assert Plugins.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 1]}
     # The plugin was added for the network, so that's who its service has it run for.
     assert_receive {:counted, "network", 1}
     service = Plugins.Process.whereis("network/plugins/counter", "Counter.Kept")
@@ -72,7 +72,7 @@ defmodule OneCore.ServicesTest do
         do:
           assert({:ok, ^number, ""} = Plugins.deploy("network", "counter", %{"counter.ex" => counter(number, self())}))
 
-    assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [902, 4]}
+    assert Plugins.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [902, 4]}
     assert Plugins.Process.whereis("network/plugins/counter", "Counter.Kept") == service
     assert length(loaded() -- earlier) == 1
 
@@ -85,19 +85,21 @@ defmodule OneCore.ServicesTest do
     assert Plugins.Process.whereis("network/plugins/counter", "Counter.Kept") == nil
     assert loaded() -- earlier == []
     assert {:ok, 6, ""} = Plugins.deploy("network", "counter", %{"counter.ex" => counter(6, self())})
-    assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [1, 6]}
+    assert Plugins.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 6]}
   end
 
   @tag :tmp_dir
   test "only a server acting for whoever it asks for calls a service's functions and the functions it calls" do
     stranger = String.duplicate("ab", 32)
-    said = %{who: User.anyone(), for: User.anyone(), passed_on: true}
+    said = %{who: OneCore.Test.owner(), for: OneCore.Test.owner(), passed_on: true}
     service = %{plugin: "network/plugins/counter", service: "Counter.Kept", function: "add", arguments: [], _meta: said}
     plugin = %{added: "network", plugin: "counter", function: "counted", arguments: [7], _meta: said}
 
-    # A client asks neither, whoever it says it is.
-    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", Map.delete(service, :_meta), nil)
-    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", Map.delete(plugin, :_meta), nil)
+    # A client asks neither, whoever it is.
+    OneCore.Test.being_built()
+    client = %{as: "owner"}
+    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", %{service | _meta: client}, nil)
+    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", %{plugin | _meta: client}, nil)
 
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", service, stranger)
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", plugin, stranger)
@@ -108,6 +110,7 @@ defmodule OneCore.ServicesTest do
     assert_received {:counted, _who, 7}
 
     # Neither is a tool, so nothing else reaches them.
-    assert %{"result" => %{"isError" => true}} = ask("tools/call", %{name: "counter_counted", arguments: %{}}, stranger)
+    tool = %{name: "counter_counted", arguments: %{}, _meta: client}
+    assert %{"result" => %{"isError" => true}} = ask("tools/call", tool, stranger)
   end
 end

@@ -58,15 +58,16 @@ defmodule OneCore.Server do
 
   @doc """
   Tells the other servers acting for `owners` that there's something new of theirs in the bucket to `look` for: a
-  plugin's version, a server, a service installed. Or that who may reach what of theirs was `decided` from what
-  has since changed. Each has looked or forgotten, or couldn't be reached, when this returns.
+  plugin's version, a server, a service installed. Or that what they kept of `hooks` was `decided` from what has
+  since changed. Each has looked or forgotten, or couldn't be reached, when this returns.
   """
-  def tell_servers(owners, what \\ "look"),
-    do: tell(Enum.uniq(Enum.flat_map(owners, &Servers.acting/1)), owners, what)
+  def tell_servers(owners, what \\ "look", hooks \\ []),
+    do: tell(Enum.uniq(Enum.flat_map(owners, &Servers.acting/1)), owners, what, hooks)
 
-  @doc "Tells `servers`, by their keys, what `tell_servers/2` tells the servers acting for `owners`."
-  def tell(servers, owners, what \\ "look") do
-    told = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/" <> what, params: %{for: owners}})
+  @doc "Tells `servers`, by their keys, what `tell_servers/3` tells the servers acting for `owners`."
+  def tell(servers, owners, what \\ "look", hooks \\ []) do
+    params = %{for: owners, hooks: hooks}
+    told = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/" <> what, params: params})
     Stream.run(Task.async_stream(servers -- [key()], &ask(&1, told), timeout: :infinity))
   end
 

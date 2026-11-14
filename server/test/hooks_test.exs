@@ -59,7 +59,7 @@ defmodule OneCore.HooksTest do
   end
   """
 
-  defp say(word), do: Plugins.call("echo", "say", %{"word" => word}, User.anyone())
+  defp say(word), do: Plugins.call("echo", "say", %{"word" => word}, OneCore.Test.owner())
 
   @tag :tmp_dir
   test "plugins change, decide and hear a call, and neither their order nor a forgotten answer lets one through", %{
@@ -67,7 +67,7 @@ defmodule OneCore.HooksTest do
   } do
     OneCore.Test.server(folder)
     Process.register(self(), :hooks_test)
-    anyone = User.anyone()
+    anyone = OneCore.Test.owner()
 
     for {name, source} <- [echo: @echo, upper: changes("Upper", "upcase"), gate: @gate, ears: @ears],
         do: assert({:ok, 1, ""} = Plugins.deploy("network", "#{name}", %{"#{name}.ex" => source}))
@@ -149,6 +149,7 @@ defmodule OneCore.HooksTest do
     end
 
     assert :ok = Plugins.remove("network", "refused")
+    OneCore.Test.being_built()
     assert {:ok, 1, ""} = Plugins.deploy("users/alice", "echo", %{"echo.ex" => @echo})
     assert {:ok, 1, ""} = Plugins.deploy("users/alice", "refused", %{"refused.ex" => broken.("raise(\"Broken.\")")})
     alice = {"users/alice", "users/alice"}

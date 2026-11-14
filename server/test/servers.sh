@@ -1,6 +1,7 @@
 # What the proofs here share: real servers of one network on this machine, with a folder as their bucket, started
 # and stopped by name. A proof sources this, and everything it makes is in the folder made here, which goes when
-# the proof ends.
+# the proof ends. The network is one being built, where nobody signs in, and every client here asks as its first
+# owner.
 #
 # The client's program is the one `cargo build --release` builds.
 set -euo pipefail
@@ -10,6 +11,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 one=$(realpath ../target/release/one)
 folder=$(mktemp -d)
 bucket=$folder/bucket
+export ONE_AS=owner
 declare -A group key seen
 trap 'for server in "${!group[@]}"; do stop "$server" >/dev/null; done; rm -rf "$folder"' EXIT
 
@@ -22,7 +24,7 @@ since() { echo "$((($(now) - $1) / 1000)) ms"; }
 # asks it and no other, and the client `client` asks every server, as `mix network` leaves them. `seen` is how much
 # of the server's log a proof has read. `options` is what a proof starts its servers with besides.
 start() {
-  mix network "$folder" "$1" ${options:-} >"$folder/$1.log" 2>&1 &
+  mix network "$folder" "$1" --development --owner owner ${options:-} >"$folder/$1.log" 2>&1 &
   group[$1]=$!
   if ! grep -q -m1 "A server is running" <(tail -f --pid=$! -n +1 "$folder/$1.log"); then
     local let_in

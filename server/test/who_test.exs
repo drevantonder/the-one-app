@@ -154,17 +154,61 @@ defmodule OneCore.WhoTest do
   end
 
   setup %{tmp_dir: folder} do
-    Application.put_env(:one_core, :development, false)
-    on_exit(fn -> Application.delete_env(:one_core, :development) end)
     OneCore.Test.server(folder)
     assert {:ok, 1, ""} = Plugins.deploy("network", "asked", %{"asked.ex" => @plugin})
     :ok
   end
 
   @tag :tmp_dir
-  test "a request is from the one user, unless a link is shown, a server acting here says who, or the network is being built" do
-    stranger = String.duplicate("ab", 32)
-    assert ask(%{}) == User.anyone()
+  test "a request is from whoever's device it came from, and from nobody where nothing places it, unless a link is shown, a server acting here says who, or the network is being built" do
+    Process.register(self(), :who_test)
+    {stranger, other} = {String.duplicate("ab", 32), String.duplicate("cd", 32)}
+    deploy("door", decides("Door", "users/bob"))
+
+    list = fn method, said, from ->
+      JSON.decode!(Mcp.answer(JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: %{_meta: said}}), from))
+    end
+
+    # With nothing signing anyone in, a request is from nobody, and nobody gets nothing: whatever key its
+    # connection proved, and whatever it says of itself.
+    nobody = {:refused, "This device is nobody's here. Sign in on it, or let it in from a device that's yours."}
+    assert ask(%{}) == nobody
+    assert ask(%{}, stranger) == nobody
+    assert ask(%{device: stranger}) == nobody
+    assert ask(%{for: "network"}, stranger) == nobody
+    assert %{"error" => %{"message" => "This device is nobody's here" <> _}} = list.("tools/list", %{}, stranger)
+    assert %{"error" => %{"message" => "This device is nobody's here" <> _}} = list.("resources/list", %{}, stranger)
+    assert %{"error" => %{"message" => "This device is nobody's here" <> _}} = list.("initialize", %{}, nil)
+
+    # A plugin that signs users in says whose a device is: the key a connection proved, or the device the
+    # network's address says a request over the web is from. A device doesn't say it's another.
+    deploy("placer", OneCore.Test.placer())
+    assert {:ok, :ok} = call("placer_place", %{"device" => stranger, "who" => "users/alice"}, OneCore.Test.owner())
+    assert ask(%{}, stranger) == "users/alice"
+    assert ask(%{device: stranger}) == "users/alice"
+    assert ask(%{device: stranger}, other) == nobody
+    assert ask(%{}, other) == nobody
+    assert %{"result" => %{"tools" => [_, _ | _]}} = list.("tools/list", %{}, stranger)
+
+    # Whose it is is kept, so a call asks nothing, until a tool of that plugin is called that doesn't only read:
+    # a device that's removed is nobody's from the next call on.
+    assert {:ok, :ok} = call("placer_remove", %{"device" => stranger}, OneCore.Test.owner())
+    assert ask(%{}, stranger) == nobody
+    # Only a plugin added for the network says whose a device is, and only a user's.
+    assert {:ok, 1, ""} =
+             Plugins.deploy("users/bob", "mine", %{"mine.ex" => String.replace(OneCore.Test.placer(), "Placer", "Mine")})
+
+    assert {:ok, :ok} =
+             Plugins.call(
+               "mine",
+               "place",
+               %{"device" => other, "who" => "users/alice"},
+               {OneCore.Test.owner(), "users/bob"}
+             )
+
+    assert ask(%{}, other) == nobody
+    assert {:ok, :ok} = call("placer_place", %{"device" => other, "who" => "network"}, OneCore.Test.owner())
+    assert ask(%{}, other) == nobody
 
     # Whoever shows a sharing link is its holder, named without the link.
     assert "links/" <> name = ask(%{link: "a-secret"})
@@ -181,17 +225,11 @@ defmodule OneCore.WhoTest do
     assert "users/alice/links/" <> _ = holder = ask(%{link: "users/alice/a-secret"})
     assert User.owner(holder) == "users/alice" and User.link?(holder) and not User.link?("users/alice")
 
-    list = fn method, said ->
-      JSON.decode!(Mcp.answer(JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: %{_meta: said}}), nil))
-    end
-
     assert %{"result" => %{"tools" => [%{"name" => "asked_who"}]}} =
-             list.("tools/list", %{link: "users/alice/a-secret"})
+             list.("tools/list", %{link: "users/alice/a-secret"}, nil)
 
     assert %{"error" => %{"message" => "A sharing link's holder reads nothing" <> _}} =
-             list.("resources/list", %{link: "users/alice/a-secret"})
-
-    assert %{"result" => %{"tools" => [_, _ | _]}} = list.("tools/list", %{})
+             list.("resources/list", %{link: "users/alice/a-secret"}, nil)
 
     # Only a server acting here is believed about who it asks for.
     assert ask(%{who: "users/alice", for: "users/alice"}, Server.key()) == "users/alice"
@@ -207,33 +245,49 @@ defmodule OneCore.WhoTest do
 
     assert ask(%{who: User.link("a-secret"), for: User.link("a-secret")}, Server.key()) == User.link("a-secret")
 
-    # Acting as another user is refused, unless the network is one being built.
-    assert {:refused, "Acting as another user" <> _} = ask(%{as: "alice"})
-    Application.put_env(:one_core, :development, true)
+    # Acting as a user is refused, unless the network is one being built.
+    assert {:refused, "Acting as a user" <> _} = ask(%{as: "alice"})
+    OneCore.Test.being_built()
     assert ask(%{as: "alice"}) == "users/alice"
     assert {:refused, "A user's name" <> _} = ask(%{as: "../network"})
+    # Even there, a request that names nobody is from nobody.
+    assert ask(%{}) == nobody
 
-    # A request is for whoever it's from, or for the group or the network it names. With nothing deciding who
-    # is whose member, everything is shared. A link's holder asks for nobody else.
+    # A request is for whoever it's from, or for the group or the network it names, where the plugins that decide
+    # say they're its member. A link's holder asks for nobody else.
+    asked()
     assert ask(%{as: "alice", for: "groups/family"}) == "users/alice for groups/family"
     assert ask(%{as: "alice", for: "network"}) == "users/alice for network"
     assert {:refused, "A request is for" <> _} = ask(%{as: "alice", for: "groups/../network"})
     assert {:refused, "A sharing link's holder asks for nobody else"} = ask(%{link: "a-secret", for: "groups/family"})
-    Process.register(self(), :who_test)
-    deploy("door", decides("Door", "users/bob"))
-    assert ask(%{as: "alice", for: "groups/family"}) == "users/alice for groups/family"
+    asked()
     assert {:refused, "Door keeps users/bob out."} = ask(%{as: "bob", for: "groups/family"})
     assert %{"who" => "users/bob", "relation" => "member", "artifact" => "groups/family"} = List.last(asked())
   end
 
   @tag :tmp_dir
-  test "with nothing deciding everything is shared, and what decides is asked about both the user and the plugin" do
+  test "with nothing deciding only the first owner does anything, unless the network is being built, and what decides is asked about both the user and the plugin" do
     Process.register(self(), :who_test)
     deploy("notes", @notes)
     deploy("peek", String.replace(@notes, "Notes", "Peek"))
     alice = "users/alice"
 
-    # One Core alone: everything in a network is shared, and a plugin hears of whatever changes.
+    # One Core alone: nobody calls a tool or reaches anything but the network's first owner, who is how a
+    # network with no plugin deciding is put right.
+    undecided = {:error, "Nothing here decides who may do what, so only the network's first owner may do anything"}
+    assert call("notes_write", %{"id" => "0", "text" => "Mine"}, alice) == undecided
+
+    assert {:ok, "users/owner/made/notes/0" = owners} =
+             call("notes_write", %{"id" => "0", "text" => "Mine"}, OneCore.Test.owner())
+
+    assert call("notes_read", %{"note" => owners}, alice) == undecided
+    assert call("peek_read", %{"note" => owners}, OneCore.Test.owner()) == {:ok, "Mine"}
+    assert OneCore.Tools.call("services", %{}, {alice, alice}) == undecided
+    assert {:ok, _} = OneCore.Tools.call("services", %{}, {OneCore.Test.owner(), "network"})
+    assert_receive {:changed, "peek", %{"artifact" => ^owners}, _}
+
+    # A network being built: everything in it is shared, and a plugin hears of whatever changes.
+    OneCore.Test.being_built()
     assert {:ok, "users/alice/made/notes/1" = note} = call("notes_write", %{"id" => "1", "text" => "Buy milk"}, alice)
     assert call("notes_read", %{"note" => note}, "users/bob") == {:ok, "Buy milk"}
     assert call("peek_read", %{"note" => note}, alice) == {:ok, "Buy milk"}
@@ -294,6 +348,7 @@ defmodule OneCore.WhoTest do
   @tag :tmp_dir
   test "a plugin is whoever's deployed it, and runs for whoever it's added for, with an artifact of its own for each" do
     Process.register(self(), :who_test)
+    OneCore.Test.being_built()
     {alice, bob, family} = {"users/alice", "users/bob", "groups/family"}
     assert {:ok, 1, _} = Plugins.deploy("network", "database", shipped("database"))
     assert {:ok, 1, ""} = Plugins.deploy(alice, "counts", %{"counts.ex" => @counts})

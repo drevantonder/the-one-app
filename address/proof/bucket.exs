@@ -4,7 +4,7 @@
 Application.ensure_all_started(:req)
 {_, address} = Application.fetch_env!(:one_core, :bucket)
 alias OneCore.{Address, Bucket}
-key = "#{OneCore.User.anyone()}/proof/#{System.unique_integer([:positive])}-#{System.os_time()}"
+key = "users/owner/proof/#{System.unique_integer([:positive])}-#{System.os_time()}"
 
 IO.puts("write only if absent: #{inspect(Bucket.write(key, "first"))}")
 IO.puts("the same write again: #{inspect(Bucket.write(key, "second"))}")

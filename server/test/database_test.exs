@@ -11,7 +11,7 @@ defmodule OneCore.DatabaseTest do
   use ExUnit.Case
   alias OneCore.{Artifact, Call, Plugins, User}
 
-  @prefix User.anyone() <> "/own/simulated/"
+  @prefix OneCore.Test.owner() <> "/own/simulated/"
   @servers 3
   @steps 1000
   @schema ["create table writes (id integer, filler blob)"]
@@ -374,11 +374,11 @@ defmodule OneCore.DatabaseTest do
   defp call(run, server) do
     %Call{
       own: %Artifact{prefix: @prefix},
-      added: User.anyone(),
+      added: OneCore.Test.owner(),
       folder: Path.join(run.home, server),
       server: server,
-      for: User.anyone(),
-      by: User.anyone(),
+      for: OneCore.Test.owner(),
+      by: OneCore.Test.owner(),
       plugin: "simulated",
       who: "network/plugins/simulated",
       ask: {"tools/call", %{name: "simulated_write", arguments: %{}}},

@@ -65,7 +65,7 @@ start_for() {
 # What it says of itself is someone else, which the address doesn't pass on.
 web() {
   local asked answer
-  asked="{\"name\":\"$3\",\"arguments\":$4,\"_meta\":{\"as\":\"anyone\",\"for\":\"network\",\"who\":\"users/anyone\"}}"
+  asked="{\"name\":\"$3\",\"arguments\":$4,\"_meta\":{\"as\":\"owner\",\"for\":\"network\",\"who\":\"users/owner\"}}"
   answer=$(curl -s -m 20 -X POST "${at_address[1]}/link/$2" -H 'content-type: application/json' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":$asked}")
   sed -E 's/.*"(text|message)":"(([^"\\]|\\.)*)".*/\2/' <<<"$answer"
@@ -258,7 +258,7 @@ defmodule Ticker do
 end
 EOF
 # They're deployed for the network, so they're everyone's.
-for plugin in notes reader ticker; do as anyone for network deploy --name $plugin --files-from "$folder/$plugin" >/dev/null; done
+for plugin in notes reader ticker; do as owner for network deploy --name $plugin --files-from "$folder/$plugin" >/dev/null; done
 
 say "One can't read the other's artifact until a tuple says so"
 note=$(as alice notes write --id shopping --text "Buy milk")
@@ -343,7 +343,7 @@ echo "  bob is listed its skill now: $listed"
 may as alice for groups/family add --plugin users/alice/plugins/diary
 may as carol for groups/family diary write --text "Ours"
 refused as dave for groups/family diary write --text "Theirs"
-may as anyone for network add --plugin users/alice/plugins/diary --name journal
+may as owner for network add --plugin users/alice/plugins/diary --name journal
 may as dave journal write --text "Everyone's"
 refused as alice reader read --note users/bob/own/diary
 may as bob remove --name diary
@@ -405,11 +405,11 @@ refused via alices as bob diary write --text "At alice's again"
 
 say "A hook that decides refuses a call with its reason"
 may as alice notes write --id diary --text "My password is hunter2"
-as anyone for network deploy --name gate --files-from "$folder/gate" >/dev/null
+as owner for network deploy --name gate --files-from "$folder/gate" >/dev/null
 echo "  gate is deployed for the network, and decides every call"
 refused as alice notes write --id secrets --text "My password is hunter2"
 may as alice notes write --id plans --text "Go for a walk"
-as anyone for network remove --name gate >/dev/null
+as owner for network remove --name gate >/dev/null
 
 say "Claims' approver is whoever a tuple says"
 expense=$(as alice claims record --amount 12.5 --note Taxi | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
@@ -419,7 +419,7 @@ as alice claims send --claim "$claim" >/dev/null
 echo "  alice sent claim $claim"
 refused as bob claims approve --claim "$claim"
 refused as alice relations share --artifact network/own/claims --relation editor --who users/alice
-may as anyone relations share --artifact network/own/claims --relation editor --who users/bob
+may as owner relations share --artifact network/own/claims --relation editor --who users/bob
 said=$(as bob claims approve --claim "$claim" | grep -o '"status":"[a-z_]*"') && echo "  may      as bob claims approve --claim $claim" && echo "           -> $said"
 
 say "What a check costs a call, over one connection as an agent's MCP session keeps"
@@ -462,10 +462,10 @@ may as alice remove --name stuck
 may as alice notes read --note "$note"
 
 say "When what broke is what says who may, whoever runs a server for them starts it without that plugin"
-may as anyone for network deploy --name lost --files-from "$folder/lost"
+may as owner for network deploy --name lost --files-from "$folder/lost"
 refused as bob notes read --note "$note"
 may as alice notes read --note "$note"
-refused as anyone for network remove --name lost
+refused as owner for network remove --name lost
 pkill -9 -f "network $folder server "
 (cd "$root/server" && exec mix network "$folder" server --development "${at_address[@]}" --without lost) >"$folder/server.log" 2>&1 &
 started+=($!)
@@ -476,7 +476,7 @@ may as bob notes read --note "$note"
 say "A scheduled job is called once across a takeover"
 # The job is due every 5 seconds, and its call takes a second. The server making the calls is killed in the middle
 # of one, so that call wrote nothing.
-ticks() { ONE_HOME=$folder/client "$one" ticker ticks | tr '}' '\n' | sed -n 's/.*"at":"\([^"]*\)","due":"\([^"]*\)","server":"\([0-9a-f]*\)".*/\2 \1 \3/p'; }
+ticks() { ONE_AS=owner ONE_HOME=$folder/client "$one" ticker ticks | tr '}' '\n' | sed -n 's/.*"at":"\([^"]*\)","due":"\([^"]*\)","server":"\([0-9a-f]*\)".*/\2 \1 \3/p'; }
 named() { sed -e "s/${key[server]}/server/" -e "s/${key[spare]}/spare/"; }
 # The clock has to pass: until the job has been called a few times, and then until just after it's next due.
 sleep 11

@@ -33,7 +33,7 @@ defmodule OneCore.PluginsTest do
   test "a call running through updates finishes on its own version, and the next gets the newest", %{tmp_dir: folder} do
     OneCore.Test.server(folder)
     test = self()
-    wait = fn -> Task.async(fn -> Plugins.call("slow", "wait", %{"test" => test}, OneCore.User.anyone()) end) end
+    wait = fn -> Task.async(fn -> Plugins.call("slow", "wait", %{"test" => test}, OneCore.Test.owner()) end) end
 
     assert {:ok, 1, ""} = Plugins.deploy("network", "slow", %{"slow.ex" => slow(1)})
     first = wait.()

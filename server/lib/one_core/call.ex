@@ -59,7 +59,7 @@ defmodule OneCore.Call do
   it too, and an `owner` says who else may. Raises with the reason if it may not.
 
   A plugin reaches an artifact only if both it and whoever it runs for have that relation to it, which is for the
-  plugins that decide `reach` to say: with none, everything in a network is shared. Nothing is asked about what
+  plugins that decide `reach` to say: with none, only the network's first owner reaches it. Nothing is asked about what
   the plugin made for whoever it runs for, and nothing about the plugin where it made the artifact for someone
   else, or the artifact is its own. Another plugin's own artifact is never reached: it's always that one plugin's.
 

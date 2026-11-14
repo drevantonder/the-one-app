@@ -57,6 +57,8 @@ defmodule OneCore.RelationsTest do
   setup %{tmp_dir: folder} do
     OneCore.Test.server(folder)
     for name <- ["database", "relations"], do: assert({:ok, 1, ""} = Plugins.deploy("network", name, shipped(name)))
+    # The plugin that keeps who may do what was told who the first owner is, and wrote their tuple.
+    assert :ok = OneCore.User.make_first_owner(OneCore.Test.owner())
     assert {:ok, 1, ""} = Plugins.deploy("network", "notes", %{"notes.ex" => @notes})
     assert {:ok, 1, ""} = Plugins.deploy("network", "peek", %{"peek.ex" => String.replace(@notes, "Notes", "Peek")})
     :ok
@@ -89,7 +91,7 @@ defmodule OneCore.RelationsTest do
 
     # The network's owner owns everything in it, and everyone is every user.
     other = write("2", @alice)
-    assert reads?(other, User.anyone()) and edits?(other, User.anyone()) and not reads?(other, @bob)
+    assert reads?(other, OneCore.Test.owner()) and edits?(other, OneCore.Test.owner()) and not reads?(other, @bob)
     assert {:ok, _} = share(other, "viewer", "everyone", @alice)
     assert reads?(other, @bob) and not edits?(other, @bob)
   end
@@ -117,7 +119,7 @@ defmodule OneCore.RelationsTest do
       OneCore.User.asking(nil, %{"as" => String.replace(who, "users/", ""), "for" => "groups/family"})
     end
 
-    Application.put_env(:one_core, :development, true)
+    OneCore.Test.being_built()
     assert {:ok, {@alice, "groups/family"} = alice_for_family, false} = for_family.(@alice)
     assert {:ok, {@carol, "groups/family"}, false} = for_family.(@carol)
 
@@ -178,9 +180,11 @@ defmodule OneCore.RelationsTest do
     assert {:ok, _} = share(note, "viewer", @bob, @alice)
     assert reads?(note, @bob, "peek")
 
-    # Without the relation tuples plugin, everything in the network is shared again.
+    # Without the relation tuples plugin nothing is shared, and nobody does anything but the network's first
+    # owner, who is how it's put back.
     assert :ok = Plugins.remove("network", "relations")
-    assert reads?(note, @carol, "peek")
+    assert not reads?(note, @alice) and not reads?(note, @bob, "peek")
+    assert reads?(note, OneCore.Test.owner(), "peek")
   end
 
   @tag :tmp_dir
@@ -223,9 +227,14 @@ defmodule OneCore.RelationsTest do
     assert {:error, "users/bob isn't an owner of groups/family" <> _} =
              tool.("deploy", Map.put(files, "name", "more"), {@bob, "groups/family"})
 
-    for inputs <- [%{"name" => "relations"}, Map.put(files, "name", "relations"), Map.put(files, "name", "another")],
+    assert {:error, "users/alice isn't an owner of network" <> _} =
+             tool.("deploy", Map.put(files, "name", "another"), {@alice, "network"})
+
+    # A plugin has no say in its own removal or in being deployed over, so with relations apart nothing decides
+    # that call, and it's the first owner's alone.
+    for inputs <- [%{"name" => "relations"}, Map.put(files, "name", "relations")],
         name = if(inputs["files"], do: "deploy", else: "remove") do
-      assert {:error, "users/alice isn't an " <> _} = tool.(name, inputs, {@alice, "network"})
+      assert {:error, "Nothing here decides who may do what" <> _} = tool.(name, inputs, {@alice, "network"})
     end
 
     # Which servers act for the network is its owner's to say, and so is what the network's own server runs and
@@ -248,7 +257,7 @@ defmodule OneCore.RelationsTest do
     assert tool.("add_server", %{"key" => key}, {@bob, @bob}) ==
              {:error, "That server is users/alice's, who hasn't chosen users/bob. Its owner does, with add_member."}
 
-    assert {:ok, _} = tool.("add_member", %{"who" => @bob}, {User.anyone(), User.anyone()})
+    assert {:ok, _} = tool.("add_member", %{"who" => @bob}, {OneCore.Test.owner(), OneCore.Test.owner()})
     assert OneCore.Servers.members(Server.key()) == ["network", @bob]
     assert {:ok, _} = tool.("add_server", %{"key" => Server.key()}, {@bob, @bob})
     assert OneCore.Servers.acts_for(Server.key()) == ["network", @bob]
@@ -265,14 +274,14 @@ defmodule OneCore.RelationsTest do
     assert tool.("remove_server", %{"key" => Server.key()}, {@bob, @bob}) ==
              {:error, "That server isn't on users/bob's list"}
 
-    assert tool.("remove_server", %{"key" => Server.key()}, {User.anyone(), "network"}) ==
+    assert tool.("remove_server", %{"key" => Server.key()}, {OneCore.Test.owner(), "network"}) ==
              {:error, "The network keeps a server. Add another before this one goes."}
 
     # The network's owner does all of it, and so recovers anything.
-    assert {:ok, _} = tool.("remove", %{"name" => "diary"}, {User.anyone(), "groups/family"})
+    assert {:ok, _} = tool.("remove", %{"name" => "diary"}, {OneCore.Test.owner(), "groups/family"})
 
     assert {:ok, "relations is removed from what's added for network."} =
-             tool.("remove", %{"name" => "relations"}, {User.anyone(), "network"})
+             tool.("remove", %{"name" => "relations"}, {OneCore.Test.owner(), "network"})
   end
 
   @tag :tmp_dir
@@ -295,10 +304,10 @@ defmodule OneCore.RelationsTest do
 
     # Only an owner of the claims says who approves.
     assert {:error, "users/alice isn't an editor of" <> _} = share(claims, "editor", @alice, @alice)
-    assert {:ok, _} = share(claims, "editor", @bob, User.anyone())
+    assert {:ok, _} = share(claims, "editor", @bob, OneCore.Test.owner())
     assert {:ok, [%{"id" => ^claim}]} = call("claims_waiting", %{}, @bob)
     assert {:ok, %{"status" => "approved"}} = call("claims_approve", %{"claim" => claim}, @bob)
-    assert {:ok, _} = unshare(claims, "editor", @bob, User.anyone())
+    assert {:ok, _} = unshare(claims, "editor", @bob, OneCore.Test.owner())
     assert {:error, "Only an approver" <> _} = call("claims_pay", %{"claim" => claim}, @bob)
   end
 end

@@ -26,21 +26,27 @@ defmodule Mix.Tasks.Network do
   for, and it and its client reach each other through the relay there when they can't directly. `--first` is the
   secret the address was deployed with, which a network's first server shows the first time it starts.
 
+      mix network <folder> --owner <name>
+
+  makes the user of that name the network's first owner, which a network gets once (`OneCore.User`).
+
       mix network <folder> --development
 
-  starts a server of a network being built, which lets a request say which user it's from (`OneCore.User`). No
-  network anyone relies on is started with it.
+  starts a server of a network being built: nobody signs in, a request says which user it's from, and where no
+  plugin decides who may do what, everything is let through (`OneCore.User`, `OneCore.Hooks`). No network anyone
+  relies on is started with it.
 
       mix network <folder> <server> --without <plugin>
 
   starts a server after removing that plugin from what's added for whoever the server is for. It's the way back
   for whoever runs one of their servers, when a plugin that decides who may do what has broken and so refuses
-  its own removal: nothing is asked of any plugin.
+  its own removal: nothing is asked of any plugin. With none left deciding, nobody does anything but the
+  network's first owner, who puts it back.
 
   `./network`, at the root, starts a whole network with this.
   """
   use Mix.Task
-  alias OneCore.{Address, Iroh, Plugins, Server, Servers}
+  alias OneCore.{Address, Iroh, Plugins, Server, Servers, User}
 
   @root Path.expand("../../../..", __DIR__)
 
@@ -50,7 +56,14 @@ defmodule Mix.Tasks.Network do
   @impl true
   def run(args) do
     case OptionParser.parse!(args,
-           strict: [address: :string, first: :string, development: :boolean, for: :string, without: :string]
+           strict: [
+             address: :string,
+             first: :string,
+             development: :boolean,
+             for: :string,
+             without: :string,
+             owner: :string
+           ]
          ) do
       {options, [folder | server]} when length(server) <= 1 ->
         start(Path.expand(folder), List.first(server, "server"), options)
@@ -101,6 +114,14 @@ defmodule Mix.Tasks.Network do
     # The plugins The One App ships with are the network's, so a server acting for it deploys them.
     if Servers.here?("network"),
       do: for({name, {:error, why}} <- Plugins.ship(), do: Mix.shell().error("#{name} wasn't deployed: #{why}"))
+
+    # The plugins are there first, so the one that keeps who may do what is told who the first owner is.
+    if owner = options[:owner] do
+      case User.make_first_owner("users/" <> owner) do
+        :ok -> Mix.shell().info("users/#{owner} is the network's first owner.")
+        {:error, why} -> Mix.shell().error("users/#{owner} wasn't made the network's first owner: #{why}")
+      end
+    end
 
     # A client of a network with an address asks there which servers to reach. Without one, it's told here: the
     # ones acting for the network, which is everyone. A server's pass for a client says the server's list, so the

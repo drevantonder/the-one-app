@@ -9,11 +9,12 @@
 #
 # It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
 # command acts as that user, and ONE_FOR=groups/<name> or ONE_FOR=network has it run for a group or the network.
+# Its first owner is the user `owner`.
 #
 # --spare starts a second server, which takes over when the first stops.
 # --address runs the network's address here too (`address/`): its Workers in `wrangler dev`, with a local S3 store
-#   as the bucket. Servers then keep their blobs through the signer there, and an assistant running somewhere else
-#   has a way in.
+#   as the bucket. Servers then keep their blobs through the signer there, and whoever holds a sharing link has a
+#   way in.
 set -euo pipefail
 set -m # What's started is a job with a process group of its own, so all of it is stopped at once.
 
@@ -62,24 +63,24 @@ if [[ -n $address ]]; then
     const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
     const made = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
     if (!made.ok && made.status !== 409) throw new Error(`the bucket answered ${made.status}`);')
-  # `wrangler dev` gives the signer its secrets from the environment. Outsiders get in without signing in, since
-  # this network is one being built.
+  # `wrangler dev` gives the signer its secrets from the environment.
   (cd "$root/address" && BUCKET=http://$bucket/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
-    DEVELOPMENT_WITHOUT_SIGN_IN=true WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
+    WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
     --inspector-port "$(free_port)" --persist-to "$folder/address") >"$folder/address.log" 2>&1 &
   started+=($!)
-  curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$gateway/ping"
-  at_address=(--address "http://127.0.0.1:$gateway" --first "$first")
+  curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://localhost:$gateway/ping"
+  # A passkey is for a name, which on one machine is `localhost`.
+  at_address=(--address "http://localhost:$gateway" --first "$first")
 fi
 
 # Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
 # which is then done as it says, and it's started again.
 start() {
-  (cd "$root/server" && exec mix network "$folder" "$1" --development "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  (cd "$root/server" && exec mix network "$folder" "$1" --development --owner owner "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
-    ONE_FOR=network ONE_HOME=$folder/client "$one" $let_in
+    ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/client "$one" $let_in
     start "$1"
   fi
 }
@@ -92,14 +93,14 @@ cat <<SAID
 
 A network is running in $folder. Its client's home is $folder/client:
 
-    export ONE_HOME=$folder/client
-    $one                                             opens the app
+    export ONE_HOME=$folder/client ONE_AS=owner
+    $one                                             opens the app, as the network's first owner
     $one tracker add --tracker water --amount 2      calls a tool
     ONE_AS=alice $one tracker list                   calls one as another user
     $one --help                                      lists every tool
     $one mcp                                         is the same tools as MCP over stdio
 ${at_address:+
-Its address is ${at_address[1]}, and an assistant somewhere else calls its tools at ${at_address[1]}/mcp.
+Its address is ${at_address[1]}.
 }
 What each part says is in $folder/*.log. Ctrl-C stops it.
 SAID

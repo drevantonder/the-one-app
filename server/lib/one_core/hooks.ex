@@ -26,8 +26,14 @@ defmodule OneCore.Hooks do
 
   That something may be reached is kept by the server that asked, so that it asks once: until a tool that doesn't
   only read is called of a plugin that decides it, which that server and the ones it tells forget at once, and
-  for a few seconds anywhere else. A refusal is never kept. So taking access away reaches every server, and
-  giving it is seen at once.
+  for a few seconds anywhere else. Whose a device is is kept the same way, until a server is told to forget it:
+  by a tool of a plugin that says whose, or by that plugin's part at the network's address. A refusal is never
+  kept, nor that a device is nobody's. So taking access away reaches every server, and giving it is seen at once.
+
+  Who may do what is a plugin's to decide. Where no plugin decides `reach` for a moment, nothing is reached and
+  no tool is called but by the network's first owner (`OneCore.User.first_owner/0`), who is how a network whose
+  deciding plugin was removed is put right. A network being built, the server's `:development` setting, lets
+  everything through instead.
   """
   require Logger
   alias OneCore.Plugins
@@ -71,6 +77,19 @@ defmodule OneCore.Hooks do
      It's also asked whether whoever asks is a `member` of the group or the network they ask for: then `who` is
      them, the `relation` is `member` and the `artifact` is the group, or `network`.
      """},
+    {"device", :changes,
+     """
+     A device asks, and One Core is about to say whose it is. It's about the `device`, by its key, and `who`, which
+     is nobody: `nil`. The answer is `who`: the user whose device it is, as `users/<name>`. With no plugin
+     answering, the device is nobody's, and nobody is refused everything. It's asked of the plugins added for the
+     network, since nobody is asking yet, and what's answered is kept until a tool of the plugin is called that
+     doesn't only read.
+     """},
+    {"owner", :decides,
+     """
+     The network is about to have its first owner. It's about `who` they are. A plugin that keeps who may do what
+     writes that down before it answers, and refuses if it can't: nothing else tells it.
+     """},
     {"called", :hears,
      """
      A tool was called. It's about what `call` is about, how long the tool `took` in microseconds, and the `error`
@@ -111,12 +130,23 @@ defmodule OneCore.Hooks do
     :ets.new(@allowed, [:named_table, :public, read_concurrency: true])
   end
 
-  @doc "Forgets what was decided, so that it's asked again: who may reach what may have changed."
-  def forget do
-    :ets.update_counter(@allowed, :forgotten, 1, {:forgotten, 0})
-    :ets.match_delete(@allowed, {{:_, :_}, :_})
+  @doc "The hooks whose answers a server keeps."
+  def kept, do: ["reach", "device"]
+
+  @doc """
+  Forgets what `hooks` were answered, so that they're asked again: who may reach what may have changed, or whose
+  a device is.
+  """
+  def forget(hooks \\ kept()) do
+    for hook <- hooks, hook in kept() do
+      :ets.update_counter(@allowed, {:forgotten, hook}, 1, {{:forgotten, hook}, 0})
+      :ets.match_delete(@allowed, {{hook, :_}, :_})
+    end
+
     :ok
   end
+
+  defp forgotten(hook), do: :ets.lookup_element(@allowed, {:forgotten, hook}, 2, 0)
 
   @doc """
   The plugins that hook into `hook` for a moment that runs for `who`: each as who it was added for, and its name
@@ -204,36 +234,51 @@ defmodule OneCore.Hooks do
 
   @doc """
   Asks each plugin that decides `hook` about it, for `asked`. Gives `:ok`, or `{:refuse, why}` from the first to
-  refuse. `apart` is a plugin that isn't asked, as who it was added for and its name there.
+  refuse. `apart` is a plugin that isn't asked, as who it was added for and its name there. Where no plugin
+  decides `reach` for them, a call or a reach is the network's first owner's alone.
   """
-  def decide(hook, about, {_by, who} = asked, apart \\ nil) do
+  def decide(hook, about, {by, who} = asked, apart \\ nil) do
     # Who decides is whoever's plugins they are, so what's kept is what they decided.
-    kept = if hook == "reach", do: {about, Plugins.chain(who)}
-    forgotten = :ets.lookup_element(@allowed, :forgotten, 2, 0)
+    kept = if hook == "reach", do: {"reach", {about, Plugins.chain(who)}}
+    forgotten = forgotten("reach")
 
     if kept != nil and kept?(kept) do
       :ok
     else
+      # Who may do what is decided only where something decides who reaches what.
+      undecided = hook in ["call", "reach"] and hooking("reach", who) -- [apart] == []
+
       decided =
-        Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = added ->
-          case answered(added, hook, about, asked) do
-            {:ok, "ok"} ->
-              nil
+        with :ok <- if(undecided, do: undecided(by), else: :ok) do
+          Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = added ->
+            case answered(added, hook, about, asked) do
+              {:ok, "ok"} ->
+                nil
 
-            {:ok, %{"refuse" => why}} ->
-              Logger.info("#{plugin} refused #{hook} for #{who}: #{why}")
-              {:refuse, why}
+              {:ok, %{"refuse" => why}} ->
+                Logger.info("#{plugin} refused #{hook} for #{who}: #{why}")
+                {:refuse, why}
 
-            {:error, why} ->
-              {:refuse, "#{plugin} couldn't decide it: #{why}"}
-          end
-        end)
+              {:error, why} ->
+                {:refuse, "#{plugin} couldn't decide it: #{why}"}
+            end
+          end)
+        end
 
       # Kept only if nothing was forgotten meanwhile: it may have been decided from what has since changed.
-      if kept != nil and decided == :ok and forgotten == :ets.lookup_element(@allowed, :forgotten, 2, 0),
+      if kept != nil and decided == :ok and forgotten == forgotten("reach"),
         do: :ets.insert(@allowed, {kept, System.monotonic_time(:millisecond) + @kept_for})
 
       decided
+    end
+  end
+
+  # What's decided where no plugin decides who may reach what.
+  defp undecided(by) do
+    cond do
+      Application.get_env(:one_core, :development, false) -> :ok
+      by != nil and by == OneCore.User.first_owner() -> :ok
+      true -> {:refuse, "Nothing here decides who may do what, so only the network's first owner may do anything"}
     end
   end
 
@@ -242,6 +287,30 @@ defmodule OneCore.Hooks do
     case :ets.lookup(@allowed, kept) do
       [{^kept, until}] -> until > System.monotonic_time(:millisecond)
       [] -> false
+    end
+  end
+
+  @doc """
+  Whose the device `device` is, as the plugins that change `device` say: a user, or `nil` for nobody's. Kept
+  once it's somebody's, so a call asks nothing.
+  """
+  def whose(device) do
+    kept = {"device", device}
+
+    case :ets.lookup(@allowed, kept) do
+      [{^kept, who}] ->
+        who
+
+      [] ->
+        forgotten = forgotten("device")
+
+        with {:ok, %{"who" => who}, _by} <- change("device", %{"device" => device, "who" => nil}, {nil, "network"}),
+             true <- is_binary(who) and who =~ ~r/^users\/[a-z][a-z0-9-]*$/ do
+          if forgotten == forgotten("device"), do: :ets.insert(@allowed, {kept, who})
+          who
+        else
+          _ -> nil
+        end
     end
   end
 

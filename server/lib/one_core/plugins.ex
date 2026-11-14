@@ -148,17 +148,17 @@ defmodule OneCore.Plugins do
           # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
           ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
           about = %{"plugin" => name, "tool" => tool, "inputs" => inputs}
-          # A plugin that decides who reaches what decides it from what its tools change. So after one of those
-          # that doesn't only read, what was decided is forgotten: here, and by the servers this one tells.
-          decides = "reach" in version.hooks and found[:read_only] != true
+          # What a plugin answered a hook that's kept, it answered from what its tools change. So after one of those
+          # that doesn't only read, it's forgotten: here, and by the servers this one tells.
+          kept = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.kept(), &(&1 in version.hooks))
 
           try do
             call = called(at, name, versions, ask, asked, passed_on)
             answered = tool(found, about, asked, version, &version.plugin.call(tool, &1, call))
-            if decides, do: Server.tell_servers(Enum.uniq([at | chain(who)]), "decided")
+            if kept != [], do: Server.tell_servers(Enum.uniq([at | chain(who)]), "decided", kept)
             answered
           after
-            if decides, do: Hooks.forget()
+            Hooks.forget(kept)
           end
       end
     end)

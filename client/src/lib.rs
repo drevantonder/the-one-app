@@ -492,13 +492,13 @@ impl Client {
                 .with_context(|| format!("{} isn't servers' addresses", file.display()));
             return servers.map(Some);
         };
-        // Until signing in says who this client's user is, it's who it says it acts as, or the one user a network
-        // has without it. A sharing link's holder asks the servers of whoever the link leads to, which it starts with.
+        // Until signing in says who this client's user is, it's who it says it acts as. A sharing link's holder
+        // asks the servers of whoever the link leads to, which it starts with.
         let said = |what| self.says.iter().find(|(says, _)| *says == what).map(|(_, said)| said.as_str());
         let of = match said("link").map(|link| link.split('/').collect::<Vec<_>>()) {
             Some(leads) if leads[0] == "network" => "network/".to_owned(),
             Some(leads) if leads.len() > 2 => format!("{}/{}/", leads[0], leads[1]),
-            _ => format!("users/{}/", said("as").unwrap_or("anyone")),
+            _ => format!("users/{}/", said("as").context("This device is nobody's here: ONE_AS says who it acts as")?),
         };
         let asked = (SERVERS, json!({"of": of}));
         if !now {

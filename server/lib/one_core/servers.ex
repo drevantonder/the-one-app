@@ -148,8 +148,8 @@ defmodule OneCore.Servers do
   @doc "Makes where what's read is kept. Whatever calls this owns it, and it goes when that ends."
   def keep, do: :ets.new(__MODULE__, [:named_table, :public, read_concurrency: true])
 
-  # What `read` gave for `what` when it was last asked, which is asked again where nothing keeps it.
-  defp kept(what, read) do
+  @doc "What `read` gave for `what` when it was last asked, which is asked again where nothing keeps it."
+  def kept(what, read) do
     case :ets.whereis(__MODULE__) != :undefined and :ets.lookup(__MODULE__, what) do
       [{^what, kept}] ->
         kept

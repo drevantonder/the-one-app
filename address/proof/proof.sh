@@ -65,52 +65,35 @@ at address curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 ht
   const store = new AwsClient({ accessKeyId: process.env.ACCESS, secretAccessKey: process.env.SECRET, service: "s3", region: "auto" });
   const made = await store.fetch("http://10.0.0.1:9000/network", { method: "PUT" });
   if (!made.ok) throw new Error(`the store answered ${made.status}`);')
-without_sign_in=false
 
-# Stops what was started in a group of its own, all of it.
-stop() {
-  [[ -z $1 ]] && return
-  kill -- -"$1" 2>/dev/null
-  wait "$1" 2>/dev/null || true
-}
 stamped() { while IFS= read -r line; do printf '%(%T)T %s\n' -1 "$line"; done; }
 
-# The address: the five Workers, started again each time this is called. The signer's secrets and the way in's
-# setting are in the environment, which only `wrangler dev` reads them from.
-start_address() {
-  stop "${address_pid-}"
-  (cd "$address" && BUCKET=http://10.0.0.1:9000/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
-    DEVELOPMENT_WITHOUT_SIGN_IN=$without_sign_in WRANGLER_SEND_METRICS=false exec setsid nsenter --net=/run/netns/address \
-    bun run dev --ip 0.0.0.0 --port 8787 --persist-to "$work/address") > >(stamped >"$work/address.log") 2>&1 &
-  address_pid=$!
-  at address curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 http://10.0.0.1:8787/ping
-}
+# The address: its Workers. The signer's secrets are in the environment, which only `wrangler dev` reads them from.
+(cd "$address" && BUCKET=http://10.0.0.1:9000/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
+  WRANGLER_SEND_METRICS=false exec setsid nsenter --net=/run/netns/address \
+  bun run dev --ip 0.0.0.0 --port 8787 --persist-to "$work/address") > >(stamped >"$work/address.log") 2>&1 &
+at address curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 http://10.0.0.1:8787/ping
 # Servers and clients reach the address through a wire that writes down what it carries.
 at address socat -v TCP-LISTEN:8788,bind=10.0.0.1,fork,reuseaddr,nodelay TCP:10.0.0.1:8787,nodelay 2>"$work/wire" &
 at_address=http://10.0.0.1:8788
 
 # start_server <name> [options]: a server of the network whose home is the folder's <name>. Returns once it's
-# running, or has said it isn't one of the network's.
+# running, or has said it isn't one of the network's. The network is one being built, where nobody signs in: a
+# passkey is for a name, which an address that is a number has none of, so every client here asks as its first owner.
+export ONE_AS=owner
 start_server() {
   local name=$1
   shift
-  (cd "$root/server" && exec setsid nsenter --net=/run/netns/server mix network "$work/network" "$name" "$@" --address $at_address) >"$work/$name.log" 2>&1 &
+  (cd "$root/server" && exec setsid nsenter --net=/run/netns/server mix network "$work/network" "$name" "$@" --development --owner owner --address $at_address) >"$work/$name.log" 2>&1 &
   wait_for "A server is running|isn't one of the network's" "$work/$name.log"
 }
 # The client that calls: the network's first, until the app is open as that one, and then a second.
 calls=$work/network/client
 one() { ONE_HOME=$calls at client "$root/target/release/one" "$@"; }
-mcp() { at client curl -s -m 20 -w ' (HTTP %{http_code})\n' -X POST "$1/mcp" -H 'content-type: application/json' -d "$2"; }
 timed() { (cd "$address" && ONE_HOME=$calls at client bun proof/calls.js "$root/target/release/one" "$@"); }
-list='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tracker_list","arguments":{}}}'
 
-say "The address serves the web client's files, and the way in for outsiders is shut without the development flag"
-start_address
+say "The address serves the web client's files"
 at client curl -s http://10.0.0.1:8787/ | grep '<p>'
-mcp http://10.0.0.1:8787 "$list"
-
-without_sign_in=true
-start_address
 
 say "A server and a client that each reach the address, and not each other"
 echo "a server that doesn't show the secret the address was started with: $(cd "$root/server" && at server mix network "$work/unknown" --address $at_address 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
@@ -142,13 +125,6 @@ let_in=$(grep -o 'add_server --key [0-9a-f]*' "$work/spare.log")
 ONE_FOR=network one $let_in
 start_server spare
 one services | grep -o '"servers":\[[^]]*\]' | tail -1
-
-say "An outsider's call over the web reaches a tool"
-note=outside-$(random 8)
-before=$(carried)
-mcp $at_address '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tracker_add","arguments":{"tracker":"water","note":"'"$note"'"}}}'
-echo "this one the address reads, to pass it on: its note ($note) is in $(tail -c +$((before + 1)) "$work/wire" | grep -a -c "$note" || true) lines of what the wire carried"
-mcp $at_address "$list"
 
 say "A server with no bucket credentials writes and reads through signed access"
 (cd "$root/server" && at server mix run --no-start -e "

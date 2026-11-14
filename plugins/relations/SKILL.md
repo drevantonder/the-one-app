@@ -3,9 +3,9 @@ name: relations
 description: Read before sharing something, making a group or a sharing link, or when a call is refused for who may reach what, and before a plugin reaches what it didn't make.
 ---
 
-Relations says who may do what, as relation tuples: an artifact, a relation, and who. With it in a network,
-a plugin reaches an artifact only if a tuple says so, both for whoever it runs for and for the plugin.
-Without it, everything in a network is shared.
+Relations says who may do what, as relation tuples: an artifact, a relation, and who. A plugin reaches an
+artifact only if a tuple says so, both for whoever it runs for and for the plugin. Without it, or another
+plugin deciding, nobody but the network's first owner does anything.
 
 - An artifact is named by where its blobs are, and its name starts with whose it is:
   `users/alice/made/notes/7` is alice's, `groups/family/made/notes/2` is the group's. A plugin's tool that
