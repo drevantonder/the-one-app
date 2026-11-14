@@ -38,10 +38,15 @@ const greet = () => greeted ??= ask("ui/initialize", {
 export async function call(tool, inputs = {}) {
   await greet()
   const { content, isError } = await ask("tools/call", { name: tool, arguments: inputs })
-  const text = content.map(({ text, data, mimeType, resource }) => text ?? `data:${mimeType ?? resource.mimeType};base64,${data ?? resource.blob}`).join("\n")
+  const text = content.map(({ type, text, uri, data, mimeType, resource }) => text ?? (type === "resource_link" ? uri : `data:${mimeType ?? resource.mimeType};base64,${data ?? resource.blob}`)).join("\n")
   if (isError) throw new Error(text)
   return text
 }
+
+/// `await call("claims_attach", { expense: 4, name: file.name, type: file.type, upload: await upload(file) })`:
+/// sends a file that's too large to go in a call straight to where the network keeps it, for a tool of this app's
+/// plugin. → the name that tool takes for it, in the input its plugin says is an upload.
+export const upload = (file) => greet().then(() => ask("one/upload", { file })).then(({ upload }) => upload)
 
 /// `changed(show)`: runs `show` whenever what this page was answered has changed, to ask again and draw it.
 export const changed = (listener) => void listeners.add(listener)

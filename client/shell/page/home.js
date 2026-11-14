@@ -103,7 +103,7 @@ function opened(view) {
 const post = (view, message) => view.frame.contentWindow?.postMessage({ jsonrpc: "2.0", ...message }, "*")
 
 /// What this page answers an app itself. The rest is the client's to answer.
-function answer(view, method, params) {
+async function answer(view, method, params) {
   if (method === "ui/initialize") {
     return {
       protocolVersion: "2026-01-26",
@@ -123,6 +123,8 @@ function answer(view, method, params) {
   }
   if (method === "ping") return {}
   if (method === "ui/request-display-mode") return { mode: "fullscreen" }
+  // A file too large to go in a call: the client sends it where the network keeps it, for a tool of the app's plugin.
+  if (method === "one/upload") return invoke("upload", await params.file.arrayBuffer(), { headers: { plugin: view.plugin } })
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
   return invoke("ask", { view: view.plugin, method, params })
 }

@@ -45,6 +45,13 @@ defmodule OneCore.Plugin do
     app is given its `data:` address, and the command writes the file out (`one hello photo > photo.jpg`).
   - A tool takes a file as base64 text, in an input that says so: `%{type: "string", contentEncoding: "base64"}`.
     The command reads one into it (`one hello keep --photo-from photo.jpg`).
+  - A file that's large, such as a photo from a phone, doesn't go inside a call or its answer. A tool takes one in
+    an input that says it's an upload, `%{type: "string", format: "upload"}`: the caller sent the file straight to
+    the bucket (an app with the kit's `upload`, an agent with the `upload` tool, the command with
+    `--photo-from photo.jpg`), and the input is its name among the plugin's own blobs, `uploads/...`.
+    `OneCore.Artifact.size(call.own, name)` says whether it arrived and how big it is. A tool answers with one of
+    its blobs as `{:file, "image/jpeg", call.own, name}`: the client is handed a short-lived link, fetches the
+    file from the bucket and keeps it, so a blob answered this way is one that's never replaced.
   - `guide/0`, if the plugin has one, is text for agents on when and how to use its tools.
   - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact, where it keeps
     what it needs as blobs through `OneCore.Artifact`: `read/2` gives `{:ok, data, tag}` or `:absent`, `write/3`

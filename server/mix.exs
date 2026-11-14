@@ -13,6 +13,6 @@ defmodule OneCore.MixProject do
   end
 
   def application do
-    [mod: {OneCore.Application, []}, extra_applications: [:logger, :crypto, :xmerl]]
+    [mod: {OneCore.Application, []}, extra_applications: [:logger, :crypto, :inets, :xmerl]]
   end
 end

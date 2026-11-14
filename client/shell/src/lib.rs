@@ -65,10 +65,14 @@ impl Views {
         Ok((text("mimeType"), text("text")))
     }
 
-    /// One file of a plugin, for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the
-    /// newest files of `plugin` this client knows of.
-    async fn file(&self, address: &Uri) -> anyhow::Result<(String, String)> {
+    /// One file for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the newest files of
+    /// `plugin` this client knows of.
+    async fn file(&self, address: &Uri) -> anyhow::Result<(String, Vec<u8>)> {
         let file = address.path().trim_start_matches('/');
+        // A large file a tool answered with, which the client keeps, at the address the answer gave an app for it.
+        if let Some(kept) = file.strip_prefix(".file/") {
+            return self.client.file(kept).ok_or_else(|| anyhow::anyhow!("this client keeps no such file"));
+        }
         let listed = self.listed().await?;
         let resource = resources(&listed).find(|resource| {
             let mut parts = resource.trim_start_matches("ui://").splitn(3, '/');
@@ -80,7 +84,8 @@ impl Views {
         // Android's and Windows' web views name the app after the scheme, in a host's name.
         let app = app.strip_prefix("oneapp.").unwrap_or(app);
         self.loaded.lock().expect("no view panics").entry(app.to_owned()).or_default().insert(resource.to_owned());
-        self.read(resource).await
+        let (kind, text) = self.read(resource).await?;
+        Ok((kind, text.into_bytes()))
     }
 
     /// The open apps that loaded a file a server no longer lists: one of their plugins has a new version. They
@@ -141,6 +146,16 @@ async fn watch(views: State<'_, Views>, watching: bool) -> Result<(), ()> {
     Ok(())
 }
 
+/// Sends a file an app's page chose, which is the request's body, to where the network keeps it, for a tool of
+/// the app's plugin. Gives the name that tool takes for it.
+#[tauri::command]
+async fn upload(views: State<'_, Views>, request: tauri::ipc::Request<'_>) -> Result<Value, String> {
+    let plugin = request.headers().get("plugin").and_then(|plugin| plugin.to_str().ok()).unwrap_or_default().to_owned();
+    let tauri::ipc::InvokeBody::Raw(file) = request.body() else { return Err("An upload is a file".into()) };
+    let sent = views.client.upload(&plugin, file.clone()).await;
+    sent.map(|upload| json!({"upload": upload})).map_err(|error| error.to_string())
+}
+
 /// Forgets what a view was answered: its page is gone, or loading again.
 #[tauri::command]
 fn close(views: State<'_, Views>, view: String) {
@@ -196,11 +211,11 @@ pub fn run() {
             let app = context.app_handle().clone();
             tauri::async_runtime::spawn(async move {
                 let response = match app.state::<Views>().file(request.uri()).await {
-                    Ok((kind, text)) => Response::builder()
+                    Ok((kind, file)) => Response::builder()
                         .header(header::CONTENT_TYPE, kind)
                         .header(header::CONTENT_SECURITY_POLICY, APP_MAY_LOAD)
                         .header(header::CACHE_CONTROL, "no-store")
-                        .body(text.into_bytes()),
+                        .body(file),
                     Err(error) => {
                         Response::builder().status(StatusCode::NOT_FOUND).body(format!("{error:#}").into_bytes())
                     }
@@ -208,7 +223,7 @@ pub fn run() {
                 responder.respond(response.expect("these headers are valid"))
             });
         })
-        .invoke_handler(tauri::generate_handler![apps, ask, again, watch, close, opened])
+        .invoke_handler(tauri::generate_handler![apps, ask, again, upload, watch, close, opened])
         .run(tauri::generate_context!())
         .expect("the app runs");
 }

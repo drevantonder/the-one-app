@@ -9,7 +9,12 @@ defmodule OneCore.Artifact do
       end
 
   `write` answers `:exists` and `replace` answers `:changed` when someone else got there first: read again and
-  decide again. `remove` is for a blob nothing reads any more, since nothing brings it back.
+  decide again. `remove` is for a blob nothing reads any more, since nothing brings it back. `size` gives
+  `{:ok, bytes}` or `:absent` without reading the blob.
+
+  A blob that's large doesn't pass through the server. A tool answers with one as `{:file, "image/jpeg", artifact,
+  name}`, and takes one a client sent as an upload: the server hands the client a short-lived link to the bucket
+  for each.
 
   An artifact's name is its prefix in the bucket without the last `/`, which is how relation tuples name it, and
   its first parts say whose it is. A plugin has its own artifact (a call's `own`), makes others for whoever it
@@ -35,6 +40,11 @@ defmodule OneCore.Artifact do
     do: changed(artifact, name, Bucket.replace(writes(artifact) <> name, data, tag))
 
   def remove(artifact, name), do: changed(artifact, name, Bucket.remove(writes(artifact) <> name))
+  def size(%__MODULE__{prefix: prefix}, name), do: Bucket.size(prefix <> name)
+
+  @doc "A short-lived link to one of its blobs, for a client to read it with, or to write it if there's none."
+  def link(%__MODULE__{prefix: prefix}, name, :read), do: Bucket.link(prefix <> name, :read)
+  def link(artifact, name, :write), do: Bucket.link(writes(artifact) <> name, :write)
 
   @doc "The names of its blobs that start with `starting`, in order."
   def list(%__MODULE__{prefix: prefix}, starting \\ "") do

@@ -47,7 +47,8 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
         Some(tool) if flags.iter().any(|flag| flag == "--help") => usage(tool),
         Some(tool) => {
             answered?;
-            let result = client.request("tools/call", json!({"name": name, "arguments": inputs(tool, flags)?})).await?;
+            let inputs = inputs(client, tool, flags).await?;
+            let result = client.request("tools/call", json!({"name": name, "arguments": inputs})).await?;
             let parts = result["content"].as_array().map(Vec::as_slice).unwrap_or_default();
             if result["isError"] == true {
                 let text: Vec<&str> = parts.iter().filter_map(|part| part["text"].as_str()).collect();
@@ -59,8 +60,15 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
                 match part["text"].as_str() {
                     Some(text) => println!("{text}"),
                     None => {
-                        let file = part["data"].as_str().or(part["resource"]["blob"].as_str()).unwrap_or_default();
-                        io::stdout().write_all(&BASE64.decode(file.as_bytes()).context("the answer isn't a file")?)?;
+                        // A large file is one the client fetched and kept, and any other is in the answer.
+                        let file = match part["uri"].as_str().and_then(|uri| uri.strip_prefix("/.file/")) {
+                            Some(kept) => client.file(kept).context("the answer isn't a file")?.1,
+                            None => {
+                                let file = part["data"].as_str().or(part["resource"]["blob"].as_str());
+                                BASE64.decode(file.unwrap_or_default().as_bytes()).context("the answer isn't a file")?
+                            }
+                        };
+                        io::stdout().write_all(&file)?;
                     }
                 }
             }
@@ -100,8 +108,9 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
 }
 
 /// A tool's inputs from the command line: `--name value`, typed as the tool says, or `--name-from path` to read
-/// the value from a file.
-fn inputs(tool: &Value, flags: &[String]) -> Result<Value> {
+/// the value from a file. A file for an input that says it's an upload (its schema's `format`) is sent to where
+/// the network keeps it, and the input is the name it was given there.
+async fn inputs(client: &Client, tool: &Value, flags: &[String]) -> Result<Value> {
     let known = &tool["inputSchema"]["properties"];
     let mut inputs = Map::new();
     let mut flags = flags.iter().peekable();
@@ -118,6 +127,11 @@ fn inputs(tool: &Value, flags: &[String]) -> Result<Value> {
         let value = match flags.next_if(|next| !next.starts_with("--")) {
             None if kind == "boolean" => Value::Bool(true),
             None => bail!("--{name} needs a value"),
+            Some(path) if from_file && known[name]["format"] == "upload" => {
+                let file = fs::read(path).with_context(|| format!("couldn't read {path}"))?;
+                let plugin = tool["name"].as_str().and_then(|tool| tool.split('_').next()).unwrap_or_default();
+                Value::String(client.upload(plugin, file).await?)
+            }
             Some(path) if from_file => read(Path::new(path), known[name]["contentEncoding"] == "base64")?,
             Some(text) if kind == "string" => Value::String(text.clone()),
             Some(text) => {

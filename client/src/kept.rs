@@ -1,14 +1,17 @@
 //! What a client keeps: every answer a server gave to something that only reads, as a file in the client's home.
 //! A view (an app, or the home screen) is shown what was kept at once and asked again behind it, so it opens as
 //! fast with no server up as with one.
+//!
+//! Something large isn't in an answer: the answer has a short-lived link to it in the bucket. The client fetches it
+//! while the link lasts and keeps it, and sends what's large the same way, by a link a server hands it.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{fs, process};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use futures_util::future::join_all;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -25,15 +28,7 @@ impl Client {
 
     /// Keeps `answer` as what `method` was last answered with.
     pub(crate) fn keep(&self, method: &str, params: &Value, answer: &Value) -> Result<()> {
-        let file = self.kept_file(method, params);
-        fs::create_dir_all(self.home.join("kept"))?;
-        // Written whole, under a name no other write has, then given its name: another ask, or another program of
-        // this client, may be reading it or keeping the same answer.
-        static WRITES: AtomicU64 = AtomicU64::new(0);
-        let writing = file.with_extension(format!("{}-{}", process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
-        fs::write(&writing, answer.to_string())?;
-        fs::rename(writing, file)?;
-        Ok(())
+        write(&self.kept_file(method, params), answer.to_string().as_bytes())
     }
 
     /// What a server last answered `method` with.
@@ -44,6 +39,69 @@ impl Client {
     fn kept_file(&self, method: &str, params: &Value) -> PathBuf {
         self.home.join("kept").join(crate::hex(&Sha256::digest(json!([method, params]).to_string())))
     }
+
+    /// Fetches each large file a tool answered with, by its link, and keeps it, unless it's kept already: a blob
+    /// answered by link is never replaced. The answer then says where the client keeps the file, in the link's
+    /// place: `/.file/<name>/<type>`, which is what a view asks this client for it by (`file`). The name is one
+    /// that only what was given this answer knows.
+    pub(crate) async fn keep_files(&self, result: &mut Value) -> Result<()> {
+        let Some(parts) = result.get_mut("content").and_then(Value::as_array_mut) else { return Ok(()) };
+        for part in parts.iter_mut().filter(|part| part["type"] == "resource_link") {
+            let (Some(link), Some(blob)) = (part["uri"].as_str(), part["name"].as_str()) else { continue };
+            let secret = self.endpoint.secret_key().to_bytes();
+            let name = crate::hex(&Sha256::digest([secret.as_slice(), blob.as_bytes()].concat()));
+            let file = self.home.join("files").join(&name);
+            if !file.exists() {
+                let web = crate::web()?;
+                let fetched = async { web.get(link).send().await?.error_for_status()?.bytes().await };
+                write(&file, &fetched.await.context("The file couldn't be fetched. Check this device is online.")?)?;
+            }
+            let kind = part["mimeType"].as_str().unwrap_or("application/octet-stream");
+            part["uri"] = format!("/.file/{name}/{kind}").into();
+        }
+        Ok(())
+    }
+
+    /// A large file this client keeps, by what follows `/.file/` in where an answer said it is: what kind of file
+    /// it is, and the file.
+    pub fn file(&self, kept: &str) -> Option<(String, Vec<u8>)> {
+        let (name, kind) = kept.split_once('/')?;
+        let named = !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_hexdigit());
+        Some((kind.to_owned(), fs::read(self.home.join("files").join(name).as_path()).ok().filter(|_| named)?))
+    }
+
+    /// Sends a file that's too large to go in a call to where the network keeps it, for a tool of `plugin`: a
+    /// server gives a short-lived link to send it by. Gives the name that tool takes for it.
+    pub async fn upload(&self, plugin: &str, file: Vec<u8>) -> Result<String> {
+        let answer = self.request("tools/call", json!({"name": "upload", "arguments": {"plugin": plugin}})).await?;
+        let said = answer["content"][0]["text"].as_str().unwrap_or_default();
+        if answer["isError"] == true {
+            bail!("{said}")
+        }
+        let to: Value = serde_json::from_str(said).context("the server didn't say where to send the file")?;
+        let (Some(method), Some(url), Some(name)) = (to["method"].as_str(), to["url"].as_str(), to["upload"].as_str())
+        else {
+            bail!("the server didn't say where to send the file")
+        };
+        let mut send = crate::web()?.request(method.parse()?, url).body(file);
+        for (header, value) in to["headers"].as_object().into_iter().flatten() {
+            send = send.header(header, value.as_str().unwrap_or_default());
+        }
+        let sent = async { send.send().await?.error_for_status() };
+        sent.await.context("The file couldn't be sent. Check this device is online, then try again.")?;
+        Ok(name.to_owned())
+    }
+}
+
+/// Writes a file whole, under a name no other write has, then gives it its name: another ask, or another program
+/// of this client, may be reading it or keeping the same thing.
+fn write(file: &Path, bytes: &[u8]) -> Result<()> {
+    fs::create_dir_all(file.parent().context("what's kept is kept in a folder")?)?;
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let writing = file.with_extension(format!("{}-{}", process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
+    fs::write(&writing, bytes)?;
+    fs::rename(writing, file)?;
+    Ok(())
 }
 
 /// What one view has been answered since it opened. It asks through this, and every view gets the same, with

@@ -80,12 +80,9 @@ impl Network {
         let pass = data_encoding::BASE64URL_NOPAD.decode(self.pass.as_bytes()).context("the pass isn't a pass")?;
         let pass: Value = serde_json::from_slice(&pass).context("the pass isn't a pass")?;
         let of = pass["list"].as_str().context("the pass names no list")?;
-        let tls = iroh::tls::CaTlsConfig::default().client_config(iroh::tls::default_provider())?;
-        let mut ask = reqwest::Client::builder()
-            .tls_backend_preconfigured(tls)
-            .timeout(CONNECT)
-            .build()?
+        let mut ask = web()?
             .get(format!("{}/signer/servers", self.address.trim_end_matches('/')))
+            .timeout(CONNECT)
             .query(&[("of", of)]);
         for (name, value) in self.signed(key, "/signer/servers", "")? {
             ask = ask.header(name, value);
@@ -104,6 +101,13 @@ impl Network {
             })
             .collect()
     }
+}
+
+/// What asks over the web: the signer at a network's address, and the bucket by a link. Its TLS is the one iroh
+/// reaches the relay with.
+fn web() -> Result<reqwest::Client> {
+    let tls = iroh::tls::CaTlsConfig::default().client_config(iroh::tls::default_provider())?;
+    Ok(reqwest::Client::builder().tls_backend_preconfigured(tls).connect_timeout(CONNECT).build()?)
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -403,10 +407,12 @@ impl Client {
         let message = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
         let answer = self.ask(message.to_string().as_bytes()).await?;
         let mut answer: Value = serde_json::from_slice(&answer).context("the server's answer isn't JSON")?;
-        match answer.get("error") {
-            Some(error) => bail!("{}", error["message"].as_str().unwrap_or("the server refused")),
-            None => Ok(answer["result"].take()),
+        if let Some(error) = answer.get("error") {
+            bail!("{}", error["message"].as_str().unwrap_or("the server refused"))
         }
+        let mut result = answer["result"].take();
+        self.keep_files(&mut result).await?;
+        Ok(result)
     }
 
     /// Ends the connection, if one was made, and tells the server. The goodbye leaves this machine at once. What

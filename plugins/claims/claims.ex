@@ -44,7 +44,7 @@ defmodule Claims do
   def guide do
     """
     Claims is a workplace's expense claims. Someone records each expense as it happens (`record`, then `attach`
-    for each receipt), gathers expenses into a claim (`gather`) and sends it (`send`). An approver lists what's
+    for each receipt, whose file is an upload), gathers expenses into a claim (`gather`) and sends it (`send`). An approver lists what's
     waiting (`waiting`), opens one (`show`), looks at each receipt (`receipt`), and approves it (`approve`) or sends
     it back with the reason (`send_back`). Once the money has been paid, `pay` says so.
 
@@ -94,9 +94,9 @@ defmodule Claims do
               expense: expense,
               name: %{type: "string", description: "The file's name, such as taxi.jpg"},
               type: %{type: "string", description: "What kind of file it is, such as image/jpeg"},
-              data: %{type: "string", contentEncoding: "base64", description: "The file, as base64"}
+              upload: %{type: "string", format: "upload", description: "The file, as the name `upload` gave it"}
             },
-            ["expense", "name", "type", "data"]
+            ["expense", "name", "type", "upload"]
           )
       },
       %{
@@ -227,16 +227,13 @@ defmodule Claims do
     end)
   end
 
-  def call("attach", %{"expense" => id, "name" => name, "type" => type, "data" => data}, call) do
-    file =
-      case Base.decode64(data, ignore: :whitespace) do
-        {:ok, file} when file != "" -> file
-        _ -> raise "A receipt's data is the file, as base64."
+  # A receipt's file was sent straight to the bucket, into this plugin's own artifact, and stays where it landed.
+  def call("attach", %{"expense" => id, "name" => name, "type" => type, "upload" => upload}, call) do
+    size =
+      case String.starts_with?(upload, "uploads/") and OneCore.Artifact.size(call.own, upload) do
+        {:ok, size} when size > 0 -> size
+        _ -> raise "That file didn't arrive. Send it again."
       end
-
-    # A blob is named by what's in it, so the same file twice, or this call starting again, writes it once.
-    blob = "receipts/" <> Base.encode16(:crypto.hash(:sha256, file), case: :lower)
-    OneCore.Artifact.write(call.own, blob, file)
 
     transaction(call, fn db ->
       open_expense!(db, call, id)
@@ -245,7 +242,7 @@ defmodule Claims do
         query(
           db,
           "insert into receipts (expense, blob, name, type, size) values (?, ?, ?, ?, ?) returning id, name, type, size",
-          [id, blob, name, type, byte_size(file)]
+          [id, upload, name, type, size]
         )
 
       receipt
@@ -269,8 +266,7 @@ defmodule Claims do
 
     case transaction(call, &query(&1, mine, [id, who(call), approver?(call)])) do
       [%{"blob" => blob, "type" => type}] ->
-        {:ok, file, _tag} = OneCore.Artifact.read(call.own, blob)
-        {:blob, type, file}
+        {:file, type, call.own, blob}
 
       [] ->
         raise "There's no receipt #{id}."

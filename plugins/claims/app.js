@@ -1,6 +1,6 @@
 // Claims' app: your expenses and your claims, and the claims that wait on an approver. Plain HTML (app.html) and
 // this module, on the kit's elements, calling the plugin's tools.
-import { call, changed, confirm, leave } from "../ui/ui.js"
+import { call, changed, confirm, leave, upload } from "../ui/ui.js"
 
 const $ = (id) => document.getElementById(id)
 const make = (tag, properties, ...inside) => {
@@ -36,7 +36,8 @@ const where = (claim) => ({
   paid: `Paid ${on.format(new Date(claim.paid_at))}`,
 })[claim.status]
 
-// Receipts. A receipt's file never changes, so it's asked for once, and its small picture is drawn once.
+// Receipts. A receipt's file never changes, so it's asked for once, and its small picture is drawn once. The
+// client keeps the file, and its address here is where the client keeps it.
 
 const files = new Map()
 const smalls = new Map()
@@ -68,11 +69,6 @@ function thumb(expense) {
   else small(receipt).then((address) => (image.src = address), () => {})
   return image
 }
-
-const base64 = (file) => new Promise((read, failed) => {
-  const reader = Object.assign(new FileReader(), { onload: () => read(reader.result.slice(reader.result.indexOf(",") + 1)), onerror: () => failed(reader.error) })
-  reader.readAsDataURL(file)
-})
 
 // The lists
 
@@ -228,11 +224,10 @@ async function edit(expense) {
   $("remove").hidden = !expense
   $("take-out").hidden = !expense?.claim
   $("expense-sheet").show()
-  // Its receipts are in the field as the files they are, each knowing which receipt it is.
-  const kept = await Promise.all((expense?.receipts ?? []).map(async (receipt) => {
-    const [, data] = (await file(receipt)).split(",")
-    return Object.assign(new File([Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0))], receipt.name, { type: receipt.type }), { receipt: receipt.id })
-  })).catch(() => [])
+  // Its receipts are in the field as what's kept of them, each knowing which receipt it is.
+  const kept = await Promise.all((expense?.receipts ?? []).map(async ({ id, name, type, size }) => (
+    { receipt: id, name, type, size, src: type.startsWith("image/") ? await small({ id }).catch(() => undefined) : undefined }
+  )))
   if (editing === expense) form.elements.receipts.files = [...kept, ...form.elements.receipts.files]
 }
 
@@ -250,7 +245,8 @@ $("expense-form").addEventListener("submit", async (event) => {
     const was = editing?.receipts ?? []
     editing = editing ? await ask("change", { expense: editing.id, ...said }) : await ask("record", said)
     for (const receipt of was) if (!chosen.some((file) => file.receipt === receipt.id)) await call("claims_detach", { receipt: receipt.id })
-    for (const file of chosen) file.receipt ??= (await ask("attach", { expense: editing.id, name: file.name, type: file.type, data: await base64(file) })).id
+    // A receipt's file goes straight to where the network keeps it, and the expense is told what was sent.
+    for (const file of chosen) file.receipt ??= (await ask("attach", { expense: editing.id, name: file.name, type: file.type, upload: await upload(file) })).id
     $("expense-sheet").close()
   } catch (error) {
     Object.assign($("expense-refused"), { text: error.message, hidden: false })

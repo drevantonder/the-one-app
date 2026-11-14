@@ -72,14 +72,42 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
+  # A blob's size is listed with its key.
+  @impl true
+  def size(address, key) do
+    case request(address, %{list: key}) do
+      %{status: 200, body: listed} ->
+        {listed, _} = :xmerl_scan.string(:binary.bin_to_list(listed))
+
+        case texts(listed, ~c"/ListBucketResult/Contents[Key='#{key}']/Size") do
+          [size] -> {:ok, String.to_integer(size)}
+          [] -> :absent
+        end
+
+      refused ->
+        raise refusal(refused)
+    end
+  end
+
+  # A link is one request to the bucket as the signer signs it, which works for a minute.
+  @impl true
+  def link(address, key, mode) do
+    %{"method" => method, "url" => url, "headers" => headers} = signed(address, %{mode => key})
+    %{method: method, url: url, headers: headers}
+  end
+
   # Has the signer sign `ask`, and sends what it signed.
   defp request(address, ask, data \\ nil) do
-    ask = JSON.encode!(ask)
-    signed = Req.post!(address <> "/signer/sign", body: ask, headers: Address.signed("/signer/sign", ask))
+    %{"method" => method, "url" => url, "headers" => headers} = signed(address, ask)
+    Req.request!(method: method, url: url, headers: headers, body: data, decode_body: false, compressed: false)
+  end
 
-    case signed do
-      %{status: 200, body: %{"method" => method, "url" => url, "headers" => headers}} ->
-        Req.request!(method: method, url: url, headers: headers, body: data, decode_body: false, compressed: false)
+  defp signed(address, ask) do
+    ask = JSON.encode!(ask)
+
+    case Req.post!(address <> "/signer/sign", body: ask, headers: Address.signed("/signer/sign", ask)) do
+      %{status: 200, body: %{"method" => _method} = signed} ->
+        signed
 
       %{status: 403, body: %{"error" => why}} ->
         raise OneCore.Bucket.Refused, "The signer at #{address} refused: #{why}"

@@ -2,8 +2,18 @@ defmodule OneCore.Bucket.Folder do
   @moduledoc """
   A folder as a bucket, for a network on one machine. A blob is a file at its key. No part of a key starts with a
   dot, which keeps keys inside the folder and leaves dot names for this module's own files.
+
+  A folder has no signer to make links to its blobs, so the server answers them itself, to this machine alone,
+  which is where a network kept in a folder is. A link says what it's to and when it ends, signed with a secret
+  made when the server first gives one.
   """
   @behaviour OneCore.Bucket
+  require Record
+
+  Record.defrecordp(:asked, :mod, Record.extract(:mod, from_lib: "inets/include/httpd.hrl"))
+
+  # How long a link works for, in seconds, as the signer's does.
+  @linked_for 60
 
   @impl true
   def read(folder, key) do
@@ -65,6 +75,78 @@ defmodule OneCore.Bucket.Folder do
   def remove(folder, key) do
     File.rm(file(folder, key))
     :ok
+  end
+
+  @impl true
+  def size(folder, key) do
+    case File.stat(file(folder, key)) do
+      {:ok, %{size: size}} -> {:ok, size}
+      {:error, :enoent} -> :absent
+    end
+  end
+
+  @impl true
+  def link(folder, key, mode) do
+    file(folder, key)
+    {port, secret} = links()
+    to = Base.url_encode64(:erlang.term_to_binary({folder, key, mode, System.system_time(:second) + @linked_for}))
+    method = if mode == :read, do: "GET", else: "PUT"
+    %{method: method, url: "http://127.0.0.1:#{port}/#{to}.#{signature(secret, to)}", headers: %{}}
+  end
+
+  defp signature(secret, to), do: Base.url_encode64(:crypto.mac(:hmac, :sha256, secret, to))
+
+  # Where links are answered, and the secret they're signed with: made when the first link is.
+  defp links do
+    with nil <- :persistent_term.get(__MODULE__, nil) do
+      :global.trans({__MODULE__, self()}, fn ->
+        with nil <- :persistent_term.get(__MODULE__, nil) do
+          {:ok, _} = Application.ensure_all_started(:inets)
+
+          here = [
+            bind_address: {127, 0, 0, 1},
+            port: 0,
+            server_name: ~c"bucket",
+            server_root: ~c"/",
+            document_root: ~c"/"
+          ]
+
+          {:ok, listener} = :inets.start(:httpd, [modules: [__MODULE__]] ++ here)
+          links = {:httpd.info(listener)[:port], :crypto.strong_rand_bytes(32)}
+          :persistent_term.put(__MODULE__, links)
+          links
+        end
+      end)
+    end
+  end
+
+  @doc false
+  # Answers a link, as `:httpd` asks a module to: the blob read, or written only if there's none.
+  def unquote(:do)(request) do
+    {_port, secret} = :persistent_term.get(__MODULE__)
+
+    {status, body} =
+      with [to, signed] <- String.split(String.trim_leading(List.to_string(asked(request, :request_uri)), "/"), "."),
+           true <- signed == signature(secret, to),
+           {folder, key, mode, until} <- :erlang.binary_to_term(Base.url_decode64!(to)),
+           true <- until > System.system_time(:second) do
+        case {mode, asked(request, :method)} do
+          {:read, ~c"GET"} ->
+            with {:ok, data, _tag} <- read(folder, key), do: {200, data}, else: (:absent -> {404, ""})
+
+          {:write, ~c"PUT"} ->
+            with :ok <- write(folder, key, :erlang.list_to_binary(asked(request, :entity_body))),
+                 do: {200, ""},
+                 else: (:exists -> {412, ""})
+
+          _ ->
+            {405, ""}
+        end
+      else
+        _ -> {403, ""}
+      end
+
+    {:proceed, [response: {:response, [code: status, content_length: Integer.to_charlist(byte_size(body))], [body]}]}
   end
 
   defp keys(folder, within) do

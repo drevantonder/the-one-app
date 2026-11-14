@@ -42,8 +42,10 @@ async function fitted(file, side) {
 /// finger, the camera and the photo library); `accept` and `capture` are an `<input type="file">`'s. What's chosen
 /// shows above the button, each with a button that removes it. With `multiple` choosing again adds; without it one
 /// file is all there is, and it's removed to choose another. `files` is what's chosen, as an array of Files, and
-/// a form is sent them under `name`. `fit="2000"` makes each photo chosen a JPEG of at most that many pixels
-/// either way first: a phone's photo is many times what reading a receipt needs.
+/// a form is sent them under `name`. A file the app has kept already goes in `files` as what's known of it,
+/// `{ name, type, size, src }` with `src` its picture's address, and shows as one chosen. `fit="2000"` makes each
+/// photo chosen a JPEG of at most that many pixels either way first: a phone's photo is many times what reading a
+/// receipt needs.
 class FileField extends Field {
   static styles = [Field.styles, more(css)]
   static properties = {
@@ -74,7 +76,7 @@ class FileField extends Field {
 
   get formValue() {
     const sent = new FormData()
-    for (const file of this.files) sent.append(this.name, file)
+    for (const file of this.files) if (file instanceof Blob) sent.append(this.name, file)
     return sent
   }
 
@@ -85,7 +87,7 @@ class FileField extends Field {
   willUpdate() {
     for (const file of this.previews.keys()) if (!this.files.includes(file)) this.previews.delete(file)
     for (const file of this.files) {
-      if (this.previews.has(file) || !file.type.startsWith("image/")) continue
+      if (this.previews.has(file) || !(file instanceof Blob) || !file.type.startsWith("image/")) continue
       this.previews.set(file, undefined)
       // One that can't be drawn keeps the look of any other file.
       drawn(file, 96).then((canvas) => {
@@ -102,7 +104,7 @@ class FileField extends Field {
         <ul>
           ${this.files.map((file) => html`
             <li>
-              ${this.previews.get(file) ? html`<img src=${this.previews.get(file)} alt="">` : html`<span class="thumb">${paper}</span>`}
+              ${file.src ?? this.previews.get(file) ? html`<img src=${file.src ?? this.previews.get(file)} alt="">` : html`<span class="thumb">${paper}</span>`}
               <span class="words"><span>${file.name}</span><small>${size(file.size)}</small></span>
               <button class="press ring" type="button" aria-label="${said.remove} ${file.name}" ?disabled=${this.disabled} @click=${() => this.remove(file)}>${x}</button>
             </li>

@@ -15,7 +15,7 @@ defmodule OneCore.Mcp do
   App is.
   """
   require Logger
-  alias OneCore.{Hooks, Plugin, Plugins, Server, Servers, Services, User}
+  alias OneCore.{Artifact, Hooks, Plugin, Plugins, Server, Servers, Services, User}
   alias OneCore.Plugins.Version
 
   # Tools are all a server speaks of MCP, and they are the same in each of these.
@@ -46,6 +46,19 @@ defmodule OneCore.Mcp do
         type: "object",
         properties: %{name: %{type: "string", description: "The plugin's name"}},
         required: ["name"]
+      }
+    },
+    %{
+      name: "upload",
+      description: """
+      Gives somewhere to send a file that's too large to go in a call: a link that takes it once, within a minute.
+      Send the file as the link says, by its `method` to its `url` with its `headers`, then give `upload`, its
+      name, to the plugin's tool that takes one. `one <plugin> <tool> --<input>-from <path>` does all of this.
+      """,
+      inputSchema: %{
+        type: "object",
+        properties: %{plugin: %{type: "string", description: "The plugin whose tool the file is for"}},
+        required: ["plugin"]
       }
     },
     %{
@@ -261,6 +274,17 @@ defmodule OneCore.Mcp do
     with :ok <- Plugins.remove(name), do: {:ok, "#{name} is removed."}
   end
 
+  # A file sent this way lands in the plugin's own artifact, under a name nobody could guess.
+  defp call("upload", %{"plugin" => plugin}, _who, _passed_on) do
+    if is_map_key(Plugins.running(), plugin) do
+      name = "uploads/" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+      own = %Artifact{prefix: Plugins.own(plugin) <> "/"}
+      {:ok, JSON.encode!(Map.put(Artifact.link(own, name, :write), :upload, name))}
+    else
+      {:error, "There's no plugin named #{plugin}"}
+    end
+  end
+
   defp call("add_server", %{"key" => key}, who, _passed_on) do
     with :ok <- Servers.add(key, Server.key()) do
       Hooks.heard("joined", %{"server" => key, "by" => Server.key()}, who)
@@ -289,7 +313,12 @@ defmodule OneCore.Mcp do
   defp call(name, inputs, who, passed_on) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
          {:ok, answer} <- Plugins.call(plugin, tool, inputs, who, passed_on) do
-      if is_binary(answer) or match?({:blob, _, _}, answer), do: {:ok, answer}, else: {:ok, JSON.encode!(answer)}
+      case answer do
+        text when is_binary(text) -> {:ok, text}
+        {:blob, _kind, _data} -> {:ok, answer}
+        {:file, _kind, %Artifact{}, _name} -> {:ok, answer}
+        _ -> {:ok, JSON.encode!(answer)}
+      end
     else
       [_] -> {:error, "#{name} takes other inputs, or isn't a tool. tools/list says what each takes."}
       other -> other
@@ -310,12 +339,17 @@ defmodule OneCore.Mcp do
   end
 
   # An answer as MCP's content. A picture is an image, which an agent that sees pictures sees, and any other file
-  # is a resource inside the answer.
+  # is a resource inside the answer, unless it's large.
   defp content(_name, {:blob, "image/" <> _ = kind, data}),
     do: [%{type: "image", mimeType: kind, data: Base.encode64(data)}]
 
   defp content(name, {:blob, kind, data}),
     do: [%{type: "resource", resource: %{uri: "one://#{name}", mimeType: kind, blob: Base.encode64(data)}}]
+
+  # A large file is a short-lived link to its blob in the bucket, under the blob's key, which never names another.
+  defp content(_name, {:file, kind, %Artifact{prefix: prefix} = artifact, blob}) do
+    [%{type: "resource_link", uri: Artifact.link(artifact, blob, :read).url, name: prefix <> blob, mimeType: kind}]
+  end
 
   defp content(_name, text), do: [%{type: "text", text: text}]
 

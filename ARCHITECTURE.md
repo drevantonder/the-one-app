@@ -23,8 +23,7 @@
 - Each user's and group's blobs sit under a prefix of their own in the bucket, so a blob's path says whose it is.
 - One Core keeps, for each user and group, the list of servers that act for them, under that prefix. A server on the
   list can add another. The first is written by a server acting for the network, and only if the list is absent.
-- A client reads the bucket only through a server. For something large, a server asks the signer for a short-lived link
-  and hands it to the client.
+- A client reads the bucket only through a server.
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
   connects.
 - A server without a connection to the bucket isn't in a normal state. Nothing is designed around it.
