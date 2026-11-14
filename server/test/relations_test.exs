@@ -60,7 +60,7 @@ defmodule OneCore.RelationsTest do
     {:ok, key} = OneCore.Iroh.key(Server.key_file())
     assert OneCore.Servers.joined?(key)
     for child <- [Plugins, Server, Services], do: start_supervised!(child)
-    for name <- ["database", "relations"], do: assert({:ok, 1, _warnings} = Plugins.deploy(name, shipped(name)))
+    for name <- ["database", "relations"], do: assert({:ok, 1, ""} = Plugins.deploy(name, shipped(name)))
     assert {:ok, 1, ""} = Plugins.deploy("notes", %{"notes.ex" => @notes})
     assert {:ok, 1, ""} = Plugins.deploy("peek", %{"peek.ex" => String.replace(@notes, "Notes", "Peek")})
     :ok
@@ -161,7 +161,7 @@ defmodule OneCore.RelationsTest do
 
   @tag :tmp_dir
   test "Claims' approver is whoever a tuple says is an editor of its claims, and everyone else sees only their own" do
-    assert {:ok, 1, _warnings} = Plugins.deploy("claims", shipped("claims"))
+    assert {:ok, 1, ""} = Plugins.deploy("claims", shipped("claims"))
     claims = Plugins.own("claims")
     assert {:ok, %{"id" => expense}} = call("claims_record", %{"amount" => 12.5}, @alice)
     assert {:ok, %{"id" => claim}} = call("claims_gather", %{"expenses" => [expense], "title" => "Taxi"}, @alice)
