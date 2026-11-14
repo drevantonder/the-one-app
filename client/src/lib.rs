@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow, bail};
-use iroh::endpoint::{Connection, QuicTransportConfig, presets};
-use iroh::{Endpoint, EndpointAddr, NetReportConfig, SecretKey};
+use iroh::endpoint::{Connection, QuicTransportConfig, RelayMode, presets};
+use iroh::{Endpoint, EndpointAddr, NetReportConfig, RelayConfig, SecretKey};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, broadcast};
 use tokio::task::JoinSet;
@@ -34,23 +35,44 @@ const CONNECT: Duration = Duration::from_secs(10);
 const ALIVE: Duration = Duration::from_secs(1);
 const GONE: Duration = Duration::from_secs(5);
 
+/// A network's address, and the pass this machine shows the relay there: what says it's one of the network's own.
+#[derive(Deserialize)]
+pub struct Network {
+    pub address: String,
+    pub pass: String,
+}
+
 /// An endpoint holding the key kept in `key_file`, which is made on first use. It reaches others, and is reached, by
-/// key at the addresses it's told: with no relay, no address lookup and no probes, nothing about a network goes to
-/// anyone outside it. A server's add-on binds this same endpoint.
-pub async fn endpoint(key_file: &Path) -> Result<Endpoint> {
+/// key: straight to the addresses it's told and the ones it finds, and otherwise through the relay at its network's
+/// address, which is also the only thing it times. With no other relay and no address lookup, nothing about a
+/// network goes to anyone outside it. A network on one machine has no address, and so no relay. A server's add-on
+/// binds this same endpoint.
+pub async fn endpoint(key_file: &Path, network: Option<&Network>) -> Result<Endpoint> {
+    let mut probes = NetReportConfig::minimal();
+    let relay = match network {
+        Some(Network { address, pass }) => {
+            let address = address.parse().with_context(|| format!("{address} isn't a network's address"))?;
+            // iroh takes the relay it timed as its own, so with none timed it would have none.
+            probes.https_probes = true;
+            RelayMode::Custom(RelayConfig::new(address, None).with_auth_token(pass).into())
+        }
+        None => RelayMode::Disabled,
+    };
     Endpoint::builder(presets::Minimal)
         .secret_key(key(key_file)?)
         .alpns(vec![ALPN.to_vec()])
         .transport_config(
             QuicTransportConfig::builder().keep_alive_interval(ALIVE).max_idle_timeout(Some(GONE.try_into()?)).build(),
         )
-        .net_report_config(NetReportConfig::minimal())
+        .relay_mode(relay)
+        .net_report_config(probes)
         .bind()
         .await
         .context("couldn't open a socket")
 }
 
-fn key(file: &Path) -> Result<SecretKey> {
+/// The key kept in `file`, which is made on first use.
+pub fn key(file: &Path) -> Result<SecretKey> {
     fs::create_dir_all(file.parent().context("a key is kept in a folder")?)?;
     let mut new = fs::OpenOptions::new();
     new.write(true).create_new(true);
@@ -103,7 +125,12 @@ pub struct Client {
 impl Client {
     pub async fn open(home: impl Into<PathBuf>) -> Result<Self> {
         let home = home.into();
-        let endpoint = endpoint(&home.join("key")).await?;
+        let network = match fs::read(home.join("network")) {
+            Ok(network) => Some(serde_json::from_slice(&network).context("`network` isn't a network's address")?),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => return Err(error).context("couldn't read `network`"),
+        };
+        let endpoint = endpoint(&home.join("key"), network.as_ref()).await?;
         Ok(Self { home, endpoint, reach: Mutex::default(), told: broadcast::channel(16).0 })
     }
 

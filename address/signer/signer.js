@@ -11,6 +11,11 @@ import { asker, isKey, signedBy } from "../ask.js";
 const SIGNED_FOR = 60;
 /** The network's own prefix. A server on its list acts for the network, and reaches every user's and group's blobs. */
 const NETWORK = "network/";
+/**
+ * A server's own blobs are under its key. It reaches them, and the network's other servers read them: that's how
+ * they learn where it is.
+ */
+const SERVER = /^servers\/([0-9a-f]{64})\//;
 /** A blob's key says whose it is by how it starts: a user's or a group's prefix, or the network's. */
 const OWNER = /^(?:(?:users|groups)\/[^/]+\/|network\/)/;
 const owner = (key) => OWNER.exec(key)?.[0];
@@ -30,7 +35,7 @@ export default class extends WorkerEntrypoint {
     const body = await request.text();
     const by = await asker(request, body);
     if (!by) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    if (pathname === "/signer/sign" && request.method === "POST") return this.sign(by, body);
+    if (pathname === "/signer/sign" && request.method === "POST") return this.sign(by, request.headers.get("one-pass"), body);
     if (pathname === "/signer/servers" && request.method === "GET") {
       if (!(await this.admits(by, request.headers.get("one-pass")))) return refuse(403, "This network doesn't know you");
       return Response.json({ servers: await this.servers(searchParams.get("of")) });
@@ -39,11 +44,11 @@ export default class extends WorkerEntrypoint {
   }
 
   /**
-   * Signs one request to the bucket for the server `by`: `{read: key}`, `{write: key}` (only if absent),
-   * `{replace: key, tag}` (only if unchanged) or `{list: prefix, after?}`. Answers what to send: its method, URL
-   * and headers.
+   * Signs one request to the bucket for the server `by`, which shows `pass`: `{read: key}`, `{write: key}` (only if
+   * absent), `{replace: key, tag}` (only if unchanged) or `{list: prefix, after?}`. Answers what to send: its
+   * method, URL and headers.
    */
-  async sign(by, body) {
+  async sign(by, pass, body) {
     let ask;
     try {
       ask = JSON.parse(body);
@@ -54,10 +59,13 @@ export default class extends WorkerEntrypoint {
     if (!isBlob(key, ask.list !== undefined)) return refuse(400, "That isn't a blob's key");
 
     const [network, owners] = await Promise.all([this.list(NETWORK), this.list(owner(key))]);
+    const listed = network?.includes(by) || owners?.includes(by);
     // A new network has no server yet. Whichever asks first writes the network's list, as its first owner is the
-    // first user to sign in, and the bucket lets only one write of a blob that's absent land.
-    const first = network === null && ask.write === NETWORK + "servers";
-    if (!first && !network?.includes(by) && !owners?.includes(by)) return refuse(403, "You aren't on its list of servers");
+    // first user to sign in. It's signed for whoever asks, since the bucket lets only the first one land.
+    const first = ask.write === NETWORK + "servers";
+    const server = SERVER.exec(key)?.[1];
+    const own = server && (server === by || ask.read !== undefined) && (await this.admits(by, pass));
+    if (!listed && !first && !own) return refuse(403, "You aren't on its list of servers");
 
     const url = new URL(this.env.BUCKET);
     const headers = {};

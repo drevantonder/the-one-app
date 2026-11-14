@@ -2,12 +2,19 @@ defmodule OneCore.Iroh do
   @moduledoc "The server's Rust add-on for being reached by key (`native/one_core_iroh`)."
   use Rustler, otp_app: :one_core, crate: "one_core_iroh"
 
+  @doc "The key kept in `key_file`, made on first use, as others know it."
+  def key(_key_file), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "The signature of `message` by the key kept in `key_file`."
+  def sign(_key_file, _message), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc """
-  Opens the endpoint whose key is kept in `key_file`, made on first use, and sends each message a client asks to
-  `asked` as `{:ask, ask, message}`. Gives the endpoint, open while it's held, and its address as the JSON a client
+  Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
+  `{:ask, ask, message}`. With a `network`, `{address, pass}`, it's reached through the relay at that address too,
+  and hears what outsiders ask there. Gives the endpoint, open while it's held, and its address as the JSON a client
   is told it in.
   """
-  def start(_key_file, _asked), do: :erlang.nif_error(:nif_not_loaded)
+  def start(_key_file, _network, _asked), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Sends `message` to every client connected to `endpoint`, each on a stream of its own."
   def tell(_endpoint, _message), do: :erlang.nif_error(:nif_not_loaded)

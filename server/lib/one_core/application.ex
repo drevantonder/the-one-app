@@ -4,6 +4,9 @@ defmodule OneCore.Application do
 
   @impl true
   def start(_type, _args) do
+    {:ok, key} = OneCore.Iroh.key(OneCore.Server.key_file())
+    OneCore.Servers.first(key)
+
     children = [{Task.Supervisor, name: OneCore.Asks}, OneCore.Plugins, OneCore.Server]
     Supervisor.start_link(children, strategy: :one_for_one, name: OneCore.Supervisor)
   end

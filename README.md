@@ -32,10 +32,22 @@ the system keeps an app's data.
 tracker carries on with nothing lost. `cd server && mix test` runs the tests, and `server/test/takeover.sh` stops
 real servers in the middle of writes and checks what's left.
 
+A network with an address has its bucket, its relay and its way in for outsiders there. `address/proof/proof.sh` runs
+one whole on this machine, with nothing deployed, and shows each of them working. To put one on Cloudflare, make an R2
+bucket and an S3 API token for it, then:
+
+    cd address && bun install && bun run deploy
+    for secret in BUCKET ACCESS_KEY_ID SECRET_ACCESS_KEY; do bunx wrangler secret put $secret -c signer/wrangler.jsonc; done
+    cd ../server && mix network /tmp/one-network --address https://<where the gateway was deployed>
+
+`BUCKET` is the bucket's S3 address with its name on the end: `https://<account>.r2.cloudflarestorage.com/<bucket>`.
+
 - `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
 - `client/shell`: the app, a window on that half, and the one program both are.
 - `ui`: the kit an app's UI is written with.
+- `address`: what sits at a network's address, each a Cloudflare Worker: the gateway, the relay, the signer, the web
+  client's files and the way in for outsiders.
 - `plugins`: the plugins The One App ships with, each a folder of its own.
 
 ## Reading it

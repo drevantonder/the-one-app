@@ -9,11 +9,15 @@ use std::path::Path;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
-use iroh::endpoint::{Connection, SendStream};
+use client::Network;
+use data_encoding::HEXLOWER;
+use iroh::endpoint::Connection;
 use iroh::{Endpoint, EndpointAddr};
 use rustler::{Atom, Binary, Encoder, Env, LocalPid, NewBinary, OwnedEnv, Resource, ResourceArc, Term};
 use tokio::runtime::Runtime;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
+
+mod outside;
 
 mod atoms {
     rustler::atoms! { ok, ask, closed, stopped, unreachable }
@@ -44,24 +48,50 @@ impl Drop for Reached {
     }
 }
 
-/// One message a client asked, holding the stream its answer goes back on. Dropped unanswered, the client is told
-/// the stream ended.
-struct Ask(Mutex<Option<SendStream>>);
+/// One message asked, holding the way its answer goes back. Dropped unanswered, whoever asked is told nothing came.
+struct Ask(Mutex<Option<oneshot::Sender<Vec<u8>>>>);
 
 #[rustler::resource_impl]
 impl Resource for Ask {}
 
-/// Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
-/// `{:ask, ask, message}`. Gives the endpoint and its address, as the JSON a client is told it in.
+/// The key kept in `key_file`, made on first use, as others know it.
 #[rustler::nif(schedule = "DirtyIo")]
-fn start(key_file: String, asked: LocalPid) -> Result<(ResourceArc<Reached>, String), String> {
+fn key(key_file: String) -> Result<String, String> {
+    let key = client::key(Path::new(&key_file)).map_err(|error| format!("{error:#}"))?;
+    Ok(key.public().to_string())
+}
+
+/// The signature of `message` by the key kept in `key_file`.
+#[rustler::nif(schedule = "DirtyIo")]
+fn sign(key_file: String, message: Binary) -> Result<String, String> {
+    let key = client::key(Path::new(&key_file)).map_err(|error| format!("{error:#}"))?;
+    Ok(HEXLOWER.encode(&key.sign(message.as_slice()).to_bytes()))
+}
+
+/// Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
+/// `{:ask, ask, message}`. With a `network`, its address and the pass shown there, it's reached through the relay
+/// at that address too, and hears what outsiders ask there. Gives the endpoint and its address, as the JSON a client
+/// is told it in.
+#[rustler::nif(schedule = "DirtyIo")]
+fn start(
+    key_file: String,
+    network: Option<(String, String)>,
+    asked: LocalPid,
+) -> Result<(ResourceArc<Reached>, String), String> {
     RUNTIME.block_on(async {
-        let endpoint = client::endpoint(Path::new(&key_file)).await.map_err(|error| format!("{error:#}"))?;
+        let network = network.map(|(address, pass)| Network { address, pass });
+        let endpoint =
+            client::endpoint(Path::new(&key_file), network.as_ref()).await.map_err(|error| format!("{error:#}"))?;
         // iroh lists the machine's addresses on its networks. A client on this machine reaches it with no network too.
         let here = endpoint.bound_sockets().into_iter().filter(SocketAddr::is_ipv4);
-        let address = here.fold(endpoint.addr(), |address, socket| {
+        let mut address = here.fold(endpoint.addr(), |address, socket| {
             address.with_ip_addr(SocketAddr::from((Ipv4Addr::LOCALHOST, socket.port())))
         });
+        if let Some(network) = network {
+            // A client is told the relay now, before the endpoint has connected to it.
+            address = address.with_relay_url(network.address.parse().map_err(|_| "that isn't an address")?);
+            tokio::spawn(outside::hear(network, endpoint.secret_key().clone(), asked));
+        }
         let address = serde_json::to_string(&address).map_err(|error| error.to_string())?;
         // A client that falls this many messages behind misses some, and hears the next.
         let (told, _) = broadcast::channel(64);
@@ -75,6 +105,19 @@ fn start(key_file: String, asked: LocalPid) -> Result<(ResourceArc<Reached>, Str
     })
 }
 
+/// Hands `message` to the server's Elixir, and waits for its answer. There's none if the Elixir is gone.
+async fn ask(asked: &LocalPid, message: &[u8]) -> Option<Vec<u8>> {
+    let (answer, answered) = oneshot::channel();
+    let ask = ResourceArc::new(Ask(Mutex::new(Some(answer))));
+    let sent = OwnedEnv::new().send_and_clear(asked, |env| {
+        let mut binary = NewBinary::new(env, message.len());
+        binary.as_mut_slice().copy_from_slice(message);
+        (atoms::ask(), ask, Binary::from(binary))
+    });
+    sent.ok()?;
+    answered.await.ok()
+}
+
 async fn accept(endpoint: Endpoint, asked: LocalPid, told: broadcast::Sender<Vec<u8>>) {
     while let Some(incoming) = endpoint.accept().await {
         let mut told = told.subscribe();
@@ -83,17 +126,14 @@ async fn accept(endpoint: Endpoint, asked: LocalPid, told: broadcast::Sender<Vec
             loop {
                 tokio::select! {
                     stream = connection.accept_bi() => {
-                        let Ok((send, mut receive)) = stream else { return };
+                        let Ok((mut send, mut receive)) = stream else { return };
                         tokio::spawn(async move {
                             let Ok(message) = receive.read_to_end(client::LIMIT).await else { return };
-                            let ask = ResourceArc::new(Ask(Mutex::new(Some(send))));
-                            // The server's Elixir going away is the only way this fails, and then nobody is left
-                            // to tell.
-                            let _ = OwnedEnv::new().send_and_clear(&asked, |env| {
-                                let mut binary = NewBinary::new(env, message.len());
-                                binary.as_mut_slice().copy_from_slice(&message);
-                                (atoms::ask(), ask, Binary::from(binary))
-                            });
+                            if let Some(answer) = ask(&asked, &message).await
+                                && send.write_all(&answer).await.is_ok()
+                            {
+                                let _ = send.finish();
+                            }
                         });
                     }
                     message = told.recv() => {
@@ -127,13 +167,9 @@ fn tell(reached: ResourceArc<Reached>, message: Binary) -> Atom {
 /// Sends `message` back to whoever asked `ask`. An empty answer only ends the stream.
 #[rustler::nif]
 fn answer(ask: ResourceArc<Ask>, message: Binary) -> Atom {
-    if let Some(mut send) = ask.0.lock().expect("no answer panics").take() {
-        let answer = message.as_slice().to_vec();
-        RUNTIME.spawn(async move {
-            if send.write_all(&answer).await.is_ok() {
-                let _ = send.finish();
-            }
-        });
+    if let Some(answer) = ask.0.lock().expect("no answer panics").take() {
+        // Whoever asked may have gone, and then nobody is left to tell.
+        let _ = answer.send(message.as_slice().to_vec());
     }
     atoms::ok()
 }

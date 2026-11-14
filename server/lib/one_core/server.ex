@@ -2,10 +2,10 @@ defmodule OneCore.Server do
   @moduledoc """
   A server on its machine: it holds its key, in the folder that is its `:home` setting, answers what clients and
   other servers ask, each message apart from the others, and asks other servers. It can also tell the clients
-  connected to it something.
+  connected to it something. Its network's address, if the network has one, is its `:address` setting.
   """
   use GenServer
-  alias OneCore.{Iroh, Mcp, Servers}
+  alias OneCore.{Address, Iroh, Mcp, Servers}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -14,6 +14,9 @@ defmodule OneCore.Server do
 
   @doc "Tells every connected client `notification`, in MCP's JSON-RPC. With no server started, nobody is told."
   def tell(notification), do: GenServer.cast(__MODULE__, {:tell, JSON.encode!(notification)})
+
+  @doc "The file this server's key is kept in."
+  def key_file, do: Path.join(Application.fetch_env!(:one_core, :home), "key")
 
   @doc "This server's key, or `nil` where no server is running."
   def key, do: elem(:persistent_term.get(__MODULE__, {nil, nil}), 0)
@@ -51,7 +54,8 @@ defmodule OneCore.Server do
 
   @impl true
   def init(nil) do
-    {:ok, {endpoint, address}} = Iroh.start(Path.join(Application.fetch_env!(:one_core, :home), "key"), self())
+    network = if at = Application.get_env(:one_core, :address), do: {at, Address.pass()}
+    {:ok, {endpoint, address}} = Iroh.start(key_file(), network, self())
     key = JSON.decode!(address)["id"]
     :persistent_term.put(__MODULE__, {key, endpoint})
     Servers.started(key, address)
