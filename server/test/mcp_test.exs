@@ -12,7 +12,7 @@ defmodule OneCore.McpTest do
       [
         %{name: "list", read_only: true, description: "Lists the notes", inputs: %{type: "object"}},
         %{name: "add", description: "Adds a note", inputs: %{type: "object"}},
-        %{name: "photo", read_only: true, fixed: true, description: "A note's photo", inputs: %{type: "object"}},
+        %{name: "photo", read_only: true, description: "A note's photo", inputs: %{type: "object"}},
         %{name: "scan", read_only: true, description: "A note's scan", inputs: %{type: "object"}}
       ]
     end
@@ -61,7 +61,6 @@ defmodule OneCore.McpTest do
     tools = ask("tools/list", %{})["tools"]
     reads = for tool <- tools, into: %{}, do: {tool["name"], tool["annotations"]["readOnlyHint"]}
     assert %{"notes_list" => true, "notes_add" => false} = reads
-    assert ["notes_photo"] = for(%{"_meta" => %{"fixed" => true}} = tool <- tools, do: tool["name"])
 
     # A file a tool answers with is a picture an agent sees, or a file inside the answer.
     assert %{"content" => [%{"type" => "text", "text" => "[]"}]} = ask("tools/call", %{name: "notes_list"})
