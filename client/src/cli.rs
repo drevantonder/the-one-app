@@ -20,8 +20,7 @@ pub fn main() -> ExitCode {
 }
 
 async fn run(args: Vec<String>) -> Result<ExitCode> {
-    let home = env::var_os("ONE_HOME").context("ONE_HOME isn't set: the folder this client is kept in")?;
-    let client = Arc::new(Client::open(home).await?);
+    let client = Arc::new(Client::open(crate::home()?).await?);
     let code = if args == ["mcp"] {
         mcp::serve(client.clone()).await?;
         ExitCode::SUCCESS
@@ -36,9 +35,9 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
 async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
     let (words, flags) = args.split_at(args.iter().take_while(|arg| !arg.starts_with("--")).count());
     let name = words.join("_");
-    let (listed, answered) = match client.tools().await {
+    let (listed, answered) = match client.fresh("tools/list", &json!({})).await {
         Ok(listed) => (listed, Ok(())),
-        Err(error) => (client.kept_tools().unwrap_or_default(), Err(error)),
+        Err(error) => (client.kept("tools/list", &json!({})).unwrap_or_default(), Err(error)),
     };
     let tools = listed["tools"].as_array().map(Vec::as_slice).unwrap_or_default();
 

@@ -1,21 +1,26 @@
 //! The client's Rust half, with no window: it holds the client's key, reaches a server by its key, and keeps what
-//! servers answered. The CLI (`cli`) and MCP (`mcp`) are this, run from a terminal or by an agent.
+//! servers answered (`kept`). The CLI (`cli`) and MCP (`mcp`) are this, run from a terminal or by an agent, and the
+//! app is a window on it (`shell`).
 //!
 //! A client asks a server in MCP's JSON-RPC: one message on a stream of its own, and the answer back on that stream.
+//! A server tells a client something the same way, on a stream the server opens.
 
 pub mod cli;
+mod kept;
 pub mod mcp;
 
-use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow, bail};
 use iroh::endpoint::{Connection, presets};
 use iroh::{Endpoint, EndpointAddr, NetReportConfig, SecretKey};
 use serde_json::{Value, json};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
+
+pub use kept::Shown;
 
 /// What servers and clients speak.
 pub const ALPN: &[u8] = b"one/mcp/1";
@@ -57,19 +62,39 @@ fn key(file: &Path) -> Result<SecretKey> {
     }
 }
 
+/// The folder a client on a computer is kept in: `ONE_HOME` if that's set, as a network made to build or test with
+/// sets it, and otherwise where the system keeps an app's data, under a name of this client's own. A phone gives
+/// its app a folder instead.
+pub fn home() -> Result<PathBuf> {
+    match env::var_os("ONE_HOME") {
+        Some(home) => Ok(home.into()),
+        None => Ok(dirs::data_dir().context("this system has no folder for an app's data: set ONE_HOME")?.join(NAME)),
+    }
+}
+
+/// What the app is to the system it's on: the name of its folder, and of the app among a phone's. The app before
+/// this one is `one` and `The One App` there, and this is neither.
+pub const NAME: &str = "app.theone.client";
+
 /// A client, kept in its home folder: its `key`, the address of the `server` it asks, and what servers answered
 /// (`kept`).
 pub struct Client {
     home: PathBuf,
     endpoint: Endpoint,
     connection: Mutex<Option<Connection>>,
+    told: broadcast::Sender<Value>,
 }
 
 impl Client {
     pub async fn open(home: impl Into<PathBuf>) -> Result<Self> {
         let home = home.into();
         let endpoint = endpoint(&home.join("key")).await?;
-        Ok(Self { home, endpoint, connection: Mutex::new(None) })
+        Ok(Self { home, endpoint, connection: Mutex::new(None), told: broadcast::channel(16).0 })
+    }
+
+    /// What the server tells this client while it's connected: each a JSON-RPC notification.
+    pub fn told(&self) -> broadcast::Receiver<Value> {
+        self.told.subscribe()
     }
 
     /// Asks the server one JSON-RPC message and gives its answer, which for a notification is nothing.
@@ -89,23 +114,6 @@ impl Client {
             Some(error) => bail!("{}", error["message"].as_str().unwrap_or("the server refused")),
             None => Ok(answer["result"].take()),
         }
-    }
-
-    /// The network's tools as the server lists them now, kept for when no server answers.
-    pub async fn tools(&self) -> Result<Value> {
-        let tools = self.request("tools/list", json!({})).await?;
-        fs::create_dir_all(self.home.join("kept"))?;
-        fs::write(self.kept_tools_file(), tools.to_string())?;
-        Ok(tools)
-    }
-
-    /// The network's tools as a server last listed them.
-    pub fn kept_tools(&self) -> Option<Value> {
-        serde_json::from_slice(&fs::read(self.kept_tools_file()).ok()?).ok()
-    }
-
-    fn kept_tools_file(&self) -> PathBuf {
-        self.home.join("kept").join("tools.json")
     }
 
     /// Ends the connection, if one was made, and waits until the server has been told.
@@ -130,6 +138,21 @@ impl Client {
             .await
             .context("no server answered")?
             .context("no server answered")?;
+        tokio::spawn(hear(open.clone(), self.told.clone()));
         Ok(connection.insert(open).clone())
+    }
+}
+
+/// Passes on what the server tells this client over `connection`, until the connection ends.
+async fn hear(connection: Connection, told: broadcast::Sender<Value>) {
+    while let Ok(mut receive) = connection.accept_uni().await {
+        let told = told.clone();
+        tokio::spawn(async move {
+            let Ok(message) = receive.read_to_end(LIMIT).await else { return };
+            if let Ok(message) = serde_json::from_slice(&message) {
+                // With nobody listening, as in the CLI, it's dropped.
+                let _ = told.send(message);
+            }
+        });
     }
 }
