@@ -22,9 +22,9 @@ defmodule OneCore.Plugins do
   folder by its name. Those are added for the network.
 
   A server looks in the bucket at what's added for the network and for whoever it acts for when it starts, and at
-  what's added for anyone else when it's first asked for them. Only a server acting for whoever a plugin was added
-  for runs it for them: another passes the call on to one that does. It looks again when it's told to, when it's asked for a plugin it doesn't
-  run, and every so often (`OneCore.Server.look/0`).
+  what's added for anyone else when it's first asked for them. Only a server acting for whoever a plugin was added for
+  runs it for them: another passes the call on to one that does. It looks again when it's told to, when it's asked for
+  a plugin it doesn't run, and every so often (`OneCore.Server.look/0`).
   """
   use GenServer
   require Logger
@@ -549,9 +549,11 @@ defmodule OneCore.Plugins do
   end
 
   # The plugins a plugin uses are added before it is: the ones missing come from what the server ships with, and
-  # are added for the network.
+  # are added for the network, by a server acting for it.
   defp bring(owner, name, uses) do
-    case Enum.reject(uses, &(is_map_key(running(owner), &1) or match?({:ok, _, _}, deploy(@network, &1, shipped(&1))))) do
+    shipped = &(Servers.here?(@network) and match?({:ok, _, _}, deploy(@network, &1, shipped(&1))))
+
+    case Enum.reject(uses, &(is_map_key(running(owner), &1) or shipped.(&1))) do
       [] ->
         :ok
 
