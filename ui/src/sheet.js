@@ -1,7 +1,14 @@
 import { html, nothing } from "lit"
 import { Element, look } from "./element.js"
 import { icon } from "./icon.js"
+import { hold } from "./toast.js"
 import css from "./sheet.css"
+
+/// The sheets and alerts that are open, the last opened last.
+const open = []
+
+/// Where a sheet is in the middle of the window, not at its foot (sheet.css).
+const wide = matchMedia("(min-width: 40rem)")
 
 /// What a sheet and an alert share: the browser's own `<dialog>`, shown over the page while `open`. The browser
 /// keeps focus inside it and closes it on Escape and on the device's back gesture; a press outside closes it too.
@@ -18,6 +25,7 @@ class Dialog extends Element {
     if (!changed.has("open") || this.open === this.dialog.open) return
     if (!this.open) return this.dialog.close()
     this.dialog.showModal()
+    this.topmost(true)
     // The keyboard doesn't come up on a phone unless the app asked for it, with `autofocus` on a field.
     if (!this.querySelector("[autofocus]")) (this.renderRoot.querySelector("[autofocus]") ?? this.dialog).focus()
   }
@@ -31,14 +39,31 @@ class Dialog extends Element {
   closed() {
     // Opened again before the browser said it had closed: it's open, and that's not news.
     if (this.dialog.open) return
+    this.topmost(false)
     this.open = false
     this.emit("close")
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback()
+    this.topmost(false)
+  }
+
+  /// An open dialog makes everything outside it inert, a toast too. So toasts show from inside the one that's on
+  /// top, and from the page again once none is open.
+  topmost(is) {
+    if (open.includes(this)) open.splice(open.indexOf(this), 1)
+    if (is) open.push(this)
+    hold(open.at(-1)?.dialog)
   }
 }
 
 /// `<ui-sheet heading="Add expense">…</ui-sheet>`: something to fill in or look at, over the page: up from the
 /// foot of a narrow window, in the middle of a wide one. Set `open`, or call `show()` and `close()`.
 class Sheet extends Dialog {
+  /// Told of every move of a finger on the sheet, and able to stop the device scrolling for it.
+  touched = { handleEvent: (event) => this.pull(event), passive: false }
+
   show() {
     this.open = true
   }
@@ -49,7 +74,8 @@ class Sheet extends Dialog {
 
   render() {
     return html`
-      <dialog class="sheet" aria-labelledby="heading" @pointerdown=${this.outside} @click=${this.outside} @close=${this.closed}>
+      <dialog class="sheet" aria-labelledby="heading" @pointerdown=${this.outside} @click=${this.outside} @close=${this.closed}
+        @touchstart=${this.touched} @touchmove=${this.touched} @touchend=${this.touched} @touchcancel=${this.touched}>
         <div class="panel">
           <header>
             <h2 id="heading">${this.heading}</h2>
@@ -61,6 +87,48 @@ class Sheet extends Dialog {
         </div>
       </dialog>
     `
+  }
+
+  /// A sheet at the foot of the window goes down with the finger that pulls it, and on letting go closes if it
+  /// was pulled far or flicked, and comes back if not. A finger that's scrolling what's in the sheet isn't
+  /// pulling it: only one that goes down with nothing above left to scroll to.
+  pull(event) {
+    const { dialog } = this
+    const finger = event.touches[0] ?? event.changedTouches[0]
+    if (event.type === "touchstart") {
+      const under = event.composedPath()
+      const scrolled = under.slice(0, under.indexOf(dialog)).some((element) => element.scrollTop > 0)
+      this.pulling = wide.matches || scrolled || event.touches.length > 1 ? null : { x: finger.clientX, y: finger.clientY, down: 0, speed: 0 }
+      return
+    }
+    const pulling = this.pulling
+    if (!pulling) return
+    const down = finger.clientY - pulling.y
+    if (event.type === "touchmove") {
+      if (!pulling.ours) {
+        const across = Math.abs(finger.clientX - pulling.x)
+        // Not far enough yet to tell which way it's going.
+        if (Math.hypot(across, down) < 4) return
+        // Going up or sideways, or the device has already started scrolling: it's not a pull.
+        if (down < across || !event.cancelable) return void (this.pulling = null)
+        pulling.ours = true
+        dialog.setAttribute("data-pulled", "")
+      }
+      event.preventDefault()
+      pulling.speed = (down - pulling.down) / Math.max(1, event.timeStamp - pulling.at)
+      pulling.down = down
+      pulling.at = event.timeStamp
+      dialog.style.setProperty("--pulled", `${Math.max(0, down)}px`)
+      dialog.style.setProperty("--pulled-part", Math.min(1, Math.max(0, down) / dialog.offsetHeight))
+      return
+    }
+    this.pulling = null
+    if (!pulling.ours) return
+    dialog.removeAttribute("data-pulled")
+    dialog.style.removeProperty("--pulled")
+    dialog.style.removeProperty("--pulled-part")
+    // Let go a third of the way down, or on the way down at a flick's speed (in px a millisecond).
+    if (event.type === "touchend" && (down > dialog.offsetHeight / 3 || pulling.speed > 0.5)) this.open = false
   }
 }
 customElements.define("ui-sheet", Sheet)

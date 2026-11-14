@@ -9,6 +9,14 @@ import css from "./toast.css"
 let zag
 let store
 let toaster
+/// Where on the page the toaster is: the page itself, or the open sheet or alert that's on top (sheet.js).
+let home = document.body
+
+/// Moves toasts to `where`, or back to the page. They go on showing as they were.
+export function hold(where = document.body) {
+  home = where
+  if (toaster?.isConnected && toaster.parentNode !== home) home.append(toaster)
+}
 
 /// `toast("Deleted", { action: { label: "Undo", run: restore } })`: one line about what just happened, at the foot
 /// of the window for a few seconds, with one thing to do about it. What went well needs none: fine is silent.
@@ -16,7 +24,7 @@ export async function toast(text, { action } = {}) {
   zag ??= (await late).toast
   store ??= zag.createStore({ placement: "bottom", gap: 8, max: 3, offsets: "1rem" })
   toaster ??= document.createElement("ui-toaster")
-  if (!toaster.isConnected) document.body.append(toaster)
+  if (toaster.parentNode !== home) home.append(toaster)
   store.create({ title: text, duration: action ? 8000 : 4000, action: action && { label: action.label, onClick: action.run } })
 }
 

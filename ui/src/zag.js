@@ -77,9 +77,13 @@ export class Machine {
     this.started = true
   }
 
+  /// An element moved to another place on the page keeps its machine. One that's gone stops it.
   hostDisconnected() {
-    this.made?.stop()
-    this.made = this.started = undefined
+    queueMicrotask(() => {
+      if (this.host.isConnected) return
+      this.made?.stop()
+      this.made = this.started = undefined
+    })
   }
 
   /// What the machine is told, without the functions it calls back: those are new each time and change nothing.

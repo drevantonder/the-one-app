@@ -65,6 +65,31 @@ h2 {
     translate: 0 100%;
   }
 }
+/* While a finger pulls it down it's where the finger is, and what's under it shows through as it goes. */
+.sheet[data-pulled] {
+  translate: 0 var(--pulled);
+  transition: none;
+}
+.sheet[data-pulled]::backdrop {
+  opacity: calc(1 - var(--pulled-part));
+  transition: none;
+}
+/* Under a finger it says it can be pulled, as a phone's own sheets do. */
+@media (pointer: coarse) {
+  .sheet .panel::before {
+    content: "";
+    flex: none;
+    align-self: center;
+    width: 2.25rem;
+    height: 0.25rem;
+    margin-top: 0.5rem;
+    border-radius: 999px;
+    background: var(--input);
+  }
+  .sheet header {
+    padding-top: 0.125rem;
+  }
+}
 header {
   display: flex;
   align-items: center;
@@ -123,6 +148,12 @@ header button {
       translate: none;
       scale: 0.97;
     }
+  }
+  .sheet .panel::before {
+    content: none;
+  }
+  .sheet header {
+    padding-top: 0.5rem;
   }
   .body {
     padding-bottom: var(--gutter);

@@ -1,3 +1,7 @@
+/* The toaster itself takes no room wherever it is: what it shows is over the page. */
+:host {
+  display: contents;
+}
 /* Zag pins the group to the foot of the window, a gutter in from each side. */
 [popover] {
   width: auto;
