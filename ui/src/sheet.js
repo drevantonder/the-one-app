@@ -1,4 +1,5 @@
 import { html, nothing } from "lit"
+import { covers } from "./bridge.js"
 import { Element, look, said } from "./element.js"
 import { icon } from "./icon.js"
 import { hold } from "./toast.js"
@@ -51,11 +52,13 @@ class Dialog extends Element {
   }
 
   /// An open dialog makes everything outside it inert, a toast too. So toasts show from inside the one that's on
-  /// top, and from the page again once none is open.
+  /// top, and from the page again once none is open. And an open dialog is what a device's own back closes.
   topmost(is) {
     if (open.includes(this)) open.splice(open.indexOf(this), 1)
     if (is) open.push(this)
     hold(open.at(-1)?.dialog)
+    this.shut?.()
+    this.shut = is ? covers(() => (this.open = false)) : undefined
   }
 }
 

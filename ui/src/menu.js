@@ -50,7 +50,7 @@ class Menu extends Element {
 
   popup(api) {
     return html`
-      <div popover="manual" ${part(api.getPositionerProps())} ${over(api.open)}>
+      <div popover="manual" ${part(api.getPositionerProps())} ${over(api.open, () => api.setOpen(false))}>
         <div class="popup" ${part(api.getContentProps())}>
           ${[...this.children].map((item, i) => item.localName === "hr"
             ? html`<hr ${part(api.getSeparatorProps())}>`

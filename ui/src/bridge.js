@@ -9,6 +9,8 @@ let asked = 0
 addEventListener("message", ({ source, data }) => {
   if (source !== parent) return
   if (data?.method === "notifications/one/changed") for (const listener of listeners) listener()
+  // The device's own back, where a device has one and something is open over the page: the last opened shuts.
+  else if (data?.method === "notifications/one/back") over.at(-1)?.()
   else waiting.get(data?.id)?.(data)
 })
 
@@ -32,9 +34,27 @@ const greet = () => greeted ??= ask("ui/initialize", {
   appCapabilities: {},
 }).then(() => tell("ui/notifications/initialized"))
 
+/// What's open over the page, the last opened last, each as the function that shuts it: a sheet, an alert, a
+/// menu, a select's list, a calendar. A device's own back shuts the last of them before it goes anywhere, so the
+/// client is told whether there are any.
+const over = []
+const overNow = () => greet().then(() => tell("notifications/one/over", { over: over.length > 0 }))
+
+/// Says something has opened over the page, which `shut` shuts. → the function that says it has shut.
+export function covers(shut) {
+  over.push(shut)
+  if (over.length === 1) overNow()
+  return () => {
+    if (!over.includes(shut)) return
+    over.splice(over.indexOf(shut), 1)
+    if (!over.length) overNow()
+  }
+}
+
 /// `await call("tracker_add", { tracker: "water" })`: calls a tool and gives its answer, which is text. A file a
-/// tool answers with is its `data:` address, which an `<img>` takes as its `src`. A tool that refuses throws what
-/// it said. The client keeps the answer of a tool that only reads, and answers with it at once.
+/// tool answers with is its address, which an `<img>` takes as its `src`: a `data:` one, or for a large file, one
+/// the client keeps the file at. A tool that refuses throws what it said. The client keeps the answer of a tool
+/// that only reads, and answers with it at once.
 export async function call(tool, inputs = {}) {
   await greet()
   const { content, isError } = await ask("tools/call", { name: tool, arguments: inputs })

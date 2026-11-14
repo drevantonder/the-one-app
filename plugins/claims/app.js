@@ -205,8 +205,6 @@ $("back-form").addEventListener("submit", async (event) => {
 $("split").addEventListener("close", () => {
   open = null
   for (const row of document.querySelectorAll("ui-row[current]")) row.current = false
-  // What was open over a claim goes with it: the claim may have gone while its approver was writing why.
-  for (const sheet of document.querySelectorAll("ui-sheet[open]")) sheet.close()
 })
 
 // An expense

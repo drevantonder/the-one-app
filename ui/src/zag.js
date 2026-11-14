@@ -6,6 +6,7 @@
 // select list and the calendar, only on a device with a mouse: under a finger the device's own pickers open.
 import { noChange } from "lit"
 import { Directive, directive } from "lit/directive.js"
+import { covers } from "./bridge.js"
 import { drawn } from "./element.js"
 
 let made = 0
@@ -110,12 +111,16 @@ export const part = directive(class extends Directive {
 })
 
 /// Shows a popover while `open`, over everything else on the page: `<div popover="manual" ${over(api.open)}>`.
+/// With `shut`, which closes it, it's one of the things a device's own back closes.
 export const over = directive(class extends Directive {
   render() {
     return noChange
   }
-  update({ element }, [open]) {
-    if (element.isConnected && open !== element.matches(":popover-open")) element.togglePopover(open)
+  update({ element }, [open, shut]) {
+    if (!element.isConnected || open === element.matches(":popover-open")) return noChange
+    element.togglePopover(open)
+    this.shut?.()
+    this.shut = open && shut ? covers(shut) : undefined
     return noChange
   }
 })

@@ -9,7 +9,7 @@ const { listen } = window.__TAURI__.event
 const home = document.getElementById("home")
 /// The apps a server listed, by their plugin's name: `{ plugin, name, icon, page }`.
 let apps = new Map()
-/// The apps that are open, by their plugin's name: `{ plugin, frame, loaded, tapped, drawn }`. An app stays open
+/// The apps that are open, by their plugin's name: `{ plugin, frame, loaded, tapped, drawn, over }`. An app stays open
 /// behind the home screen once it's been opened, as on a phone, so going back to it shows it as it was.
 const open = new Map()
 
@@ -165,6 +165,8 @@ addEventListener("message", async ({ source, data }) => {
   if (id === undefined) {
     // The app's user went back out of it. The app stays open behind the home screen.
     if (method === "ui/notifications/request-teardown" && !view.frame.inert) history.back()
+    // Something is open over its page, or nothing is any more.
+    if (method === "notifications/one/over") view.over = params.over === true
     return
   }
   try {
@@ -182,6 +184,16 @@ listen("changed", ({ payload: view }) => {
   if (view === "home") list()
   else if (open.has(view)) post(open.get(view), { method: "notifications/one/changed" })
 })
+
+/// The device's own back, where a device has one (the app's window there calls this): what's open over the app
+/// that's showing shuts first. → whether anything was. If nothing was, the device goes back through this window's
+/// history, which leads back through an app's screens and out of it, and from the home screen out of the app.
+window.back = () => {
+  const view = open.get(history.state)
+  if (!view?.over || view.frame.inert) return false
+  post(view, { method: "notifications/one/back" })
+  return true
+}
 
 // The device's own way back, and this page's, both end here.
 addEventListener("popstate", (event) => {

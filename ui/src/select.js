@@ -62,7 +62,7 @@ class Select extends Field {
           ? html`<div class="box" aria-hidden="true" ?data-disabled=${this.disabled} ?data-invalid=${!!message}>${face}</div>`
           : html`
             <button class="box ring" ${part(api.getTriggerProps())} aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-describedby="message">${face}</button>
-            <div popover="manual" ${part(api.getPositionerProps())} ${over(api.open)}>
+            <div popover="manual" ${part(api.getPositionerProps())} ${over(api.open, () => api.setOpen(false))}>
               <div class="popup list" ${part(api.getContentProps())}>
                 ${options.map((item) => html`
                   <div class="item" ${part(api.getItemProps({ item }))}>

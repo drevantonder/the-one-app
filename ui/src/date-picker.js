@@ -61,7 +61,7 @@ class DatePicker extends Field {
           : html`
             <button class="box ring" ${part(api.getTriggerProps())} aria-labelledby="label trigger" ?data-invalid=${!!message}
               aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-describedby="message">${face}</button>
-            <div popover="manual" ${part(api.getPositionerProps())} ${over(api.open)}>${this.calendar(api)}</div>
+            <div popover="manual" ${part(api.getPositionerProps())} ${over(api.open, () => api.setOpen(false))}>${this.calendar(api)}</div>
           `}
         <input id="control" class="native" type="date" .value=${this.value} min=${ifDefined(this.min)} max=${ifDefined(this.max)}
           ?hidden=${!!api} ?required=${this.required} ?disabled=${this.disabled}
