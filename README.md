@@ -32,6 +32,12 @@ the system keeps an app's data.
 tracker carries on with nothing lost. `cd server && mix test` runs the tests, and `server/test/takeover.sh` stops
 real servers in the middle of writes and checks what's left.
 
+A plugin's service runs only on the servers it's installed on. `target/release/one services` lists every service
+with what it needs of a machine and each server's key, and
+`target/release/one install_service --plugin inbox --service Inbox.Watcher --server <key>` runs one on a server.
+`server/test/services.sh` installs two plugins' services on one of two servers, calls them through the other,
+and updates and kills them while they run.
+
 A network with an address has its bucket, its relay and its way in for outsiders there. `address/proof/proof.sh` runs
 one whole on this machine, with nothing deployed, and shows each of them working. To put one on Cloudflare, make an R2
 bucket and an S3 API token for it, then:
