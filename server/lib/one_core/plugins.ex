@@ -23,6 +23,7 @@ defmodule OneCore.Plugins do
   require Logger
   alias OneCore.{Artifact, Bucket, Call, Hooks, Jobs, Server, Services, User}
   alias OneCore.Plugins.Version
+  alias ExJsonSchema.Validator.Error
 
   @added User.anyone() <> "/added"
 
@@ -161,16 +162,61 @@ defmodule OneCore.Plugins do
     end
   end
 
-  # Whether `inputs` are what a tool says it takes, its JSON Schema, so a tool is only ever called with them.
+  # Whether `inputs` are what a tool says it takes, its JSON Schema, so a tool is only ever called with them. What's
+  # wrong is said to whoever called, a person or an agent, a sentence each.
   defp given(takes, inputs) do
-    with {:error, wrong} <- ExJsonSchema.Validator.validate(takes, inputs) do
-      # Each says which input it's about, if it's about one, by its path in the inputs: `expenses/0`.
-      {:error,
-       Enum.map_join(wrong, "\n", fn
-         {what, "#"} -> what
-         {what, "#/" <> at} -> "#{at}: #{what}"
-       end)}
+    with {:error, wrong} <- ExJsonSchema.Validator.validate(takes, inputs, error_formatter: false) do
+      {:error, Enum.map_join(wrong, "\n", &wrong(&1.error, input(&1.path), takes.schema))}
     end
+  end
+
+  # An input as it's named to whoever called, by its path in the inputs: `expenses/0`. All of them have no name.
+  defp input("#"), do: nil
+  defp input("#/" <> at), do: at
+
+  defp wrong(%Error.Required{missing: missing}, at, _takes) do
+    needs = if match?([_], missing), do: "is needed", else: "are needed"
+    "#{Enum.map_join(missing, ", ", &Enum.join(List.wrap(at) ++ [&1], "/"))} #{needs}."
+  end
+
+  defp wrong(%Error.Type{expected: expected, actual: actual}, at, _takes),
+    do: "#{at || "What's given"} is #{Enum.map_join(expected, " or ", &kind/1)}, not #{kind(actual)}."
+
+  defp wrong(%Error.Enum{}, at, takes) do
+    case described(takes, at) do
+      %{"enum" => one_of} -> "#{at} is one of #{Enum.join(one_of, ", ")}."
+      _ -> "#{at} isn't one of what it can be."
+    end
+  end
+
+  defp wrong(%Error.AdditionalProperties{}, at, _takes), do: "There's no input named #{at}."
+  defp wrong(%Error.Minimum{expected: least, exclusive?: true}, at, _takes), do: "#{at} is more than #{least}."
+  defp wrong(%Error.Minimum{expected: least}, at, _takes), do: "#{at} is #{least} or more."
+  defp wrong(%Error.Maximum{expected: most, exclusive?: true}, at, _takes), do: "#{at} is less than #{most}."
+  defp wrong(%Error.Maximum{expected: most}, at, _takes), do: "#{at} is #{most} or less."
+  defp wrong(%Error.MinLength{expected: 1}, at, _takes), do: "#{at} can't be empty."
+  defp wrong(%Error.MinLength{expected: least}, at, _takes), do: "#{at} is #{least} characters or more."
+  defp wrong(%Error.MaxLength{expected: most}, at, _takes), do: "#{at} is #{most} characters or fewer."
+  defp wrong(%Error.MinItems{expected: 1}, at, _takes), do: "#{at} can't be empty."
+  defp wrong(%Error.MinItems{expected: least}, at, _takes), do: "#{at} has #{least} or more."
+  defp wrong(%Error.MaxItems{expected: most}, at, _takes), do: "#{at} has #{most} or fewer."
+  # Anything rarer is said as the checker says it, which names the rule that was broken.
+  defp wrong(other, at, _takes), do: Enum.join(List.wrap(at) ++ [to_string(other)], ": ")
+
+  # A kind of value, as people call it.
+  defp kind("string"), do: "text"
+  defp kind("integer"), do: "a whole number"
+  defp kind("number"), do: "a number"
+  defp kind("boolean"), do: "true or false"
+  defp kind("array"), do: "a list"
+  defp kind("object"), do: "a set of named values"
+  defp kind("null"), do: "nothing"
+
+  # What a tool says of one of its inputs, by the input's path.
+  defp described(takes, at) do
+    Enum.reduce(String.split(at || "", "/", trim: true), takes, fn part, takes ->
+      if is_map(takes), do: takes["properties"][part] || takes["items"]
+    end)
   end
 
   @doc """
