@@ -28,7 +28,7 @@ stdio. The last, asked nothing, is the app: a home screen with the tracker's app
 updates it while the server runs, and its app loads again where it's open. Without `ONE_HOME`, a client is kept where
 the system keeps an app's data. `cd server && mix test` runs the tests.
 
-- `server`: One Core, in Elixir, with its Rust add-on in `server/native`.
+- `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
 - `client/shell`: the app, a window on that half, and the one program both are.
 - `ui`: the kit an app's UI is written with.

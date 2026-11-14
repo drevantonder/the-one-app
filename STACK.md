@@ -8,7 +8,6 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - **A server is one program on Mac, Linux and Windows.**
 - **A service is a part of a plugin's Elixir that names the machines it needs.** Code in another language is a program
   the plugin brings and starts as a child of the server.
-- **A Rust add-on to the server for SQLite.**
 - **A database is SQLite plus numbered log blobs.** Each log blob is written only if absent, and writing the next
   number is the lease, so no clock is needed. A snapshot is named by the log number it covers.
 - **The bucket is Cloudflare R2**, unless measured write times say otherwise.

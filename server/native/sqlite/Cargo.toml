@@ -1,0 +1,13 @@
+[package]
+name = "sqlite"
+description = "SQLite for plugins on a server: something they import, and no part of One Core."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rusqlite = { version = "0.41", features = ["bundled"] }
+rustler = "0.39"
