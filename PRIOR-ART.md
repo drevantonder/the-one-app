@@ -88,7 +88,7 @@ chose the same: a plugin's code on a server is free, and which servers act for w
 ## Chosen
 
 - **iroh**: reaching a machine by its key, directly where possible and through a relay otherwise. Today's app links
-  its devices this way, with the relay as a Worker. Chosen on 14 November 2026: see `STACK.md`.
+  its devices this way, with the relay as a Worker. Chosen on 14 November 2026.
 
 ## Decided earlier, and easy to miss
 

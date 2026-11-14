@@ -1,0 +1,19 @@
+# The Rust packages build as one workspace, so they share one lockfile and one `target` folder.
+[workspace]
+resolver = "3"
+members = ["client", "server/native/one_core_iroh"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+# Reaching by key. No n0 relay, discovery or metrics, and no router port mapping: nothing about a network leaves it.
+iroh = { version = "1.4", default-features = false, features = ["tls-ring"] }
+serde_json = "1"
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+
+[profile.release]
+strip = true

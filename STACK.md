@@ -5,13 +5,10 @@ exists and what was set aside is in `PRIOR-ART.md`.
 
 ## Chosen
 
-- **Servers are written in Elixir, on the Erlang VM.** One program on Mac, Linux and Windows.
-- **A plugin's server part is Elixir, free to use the OS.** The server compiles it when it's deployed and loads it
-  into the same VM. There is no sandbox and no check of its code.
+- **A server is one program on Mac, Linux and Windows.**
 - **A service is a part of a plugin's Elixir that names the machines it needs.** Code in another language is a program
   the plugin brings and starts as a child of the server.
-- **Rust add-ons to the server for SQLite and iroh.**
-- **Servers and clients reach each other by key with iroh.**
+- **A Rust add-on to the server for SQLite.**
 - **A database is SQLite plus numbered log blobs.** Each log blob is written only if absent, and writing the next
   number is the lease, so no clock is needed. A snapshot is named by the log number it covers.
 - **The bucket is Cloudflare R2**, unless measured write times say otherwise.
@@ -19,8 +16,7 @@ exists and what was set aside is in `PRIOR-ART.md`.
   files and the way in for outsiders. The relay is a Durable Object that sleeps while idle.
 - **Each client is one Tauri shell per platform**, drawing in the device's web view.
 - **A plugin's app is web content, written in JavaScript.**
-- **The CLI and MCP are the Rust half of the Tauri shell, run without a window.** That half already holds the key,
-  reaches servers and keeps what they answered.
+- **The Tauri shell is a window on the client's Rust half**, which already is the CLI and MCP.
 
 ## Not chosen yet
 
@@ -34,16 +30,13 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - A crash in a Rust add-on ends the VM. Rust panics are caught, and what's left is rare.
 - The VM takes up to a second to start, which a cloud server started on demand pays each time.
 - No official build of the Erlang VM for Windows on ARM was found. The x64 build likely runs there emulated.
-- The VM keeps only two versions of a module at once. So that a call already running finishes on the old version
-  however many updates follow, the server gives each version of a plugin its own module names, and removes a version
-  when its last call ends.
 
 ## To test first
 
 None of this was run. About a week in all.
 
-1. Three real plugins in Elixir, written by an agent, with an update while a call runs: 2 days.
-2. iroh through a Rust add-on, on Windows too: 1 day.
+1. Two more real plugins in Elixir, written by an agent: 1 day.
+2. iroh through a Rust add-on on Windows: 1 day.
 3. An app in Tauri's web view on a mid-priced Android phone, opening, scrolling and going back: 2 to 3 days.
 4. A phone on mobile data reaching a home server: how often directly, and how long the first connection takes: 1 day.
 5. How long a write to the bucket takes from a home connection: 1 hour.

@@ -1,7 +1,10 @@
-/_build/
-/deps/
-/target/
+_build/
+deps/
+target/
 node_modules/
 *.beam
 erl_crash.dump
 .DS_Store
+# The server's Rust add-ons as Rustler builds them, and its tests' folders
+/server/priv/native/
+/server/tmp/

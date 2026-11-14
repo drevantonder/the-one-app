@@ -18,8 +18,6 @@
 
 ## Storage
 
-- An artifact's blobs are read, written only if absent, replaced only if unchanged, and listed. Nothing else is asked of
-  a bucket.
 - The database needs only one thing of the bucket to stay safe: writing a blob only if it's absent.
 - A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
   blobs. An `editor` asks that server, which checks the relation tuples.
@@ -117,8 +115,6 @@
   fortune.
 - A plugin can use this same way of choosing a server for its own calls, a service's included, or choose its own.
 - A server takes the newest release by itself, so none lags behind. One Core is small and stable, so that's seldom.
-- A plugin is added, updated and removed while a server keeps running. Nothing else on that server stops or restarts
-  for it. A call already running finishes on the old version, and the next gets the new one.
 
 ## The network's address
 
@@ -178,15 +174,12 @@
 - Letting a computer be a server for a user or a group means trusting the plugins they add with that computer.
 - Nothing on a server keeps one plugin's code from what another's can reach there. What keeps users and groups apart is
   which servers act for whom.
-- An agent can write a plugin and deploy it with no developer tools, on any ordinary machine. A server may compile it
-  when it's deployed, and keeps the source beside it. Tools to check it first are recommended, not needed.
+- Tools to check a plugin before it's deployed are recommended, not needed.
 - Everyone using a plugin runs its newest version.
 - A plugin's tools are its only public part. Anything may call one for the user or group it runs for: an app, an agent,
   a scheduled job, another plugin's tool.
 - A plugin says which other plugins it uses, so adding it brings them along.
 - A plugin's deployed code is open to everyone in the network. A git repo it came from can be private.
-- Every tool has a name, a description and its inputs, and is also a CLI command and an MCP tool. A plugin may also
-  provide a tool guide: text for agents on when and how to use its tools. The CLI and MCP hand both over.
 - Plugin hooks are part of the interface plugins are written against. A plugin hooks into a moment, such as a tool being
   called, an artifact changing or a server joining, and is called when it happens.
 - Each plugin hook states whether a plugin only hears about it, can change it, or decides it.
@@ -230,5 +223,3 @@
 - Nothing is shared between networks. Whoever wants an app on phones publishes their own, built on our packages, and
   sends its notifications. One general app that we run for every network may come later.
 - Anything more than that is a fork, and forks should be few and far between.
-- Starting a network to build or test with is cheap, fast and repeatable: a whole network on one machine, with a folder
-  as its bucket.

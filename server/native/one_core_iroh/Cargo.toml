@@ -1,0 +1,16 @@
+[package]
+name = "one_core_iroh"
+description = "The server's add-on for being reached by key."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+client = { path = "../../../client" }
+iroh.workspace = true
+rustler = "0.39"
+serde_json.workspace = true
+tokio.workspace = true

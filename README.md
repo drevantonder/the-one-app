@@ -3,6 +3,31 @@
 The One App designed again from the ground up, starting with what an artifact is. The app as it ran before is at the
 tag `before-redesign` and on the branch `v1`.
 
+## Running it
+
+`mise install` installs Erlang and Elixir, and `rustup` installs Rust. Then, with mise active in your shell:
+
+    cargo build --release
+    cd server && mix deps.get && mix network /tmp/one-network
+
+That starts a whole network on this machine in a folder: its bucket, its one server and a client's home. Starting it
+again in the same folder carries on with what's there. In another terminal, use its client:
+
+    export ONE_HOME=/tmp/one-network/client
+    target/release/one deploy --name tracker --files-from plugins/tracker
+    target/release/one tracker add --tracker water --amount 2
+    target/release/one tracker list
+    target/release/one
+
+The last lists every tool, each of which is a command, and `target/release/one mcp` is the same tools as MCP over
+stdio. Deploying a plugin again updates it while the server runs. `cd server && mix test` runs the tests.
+
+- `server`: One Core, in Elixir, with its Rust add-on in `server/native`.
+- `client`: the client's Rust half, which is the CLI and MCP.
+- `plugins`: the plugins The One App ships with, each a folder of its own.
+
+## Reading it
+
 - `VISION.md`: the vision, unchanged.
 - `GLOSSARY.md`: the redesign's words.
 - `ARCHITECTURE.md`: the redesign's rules.
