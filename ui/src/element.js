@@ -30,7 +30,7 @@ export const said = {
 }
 
 /// `words({ back: "Zurück", cancel: "Abbrechen", close: "Schließen" })`: says the kit's own words in the user's
-/// language, once, for every element on the page. `said` above lists them.
+/// language, once, for every element on the page. A word the kit doesn't say throws the words it does.
 export function words(theirs) {
   for (const name in theirs) if (!(name in said)) throw new Error(`The kit has no word "${name}". It has: ${Object.keys(said).join(", ")}`)
   Object.assign(said, theirs)

@@ -75,6 +75,9 @@ defmodule OneCore.Plugin do
   - An app is a page of HTML, drawn in the client's web view on a home screen under its `name` and `icon`. It
     loads the plugin's other files by their paths beside it (`app.js`), and another plugin's by that plugin's
     name (`../ui/ui.js`). It needs no build step.
+  - The kit, the plugin `ui`, is what an app's UI is written with, so every app looks and moves the same. Its
+    guide lists its elements, and it speaks to the client for the app: its `call` and `changed` are the next two
+    lines, done.
   - An app reaches nothing but its client, and speaks to it as an MCP App does: JSON-RPC messages posted to
     `window.parent`, which answers with a message to the page. It sends `ui/initialize` first and then
     `ui/notifications/initialized`, calls a tool with `tools/call` (`{name: "hello_greet", arguments: {...}}`),

@@ -15,7 +15,33 @@ async function build(options) {
   return built.outputs
 }
 
+/// The kit's guide: every `///` comment that starts with an example, from index.js and then from each file in the
+/// order a page loads them, a file's own imports first.
+async function guide(file = "index.js", seen = new Set()) {
+  if (seen.has(file)) return []
+  seen.add(file)
+  const source = await text(`src/${file}`)
+  const said = [...source.matchAll(/(?:^\/\/\/.*\n)+/gm)].map(([comment]) => comment.replace(/^\/\/\/ ?/gm, "")).filter((comment) => comment.startsWith("`"))
+  const imported = []
+  for (const [, other] of source.matchAll(/from "\.\/(.+?\.js)"|^import "\.\/(.+?\.js)"/gm).map(([, from, bare]) => [, from ?? bare])) imported.push(...(await guide(other, seen)))
+  return file === "index.js" ? [...said, ...imported] : [...imported, ...said]
+}
+
 rmSync(here("dist"), { recursive: true, force: true })
+// The kit is a plugin whose only server part is its guide, which a server hands every agent that connects.
+await Bun.write(here("dist/ui.ex"), `defmodule Ui do
+  @moduledoc false
+  @behaviour OneCore.Plugin
+
+  @impl true
+  def guide do
+    ~S"""
+    The kit an app's UI is written with: custom elements, plain HTML and ES modules, with no build step.
+
+${(await guide()).join("\n").replace(/^(?=.)/gm, "    ")}    """
+  end
+end
+`)
 await Bun.write(here("dist/ui.css"), minified((await text("src/tokens.css")) + (await text("src/page.css"))))
 
 // Zag's parts, and what the two share, under names that change when they do: a client keeps them for good.

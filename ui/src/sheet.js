@@ -59,7 +59,8 @@ class Dialog extends Element {
 }
 
 /// `<ui-sheet heading="Add expense">…</ui-sheet>`: something to fill in or look at, over the page: up from the
-/// foot of a narrow window, in the middle of a wide one. Set `open`, or call `show()` and `close()`.
+/// foot of a narrow window, in the middle of a wide one. Set `open`, or call `show()` and `close()`. Escape, the
+/// device's back, a press outside and a pull down close it too, and it tells the page `close` once it's shut.
 class Sheet extends Dialog {
   /// Told of every move of a finger on the sheet, and able to stop the device scrolling for it.
   touched = { handleEvent: (event) => this.pull(event), passive: false }

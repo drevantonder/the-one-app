@@ -17,8 +17,7 @@ import trash from "@phosphor-icons/core/assets/regular/trash.svg"
 import warningCircle from "@phosphor-icons/core/assets/fill/warning-circle-fill.svg"
 import x from "@phosphor-icons/core/assets/regular/x.svg"
 
-// The Phosphor icons the kit draws with, by Phosphor's own names. An app that wants another puts Phosphor's SVG
-// where the icon goes.
+// The Phosphor icons the kit draws with, by Phosphor's own names.
 const icons = {
   "calendar-blank": calendarBlank,
   "caret-left": caretLeft,
@@ -42,7 +41,9 @@ export const icon = (name) => {
   return unsafeSVG(icons[name].replace(/^<svg[^>]*>|<\/svg>$/g, ""))
 }
 
-/// `<ui-icon name="plus">`: one of the kit's icons, the size of the text around it and its colour.
+/// `<ui-icon name="plus">`: one of the kit's icons, by Phosphor's name for it, the size of the text around it and
+/// its colour. A name the kit doesn't have throws the names it has. An app that wants another puts Phosphor's SVG
+/// where the icon goes.
 class Icon extends Element {
   static styles = look(css)
   static properties = { name: {} }

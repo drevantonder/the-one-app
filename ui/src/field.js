@@ -5,10 +5,12 @@ import css from "./field.css"
 /// What the browser says of a field left empty, in the user's language.
 export const missing = Object.assign(document.createElement("input"), { required: true }).validationMessage
 
-/// What every form field is: a `label` above its control, a grey `hint` below, and its problem in the hint's place:
-/// `error`, which the app sets, or what's wrong with what was typed, once the form was sent. It takes part in a
-/// `<form>` as an `<input>` does: `name`, `value`, `required`, `disabled`, in FormData, and in the form's reset.
-/// It tells the page `input` as its value changes and `change` once it has.
+/// `<ui-input label="Name" hint="As your card has it" name="name" required>` is what every form field is: a
+/// `label` above its control, a grey `hint` below, and its problem in the hint's place: `error`, which the app
+/// sets, or what's wrong with what was typed, once the form was sent. It takes part in a `<form>` as an `<input>`
+/// does: `name`, `value`, `required`, `disabled`, in FormData, and in the form's reset. It tells the page `input`
+/// as its value changes and `change` once it has. `autofocus` on the field a sheet opens for brings up a phone's
+/// keyboard.
 export class Field extends Element {
   static styles = look(css)
   static shadowRootOptions = delegatesFocus

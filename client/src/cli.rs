@@ -72,15 +72,20 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
                     name.is_empty() || tool["name"].as_str().is_some_and(|tool| tool.starts_with(&format!("{name}_")))
                 })
                 .collect();
-            if within.is_empty() {
+            // A plugin with no tools can still have a guide: the kit's says how an app is written with it.
+            let guide = listed["_meta"]["guides"][&name].as_str();
+            if within.is_empty() && guide.is_none() {
                 answered?;
                 bail!("There's no tool or plugin named `{}`. `one` lists them.", words.join(" "));
             }
             if answered.is_err() {
                 eprintln!("No server answered, so this is what one last listed.\n");
             }
-            if let Some(guide) = listed["_meta"]["guides"][&name].as_str() {
+            if let Some(guide) = guide {
                 println!("{}\n", guide.trim_end());
+            }
+            if within.is_empty() {
+                return Ok(ExitCode::SUCCESS);
             }
             let width = within.iter().filter_map(|tool| tool["name"].as_str()).map(str::len).max().unwrap_or(0);
             for tool in within {

@@ -46,5 +46,6 @@ export async function call(tool, inputs = {}) {
 /// `changed(show)`: runs `show` whenever what this page was answered has changed, to ask again and draw it.
 export const changed = (listener) => void listeners.add(listener)
 
-/// Tells the client the user went back out of the app, from its first screen.
+/// `screen.addEventListener("back", (event) => (event.preventDefault(), leave()))`: tells the client the user went
+/// back out of the app, from its first screen.
 export const leave = () => greet().then(() => tell("ui/notifications/request-teardown"))
