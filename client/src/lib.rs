@@ -3,13 +3,16 @@
 //! app is a window on it (`shell`).
 //!
 //! A client asks a server in MCP's JSON-RPC: one message on a stream of its own, and the answer back on that stream.
-//! A server tells a client something the same way, on a stream the server opens.
+//! A server tells a client something the same way, on a stream the server opens. No connection is kept open for
+//! that: a client with an app on screen says it's watching, and a server connects to it when there's something to
+//! say.
 
 pub mod cli;
 mod kept;
 pub mod mcp;
 
 use std::io::{ErrorKind, Write};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,12 +20,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow, bail};
+use futures_util::StreamExt;
+use futures_util::future::join_all;
+use futures_util::stream::FuturesUnordered;
 use iroh::endpoint::{Connection, QuicTransportConfig, RecvStream, RelayMode, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, broadcast};
-use tokio::task::JoinSet;
 use tokio::time::{sleep, timeout};
 
 pub use kept::Shown;
@@ -130,6 +135,22 @@ pub async fn endpoint(key_file: &Path, network: Option<&Network>) -> Result<Endp
         .bind()
         .await
         .context("couldn't open a socket")
+}
+
+/// Where `endpoint` is reached, as another is told it: its key, the machine's addresses on its networks, and the
+/// relay at its network's address, which it's told now, before the endpoint has connected there. Another on this
+/// machine reaches it with no network too.
+pub fn address(endpoint: &Endpoint, network: Option<&Network>) -> Result<EndpointAddr> {
+    let here = endpoint.bound_sockets().into_iter().filter(SocketAddr::is_ipv4);
+    let address = here.fold(endpoint.addr(), |address, socket| {
+        address.with_ip_addr(SocketAddr::from((Ipv4Addr::LOCALHOST, socket.port())))
+    });
+    match network {
+        Some(Network { address: at, .. }) => {
+            Ok(address.with_relay_url(at.parse().with_context(|| format!("{at} isn't an address"))?))
+        }
+        None => Ok(address),
+    }
 }
 
 /// The key kept in `file`, which is made on first use.
@@ -280,6 +301,8 @@ pub struct Client {
     /// What every request says of who it's from, where the environment says: `ONE_LINK` is a sharing link, whose
     /// holder asks, and `ONE_AS` names a user to act as, which only a server of a network being built allows.
     says: Vec<(&'static str, String)>,
+    /// Whether an app of this client's is on screen, so its servers are to tell it what changes.
+    watching: AtomicBool,
 }
 
 impl Client {
@@ -293,10 +316,55 @@ impl Client {
         let endpoint = endpoint(&home.join("key"), network.as_ref()).await?;
         let says = [("as", "ONE_AS"), ("link", "ONE_LINK")];
         let says = says.into_iter().filter_map(|(says, variable)| Some((says, env::var(variable).ok()?))).collect();
-        Ok(Self { home, endpoint, network, reach: Mutex::default(), told: broadcast::channel(16).0, says })
+        let told = broadcast::channel(16).0;
+        // A server with something to say connects to this client to say it. Only one of the network's own reaches
+        // a client, and all it can make one do is ask again.
+        let (accepting, tell) = (endpoint.clone(), told.clone());
+        tokio::spawn(async move {
+            while let Some(incoming) = accepting.accept().await {
+                let tell = tell.clone();
+                tokio::spawn(async move {
+                    if let Ok(connection) = incoming.await {
+                        hear(connection, tell).await
+                    }
+                });
+            }
+        });
+        Ok(Self { home, endpoint, network, reach: Mutex::default(), told, says, watching: AtomicBool::new(false) })
     }
 
-    /// What the server tells this client while it's connected: each a JSON-RPC notification.
+    /// Says whether an app of this client's is on screen. While one is, every server acting for its user tells it
+    /// when something changed. A server that isn't up now is told when it's next asked anything, and one that
+    /// isn't told the app has gone finds out when it next has something to say.
+    pub async fn watch(&self, watching: bool) {
+        if self.watching.swap(watching, Ordering::Relaxed) == watching {
+            return;
+        }
+        let Ok(Some(servers)) = self.servers(false).await else { return };
+        let told = servers.into_iter().map(|server| async move {
+            if let Some(open) = self.connect(server).await
+                && !watching
+            {
+                let _ = open.ask(json!({"jsonrpc": "2.0", "method": WATCH, "params": {}}).to_string().as_bytes()).await;
+            }
+        });
+        join_all(told).await;
+    }
+
+    /// Connects to `server`, hears what it tells this client over the connection, and if this client is watching,
+    /// says so first, with where a server reaches it.
+    async fn connect(&self, server: EndpointAddr) -> Option<Reached> {
+        let open = Reached::connect(&self.endpoint, server, CONNECT).await?;
+        tokio::spawn(hear(open.connection().clone(), self.told.clone()));
+        if self.watching.load(Ordering::Relaxed) {
+            let here = address(&self.endpoint, self.network.as_ref()).ok()?;
+            let watch = json!({"jsonrpc": "2.0", "method": WATCH, "params": {"address": here}});
+            open.ask(watch.to_string().as_bytes()).await.ok()?;
+        }
+        Some(open)
+    }
+
+    /// What servers tell this client: each a JSON-RPC notification.
     pub fn told(&self) -> broadcast::Receiver<Value> {
         self.told.subscribe()
     }
@@ -371,14 +439,10 @@ impl Client {
             if tried.as_ref() == Some(&servers) {
                 continue;
             }
-            let mut connecting = JoinSet::new();
-            for server in servers.clone() {
-                let endpoint = self.endpoint.clone();
-                connecting.spawn(async move { Reached::connect(&endpoint, server, CONNECT).await });
-            }
-            while let Some(connected) = connecting.join_next().await {
-                if let Ok(Some(open)) = connected {
-                    tokio::spawn(hear(open.connection().clone(), self.told.clone()));
+            let mut connecting =
+                FuturesUnordered::from_iter(servers.iter().cloned().map(|server| self.connect(server)));
+            while let Some(connected) = connecting.next().await {
+                if let Some(open) = connected {
                     return Ok(reach.open.insert(Arc::new(open)).clone());
                 }
             }
@@ -416,10 +480,24 @@ impl Client {
     }
 }
 
+/// What a client tells a server to be told what changes, at the `address` it gives, or with none, no longer.
+const WATCH: &str = "notifications/one/watch";
+
 /// What the servers the signer listed are kept as.
 const SERVERS: &str = "signer/servers";
 
-/// Passes on what the server tells this client over `connection`, until the connection ends.
+/// Tells whoever `connection` is to one message, on a stream of its own, which isn't answered. Gives whether it
+/// was sent.
+pub async fn tell(connection: &Connection, message: &[u8]) -> bool {
+    let told = async {
+        let mut send = connection.open_uni().await.ok()?;
+        send.write_all(message).await.ok()?;
+        send.finish().ok()
+    };
+    told.await.is_some()
+}
+
+/// Passes on what a server tells this client over `connection`, until the connection ends.
 async fn hear(connection: Connection, told: broadcast::Sender<Value>) {
     while let Ok(mut receive) = connection.accept_uni().await {
         let told = told.clone();

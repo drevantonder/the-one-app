@@ -12,9 +12,18 @@ defmodule OneCore.Server do
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-  @doc "Tells every connected client that something changed, so that it asks again. With no server started, nobody is told."
+  @doc "Tells every client that's watching that something changed, so that it asks again. With no server started, nobody is told."
   def changed do
     GenServer.cast(__MODULE__, {:tell, JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/changed"})})
+  end
+
+  @doc """
+  Keeps that the client whose key is `client` has an app on screen, and is reached at `address` to be told what
+  changes. With no address, it no longer has. A client that can't be reached there is forgotten.
+  """
+  def watch(client, address) do
+    {_key, endpoint} = :persistent_term.get(__MODULE__)
+    Iroh.watch(endpoint, client, address && JSON.encode!(address))
   end
 
   @doc "The folder this server keeps what's its own on this machine in."

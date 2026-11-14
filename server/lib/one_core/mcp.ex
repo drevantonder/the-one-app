@@ -119,6 +119,11 @@ defmodule OneCore.Mcp do
             JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: Exception.message(error)}})
         end
 
+      # A client saying an app of its is on screen, and where a server reaches it, or with no address, that none is.
+      {:ok, %{"method" => "notifications/one/watch"} = said} when from != nil ->
+        Server.watch(from, said["params"]["address"])
+        ""
+
       # Another server saying there's something new in the bucket.
       {:ok, %{"method" => "notifications/one/look"}} ->
         Server.look()

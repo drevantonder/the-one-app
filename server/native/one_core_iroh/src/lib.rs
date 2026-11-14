@@ -1,20 +1,21 @@
 //! The server's add-on for being reached by key: it opens the server's endpoint, hands what clients ask to the
 //! server's Elixir with the key of whoever asked, and sends its answers back. A client asks one message a stream
-//! (`client`), and is told something the same way: one message on a stream the server opens. A server asks another
-//! as a client does.
+//! (`client`), and is told something the same way: one message on a stream the server opens, over the connection
+//! the client has open if it has one, and otherwise over one the server makes to it. A server asks another as a
+//! client does.
 
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr};
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use client::{Network, Unanswered};
 use data_encoding::HEXLOWER;
+use iroh::endpoint::Connection;
 use iroh::{Endpoint, EndpointAddr};
 use rustler::{Atom, Binary, Encoder, Env, LocalPid, NewBinary, OwnedEnv, Resource, ResourceArc, Term};
 use tokio::runtime::Runtime;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::oneshot;
 
 mod outside;
 
@@ -24,14 +25,28 @@ mod atoms {
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("tokio starts"));
 
-/// A server's endpoint, open for as long as the server holds this, where what it tells its clients is sent from,
-/// and its connections to other servers by their keys, each with the address it was made to. A server found gone
-/// leaves that address with no connection, and a connection that closed for want of anything to ask leaves nothing.
-/// Nothing looks inside it after a panic, which is what Rustler needs to hear before it hands one to Elixir.
+/// A server's endpoint, open for as long as the server holds this, with the clients that have a connection open to
+/// it and the ones watching, by their keys, and its connections to other servers by theirs, each with the address
+/// it was made to. A server found gone leaves that address with no connection, and a connection that closed for
+/// want of anything to ask leaves nothing. Nothing looks inside it after a panic, which is what Rustler needs to
+/// hear before it hands one to Elixir.
 struct Reached {
     endpoint: AssertUnwindSafe<Endpoint>,
-    told: AssertUnwindSafe<broadcast::Sender<Vec<u8>>>,
+    clients: AssertUnwindSafe<Clients>,
+    watchers: AssertUnwindSafe<Mutex<HashMap<String, Watcher>>>,
     servers: AssertUnwindSafe<Mutex<HashMap<String, (String, Option<Arc<client::Reached>>)>>>,
+}
+
+/// The connection each client last made to this server, by the client's key.
+type Clients = Arc<Mutex<HashMap<String, Connection>>>;
+
+/// A client with an app on screen: where it said a server reaches it, and the connection this server made to it
+/// there to tell it something, while that's open. One thing at a time is said over it, so that many things to say
+/// at once make one connection.
+#[derive(Clone)]
+struct Watcher {
+    address: EndpointAddr,
+    open: Arc<tokio::sync::Mutex<Option<client::Reached>>>,
 }
 
 #[rustler::resource_impl]
@@ -78,24 +93,18 @@ fn start(
         let network = network.map(|(address, pass)| Network { address, pass });
         let endpoint =
             client::endpoint(Path::new(&key_file), network.as_ref()).await.map_err(|error| format!("{error:#}"))?;
-        // iroh lists the machine's addresses on its networks. A client on this machine reaches it with no network too.
-        let here = endpoint.bound_sockets().into_iter().filter(SocketAddr::is_ipv4);
-        let mut address = here.fold(endpoint.addr(), |address, socket| {
-            address.with_ip_addr(SocketAddr::from((Ipv4Addr::LOCALHOST, socket.port())))
-        });
+        let address = client::address(&endpoint, network.as_ref()).map_err(|error| format!("{error:#}"))?;
         if let Some(network) = network {
-            // A client is told the relay now, before the endpoint has connected to it.
-            address = address.with_relay_url(network.address.parse().map_err(|_| "that isn't an address")?);
             tokio::spawn(outside::hear(network, endpoint.secret_key().clone(), asked));
         }
         let address = serde_json::to_string(&address).map_err(|error| error.to_string())?;
-        // A client that falls this many messages behind misses some, and hears the next.
-        let (told, _) = broadcast::channel(64);
-        tokio::spawn(accept(endpoint.clone(), asked, told.clone()));
+        let clients = Clients::default();
+        tokio::spawn(accept(endpoint.clone(), asked, clients.clone()));
         let reached = Reached {
             endpoint: AssertUnwindSafe(endpoint),
-            told: AssertUnwindSafe(told),
-            servers: AssertUnwindSafe(Mutex::new(HashMap::new())),
+            clients: AssertUnwindSafe(clients),
+            watchers: AssertUnwindSafe(Mutex::default()),
+            servers: AssertUnwindSafe(Mutex::default()),
         };
         Ok((ResourceArc::new(reached), address))
     })
@@ -115,54 +124,83 @@ async fn ask(asked: &LocalPid, from: Option<&str>, message: &[u8]) -> Option<Vec
     answered.await.ok()
 }
 
-async fn accept(endpoint: Endpoint, asked: LocalPid, told: broadcast::Sender<Vec<u8>>) {
+async fn accept(endpoint: Endpoint, asked: LocalPid, clients: Clients) {
     while let Some(incoming) = endpoint.accept().await {
-        let mut told = told.subscribe();
+        let clients = clients.clone();
         tokio::spawn(async move {
             let Ok(connection) = incoming.await else { return };
             let from = connection.remote_id().to_string();
-            loop {
-                tokio::select! {
-                    stream = connection.accept_bi() => {
-                        let Ok((mut send, mut receive)) = stream else { return };
-                        let from = from.clone();
-                        tokio::spawn(async move {
-                            let Ok(message) = receive.read_to_end(client::LIMIT).await else { return };
-                            // Whoever asks nothing only asks whether this server is there, which this says.
-                            if message.is_empty() {
-                                let _ = send.finish();
-                            } else if let Some(answer) = ask(&asked, Some(&from), &message).await
-                                && send.write_all(&answer).await.is_ok()
-                            {
-                                let _ = send.finish();
-                            }
-                        });
+            clients.lock().expect("no connection panics").insert(from.clone(), connection.clone());
+            while let Ok((mut send, mut receive)) = connection.accept_bi().await {
+                let from = from.clone();
+                tokio::spawn(async move {
+                    let Ok(message) = receive.read_to_end(client::LIMIT).await else { return };
+                    // Whoever asks nothing only asks whether this server is there, which this says.
+                    if message.is_empty() {
+                        let _ = send.finish();
+                    } else if let Some(answer) = ask(&asked, Some(&from), &message).await
+                        && send.write_all(&answer).await.is_ok()
+                    {
+                        let _ = send.finish();
                     }
-                    message = told.recv() => {
-                        let message = match message {
-                            Ok(message) => message,
-                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                            Err(broadcast::error::RecvError::Closed) => return,
-                        };
-                        let connection = connection.clone();
-                        tokio::spawn(async move {
-                            let Ok(mut send) = connection.open_uni().await else { return };
-                            if send.write_all(&message).await.is_ok() {
-                                let _ = send.finish();
-                            }
-                        });
-                    }
-                }
+                });
+            }
+            // A connection the client made after this one stays.
+            let mut clients = clients.lock().expect("no connection panics");
+            if clients.get(&from).is_some_and(|last| last.stable_id() == connection.stable_id()) {
+                clients.remove(&from);
             }
         });
     }
 }
 
-/// Sends `message` to every client connected to the endpoint.
+/// Keeps where the client whose key is `client` says a server reaches it while it has an app on screen, the JSON a
+/// client is told an address in, or with none, forgets it. A client says only where it is itself.
+#[rustler::nif]
+fn watch(reached: ResourceArc<Reached>, client: String, address: Option<String>) -> Atom {
+    let address = address.and_then(|address| serde_json::from_str::<EndpointAddr>(&address).ok());
+    let mut watchers = reached.watchers.lock().expect("no connection panics");
+    match address.filter(|address| address.id.to_string() == client) {
+        Some(address) => watchers.insert(client, Watcher { address, open: Arc::default() }),
+        None => watchers.remove(&client),
+    };
+    atoms::ok()
+}
+
+/// Sends `message` to every client that's watching: over the connection it has open to this server, or else over
+/// one made to it for this. A client that can't be reached where it said has gone, and is told nothing more.
 #[rustler::nif]
 fn tell(reached: ResourceArc<Reached>, message: Binary) -> Atom {
-    // With no client connected there's nobody to send to, which is fine.
-    let _ = reached.told.send(message.as_slice().to_vec());
+    let message: Arc<[u8]> = message.as_slice().into();
+    let watchers = reached.watchers.lock().expect("no connection panics").clone();
+    for (key, watcher) in watchers {
+        let (reached, message) = (reached.clone(), message.clone());
+        RUNTIME.spawn(async move {
+            let asking = reached.clients.lock().expect("no connection panics").get(&key).cloned();
+            if let Some(asking) = asking
+                && client::tell(&asking, &message).await
+            {
+                return;
+            }
+            let mut open = watcher.open.lock().await;
+            if let Some(open) = open.as_ref().filter(|open| open.open())
+                && client::tell(open.connection(), &message).await
+            {
+                return;
+            }
+            *open = client::Reached::connect(&reached.endpoint, watcher.address.clone(), client::CONNECT).await;
+            match open.as_ref() {
+                Some(open) => drop(client::tell(open.connection(), &message).await),
+                None => {
+                    let mut watchers = reached.watchers.lock().expect("no connection panics");
+                    // It may have said where it is again since.
+                    if watchers.get(&key).is_some_and(|now| Arc::ptr_eq(&now.open, &watcher.open)) {
+                        watchers.remove(&key);
+                    }
+                }
+            }
+        });
+    }
     atoms::ok()
 }
 
@@ -194,14 +232,7 @@ fn connect(reached: ResourceArc<Reached>, address: String, to: LocalPid, referen
                 .is_some_and(|(was, open)| *was == address && open.is_none());
             let within = if gone_there { client::THERE } else { client::CONNECT };
             let open = Arc::new(client::Reached::connect(&reached.endpoint, server, within).await?);
-            let connection = open.connection().clone();
             reached.servers.lock().expect("no connection panics").insert(key, (address, Some(open)));
-            // What that server tells its clients isn't for this one, and is read so that it can go on telling.
-            tokio::spawn(async move {
-                while let Ok(mut told) = connection.accept_uni().await {
-                    let _ = told.read_to_end(client::LIMIT).await;
-                }
-            });
             Some(atoms::ok())
         };
         let outcome = connected.await.unwrap_or(atoms::unreachable());

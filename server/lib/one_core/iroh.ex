@@ -16,7 +16,16 @@ defmodule OneCore.Iroh do
   """
   def start(_key_file, _network, _asked), do: :erlang.nif_error(:nif_not_loaded)
 
-  @doc "Sends `message` to every client connected to `endpoint`, each on a stream of its own."
+  @doc """
+  Keeps where the client whose key is `client` says a server reaches it while it has an app on screen: `address`,
+  the JSON a client is told one in. With `nil`, forgets it.
+  """
+  def watch(_endpoint, _client, _address), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  Sends `message` to every client that's watching, each on a stream of its own: over the connection it has open
+  to `endpoint`, or else over one made to it for this.
+  """
   def tell(_endpoint, _message), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Sends `answer` back to whoever asked `ask`."

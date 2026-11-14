@@ -104,7 +104,7 @@
 
 - A client changes an artifact only by calling a tool, which goes straight to a server. Whatever an app can do, an agent
   can.
-- A server can also tell a client that something changed, and the client asks again. A plugin is free to do more.
+- A plugin is free to do more than have its clients told that something changed.
 - MCP can also be hosted where an assistant running somewhere else reaches it, signing in with OAuth.
 - A client has little of its own: it keeps what servers answered, keeps secrets safe on its device, and runs and draws
   what plugins give it.

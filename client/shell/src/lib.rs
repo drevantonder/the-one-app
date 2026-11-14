@@ -134,6 +134,13 @@ async fn again(views: State<'_, Views>, view: String) -> Result<(), ()> {
     Ok(())
 }
 
+/// Says whether the window is on screen. While it is, servers tell this client when something changed.
+#[tauri::command]
+async fn watch(views: State<'_, Views>, watching: bool) -> Result<(), ()> {
+    views.client.watch(watching).await;
+    Ok(())
+}
+
 /// Forgets what a view was answered: its page is gone, or loading again.
 #[tauri::command]
 fn close(views: State<'_, Views>, view: String) {
@@ -173,6 +180,7 @@ pub fn run() {
                 let mut told = client.told();
                 while let Ok(message) = told.recv().await {
                     if message["method"] == "notifications/one/changed" {
+                        eprintln!("a server said something changed");
                         handle.state::<Views>().again().await
                     }
                 }
@@ -200,7 +208,7 @@ pub fn run() {
                 responder.respond(response.expect("these headers are valid"))
             });
         })
-        .invoke_handler(tauri::generate_handler![apps, ask, again, close, opened])
+        .invoke_handler(tauri::generate_handler![apps, ask, again, watch, close, opened])
         .run(tauri::generate_context!())
         .expect("the app runs");
 }

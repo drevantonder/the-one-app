@@ -157,8 +157,10 @@ addEventListener("popstate", ({ state }) => show(state, performance.now()))
 
 document.getElementById("retry").addEventListener("click", list)
 
-/// The user returned to the window, so what's showing asks again.
+/// The user returned to the window, so what's showing asks again. While the window is on screen, servers say when
+/// something changed.
 function returned() {
+  invoke("watch", { watching: !document.hidden })
   if (document.hidden) return
   if (!document.getElementById("problem").hidden) list()
   invoke("again", { view: "home" })
@@ -168,5 +170,6 @@ document.addEventListener("visibilitychange", returned)
 addEventListener("focus", returned)
 
 await list()
+invoke("watch", { watching: !document.hidden })
 show(history.state)
 requestAnimationFrame(() => requestAnimationFrame(() => invoke("opened", { view: "home", ms: Math.round(performance.now()) })))

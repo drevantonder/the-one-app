@@ -5,8 +5,8 @@
 #
 #     mise exec -- address/proof/proof.sh
 #
-# It needs Linux with unprivileged user namespaces, and `socat`, which stands on the wire to the address and writes
-# down what passes.
+# It needs Linux with unprivileged user namespaces, `socat`, which stands on the wire to the address and writes
+# down what passes, and `xvfb-run`, `dbus-run-session` and `xdotool`, for the app on a screen of its own.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 address=$(dirname "$here")
@@ -97,9 +97,11 @@ start_server() {
   (cd "$root/server" && exec setsid nsenter --net=/run/netns/server mix network "$work/network" "$name" "$@" --address $at_address) >"$work/$name.log" 2>&1 &
   wait_for "A server is running|isn't one of the network's" "$work/$name.log"
 }
-one() { ONE_HOME=$work/network/client at client "$root/target/release/one" "$@"; }
+# The client that calls: the network's first, until the app is open as that one, and then a second.
+calls=$work/network/client
+one() { ONE_HOME=$calls at client "$root/target/release/one" "$@"; }
 mcp() { at client curl -s -m 20 -w ' (HTTP %{http_code})\n' -X POST "$1/mcp" -H 'content-type: application/json' -d "$2"; }
-timed() { (cd "$address" && ONE_HOME=$work/network/client at client bun proof/calls.js "$root/target/release/one" "$@"); }
+timed() { (cd "$address" && ONE_HOME=$calls at client bun proof/calls.js "$root/target/release/one" "$@"); }
 list='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tracker_list","arguments":{}}}'
 
 say "The address serves the web client's files, and the way in for outsiders is shut without the development flag"
@@ -155,19 +157,67 @@ say "A server with no bucket credentials writes and reads through signed access"
   Code.eval_file(\"$here/bucket.exs\")")
 
 say "The relay sleeps with its connections open"
+# Nothing an idle network says reaches it, so after a quiet while it's asleep, and a call wakes it.
+sleep 20
+echo "a call gets through them:"
+one tracker list
 wait_for '"woke","connections":[1-9]' "$work/address.log"
 grep -E 'relay.*woke' "$work/address.log" | tail -3
-echo "and a call still gets through them:"
-one tracker list
 
-say "What a minute of nothing asks of the relay"
+say "What an hour asks of the relay, by a minute of each"
 # The minute is what's measured.
-woke=$(woken)
-sleep 60
-echo "with the server connected and nobody calling, it was woken $(($(woken) - woke)) times"
+hourly() { local woke=$(woken); sleep 60; echo "$((($(woken) - woke) * 60)) times an hour"; }
+echo "with two servers connected and nobody calling, it's woken $(hourly)"
 woke=$(woken)
 (echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' && sleep 60) | one mcp >/dev/null
-echo "with a client that asked once and stays open for the minute, $(($(woken) - woke)) times"
+echo "by a client that asks once and stays open for a minute, as an assistant's does: $(($(woken) - woke)) times in all"
+
+# The app, on a screen of its own in the client's network. It says when it has drawn, and when a server told it
+# something changed. A window nothing shows is what its page takes for hidden.
+: >"$work/app.log"
+ONE_HOME=$work/network/client at client dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
+  echo "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY" >"$1/screen"
+  exec "$0" 2> >(while IFS= read -r line; do echo "${EPOCHREALTIME/[.,]/} $line"; done >"$1/app.log")
+' "$root/target/release/one" "$work" >/dev/null 2>&1 &
+wait_for "home opened" "$work/app.log"
+window() { at client env $(cat "$work/screen") xdotool search --name "The One App" "$@" >/dev/null; }
+# A second client of the network, which a server gives a pass as it gave the first: two programs can't be one
+# client at the relay, and the app is the first.
+(cd "$root/server" && at server mix run --no-start -e "
+  Application.put_env(:one_core, :home, \"$work/network/server\")
+  {:ok, key} = OneCore.Iroh.key(\"$work/network/elsewhere/key\")
+  pass = OneCore.Address.pass(key, System.system_time(:millisecond) + :timer.hours(1))
+  File.write!(\"$work/network/elsewhere/network\", JSON.encode!(%{address: \"$at_address\", pass: pass}))")
+calls=$work/network/elsewhere
+sleep 5
+echo "with the app open and on screen, and nothing changing: $(hourly)"
+
+say "A change made elsewhere reaches the app on screen"
+# told <command...>: calls a tool as the second client, and says how long after that began the app was told.
+told() {
+  local woke=$(woken) lines=$(wc -l <"$work/app.log") began=${EPOCHREALTIME/[.,]/}
+  one "$@" >/dev/null
+  local done=${EPOCHREALTIME/[.,]/}
+  if timeout 5 grep -q -m1 "said something changed" <(tail -n +$((lines + 1)) -f "$work/app.log"); then
+    local told=$(tail -n +$((lines + 1)) "$work/app.log" | grep -m1 "said something changed" | cut -d' ' -f1)
+    sleep 3
+    echo "the call took $(((done - began) / 1000)) ms, the app was told $(((told - began) / 1000)) ms after it began, and the relay was woken $(($(woken) - woke)) times for all of it"
+  else
+    echo "the call took $(((done - began) / 1000)) ms, the app wasn't told, and the relay was woken $(($(woken) - woke)) times for all of it"
+  fi
+}
+echo "through the relay, with nothing between the three but this machine:"
+told tracker add --tracker water
+sleep 5
+told tracker add --tracker water
+
+say "An app that's hidden is told nothing, and asks nothing of the relay"
+window windowunmap && sleep 5
+told tracker add --tracker water
+echo "with the app open and hidden, and nothing changing: $(hourly)"
+window windowmap && sleep 5
+echo "on screen again:"
+told tracker add --tracker water
 
 # `ping` is a call that only goes there and back, and `tracker_list` a tool's, which reads the bucket twice.
 timings() {
@@ -188,6 +238,8 @@ timings
 say "Timings through the relay, with the address 10 ms from each of the two"
 far=add far
 timings
+sleep 5
+told tracker add --tracker water
 
 say "The same pair with a wire between them: the call goes direct, with neither told"
 wire server client 10.3.0
