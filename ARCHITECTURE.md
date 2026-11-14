@@ -86,8 +86,6 @@
   through the relay otherwise. Nothing at home is opened to the internet.
 - A tool call and a scheduled job go to the server acting for the user or group they're for. If it writes a database
   whose lease another server holds, that server passes it on to the one holding it.
-- A scheduled job is a tool call made by the clock. The server holding the lease of the database its schedule is kept in
-  makes the call.
 - A scheduled job runs when a server is up. A network that has a cloud server uses it, started when there's work and
   stopped after. Nothing sets one up by itself, and with no server available nothing runs.
 - A cloud server that's always ready is its owner's choice to pay for. Otherwise it should start fast without costing a

@@ -5,9 +5,10 @@ defmodule OneCore.Mcp do
 
   Every request is from someone, which `OneCore.User.asking/2` says, and a plugin's tool runs for them.
 
-  Servers ask each other the same way, and three things only a server acting for the same user may ask: to call a
+  Servers ask each other the same way, and four things only a server acting for the same user may ask: to call a
   function of a plugin's service running here (`services/call`), and to run what was passed on of a service's
-  call into its plugin (`plugins/call`) or of a plugin's hook (`hooks/call`).
+  call into its plugin (`plugins/call`), of a plugin's hook (`hooks/call`) or of having a plugin's scheduled jobs
+  called (`plugins/schedule`).
 
   The parts of a plugin that run in a client are MCP resources: `ui://<plugin>/<code>/<path>`, where `code` names
   the set of files a version runs, so a file at an address never changes. A plugin's app is one of them, as an MCP
@@ -144,6 +145,10 @@ defmodule OneCore.Mcp do
       Server.changed()
       {:ok, result}
     end
+  end
+
+  defp result("plugins/schedule", %{"plugin" => plugin}, from, _who) do
+    between(from, fn -> Plugins.schedule(plugin, true) end)
   end
 
   defp result("hooks/call", %{"plugin" => plugin, "hook" => hook, "about" => about}, from, who) do

@@ -82,6 +82,25 @@ defmodule OneCore.Plugin do
   - Every module is a `defmodule` at the top of a file, and a plugin can have as many files and modules as it
     likes. The code is free to use the machine it runs on.
 
+  A scheduled job is a tool call made by the clock. `jobs/0`, if the plugin has one, lists them:
+
+      @impl true
+      def uses, do: ["database"]
+
+      @impl true
+      def jobs, do: [%{tool: "sweep", every: 3600}]
+
+  - A job names one of the plugin's `tool`s, the `inputs` to call it with if it takes any, and `every`: how many
+    seconds apart. It's due at each whole multiple of that since 1970 in UTC, so `every: 3600` is on the hour and
+    `every: 86_400` is at midnight UTC, and first at the next one after it's deployed.
+  - The call is made on one server, for the user the plugin was added for, when a server is up. Times that
+    passed with none up are made up for with one call when one is back.
+  - A plugin with jobs uses `database`, which keeps when each last ran in the plugin's database, and has the
+    server writing that database make the call. Its guide says what that promises a job's tool.
+  - `schedule/3` is only for a plugin that keeps other plugins' schedules, as `database` does. It's called as
+    the plugin whose jobs they are, on every server, each time one of them is due, with the jobs and a function
+    that makes a job's call on the server it's called on: `fire.(job)`. It's what has one server call it once.
+
   A plugin hooks into a moment that isn't one of its own tools being called, to hear of it, to change it or to
   decide it. `hooks/0` names the hooks it hooks into, and `hook/3` is called at each:
 
@@ -187,5 +206,7 @@ defmodule OneCore.Plugin do
   @callback uses() :: [String.t()]
   @callback hooks() :: [String.t()]
   @callback hook(hook :: String.t(), about :: map, OneCore.Call.t()) :: term
-  @optional_callbacks tools: 0, call: 3, guide: 0, apps: 0, uses: 0, hooks: 0, hook: 3
+  @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
+  @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
+  @optional_callbacks tools: 0, call: 3, guide: 0, apps: 0, uses: 0, hooks: 0, hook: 3, jobs: 0, schedule: 3
 end

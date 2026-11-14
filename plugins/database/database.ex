@@ -42,6 +42,12 @@ defmodule Database do
     - One server at a time writes a database, and a call that reaches another is passed on to it. So the tool may
       start again on another server, and `fun` may run more than once. Do everything that touches the database
       inside `fun`, and what reaches outside, such as sending a message, after `transaction` returns.
+    - A plugin's scheduled jobs (its `jobs/0`) are called by the server writing its database, and when each last
+      ran is kept there too, in the table `database_scheduled`. A job's call marks that it ran in its own first
+      transaction, so what it wrote and its having run are kept together or not at all: a server that takes over
+      makes the call again only if neither was. So a job does its work in one transaction, in the process its
+      tool is called in, and what reaches outside after `transaction` returns, which then happens at most once.
+      A job that makes no transaction is marked when its call ends, and may be called again after a takeover.
     """
   end
 
@@ -66,6 +72,26 @@ defmodule Database do
         :no_answer = Call.pass_on(call, server)
         :ok = GenServer.call(lease, {:take_over, server}, :infinity)
         transaction(call, schema, fun)
+    end
+  end
+
+  @doc """
+  Has each of the calling plugin's scheduled `jobs` that is due called with `fire`, once, by the server holding
+  the lease of its database: here, or by passing this on to the one that does, and taking the lease if that one
+  doesn't answer. One Core calls this on every server, each time a job is due (`OneCore.Plugin`).
+  """
+  @impl true
+  def schedule(%Call{} = call, jobs, fire) when is_list(jobs) and is_function(fire, 1) do
+    lease = Lease.of(call)
+
+    case GenServer.call(lease, {:schedule, jobs, fire, System.os_time(:second)}, :infinity) do
+      :ok ->
+        :ok
+
+      {:held_by, server} ->
+        :no_answer = Call.pass_on(call, server)
+        :ok = GenServer.call(lease, {:take_over, server}, :infinity)
+        schedule(call, jobs, fire)
     end
   end
 

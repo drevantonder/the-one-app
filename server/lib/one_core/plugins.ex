@@ -21,7 +21,7 @@ defmodule OneCore.Plugins do
   """
   use GenServer
   require Logger
-  alias OneCore.{Artifact, Bucket, Call, Hooks, Server, Services, User}
+  alias OneCore.{Artifact, Bucket, Call, Hooks, Jobs, Server, Services, User}
   alias OneCore.Plugins.Version
 
   @added User.anyone() <> "/added"
@@ -40,6 +40,7 @@ defmodule OneCore.Plugins do
     with :ok <- check(name, files),
          {:ok, version, warnings} <- Version.load(files) do
       with :ok <- bring(name, version.uses),
+           :ok <- scheduled(name, version),
            {:ok, number} <- keep(name, files) do
         takes_over(name, number, {:ok, version})
         Server.tell_servers()
@@ -207,6 +208,49 @@ defmodule OneCore.Plugins do
     end)
   end
 
+  @doc """
+  Has a plugin's scheduled jobs that are due called: the plugin it uses that keeps schedules is given its jobs, as
+  the plugin, and a function that makes one's call here. That plugin has one server make each call, once. The call
+  runs for the user the plugin was added for, and is never passed on: it's made where the schedule is kept.
+  """
+  def schedule(name, passed_on \\ false) do
+    who = User.anyone()
+
+    run(name, fn versions ->
+      asked = called(name, versions, {"plugins/schedule", %{plugin: name}}, who, passed_on)
+
+      fire = fn job ->
+        with {:error, why} <- call(name, job.tool, job.inputs, who, true),
+             do: Logger.error("#{name}'s scheduled #{job.tool} failed: #{why}")
+
+        Server.changed()
+      end
+
+      for keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(asked, versions[name].jobs, fire)
+      {:ok, :ok}
+    end)
+  end
+
+  # The plugins among `versions` that keep other plugins' schedules.
+  defp keepers(versions) do
+    for {_name, %Version{plugin: plugin}} <- versions,
+        plugin != nil,
+        function_exported?(plugin, :schedule, 3),
+        do: plugin
+  end
+
+  # A plugin's scheduled jobs are kept by a plugin it uses.
+  defp scheduled(_name, %Version{jobs: []}), do: :ok
+
+  defp scheduled(name, version) do
+    with {:ok, used} <- used(running(), version.uses, %{}),
+         [_ | _] <- keepers(used) do
+      :ok
+    else
+      _ -> {:error, "#{name} has scheduled jobs, so it uses a plugin that keeps its schedule, as database does"}
+    end
+  end
+
   @doc "The function of `module` named by the text `name` that takes `arity` arguments, or `nil` if it has none."
   def exported(module, name, arity) do
     Enum.find_value(module.__info__(:functions), fn {function, takes} ->
@@ -275,6 +319,7 @@ defmodule OneCore.Plugins do
     # A process whose own code brought the newer version in is the one that can't wait for itself.
     for process <- __MODULE__.Process.all(name), process != self(), do: __MODULE__.Process.follow(process)
     Services.start(name)
+    Jobs.look()
   end
 
   # What a function of a plugin is called with: who it runs for, and what was asked, to pass on. The plugin's own

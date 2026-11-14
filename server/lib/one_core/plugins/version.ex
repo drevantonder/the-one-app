@@ -12,12 +12,13 @@ defmodule OneCore.Plugins.Version do
   what's in it, so a service can tell whether a program it brings changed.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
-  `needs` of a machine. `hooks` names the hooks it hooks into.
+  `needs` of a machine. `hooks` names the hooks it hooks into, and `jobs` lists its scheduled jobs: each one's
+  `tool`, the `inputs` it's called with, and `every` how many seconds.
   """
   alias OneCore.{Hooks, Server}
 
-  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :code, :files, :hashes]
-  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :code, :files, :hashes]
+  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
+  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
 
   # The names versions are loaded under: each is free, or taken by the one version loaded under it.
   @names 4096
@@ -148,6 +149,7 @@ defmodule OneCore.Plugins.Version do
         apps = if function_exported?(plugin, :apps, 0), do: plugin.apps(), else: []
         uses = if function_exported?(plugin, :uses, 0), do: plugin.uses(), else: []
         hooks = if function_exported?(plugin, :hooks, 0), do: plugin.hooks(), else: []
+        jobs = if function_exported?(plugin, :jobs, 0), do: plugin.jobs(), else: []
         services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
 
         cond do
@@ -177,7 +179,9 @@ defmodule OneCore.Plugins.Version do
                   do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
 
             version = version(under, plugin, tools, guide, apps, Enum.sort(services), client)
-            {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks)}}
+
+            with {:ok, jobs} <- jobs(jobs, tools),
+                 do: {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks), jobs: jobs}}
         end
 
       found ->
@@ -185,7 +189,30 @@ defmodule OneCore.Plugins.Version do
     end
   rescue
     error ->
-      {:error, "tools/0, guide/0, apps/0, uses/0, hooks/0 or a service's needs/0 raised: " <> Exception.message(error)}
+      {:error,
+       "tools/0, guide/0, apps/0, uses/0, hooks/0, jobs/0 or a service's needs/0 raised: " <> Exception.message(error)}
+  end
+
+  # A scheduled job calls one of the plugin's tools with inputs the tool takes, so one that could never run is
+  # found out when it's deployed.
+  defp jobs(jobs, tools) do
+    checked =
+      for job <- List.wrap(jobs) do
+        with %{tool: name, every: every} when is_integer(every) and every > 0 <- job,
+             inputs = JSON.decode!(JSON.encode!(Map.get(job, :inputs, %{}))),
+             %{takes: takes} <- Enum.find(tools, &(&1.name == name)),
+             :ok <- ExJsonSchema.Validator.validate(takes, inputs) do
+          %{tool: name, every: every, inputs: inputs}
+        else
+          _ -> nil
+        end
+      end
+
+    if is_list(jobs) and nil not in checked,
+      do: {:ok, checked},
+      else:
+        {:error,
+         "jobs/0 gives a list of %{tool: ..., every: ...}: one of this plugin's tools, how many seconds apart, and the inputs it takes, if any"}
   end
 
   # A module has one `behaviour` attribute for each behaviour it says it follows.
@@ -207,6 +234,7 @@ defmodule OneCore.Plugins.Version do
       uses: [],
       services: services,
       hooks: [],
+      jobs: [],
       code: nil,
       files: Enum.sort(Map.keys(client)),
       hashes: Map.new(client, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)

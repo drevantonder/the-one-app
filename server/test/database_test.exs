@@ -90,6 +90,81 @@ defmodule OneCore.DatabaseTest do
     %{database: Plugins.running()["database"].plugin, home: home}
   end
 
+  # A scheduled job, asked for on two servers at times the test says. Its call writes the time it was due at, and
+  # which server made it, in the one transaction that also marks it as run.
+  @tag :tmp_dir
+  test "a scheduled job is called once for each time it's due, whichever server holds the lease when", simulated do
+    %{database: database} = simulated
+    lease = Module.concat(database, Lease)
+    job = %{tool: "tick", inputs: %{}, every: 10}
+    schema = ["create table ticks (server text, at integer)"]
+    test = self()
+
+    # What a server is asked each time a job is due. Its call can be made to wait before it writes.
+    ask = fn server, now, wait ->
+      call = %{call(simulated, server) | passed_on: true}
+
+      fire = fn _job ->
+        if wait, do: send(test, {:calling, self()}) && receive(do: (:go -> :ok))
+
+        database.transaction(call, schema, fn db ->
+          database.query(db, "insert into ticks (server, at) values (?, ?)", [server, div(now, 10) * 10])
+        end)
+
+        send(test, {:called, server})
+      end
+
+      GenServer.call(lease.of(call), {:schedule, [job], fire, now})
+    end
+
+    takes = fn server, from -> GenServer.call(lease.of(call(simulated, server)), {:take_over, from}) end
+
+    ticks = fn server ->
+      database.transaction(
+        call(simulated, server),
+        schema,
+        &database.query(&1, "select server, at from ticks order by at")
+      )
+    end
+
+    # A new job is first due at the next time, and then once for each.
+    assert ask.("a", 105, false) == :ok
+    refute_receive {:called, _server}
+    assert ask.("a", 111, false) == :ok
+    assert_receive {:called, "a"}
+    assert ask.("a", 119, false) == :ok
+    assert {:held_by, "a"} = ask.("b", 119, false)
+    refute_receive {:called, _server}
+
+    # A server that takes the lease reads that the call was made, and makes only the next.
+    assert takes.("b", "a") == :ok
+    assert ask.("b", 119, false) == :ok
+    refute_receive {:called, _server}
+
+    # A server that lost the lease without knowing makes the call too, and nothing of its call is kept.
+    assert ask.("a", 120, false) == :ok
+    refute_receive {:called, _server}
+    assert ask.("b", 120, true) == :ok
+    assert_receive {:calling, calling}
+
+    # The lease is taken while that call is being made. The server taking it makes the call, and the one that
+    # lost it writes nothing: its call ends there. Times nobody was asked at are made up for by one call.
+    assert takes.("a", "b") == :ok
+    assert ask.("a", 121, false) == :ok
+    assert_receive {:called, "a"}
+    send(calling, :go)
+    refute_receive {:called, "b"}
+    assert {:held_by, "a"} = ask.("b", 150, false)
+    assert ask.("a", 155, false) == :ok
+    assert_receive {:called, "a"}
+
+    assert ticks.("a") == [
+             %{"server" => "a", "at" => 110},
+             %{"server" => "a", "at" => 120},
+             %{"server" => "a", "at" => 150}
+           ]
+  end
+
   @tag :tmp_dir
   test "no answered write is lost or doubled, whoever stops and whoever takes the lease", simulated do
     seeds = String.to_integer(System.get_env("SEEDS", "40"))
