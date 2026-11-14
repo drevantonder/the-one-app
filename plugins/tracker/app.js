@@ -16,8 +16,9 @@ async function show() {
   try {
     const listed = JSON.parse(await call("tracker_list", tracker ? { tracker } : {}))
     rows = tracker ? listed.toReversed().map(entry) : listed.map(total)
-  } catch {
+  } catch (error) {
     rows = null
+    $("problem").text = error.message
   }
   // A tracker opened or left while this was asking has drawn already.
   if (tracker !== inside()) return
