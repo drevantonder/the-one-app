@@ -21,8 +21,9 @@ body {
   grid-template-rows: 1fr auto;
   height: 100%;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-  /* A little light from above, so the page is a place and not a blank sheet. */
-  background: radial-gradient(ellipse 120% 60% at 50% 0%, var(--muted), transparent 70%);
+  /* A little light behind the apps, so the page is a place and not a blank sheet. It's gone by the page's edges,
+     where the window shows behind a phone's own bars. */
+  background: radial-gradient(ellipse 85% 26% at 50% 20%, color-mix(in oklab, var(--muted) 70%, transparent), transparent 72%);
 }
 #page {
   display: grid;
