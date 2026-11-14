@@ -11,7 +11,9 @@ defmodule OneCore.McpTest do
     def tools do
       [
         %{name: "list", read_only: true, description: "Lists the notes", inputs: %{type: "object"}},
-        %{name: "add", description: "Adds a note", inputs: %{type: "object"}}
+        %{name: "add", description: "Adds a note", inputs: %{type: "object"}},
+        %{name: "photo", read_only: true, description: "A note's photo", inputs: %{type: "object"}},
+        %{name: "scan", read_only: true, description: "A note's scan", inputs: %{type: "object"}}
       ]
     end
 
@@ -19,6 +21,8 @@ defmodule OneCore.McpTest do
     def apps, do: [%{name: "Notes", page: "app.html", icon: "icon.svg"}]
 
     @impl true
+    def call("photo", _inputs, _call), do: {:blob, "image/png", <<137, 80>>}
+    def call("scan", _inputs, _call), do: {:blob, "application/pdf", "%PDF"}
     def call(_tool, _inputs, _call), do: []
   end
   """
@@ -56,5 +60,18 @@ defmodule OneCore.McpTest do
       for tool <- ask("tools/list", %{})["tools"], into: %{}, do: {tool["name"], tool["annotations"]["readOnlyHint"]}
 
     assert %{"notes_list" => true, "notes_add" => false} = reads
+
+    # A file a tool answers with is a picture an agent sees, or a file inside the answer.
+    assert %{"content" => [%{"type" => "text", "text" => "[]"}]} = ask("tools/call", %{name: "notes_list"})
+
+    assert %{"content" => [%{"type" => "image", "mimeType" => "image/png", "data" => "iVA="}]} =
+             ask("tools/call", %{name: "notes_photo"})
+
+    assert %{
+             "content" => [
+               %{"type" => "resource", "resource" => %{"mimeType" => "application/pdf", "blob" => "JVBERg=="}}
+             ]
+           } =
+             ask("tools/call", %{name: "notes_scan"})
   end
 end

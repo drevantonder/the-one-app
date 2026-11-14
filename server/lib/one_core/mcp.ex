@@ -183,7 +183,7 @@ defmodule OneCore.Mcp do
 
   defp result("tools/call", %{"name" => name} = params) do
     case call(name, Map.get(params, "arguments", %{}), params["_meta"]["passed_on"] == true) do
-      {:ok, text} -> changed(name, %{content: [%{type: "text", text: text}]})
+      {:ok, answer} -> changed(name, %{content: content(name, answer)})
       {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
       # Another server ran it, and told its own clients.
       {:passed_on, %{"isError" => true} = result} -> {:ok, result}
@@ -256,7 +256,7 @@ defmodule OneCore.Mcp do
   defp call(name, inputs, passed_on) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
          {:ok, answer} <- Plugins.call(plugin, tool, inputs, passed_on) do
-      if is_binary(answer), do: {:ok, answer}, else: {:ok, JSON.encode!(answer)}
+      if is_binary(answer) or match?({:blob, _, _}, answer), do: {:ok, answer}, else: {:ok, JSON.encode!(answer)}
     else
       [_] -> {:error, "#{name} takes other inputs, or isn't a tool. tools/list says what each takes."}
       other -> other
@@ -275,6 +275,16 @@ defmodule OneCore.Mcp do
       end
     end
   end
+
+  # An answer as MCP's content. A picture is an image, which an agent that sees pictures sees, and any other file
+  # is a resource inside the answer.
+  defp content(_name, {:blob, "image/" <> _ = kind, data}),
+    do: [%{type: "image", mimeType: kind, data: Base.encode64(data)}]
+
+  defp content(name, {:blob, kind, data}),
+    do: [%{type: "resource", resource: %{uri: "one://#{name}", mimeType: kind, blob: Base.encode64(data)}}]
+
+  defp content(_name, text), do: [%{type: "text", text: text}]
 
   # After a tool that doesn't only read, every client connected here is told that something changed.
   defp changed(name, result) do

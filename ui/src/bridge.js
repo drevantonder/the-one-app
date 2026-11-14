@@ -32,12 +32,13 @@ const greet = () => greeted ??= ask("ui/initialize", {
   appCapabilities: {},
 }).then(() => tell("ui/notifications/initialized"))
 
-/// `await call("tracker_add", { tracker: "water" })`: calls a tool and gives its answer, which is text. A tool that
-/// refuses throws what it said. The client keeps the answer of a tool that only reads, and answers with it at once.
+/// `await call("tracker_add", { tracker: "water" })`: calls a tool and gives its answer, which is text. A file a
+/// tool answers with is its `data:` address, which an `<img>` takes as its `src`. A tool that refuses throws what
+/// it said. The client keeps the answer of a tool that only reads, and answers with it at once.
 export async function call(tool, inputs = {}) {
   await greet()
   const { content, isError } = await ask("tools/call", { name: tool, arguments: inputs })
-  const text = content.map((part) => part.text).join("\n")
+  const text = content.map(({ text, data, mimeType, resource }) => text ?? `data:${mimeType ?? resource.mimeType};base64,${data ?? resource.blob}`).join("\n")
   if (isError) throw new Error(text)
   return text
 }

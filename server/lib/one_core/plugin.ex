@@ -40,6 +40,8 @@ defmodule OneCore.Plugin do
     `one hello greet`.
   - `call/3` runs a tool with its inputs, a map with string keys. It returns the answer: text, or anything JSON can
     hold. To refuse, raise, and the message is what the caller is told.
+  - A tool answers with a file, such as a photo, as `{:blob, "image/jpeg", data}`. An agent sees the picture, an
+    app is given its `data:` address, and the command writes the file out (`one hello photo > photo.jpg`).
   - `guide/0`, if the plugin has one, is text for agents on when and how to use its tools.
   - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact, where it keeps
     what it needs as blobs through `OneCore.Artifact`: `read/2`, `write/3` (only if absent), `replace/4` (only if

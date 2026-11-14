@@ -1,12 +1,14 @@
 //! The CLI. Every tool is a command: the words before the first `--` input, joined by `_`, are the tool's name, so
 //! `one tracker add --tracker water` calls `tracker_add`. `one mcp` serves MCP over stdio instead.
 
+use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::{env, fs};
+use std::{env, fs, io};
 
 use anyhow::{Context, Result, bail};
+use data_encoding::BASE64;
 use serde_json::{Map, Value, json};
 
 use crate::{Client, mcp};
@@ -46,13 +48,22 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
         Some(tool) => {
             answered?;
             let result = client.request("tools/call", json!({"name": name, "arguments": inputs(tool, flags)?})).await?;
-            let text: Vec<&str> =
-                result["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
+            let parts = result["content"].as_array().map(Vec::as_slice).unwrap_or_default();
             if result["isError"] == true {
+                let text: Vec<&str> = parts.iter().filter_map(|part| part["text"].as_str()).collect();
                 eprintln!("{}", text.join("\n"));
                 return Ok(ExitCode::FAILURE);
             }
-            println!("{}", text.join("\n"));
+            // Text is printed, and a file is written out as it is, to be sent to a file: `> photo.jpg`.
+            for part in parts {
+                match part["text"].as_str() {
+                    Some(text) => println!("{text}"),
+                    None => {
+                        let file = part["data"].as_str().or(part["resource"]["blob"].as_str()).unwrap_or_default();
+                        io::stdout().write_all(&BASE64.decode(file.as_bytes()).context("the answer isn't a file")?)?;
+                    }
+                }
+            }
         }
         None => {
             let within: Vec<&Value> = tools

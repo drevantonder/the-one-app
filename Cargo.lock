@@ -481,6 +481,7 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "data-encoding",
  "dirs 6.0.0",
  "futures-util",
  "iroh",
