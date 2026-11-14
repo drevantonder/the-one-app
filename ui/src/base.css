@@ -1,0 +1,120 @@
+/* What every element's shadow root starts with. An element's own look is in the layer `look` (element.js), over
+   these defaults; what's below the layer here wins over any look: hidden, pressed, and where the keyboard is. */
+@layer base, look;
+
+@layer base {
+  *, ::before, ::after {
+    box-sizing: border-box;
+  }
+  button, input, textarea, select {
+    margin: 0;
+    font: inherit;
+    color: inherit;
+  }
+  button {
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  /* What's the app's own, not what it shows: read and pressed, not selected. */
+  button, label, [role="tab"], [role="menuitem"], [role="option"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  svg {
+    flex: none;
+    width: var(--icon);
+    height: var(--icon);
+    fill: currentColor;
+    pointer-events: none;
+  }
+
+  /* What floats over the page from the thing that opened it: a menu, a select's list, a calendar. It's a popover, so
+     it's drawn over everything and nothing it sits inside can cut it off. Zag places it. */
+  [popover] {
+    inset: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    overflow: visible;
+  }
+  .popup {
+    padding: 0.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--popover);
+    color: var(--popover-foreground);
+    font-size: var(--text-base);
+    box-shadow: var(--shadow-md);
+    outline: 0;
+    opacity: 0;
+    scale: 0.97;
+    transform-origin: var(--transform-origin);
+    transition: opacity var(--move-quick) var(--ease-quick), scale var(--move-quick) var(--ease-quick);
+  }
+  :popover-open > .popup {
+    opacity: 1;
+    scale: 1;
+  }
+  @starting-style {
+    :popover-open > .popup {
+      opacity: 0;
+      scale: 0.97;
+    }
+  }
+  /* One thing to choose in a popup. */
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: calc(var(--control) - 0.25rem);
+    padding: 0 0.5rem;
+    border-radius: var(--radius-sm);
+    outline: 0;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .item[data-highlighted] {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+  .item[data-disabled] {
+    opacity: 0.5;
+  }
+}
+
+[hidden], :host([hidden]) {
+  display: none !important;
+}
+
+/* What's pressed dims the moment it's touched, and comes back quickly. */
+.press {
+  transition: opacity var(--move-quick) var(--ease-quick);
+}
+.press:active:not(:disabled, [data-disabled]) {
+  opacity: 0.7;
+  transition-duration: 0s;
+}
+
+/* Where the keyboard is: a ring, red on what's wrong or can't be undone (`--ring-color`). */
+.ring {
+  outline: 3px solid transparent;
+  transition-property: opacity, color, background-color, border-color, outline-color, box-shadow;
+  transition-duration: var(--move-quick);
+  transition-timing-function: var(--ease-quick);
+}
+.ring:focus-visible {
+  border-color: var(--ring-color, var(--ring));
+  outline-color: color-mix(in oklab, var(--ring-color, var(--ring)) 50%, transparent);
+}
+
+/* Asked for no motion: a plain swap everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after, ::backdrop {
+    transition-duration: 0s !important;
+  }
+}

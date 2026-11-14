@@ -1,0 +1,92 @@
+:host {
+  --box: calc(var(--control) * 0.45);
+  --track: calc(var(--control) * 0.55);
+}
+label {
+  display: flex;
+  align-items: center;
+  justify-self: stretch;
+  gap: 0.625rem;
+  min-height: var(--control);
+  font-weight: 400;
+  cursor: pointer;
+}
+:host([disabled]) label {
+  cursor: default;
+}
+span {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+input {
+  appearance: none;
+  flex: none;
+  display: grid;
+  place-content: center;
+  width: var(--box);
+  height: var(--box);
+  border: 1px solid var(--input);
+  border-radius: 4px;
+  background: light-dark(transparent, color-mix(in oklab, var(--input) 30%, transparent));
+  box-shadow: var(--shadow-xs);
+  cursor: inherit;
+}
+input[aria-invalid="true"] {
+  --ring-color: var(--destructive);
+  border-color: var(--destructive);
+}
+input:not([role])::before {
+  content: "";
+  width: calc(var(--box) * 0.75);
+  height: calc(var(--box) * 0.75);
+  background: var(--primary-foreground);
+  mask: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z" stroke="black" stroke-width="16"/></svg>') center / contain no-repeat;
+  scale: 0;
+  transition: scale var(--move-quick) var(--ease-quick);
+}
+input:checked {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+input:checked::before {
+  scale: 1;
+}
+
+/* A switch: the same control, drawn as a track with a thumb, at the end of its label. */
+:host(ui-switch) span {
+  order: -1;
+}
+input[role="switch"] {
+  justify-content: start;
+  width: calc(var(--track) * 1.75);
+  height: var(--track);
+  padding: 0 1px;
+  border-color: transparent;
+  border-radius: 999px;
+  background: light-dark(var(--input), color-mix(in oklab, var(--input) 80%, transparent));
+}
+input[role="switch"]::before {
+  content: "";
+  width: calc(var(--track) - 4px);
+  height: calc(var(--track) - 4px);
+  border-radius: 50%;
+  background: light-dark(var(--background), var(--foreground));
+  transition: translate var(--move-settle) var(--ease-settle);
+}
+input[role="switch"]:checked {
+  background: var(--primary);
+}
+input[role="switch"]:checked::before {
+  background: light-dark(var(--background), var(--primary-foreground));
+  translate: calc(var(--track) * 0.75) 0;
+}
+input:disabled {
+  opacity: 0.5;
+}

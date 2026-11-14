@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Expenses</title>
+  <link rel="stylesheet" href="../dist/ui.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <ui-screen heading="Expenses">
+    <ui-button slot="action" id="add"><ui-icon name="plus"></ui-icon>Add</ui-button>
+    <ui-skeleton id="loading"></ui-skeleton>
+    <ui-problem id="problem" heading="Couldn't load expenses" hidden>
+      <ui-button slot="action" variant="outline" id="retry">Try again</ui-button>
+    </ui-problem>
+    <ui-empty id="empty" hidden>No expenses yet.</ui-empty>
+    <ui-list id="list"></ui-list>
+  </ui-screen>
+
+  <ui-sheet id="sheet">
+    <form id="form">
+      <ui-input label="What" name="what" required autofocus></ui-input>
+      <ui-number label="Amount" name="amount" currency="AUD" decimals="2" min="0" required></ui-number>
+      <ui-select label="Category" name="category">
+        <option value="meals">Meals</option>
+        <option value="travel">Travel</option>
+        <option value="stay">Somewhere to stay</option>
+        <option value="other">Something else</option>
+      </ui-select>
+      <ui-date-picker label="Date" name="date" required></ui-date-picker>
+      <ui-button type="submit" id="save">Save</ui-button>
+      <ui-button variant="ghost" id="remove">Delete</ui-button>
+    </form>
+  </ui-sheet>
+</body>
+</html>

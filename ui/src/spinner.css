@@ -1,0 +1,16 @@
+:host {
+  display: inline-flex;
+  flex: none;
+  vertical-align: -0.15em;
+}
+svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 42 57;
+  animation: turn 0.8s linear infinite;
+}
+@keyframes turn {
+  to { rotate: 1turn; }
+}

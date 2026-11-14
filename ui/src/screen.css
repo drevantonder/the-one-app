@@ -1,0 +1,50 @@
+:host {
+  display: block;
+  min-height: 100dvh;
+}
+header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: calc(var(--control) + 0.75rem + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(var(--gutter), env(safe-area-inset-right)) 0 max(var(--gutter), env(safe-area-inset-left));
+  background: var(--background);
+}
+h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button {
+  display: grid;
+  flex: none;
+  place-content: center;
+  width: var(--control);
+  height: var(--control);
+  /* The arrow, not the button's edge, lines up with what's under it. */
+  margin-inline-start: calc((var(--icon) - var(--control)) / 2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+@media (hover: hover) {
+  button:hover {
+    background: var(--accent);
+  }
+}
+main {
+  display: grid;
+  align-content: start;
+  gap: var(--gap);
+  padding: 0.5rem max(var(--gutter), env(safe-area-inset-right)) calc(var(--gutter) + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
+  /* Each part sizes itself by the room it has here, not by the window. */
+  container-type: inline-size;
+}

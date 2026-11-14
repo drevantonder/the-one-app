@@ -1,0 +1,43 @@
+:host {
+  display: inline-flex;
+  vertical-align: middle;
+}
+.trigger {
+  display: grid;
+  place-content: center;
+  width: var(--control);
+  height: var(--control);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+.trigger[data-state="open"] {
+  background: var(--accent);
+}
+@media (hover: hover) {
+  .trigger:hover {
+    background: var(--accent);
+  }
+}
+.popup {
+  min-width: 10rem;
+  max-width: min(20rem, 100vw - 1rem);
+}
+.item {
+  padding-inline-end: 1rem;
+}
+.item > svg {
+  color: var(--muted-foreground);
+}
+.destructive, .destructive > svg {
+  color: var(--destructive);
+}
+.destructive[data-highlighted] {
+  background: color-mix(in oklab, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+hr {
+  height: 1px;
+  margin: 0.25rem -0.25rem;
+  border: 0;
+  background: var(--border);
+}

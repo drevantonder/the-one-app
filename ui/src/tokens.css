@@ -1,0 +1,97 @@
+/* Every colour, size, radius and pace the kit draws with: shadcn's neutral, light and dark. A colour is
+   light-dark(light, dark), so it follows `color-scheme` wherever it's used: the user's own by default, which a shell
+   sets from Settings › Appearance, and any part of a page can set its own. */
+:root {
+  color-scheme: light dark;
+
+  --background: light-dark(oklch(1 0 0), oklch(0.145 0 0));
+  --foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --card: light-dark(oklch(1 0 0), oklch(0.205 0 0));
+  --card-foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --popover: light-dark(oklch(1 0 0), oklch(0.205 0 0));
+  --popover-foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --primary: light-dark(oklch(0.205 0 0), oklch(0.922 0 0));
+  --primary-foreground: light-dark(oklch(0.985 0 0), oklch(0.205 0 0));
+  --secondary: light-dark(oklch(0.97 0 0), oklch(0.269 0 0));
+  --secondary-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
+  --muted: light-dark(oklch(0.97 0 0), oklch(0.269 0 0));
+  --muted-foreground: light-dark(oklch(0.54 0 0), oklch(0.708 0 0));
+  --accent: light-dark(oklch(0.97 0 0), oklch(0.269 0 0));
+  --accent-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
+  --destructive: light-dark(oklch(0.565 0.245 27.325), oklch(0.704 0.191 22.216));
+  /* Warn: "this needs you", but it can wait. */
+  --warning: light-dark(oklch(0.555 0.163 48.998), oklch(0.828 0.189 84.429));
+  --border: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 10%));
+  --input: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 15%));
+  --ring: light-dark(oklch(0.45 0 0), oklch(0.708 0 0));
+  --sidebar: light-dark(oklch(0.985 0 0), oklch(0.205 0 0));
+  --sidebar-foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --sidebar-primary: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
+  --sidebar-primary-foreground: light-dark(oklch(0.985 0 0), oklch(0.205 0 0));
+  --sidebar-accent: light-dark(oklch(0.97 0 0), oklch(0.269 0 0));
+  --sidebar-accent-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
+  --sidebar-border: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 10%));
+  --sidebar-ring: light-dark(oklch(0.45 0 0), oklch(0.708 0 0));
+  /* What dims the page under a sheet. */
+  --overlay: oklch(0 0 0 / 50%);
+
+  /* Code, coloured as GitHub colours it, and a diff's tints. */
+  --hl-kw: light-dark(#cf222e, #ff7b72);
+  --hl-str: light-dark(#0a3069, #a5d6ff);
+  --hl-com: light-dark(#6e7781, #8b949e);
+  --hl-num: light-dark(#0550ae, #79c0ff);
+  --hl-fn: light-dark(#8250df, #d2a8ff);
+  --hl-type: light-dark(#953800, #ffa657);
+  --hl-tag: light-dark(#116329, #7ee787);
+  --hl-ins: light-dark(#116329, #7ee787);
+  --hl-del: light-dark(#82071e, #ffa198);
+  --find: light-dark(#fae17d, #9e6a03);
+  --diff-add: light-dark(#e6ffec, rgb(46 160 67 / 0.15));
+  --diff-add-number: light-dark(#ccffd8, rgb(63 185 80 / 0.3));
+  --diff-del: light-dark(#ffebe9, rgb(248 81 73 / 0.15));
+  --diff-del-number: light-dark(#ffd7d5, rgb(248 81 73 / 0.3));
+
+  --radius: 0.625rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1.0625rem;
+  --text-title: 1.75rem;
+
+  /* How tall what's pressed or typed in is, and an icon in it. */
+  --control: 2.25rem;
+  --icon: 1rem;
+  /* A screen's gutter, the gap between its parts, and where lists and forms stop growing. */
+  --gutter: 1rem;
+  --gap: 1rem;
+  --readable: 42rem;
+
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 5%);
+  --shadow-md: 0 4px 6px -1px oklch(0 0 0 / 10%), 0 2px 4px -2px oklch(0 0 0 / 10%);
+  --shadow-lg: 0 10px 15px -3px oklch(0 0 0 / 10%), 0 4px 6px -4px oklch(0 0 0 / 10%);
+
+  /* How things move. Quick: what goes, what's small (a press, a fade, a menu). Settle: what arrives or shifts in
+     place. Travel: what crosses the screen (a sheet). */
+  --move-quick: 120ms;
+  --ease-quick: cubic-bezier(0.22, 1, 0.36, 1);
+  --move-settle: 200ms;
+  --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
+  --move-travel: 300ms;
+  --ease-travel: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Under a finger: a target of 44px, and text an iPhone doesn't zoom into a field to show. */
+@media (pointer: coarse) {
+  :root {
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.0625rem;
+    --control: 2.75rem;
+    --icon: 1.125rem;
+  }
+}

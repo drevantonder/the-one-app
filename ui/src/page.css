@@ -1,0 +1,30 @@
+/* What every page starts with, before ui.js has run: the theme on the page itself, so nothing flashes white. */
+html {
+  -webkit-text-size-adjust: 100%;
+  scrollbar-gutter: stable;
+}
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font: var(--text-base) / 1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+h1, h2, h3, p {
+  margin: 0;
+}
+/* A form's fields, one under another. */
+form {
+  display: grid;
+  gap: var(--gap);
+}
+/* An element ui.js hasn't drawn yet shows nothing, not its bare text. */
+:not(:defined) {
+  visibility: hidden;
+}
+/* The page under an open sheet stays where it is. */
+html:has(ui-sheet[open]) {
+  overflow: hidden;
+}

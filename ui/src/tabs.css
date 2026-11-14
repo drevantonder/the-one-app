@@ -1,0 +1,42 @@
+:host {
+  display: grid;
+  gap: var(--gap);
+  min-width: 0;
+}
+.tabs {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  justify-self: start;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: var(--radius-lg);
+  background: var(--muted);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+button {
+  flex: 1;
+  height: calc(var(--control) - 6px);
+  padding: 0 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  font-size: var(--text-base);
+  font-weight: 500;
+  white-space: nowrap;
+}
+button[data-selected] {
+  color: var(--foreground);
+}
+/* What marks the chosen tab, sliding to it. Zag says where. */
+.indicator {
+  z-index: -1;
+  top: var(--top);
+  left: var(--left);
+  width: var(--width);
+  height: var(--height);
+  border-radius: var(--radius-md);
+  background: light-dark(var(--background), color-mix(in oklab, var(--input) 60%, transparent));
+  box-shadow: var(--shadow-xs);
+}

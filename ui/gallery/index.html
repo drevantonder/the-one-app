@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gallery</title>
+  <link rel="stylesheet" href="../dist/ui.css">
+  <script type="module" src="gallery.js"></script>
+  <style>
+    /* The gallery's own layout: what it shows sits side by side where there's room. */
+    .side { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+    .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); align-items: start; gap: 1rem 1.5rem; }
+    .lists { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); align-items: start; gap: 1rem 1.5rem; }
+    .frame { max-width: 24rem; border: 1px solid var(--border); border-radius: var(--radius-xl); overflow: hidden; }
+    .frame ui-screen { min-height: 0; }
+    ui-section { margin-top: 0.75rem; }
+    .grey { color: var(--muted-foreground); }
+  </style>
+</head>
+<body>
+  <ui-screen heading="Gallery">
+    <ui-menu slot="action" label="Appearance" id="appearance">
+      <ui-menu-item data-scheme="light dark">As the device</ui-menu-item>
+      <ui-menu-item data-scheme="light">Light</ui-menu-item>
+      <ui-menu-item data-scheme="dark">Dark</ui-menu-item>
+    </ui-menu>
+
+    <ui-section heading="Button" id="button">
+      <div class="side">
+        <ui-button>Default</ui-button>
+        <ui-button variant="secondary">Secondary</ui-button>
+        <ui-button variant="outline">Outline</ui-button>
+        <ui-button variant="ghost">Ghost</ui-button>
+        <ui-button variant="destructive">Destructive</ui-button>
+      </div>
+      <div class="side">
+        <ui-button><ui-icon name="plus"></ui-icon>With an icon</ui-button>
+        <ui-button variant="outline" size="icon" aria-label="Edit"><ui-icon name="pencil-simple"></ui-icon></ui-button>
+        <ui-button variant="ghost" size="icon" aria-label="Delete"><ui-icon name="trash"></ui-icon></ui-button>
+        <ui-button disabled>Disabled</ui-button>
+        <ui-button variant="outline" disabled>Disabled</ui-button>
+        <ui-button loading>Saving</ui-button>
+        <ui-button variant="outline" loading>Saving</ui-button>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Text field" id="input">
+      <div class="fields">
+        <ui-input label="Name" placeholder="Who it's for"></ui-input>
+        <ui-input label="Name" value="Sam Okafor" hint="As it is on the receipt."></ui-input>
+        <ui-input label="Email" type="email" value="sam@" error="Enter an email address."></ui-input>
+        <ui-input label="Name" value="Sam Okafor" disabled></ui-input>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Text area" id="textarea">
+      <div class="fields">
+        <ui-textarea label="Note" placeholder="Anything the approver should know"></ui-textarea>
+        <ui-textarea label="Note" value="Taxi back from the airport after the late flight. The train had stopped running by then." hint="It grows with what's typed."></ui-textarea>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Number field" id="number">
+      <div class="fields">
+        <ui-number label="Glasses" value="3" min="0" max="20" hint="The arrow keys step it."></ui-number>
+        <ui-number label="Amount" currency="AUD" decimals="2" value="48.5" min="0"></ui-number>
+        <ui-number label="Amount" currency="AUD" decimals="2" placeholder="$0.00" error="Enter the amount on the receipt."></ui-number>
+        <ui-number label="Amount" value="12" disabled></ui-number>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Switch and checkbox" id="checkbox">
+      <div class="fields">
+        <ui-switch label="Reimbursable"></ui-switch>
+        <ui-switch label="Reimbursable" hint="Goes to finance when saved." checked></ui-switch>
+        <ui-switch label="Reimbursable" checked disabled></ui-switch>
+        <ui-checkbox label="I have the receipt"></ui-checkbox>
+        <ui-checkbox label="I have the receipt" hint="A photo is enough." checked></ui-checkbox>
+        <ui-checkbox label="I have the receipt" error="Tick this to send the claim."></ui-checkbox>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Select" id="select">
+      <div class="fields">
+        <ui-select label="Category" placeholder="Choose one">
+          <option value="meals">Meals</option>
+          <option value="travel">Travel</option>
+          <option value="stay">Somewhere to stay</option>
+          <option value="other">Something else</option>
+        </ui-select>
+        <ui-select label="Category" value="travel" id="select-open">
+          <option value="meals">Meals</option>
+          <option value="travel">Travel</option>
+          <option value="stay">Somewhere to stay</option>
+          <option value="gifts" disabled>Gifts</option>
+          <option value="other">Something else</option>
+        </ui-select>
+        <ui-select label="Category" placeholder="Choose one" error="Choose a category.">
+          <option value="meals">Meals</option>
+          <option value="travel">Travel</option>
+        </ui-select>
+        <ui-select label="Category" value="meals" disabled>
+          <option value="meals">Meals</option>
+        </ui-select>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Date picker" id="date">
+      <div class="fields">
+        <ui-date-picker label="Date" placeholder="Pick a day"></ui-date-picker>
+        <ui-date-picker label="Date" value="2026-11-12" id="date-open"></ui-date-picker>
+        <ui-date-picker label="Date" value="2026-11-12" min="2026-11-01" max="2026-11-14" hint="This month, up to today."></ui-date-picker>
+        <ui-date-picker label="Date" value="2026-11-12" disabled></ui-date-picker>
+      </div>
+    </ui-section>
+
+    <ui-section heading="List and row" id="list">
+      <div class="lists">
+        <ui-list>
+          <ui-row heading="Coffee with Sam" text="Meals · 12 Nov"><span slot="end">$8.50</span></ui-row>
+          <ui-row heading="Taxi from the airport, after the late flight got in" text="Travel · 11 Nov · waiting on a receipt"><span slot="end">$64.00</span></ui-row>
+          <ui-row heading="Hotel"><span slot="end">$212.00</span></ui-row>
+        </ui-list>
+        <ui-list>
+          <ui-row heading="November" text="3 expenses" href="#list"></ui-row>
+          <ui-row heading="October" text="11 expenses" href="#list"></ui-row>
+          <ui-row heading="Opens in place" text="The whole row is a button" button></ui-row>
+        </ui-list>
+        <ui-list>
+          <ui-row heading="Remind me on Fridays"><ui-switch slot="end" aria-label="Remind me on Fridays" checked></ui-switch></ui-row>
+          <ui-row heading="Round to the dollar"><ui-switch slot="end" aria-label="Round to the dollar"></ui-switch></ui-row>
+          <ui-row heading="Receipts" text="Kept with each expense"><ui-icon slot="start" name="magnifying-glass"></ui-icon><ui-button slot="end" variant="outline">Find</ui-button></ui-row>
+        </ui-list>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Tabs" id="tabs">
+      <ui-tabs>
+        <ui-tab value="all" label="All">
+          <ui-list>
+            <ui-row heading="Coffee with Sam" text="Meals · 12 Nov"><span slot="end">$8.50</span></ui-row>
+            <ui-row heading="Hotel" text="Somewhere to stay · 2 Oct"><span slot="end">$212.00</span></ui-row>
+          </ui-list>
+        </ui-tab>
+        <ui-tab value="month" label="This month">
+          <ui-list>
+            <ui-row heading="Coffee with Sam" text="Meals · 12 Nov"><span slot="end">$8.50</span></ui-row>
+          </ui-list>
+        </ui-tab>
+        <ui-tab value="sent" label="Sent">
+          <ui-empty>Nothing sent yet.</ui-empty>
+        </ui-tab>
+      </ui-tabs>
+    </ui-section>
+
+    <ui-section heading="Menu" id="menu">
+      <div class="side">
+        <ui-menu label="More" id="menu-open">
+          <ui-menu-item icon="pencil-simple">Rename</ui-menu-item>
+          <ui-menu-item icon="plus">Duplicate</ui-menu-item>
+          <ui-menu-item disabled>Move to…</ui-menu-item>
+          <hr>
+          <ui-menu-item icon="trash" destructive>Delete</ui-menu-item>
+        </ui-menu>
+        <span class="grey" id="menu-said">Nothing chosen yet.</span>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Sheet and alert" id="sheet">
+      <div class="side">
+        <ui-button variant="outline" id="sheet-button">Open a sheet</ui-button>
+        <ui-button variant="outline" id="alert-button">Ask before deleting</ui-button>
+        <span class="grey" id="alert-said"></span>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Toast" id="toast">
+      <div class="side">
+        <ui-button variant="outline" id="toast-button">Say something</ui-button>
+        <ui-button variant="outline" id="undo-button">Say it with Undo</ui-button>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Empty" id="empty">
+      <div class="fields">
+        <ui-empty>No expenses this month.</ui-empty>
+        <ui-empty>No expenses yet.<ui-button slot="action">Add expense</ui-button></ui-empty>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Loading" id="loading">
+      <div class="lists">
+        <ui-skeleton rows="3"></ui-skeleton>
+        <p class="grey"><ui-spinner></ui-spinner> Sending the claim</p>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Problem" id="problem">
+      <div class="lists">
+        <ui-problem heading="Couldn't load expenses" text="The server didn't answer.">
+          <ui-button slot="action" variant="outline">Try again</ui-button>
+        </ui-problem>
+        <ui-problem warn heading="2 expenses have no receipt" text="Finance sends them back without one."></ui-problem>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Screen" id="screen">
+      <div class="frame">
+        <ui-screen heading="Coffee with Sam" back id="screen-back">
+          <ui-menu slot="action" label="More">
+            <ui-menu-item>Duplicate</ui-menu-item>
+            <ui-menu-item destructive>Delete</ui-menu-item>
+          </ui-menu>
+          <ui-list>
+            <ui-row heading="Amount"><span slot="end">$8.50</span></ui-row>
+            <ui-row heading="Category"><span slot="end">Meals</span></ui-row>
+            <ui-row heading="Date"><span slot="end">12 Nov 2026</span></ui-row>
+          </ui-list>
+        </ui-screen>
+      </div>
+    </ui-section>
+  </ui-screen>
+
+  <ui-sheet heading="Add expense" id="the-sheet">
+    <form id="sheet-form">
+      <ui-input label="What" name="what" required placeholder="Coffee with Sam"></ui-input>
+      <ui-number label="Amount" name="amount" currency="AUD" decimals="2" min="0" required></ui-number>
+      <ui-select label="Category" name="category" placeholder="Choose one" required>
+        <option value="meals">Meals</option>
+        <option value="travel">Travel</option>
+        <option value="stay">Somewhere to stay</option>
+      </ui-select>
+      <ui-date-picker label="Date" name="date" value="2026-11-14" required></ui-date-picker>
+      <ui-textarea label="Note" name="note" rows="2"></ui-textarea>
+      <ui-switch label="Reimbursable" name="reimbursable" checked></ui-switch>
+      <ui-button type="submit">Save</ui-button>
+    </form>
+  </ui-sheet>
+</body>
+</html>

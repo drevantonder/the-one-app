@@ -1,0 +1,86 @@
+:host {
+  display: grid;
+  justify-items: start;
+  gap: 1rem;
+  max-width: var(--readable);
+  font-size: var(--text-base);
+}
+p {
+  margin: 0;
+}
+.empty {
+  color: var(--muted-foreground);
+}
+
+.skeleton {
+  justify-self: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  opacity: 0;
+  animation: late var(--move-settle) var(--ease-settle) 100ms forwards;
+}
+.skeleton > div {
+  display: grid;
+  align-content: center;
+  gap: 0.5rem;
+  min-height: calc(var(--control) + 0.5rem);
+  padding: 0.75rem;
+}
+.skeleton > div + div {
+  border-top: 1px solid var(--border);
+}
+.skeleton i {
+  width: 40%;
+  height: 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.skeleton i + i {
+  width: 70%;
+}
+@keyframes late {
+  to { opacity: 1; }
+}
+@keyframes pulse {
+  50% { opacity: 0.5; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton i {
+    animation: none;
+  }
+}
+
+.problem {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  justify-self: stretch;
+  gap: 0.125rem 0.625rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--destructive);
+  line-height: 1.4;
+}
+:host([warn]) .problem {
+  color: var(--warning);
+}
+.problem svg {
+  margin-top: 0.15em;
+}
+.problem strong {
+  font-weight: 500;
+}
+.problem p, .problem ::slotted(*) {
+  grid-column: 2;
+}
+.problem p {
+  opacity: 0.9;
+}
+.problem ::slotted(*) {
+  justify-self: start;
+  margin-top: 0.5rem;
+  color: var(--foreground);
+}

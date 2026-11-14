@@ -1,0 +1,87 @@
+/* The calendar, with a mouse. */
+.popup {
+  --cell: 2rem;
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+.bar button {
+  display: grid;
+  place-content: center;
+  min-width: var(--cell);
+  height: var(--cell);
+  padding: 0 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+.bar button:hover {
+  background: var(--accent);
+}
+.bar button:disabled {
+  opacity: 0.5;
+}
+table {
+  border-collapse: collapse;
+}
+th {
+  width: var(--cell);
+  height: var(--cell);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+td {
+  padding: 0;
+  text-align: center;
+}
+td > div {
+  display: grid;
+  place-content: center;
+  min-width: var(--cell);
+  height: var(--cell);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+}
+[data-view="month"] td > div, [data-view="year"] td > div {
+  min-width: calc(var(--cell) * 7 / 4);
+  height: calc(var(--cell) * 1.25);
+}
+td > div:hover:not([data-disabled], [data-selected]) {
+  background: var(--accent);
+}
+td > div[data-today] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+td > div[data-outside-range] {
+  color: var(--muted-foreground);
+}
+td > div[data-selected] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+td > div[data-disabled] {
+  opacity: 0.4;
+}
+.clear {
+  justify-self: start;
+  height: var(--cell);
+  padding: 0 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+.clear:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}

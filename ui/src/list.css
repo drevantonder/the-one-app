@@ -1,0 +1,56 @@
+:host {
+  display: block;
+  /* A long list costs only the rows on screen. */
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(var(--control) + 1rem);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: calc(var(--control) + 0.5rem);
+  padding: 0.5rem 0.75rem;
+  color: inherit;
+  font-size: var(--text-base);
+  text-align: start;
+  text-decoration: none;
+  outline: 0;
+}
+a.row, button.row {
+  cursor: pointer;
+}
+@media (hover: hover) {
+  a.row:hover, button.row:hover {
+    background: color-mix(in oklab, var(--accent) 50%, transparent);
+  }
+}
+.row:focus-visible {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.words {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+}
+.words > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.heading {
+  font-weight: 500;
+}
+.text, svg {
+  color: var(--muted-foreground);
+}
+::slotted([slot="end"]) {
+  flex: none;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+::slotted([slot="start"]) {
+  flex: none;
+}

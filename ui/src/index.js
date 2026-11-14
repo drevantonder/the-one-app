@@ -1,0 +1,17 @@
+// The kit: every element, defined as it's imported, and the two things a page asks for in passing.
+import "./icon.js"
+import "./spinner.js"
+import "./button.js"
+import "./input.js"
+import "./number.js"
+import "./checkbox.js"
+import "./select.js"
+import "./date-picker.js"
+import "./list.js"
+import "./screen.js"
+import "./menu.js"
+import "./tabs.js"
+import "./states.js"
+
+export { confirm } from "./sheet.js"
+export { toast } from "./toast.js"

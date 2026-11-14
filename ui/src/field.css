@@ -1,0 +1,110 @@
+:host {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+  font-size: var(--text-base);
+}
+label {
+  justify-self: start;
+  font-weight: 500;
+  line-height: 1.25;
+}
+p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+}
+p.error {
+  color: var(--destructive);
+}
+:host([disabled]) label {
+  opacity: 0.5;
+}
+
+/* What's typed in or chosen from: a text field, and the face of a select or a date. */
+.box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  height: var(--control);
+  padding: 0 0.75rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  background: light-dark(transparent, color-mix(in oklab, var(--input) 30%, transparent));
+  font-size: var(--text-base);
+  text-align: start;
+  box-shadow: var(--shadow-xs);
+}
+.box::placeholder, .box .placeholder {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+.box:disabled, .box[data-disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+.box[aria-invalid="true"], .box[data-invalid] {
+  --ring-color: var(--destructive);
+  border-color: var(--destructive);
+}
+textarea.box {
+  display: block;
+  height: auto;
+  min-height: calc(var(--control) * 2);
+  padding-block: 0.5rem;
+  line-height: 1.45;
+  resize: none;
+  /* As tall as what's typed, where the browser can. */
+  field-sizing: content;
+}
+.box > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.box > svg {
+  color: var(--muted-foreground);
+}
+
+/* A select or a date: its face, and the device's own control. Under a finger the device's control lies over the
+   face, unseen, so a tap opens the device's own picker; with a mouse the face opens ours and the control only
+   holds the value. */
+.picker {
+  position: relative;
+  display: grid;
+}
+.picker > .native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.picker:has(> .native:focus-visible) > .box {
+  border-color: var(--ring-color, var(--ring));
+  outline: 3px solid color-mix(in oklab, var(--ring-color, var(--ring)) 50%, transparent);
+}
+
+/* A select's own list, with a mouse. */
+.list {
+  max-height: min(20rem, var(--available-height, 20rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.list .item > :first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.list .item > [data-part="item-indicator"] {
+  display: flex;
+}
+.list .item > [data-part="item-indicator"]:not([data-state="checked"]) {
+  visibility: hidden;
+}

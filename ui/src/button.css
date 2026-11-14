@@ -1,0 +1,75 @@
+:host {
+  display: inline-flex;
+  vertical-align: middle;
+}
+button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-width: 0;
+  height: var(--control);
+  padding: 0 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: var(--text-base);
+  font-weight: 500;
+  white-space: nowrap;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+::slotted(svg) {
+  flex: none;
+  width: var(--icon);
+  height: var(--icon);
+  fill: currentColor;
+}
+
+@media (hover: hover) {
+  button:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--primary) 90%, transparent);
+  }
+  :host([variant="secondary"]) button:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--secondary) 80%, transparent);
+  }
+  :host(:is([variant="outline"], [variant="ghost"])) button:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+  :host([variant="destructive"]) button:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--destructive) 90%, transparent);
+  }
+}
+
+:host([variant="secondary"]) button {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+:host([variant="outline"]) button {
+  border-color: var(--input);
+  background: light-dark(var(--background), color-mix(in oklab, var(--input) 30%, transparent));
+  color: var(--foreground);
+  box-shadow: var(--shadow-xs);
+}
+:host([variant="ghost"]) button {
+  background: none;
+  color: var(--foreground);
+}
+:host([variant="destructive"]) button {
+  background: light-dark(var(--destructive), color-mix(in oklab, var(--destructive) 60%, transparent));
+  color: white;
+}
+:host([variant="destructive"]) button {
+  --ring-color: var(--destructive);
+}
+
+:host([size="icon"]) button {
+  flex: none;
+  width: var(--control);
+  padding: 0;
+}
