@@ -1,5 +1,6 @@
 //! The server's add-on for being reached by key: it opens the server's endpoint, hands what clients ask to the
-//! server's Elixir, and sends its answers back. A client asks one message a stream (`client`).
+//! server's Elixir, and sends its answers back. A client asks one message a stream (`client`), and is told
+//! something the same way: one message on a stream the server opens.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::panic::AssertUnwindSafe;
@@ -10,6 +11,7 @@ use iroh::Endpoint;
 use iroh::endpoint::SendStream;
 use rustler::{Atom, Binary, LocalPid, NewBinary, OwnedEnv, Resource, ResourceArc};
 use tokio::runtime::Runtime;
+use tokio::sync::broadcast;
 
 mod atoms {
     rustler::atoms! { ok, ask }
@@ -17,16 +19,19 @@ mod atoms {
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("tokio starts"));
 
-/// A server's endpoint, open for as long as the server holds this. Nothing looks inside it after a panic, which is
-/// what Rustler needs to hear before it hands one to Elixir.
-struct Reached(AssertUnwindSafe<Endpoint>);
+/// A server's endpoint, open for as long as the server holds this, and where what it tells its clients is sent
+/// from. Nothing looks inside it after a panic, which is what Rustler needs to hear before it hands one to Elixir.
+struct Reached {
+    endpoint: AssertUnwindSafe<Endpoint>,
+    told: AssertUnwindSafe<broadcast::Sender<Vec<u8>>>,
+}
 
 #[rustler::resource_impl]
 impl Resource for Reached {}
 
 impl Drop for Reached {
     fn drop(&mut self) {
-        let endpoint = self.0.clone();
+        let endpoint = self.endpoint.clone();
         RUNTIME.spawn(async move { endpoint.close().await });
     }
 }
@@ -50,29 +55,61 @@ fn start(key_file: String, asked: LocalPid) -> Result<(ResourceArc<Reached>, Str
             address.with_ip_addr(SocketAddr::from((Ipv4Addr::LOCALHOST, socket.port())))
         });
         let address = serde_json::to_string(&address).map_err(|error| error.to_string())?;
-        tokio::spawn(accept(endpoint.clone(), asked));
-        Ok((ResourceArc::new(Reached(AssertUnwindSafe(endpoint))), address))
+        // A client that falls this many messages behind misses some, and hears the next.
+        let (told, _) = broadcast::channel(64);
+        tokio::spawn(accept(endpoint.clone(), asked, told.clone()));
+        let reached = Reached { endpoint: AssertUnwindSafe(endpoint), told: AssertUnwindSafe(told) };
+        Ok((ResourceArc::new(reached), address))
     })
 }
 
-async fn accept(endpoint: Endpoint, asked: LocalPid) {
+async fn accept(endpoint: Endpoint, asked: LocalPid, told: broadcast::Sender<Vec<u8>>) {
     while let Some(incoming) = endpoint.accept().await {
+        let mut told = told.subscribe();
         tokio::spawn(async move {
             let Ok(connection) = incoming.await else { return };
-            while let Ok((send, mut receive)) = connection.accept_bi().await {
-                tokio::spawn(async move {
-                    let Ok(message) = receive.read_to_end(client::LIMIT).await else { return };
-                    let ask = ResourceArc::new(Ask(Mutex::new(Some(send))));
-                    // The server's Elixir going away is the only way this fails, and then nobody is left to tell.
-                    let _ = OwnedEnv::new().send_and_clear(&asked, |env| {
-                        let mut binary = NewBinary::new(env, message.len());
-                        binary.as_mut_slice().copy_from_slice(&message);
-                        (atoms::ask(), ask, Binary::from(binary))
-                    });
-                });
+            loop {
+                tokio::select! {
+                    stream = connection.accept_bi() => {
+                        let Ok((send, mut receive)) = stream else { return };
+                        tokio::spawn(async move {
+                            let Ok(message) = receive.read_to_end(client::LIMIT).await else { return };
+                            let ask = ResourceArc::new(Ask(Mutex::new(Some(send))));
+                            // The server's Elixir going away is the only way this fails, and then nobody is left
+                            // to tell.
+                            let _ = OwnedEnv::new().send_and_clear(&asked, |env| {
+                                let mut binary = NewBinary::new(env, message.len());
+                                binary.as_mut_slice().copy_from_slice(&message);
+                                (atoms::ask(), ask, Binary::from(binary))
+                            });
+                        });
+                    }
+                    message = told.recv() => {
+                        let message = match message {
+                            Ok(message) => message,
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => return,
+                        };
+                        let connection = connection.clone();
+                        tokio::spawn(async move {
+                            let Ok(mut send) = connection.open_uni().await else { return };
+                            if send.write_all(&message).await.is_ok() {
+                                let _ = send.finish();
+                            }
+                        });
+                    }
+                }
             }
         });
     }
+}
+
+/// Sends `message` to every client connected to the endpoint.
+#[rustler::nif]
+fn tell(reached: ResourceArc<Reached>, message: Binary) -> Atom {
+    // With no client connected there's nobody to send to, which is fine.
+    let _ = reached.told.send(message.as_slice().to_vec());
+    atoms::ok()
 }
 
 /// Sends `message` back to whoever asked `ask`. An empty answer only ends the stream.

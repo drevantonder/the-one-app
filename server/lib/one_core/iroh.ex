@@ -9,6 +9,9 @@ defmodule OneCore.Iroh do
   """
   def start(_key_file, _asked), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc "Sends `message` to every client connected to `endpoint`, each on a stream of its own."
+  def tell(_endpoint, _message), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc "Sends `answer` back to whoever asked `ask`."
   def answer(_ask, _answer), do: :erlang.nif_error(:nif_not_loaded)
 end

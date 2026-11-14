@@ -5,19 +5,26 @@ defmodule OneCore.Plugins.Version do
   The VM keeps only two versions of a module, so each version loaded gets module names of its own: its modules
   sit under a name no other version has (`OneCore.Plugins.Load7.Tracker`), by an alias put before each file. A
   version is unloaded by removing every module under that name.
+
+  A version's files that aren't Elixir are its parts that run in a client (`files`, by their paths), and `code` names
+  the whole set, so a client can tell one version's files from the next's.
   """
 
-  @enforce_keys [:under, :plugin, :tools, :guide]
-  defstruct [:under, :plugin, :tools, :guide]
+  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :code, :files]
+  defstruct [:under, :plugin, :tools, :guide, :apps, :code, :files]
+
+  @doc "The name of a set of files: the same files have the same name, on any server."
+  def code(files),
+    do: Base.encode16(:crypto.hash(:sha256, :erlang.term_to_binary(files, [:deterministic])), case: :lower)
 
   @doc "Compiles and loads a plugin's files. Gives the version and the compiler's warnings, or what's wrong."
   def load(files) do
     under = Module.concat(OneCore.Plugins, "Load#{System.unique_integer([:positive])}")
-    sources = for {path, source} <- files, String.ends_with?(path, ".ex"), do: {path, source}
+    {sources, client} = Enum.split_with(files, fn {path, _} -> String.ends_with?(path, ".ex") end)
 
     with {:ok, modules, warnings} <- compile(under, sources),
-         {:ok, version} <- describe(under, modules) do
-      {:ok, version, warnings}
+         {:ok, version} <- describe(under, modules, Map.new(client)) do
+      {:ok, %{version | code: code(files)}, warnings}
     else
       {:error, why} ->
         unload(under)
@@ -100,24 +107,70 @@ defmodule OneCore.Plugins.Version do
   def own_names(text, %__MODULE__{under: under}), do: own_names(text, under)
   def own_names(text, under), do: String.replace(text, inspect(under) <> ".", "")
 
-  defp describe(under, modules) do
+  # A plugin with no Elixir has only parts that run in a client: it provides no tools and names no apps.
+  defp describe(under, modules, client) do
     case Enum.filter(modules, &(OneCore.Plugin in Keyword.get(&1.module_info(:attributes), :behaviour, []))) do
+      [] when modules == [] ->
+        {:ok, version(under, nil, [], nil, [], client)}
+
       [plugin] ->
         tools = plugin.tools()
         guide = if function_exported?(plugin, :guide, 0), do: plugin.guide()
+        apps = if function_exported?(plugin, :apps, 0), do: plugin.apps(), else: []
 
-        if is_list(tools) and Enum.all?(tools, &tool?/1) and (is_nil(guide) or is_binary(guide)) do
-          {:ok, %__MODULE__{under: under, plugin: plugin, tools: tools, guide: guide}}
-        else
-          {:error, "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}, and guide/0 gives text"}
+        cond do
+          not (is_list(tools) and Enum.all?(tools, &tool?/1) and (is_nil(guide) or is_binary(guide))) ->
+            {:error, "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}, and guide/0 gives text"}
+
+          not (is_list(apps) and Enum.all?(apps, &app?(&1, client))) ->
+            {:error, "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page and icon are files here"}
+
+          true ->
+            {:ok, version(under, plugin, tools, guide, apps, client)}
         end
 
       found ->
         {:error, "One module of a plugin says `@behaviour OneCore.Plugin`, and #{length(found)} do"}
     end
   rescue
-    error -> {:error, "tools/0 or guide/0 raised: " <> Exception.message(error)}
+    error -> {:error, "tools/0, guide/0 or apps/0 raised: " <> Exception.message(error)}
   end
+
+  # An app's icon goes to clients with its name, as a `data:` address, so a home screen asks for nothing more.
+  defp version(under, plugin, tools, guide, apps, client) do
+    apps =
+      for %{name: name, page: page, icon: icon} <- apps do
+        %{name: name, page: page, icon: "data:#{kind(icon)};base64,#{Base.encode64(client[icon])}"}
+      end
+
+    %__MODULE__{
+      under: under,
+      plugin: plugin,
+      tools: tools,
+      guide: guide,
+      apps: apps,
+      code: nil,
+      files: Enum.sort(Map.keys(client))
+    }
+  end
+
+  @doc "What kind of file `path` is, as a web view is told it."
+  def kind(path) do
+    case Path.extname(path) do
+      # What MCP Apps calls a page of an app.
+      ".html" -> "text/html;profile=mcp-app"
+      ".js" -> "text/javascript"
+      ".css" -> "text/css"
+      ".svg" -> "image/svg+xml"
+      ".json" -> "application/json"
+      _ -> "text/plain"
+    end
+  end
+
+  defp app?(%{name: name, page: page, icon: icon}, client) when is_binary(name),
+    do: Path.extname(page) == ".html" and is_map_key(client, page) and is_map_key(client, icon)
+
+  defp app?(_, _), do: false
 
   defp tool?(%{name: name, description: description, inputs: %{}}) when is_binary(name) and is_binary(description),
     do: name =~ ~r/^[a-z][a-z0-9_]*$/

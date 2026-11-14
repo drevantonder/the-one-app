@@ -67,8 +67,13 @@ defmodule OneCore.Plugins do
     end
   end
 
-  @doc "The plugins running, by name: each one's `Version`, which holds its tools and its guide."
+  @doc "The plugins running, by name: each one's `Version`, which holds its tools, its guide and its apps."
   def running, do: GenServer.call(__MODULE__, :running)
+
+  @doc "One file of the set of a plugin's files named `code`, which needn't be the set running now."
+  def file(name, code, path) do
+    with {:ok, text, _tag} <- Artifact.read(artifact(name), "code/#{code}/#{path}"), do: {:ok, text}
+  end
 
   defp check(name, files) do
     cond do
@@ -92,10 +97,7 @@ defmodule OneCore.Plugins do
   defp keep(name, files) do
     plugin = artifact(name)
 
-    code =
-      if files == %{},
-        do: "",
-        else: Base.encode16(:crypto.hash(:sha256, :erlang.term_to_binary(files, [:deterministic])), case: :lower)
+    code = if files == %{}, do: "", else: Version.code(files)
 
     for {path, text} <- files, do: Artifact.write(plugin, "code/#{code}/#{path}", text)
     number = length(Artifact.list(plugin, "versions/")) + 1

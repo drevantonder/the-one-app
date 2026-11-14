@@ -1,7 +1,7 @@
 defmodule OneCore.Server do
   @moduledoc """
   A server on its machine: it holds its key, in the folder that is its `:home` setting, and answers what clients
-  ask, each message apart from the others.
+  ask, each message apart from the others. It can also tell the clients connected to it something.
   """
   use GenServer
   alias OneCore.{Iroh, Mcp}
@@ -10,6 +10,9 @@ defmodule OneCore.Server do
 
   @doc "Where clients reach this server: its key and its addresses, as the JSON a client is told them in."
   def address, do: GenServer.call(__MODULE__, :address)
+
+  @doc "Tells every connected client `notification`, in MCP's JSON-RPC. With no server started, nobody is told."
+  def tell(notification), do: GenServer.cast(__MODULE__, {:tell, JSON.encode!(notification)})
 
   @impl true
   def init(nil) do
@@ -20,6 +23,12 @@ defmodule OneCore.Server do
 
   @impl true
   def handle_call(:address, _from, server), do: {:reply, server.address, server}
+
+  @impl true
+  def handle_cast({:tell, notification}, server) do
+    Iroh.tell(server.endpoint, notification)
+    {:noreply, server}
+  end
 
   @impl true
   def handle_info({:ask, ask, message}, server) do

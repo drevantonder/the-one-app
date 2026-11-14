@@ -2,9 +2,14 @@ defmodule OneCore.Mcp do
   @moduledoc """
   Answers what a client asks, in MCP's JSON-RPC: a message in, and its answer out. So a server is an MCP server to
   whatever reaches it, and the tools it lists are One Core's own two and every running plugin's.
+
+  The parts of a plugin that run in a client are MCP resources: `ui://<plugin>/<code>/<path>`, where `code` names
+  the set of files a version runs, so a file at an address never changes. A plugin's app is one of them, as an MCP
+  App is.
   """
   require Logger
   alias OneCore.{Plugin, Plugins}
+  alias OneCore.Plugins.Version
 
   # Tools are all a server speaks of MCP, and they are the same in each of these.
   @versions ~w(2025-11-25 2025-06-18 2025-03-26 2024-11-05)
@@ -67,7 +72,7 @@ defmodule OneCore.Mcp do
     {:ok,
      %{
        protocolVersion: if(asked in @versions, do: asked, else: hd(@versions)),
-       capabilities: %{tools: %{}},
+       capabilities: %{tools: %{}, resources: %{}},
        serverInfo: %{name: "one", version: to_string(Application.spec(:one_core, :vsn))},
        instructions: instructions()
      }}
@@ -80,7 +85,12 @@ defmodule OneCore.Mcp do
 
     plugins =
       for {plugin, version} <- Enum.sort(running), tool <- version.tools do
-        %{name: "#{plugin}_#{tool.name}", description: tool.description, inputSchema: tool.inputs}
+        %{
+          name: "#{plugin}_#{tool.name}",
+          description: tool.description,
+          inputSchema: tool.inputs,
+          annotations: %{readOnlyHint: tool[:read_only] == true}
+        }
       end
 
     guides = for {plugin, %{guide: guide}} when guide != nil <- running, into: %{}, do: {plugin, guide}
@@ -89,8 +99,35 @@ defmodule OneCore.Mcp do
 
   defp result("tools/call", %{"name" => name} = params) do
     case call(name, Map.get(params, "arguments", %{})) do
-      {:ok, text} -> {:ok, %{content: [%{type: "text", text: text}]}}
-      {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
+      {:ok, text} ->
+        if not reads?(name), do: OneCore.Server.tell(%{jsonrpc: "2.0", method: "notifications/one/changed"})
+        {:ok, %{content: [%{type: "text", text: text}]}}
+
+      {:error, why} ->
+        {:ok, %{content: [%{type: "text", text: why}], isError: true}}
+    end
+  end
+
+  defp result("resources/list", _) do
+    resources =
+      for {plugin, version} <- Enum.sort(Plugins.running()), path <- version.files do
+        resource = %{uri: "ui://#{plugin}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
+
+        case Enum.find(version.apps, &(&1.page == path)) do
+          nil -> %{resource | mimeType: String.replace_suffix(resource.mimeType, ";profile=mcp-app", "")}
+          app -> Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}]})
+        end
+      end
+
+    {:ok, %{resources: resources}}
+  end
+
+  defp result("resources/read", %{"uri" => uri}) do
+    with ["ui:", "", plugin, code, path] <- String.split(uri, "/", parts: 5),
+         {:ok, text} <- Plugins.file(plugin, code, path) do
+      {:ok, %{contents: [%{uri: uri, mimeType: Version.kind(path), text: text}]}}
+    else
+      _ -> {:error, -32002, "There's nothing at #{uri}"}
     end
   end
 
@@ -115,6 +152,16 @@ defmodule OneCore.Mcp do
     else
       [_] -> {:error, "#{name} takes other inputs, or isn't a tool. tools/list says what each takes."}
       {:error, why} -> {:error, why}
+    end
+  end
+
+  # Whether calling a tool only reads. One Core's own two don't.
+  defp reads?(name) do
+    with [plugin, tool] <- String.split(name, "_", parts: 2),
+         %{^plugin => version} <- Plugins.running() do
+      Enum.any?(version.tools, &(&1.name == tool and &1[:read_only] == true))
+    else
+      _ -> false
     end
   end
 

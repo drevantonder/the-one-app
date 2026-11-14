@@ -58,8 +58,6 @@
   repos, the Vault and notifications.
 - Plugins are written against one published interface for everything One Core gives them. In a client they reach
   nothing else. On a server they're also free to use the machine: its files, its programs and its network.
-- A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts meant
-  for it.
 - A plugin's parts needn't be written in the same language. Its server part and its client part already aren't.
 - A plugin's code runs on servers and in clients, and nowhere else.
 
