@@ -92,7 +92,6 @@
 - A client changes an artifact only by calling a tool, which goes straight to a server. Whatever an app can do, an agent
   can.
 - A plugin is free to do more than have its clients told that something changed.
-- MCP can also be hosted where an assistant running somewhere else reaches it, signing in with OAuth.
 - A client has little of its own: it keeps what servers answered, keeps secrets safe on its device, and runs and draws
   what plugins give it.
 - A plugin's app is web content, as an MCP App is. Every client draws it in the device's web view, so an app is written
@@ -101,8 +100,6 @@
 
 ## Signing in
 
-- Signing in is a plugin. It tells One Core who a request is from. With none, a request is from nobody, and nobody
-  gets nothing.
 - Signing in only says who a user is. No key comes from it, so how a network signs in can change.
 - A client that's signed in reaches everything its user may, except encrypted artifacts. Those need something that
   already holds the key to let it in.

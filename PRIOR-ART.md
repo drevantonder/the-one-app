@@ -23,7 +23,6 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   optimistic changes at the screen, kept on disk in SQLite (browsers, Tauri), and a separate package that queues
   changes made offline. A 1.0 release candidate is reported for 29 October 2026, by secondary sources only. Not named in
   the rules.
-- **Better Auth**: a candidate for signing in, not chosen. The old PTC app runs on it.
 - **Conditional writes**: Amazon S3, Cloudflare R2, Tigris, Google Cloud Storage and Azure Blob have them. Backblaze B2,
   Hetzner and DigitalOcean Spaces don't, by celld's own tests.
 
@@ -92,6 +91,11 @@ chose the same: a plugin's code on a server is free, and which servers act for w
 
 - **iroh**: reaching a machine by its key, directly where possible and through a relay otherwise. Today's app links
   its devices this way, with the relay as a Worker. Chosen on 14 November 2026.
+- **Better Auth** (1.7): signing in, with passkeys, and the OAuth provider MCP's authorization asks for, all in one
+  Worker on D1. The old PTC app runs on it. Chosen on 14 November 2026, and run. Its OAuth provider ties an
+  assistant's code to the browser session that said yes, so that browser stays signed in until the code is used.
+  Its support for client ID metadata documents wants a fetch that pins the address a name resolved to, which a
+  Worker's fetch can't, so assistants register themselves, which MCP still allows.
 
 ## Decided earlier, and easy to miss
 

@@ -12,7 +12,9 @@ built on GTK and WebKitGTK (`libwebkit2gtk-4.1-dev`). Then:
 
 That builds what isn't built and starts a whole network on this machine, kept in that folder, with the plugins The
 One App ships with. It says how to open the app and call a tool. `--spare` starts a second server too, which takes
-over when the first stops, and `--address` runs the network's address here as well.
+over when the first stops, and `--address` runs the network's address here as well. That's a network being built,
+where nobody signs in and a command says who it acts as. With `--address --owner <name>` it's one people sign in
+to, with a passkey, and it says where its first owner joins.
 
 Without `ONE_HOME`, a client is kept where the system keeps an app's data. Where there's no desktop, as under
 `xvfb-run`, start the app inside `dbus-run-session`: GTK otherwise waits half a minute for a desktop that isn't
@@ -22,28 +24,31 @@ there.
 `server/test/takeover.sh` stops servers in the middle of writes, `server/test/services.sh` runs services on one of
 two servers, `server/test/who.sh` shows who may do what as several users, each with their own plugins and servers,
 and a scheduled job across a takeover, on a folder or with `--address` through the signer,
-`address/proof/proof.sh` runs a whole address with nothing deployed, and `client/shell/test/isolation.sh` has an
-app try everything it mustn't reach.
+`address/proof/proof.sh` runs a whole address with nothing deployed, `address/proof/sign-in.sh` has people sign in
+with passkeys in real browsers and let in devices and an assistant, and `client/shell/test/isolation.sh` has an app
+try everything it mustn't reach.
 
 To put a network's address on Cloudflare, make an R2 bucket and an S3 API token for it, and write the signer's
 secrets to `address/signer/secrets`, a line each: `BUCKET`, the bucket's S3 address with its name on the end
 (`https://<account>.r2.cloudflarestorage.com/<bucket>`), `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, and `FIRST_SERVER`,
 which you make up (`openssl rand -hex 16`). Then:
 
-    cd address && bun install && bun run deploy
-    cd ../server && mix network /tmp/one-network --address https://<where the gateway was deployed> --first <FIRST_SERVER>
+    cd ui && bun install && bun build.js
+    cd ../address && bun install && bun run deploy
+    cd ../server && mix network /tmp/one-network --address https://<where the gateway was deployed> --first <FIRST_SERVER> --owner <name>
 
 The network's first server shows `FIRST_SERVER` that once, and nobody without it can become the first. It opens
-nothing after.
+nothing after. `--owner` names the network's first owner, and the server says where they join: a link they open to
+make their passkey.
 
 The same app builds for Android with Tauri's CLI (`cargo install tauri-cli`), an Android SDK and its NDK:
 
     cd client/shell
     ANDROID_HOME=~/Android/Sdk NDK_HOME=~/Android/Sdk/ndk/<version> cargo tauri android build --debug --apk
 
-Its project is `client/shell/gen/android`. A phone's client is kept in the app's own folder, and until a client
-can join a network from its screen, it's told its network by a `network` file put there, as `mix network` writes
-one for a network with an address.
+Its project is `client/shell/gen/android`. A phone's client is kept in the app's own folder, and is told its
+network's address by a `network` file put there (`{"address": "https://..."}`), as `mix network` writes one for a
+network with an address. It starts on that network's sign-in page.
 
 - `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
@@ -64,7 +69,7 @@ one for a network with an address.
 - `PRIOR-ART.md`: what exists already, what was set aside and why, and decisions that are easy to miss. Read it
   before designing anything.
 
-Not designed yet: how a client's offline writes reach a server, and what signs users in.
+Not designed yet: how a client's offline writes reach a server.
 
 The glossary and the rules name no technology on purpose, to avoid overfitting or getting distracted. What's chosen is
 in `STACK.md`, and what else exists is in `PRIOR-ART.md`.
