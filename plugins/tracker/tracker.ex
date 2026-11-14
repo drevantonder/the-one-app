@@ -13,6 +13,9 @@ defmodule Tracker do
   end
 
   @impl true
+  def apps, do: [%{name: "Tracker", page: "app.html", icon: "icon.svg"}]
+
+  @impl true
   def tools do
     [
       %{
@@ -30,6 +33,7 @@ defmodule Tracker do
       },
       %{
         name: "list",
+        read_only: true,
         description: "Lists the trackers with their totals, or one tracker's entries",
         inputs: %{
           type: "object",

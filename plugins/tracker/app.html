@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Tracker</title>
+  <link rel="stylesheet" href="../ui/ui.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <ui-screen heading="Tracker" back id="screen">
+    <ui-button slot="action" id="add"><ui-icon name="plus"></ui-icon>Add</ui-button>
+    <ui-skeleton id="loading"></ui-skeleton>
+    <ui-problem id="problem" heading="Couldn't load this" hidden>
+      <ui-button slot="action" variant="outline" id="retry">Try again</ui-button>
+    </ui-problem>
+    <ui-empty id="empty" hidden>Nothing tracked yet.</ui-empty>
+    <ui-list id="list"></ui-list>
+  </ui-screen>
+
+  <ui-sheet id="sheet" heading="Add entry">
+    <form id="form">
+      <ui-input label="Tracker" name="tracker" hint="Such as water, push-ups or hours slept" required></ui-input>
+      <ui-number label="Amount" name="amount" required></ui-number>
+      <ui-input label="Note" name="note"></ui-input>
+      <ui-problem id="refused" heading="Couldn't add it" hidden></ui-problem>
+      <ui-button type="submit" id="save">Add</ui-button>
+    </form>
+  </ui-sheet>
+</body>
+</html>
