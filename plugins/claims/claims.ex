@@ -2,9 +2,8 @@ defmodule Claims do
   @moduledoc """
   A workplace's expense claims, kept in the plugin's database, with each receipt a blob beside it.
 
-  Until a network signs its users in, everyone is the same one user. `who/1` and `approver!/1` are the two places
-  that changes: whose expenses and claims a call is about, and whether its user may approve. Every row already
-  says whose it is, so a workplace's claims can share one database.
+  A workplace's claims share one database, the plugin's own, and every row says whose it is: whoever the call that
+  wrote it ran for. Who may approve is a relation tuple: an `editor` of that artifact.
   """
   @behaviour OneCore.Plugin
 
@@ -54,6 +53,8 @@ defmodule Claims do
     - An amount is a number in #{@currency}: 12.5 is $12.50. A date is written 2026-11-14.
     - Sending a claim, approving one, sending one back and saying one is paid are a person's decisions. Do them
       when asked to, and say what you did.
+    - An approver is an editor of Claims' own artifact, which whoever owns it says with `relations share`.
+      Being refused names the artifact. Everyone else sees only their own expenses and claims.
     """
   end
 
@@ -155,7 +156,7 @@ defmodule Claims do
       %{
         name: "waiting",
         description:
-          "Lists everyone's claims that wait on an approver: sent, to approve or send back, and approved, to pay",
+          "Lists the claims that wait on you as an approver: sent, to approve or send back, and approved, to pay",
         read_only: true,
         inputs: of.(%{}, [])
       },
@@ -173,13 +174,18 @@ defmodule Claims do
     ]
   end
 
-  # Whose expenses and claims a call is about: whoever it runs for, who is also whoever asks, while a network has
-  # one user.
+  # Whose expenses and claims a call is about: whoever it runs for.
   defp who(call), do: call.for
 
-  # Raises unless a call's user may approve, send back and pay. Anyone may for now: this is where a relation tuple
-  # is asked for.
-  defp approver!(_call), do: :ok
+  # Whether a call's user may approve, send back and pay: an editor of the workplace's claims, which are this
+  # plugin's own artifact. With no plugin deciding who reaches what, everyone is.
+  defp approver?(call), do: OneCore.Call.reaches?(call, OneCore.Artifact.name(call.own), "editor")
+
+  defp approver!(call) do
+    if not approver?(call) do
+      raise "Only an approver does that: an editor of #{OneCore.Artifact.name(call.own)}, which #{who(call)} isn't."
+    end
+  end
 
   @impl true
   def call("record", %{"amount" => amount} = inputs, call) do
@@ -259,7 +265,9 @@ defmodule Claims do
   end
 
   def call("receipt", %{"receipt" => id}, call) do
-    case transaction(call, &query(&1, "select blob, type from receipts where id = ?", [id])) do
+    mine = "select blob, type from receipts where id = ? and expense in (select id from expenses where who = ? or ?)"
+
+    case transaction(call, &query(&1, mine, [id, who(call), approver?(call)])) do
       [%{"blob" => blob, "type" => type}] ->
         {:ok, file, _tag} = OneCore.Artifact.read(call.own, blob)
         {:blob, type, file}
@@ -342,14 +350,15 @@ defmodule Claims do
     transaction(call, &claims(&1, "who = ?", [who(call)]))
   end
 
-  # A claim is shown to whoever made it and to an approver, who are the same one user for now.
+  # A claim is shown to whoever made it and to an approver.
   def call("show", %{"claim" => id}, call) do
-    transaction(call, &claim(&1, id))
+    whose = if approver?(call), do: [], else: [who(call)]
+    transaction(call, &claim(&1, id, whose))
   end
 
+  # Nothing waits on someone who isn't an approver.
   def call("waiting", _inputs, call) do
-    approver!(call)
-    transaction(call, &claims(&1, "status in ('sent', 'approved')", []))
+    if approver?(call), do: transaction(call, &claims(&1, "status in ('sent', 'approved')", [])), else: []
   end
 
   def call("approve", %{"claim" => id}, call) do
@@ -440,8 +449,11 @@ defmodule Claims do
     end
   end
 
-  defp claim(db, id) do
-    case claims(db, "id = ?", [id]) do
+  # A claim with its expenses: the one with this id, or only if it's `whose`.
+  defp claim(db, id, whose \\ []) do
+    which = if whose == [], do: "id = ?", else: "id = ? and who = ?"
+
+    case claims(db, which, [id | whose]) do
       [claim] -> Map.put(claim, "expenses", expenses(db, "claim = ?", [id]))
       [] -> raise "There's no claim #{id}."
     end
