@@ -12,9 +12,6 @@ defmodule OneCore.Server do
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-  @doc "Where clients reach this server: its key and its addresses, as the JSON a client is told them in."
-  def address, do: GenServer.call(__MODULE__, :address)
-
   @doc "Tells every connected client that something changed, so that it asks again. With no server started, nobody is told."
   def changed do
     GenServer.cast(__MODULE__, {:tell, JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/changed"})})
@@ -111,11 +108,8 @@ defmodule OneCore.Server do
     key = JSON.decode!(address)["id"]
     :persistent_term.put(__MODULE__, {key, endpoint})
     Servers.started(key, address)
-    {:ok, %{endpoint: endpoint, address: address}}
+    {:ok, %{endpoint: endpoint}}
   end
-
-  @impl true
-  def handle_call(:address, _from, server), do: {:reply, server.address, server}
 
   @impl true
   def handle_cast({:tell, notification}, server) do
