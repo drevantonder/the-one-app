@@ -121,8 +121,6 @@
   what plugins give it.
 - A plugin's app is web content, as an MCP App is. Every client draws it in the device's web view, so an app is written
   once.
-- A client holds the keys of the servers acting for a user or group, and asks the first that answers. On the same local
-  network that goes straight to the server, and often between different local networks too.
 - The web client is static files, served at the network's address.
 
 ## Signing in
