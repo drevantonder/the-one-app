@@ -1,68 +1,52 @@
-// Builds what a server hands to clients, into dist: ui.css (the theme a page starts with, before any script has
-// run), ui.js (every element, and all a page needs to draw), and Zag's two parts, which ui.js loads by itself:
-// one once the page has drawn, one only on a device with a mouse (src/zag.js).
-import { rmSync } from "node:fs"
-import { basename } from "node:path"
+// Builds the kit into dist, which is the plugin `ui`: what a server hands to clients. ui.css is the one stylesheet,
+// ui.js every component, solid.js and web.js are Solid, which the kit and every app share (app.js leaves them out
+// of an app), and SKILL.md is the kit's skill.
+import { readFileSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
+import solid from "@solidjs/vite-plugin"
+import { build } from "vite"
 
 const here = (path) => new URL(path, import.meta.url).pathname
-const minified = (css) => transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code.toString()
-const text = (path) => Bun.file(here(path)).text()
-
-async function build(options) {
-  const built = await Bun.build({ outdir: here("dist"), target: "browser", minify: true, ...options })
-  if (!built.success) throw new AggregateError(built.logs, "The kit didn't build")
-  return built.outputs
-}
-
-/// The kit's skill: every `///` comment that starts with an example, from index.js and then from each file in the
-/// order a page loads them, a file's own imports first.
-async function skill(file = "index.js", seen = new Set()) {
-  if (seen.has(file)) return []
-  seen.add(file)
-  const source = await text(`src/${file}`)
-  const said = [...source.matchAll(/(?:^\/\/\/.*\n)+/gm)].map(([comment]) => comment.replace(/^\/\/\/ ?/gm, "")).filter((comment) => comment.startsWith("`"))
-  const imported = []
-  for (const [, other] of source.matchAll(/from "\.\/(.+?\.js)"|^import "\.\/(.+?\.js)"/gm).map(([, from, bare]) => [, from ?? bare])) imported.push(...(await skill(other, seen)))
-  return file === "index.js" ? [...said, ...imported] : [...imported, ...said]
-}
-
-rmSync(here("dist"), { recursive: true, force: true })
-// The kit is a plugin with no server part: its files, and its skill, which an agent reads before it writes an app.
-await Bun.write(here("dist/SKILL.md"), `---
-name: ui
-description: Read before writing or changing an app's page, which is written with the kit's elements.
----
-
-The kit an app's UI is written with: custom elements, plain HTML and ES modules, with no build step.
-
-${(await skill()).join("\n")}`)
-await Bun.write(here("dist/ui.css"), minified((await text("src/tokens.css")) + (await text("src/page.css"))))
-
-// Zag's parts, and what the two share, under names that change when they do: a client keeps them for good.
-const parts = await build({
-  entrypoints: [here("src/zag-late.js"), here("src/zag-mouse.js")],
-  naming: { entry: "ui-[name]-[hash].js", chunk: "ui-zag-[hash].js" },
-  splitting: true,
-})
-const named = Object.fromEntries(parts.filter((part) => part.kind === "entry-point").map((part) => [basename(part.path).slice(3, -12), basename(part.path)]))
+const text = (path) => readFileSync(here(path), "utf8")
 
 await build({
-  entrypoints: [here("src/index.js")],
-  naming: "ui.js",
-  // What ui.js is built from picks its production build by this (Lit's, without its development warnings).
-  define: { "process.env.NODE_ENV": '"production"' },
-  loader: { ".svg": "text" },
-  plugins: [{
-    name: "kit",
-    setup(build) {
-      // An element's look is a CSS file beside it, imported as its text.
-      build.onLoad({ filter: /\.css$/ }, async ({ path }) => ({
-        loader: "js",
-        contents: `export default ${JSON.stringify(minified(await Bun.file(path).text()))}`,
-      }))
-      // Zag's parts stay files of their own, loaded when they're wanted.
-      build.onResolve({ filter: /\/zag-(late|mouse)\.js$/ }, ({ path }) => ({ path: `./${named[basename(path, ".js")]}`, external: true }))
+  configFile: false,
+  root: here("."),
+  // Its files find each other wherever the client serves them.
+  base: "./",
+  logLevel: "warn",
+  plugins: [solid()],
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    sourcemap: true,
+    rolldownOptions: {
+      input: { ui: here("src/index.js"), solid: "solid-js", web: "@solidjs/web" },
+      // What an app imports from each is what each exports, whether or not the kit uses it.
+      preserveEntrySignatures: "strict",
+      output: { entryFileNames: "[name].js", chunkFileNames: "ui-[hash].js" },
     },
-  }],
+  },
 })
+
+const css = text("src/tokens.css") + text("src/ui.css")
+writeFileSync(here("dist/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
+
+/// The kit's skill: every `///` comment that starts with an example, from index.js and then from each file it
+/// exports from, in its order.
+function skill() {
+  const index = text("src/index.js")
+  const files = ["index.js", ...new Set([...index.matchAll(/from "\.\/(.+?)"/g)].map(([, file]) => file))]
+  return files.flatMap((file) =>
+    [...text(`src/${file}`).matchAll(/(?:^\/\/\/.*\n)+/gm)]
+      .map(([comment]) => comment.replace(/^\/\/\/ ?/gm, ""))
+      .filter((comment) => file === "index.js" || comment.startsWith("`")),
+  )
+}
+
+writeFileSync(here("dist/SKILL.md"), `---
+name: ui
+description: Read before writing or changing an app's screens, which are written in Solid 2.0 with the kit's components.
+---
+
+${skill().join("\n")}`)

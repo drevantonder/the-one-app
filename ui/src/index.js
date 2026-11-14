@@ -1,34 +1,28 @@
-// The kit: every element, defined as it's imported, and the few things a page asks for in passing.
+// The kit: every component an app's UI is written with, and the few things an app asks for in passing.
 //
-// A `///` comment that starts with an example is the kit's skill: build.js gathers them, in the order a page loads
-// them, as the skill an agent reads before it writes an app with the kit.
+// A `///` comment that starts with an example is the kit's skill: build.js gathers them, in the order this file
+// names the files, as the skill an agent reads before it writes an app with the kit.
 
-/// `<link rel="stylesheet" href="../ui/ui.css">` and `<script type="module" src="../ui/ui.js"></script>` in an
-/// app's page give it the kit: the theme, light and dark, as the custom properties ui.css sets (`--foreground`,
-/// `--muted-foreground`, `--border`, `--warning`, `--radius`, `--gap`), and the elements below, which look the
-/// same on every client. The app's own module imports what it calls from the same file:
-/// `import { call, changed, toast } from "../ui/ui.js"`. What an element's example shows as an attribute is a
-/// property too (`row.heading = "Coffee"`), `hidden` hides any of them, and the page lays out what's its own
-/// with its own CSS. A page shows pictures only from `data:` addresses and its plugin's own files.
-import "./icon.js"
-import "./spinner.js"
-import "./button.js"
-import "./input.js"
-import "./number.js"
-import "./checkbox.js"
-import "./radio.js"
-import "./file.js"
-import "./select.js"
-import "./date-picker.js"
-import "./list.js"
-import "./screen.js"
-import "./split.js"
-import "./menu.js"
-import "./tabs.js"
-import "./states.js"
-
+/// An app is written in Solid 2.0 (its skills, `solid-2.0` and `solid-2.0-cheatsheet`, say how), and imports what
+/// it draws with from the kit: `import { Screen, List, Row, call } from "ui"`. The kit looks the same in every
+/// app, light and dark, under a finger and with a mouse, and right to left on `<html dir="rtl">`; an app lays out
+/// what's its own with its own CSS, from the kit's custom properties (`--foreground`, `--muted-foreground`,
+/// `--border`, `--warning`, `--radius`, `--gap`). A page shows pictures only from `data:` addresses and its
+/// plugin's own files. Menu, Select, DatePicker, NumberInput and Tabs are Ark UI's, with Ark's parts and props
+/// (ark-ui.com/llms-solid.txt); the rest are the kit's own.
 export { call, changed, leave, upload } from "./bridge.js"
-export { words } from "./element.js"
-export { go } from "./screen.js"
-export { confirm } from "./sheet.js"
-export { toast } from "./toast.js"
+export { words } from "./kit.js"
+export { Button, Icon, Spinner } from "./button.jsx"
+export { Checkbox, Field, File, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.jsx"
+export { NumberInput } from "./number-input.jsx"
+export { createListCollection } from "./collection.js"
+export { Select } from "./select.jsx"
+export { DatePicker } from "./date-picker.jsx"
+export { parseDate } from "./day.js"
+export { List, Row } from "./list.jsx"
+export { go, Screen, Section, Split } from "./screen.jsx"
+export { Menu } from "./menu.jsx"
+export { Tabs } from "./tabs.jsx"
+export { Empty, Problem, Skeleton } from "./states.jsx"
+export { confirm, Sheet } from "./sheet.jsx"
+export { toast } from "./toast.jsx"

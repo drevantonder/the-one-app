@@ -51,10 +51,11 @@ export function covers(shut) {
   }
 }
 
-/// `await call("tracker_add", { tracker: "water" })`: calls a tool and gives its answer, which is text. A file a
+/// `await call("notes_add", { text: "Milk" })`: calls a tool and gives its answer, which is text. A file a
 /// tool answers with is its address, which an `<img>` takes as its `src`: a `data:` one, or for a large file, one
 /// the client keeps the file at. A tool that refuses throws what it said. The client keeps the answer of a tool
-/// that only reads, and answers with it at once.
+/// that only reads, and answers with it at once. A screen that shows what a tool answers reads it in a memo:
+/// `const notes = createMemo(() => call("notes_list").then(JSON.parse))`, under `<Loading>`.
 export async function call(tool, inputs = {}) {
   await greet()
   const { content, isError } = await ask("tools/call", { name: tool, arguments: inputs })
@@ -63,14 +64,18 @@ export async function call(tool, inputs = {}) {
   return text
 }
 
-/// `await call("claims_attach", { expense: 4, name: file.name, type: file.type, upload: await upload(file) })`:
+/// `await call("notes_attach", { note: 4, name: file.name, type: file.type, upload: await upload(file) })`:
 /// sends a file that's too large to go in a call straight to where the network keeps it, for a tool of this app's
 /// plugin. → the name that tool takes for it, in the input its plugin says is an upload.
 export const upload = (file) => greet().then(() => ask("one/upload", { file })).then(({ upload }) => upload)
 
-/// `changed(show)`: runs `show` whenever what this page was answered has changed, to ask again and draw it.
-export const changed = (listener) => void listeners.add(listener)
+/// `changed(() => refresh(notes))`: runs what it's given whenever what this page was answered has changed, to ask
+/// again and draw it. → the function that stops it.
+export function changed(listener) {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
 
-/// `screen.addEventListener("back", (event) => (event.preventDefault(), leave()))`: tells the client the user went
-/// back out of the app, from its first screen.
+/// `<Screen heading="Notes" back onBack={leave}>`: tells the client the user went back out of the app, from its
+/// first screen.
 export const leave = () => greet().then(() => tell("ui/notifications/request-teardown"))
