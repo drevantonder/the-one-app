@@ -5,25 +5,33 @@ tag `before-redesign` and on the branch `v1`.
 
 ## Running it
 
-`mise install` installs Erlang and Elixir, and `rustup` installs Rust. Then, with mise active in your shell:
+`mise install` installs Erlang, Elixir and Bun, and `rustup` installs Rust. On Linux the app is built on GTK and
+WebKitGTK (`libwebkit2gtk-4.1-dev`). Then, with mise active in your shell:
 
     cargo build --release
+    (cd ui && bun install && bun build.js)
     cd server && mix deps.get && mix network /tmp/one-network
 
 That starts a whole network on this machine in a folder: its bucket, its one server and a client's home. Starting it
 again in the same folder carries on with what's there. In another terminal, use its client:
 
     export ONE_HOME=/tmp/one-network/client
+    target/release/one deploy --name ui --files-from ui/dist
     target/release/one deploy --name tracker --files-from plugins/tracker
     target/release/one tracker add --tracker water --amount 2
     target/release/one tracker list
+    target/release/one --help
     target/release/one
 
-The last lists every tool, each of which is a command, and `target/release/one mcp` is the same tools as MCP over
-stdio. Deploying a plugin again updates it while the server runs. `cd server && mix test` runs the tests.
+`--help` lists every tool, each of which is a command, and `target/release/one mcp` is the same tools as MCP over
+stdio. The last, asked nothing, is the app: a home screen with the tracker's app on it. Deploying a plugin again
+updates it while the server runs, and its app loads again where it's open. Without `ONE_HOME`, a client is kept where
+the system keeps an app's data. `cd server && mix test` runs the tests.
 
 - `server`: One Core, in Elixir, with its Rust add-on in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
+- `client/shell`: the app, a window on that half, and the one program both are.
+- `ui`: the kit an app's UI is written with.
 - `plugins`: the plugins The One App ships with, each a folder of its own.
 
 ## Reading it

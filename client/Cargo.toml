@@ -5,10 +5,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[[bin]]
-name = "one"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
 dirs = "6"

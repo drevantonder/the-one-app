@@ -1,0 +1,83 @@
+/* The home screen, and the frame an open app is drawn in over it. */
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font: var(--text-base) / 1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+/* The top of a page keeps the gap a phone's own home screen has. */
+#home {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: calc(3.5rem + env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right))
+    calc(1.25rem + env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left));
+}
+#empty {
+  margin: 0;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+/* As many apps across as fit, four on a phone. */
+#apps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr));
+  gap: 1.5rem 0.5rem;
+  max-width: 60rem;
+  margin: 0 auto;
+}
+#apps button {
+  display: grid;
+  justify-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+#apps img {
+  width: 3.75rem;
+  height: 3.75rem;
+  border-radius: 22.5%;
+  transition: scale var(--move-quick) var(--ease-quick);
+}
+#apps button:active img {
+  scale: 0.94;
+}
+#apps button:focus-visible {
+  outline: none;
+}
+#apps button:focus-visible img {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+#apps span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* An app has the whole window but what the device keeps for itself. A frame is told of no safe area, so the page
+   keeps the app clear of it. */
+iframe {
+  position: fixed;
+  top: env(safe-area-inset-top);
+  left: env(safe-area-inset-left);
+  width: calc(100% - env(safe-area-inset-left) - env(safe-area-inset-right));
+  height: calc(100% - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  border: 0;
+  background: var(--background);
+}
+[hidden] {
+  display: none !important;
+}

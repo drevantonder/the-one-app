@@ -1,7 +1,7 @@
 # The Rust packages build as one workspace, so they share one lockfile and one `target` folder.
 [workspace]
 resolver = "3"
-members = ["client", "server/native/one_core_iroh"]
+members = ["client", "client/shell", "server/native/one_core_iroh"]
 
 [workspace.package]
 version = "0.1.0"

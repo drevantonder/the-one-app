@@ -15,8 +15,6 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - **Everything at the network's address is a Cloudflare Worker**: the gateway, the signer, the relay, the web client's
   files and the way in for outsiders. The relay is a Durable Object that sleeps while idle.
 - **Each client is one Tauri shell per platform**, drawing in the device's web view.
-- **A plugin's app is web content, written in JavaScript.**
-- **The Tauri shell is a window on the client's Rust half**, which already is the CLI and MCP.
 
 ## Not chosen yet
 
