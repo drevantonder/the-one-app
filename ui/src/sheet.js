@@ -26,8 +26,9 @@ class Dialog extends Element {
     if (!this.open) return this.dialog.close()
     this.dialog.showModal()
     this.topmost(true)
-    // The keyboard doesn't come up on a phone unless the app asked for it, with `autofocus` on a field.
-    if (!this.querySelector("[autofocus]")) (this.renderRoot.querySelector("[autofocus]") ?? this.dialog).focus()
+    // The keyboard doesn't come up on a phone unless the app asked for it, with `autofocus` on a field. WebKit
+    // doesn't find that field by itself when it's one of the kit's.
+    ;(this.querySelector("[autofocus]") ?? this.renderRoot.querySelector("[autofocus]") ?? this.dialog).focus()
   }
 
   /// A press that both starts and ends on the dialog itself was on what's around it.
