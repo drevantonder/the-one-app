@@ -5,9 +5,10 @@ import { toast } from "../dist/ui.js"
 /// memory. Replace what's inside with the real call, and nothing else here changes.
 const kept = []
 async function call(tool, input) {
+  const at = kept.findIndex((expense) => expense.id === input?.id)
   if (tool === "list") return kept.toSorted((a, b) => b.date.localeCompare(a.date))
-  if (tool === "save") return void kept.splice(kept.findIndex((expense) => expense.id === input.id) >>> 0, 1, input)
-  if (tool === "remove") return void kept.splice(kept.findIndex((expense) => expense.id === input.id), 1)
+  if (tool === "save") return void (at < 0 ? kept.push(input) : (kept[at] = input))
+  if (tool === "remove") return void kept.splice(at, 1)
   throw new Error(`No tool named ${tool}`)
 }
 

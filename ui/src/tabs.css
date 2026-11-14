@@ -31,6 +31,8 @@ button[data-selected] {
 }
 /* What marks the chosen tab, sliding to it. Zag says where. */
 .indicator {
+  --transition-duration: var(--move-settle);
+  --transition-timing-function: var(--ease-settle);
   z-index: -1;
   top: var(--top);
   left: var(--left);
