@@ -23,4 +23,6 @@ defmodule Mix.Tasks.Network do
     Mix.shell().info("A network is running in #{folder}. Its client: ONE_HOME=#{client}")
     System.no_halt(true)
   end
+
+  def run(_), do: Mix.raise("mix network <folder> starts a network in that folder")
 end
