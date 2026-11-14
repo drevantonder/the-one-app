@@ -47,4 +47,5 @@
 - **Relay**: passes traffic between a network's servers and clients when they can't reach each other directly. It
   can't read it.
 - **Scheduled job**: a tool call made by the clock.
-- **Tool guide**: text a plugin provides for agents, on when and how to use its tools.
+- **Skill**: text for agents on when and how to use a plugin's tools, which an agent reads when it needs it. A plugin
+  provides one as a file, and One Core has one of its own, on building plugins.

@@ -15,12 +15,16 @@ defmodule OneCore.Mcp do
   The parts of a plugin that run in a client are MCP resources: `ui://<plugin>/<code>/<path>`, where `code` names
   the set of files a version runs, so a file at an address never changes. A plugin's app is one of them, as an MCP
   App is.
+
+  Skills are served as MCP's Skills Extension says (SEP-2640), in the shapes it gives for the protocol versions a
+  server speaks: `skills/list` lists them, `skills/get` gives one by its address, and each is a resource too,
+  `skill://<name>/SKILL.md`, which `resources/read` reads (`OneCore.Skills`).
   """
   require Logger
-  alias OneCore.{Artifact, Hooks, Plugin, Plugins, Server, Services, Tools, User}
+  alias OneCore.{Artifact, Hooks, Plugins, Server, Services, Skills, Tools, User}
   alias OneCore.Plugins.Version
 
-  # Tools are all a server speaks of MCP, and they are the same in each of these.
+  # What a server speaks of MCP is the same in each of these.
   @versions ~w(2025-11-25 2025-06-18 2025-03-26 2024-11-05)
 
   @doc "The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty."
@@ -102,15 +106,15 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result("initialize", params, _from, {_by, who}, _passed_on) do
+  defp result("initialize", params, _from, {by, _who}, _passed_on) do
     asked = params["protocolVersion"]
 
     {:ok,
      %{
        protocolVersion: if(asked in @versions, do: asked, else: hd(@versions)),
-       capabilities: %{tools: %{}, resources: %{}},
+       capabilities: %{tools: %{}, resources: %{}, extensions: %{"io.modelcontextprotocol/skills" => %{}}},
        serverInfo: %{name: "one", version: to_string(Application.spec(:one_core, :vsn))},
-       instructions: instructions(who)
+       instructions: instructions(holder?(by))
      }}
   end
 
@@ -118,14 +122,7 @@ defmodule OneCore.Mcp do
 
   # A sharing link's holder is told of the tools they may call, and of nothing else that's in the network.
   defp result("tools/list", _params, _from, {by, who}, _passed_on) do
-    holder = by != nil and User.link?(by)
-
-    running =
-      if holder,
-        do: Map.new(Plugins.running(who), fn {name, version} -> {name, %{version | guide: nil}} end),
-        else: Plugins.running(who)
-
-    open = fn tools -> if holder, do: Enum.filter(tools, &(&1[:by_link] == true)), else: tools end
+    open = fn tools -> if holder?(by), do: Enum.filter(tools, &(&1[:by_link] == true)), else: tools end
 
     listed = fn name, tool ->
       %{
@@ -140,16 +137,25 @@ defmodule OneCore.Mcp do
     own = for tool <- open.(Tools.tools()), do: listed.(tool.name, tool)
 
     plugins =
-      for {plugin, version} <- Enum.sort(running),
+      for {plugin, version} <- Enum.sort(Plugins.running(who)),
           tool <- open.(version.tools),
           do: listed.("#{plugin}_#{tool.name}", tool)
 
-    guides = for {plugin, %{guide: guide}} when guide != nil <- running, into: %{}, do: {plugin, guide}
-    {:ok, %{tools: own ++ plugins, _meta: %{guides: guides}}}
+    {:ok, %{tools: own ++ plugins}}
+  end
+
+  defp result("skills/list", _params, _from, asked, _passed_on),
+    do: {:ok, %{resultType: "complete", skills: skills(asked)}}
+
+  defp result("skills/get", params, _from, asked, _passed_on) do
+    case Enum.find(skills(asked), &(&1.uri == params["uri"])) do
+      nil -> {:error, -32602, "There's no skill at #{params["uri"]}. skills/list says what there is."}
+      skill -> {:ok, %{resultType: "complete", skill: skill}}
+    end
   end
 
   defp result("resources/" <> _ = method, params, _from, {by, who}, _passed_on) do
-    if by != nil and User.link?(by),
+    if holder?(by),
       do: {:error, -32002, "A sharing link's holder reads nothing of a network but what a tool gives them"},
       else: resources(method, params, who)
   end
@@ -157,7 +163,12 @@ defmodule OneCore.Mcp do
   defp result(method, _params, _from, _asked, _passed_on),
     do: {:error, -32601, "This server has no method #{method}"}
 
+  # A skill is listed here too, for an agent whose client lists resources and not yet skills.
   defp resources("resources/list", _params, who) do
+    skills =
+      for %{uri: uri, frontmatter: %{"name" => name, "description" => description}} <- Skills.list(who),
+          do: %{uri: uri, name: name, description: description, mimeType: "text/markdown"}
+
     resources =
       for {plugin, version} <- Enum.sort(Plugins.running(who)), path <- version.files do
         resource = %{uri: "ui://#{plugin}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
@@ -168,7 +179,14 @@ defmodule OneCore.Mcp do
         end
       end
 
-    {:ok, %{resources: resources}}
+    {:ok, %{resources: skills ++ resources}}
+  end
+
+  defp resources("resources/read", %{"uri" => "skill://" <> _ = uri}, who) do
+    case Skills.text(who, uri) do
+      {:ok, text} -> {:ok, %{contents: [%{uri: uri, mimeType: "text/markdown", text: text}]}}
+      :absent -> {:error, -32602, "There's no skill at #{uri}. skills/list says what there is."}
+    end
   end
 
   defp resources("resources/read", %{"uri" => uri}, who) do
@@ -244,16 +262,26 @@ defmodule OneCore.Mcp do
     end
   end
 
-  # What an agent is told when it connects: each plugin's guide, and how to make a plugin.
-  defp instructions(who) do
-    guides =
-      for {plugin, %{guide: guide}} when guide != nil <- Enum.sort(Plugins.running(who)),
-          do: "# #{plugin}\n\n#{String.trim(guide)}"
+  defp holder?(by), do: by != nil and User.link?(by)
 
-    Enum.join(
-      ["This is a One App network. Its tools are its plugins': <plugin>_<tool>." | guides] ++
-        ["# Making a plugin\n\n" <> String.trim(Plugin.guide())],
-      "\n\n"
-    )
+  # A sharing link's holder sees no skill.
+  defp skills({by, who}), do: if(holder?(by), do: [], else: Skills.list(who))
+
+  # What an agent is told when it connects. Skills say the rest, so it's pointed at them: not every client lists
+  # skills yet, and any reads one that it has the address of.
+  defp instructions(holder) do
+    network = """
+    This is a One App network: what one user, family or workplace keeps and makes, which you use as whoever you act \
+    for. Its tools are its plugins', each named <plugin>_<tool>, and One Core's own, which add and remove plugins, \
+    servers and services.\
+    """
+
+    skills = """
+    A plugin's skill says when and how to use its tools, and the skill building-plugins how to make a plugin. \
+    skills/list and resources/list list them, and resources/read reads one: skill://<plugin>/SKILL.md, and \
+    skill://building-plugins/SKILL.md.\
+    """
+
+    if holder, do: network, else: network <> "\n" <> skills
   end
 end

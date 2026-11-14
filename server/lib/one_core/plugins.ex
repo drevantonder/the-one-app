@@ -52,9 +52,10 @@ defmodule OneCore.Plugins do
   warnings.
   """
   def deploy(owner, name, files) do
+    artifact = plugin(owner, name) || "#{owner}/plugins/#{name}"
+
     with :ok <- check(name, files),
-         {:ok, version, warnings} <- Version.load(files) do
-      artifact = plugin(owner, name) || "#{owner}/plugins/#{name}"
+         {:ok, version, warnings} <- Version.load(Path.basename(artifact), files) do
       version = %{version | artifact: artifact}
 
       with :ok <- bring(owner, name, version.uses),
@@ -438,7 +439,7 @@ defmodule OneCore.Plugins do
   @doc "Lets go of the versions that were held, which are unloaded once nothing runs or holds them."
   def release(held), do: GenServer.call(__MODULE__, {:end, held})
 
-  @doc "The plugins something that runs for `who` finds, by name: each one's `Version`, which holds its tools, its guide and its apps."
+  @doc "The plugins something that runs for `who` finds, by name: each one's `Version`, which holds its tools, its skill and its apps."
   def running(who), do: versions(chain(who))
 
   # The plugins added for `owners`, by name, the first's found first. One this server hasn't looked at is first.
@@ -675,7 +676,7 @@ defmodule OneCore.Plugins do
       end)
       |> Map.new()
 
-    case Version.load(files) do
+    case Version.load(Path.basename(artifact), files) do
       {:ok, version, _warnings} ->
         {:ok, %{version | artifact: artifact}}
 

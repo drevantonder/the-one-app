@@ -1,5 +1,5 @@
 defmodule OneCore.Plugin do
-  @guide """
+  @text """
   A plugin is a folder of Elixir files, and nothing is needed to write one but a text editor. Deploying it (the
   `deploy` tool) hands the server those files: it compiles them, says what's wrong if they don't compile, and
   otherwise runs them at once, with no restart. The plugin is whoever's deployed it, and is added for them: a user, or
@@ -28,9 +28,6 @@ defmodule OneCore.Plugin do
         end
 
         @impl true
-        def guide, do: "Use greet when someone arrives."
-
-        @impl true
         def call("greet", %{"name" => name}, %OneCore.Call{own: own}) do
           OneCore.Artifact.write(own, "greeted/" <> name, "")
           "Hello, \#{name}! That's \#{length(OneCore.Artifact.list(own, "greeted/"))} greeted."
@@ -54,7 +51,18 @@ defmodule OneCore.Plugin do
     `OneCore.Artifact.size(call.own, name)` says whether it arrived and how big it is. A tool answers with one of
     its blobs as `{:file, "image/jpeg", call.own, name}`: the client is handed a short-lived link, fetches the
     file from the bucket and keeps it, so a blob answered this way is one that's never replaced.
-  - `guide/0`, if the plugin has one, is text for agents on when and how to use its tools.
+  - A `SKILL.md` at the root of the folder, if the plugin has one, is its skill: text for agents on when and how
+    to use its tools, which an agent reads when it needs it, at `skill://hello/SKILL.md`, and `one hello` shows
+    with the plugin's tools. It's an Agent Skill (agentskills.io): it starts with the skill's `name`, which is the
+    plugin's, and its `description`, one line saying when an agent should read it, as YAML between two lines of
+    `---`:
+
+        ---
+        name: hello
+        description: Read when someone arrives, to greet them.
+        ---
+
+        Use `greet` when someone arrives, once for each of them.
   - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact for whoever it was
     added for, which only this plugin reaches: one added for a user keeps that user's, and one added for the network
     keeps everyone's together. It keeps what it needs there as blobs through `OneCore.Artifact`: `read/2` gives `{:ok,
@@ -70,7 +78,7 @@ defmodule OneCore.Plugin do
     raises with the reason if it may not, which is then what the caller is told, and `OneCore.Call.reaches?/3`
     asks without raising. What the plugin made for whoever it runs for is reached without asking. Anything else
     is reached only if both the plugin and whoever it runs for have that relation to it, which the plugins that
-    decide `reach` say. `relations` is the one The One App ships with, and its guide says how something is
+    decide `reach` say. `relations` is the one The One App ships with, and its skill says how something is
     shared. With none, everything in a network is shared.
   - A tool runs for whoever asked, `call.for`. Whoever asks
     can ask for a group they're a member of, or for the network: `call.for` is then the group, what the tool
@@ -84,7 +92,7 @@ defmodule OneCore.Plugin do
   - `uses/0`, if the plugin has one, names the other plugins it uses, as they're added for whoever it's added for, or
     for the network. Deploying it brings along the ones the server ships with, and `OneCore.Call.plugin(call,
     "database")` gives one of them: its module, whose functions take the call and run as this plugin, for whoever it
-    runs for. A plugin that keeps more than a few blobs uses `database`, whose guide says how.
+    runs for. A plugin that keeps more than a few blobs uses `database`, whose skill says how.
   - A plugin's module is what other plugins call, so its public functions besides these are what it provides
     them. One that only provides functions leaves out `tools/0` and `call/3`.
   - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on
@@ -109,7 +117,7 @@ defmodule OneCore.Plugin do
     them, with `call.for` the user, the group or the network, and `call.by` nobody. Times that
     passed with none up are made up for with one call when one is back.
   - A plugin with jobs uses `database`, which keeps when each last ran in the plugin's database, and has the
-    server writing that database make the call. Its guide says what that promises a job's tool.
+    server writing that database make the call. Its skill says what that promises a job's tool.
   - `schedule/3` is only for a plugin that keeps other plugins' schedules, as `database` does. It's called as
     the plugin whose jobs they are, on every server, each time one of them is due, with the jobs and a function
     that makes a job's call on the server it's called on: `fire.(job)`. It's what has one server call it once.
@@ -131,10 +139,11 @@ defmodule OneCore.Plugin do
     hook gives a plugin nothing it couldn't already reach.
   - A plugin hooks into the moments of whoever it was added for: one added for a user decides only what runs for
     that user, and one added for the network decides for everyone.
-  #{OneCore.Hooks.guide()}
+  #{OneCore.Hooks.listed()}
 
-  A plugin's files that aren't Elixir reach each client from the server: they are its parts that run in a client,
-  and the source of any program a service of its brings. `apps/0`, if the plugin has one, names its apps:
+  A plugin's files that aren't Elixir or its skill reach each client from the server: they are its parts that run
+  in a client, and the source of any program a service of its brings. `apps/0`, if the plugin has one, names its
+  apps:
 
       @impl true
       def apps, do: [%{name: "Hello", page: "app.html", icon: "icon.svg"}]
@@ -143,7 +152,7 @@ defmodule OneCore.Plugin do
     loads the plugin's other files by their paths beside it (`app.js`), and another plugin's by that plugin's
     name (`../ui/ui.js`). It needs no build step.
   - The kit, the plugin `ui`, is what an app's UI is written with, so every app looks and moves the same. Its
-    guide lists its elements, and it speaks to the client for the app: its `call` and `changed` are the next two
+    skill lists its elements, and it speaks to the client for the app: its `call` and `changed` are the next two
     lines, done.
   - An app reaches nothing but its client, and speaks to it as an MCP App does: JSON-RPC messages posted to
     `window.parent`, which answers with a message to the page. It sends `ui/initialize` first and then
@@ -210,19 +219,26 @@ defmodule OneCore.Plugin do
     that stops by itself should stop the service, so that both are started again. The plugin `load` does all of
     this.
   """
-  @moduledoc "The interface a plugin's server part is written against.\n\n" <> @guide
+  @moduledoc "The interface a plugin's server part is written against.\n\n" <> @text
 
-  @doc "How to write a plugin, for whoever is about to."
-  def guide, do: @guide
+  @doc "One Core's own skill, `building-plugins`, as its `SKILL.md`: how to write a plugin, which is this module's."
+  def skill do
+    """
+    ---
+    name: building-plugins
+    description: Read before making or changing a plugin. It says how one is written, deployed and updated.
+    ---
+
+    """ <> @text
+  end
 
   @callback tools() :: [%{name: String.t(), description: String.t(), inputs: map}]
   @callback call(tool :: String.t(), inputs :: map, OneCore.Call.t()) :: term
-  @callback guide() :: String.t()
   @callback apps() :: [%{name: String.t(), page: String.t(), icon: String.t()}]
   @callback uses() :: [String.t()]
   @callback hooks() :: [String.t()]
   @callback hook(hook :: String.t(), about :: map, OneCore.Call.t()) :: term
   @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
   @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
-  @optional_callbacks tools: 0, call: 3, guide: 0, apps: 0, uses: 0, hooks: 0, hook: 3, jobs: 0, schedule: 3
+  @optional_callbacks tools: 0, call: 3, apps: 0, uses: 0, hooks: 0, hook: 3, jobs: 0, schedule: 3
 end

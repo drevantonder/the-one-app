@@ -1,5 +1,6 @@
 //! The CLI. Every tool is a command: the words before the first `--` input, joined by `_`, are the tool's name, so
-//! `one tracker add --tracker water` calls `tracker_add`. `one mcp` serves MCP over stdio instead.
+//! `one tracker add --tracker water` calls `tracker_add`. `one tracker` shows the plugin's skill and its tools, and
+//! `one mcp` serves MCP over stdio instead.
 
 use std::io::Write;
 use std::path::Path;
@@ -80,17 +81,25 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
                     name.is_empty() || tool["name"].as_str().is_some_and(|tool| tool.starts_with(&format!("{name}_")))
                 })
                 .collect();
-            // A plugin with no tools can still have a guide: the kit's says how an app is written with it.
-            let guide = listed["_meta"]["guides"][&name].as_str();
-            if within.is_empty() && guide.is_none() {
+            // What a server says now, or what one last said if none is answering.
+            let says = async |method: &str, params: Value| match answered {
+                Ok(()) => client.fresh(method, &params).await.ok(),
+                Err(_) => client.kept(method, &params),
+            };
+            // A plugin with no tools can still have a skill: the kit's says how an app is written with it. It's
+            // read as any skill is, and what's printed of it is what follows its name and description.
+            let skill = says("resources/read", json!({"uri": format!("skill://{name}/SKILL.md")})).await;
+            let skill = skill.as_ref().and_then(|skill| skill["contents"][0]["text"].as_str());
+            let skill = skill.map(|skill| skill.split_once("\n---\n").map_or(skill, |(_, text)| text).trim());
+            if within.is_empty() && skill.is_none() {
                 answered?;
-                bail!("There's no tool or plugin named `{}`. `one` lists them.", words.join(" "));
+                bail!("There's no tool, plugin or skill named `{}`. `one --help` lists them.", words.join(" "));
             }
             if answered.is_err() {
                 eprintln!("No server is answering, so this is what one last listed.\n");
             }
-            if let Some(guide) = guide {
-                println!("{}\n", guide.trim_end());
+            if let Some(skill) = skill {
+                println!("{skill}\n");
             }
             if within.is_empty() {
                 return Ok(ExitCode::SUCCESS);
@@ -102,6 +111,18 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
                 println!("one {name:width$}  {about}");
             }
             println!("\n`one <tool> --help` shows a tool's inputs.");
+            if name.is_empty() {
+                let skills = says("skills/list", json!({})).await.unwrap_or_default();
+                println!("\nA skill says when and how to use a plugin's tools, and `one <skill>` shows one:\n");
+                for skill in skills["skills"].as_array().into_iter().flatten() {
+                    let (name, about) = (&skill["frontmatter"]["name"], &skill["frontmatter"]["description"]);
+                    println!(
+                        "one {:width$}  {}",
+                        name.as_str().unwrap_or_default(),
+                        about.as_str().unwrap_or_default()
+                    );
+                }
+            }
         }
     }
     Ok(ExitCode::SUCCESS)

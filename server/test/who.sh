@@ -3,11 +3,11 @@
 # a scheduled job once. As users of a network being built: what one made is read by another only once a relation
 # tuple says so, by a group's member, and by a sharing link's holder until its tuple is removed. A plugin reaches
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
-# user, group and the network it's added for. One Core's own tools are whoever's may. Anyone brings a server, which
-# acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on the
-# rest. A plugin that decides refuses a call with its reason, and one that breaks is undone. Claims' approver is a
-# tuple, and a job that's being called when the server calling it is killed is called once by the spare. It says
-# what a check costs a call.
+# user, group and the network it's added for, and its skill is seen by whoever it's added for. One Core's own tools
+# are whoever's may. Anyone brings a server, which acts for them alone until its owner chooses who else and they
+# agree, runs only their plugins and passes on the rest. A plugin that decides refuses a call with its reason, and
+# one that breaks is undone. Claims' approver is a tuple, and a job that's being called when the server calling it
+# is killed is called once by the spare. It says what a check costs a call.
 #
 #     mise exec -- server/test/who.sh [--address]
 #
@@ -77,6 +77,11 @@ shown() {
   echo "           -> $(named <<<"$said")"
 }
 may() { said=$("$@" 2>&1) && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $said" && exit 1; }; }
+# The skills someone is listed, by name, as MCP lists them: `skills as alice`.
+skills() {
+  echo '{"jsonrpc":"2.0","id":1,"method":"skills/list","params":{}}' | "$@" mcp |
+    { grep -o '"uri":"skill://[^"]*"' || true; } | sort -u | cut -d/ -f3 | paste -sd' '
+}
 refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $said" && exit 1; }; }
 
 # The plugins this proves with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
@@ -203,6 +208,14 @@ defmodule Diary do
   end
 end
 EOF
+cat >"$folder/diary/SKILL.md" <<'EOF'
+---
+name: diary
+description: Read before writing in someone's diary.
+---
+
+Use `write` when someone says what happened today, in their own words.
+EOF
 cat >"$folder/ticker/ticker.ex" <<'EOF'
 defmodule Ticker do
   @behaviour OneCore.Plugin
@@ -297,14 +310,36 @@ may as alice relations share --artifact "$note" --relation viewer --who network/
 may as alice reader read --note "$note"
 refused as dave reader read --note "$note"
 
-say "A plugin is whoever's deployed it, and has an artifact of its own for each one it's added for"
+say "A plugin's skill is listed for whoever the plugin is added for, with One Core's own, and a link's holder sees none"
 may as alice deploy --name diary --files-from "$folder/diary"
+link=$(as alice relations link --artifact "$note" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
+may as link "$link" notes read --note "$note"
+listed=$(skills as alice)
+echo "  alice is listed: $listed"
+[[ " $listed " == *" diary "* && " $listed " == *" tracker "* && " $listed " == *" building-plugins "* ]]
+listed=$(skills as bob)
+echo "  bob is listed: $listed"
+[[ " $listed " != *" diary "* && " $listed " == *" tracker "* && " $listed " == *" building-plugins "* ]]
+listed=$(skills as link "$link")
+echo "  the holder of alice's link is listed: ${listed:-none}"
+[[ -z $listed ]]
+may as alice diary
+refused as bob diary
+refused as link "$link" diary
+said=$(as bob building-plugins)
+said="${said%%$'\n'*} ..." shown "may    " as bob building-plugins
+refused as link "$link" building-plugins
+
+say "A plugin is whoever's deployed it, and has an artifact of its own for each one it's added for"
 may as alice diary write --text "Dear diary"
 refused as bob diary write --text "Dear diary"
 refused as bob add --plugin users/alice/plugins/diary
 may as alice relations share --artifact users/alice/plugins/diary --relation viewer --who everyone
 may as bob add --plugin users/alice/plugins/diary
 may as bob diary write --text "Mine"
+listed=$(skills as bob)
+echo "  bob is listed its skill now: $listed"
+[[ " $listed " == *" diary "* ]]
 may as alice for groups/family add --plugin users/alice/plugins/diary
 may as carol for groups/family diary write --text "Ours"
 refused as dave for groups/family diary write --text "Theirs"

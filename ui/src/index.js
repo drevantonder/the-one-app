@@ -1,7 +1,7 @@
 // The kit: every element, defined as it's imported, and the few things a page asks for in passing.
 //
-// A `///` comment that starts with an example is the kit's guide: build.js gathers them, in the order a page loads
-// them, as the guide an agent is handed with the kit.
+// A `///` comment that starts with an example is the kit's skill: build.js gathers them, in the order a page loads
+// them, as the skill an agent reads before it writes an app with the kit.
 
 /// `<link rel="stylesheet" href="../ui/ui.css">` and `<script type="module" src="../ui/ui.js"></script>` in an
 /// app's page give it the kit: the theme, light and dark, as the custom properties ui.css sets (`--foreground`,

@@ -93,7 +93,7 @@ defmodule OneCore.Hooks do
   def kinds, do: Map.new(@hooks, fn {hook, kind, _about} -> {hook, kind} end)
 
   @doc "What a plugin's author reads about hooks: each kind, and each hook with its kind and what it's about."
-  def guide do
+  def listed do
     kinds = for {kind, how} <- @kinds, do: "- A hook that #{kind} #{flat(how)}"
     hooks = for {hook, kind, about} <- @hooks, do: "- `#{hook}` #{kind}. #{flat(about)}"
     Enum.join(kinds ++ ["", "The hooks:", ""] ++ hooks, "\n")

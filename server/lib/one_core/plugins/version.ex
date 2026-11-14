@@ -7,19 +7,21 @@ defmodule OneCore.Plugins.Version do
   file. A version is unloaded by removing every module under that name, which the next version loaded then takes,
   so a server that's updated for years makes no more names than it ever ran versions at once.
 
-  A version's files that aren't Elixir are its parts that run in a client (`files`, by their paths), and `code` names
-  the whole set, so a client can tell one version's files from the next's. `hashes` names each of those files by
-  what's in it, so a service can tell whether a program it brings changed.
+  A version's files that aren't Elixir or its skill are its parts that run in a client (`files`, by their paths), and
+  `code` names the whole set, so a client can tell one version's files from the next's. `hashes` names each of those
+  files by what's in it, so a service can tell whether a program it brings changed.
+
+  `skill` is what its `SKILL.md` says of itself, as `OneCore.Skills.read/2` gives it, or `nil` for a plugin with none.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
   `needs` of a machine. `hooks` names the hooks it hooks into, and `jobs` lists its scheduled jobs: each one's
   `tool`, the `inputs` it's called with, and `every` how many seconds. `artifact` is the plugin it's a version of,
   which whatever loaded it says.
   """
-  alias OneCore.{Hooks, Server}
+  alias OneCore.{Hooks, Server, Skills}
 
-  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
-  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes, :artifact]
+  @enforce_keys [:under, :plugin, :tools, :skill, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
+  defstruct [:under, :plugin, :tools, :skill, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes, :artifact]
 
   # The names versions are loaded under: each is free, or taken by the one version loaded under it.
   @names 4096
@@ -32,17 +34,22 @@ defmodule OneCore.Plugins.Version do
   def code(files),
     do: Base.encode16(:crypto.hash(:sha256, :erlang.term_to_binary(files, [:deterministic])), case: :lower)
 
-  @doc "Compiles and loads a plugin's files. Gives the version and the compiler's warnings, or what's wrong."
-  def load(files) do
+  @doc """
+  Compiles and loads the files of the plugin named `name`. Gives the version and the compiler's warnings, or what's
+  wrong.
+  """
+  def load(name, files) do
     names = :persistent_term.get(__MODULE__)
     free = Enum.find(1..@names, &(:atomics.compare_exchange(names, &1, 0, 1) == :ok))
     if free == nil, do: raise("#{@names} versions of plugins are loaded, which is as many as a server runs at once")
     under = Module.concat(OneCore.Plugins, "Load#{free}")
     {sources, client} = Enum.split_with(files, fn {path, _} -> String.ends_with?(path, ".ex") end)
+    {skill, client} = Map.pop(Map.new(client), "SKILL.md")
 
-    with {:ok, modules, warnings} <- compile(under, sources),
-         {:ok, version} <- describe(under, modules, Map.new(client)) do
-      {:ok, %{version | code: code(files)}, warnings}
+    with {:ok, skill} <- if(skill, do: Skills.read(name, skill), else: {:ok, nil}),
+         {:ok, modules, warnings} <- compile(under, sources),
+         {:ok, version} <- describe(under, modules, client) do
+      {:ok, %{version | code: code(files), skill: skill}, warnings}
     else
       {:error, why} ->
         unload(under)
@@ -142,11 +149,10 @@ defmodule OneCore.Plugins.Version do
   defp describe(under, modules, client) do
     case Enum.filter(modules, &(OneCore.Plugin in behaviours(&1))) do
       [] when modules == [] ->
-        {:ok, version(under, nil, [], nil, [], [], client)}
+        {:ok, version(under, nil, [], [], [], client)}
 
       [plugin] ->
         tools = if function_exported?(plugin, :tools, 0), do: plugin.tools(), else: []
-        guide = if function_exported?(plugin, :guide, 0), do: plugin.guide()
         apps = if function_exported?(plugin, :apps, 0), do: plugin.apps(), else: []
         uses = if function_exported?(plugin, :uses, 0), do: plugin.uses(), else: []
         hooks = if function_exported?(plugin, :hooks, 0), do: plugin.hooks(), else: []
@@ -154,8 +160,8 @@ defmodule OneCore.Plugins.Version do
         services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
 
         cond do
-          not (is_list(tools) and Enum.all?(tools, &tool?/1) and (is_nil(guide) or is_binary(guide))) ->
-            {:error, "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}, and guide/0 gives text"}
+          not (is_list(tools) and Enum.all?(tools, &tool?/1)) ->
+            {:error, "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}"}
 
           not (is_list(apps) and Enum.all?(apps, &app?(&1, client))) ->
             {:error, "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page and icon are files here"}
@@ -179,7 +185,7 @@ defmodule OneCore.Plugins.Version do
               for tool <- tools,
                   do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
 
-            version = version(under, plugin, tools, guide, apps, Enum.sort(services), client)
+            version = version(under, plugin, tools, apps, Enum.sort(services), client)
 
             with {:ok, jobs} <- jobs(jobs, tools),
                  do: {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks), jobs: jobs}}
@@ -190,8 +196,7 @@ defmodule OneCore.Plugins.Version do
     end
   rescue
     error ->
-      {:error,
-       "tools/0, guide/0, apps/0, uses/0, hooks/0, jobs/0 or a service's needs/0 raised: " <> Exception.message(error)}
+      {:error, "tools/0, apps/0, uses/0, hooks/0, jobs/0 or a service's needs/0 raised: " <> Exception.message(error)}
   end
 
   # A scheduled job calls one of the plugin's tools with inputs the tool takes, so one that could never run is
@@ -220,7 +225,7 @@ defmodule OneCore.Plugins.Version do
   defp behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
   # An app's icon goes to clients with its name, as a `data:` address, so a home screen asks for nothing more.
-  defp version(under, plugin, tools, guide, apps, services, client) do
+  defp version(under, plugin, tools, apps, services, client) do
     apps =
       for %{name: name, page: page, icon: icon} <- apps do
         %{name: name, page: page, icon: "data:#{kind(icon)};base64,#{Base.encode64(client[icon])}"}
@@ -230,7 +235,7 @@ defmodule OneCore.Plugins.Version do
       under: under,
       plugin: plugin,
       tools: tools,
-      guide: guide,
+      skill: nil,
       apps: apps,
       uses: [],
       services: services,

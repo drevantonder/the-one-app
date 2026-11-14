@@ -15,15 +15,6 @@ defmodule Tracker do
   def uses, do: ["database"]
 
   @impl true
-  def guide do
-    """
-    Trackers count things over time: glasses of water, push-ups, hours slept. Add an entry when someone says they
-    did something they track, and make a new tracker just by adding to it. An entry is stamped with the time it's
-    added.
-    """
-  end
-
-  @impl true
   def apps, do: [%{name: "Tracker", page: "app.html", icon: "icon.svg"}]
 
   @impl true

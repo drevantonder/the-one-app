@@ -22,8 +22,8 @@ defmodule OneCore.Tools do
       description: """
       Adds a plugin for you, or updates it, from its files.
       The server compiles them and runs the plugin at once, with its tools listed and called as <name>_<tool>. If
-      they don't compile, it says why, and the version already running stays. The server's instructions say how to
-      write a plugin. It's yours, and is added for you: asked for a group or for the network, it's theirs.
+      they don't compile, it says why, and the version already running stays. The skill `building-plugins` says how
+      to write a plugin. It's yours, and is added for you: asked for a group or for the network, it's theirs.
       """,
       inputs: %{
         type: "object",

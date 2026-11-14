@@ -1,6 +1,6 @@
 defmodule OneCore.Service do
   @moduledoc """
-  The interface a plugin's service is written against. `OneCore.Plugin.guide/0` says how to write one.
+  The interface a plugin's service is written against. `OneCore.Plugin` says how to write one.
 
   A service is a module of its plugin that says `use GenServer` and `@behaviour OneCore.Service`. Its process runs
   on each server whose owner installed it, and its public functions are what the rest of its plugin calls there.
