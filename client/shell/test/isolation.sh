@@ -6,7 +6,8 @@
 #
 #     cargo build --release && mise exec -- client/shell/test/isolation.sh
 #
-# It needs Linux with `xvfb-run` and `xdotool`: the app runs on a screen of its own, and its icons are pressed there.
+# It needs Linux with `xvfb-run`, `dbus-run-session` and `xdotool`: the app runs on a screen of its own, with a
+# session bus of its own, and its icons are pressed there.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 source "$here/../../../server/test/servers.sh"
@@ -77,7 +78,7 @@ ONE_HOME=$folder/client "$one" deploy --name a-kept --files-from "$folder/kept"
 ONE_HOME=$folder/client "$one" deploy --name a-prober --files-from "$folder/prober"
 
 say "The app, on a screen of its own: Kept is started behind the home screen, and Prober is opened"
-ONE_HOME=$folder/client xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
+ONE_HOME=$folder/client dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
   "$0" 2>"$1/app.log" &
   app=$!
   # The home screen says when it has drawn.
