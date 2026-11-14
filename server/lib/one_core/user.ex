@@ -20,7 +20,8 @@ defmodule OneCore.User do
   whatever sent it, and `said` is what the request says of itself, its `_meta`:
 
   - `who` and `for`, from a server acting here, are who that server was asked by and for: it passes on what it
-    was asked, and `passed_on` says so. A scheduled job is asked by nobody, so its `who` is `nil`.
+    was asked, having decided it, and `passed_on` says so. A scheduled job is asked by nobody, so its `who` is
+    `nil`.
   - `link` is a sharing link, and whoever shows one is its holder.
   - `as` names another user to act as. It's for a network being built, to show who may do what before anyone
     signs in, and is refused unless the server's `:development` setting is on.
@@ -29,8 +30,8 @@ defmodule OneCore.User do
   def asking(from, %{"who" => by} = said) when is_binary(by) or is_nil(by) do
     cond do
       not Services.acting?(from) -> {:error, "Only a server acting here says who it asks for"}
-      owner?(said["for"]) -> with :ok <- acts(by, said["for"]), do: {:ok, {by, said["for"]}, said["passed_on"] == true}
-      true -> {:error, "A server says who it asks for: a user, a group or the network"}
+      is_binary(said["for"]) -> {:ok, {by, said["for"]}, said["passed_on"] == true}
+      true -> {:error, "A server says who it asks for too"}
     end
   end
 
@@ -61,7 +62,6 @@ defmodule OneCore.User do
   # Whether a request by `by` runs for `asked`: themselves, or whoever the plugins that decide say they're a
   # member of. With none deciding, everything in a network is shared.
   defp acts(by, by), do: :ok
-  defp acts(nil, _asked), do: :ok
 
   defp acts(by, asked) do
     cond do

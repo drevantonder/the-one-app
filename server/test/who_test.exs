@@ -178,6 +178,11 @@ defmodule OneCore.WhoTest do
     assert ask(%{who: nil, for: "groups/family"}, Server.key()) == " for groups/family"
     assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice", for: "users/alice"}, stranger)
     assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice", for: "users/alice"})
+    # What it passes on it has decided, so a group's member isn't asked about again, nor a link's holder refused.
+    assert ask(%{who: "users/bob", for: "groups/family", passed_on: true}, Server.key()) ==
+             "users/bob for groups/family"
+
+    assert ask(%{who: User.link("a-secret"), for: User.link("a-secret")}, Server.key()) == User.link("a-secret")
 
     # Acting as another user is refused, unless the network is one being built.
     assert {:refused, "Acting as another user" <> _} = ask(%{as: "alice"})
