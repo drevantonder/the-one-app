@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Starts a whole network on this machine, to build or test with, and says how to use it:
+#
+#     ./network <folder> [--spare] [--address]
+#
+# It builds what isn't built, then starts the network's server in the folder, which is where everything the network
+# keeps goes: its bucket, each server's home, a client's home and the logs. A new network starts with the plugins
+# The One App ships with. Starting again in the same folder carries on with what's there, and Ctrl-C stops it.
+#
+# --spare starts a second server, which takes over when the first stops.
+# --address runs the network's address here too (`address/`): its Workers in `wrangler dev`, with a local S3 store
+#   as the bucket. Servers then keep their blobs through the signer there, and an assistant running somewhere else
+#   has a way in.
+set -euo pipefail
+set -m # What's started is a job with a process group of its own, so all of it is stopped at once.
+
+root=$(cd "$(dirname "$0")" && pwd)
+# The tools this needs are the ones `mise.toml` names.
+command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
+
+folder= spare= address=
+for argument; do
+  case $argument in
+    --spare) spare=yes ;;
+    --address) address=yes ;;
+    -*) echo "./network <folder> [--spare] [--address]" >&2 && exit 1 ;;
+    *) folder=$argument ;;
+  esac
+done
+[[ -n $folder ]] || { echo "./network <folder> [--spare] [--address]" >&2 && exit 1; }
+mkdir -p "$folder"
+folder=$(cd "$folder" && pwd)
+one=$root/target/release/one
+
+(cd "$root" && cargo build --release)
+(cd "$root/ui" && bun install --frozen-lockfile && bun build.js)
+(cd "$root/server" && mix deps.get && mix compile)
+
+started=()
+trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done' EXIT
+# Waits for a line in a log that the job just started is still writing. Fails if the job ends without it.
+wait_for() { grep -q -m1 -E "$1" <(tail -f --pid="${started[-1]}" -n +1 "$2"); }
+free_port() { bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'; }
+random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
+
+at_address=()
+if [[ -n $address ]]; then
+  (cd "$root/address" && bun install --frozen-lockfile)
+  # The bucket's credentials are made up for this run, and only the signer is given them, with the secret a
+  # network's first server shows.
+  access=$(random 8) secret=$(random 24) first=$(random 16)
+  bucket=127.0.0.1:$(free_port) gateway=$(free_port)
+  RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$bucket" "$folder/bucket" >"$folder/bucket.log" 2>&1 &
+  started+=($!)
+  curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://$bucket/"
+  (cd "$root/address" && ACCESS=$access SECRET=$secret BUCKET=http://$bucket/network bun -e '
+    import { AwsClient } from "aws4fetch";
+    const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
+    const made = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
+    if (!made.ok && made.status !== 409) throw new Error(`the bucket answered ${made.status}`);')
+  # `wrangler dev` gives the signer its secrets from the environment. Outsiders get in without signing in, since
+  # this network is one being built.
+  (cd "$root/address" && BUCKET=http://$bucket/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
+    DEVELOPMENT_WITHOUT_SIGN_IN=true WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
+    --inspector-port "$(free_port)" --persist-to "$folder/address") >"$folder/address.log" 2>&1 &
+  started+=($!)
+  curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$gateway/ping"
+  at_address=(--address "http://127.0.0.1:$gateway" --first "$first")
+fi
+
+# Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
+# which is then done as it says, and it's started again.
+start() {
+  (cd "$root/server" && exec mix network "$folder" "$1" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  started+=($!)
+  if ! wait_for "A server is running" "$folder/$1.log"; then
+    let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
+    ONE_HOME=$folder/client "$one" $let_in
+    start "$1"
+  fi
+}
+start server
+[[ -z $spare ]] || start spare
+
+# The program as whoever started this would type it.
+one=${one#"$PWD/"}
+cat <<SAID
+
+A network is running in $folder. Its client's home is $folder/client:
+
+    export ONE_HOME=$folder/client
+    $one                                             opens the app
+    $one tracker add --tracker water --amount 2      calls a tool
+    $one --help                                      lists every tool
+    $one mcp                                         is the same tools as MCP over stdio
+${at_address:+
+Its address is ${at_address[1]}, and an assistant somewhere else calls its tools at ${at_address[1]}/mcp.
+}
+What each part says is in $folder/*.log. Ctrl-C stops it.
+SAID
+wait

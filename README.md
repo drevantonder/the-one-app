@@ -5,50 +5,34 @@ tag `before-redesign` and on the branch `v1`.
 
 ## Running it
 
-`mise install` installs Erlang, Elixir and Bun, and `rustup` installs Rust. On Linux the app is built on GTK and
-WebKitGTK (`libwebkit2gtk-4.1-dev`). Then, with mise active in your shell:
+`mise install` installs Erlang, Elixir, Bun and a local S3 store, and `rustup` installs Rust. On Linux the app is
+built on GTK and WebKitGTK (`libwebkit2gtk-4.1-dev`). Then:
 
-    cargo build --release
-    (cd ui && bun install && bun build.js)
-    cd server && mix deps.get && mix network /tmp/one-network
+    ./network /tmp/one-network
 
-That starts a whole network on this machine in a folder: its bucket, its one server and a client's home. Starting it
-again in the same folder carries on with what's there. In another terminal, use its client:
+That builds what isn't built and starts a whole network on this machine, kept in that folder, with the plugins The
+One App ships with. It says how to open the app and call a tool. `--spare` starts a second server too, which takes
+over when the first stops, and `--address` runs the network's address here as well.
 
-    export ONE_HOME=/tmp/one-network/client
-    target/release/one deploy --name ui --files-from ui/dist
-    target/release/one deploy --name tracker --files-from plugins/tracker
-    target/release/one deploy --name claims --files-from plugins/claims
-    target/release/one tracker add --tracker water --amount 2
-    target/release/one tracker list
-    target/release/one --help
-    target/release/one
+Without `ONE_HOME`, a client is kept where the system keeps an app's data. Where there's no desktop, as under
+`xvfb-run`, start the app inside `dbus-run-session`: GTK otherwise waits half a minute for a desktop that isn't
+there.
 
-`--help` lists every tool, each of which is a command, and `target/release/one mcp` is the same tools as MCP over
-stdio. The last, asked nothing, is the app: a home screen with the tracker's app and Claims on it. Deploying a plugin
-again updates it while the server runs, and its app loads again where it's open. Without `ONE_HOME`, a client is kept
-where the system keeps an app's data. Where there's no desktop, as under `xvfb-run`, start the app inside
-`dbus-run-session`: GTK otherwise waits half a minute for a desktop that isn't there.
+`cd server && mix test` runs the tests. The proofs run real servers and the real app and say what happened:
+`server/test/takeover.sh` stops servers in the middle of writes, `server/test/services.sh` runs services on one of
+two servers, `address/proof/proof.sh` runs a whole address with nothing deployed, and
+`client/shell/test/isolation.sh` has an app try everything it mustn't reach.
 
-`mix network /tmp/one-network spare` starts a second server on the same bucket, as a spare: stop the first, and the
-tracker carries on with nothing lost. `cd server && mix test` runs the tests, and `server/test/takeover.sh` stops
-real servers in the middle of writes and checks what's left.
-
-A plugin's service runs only on the servers it's installed on. `target/release/one services` lists every service
-with what it needs of a machine and each server's key, and
-`target/release/one install_service --plugin inbox --service Inbox.Watcher --server <key>` runs one on a server.
-`server/test/services.sh` installs two plugins' services on one of two servers, calls them through the other,
-and updates and kills them while they run.
-
-A network with an address has its bucket, its relay and its way in for outsiders there. `address/proof/proof.sh` runs
-one whole on this machine, with nothing deployed, and shows each of them working. To put one on Cloudflare, make an R2
-bucket and an S3 API token for it, then:
+To put a network's address on Cloudflare, make an R2 bucket and an S3 API token for it, and write the signer's
+secrets to `address/signer/secrets`, a line each: `BUCKET`, the bucket's S3 address with its name on the end
+(`https://<account>.r2.cloudflarestorage.com/<bucket>`), `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, and `FIRST_SERVER`,
+which you make up (`openssl rand -hex 16`). Then:
 
     cd address && bun install && bun run deploy
-    for secret in BUCKET ACCESS_KEY_ID SECRET_ACCESS_KEY; do bunx wrangler secret put $secret -c signer/wrangler.jsonc; done
-    cd ../server && mix network /tmp/one-network --address https://<where the gateway was deployed>
+    cd ../server && mix network /tmp/one-network --address https://<where the gateway was deployed> --first <FIRST_SERVER>
 
-`BUCKET` is the bucket's S3 address with its name on the end: `https://<account>.r2.cloudflarestorage.com/<bucket>`.
+The network's first server shows `FIRST_SERVER` that once, and nobody without it can become the first. It opens
+nothing after.
 
 The same app builds for Android with Tauri's CLI (`cargo install tauri-cli`), an Android SDK and its NDK:
 
@@ -56,7 +40,8 @@ The same app builds for Android with Tauri's CLI (`cargo install tauri-cli`), an
     ANDROID_HOME=~/Android/Sdk NDK_HOME=~/Android/Sdk/ndk/<version> cargo tauri android build --debug --apk
 
 Its project is `client/shell/gen/android`. A phone's client is kept in the app's own folder, and until a client
-can join a network from its screen, it's told which servers to ask by a `servers` file put there.
+can join a network from its screen, it's told its network by a `network` file put there, as `mix network` writes
+one for a network with an address.
 
 - `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
