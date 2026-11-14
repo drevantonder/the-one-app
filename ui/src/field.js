@@ -1,5 +1,5 @@
 import { html, nothing } from "lit"
-import { Element, delegatesFocus, look } from "./element.js"
+import { Element, delegatesFocus, look, touch } from "./element.js"
 import css from "./field.css"
 
 /// What the browser says of a field left empty, in the user's language.
@@ -33,6 +33,7 @@ export class Field extends Element {
   constructor() {
     super()
     this.value = ""
+    this.addEventListener("focusin", () => this.offers())
     // The browser's own bubble isn't ours, and a phone's web view shows none: the problem shows on the field.
     this.addEventListener("invalid", (event) => {
       event.preventDefault()
@@ -74,6 +75,7 @@ export class Field extends Element {
     this.internals.setValidity(flags, text, this.renderRoot.querySelector("#control") ?? undefined)
     // Once it's been called wrong, it says what's wrong as it's put right.
     if (this.problem) this.problem = text
+    if (this.matches(":focus-within")) this.offers()
   }
 
   /// A new value from the user.
@@ -83,12 +85,31 @@ export class Field extends Element {
     if (done) this.emit("change")
   }
 
-  /// Enter in a one-line field sends the form, as it does in a form's own `<input>`. The key press ends here: the
-  /// form may move focus (closing a sheet puts it back on what opened it), and the same press mustn't press that.
+  /// The next field of the form that's typed in, if there's one after this.
+  get next() {
+    const fields = [...(this.internals.form?.elements ?? [])]
+    const typed = (field) => (field.constructor.typed || field.matches("input:not([type=hidden], [type=checkbox], [type=radio], [type=file]), textarea")) && !field.disabled && field.checkVisibility()
+    return fields.slice(fields.indexOf(this) + 1).find(typed)
+  }
+
+  /// What a phone's keyboard offers in Enter's place while a one-line field is typed in, unless the page says
+  /// (`enterkeyhint`): on to the next field that's typed in, or with none after this one, to send the form. So a
+  /// form that ends in pickers is sent from its last typed field.
+  offers() {
+    const control = this.renderRoot.querySelector("input.box")
+    if (!control || !this.constructor.typed || !(this.enterkeyhint || this.internals.form)) return
+    control.enterKeyHint = this.enterkeyhint ?? (this.next ? "next" : "go")
+  }
+
+  /// Enter in a one-line field sends the form, as it does in a form's own `<input>`. Under a finger it does what
+  /// the keyboard offered: on to the next typed field while there is one. The key press ends here: the form may
+  /// move focus (closing a sheet puts it back on what opened it), and the same press mustn't press that.
   enter(event) {
     if (event.key !== "Enter" || event.isComposing) return
     event.preventDefault()
-    this.internals.form?.requestSubmit()
+    const next = touch.matches && !this.enterkeyhint && this.next
+    if (next) next.focus()
+    else this.internals.form?.requestSubmit()
   }
 
   formResetCallback() {

@@ -10,6 +10,7 @@ const ids = { input: "control", label: "label" }
 /// `currency="AUD"` shows it as money; `decimals` is how many places it's shown to. `value` is the plain number
 /// as text ("8.5"), and `valueAsNumber` the number.
 class NumberField extends Field {
+  static typed = true
   static properties = {
     min: { type: Number },
     max: { type: Number },

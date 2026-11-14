@@ -6,8 +6,10 @@ import { icon } from "./icon.js"
 
 /// `<ui-input label="Name" name="name">`: one line of text. `type` is an `<input>`'s (`email`, `tel`, `url`,
 /// `password`, `search`), and so are `autocomplete`, `inputmode`, `enterkeyhint`, `maxlength`, `pattern` and
-/// `readonly`, so the device shows the right keyboard and offers what it knows. Enter sends the form.
+/// `readonly`, so the device shows the right keyboard and offers what it knows. Enter sends the form, and a
+/// phone's keyboard offers that from the last field of a form that's typed in, and the next field before it.
 class Input extends Field {
+  static typed = true
   static properties = {
     type: {},
     autocomplete: {},
@@ -22,7 +24,7 @@ class Input extends Field {
     return html`
       <input id="control" class="native box ring"
         type=${this.type ?? "text"} .value=${this.value} placeholder=${ifDefined(this.placeholder)}
-        autocomplete=${ifDefined(this.autocomplete)} inputmode=${ifDefined(this.inputmode)} enterkeyhint=${ifDefined(this.enterkeyhint)}
+        autocomplete=${ifDefined(this.autocomplete)} inputmode=${ifDefined(this.inputmode)}
         maxlength=${ifDefined(this.maxlength)} pattern=${ifDefined(this.pattern)}
         ?required=${this.required} ?disabled=${this.disabled} ?readonly=${this.readonly}
         aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-invalid=${message ? "true" : "false"} aria-describedby="message"
@@ -74,6 +76,7 @@ const x = html`<svg viewBox="0 0 256 256" aria-hidden="true">${icon("x")}</svg>`
 /// `<ui-textarea label="Note" name="note">`: several lines of text, growing with what's typed. `rows` is how tall
 /// it starts.
 class Textarea extends Field {
+  static typed = true
   static properties = {
     rows: { type: Number },
     maxlength: {},
