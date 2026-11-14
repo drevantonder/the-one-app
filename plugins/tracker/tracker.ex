@@ -1,7 +1,18 @@
 defmodule Tracker do
-  @moduledoc "Trackers for anything counted over time. Each tracker is one blob in the plugin's own artifact."
+  @moduledoc "Trackers for anything counted over time, kept in the plugin's database."
   @behaviour OneCore.Plugin
-  alias OneCore.Artifact
+
+  @schema [
+    """
+    create table entries (
+      id integer primary key, tracker text not null, amount numeric not null, note text, at text not null
+    )
+    """,
+    "create index entries_by_tracker on entries (tracker, id)"
+  ]
+
+  @impl true
+  def uses, do: ["database"]
 
   @impl true
   def guide do
@@ -46,49 +57,38 @@ defmodule Tracker do
   end
 
   @impl true
-  def call("add", %{"tracker" => tracker} = inputs, %OneCore.Call{own: own}) do
-    entry =
-      Map.merge(
-        %{"at" => DateTime.to_iso8601(DateTime.utc_now(:second)), "amount" => 1},
-        Map.take(inputs, ["amount", "note"])
-      )
+  def call("add", %{"tracker" => tracker} = inputs, call) do
+    database = OneCore.Call.plugin(call, "database")
+    entry = [tracker, Map.get(inputs, "amount", 1), inputs["note"], DateTime.to_iso8601(DateTime.utc_now(:second))]
 
-    entries = add(own, tracker, entry)
-    "Added. #{tracker} is at #{total(entries)} over #{length(entries)} entries."
+    database.transaction(call, @schema, fn db ->
+      database.query(db, "insert into entries (tracker, amount, note, at) values (?, ?, ?, ?)", entry)
+
+      [%{"total" => total, "entries" => entries}] =
+        database.query(db, "select sum(amount) as total, count(*) as entries from entries where tracker = ?", [tracker])
+
+      "Added. #{tracker} is at #{total} over #{entries} entries."
+    end)
   end
 
-  def call("list", %{"tracker" => tracker}, %OneCore.Call{own: own}) do
-    case Artifact.read(own, tracker <> ".json") do
-      {:ok, entries, _tag} -> JSON.decode!(entries)
-      :absent -> raise "There's no tracker named #{tracker}"
-    end
-  end
+  def call("list", %{"tracker" => tracker}, call) do
+    database = OneCore.Call.plugin(call, "database")
 
-  def call("list", _inputs, %OneCore.Call{own: own}) do
-    for blob <- Artifact.list(own) do
-      {:ok, entries, _tag} = Artifact.read(own, blob)
-      entries = JSON.decode!(entries)
-      %{tracker: String.replace_suffix(blob, ".json", ""), total: total(entries), entries: length(entries)}
-    end
-  end
-
-  # Two entries can be added at the same moment. The blob is written only if it's still as it was read, and
-  # otherwise read again.
-  defp add(own, tracker, entry) do
-    blob = tracker <> ".json"
-
-    {entries, written} =
-      case Artifact.read(own, blob) do
-        {:ok, entries, tag} ->
-          entries = JSON.decode!(entries) ++ [entry]
-          {entries, Artifact.replace(own, blob, JSON.encode!(entries), tag)}
-
-        :absent ->
-          {[entry], Artifact.write(own, blob, JSON.encode!([entry]))}
+    database.transaction(call, @schema, fn db ->
+      case database.query(db, "select at, amount, note from entries where tracker = ? order by id", [tracker]) do
+        [] -> raise "There's no tracker named #{tracker}"
+        entries -> entries
       end
-
-    if written == :ok, do: entries, else: add(own, tracker, entry)
+    end)
   end
 
-  defp total(entries), do: Enum.sum_by(entries, & &1["amount"])
+  def call("list", _inputs, call) do
+    database = OneCore.Call.plugin(call, "database")
+
+    database.transaction(call, @schema, fn db ->
+      database.query(db, """
+      select tracker, sum(amount) as total, count(*) as entries from entries group by tracker order by tracker
+      """)
+    end)
+  end
 end

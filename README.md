@@ -26,7 +26,11 @@ again in the same folder carries on with what's there. In another terminal, use 
 `--help` lists every tool, each of which is a command, and `target/release/one mcp` is the same tools as MCP over
 stdio. The last, asked nothing, is the app: a home screen with the tracker's app on it. Deploying a plugin again
 updates it while the server runs, and its app loads again where it's open. Without `ONE_HOME`, a client is kept where
-the system keeps an app's data. `cd server && mix test` runs the tests.
+the system keeps an app's data.
+
+`mix network /tmp/one-network spare` starts a second server on the same bucket, as a spare: stop the first, and the
+tracker carries on with nothing lost. `cd server && mix test` runs the tests, and `server/test/takeover.sh` stops
+real servers in the middle of writes and checks what's left.
 
 - `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
