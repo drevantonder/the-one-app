@@ -113,7 +113,7 @@ fn inputs(tool: &Value, flags: &[String]) -> Result<Value> {
         let value = match flags.next_if(|next| !next.starts_with("--")) {
             None if kind == "boolean" => Value::Bool(true),
             None => bail!("--{name} needs a value"),
-            Some(path) if from_file => read(Path::new(path))?,
+            Some(path) if from_file => read(Path::new(path), known[name]["contentEncoding"] == "base64")?,
             Some(text) if kind == "string" => Value::String(text.clone()),
             Some(text) => {
                 serde_json::from_str(text).with_context(|| format!("--{name} takes {kind}, written as JSON"))?
@@ -124,12 +124,15 @@ fn inputs(tool: &Value, flags: &[String]) -> Result<Value> {
     Ok(Value::Object(inputs))
 }
 
-/// A file's text, or a folder as its files' text by their paths in it. Names starting with a dot are left out.
-fn read(path: &Path) -> Result<Value> {
+/// A file's text, or a folder as its files' text by their paths in it. Names starting with a dot are left out. A
+/// file for an input that says it's base64 (its schema's `contentEncoding`) is read as it is and written as that.
+fn read(path: &Path, base64: bool) -> Result<Value> {
+    let couldnt = || format!("couldn't read {}", path.display());
+    if base64 {
+        return Ok(Value::String(BASE64.encode(&fs::read(path).with_context(couldnt)?)));
+    }
     if !path.is_dir() {
-        return Ok(Value::String(
-            fs::read_to_string(path).with_context(|| format!("couldn't read {}", path.display()))?,
-        ));
+        return Ok(Value::String(fs::read_to_string(path).with_context(couldnt)?));
     }
     fn files(folder: &Path, within: &str, into: &mut Map<String, Value>) -> Result<()> {
         for entry in fs::read_dir(folder)? {
@@ -141,7 +144,7 @@ fn read(path: &Path) -> Result<Value> {
             if entry.file_type()?.is_dir() {
                 files(&entry.path(), &format!("{within}{name}/"), into)?;
             } else {
-                into.insert(format!("{within}{name}"), read(&entry.path())?);
+                into.insert(format!("{within}{name}"), read(&entry.path(), false)?);
             }
         }
         Ok(())
@@ -160,7 +163,11 @@ fn usage(tool: &Value) {
     for (name, input) in inputs {
         let optional = if required.iter().any(|required| required == name) { "" } else { ", optional" };
         let about = input["description"].as_str().unwrap_or_default();
-        println!("  --{name} <{}{optional}>  {about}", input["type"].as_str().unwrap_or("JSON"));
+        // One of a few is shown as the few.
+        let one_of: Vec<&str> = input["enum"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        let kind =
+            if one_of.is_empty() { input["type"].as_str().unwrap_or("JSON").to_owned() } else { one_of.join("|") };
+        println!("  --{name} <{kind}{optional}>  {about}");
     }
     println!("\n--<input>-from <path> reads an input from a file, or from a folder as its files.");
 }
