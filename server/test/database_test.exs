@@ -47,7 +47,7 @@ defmodule OneCore.DatabaseTest do
     # process holding its database.
     defp server do
       case Registry.keys(OneCore.Plugins.Processes, self()) do
-        [{"database", "Database.Lease", {server, _prefix}}] -> server
+        [{"network/plugins/database", "Database.Lease", {server, _prefix}}] -> server
         [] -> Process.get(:server)
       end
     end
@@ -86,8 +86,8 @@ defmodule OneCore.DatabaseTest do
     files =
       for file <- Path.wildcard(folder <> "/**/*.ex"), into: %{}, do: {Path.relative_to(file, folder), File.read!(file)}
 
-    {:ok, 1, _warnings} = Plugins.deploy("database", files)
-    %{database: Plugins.running()["database"].plugin, home: home}
+    {:ok, 1, _warnings} = Plugins.deploy("network", "database", files)
+    %{database: Plugins.running("network")["database"].plugin, home: home}
   end
 
   # A scheduled job, asked for on two servers at times the test says. Its call writes the time it was due at, and
@@ -318,7 +318,7 @@ defmodule OneCore.DatabaseTest do
 
   # Stops a server as `kill -9` would: its process and the one holding its copy of the database, at once.
   defp stop(process, server) do
-    holding = Plugins.Process.whereis("database", "Database.Lease", {server, @prefix})
+    holding = Plugins.Process.whereis("network/plugins/database", "Database.Lease", {server, @prefix})
 
     for pid <- [process | List.wrap(holding)] do
       watching = Process.monitor(pid)
@@ -381,8 +381,9 @@ defmodule OneCore.DatabaseTest do
       for: User.anyone(),
       by: User.anyone(),
       plugin: "simulated",
+      who: "network/plugins/simulated",
       ask: {"tools/call", %{name: "simulated_write", arguments: %{}}},
-      uses: %{"database" => run.database},
+      uses: %{"database" => {"network/plugins/database", run.database}},
       passed_on: false
     }
   end

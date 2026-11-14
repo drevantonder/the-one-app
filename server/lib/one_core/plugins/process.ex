@@ -10,7 +10,7 @@ defmodule OneCore.Plugins.Process do
   module's `code_change/3`, and lets go of the old one, which is unloaded once no call holds it either. The process
   is the same one throughout, so what it has open stays open.
 
-  It's registered by its plugin's name, its module's as the plugin wrote it, and a key that tells it from the
+  It's registered by its plugin, its module's name as the plugin wrote it, and a key that tells it from the
   module's other processes, with the version it's at, so all are known without asking it.
   """
   use GenServer, restart: :temporary
@@ -191,7 +191,7 @@ defmodule OneCore.Plugins.Process do
   # Holds the plugin's newest version, says so where this process is registered, and gives its module in it.
   # `:absent` if the plugin isn't running here, or no longer has the module.
   defp held(plugin, name, key) do
-    with {:ok, held, %{^plugin => version}} <- Plugins.hold(plugin) do
+    with {:ok, held, version} <- Plugins.hold(plugin) do
       case Version.module(version, name) do
         nil ->
           Plugins.release(held)
@@ -201,8 +201,6 @@ defmodule OneCore.Plugins.Process do
           {_, _} = Registry.update_value(@registry, {plugin, name, key}, fn _ -> version end)
           {:ok, held, module}
       end
-    else
-      {:absent, _name} -> :absent
     end
   end
 

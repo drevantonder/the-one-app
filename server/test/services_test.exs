@@ -59,8 +59,8 @@ defmodule OneCore.ServicesTest do
     for child <- [Plugins, Server, Services], do: start_supervised!(child)
     # What an earlier test loaded stays loaded, since nothing unloads a server's plugins as it stops.
     earlier = loaded()
-    assert {:ok, 1, ""} = Plugins.deploy("counter", %{"counter.ex" => counter(1, self())})
-    assert :ok = Services.install("counter", "Counter.Kept")
+    assert {:ok, 1, ""} = Plugins.deploy("network", "counter", %{"counter.ex" => counter(1, self())})
+    assert :ok = Services.install("network/plugins/counter", "Counter.Kept")
     %{earlier: earlier}
   end
 
@@ -69,31 +69,41 @@ defmodule OneCore.ServicesTest do
     assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [1, 1]}
     anyone = User.anyone()
     assert_receive {:counted, ^anyone, 1}
-    service = Plugins.Process.whereis("counter", "Counter.Kept")
+    service = Plugins.Process.whereis("network/plugins/counter", "Counter.Kept")
 
     # More updates than the two versions of a module the VM keeps.
     for number <- 2..4,
-        do: assert({:ok, ^number, ""} = Plugins.deploy("counter", %{"counter.ex" => counter(number, self())}))
+        do:
+          assert({:ok, ^number, ""} = Plugins.deploy("network", "counter", %{"counter.ex" => counter(number, self())}))
 
     assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [902, 4]}
-    assert Plugins.Process.whereis("counter", "Counter.Kept") == service
+    assert Plugins.Process.whereis("network/plugins/counter", "Counter.Kept") == service
     assert length(loaded() -- earlier) == 1
 
     # A version without the service stops it, and one with it starts it afresh.
     assert {:ok, 5, ""} =
-             Plugins.deploy("counter", %{"counter.ex" => "defmodule Counter do\n  @behaviour OneCore.Plugin\nend"})
+             Plugins.deploy("network", "counter", %{
+               "counter.ex" => "defmodule Counter do\n  @behaviour OneCore.Plugin\nend"
+             })
 
-    assert Plugins.Process.whereis("counter", "Counter.Kept") == nil
+    assert Plugins.Process.whereis("network/plugins/counter", "Counter.Kept") == nil
     assert loaded() -- earlier == []
-    assert {:ok, 6, ""} = Plugins.deploy("counter", %{"counter.ex" => counter(6, self())})
+    assert {:ok, 6, ""} = Plugins.deploy("network", "counter", %{"counter.ex" => counter(6, self())})
     assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [1, 6]}
   end
 
   @tag :tmp_dir
   test "only a server acting for the same user calls a service's functions and the functions it calls" do
     stranger = String.duplicate("ab", 32)
-    service = %{plugin: "counter", service: "Counter.Kept", function: "add", arguments: []}
-    plugin = %{plugin: "counter", function: "counted", arguments: [7], _meta: %{who: User.anyone(), for: User.anyone()}}
+    service = %{plugin: "network/plugins/counter", service: "Counter.Kept", function: "add", arguments: []}
+
+    plugin = %{
+      added: "network",
+      plugin: "counter",
+      function: "counted",
+      arguments: [7],
+      _meta: %{who: User.anyone(), for: User.anyone()}
+    }
 
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", service, stranger)
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", plugin, stranger)

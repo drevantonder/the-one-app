@@ -8,7 +8,7 @@
 # The One App ships with. Starting again in the same folder carries on with what's there, and Ctrl-C stops it.
 #
 # It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
-# command acts as that user.
+# command acts as that user, and ONE_FOR=groups/<name> or ONE_FOR=network has it run for a group or the network.
 #
 # --spare starts a second server, which takes over when the first stops.
 # --address runs the network's address here too (`address/`): its Workers in `wrangler dev`, with a local S3 store

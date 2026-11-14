@@ -38,7 +38,7 @@ defmodule OneCore.McpTest do
     start_supervised!(Plugins)
     start_supervised!(OneCore.Services)
     files = %{"notes.ex" => @plugin, "app.html" => "<p>Notes</p>", "app.js" => "1", "icon.svg" => "<svg/>"}
-    assert {:ok, 1, ""} = Plugins.deploy("notes", files)
+    assert {:ok, 1, ""} = Plugins.deploy("network", "notes", files)
 
     assert [app, script, icon] = ask("resources/list", %{})["resources"]
     assert %{"name" => "Notes", "mimeType" => "text/html;profile=mcp-app", "icons" => [%{"src" => src}]} = app
@@ -52,7 +52,7 @@ defmodule OneCore.McpTest do
              ask("resources/read", %{uri: app["uri"]})
 
     # A version that's been replaced is still read by a client that's showing it.
-    assert {:ok, 2, ""} = Plugins.deploy("notes", %{files | "app.js" => "2"})
+    assert {:ok, 2, ""} = Plugins.deploy("network", "notes", %{files | "app.js" => "2"})
     assert %{"contents" => [%{"text" => "1"}]} = ask("resources/read", %{uri: script["uri"]})
     assert Enum.all?(ask("resources/list", %{})["resources"], &(not String.contains?(&1["uri"], version)))
 

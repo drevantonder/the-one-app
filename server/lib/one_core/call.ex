@@ -12,14 +12,14 @@ defmodule OneCore.Call do
   - `by`: who asked: a user, or a sharing link's holder. They're a member of whoever the call is for. A scheduled
     job is called by the clock, so by nobody: `nil`.
 
-  The rest is One Core's: which plugin this is, what was asked of it, the plugins it uses, and whether another
-  server passed it on.
+  The rest is One Core's: the plugin's name where it was added and the plugin as a who, what was asked of it, the
+  plugins it uses, and whether another server passed it on.
   """
   alias OneCore.{Artifact, Hooks, Plugins, Server, User}
   alias OneCore.Plugins.Version
 
-  @enforce_keys [:own, :folder, :server, :for, :by, :plugin, :ask, :uses, :passed_on]
-  defstruct [:own, :folder, :server, :for, :by, :plugin, :ask, :uses, :passed_on]
+  @enforce_keys [:own, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
+  defstruct [:own, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
 
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), for: String.t()}
 
@@ -31,7 +31,7 @@ defmodule OneCore.Call do
   """
   def plugin(%__MODULE__{uses: uses, plugin: plugin}, name) do
     case uses do
-      %{^name => module} -> module
+      %{^name => {_artifact, module}} -> module
       _ -> raise "#{plugin} doesn't say it uses #{name}. Its uses/0 names the plugins it uses."
     end
   end
@@ -44,12 +44,12 @@ defmodule OneCore.Call do
       note = OneCore.Call.make(call, "7")
       OneCore.Artifact.write(note, "text", "Buy milk")
       OneCore.Artifact.name(note)
-      #=> "users/anyone/made/notes/7"
+      #=> "users/alice/made/notes/7"
   """
-  def make(%__MODULE__{for: who, by: by, plugin: plugin}, id) do
+  def make(%__MODULE__{for: who, by: by, plugin: plugin} = call, id) do
     if User.link?(who), do: raise("A sharing link's holder makes nothing: nothing in a network is theirs")
     if not (is_binary(id) and id =~ ~r/^[A-Za-z0-9_-]+$/), do: raise(ArgumentError, "an id is letters, digits, _ and -")
-    %Artifact{prefix: "#{who}/made/#{plugin}/#{id}/", reached: {plugin, {by, who}, "owner"}}
+    %Artifact{prefix: "#{who}/made/#{plugin}/#{id}/", reached: {call.who, {by, who}, "owner"}}
   end
 
   @doc """
@@ -59,45 +59,51 @@ defmodule OneCore.Call do
   A plugin reaches an artifact only if both it and whoever it runs for have that relation to it, which is for the
   plugins that decide `reach` to say: with none, everything in a network is shared. Nothing is asked about what
   the plugin made for whoever it runs for, and nothing about the plugin where it made the artifact for someone
-  else, or the artifact is its own.
+  else, or the artifact is its own. Another plugin's own artifact is never reached: it's always that one plugin's.
 
       note = OneCore.Call.reach(call, "users/alice/made/notes/7")
       {:ok, text, _tag} = OneCore.Artifact.read(note, "text")
   """
-  def reach(%__MODULE__{for: who, by: by, plugin: plugin}, name, relation \\ "viewer") do
-    case refused(plugin, {by, who}, name, relation) do
-      nil -> %Artifact{prefix: name <> "/", reached: {plugin, {by, who}, relation}}
+  def reach(%__MODULE__{for: who, by: by} = call, name, relation \\ "viewer") do
+    case refused(call, name, relation) do
+      nil -> %Artifact{prefix: name <> "/", reached: {call.who, {by, who}, relation}}
       why -> raise why
     end
   end
 
   @doc "Whether `reach/3` would give the artifact: whether this call may reach it as `relation`."
-  def reaches?(%__MODULE__{for: who, by: by, plugin: plugin}, name, relation \\ "viewer"),
-    do: refused(plugin, {by, who}, name, relation) == nil
+  def reaches?(%__MODULE__{} = call, name, relation \\ "viewer"), do: refused(call, name, relation) == nil
 
-  @doc """
-  Why a plugin in a call asked by `by`, running for `who`, may not reach the artifact `name` as `relation`, or
-  `nil` if it may.
-  """
-  def refused(plugin, {_by, who} = asked, name, relation) when relation in ["viewer", "editor", "owner"] do
-    if not Enum.all?(String.split(name, "/"), &(&1 =~ ~r/^[^.]/)),
+  @doc "Why this call may not reach the artifact `name` as `relation`, or `nil` if it may."
+  def refused(%__MODULE__{for: who, by: by, plugin: plugin} = call, name, relation)
+      when relation in ["viewer", "editor", "owner"] do
+    parts = String.split(name, "/")
+
+    if not Enum.all?(parts, &(&1 =~ ~r/^[^.]/)),
       do: raise(ArgumentError, "an artifact's name is parts joined by /, none empty or starting with a dot")
 
-    made = match?([_, _, "made", ^plugin | _], String.split(name, "/"))
+    # What's someone's sits under their prefix by what it is: what a plugin made for them, or a plugin's own.
+    kind = if hd(parts) == "network", do: Enum.slice(parts, 1, 2), else: Enum.slice(parts, 2, 2)
 
     about =
       cond do
-        made and String.starts_with?(name, who <> "/") -> []
-        made or name == Plugins.own(plugin) -> [who]
-        true -> [who, Plugins.who(plugin)]
+        name == Artifact.name(call.own) -> [who]
+        match?(["own" | _], kind) -> nil
+        kind == ["made", plugin] and String.starts_with?(name, who <> "/") -> []
+        kind == ["made", plugin] -> [who]
+        true -> [who, call.who]
       end
 
-    Enum.find_value(about, fn about ->
-      case Hooks.decide("reach", %{"who" => about, "relation" => relation, "artifact" => name}, asked) do
-        :ok -> nil
-        {:refuse, why} -> why
-      end
-    end)
+    if about == nil do
+      "#{name} is a plugin's own artifact, which only that plugin reaches"
+    else
+      Enum.find_value(about, fn about ->
+        case Hooks.decide("reach", %{"who" => about, "relation" => relation, "artifact" => name}, {by, who}) do
+          :ok -> nil
+          {:refuse, why} -> why
+        end
+      end)
+    end
   end
 
   @doc """
@@ -108,9 +114,9 @@ defmodule OneCore.Call do
 
       counter = OneCore.Call.process(call, Hello.Counter, call.for, 0)
   """
-  def process(%__MODULE__{uses: uses, plugin: plugin}, module, key, argument) do
+  def process(%__MODULE__{uses: uses, who: plugin}, module, key, argument) do
     under = Version.under(module)
-    plugin = Enum.find_value(uses, plugin, fn {name, used} -> Version.under(used) == under && name end)
+    plugin = Enum.find_value(uses, plugin, fn {_name, {plugin, used}} -> Version.under(used) == under && plugin end)
 
     Plugins.Process.of(plugin, Version.own_name(module), key, argument) ||
       raise "#{inspect(module)} isn't a module of #{plugin} as it runs now"

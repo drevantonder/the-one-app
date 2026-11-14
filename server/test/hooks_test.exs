@@ -73,10 +73,10 @@ defmodule OneCore.HooksTest do
     anyone = User.anyone()
 
     for {name, source} <- [echo: @echo, upper: changes("Upper", "upcase"), gate: @gate, ears: @ears],
-        do: assert({:ok, 1, ""} = Plugins.deploy("#{name}", %{"#{name}.ex" => source}))
+        do: assert({:ok, 1, ""} = Plugins.deploy("network", "#{name}", %{"#{name}.ex" => source}))
 
     assert {:error, "hooks/0 gives" <> _} =
-             Plugins.deploy("wrong", %{"wrong.ex" => String.replace(@ears, ~s(["called"]), ~s(["calling"]))})
+             Plugins.deploy("network", "wrong", %{"wrong.ex" => String.replace(@ears, ~s(["called"]), ~s(["calling"]))})
 
     # The tool is called with what was changed, and those that hear are told who changed what.
     assert say("hello") == {:ok, "HELLO"}
@@ -93,7 +93,7 @@ defmodule OneCore.HooksTest do
     refute_receive {:called, _about, _who}
 
     # Two that change the same thing agree, or the call is refused: neither is the one that came last.
-    assert {:ok, 1, ""} = Plugins.deploy("lower", %{"lower.ex" => changes("Lower", "downcase")})
+    assert {:ok, 1, ""} = Plugins.deploy("network", "lower", %{"lower.ex" => changes("Lower", "downcase")})
     assert say("42") == {:ok, "42"}
     assert say("hello") == {:error, "lower and upper each change word to something else. One has to give way."}
   end

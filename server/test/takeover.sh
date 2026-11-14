@@ -135,6 +135,6 @@ said b c >/dev/null
 stop b
 stop c
 until write only-d; do :; done
-echo "snapshots: $(ls "$bucket"/users/*/own/tracker/snapshot | sed 's/^0*//' | tr '\n' ' ')"
+echo "snapshots: $(ls "$bucket"/network/own/tracker/snapshot | sed 's/^0*//' | tr '\n' ' ')"
 said d
 check only-d

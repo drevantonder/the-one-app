@@ -60,9 +60,9 @@ defmodule OneCore.RelationsTest do
     {:ok, key} = OneCore.Iroh.key(Server.key_file())
     assert OneCore.Servers.joined?(key)
     for child <- [Plugins, Server, Services], do: start_supervised!(child)
-    for name <- ["database", "relations"], do: assert({:ok, 1, ""} = Plugins.deploy(name, shipped(name)))
-    assert {:ok, 1, ""} = Plugins.deploy("notes", %{"notes.ex" => @notes})
-    assert {:ok, 1, ""} = Plugins.deploy("peek", %{"peek.ex" => String.replace(@notes, "Notes", "Peek")})
+    for name <- ["database", "relations"], do: assert({:ok, 1, ""} = Plugins.deploy("network", name, shipped(name)))
+    assert {:ok, 1, ""} = Plugins.deploy("network", "notes", %{"notes.ex" => @notes})
+    assert {:ok, 1, ""} = Plugins.deploy("network", "peek", %{"peek.ex" => String.replace(@notes, "Notes", "Peek")})
     :ok
   end
 
@@ -161,7 +161,7 @@ defmodule OneCore.RelationsTest do
   @tag :tmp_dir
   test "a plugin reaches what another made only where both it and whoever it runs for have a relation to it" do
     note = write("1", @alice)
-    peek = Plugins.who("peek")
+    peek = "network/plugins/peek"
 
     # alice may, and the plugin may not: it's hers, and peek didn't make it.
     assert call("peek_read", %{"note" => note}, @alice) ==
@@ -175,14 +175,14 @@ defmodule OneCore.RelationsTest do
     assert reads?(note, @bob, "peek")
 
     # Without the relation tuples plugin, everything in the network is shared again.
-    assert :ok = Plugins.remove("relations")
+    assert :ok = Plugins.remove("network", "relations")
     assert reads?(note, @carol, "peek")
   end
 
   @tag :tmp_dir
   test "Claims' approver is whoever a tuple says is an editor of its claims, and everyone else sees only their own" do
-    assert {:ok, 1, ""} = Plugins.deploy("claims", shipped("claims"))
-    claims = Plugins.own("claims")
+    assert {:ok, 1, ""} = Plugins.deploy("network", "claims", shipped("claims"))
+    claims = "network/own/claims"
     assert {:ok, %{"id" => expense}} = call("claims_record", %{"amount" => 12.5}, @alice)
     assert {:ok, %{"id" => claim}} = call("claims_gather", %{"expenses" => [expense], "title" => "Taxi"}, @alice)
     assert {:ok, %{"status" => "sent"}} = call("claims_send", %{"claim" => claim}, @alice)

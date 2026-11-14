@@ -12,11 +12,15 @@ defmodule OneCore.Hooks do
     every plugin that changes is handed the same thing, and every plugin that decides has to agree.
   - What a plugin changed is said, with its name, to the plugins that decide and hear the same moment.
 
+  A plugin hooks into the moments of whoever it was added for. So a moment that runs for someone is hooked into
+  by the plugins added for them and by the ones added for the network, and by nobody else's: what one user adds
+  decides nothing for another.
+
   A hook may be asked more than once for one moment, as a tool may run more than once: a call passed on to
   another server is decided on both.
   """
   require Logger
-  alias OneCore.{Call, Plugins}
+  alias OneCore.Plugins
 
   @kinds [
     hears: """
@@ -61,7 +65,7 @@ defmodule OneCore.Hooks do
     {"changed", :hears,
      """
      A blob of an artifact that a plugin made or reached was written or removed. It's about the `artifact`'s
-     name, the `blob`'s name in it, and `by`, the plugin that did it. A plugin is told only if it could already
+     name, the `blob`'s name in it, and `by`, the plugin that did it, as a who. A plugin is told only if it could already
      reach the artifact for whoever changed it, and isn't told what it changed itself.
      """},
     {"joined", :hears,
@@ -83,18 +87,25 @@ defmodule OneCore.Hooks do
 
   defp flat(text), do: text |> String.split() |> Enum.join(" ")
 
-  @doc "Keeps which of the `running` plugins hooks into what, for every call to find without asking."
-  def running(running) do
-    hooking =
-      for {name, version} <- Enum.sort(running), hook <- version.hooks, reduce: %{} do
-        hooking -> Map.update(hooking, hook, [name], &(&1 ++ [name]))
-      end
-
-    if hooking != :persistent_term.get(__MODULE__, %{}), do: :persistent_term.put(__MODULE__, hooking)
+  @doc """
+  The plugins that hook into `hook` for a moment that runs for `who`: each as who it was added for, and its name
+  there. Which hook into what is kept by `OneCore.Plugins`, by who they were added for, as it looks at them.
+  """
+  def hooking(hook, who) do
+    for at <- Plugins.chain(who), name <- Map.get(added(at), hook, []), do: {at, name}
   end
 
-  @doc "The plugins that hook into `hook`, by name."
-  def hooking(hook), do: Map.get(:persistent_term.get(__MODULE__, %{}), hook, [])
+  # The hooks that the plugins added for an owner hook into, each with those plugins' names. An owner this server
+  # hasn't looked at is looked at first.
+  defp added(owner) do
+    with [] <- :ets.lookup(__MODULE__, owner),
+         _ = Plugins.look(owner),
+         [] <- :ets.lookup(__MODULE__, owner) do
+      %{}
+    else
+      [{^owner, hooking}] -> hooking
+    end
+  end
 
   @doc """
   What a plugin's `hook/3` answered, as it's passed between servers: what JSON holds. Raises if it isn't an answer
@@ -132,31 +143,21 @@ defmodule OneCore.Hooks do
   end
 
   @doc "Tells each plugin that hears `hook` what it's about, for `asked`."
-  def heard(hook, about, asked) do
-    for plugin <- hooking(hook), do: tell(plugin, hook, about, asked)
+  def heard(hook, about, {_by, who} = asked) do
+    for {at, name} <- hooking(hook, who),
+        do: Task.Supervisor.start_child(__MODULE__, fn -> Plugins.hook(at, name, hook, about, asked) end)
+
     :ok
   end
-
-  defp tell(plugin, hook, about, asked) do
-    Task.Supervisor.start_child(__MODULE__, fn ->
-      if hears?(plugin, about, asked), do: Plugins.hook(plugin, hook, about, asked)
-    end)
-  end
-
-  # A hook gives no access of its own: a plugin hears about an artifact only if it could already reach it.
-  defp hears?(plugin, %{"artifact" => artifact, "by" => by}, asked),
-    do: plugin != by and Call.refused(plugin, asked, artifact, "viewer") == nil
-
-  defp hears?(_plugin, _about, _asked), do: true
 
   @doc """
   Asks each plugin that changes `hook` what it changes of what it's about, for `asked`. Gives `{:ok, changes, by}`:
   what's changed by name, and the plugin that changed each. `{:refuse, why}` if two don't agree, or one couldn't
   say.
   """
-  def change(hook, about, asked) do
-    Enum.reduce_while(hooking(hook), {:ok, %{}, %{}}, fn plugin, {:ok, changes, by} ->
-      with {:ok, changed} <- answered(plugin, hook, about, asked),
+  def change(hook, about, {_by, who} = asked) do
+    Enum.reduce_while(hooking(hook, who), {:ok, %{}, %{}}, fn {_at, plugin} = added, {:ok, changes, by} ->
+      with {:ok, changed} <- answered(added, hook, about, asked),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, plugin} end), by)
         {:cont, {:ok, Map.merge(changes, changed), by}}
@@ -172,8 +173,8 @@ defmodule OneCore.Hooks do
 
   @doc "Asks each plugin that decides `hook` about it, for `asked`. Gives `:ok`, or `{:refuse, why}` from the first to refuse."
   def decide(hook, about, {_by, who} = asked) do
-    Enum.find_value(hooking(hook), :ok, fn plugin ->
-      case answered(plugin, hook, about, asked) do
+    Enum.find_value(hooking(hook, who), :ok, fn {_at, plugin} = added ->
+      case answered(added, hook, about, asked) do
         {:ok, "ok"} ->
           nil
 
@@ -188,8 +189,8 @@ defmodule OneCore.Hooks do
   end
 
   # A hook whose plugin keeps what it needs in a database another server writes is answered there.
-  defp answered(plugin, hook, about, asked) do
-    case Plugins.hook(plugin, hook, about, asked) do
+  defp answered({at, plugin}, hook, about, asked) do
+    case Plugins.hook(at, plugin, hook, about, asked) do
       {:ok, answer} -> {:ok, answer}
       {:passed_on, %{"answer" => answer}} -> {:ok, answer}
       {:error, why} -> {:error, why}

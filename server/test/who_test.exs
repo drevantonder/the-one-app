@@ -76,7 +76,53 @@ defmodule OneCore.WhoTest do
     """
   end
 
-  defp deploy(name, source), do: assert({:ok, _number, ""} = Plugins.deploy(name, %{"#{name}.ex" => source}))
+  # A plugin that counts in its own artifact, says where that is and who it ran for, and has a job that says the
+  # same to the test.
+  @counts """
+  defmodule Counts do
+    @behaviour OneCore.Plugin
+    alias OneCore.Artifact
+
+    @impl true
+    def uses, do: ["database"]
+
+    @impl true
+    def jobs, do: [%{tool: "tick", every: 1}]
+
+    @impl true
+    def tools, do: for(name <- ~w(count tick peek), do: %{name: name, description: name, inputs: %{type: "object"}})
+
+    @impl true
+    def call("count", _inputs, %{own: own} = call) do
+      Artifact.write(own, "\#{length(Artifact.list(own))}", "")
+      "\#{Artifact.name(own)}: \#{length(Artifact.list(own))} for \#{call.for}"
+    end
+
+    def call("tick", _inputs, call), do: send(:who_test, {:ticked, call.for, call.by, Artifact.name(call.own)})
+    def call("peek", %{"artifact" => name}, call), do: Artifact.list(OneCore.Call.reach(call, name))
+  end
+  """
+
+  # A plugin that decides every call, and refuses it.
+  @shut """
+  defmodule Shut do
+    @behaviour OneCore.Plugin
+
+    @impl true
+    def hooks, do: ["call"]
+
+    @impl true
+    def hook("call", _about, call), do: {:refuse, "Shut to \#{call.for}."}
+  end
+  """
+
+  defp shipped(name) do
+    folder = Path.expand("../../plugins/#{name}", __DIR__)
+    files = Enum.filter(Path.wildcard(folder <> "/**"), &File.regular?/1)
+    Map.new(files, &{Path.relative_to(&1, folder), File.read!(&1)})
+  end
+
+  defp deploy(name, source), do: assert({:ok, _number, ""} = Plugins.deploy("network", name, %{"#{name}.ex" => source}))
 
   defp call(tool, inputs, who),
     do: Plugins.call(hd(String.split(tool, "_")), tl(String.split(tool, "_", parts: 2)) |> hd(), inputs, who)
@@ -108,7 +154,7 @@ defmodule OneCore.WhoTest do
     {:ok, key} = OneCore.Iroh.key(Server.key_file())
     assert OneCore.Servers.joined?(key)
     for child <- [Plugins, Server, Services], do: start_supervised!(child)
-    assert {:ok, 1, ""} = Plugins.deploy("asked", %{"asked.ex" => @plugin})
+    assert {:ok, 1, ""} = Plugins.deploy("network", "asked", %{"asked.ex" => @plugin})
     :ok
   end
 
@@ -163,7 +209,7 @@ defmodule OneCore.WhoTest do
     assert {:ok, "users/alice/made/notes/1" = note} = call("notes_write", %{"id" => "1", "text" => "Buy milk"}, alice)
     assert call("notes_read", %{"note" => note}, "users/bob") == {:ok, "Buy milk"}
     assert call("peek_read", %{"note" => note}, alice) == {:ok, "Buy milk"}
-    assert_receive {:changed, "peek", %{"artifact" => ^note, "blob" => "text", "by" => "notes"}, ^alice}
+    assert_receive {:changed, "peek", %{"artifact" => ^note, "blob" => "text", "by" => "network/plugins/notes"}, ^alice}
     # What was reached to read is only read, and a link's holder makes nothing.
     assert {:error, "users/alice/made/notes/1 was reached as a viewer" <> _} =
              call("notes_scribble", %{"note" => note}, "users/bob")
@@ -176,7 +222,7 @@ defmodule OneCore.WhoTest do
     assert {:ok, _name} = call("notes_write", %{"id" => "3", "text" => "x"}, alice)
     assert call("notes_read", %{"note" => note}, alice) == {:ok, "Buy milk"}
     # peek hears of the change only if it could reach the note for alice, which is what was asked here.
-    assert [%{"who" => ^alice}, %{"who" => "users/anyone/plugins/peek"}] = asked()
+    assert [%{"who" => ^alice}, %{"who" => "network/plugins/peek"}] = asked()
 
     # For someone else it's asked about them, and for another plugin about the plugin too: both need the relation.
     assert call("notes_read", %{"note" => note}, "users/bob") == {:error, "Door keeps users/bob out."}
@@ -184,9 +230,9 @@ defmodule OneCore.WhoTest do
     assert call("notes_edit", %{"note" => note}, "users/carol") == {:ok, :ok}
     assert [%{"who" => "users/carol", "relation" => "editor"} | _hearing] = asked()
 
-    deploy("door", decides("Door", "users/anyone/plugins/peek"))
-    assert call("peek_read", %{"note" => note}, alice) == {:error, "Door keeps users/anyone/plugins/peek out."}
-    assert [%{"who" => ^alice}, %{"who" => "users/anyone/plugins/peek"}] = asked()
+    deploy("door", decides("Door", "network/plugins/peek"))
+    assert call("peek_read", %{"note" => note}, alice) == {:error, "Door keeps network/plugins/peek out."}
+    assert [%{"who" => ^alice}, %{"who" => "network/plugins/peek"}] = asked()
 
     # A plugin kept out hears nothing of the artifact, and none hears what it changed itself.
     assert {:ok, _name} = call("notes_write", %{"id" => "4", "text" => "x"}, alice)
@@ -197,5 +243,72 @@ defmodule OneCore.WhoTest do
     deploy("lock", decides("Lock", "users/carol"))
     assert call("notes_read", %{"note" => note}, "users/carol") == {:error, "Lock keeps users/carol out."}
     assert call("notes_read", %{"note" => note}, "users/dave") == {:ok, "Buy milk"}
+  end
+
+  @tag :tmp_dir
+  test "a plugin is whoever's deployed it, and runs for whoever it's added for, with an artifact of its own for each" do
+    Process.register(self(), :who_test)
+    {alice, bob, family} = {"users/alice", "users/bob", "groups/family"}
+    assert {:ok, 1, _} = Plugins.deploy("network", "database", shipped("database"))
+    assert {:ok, 1, ""} = Plugins.deploy(alice, "counts", %{"counts.ex" => @counts})
+    assert Plugins.plugin(alice, "counts") == "users/alice/plugins/counts"
+    assert call("counts_count", %{}, alice) == {:ok, "users/alice/own/counts: 1 for users/alice"}
+
+    # Nobody else has it until it's added for them: the same plugin, with another artifact of its own.
+    assert call("counts_count", %{}, bob) == {:error, "There's no plugin named counts"}
+    assert :ok = Plugins.add(bob, "counts", "users/alice/plugins/counts")
+    assert :ok = Plugins.add(family, "counts", "users/alice/plugins/counts")
+    assert call("counts_count", %{}, bob) == {:ok, "users/bob/own/counts: 1 for users/bob"}
+    assert call("counts_count", %{}, alice) == {:ok, "users/alice/own/counts: 2 for users/alice"}
+    assert call("counts_count", %{}, {alice, family}) == {:ok, "groups/family/own/counts: 1 for groups/family"}
+
+    # What's added for the network is everyone's, with one artifact of its own.
+    assert :ok = Plugins.add("network", "tally", "users/alice/plugins/counts")
+    assert call("tally_count", %{}, "users/carol") == {:ok, "network/own/tally: 1 for users/carol"}
+    assert call("tally_count", %{}, bob) == {:ok, "network/own/tally: 2 for users/bob"}
+
+    assert Plugins.add("network", "tally", "users/bob/plugins/nothing") ==
+             {:error, "There's no plugin users/bob/plugins/nothing"}
+
+    # Another plugin's own artifact is never reached, whoever asks, even with nothing deciding who reaches what.
+    assert {:error, "users/alice/own/counts is a plugin's own artifact, which only that plugin reaches"} =
+             call("tally_peek", %{"artifact" => "users/alice/own/counts"}, alice)
+
+    # Everyone using a plugin runs its newest version.
+    newer = String.replace(@counts, "for \#{call.for}", "now \#{call.for}")
+    assert {:ok, 2, ""} = Plugins.deploy(alice, "counts", %{"counts.ex" => newer})
+    assert call("counts_count", %{}, bob) == {:ok, "users/bob/own/counts: 2 now users/bob"}
+    assert call("tally_count", %{}, bob) == {:ok, "network/own/tally: 3 now users/bob"}
+
+    # A scheduled job runs for each one its plugin was added for, asked by nobody.
+    start_supervised!({Task.Supervisor, name: OneCore.Asks})
+    start_supervised!(OneCore.Jobs)
+
+    for {who, own} <- [
+          {alice, "users/alice/own/counts"},
+          {family, "groups/family/own/counts"},
+          {"network", "network/own/tally"}
+        ],
+        do: assert_receive({:ticked, ^who, nil, ^own}, 5_000)
+
+    stop_supervised!(OneCore.Jobs)
+
+    # A plugin hooks into the moments of whoever it was added for, and of nobody else.
+    assert {:ok, 1, ""} = Plugins.deploy(bob, "shut", %{"shut.ex" => @shut})
+    assert call("counts_count", %{}, bob) == {:error, "Shut to users/bob."}
+    assert call("tally_count", %{}, bob) == {:error, "Shut to users/bob."}
+    assert {:ok, _} = call("tally_count", %{}, alice)
+    assert :ok = Plugins.add("network", "shut", "users/bob/plugins/shut")
+    assert call("tally_count", %{}, alice) == {:error, "Shut to users/alice."}
+    assert :ok = Plugins.remove("network", "shut")
+    assert {:ok, _} = call("tally_count", %{}, alice)
+
+    # Removing it for someone leaves it whoever's it is, with what it kept.
+    assert :ok = Plugins.remove(bob, "shut")
+    assert :ok = Plugins.remove(bob, "counts")
+    assert call("counts_count", %{}, bob) == {:error, "There's no plugin named counts"}
+    assert {:ok, _} = call("counts_count", %{}, alice)
+    assert ["users/bob/own/counts/0", "users/bob/own/counts/1" | _] = OneCore.Bucket.list("users/bob/own/counts/")
+    assert Plugins.remove(bob, "counts") == {:error, "No plugin named counts is added for users/bob"}
   end
 end

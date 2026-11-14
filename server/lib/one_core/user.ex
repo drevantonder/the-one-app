@@ -78,6 +78,18 @@ defmodule OneCore.User do
     end
   end
 
+  @doc """
+  Whose `who` is, or who they are: the user, the group or the network that an artifact's name, or a who's, starts
+  with. `nil` for the holder of a sharing link, who is nobody's.
+  """
+  def owner(who) do
+    case String.split(who, "/") do
+      [kind, name | _] when kind in ["users", "groups"] -> kind <> "/" <> name
+      ["network" | _] -> "network"
+      _ -> nil
+    end
+  end
+
   @doc "Whether `who` names a user, a group or the network: someone things belong to."
   def owner?(who), do: is_binary(who) and who =~ ~r/^((users|groups)\/[a-z][a-z0-9-]*|network)$/
 

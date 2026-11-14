@@ -23,13 +23,13 @@ defmodule OneCore.Service do
   """
   def call(%Call{} = call, service, function, arguments \\ [], server \\ nil) when is_list(arguments) do
     service = Version.own_name(service)
-    servers = if server, do: [server], else: Services.servers(call.plugin, service)
+    servers = if server, do: [server], else: Services.servers(call.who, service)
 
     if servers == [] do
       raise "No server runs #{call.plugin}'s #{service}. `services` says what it needs, and `install_service` runs it on one."
     end
 
-    ask = %{plugin: call.plugin, service: service, function: "#{function}", arguments: json(arguments)}
+    ask = %{plugin: call.who, service: service, function: "#{function}", arguments: json(arguments)}
 
     case ask(servers, call.server, ask) do
       {:ok, answer} -> answer
@@ -38,7 +38,7 @@ defmodule OneCore.Service do
   end
 
   @doc "The keys of the servers that run a service of this call's plugin, for a plugin that chooses which to call."
-  def servers(%Call{plugin: plugin}, service), do: Services.servers(plugin, Version.own_name(service))
+  def servers(%Call{who: plugin}, service), do: Services.servers(plugin, Version.own_name(service))
 
   @doc """
   Calls a function of the service's plugin, for the user or group `who`, asked by nobody, and gives its answer.
@@ -51,8 +51,11 @@ defmodule OneCore.Service do
     {plugin, _name, _version} = which(service)
     if Services.acts_for() == [], do: raise("This server doesn't act for #{who}")
 
+    {added, name} =
+      Plugins.added(who, plugin) || raise "#{plugin} isn't added for #{who}, or for the network"
+
     answer =
-      case Plugins.function(plugin, "#{function}", json(arguments), {nil, who}) do
+      case Plugins.function(added, name, "#{function}", json(arguments), {nil, who}) do
         {:ok, answer} -> json(answer)
         {:passed_on, %{"answer" => answer}} -> answer
         {:error, why} -> raise why

@@ -13,12 +13,13 @@ defmodule OneCore.Plugins.Version do
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
   `needs` of a machine. `hooks` names the hooks it hooks into, and `jobs` lists its scheduled jobs: each one's
-  `tool`, the `inputs` it's called with, and `every` how many seconds.
+  `tool`, the `inputs` it's called with, and `every` how many seconds. `artifact` is the plugin it's a version of,
+  which whatever loaded it says.
   """
   alias OneCore.{Hooks, Server}
 
   @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
-  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
+  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes, :artifact]
 
   # The names versions are loaded under: each is free, or taken by the one version loaded under it.
   @names 4096

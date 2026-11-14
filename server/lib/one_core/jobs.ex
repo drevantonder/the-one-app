@@ -4,7 +4,7 @@ defmodule OneCore.Jobs do
 
   A job is due at each whole multiple of its `every` seconds since 1970, so every server knows when without any
   telling another. At each of those times, and when this server starts or a plugin's version changes, the plugin
-  is asked to have what's due called (`OneCore.Plugins.schedule/1`). Every server asks, and the plugin keeping the
+  is asked to have what's due called (`OneCore.Plugins.schedule/2`), for each one it was added for. Every server asks, and the plugin keeping the
   schedule is what makes one of them make each call, once: a time that passed with no server up is made up for
   by the first that's back.
   """
@@ -33,13 +33,13 @@ defmodule OneCore.Jobs do
   defp asked(%{at: at, timer: timer}) do
     if timer, do: Process.cancel_timer(timer)
     now = System.os_time(:second)
-    scheduled = for {name, %{jobs: [_ | _] = jobs}} <- Plugins.running(), do: {name, jobs}
+    scheduled = Plugins.scheduled()
 
-    for {name, jobs} <- scheduled, Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))) do
-      Task.Supervisor.start_child(OneCore.Asks, fn -> Plugins.schedule(name) end)
+    for {added, name, jobs} <- scheduled, Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))) do
+      Task.Supervisor.start_child(OneCore.Asks, fn -> Plugins.schedule(added, name) end)
     end
 
-    next = for {_name, jobs} <- scheduled, job <- jobs, do: (div(now, job.every) + 1) * job.every
+    next = for {_added, _name, jobs} <- scheduled, job <- jobs, do: (div(now, job.every) + 1) * job.every
 
     timer =
       if next != [],

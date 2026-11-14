@@ -2,7 +2,9 @@ defmodule OneCore.Plugin do
   @guide """
   A plugin is a folder of Elixir files, and nothing is needed to write one but a text editor. Deploying it (the
   `deploy` tool) hands the server those files: it compiles them, says what's wrong if they don't compile, and
-  otherwise runs them at once, with no restart. A plugin is updated by deploying it again. Calls already running
+  otherwise runs them at once, with no restart. The plugin is whoever's deployed it, and is added for them: a
+  user, or the group or the network they asked for. Someone else has it too once it's added for them (the `add`
+  tool), and what's added for the network is everyone's. A plugin is updated by deploying it again. Calls already running
   finish on the version they started on, and the next call gets the new one.
 
   One module in the plugin says `@behaviour OneCore.Plugin`, and gives the plugin's tools:
@@ -53,8 +55,9 @@ defmodule OneCore.Plugin do
     its blobs as `{:file, "image/jpeg", call.own, name}`: the client is handed a short-lived link, fetches the
     file from the bucket and keeps it, so a blob answered this way is one that's never replaced.
   - `guide/0`, if the plugin has one, is text for agents on when and how to use its tools.
-  - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact, where it keeps
-    what it needs as blobs through `OneCore.Artifact`: `read/2` gives `{:ok, data, tag}` or `:absent`, `write/3`
+  - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact for whoever it
+    was added for, which only this plugin reaches: one added for a user keeps that user's, and one added for the
+    network keeps everyone's together. It keeps what it needs there as blobs through `OneCore.Artifact`: `read/2` gives `{:ok, data, tag}` or `:absent`, `write/3`
     writes only if absent and gives `:ok` or `:exists`, `replace/4` takes that tag, replaces only if unchanged
     and gives `:ok` or `:changed`, `list/2` gives the names that start with what it's given, and `remove/2`
     removes one for good. Its `folder` is a folder of the plugin's own on the machine running the call, for files
@@ -69,7 +72,7 @@ defmodule OneCore.Plugin do
     is reached only if both the plugin and whoever it runs for have that relation to it, which the plugins that
     decide `reach` say. `relations` is the one The One App ships with, and its guide says how something is
     shared. With none, everything in a network is shared.
-  - A tool runs for whoever asked, `call.for`, and every plugin is added for the network's users. Whoever asks
+  - A tool runs for whoever asked, `call.for`. Whoever asks
     can ask for a group they're a member of, or for the network: `call.for` is then the group, what the tool
     makes is the group's, it reaches what the group may, and `call.by` is who asked. A tool that the holder of a
     sharing link may call too says `by_link: true`: it then runs for someone who is no user, so it keeps to what
@@ -78,8 +81,8 @@ defmodule OneCore.Plugin do
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
   - A tool whose answer to the same inputs is never different, such as a photo by its id, says `fixed: true` too.
     A client that has kept its answer never asks again.
-  - `uses/0`, if the plugin has one, names the other plugins it uses. Deploying it brings along the ones the
-    server ships with, and `OneCore.Call.plugin(call, "database")` gives one of them: its module, whose functions
+  - `uses/0`, if the plugin has one, names the other plugins it uses, as they're added for whoever it's added
+    for, or for the network. Deploying it brings along the ones the server ships with, and `OneCore.Call.plugin(call, "database")` gives one of them: its module, whose functions
     take the call and run as this plugin, for whoever it runs for. A plugin that keeps more than a few blobs uses
     `database`, whose guide says how.
   - A plugin's module is what other plugins call, so its public functions besides these are what it provides
@@ -102,7 +105,8 @@ defmodule OneCore.Plugin do
   - A job names one of the plugin's `tool`s, the `inputs` to call it with if it takes any, and `every`: how many
     seconds apart. It's due at each whole multiple of that since 1970 in UTC, so `every: 3600` is on the hour and
     `every: 86_400` is at midnight UTC, and first at the next one after it's deployed.
-  - The call is made on one server, for the user the plugin was added for, when a server is up. Times that
+  - The call is made on one server, for whoever the plugin was added for, when a server is up: once for each of
+    them, with `call.for` the user, the group or the network, and `call.by` nobody. Times that
     passed with none up are made up for with one call when one is back.
   - A plugin with jobs uses `database`, which keeps when each last ran in the plugin's database, and has the
     server writing that database make the call. Its guide says what that promises a job's tool.
@@ -125,6 +129,8 @@ defmodule OneCore.Plugin do
   - `hook/3` is called with the hook's name, what the moment is about, a map with string keys, and an
     `OneCore.Call`: it runs as this plugin, for whoever the moment is about, with the plugin's own artifact. A
     hook gives a plugin nothing it couldn't already reach.
+  - A plugin hooks into the moments of whoever it was added for: one added for a user decides only what runs for
+    that user, and one added for the network decides for everyone.
   #{OneCore.Hooks.guide()}
 
   A plugin's files that aren't Elixir reach each client from the server: they are its parts that run in a client,

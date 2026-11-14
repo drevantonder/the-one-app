@@ -24,16 +24,18 @@ say() { printf '\n== %s\n' "$*"; }
 now() { echo "${EPOCHREALTIME/[.,]/}"; }
 median() { sort -n "$1" | awk '{ all[NR] = $1 } END { printf "%.3f ms", all[int((NR + 1) / 2)] / 1000 }'; }
 
-# A command as a user of the network, or `link <link>` as a sharing link's holder: `as alice notes read --note ...`.
+# A command as a user of the network, or `link <link>` as a sharing link's holder, and for a group or the network if
+# it says: `as alice notes read --note ...`, `as alice for groups/family notes write ...`.
 as() {
-  local who=$1
+  local who=$1 asked=
   shift
   if [[ $who == link ]]; then
     who=$1
     shift
     ONE_LINK=$who ONE_HOME=$folder/client "$one" "$@"
   else
-    ONE_AS=$who ONE_HOME=$folder/client "$one" "$@"
+    [[ $1 == for ]] && asked=$2 && shift 2
+    ${asked:+env ONE_FOR=$asked} env ONE_AS=$who ONE_HOME=$folder/client "$one" "$@"
   fi
 }
 # What a command says is shown with it. `may` is one that has to be answered, and `refused` one that mustn't be.
@@ -44,7 +46,7 @@ refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answ
 # The plugins this proves with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
 # due and which server made it.
-mkdir -p "$folder"/{notes,reader,gate,ticker}
+mkdir -p "$folder"/{notes,reader,gate,ticker,diary}
 cat >"$folder/notes/notes.ex" <<'EOF'
 defmodule Notes do
   @behaviour OneCore.Plugin
@@ -131,6 +133,24 @@ defmodule Gate do
   def hook("call", _about, _call), do: :ok
 end
 EOF
+cat >"$folder/diary/diary.ex" <<'EOF'
+defmodule Diary do
+  @behaviour OneCore.Plugin
+  alias OneCore.Artifact
+
+  @impl true
+  def tools do
+    text = %{type: "object", properties: %{text: %{type: "string", description: "What to write"}}, required: ["text"]}
+    [%{name: "write", description: "Writes an entry in the diary of whoever this is added for", inputs: text}]
+  end
+
+  @impl true
+  def call("write", %{"text" => text}, %{own: own} = call) do
+    Artifact.write(own, "#{length(Artifact.list(own)) + 1}", text)
+    "#{Artifact.name(own)} has #{length(Artifact.list(own))}, and this ran for #{call.for}, asked by #{call.by}"
+  end
+end
+EOF
 cat >"$folder/ticker/ticker.ex" <<'EOF'
 defmodule Ticker do
   @behaviour OneCore.Plugin
@@ -172,7 +192,8 @@ defmodule Ticker do
   end
 end
 EOF
-for plugin in notes reader ticker; do as anyone deploy --name $plugin --files-from "$folder/$plugin" >/dev/null; done
+# They're deployed for the network, so they're everyone's.
+for plugin in notes reader ticker; do as anyone for network deploy --name $plugin --files-from "$folder/$plugin" >/dev/null; done
 
 say "One can't read the other's artifact until a tuple says so"
 note=$(as alice notes write --id shopping --text "Buy milk")
@@ -207,17 +228,33 @@ refused as link "$link" notes read --note "$note"
 say "A plugin can't reach what its user can't, or what it has no relation to itself"
 refused as dave notes read --note "$note"
 refused as alice reader read --note "$note"
-may as alice relations share --artifact "$note" --relation viewer --who users/anyone/plugins/reader
+may as alice relations share --artifact "$note" --relation viewer --who network/plugins/reader
 may as alice reader read --note "$note"
 refused as dave reader read --note "$note"
 
+say "A plugin is whoever's deployed it, and has an artifact of its own for each one it's added for"
+may as alice deploy --name diary --files-from "$folder/diary"
+may as alice diary write --text "Dear diary"
+refused as bob diary write --text "Dear diary"
+may as bob add --plugin users/alice/plugins/diary
+may as bob diary write --text "Mine"
+may as alice for groups/family add --plugin users/alice/plugins/diary
+may as carol for groups/family diary write --text "Ours"
+refused as dave for groups/family diary write --text "Theirs"
+may as anyone for network add --plugin users/alice/plugins/diary --name journal
+may as dave journal write --text "Everyone's"
+refused as alice reader read --note users/bob/own/diary
+may as bob remove --name diary
+refused as bob diary write --text "Mine again"
+may as alice diary write --text "Still here"
+
 say "A hook that decides refuses a call with its reason"
 may as alice notes write --id diary --text "My password is hunter2"
-as anyone deploy --name gate --files-from "$folder/gate" >/dev/null
-echo "  gate is deployed, and decides every call"
+as anyone for network deploy --name gate --files-from "$folder/gate" >/dev/null
+echo "  gate is deployed for the network, and decides every call"
 refused as alice notes write --id secrets --text "My password is hunter2"
 may as alice notes write --id plans --text "Go for a walk"
-as anyone remove --name gate >/dev/null
+as anyone for network remove --name gate >/dev/null
 
 say "Claims' approver is whoever a tuple says"
 expense=$(as alice claims record --amount 12.5 --note Taxi | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
@@ -226,8 +263,8 @@ claim=$(as alice claims list | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
 as alice claims send --claim "$claim" >/dev/null
 echo "  alice sent claim $claim"
 refused as bob claims approve --claim "$claim"
-refused as alice relations share --artifact users/anyone/own/claims --relation editor --who users/alice
-may as anyone relations share --artifact users/anyone/own/claims --relation editor --who users/bob
+refused as alice relations share --artifact network/own/claims --relation editor --who users/alice
+may as anyone relations share --artifact network/own/claims --relation editor --who users/bob
 said=$(as bob claims approve --claim "$claim" | grep -o '"status":"[a-z_]*"') && echo "  may      as bob claims approve --claim $claim" && echo "           -> $said"
 
 say "What a check costs a call, over one connection as an agent's MCP session keeps"

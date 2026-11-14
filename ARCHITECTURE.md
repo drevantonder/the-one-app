@@ -60,9 +60,6 @@
   need, and the owner isn't responsible for keeping their credentials safe.
 - Servers ask the relation tuples plugin. The signer doesn't: it only knows which servers act for whom. Taking access
   away reaches every server eventually. No time is promised.
-- A plugin is added for a user, for a group or for the network.
-- Every plugin has an artifact of its own for each one it was added for. Only that plugin reaches it, and it needs no
-  relation tuple, because it's always that one plugin's.
 - That artifact belongs to whoever the plugin was added for, so only a server its owner chose holds its lease. What's
   added for the network is safe from its members, and what's added for a group is safe from that group's members.
 - Any user can add a plugin. It's an artifact they own, and relation tuples say who else may use it.
@@ -133,13 +130,11 @@
 
 ## Plugins
 
-- A plugin always runs for a user or a group: whoever is using it, or, with nobody there, the one it was set up for.
 - A plugin's code on a server is free, and nothing checks it. Agents are intelligent, and a network is trusted.
 - Letting a computer be a server for a user or a group means trusting the plugins they add with that computer.
 - Nothing on a server keeps one plugin's code from what another's can reach there. What keeps users and groups apart is
   which servers act for whom.
 - Tools to check a plugin before it's deployed are recommended, not needed.
-- Everyone using a plugin runs its newest version.
 - A plugin's tools are its only public part. Anything may call one for the user or group it runs for: an app, an agent,
   a scheduled job, another plugin's tool.
 - A plugin's deployed code is open to everyone in the network. A git repo it came from can be private.

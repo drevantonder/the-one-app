@@ -38,14 +38,17 @@ defmodule OneCore.PluginsTest do
     test = self()
     wait = fn -> Task.async(fn -> Plugins.call("slow", "wait", %{"test" => test}, OneCore.User.anyone()) end) end
 
-    assert {:ok, 1, ""} = Plugins.deploy("slow", %{"slow.ex" => slow(1)})
+    assert {:ok, 1, ""} = Plugins.deploy("network", "slow", %{"slow.ex" => slow(1)})
     first = wait.()
     assert_receive {:waiting, first_call}
 
     # More updates than the two versions of a module the VM keeps.
-    assert {:ok, 2, ""} = Plugins.deploy("slow", %{"slow.ex" => slow(2)})
-    assert {:ok, 3, ""} = Plugins.deploy("slow", %{"slow.ex" => slow(3)})
-    assert {:error, why} = Plugins.deploy("slow", %{"slow.ex" => "defmodule Slow do\n  def broken(, do: 1\nend"})
+    assert {:ok, 2, ""} = Plugins.deploy("network", "slow", %{"slow.ex" => slow(2)})
+    assert {:ok, 3, ""} = Plugins.deploy("network", "slow", %{"slow.ex" => slow(3)})
+
+    assert {:error, why} =
+             Plugins.deploy("network", "slow", %{"slow.ex" => "defmodule Slow do\n  def broken(, do: 1\nend"})
+
     assert why =~ "slow.ex:2"
 
     next = wait.()

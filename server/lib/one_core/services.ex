@@ -3,7 +3,7 @@ defmodule OneCore.Services do
   Runs plugins' services on this server, and knows which servers run which.
 
   A service runs on each server whose owner installed it there. What a server has installed is a blob of its own,
-  `servers/<its key>/services`: each service's name with its plugin's. Only that server writes it. Every server
+  `servers/<its key>/services`: each service's name with its plugin, by its artifact's name. Only that server writes it. Every server
   keeps what the servers acting for its user have installed, as it last read it, so calling a service asks the
   bucket nothing. It reads again when a server tells it to, when whoever asks isn't a server it knows, and when it
   knows of none that runs a service.
@@ -36,14 +36,15 @@ defmodule OneCore.Services do
   def look, do: GenServer.call(__MODULE__, :look)
 
   @doc """
-  Every running plugin's services, as the bucket has them now: each one's `plugin`, its `service` name, what it
-  `needs` of a machine, and the `servers` that run it.
+  The services of the plugins something that runs for `who` finds, as the bucket has them now: each one's
+  `plugin`, its `service` name, what it `needs` of a machine, and the `servers` that run it.
   """
-  def list do
+  def list(who) do
     {acting, installed} = look()
 
-    for {plugin, version} <- Enum.sort(Plugins.running()), %{name: name, needs: needs} <- version.services do
-      %{plugin: plugin, service: name, needs: needs, servers: Enum.filter(acting, &({plugin, name} in installed[&1]))}
+    for {plugin, version} <- Enum.sort(Plugins.running(who)), %{name: name, needs: needs} <- version.services do
+      servers = Enum.filter(acting, &({version.artifact, name} in installed[&1]))
+      %{plugin: plugin, service: name, needs: needs, servers: servers}
     end
   end
 
@@ -83,7 +84,14 @@ defmodule OneCore.Services do
   `{:ok, answer}`, or `{:error, why}` with what the caller is told.
   """
   def run(plugin, service, function, arguments) do
-    Plugins.run(plugin, fn %{^plugin => version} ->
+    with :absent <- run(plugin, service, function, arguments, Plugins.version(plugin)),
+         do: {:error, "#{plugin} isn't running on this server"}
+  end
+
+  defp run(_plugin, _service, _function, _arguments, nil), do: :absent
+
+  defp run(plugin, service, function, arguments, _running) do
+    Plugins.run(plugin, fn version ->
       module = if Enum.any?(version.services, &(&1.name == service)), do: Version.module(version, service)
       instance = Plugins.Process.whereis(plugin, service)
 
@@ -107,8 +115,7 @@ defmodule OneCore.Services do
   def folder(plugin, service), do: Path.join([Server.home(), "services", plugin, service])
 
   defp known(plugin, service) do
-    with _ = Plugins.look(),
-         %{^plugin => %{services: services}} <- Plugins.running() do
+    with %{services: services} <- Plugins.version(plugin) do
       cond do
         Enum.any?(services, &(&1.name == service)) ->
           :ok
@@ -120,7 +127,7 @@ defmodule OneCore.Services do
           {:error, "#{plugin} has no service named #{service}. It has: #{Enum.map_join(services, ", ", & &1.name)}"}
       end
     else
-      _ -> {:error, "There's no plugin named #{plugin}"}
+      _ -> {:error, "#{plugin} isn't running on this server"}
     end
   end
 
@@ -132,9 +139,9 @@ defmodule OneCore.Services do
         _ -> Exception.format_exit(why)
       end
 
-    case Plugins.running() do
-      %{^plugin => version} -> Version.own_names(why, version)
-      _removed -> why
+    case Plugins.version(plugin) do
+      nil -> why
+      version -> Version.own_names(why, version)
     end
   end
 
@@ -239,12 +246,12 @@ defmodule OneCore.Services do
 
   defp running(state, service), do: for(key <- state.acting, service in Map.get(state.installed, key, []), do: key)
 
-  # Starts a service, and gives its process: none if its plugin isn't running here, or no longer has it. One
-  # that outlived this process is already running, and is watched again.
+  # Starts a service, and gives its process: none if its plugin isn't running here, or no longer has it, which is
+  # when what it built here goes. One that outlived this process is already running, and is watched again.
   defp start({plugin, name} = service, state) do
     case Plugins.Process.of(plugin, name) do
       nil ->
-        File.rm_rf!(folder(plugin, name))
+        if Plugins.version(plugin), do: File.rm_rf!(folder(plugin, name))
         {nil, state}
 
       instance ->
