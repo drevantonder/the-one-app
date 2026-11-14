@@ -1,4 +1,4 @@
-// The gallery and the example over HTTP, as plain static files: a browser won't load modules from file://.
+// The example over HTTP, as plain static files: a browser won't load modules from file://.
 export const serve = (port) => Bun.serve({
   port,
   async fetch(request) {
@@ -10,5 +10,5 @@ export const serve = (port) => Bun.serve({
 
 if (import.meta.main) {
   const { url } = serve(4173)
-  console.log(`${url}gallery/\n${url}example/`)
+  console.log(`${url}example/`)
 }

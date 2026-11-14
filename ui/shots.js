@@ -1,4 +1,4 @@
-// Pictures of the gallery and the example in a real browser, to look at after a change: a phone's width under a
+// Pictures of the example in a real browser, to look at after a change: a phone's width under a
 // finger and a desktop's with a mouse, light and dark. `bun run shots <folder>`.
 import { mkdirSync } from "node:fs"
 import { chromium } from "playwright"
@@ -27,79 +27,6 @@ for (const [size, options] of Object.entries(sizes)) {
       const moving = (root) => [...root.getAnimations(), ...[...root.querySelectorAll("*")].flatMap((element) => (element.shadowRoot ? moving(element.shadowRoot) : []))]
       await Promise.all(moving(document).filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => {})))
     })
-    const whole = async (name) => {
-      // The whole page as one window, so rows off the foot of the screen are drawn too.
-      await page.setViewportSize({ width: options.viewport.width, height: await page.evaluate(() => document.documentElement.scrollHeight) })
-      await shot(name)
-      await page.setViewportSize(options.viewport)
-    }
-
-    await page.goto(`${server.url}gallery/`)
-    await page.waitForFunction(() => customElements.get("ui-toaster"))
-    await settled()
-    await whole("gallery")
-
-    await page.locator("#menu").scrollIntoViewIfNeeded()
-    await press("#menu-open button")
-    await settled()
-    await shot("gallery-menu")
-    await page.keyboard.press("Escape")
-
-    if (size === "desktop") {
-      // With a mouse the pickers are ours. Under a finger they're the device's, which a picture can't show.
-      await page.locator("#select").scrollIntoViewIfNeeded()
-      await press("#select-open button")
-      await settled()
-      await shot("gallery-select")
-      await page.keyboard.press("Escape")
-      await press("#date-open button")
-      await settled()
-      await shot("gallery-date")
-      await page.keyboard.press("Escape")
-      // Where the keyboard is: Tab onto a button, then onto a field.
-      await page.evaluate(() => scrollTo(0, 0))
-      await page.focus("#button ui-button")
-      await page.keyboard.press("Tab")
-      await page.keyboard.press("Tab")
-      await settled()
-      await shot("gallery-focus-button")
-      await page.focus("#input ui-input")
-      await page.keyboard.press("Tab")
-      await settled()
-      await shot("gallery-focus-field")
-    }
-
-    await page.locator("#sheet").scrollIntoViewIfNeeded()
-    await press("#sheet-button")
-    await settled()
-    await shot("gallery-sheet")
-    await press("#sheet-form ui-button")
-    await settled()
-    await shot("gallery-sheet-problems")
-    await page.keyboard.press("Escape")
-    await settled()
-
-    await press("#alert-button")
-    await settled()
-    await shot("gallery-alert")
-    await page.keyboard.press("Escape")
-    await settled()
-
-    await press("#undo-button")
-    await settled()
-    await shot("gallery-toast")
-
-    // A list and what it opens: beside it on the desktop, pushed over it on the phone.
-    await page.locator("#split").scrollIntoViewIfNeeded()
-    await press("#the-split ui-row:nth-child(2)")
-    await settled()
-    await shot("gallery-split")
-
-    // The whole gallery the other way round, as Arabic and Hebrew read.
-    await page.keyboard.press("Escape")
-    await page.evaluate(() => (document.documentElement.dir = "rtl"))
-    await settled()
-    await whole("gallery-rtl")
 
     await page.goto(`${server.url}example/`)
     await page.waitForFunction(() => !document.querySelector("#empty").hidden)
