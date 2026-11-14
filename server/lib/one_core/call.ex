@@ -6,7 +6,8 @@ defmodule OneCore.Call do
   - `folder`: a folder on the machine running this call that is the plugin's own for whoever it runs for, for what
     it keeps there. It may not be there yet, and another server has another.
   - `server`: the key of the server running this call.
-  - `for`: the user or group this call runs for.
+  - `for`: who this call runs for, as relation tuples name them: the user who asked, or a sharing link's holder.
+    A scheduled job runs for the user its plugin was added for.
 
   The rest is One Core's: which plugin this is, what was asked of it, the plugins it uses, and whether another
   server passed it on.
@@ -57,10 +58,10 @@ defmodule OneCore.Call do
   """
   def pass_on(%__MODULE__{passed_on: true}, _server), do: throw({__MODULE__, :passed_back})
 
-  def pass_on(%__MODULE__{ask: {method, params}}, server) do
+  def pass_on(%__MODULE__{ask: {method, params}, for: who}, server) do
     passed_back = Server.passed_back()
 
-    case Server.request(server, method, Map.put(params, :_meta, %{passed_on: true})) do
+    case Server.request(server, method, Map.put(params, :_meta, %{passed_on: true, who: who})) do
       {:ok, result} -> throw({__MODULE__, {:passed_on, result}})
       {:error, ^passed_back, _why} -> :no_answer
       {:error, _code, why} -> raise why

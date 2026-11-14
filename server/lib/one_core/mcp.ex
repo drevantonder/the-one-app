@@ -3,6 +3,8 @@ defmodule OneCore.Mcp do
   Answers what a client asks, in MCP's JSON-RPC: a message in, and its answer out. So a server is an MCP server to
   whatever reaches it, and the tools it lists are One Core's own and every running plugin's.
 
+  Every request is from someone, which `OneCore.User.asking/2` says, and a plugin's tool runs for them.
+
   Servers ask each other the same way, and two things only a server acting for the same user may ask: to call a
   function of a plugin's service running here (`services/call`), and to run a service's call into its plugin that
   was passed on (`plugins/call`).
@@ -12,7 +14,7 @@ defmodule OneCore.Mcp do
   App is.
   """
   require Logger
-  alias OneCore.{Plugin, Plugins, Server, Servers, Services}
+  alias OneCore.{Plugin, Plugins, Server, Servers, Services, User}
   alias OneCore.Plugins.Version
 
   # Tools are all a server speaks of MCP, and they are the same in each of these.
@@ -98,9 +100,14 @@ defmodule OneCore.Mcp do
   def answer(message, from) do
     case JSON.decode(message) do
       {:ok, %{"method" => method, "id" => id} = request} ->
+        params = Map.get(request, "params", %{})
+
         try do
-          case result(method, Map.get(request, "params", %{}), from) do
-            {:ok, result} -> JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
+          with {:ok, who} <- User.asking(from, said(params)),
+               {:ok, result} <- result(method, params, from, who) do
+            JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
+          else
+            {:error, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32000, message: why}})
             {:error, code, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why}})
           end
         rescue
@@ -122,18 +129,33 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, from) do
+  # What a request says of itself.
+  defp said(%{"_meta" => %{} = said}), do: said
+  defp said(_params), do: %{}
+
+  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, from, _who) do
     between(from, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
   end
 
-  defp result("plugins/call", %{"plugin" => plugin, "function" => function, "arguments" => arguments}, from) do
-    with {:ok, result} <- between(from, fn -> Plugins.function(plugin, function, arguments, true) end) do
+  defp result("plugins/call", %{"plugin" => plugin, "function" => function, "arguments" => arguments}, from, who) do
+    with {:ok, result} <- between(from, fn -> Plugins.function(plugin, function, arguments, who, true) end) do
       Server.changed()
       {:ok, result}
     end
   end
 
-  defp result(method, params, _from), do: result(method, params)
+  defp result("tools/call", %{"name" => name} = params, _from, who) do
+    case call(name, Map.get(params, "arguments", %{}), who, said(params)["passed_on"] == true) do
+      {:ok, answer} -> changed(name, %{content: content(name, answer)})
+      {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
+      # Another server ran it, and told its own clients.
+      {:passed_on, %{"isError" => true} = result} -> {:ok, result}
+      {:passed_on, result} -> changed(name, result)
+      :passed_back -> {:error, Server.passed_back(), "This server would pass #{name} on in turn"}
+    end
+  end
+
+  defp result(method, params, _from, _who), do: result(method, params)
 
   # What one server asks of another is run only for a server acting for the same user, by one that acts for them
   # too.
@@ -182,17 +204,6 @@ defmodule OneCore.Mcp do
     {:ok, %{tools: @tools ++ plugins, _meta: %{guides: guides}}}
   end
 
-  defp result("tools/call", %{"name" => name} = params) do
-    case call(name, Map.get(params, "arguments", %{}), params["_meta"]["passed_on"] == true) do
-      {:ok, answer} -> changed(name, %{content: content(name, answer)})
-      {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
-      # Another server ran it, and told its own clients.
-      {:passed_on, %{"isError" => true} = result} -> {:ok, result}
-      {:passed_on, result} -> changed(name, result)
-      :passed_back -> {:error, Server.passed_back(), "This server would pass #{name} on in turn"}
-    end
-  end
-
   defp result("resources/list", _) do
     resources =
       for {plugin, version} <- Enum.sort(Plugins.running()), path <- version.files do
@@ -218,7 +229,7 @@ defmodule OneCore.Mcp do
 
   defp result(method, _), do: {:error, -32601, "This server has no method #{method}"}
 
-  defp call("deploy", %{"name" => name, "files" => files}, _passed_on) do
+  defp call("deploy", %{"name" => name, "files" => files}, _who, _passed_on) do
     case Plugins.deploy(name, files) do
       {:ok, number, ""} -> {:ok, "#{name} is running, at version #{number}."}
       {:ok, number, warnings} -> {:ok, "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"}
@@ -226,37 +237,37 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp call("remove", %{"name" => name}, _passed_on) do
+  defp call("remove", %{"name" => name}, _who, _passed_on) do
     with :ok <- Plugins.remove(name), do: {:ok, "#{name} is removed."}
   end
 
-  defp call("add_server", %{"key" => key}, _passed_on) do
+  defp call("add_server", %{"key" => key}, _who, _passed_on) do
     with :ok <- Servers.add(key, Server.key()) do
       Server.tell_servers()
       {:ok, "That server acts for you too now. Start it, and it's a spare."}
     end
   end
 
-  defp call("services", _inputs, _passed_on) do
+  defp call("services", _inputs, _who, _passed_on) do
     {:ok, JSON.encode!(%{asked: Server.key(), servers: Servers.acting(), services: Services.list()})}
   end
 
-  defp call("install_service", %{"plugin" => plugin, "service" => service} = inputs, _passed_on) do
-    on(inputs["server"], "install_service", inputs, fn ->
+  defp call("install_service", %{"plugin" => plugin, "service" => service} = inputs, who, _passed_on) do
+    on(inputs["server"], "install_service", inputs, who, fn ->
       with :ok <- Services.install(plugin, service), do: {:ok, "#{service} is running on the server #{Server.key()}."}
     end)
   end
 
-  defp call("remove_service", %{"plugin" => plugin, "service" => service} = inputs, _passed_on) do
-    on(inputs["server"], "remove_service", inputs, fn ->
+  defp call("remove_service", %{"plugin" => plugin, "service" => service} = inputs, who, _passed_on) do
+    on(inputs["server"], "remove_service", inputs, who, fn ->
       with :ok <- Services.remove(plugin, service),
            do: {:ok, "#{service} no longer runs on the server #{Server.key()}."}
     end)
   end
 
-  defp call(name, inputs, passed_on) do
+  defp call(name, inputs, who, passed_on) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
-         {:ok, answer} <- Plugins.call(plugin, tool, inputs, passed_on) do
+         {:ok, answer} <- Plugins.call(plugin, tool, inputs, who, passed_on) do
       if is_binary(answer) or match?({:blob, _, _}, answer), do: {:ok, answer}, else: {:ok, JSON.encode!(answer)}
     else
       [_] -> {:error, "#{name} takes other inputs, or isn't a tool. tools/list says what each takes."}
@@ -264,12 +275,12 @@ defmodule OneCore.Mcp do
     end
   end
 
-  # Runs what a tool does on the server it names: here, or by asking that server to.
-  defp on(server, tool, inputs, here) do
+  # Runs what a tool does on the server it names: here, or by asking that server to, for whoever asked.
+  defp on(server, tool, inputs, who, here) do
     if server in [nil, Server.key()] do
       here.()
     else
-      case Server.request(server, "tools/call", %{name: tool, arguments: inputs}) do
+      case Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: %{who: who}}) do
         {:ok, result} -> {:passed_on, result}
         {:error, _code, why} -> {:error, why}
         down -> {:error, Server.said(down)}

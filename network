@@ -7,6 +7,9 @@
 # keeps goes: its bucket, each server's home, a client's home and the logs. A new network starts with the plugins
 # The One App ships with. Starting again in the same folder carries on with what's there, and Ctrl-C stops it.
 #
+# It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
+# command acts as that user.
+#
 # --spare starts a second server, which takes over when the first stops.
 # --address runs the network's address here too (`address/`): its Workers in `wrangler dev`, with a local S3 store
 #   as the bucket. Servers then keep their blobs through the signer there, and an assistant running somewhere else
@@ -72,7 +75,7 @@ fi
 # Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
 # which is then done as it says, and it's started again.
 start() {
-  (cd "$root/server" && exec mix network "$folder" "$1" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  (cd "$root/server" && exec mix network "$folder" "$1" --development "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
@@ -92,6 +95,7 @@ A network is running in $folder. Its client's home is $folder/client:
     export ONE_HOME=$folder/client
     $one                                             opens the app
     $one tracker add --tracker water --amount 2      calls a tool
+    ONE_AS=alice $one tracker list                   calls one as another user
     $one --help                                      lists every tool
     $one mcp                                         is the same tools as MCP over stdio
 ${at_address:+

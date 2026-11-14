@@ -36,7 +36,7 @@ defmodule OneCore.PluginsTest do
     start_supervised!(Plugins)
     start_supervised!(OneCore.Services)
     test = self()
-    wait = fn -> Task.async(fn -> Plugins.call("slow", "wait", %{"test" => test}) end) end
+    wait = fn -> Task.async(fn -> Plugins.call("slow", "wait", %{"test" => test}, OneCore.User.anyone()) end) end
 
     assert {:ok, 1, ""} = Plugins.deploy("slow", %{"slow.ex" => slow(1)})
     first = wait.()

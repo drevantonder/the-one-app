@@ -82,11 +82,11 @@ defmodule OneCore.Plugins do
   end
 
   @doc """
-  Calls a plugin's tool. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is told. A call another
-  server ran instead gives `{:passed_on, result}`, that server's result. `passed_on` says another server passed
-  this call on to this one, and `:passed_back` that this one would pass it on in turn.
+  Calls a plugin's tool for `who`. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is told. A call
+  another server ran instead gives `{:passed_on, result}`, that server's result. `passed_on` says another server
+  passed this call on to this one, and `:passed_back` that this one would pass it on in turn.
   """
-  def call(name, tool, inputs, passed_on \\ false) do
+  def call(name, tool, inputs, who, passed_on \\ false) do
     run(name, fn versions ->
       version = versions[name]
 
@@ -98,7 +98,7 @@ defmodule OneCore.Plugins do
           ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
 
           with :ok <- given(takes, inputs),
-               do: {:ok, version.plugin.call(tool, inputs, called(name, versions, ask, passed_on))}
+               do: {:ok, version.plugin.call(tool, inputs, called(name, versions, ask, who, passed_on))}
       end
     end)
   end
@@ -116,10 +116,10 @@ defmodule OneCore.Plugins do
   end
 
   @doc """
-  Calls one of a plugin's functions for a service of its own, with a call and then `arguments`. Gives what `call/4`
-  does.
+  Calls one of a plugin's functions for a service of its own, with a call for `who` and then `arguments`. Gives
+  what `call/5` does.
   """
-  def function(name, function, arguments, passed_on \\ false) do
+  def function(name, function, arguments, who, passed_on \\ false) do
     run(name, fn versions ->
       plugin = versions[name].plugin
 
@@ -128,8 +128,8 @@ defmodule OneCore.Plugins do
           {:error, "#{name} has no function #{function} that takes a call and #{length(arguments)} more"}
 
         function ->
-          ask = {"plugins/call", %{plugin: name, function: function, arguments: arguments, for: User.anyone()}}
-          {:ok, apply(plugin, function, [called(name, versions, ask, passed_on) | arguments])}
+          ask = {"plugins/call", %{plugin: name, function: function, arguments: arguments}}
+          {:ok, apply(plugin, function, [called(name, versions, ask, who, passed_on) | arguments])}
       end
     end)
   end
@@ -198,15 +198,16 @@ defmodule OneCore.Plugins do
     Services.start(name)
   end
 
-  # What a function of a plugin is called with: who it runs for, and what was asked, to pass on.
-  defp called(name, versions, ask, passed_on) do
+  # What a function of a plugin is called with: who it runs for, and what was asked, to pass on. The plugin's own
+  # artifact is the one for whoever it was added for, which is the one user every plugin is added for.
+  defp called(name, versions, ask, who, passed_on) do
     own = "#{User.anyone()}/own/#{name}/"
 
     %Call{
       own: %Artifact{prefix: own},
       folder: Path.join(Server.home(), own),
       server: Server.key(),
-      for: User.anyone(),
+      for: who,
       plugin: name,
       ask: ask,
       uses: Map.new(Map.delete(versions, name), fn {used, version} -> {used, version.plugin} end),

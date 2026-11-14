@@ -277,6 +277,9 @@ pub struct Client {
     network: Option<Network>,
     reach: Mutex<Reach>,
     told: broadcast::Sender<Value>,
+    /// What every request says of who it's from, where the environment says: `ONE_LINK` is a sharing link, whose
+    /// holder asks, and `ONE_AS` names a user to act as, which only a server of a network being built allows.
+    says: Vec<(&'static str, String)>,
 }
 
 impl Client {
@@ -288,7 +291,9 @@ impl Client {
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
         let endpoint = endpoint(&home.join("key"), network.as_ref()).await?;
-        Ok(Self { home, endpoint, network, reach: Mutex::default(), told: broadcast::channel(16).0 })
+        let says = [("as", "ONE_AS"), ("link", "ONE_LINK")];
+        let says = says.into_iter().filter_map(|(says, variable)| Some((says, env::var(variable).ok()?))).collect();
+        Ok(Self { home, endpoint, network, reach: Mutex::default(), told: broadcast::channel(16).0, says })
     }
 
     /// What the server tells this client while it's connected: each a JSON-RPC notification.
@@ -299,8 +304,9 @@ impl Client {
     /// Asks a server one JSON-RPC message and gives its answer, which for a notification is nothing. A server that
     /// has gone was asked nothing, so whichever answers now is asked instead.
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>> {
+        let message = self.saying(message);
         for _ in 0..2 {
-            match self.reached().await?.ask(message).await {
+            match self.reached().await?.ask(&message).await {
                 Ok(answer) => return Ok(answer),
                 Err(Unanswered::Unreachable) => continue,
                 Err(Unanswered::Stopped) => {
@@ -309,6 +315,19 @@ impl Client {
             }
         }
         bail!("No server answered")
+    }
+
+    /// `message` with what this client says of who it's from, in the request's `_meta`.
+    fn saying<'a>(&self, message: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
+        match serde_json::from_slice::<Value>(message) {
+            Ok(mut request) if !self.says.is_empty() && request["method"].is_string() => {
+                for (says, value) in &self.says {
+                    request["params"]["_meta"][*says] = json!(value);
+                }
+                request.to_string().into_bytes().into()
+            }
+            _ => message.into(),
+        }
     }
 
     /// Asks the server for `method`, and gives its result.

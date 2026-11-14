@@ -29,7 +29,7 @@ defmodule OneCore.Service do
       raise "No server runs #{call.plugin}'s #{service}. `services` says what it needs, and `install_service` runs it on one."
     end
 
-    ask = %{plugin: call.plugin, service: service, function: "#{function}", arguments: json(arguments), for: call.for}
+    ask = %{plugin: call.plugin, service: service, function: "#{function}", arguments: json(arguments)}
 
     case ask(servers, call.server, ask) do
       {:ok, answer} -> answer
@@ -43,14 +43,15 @@ defmodule OneCore.Service do
   @doc """
   Calls a function of the service's plugin, for the user or group `who`, and gives its answer. `service` is the
   service's process: `self()` in its callbacks, and what its functions are called with. The function is called
-  with an `OneCore.Call` for `who` and then `arguments`, on a server acting for them, which this server must be.
+  with an `OneCore.Call` for `who` and then `arguments`, on a server acting for them, which this server must be:
+  one on the network's one list acts for every user in it.
   """
   def plugin(service, who, function, arguments \\ []) when is_pid(service) and is_list(arguments) do
     {plugin, _name, _version} = which(service)
-    if who not in Services.acts_for(), do: raise("This server doesn't act for #{who}")
+    if Services.acts_for() == [], do: raise("This server doesn't act for #{who}")
 
     answer =
-      case Plugins.function(plugin, "#{function}", json(arguments)) do
+      case Plugins.function(plugin, "#{function}", json(arguments), who) do
         {:ok, answer} -> json(answer)
         {:passed_on, %{"answer" => answer}} -> answer
         {:error, why} -> raise why

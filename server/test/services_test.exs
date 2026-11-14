@@ -66,7 +66,7 @@ defmodule OneCore.ServicesTest do
 
   @tag :tmp_dir
   test "a service keeps what it holds through its plugin's updates, in the newest code", %{earlier: earlier} do
-    assert Plugins.call("counter", "add", %{}) == {:ok, [1, 1]}
+    assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [1, 1]}
     anyone = User.anyone()
     assert_receive {:counted, ^anyone, 1}
     service = Plugins.Process.whereis("counter", "Counter.Kept")
@@ -75,7 +75,7 @@ defmodule OneCore.ServicesTest do
     for number <- 2..4,
         do: assert({:ok, ^number, ""} = Plugins.deploy("counter", %{"counter.ex" => counter(number, self())}))
 
-    assert Plugins.call("counter", "add", %{}) == {:ok, [902, 4]}
+    assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [902, 4]}
     assert Plugins.Process.whereis("counter", "Counter.Kept") == service
     assert length(loaded() -- earlier) == 1
 
@@ -86,14 +86,14 @@ defmodule OneCore.ServicesTest do
     assert Plugins.Process.whereis("counter", "Counter.Kept") == nil
     assert loaded() -- earlier == []
     assert {:ok, 6, ""} = Plugins.deploy("counter", %{"counter.ex" => counter(6, self())})
-    assert Plugins.call("counter", "add", %{}) == {:ok, [1, 6]}
+    assert Plugins.call("counter", "add", %{}, User.anyone()) == {:ok, [1, 6]}
   end
 
   @tag :tmp_dir
   test "only a server acting for the same user calls a service's functions and the functions it calls" do
     stranger = String.duplicate("ab", 32)
-    service = %{plugin: "counter", service: "Counter.Kept", function: "add", arguments: [], for: User.anyone()}
-    plugin = %{plugin: "counter", function: "counted", arguments: [7], for: User.anyone()}
+    service = %{plugin: "counter", service: "Counter.Kept", function: "add", arguments: []}
+    plugin = %{plugin: "counter", function: "counted", arguments: [7], _meta: %{who: User.anyone()}}
 
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", service, stranger)
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", plugin, stranger)

@@ -20,6 +20,11 @@ defmodule Mix.Tasks.Network do
   for, and it and its client reach each other through the relay there when they can't directly. `--first` is the
   secret the address was deployed with, which a network's first server shows the first time it starts.
 
+      mix network <folder> --development
+
+  starts a server of a network being built, which lets a request say which user it's from (`OneCore.User`). No
+  network anyone relies on is started with it.
+
   `./network`, at the root, starts a whole network with this.
   """
   use Mix.Task
@@ -32,7 +37,7 @@ defmodule Mix.Tasks.Network do
 
   @impl true
   def run(args) do
-    case OptionParser.parse!(args, strict: [address: :string, first: :string]) do
+    case OptionParser.parse!(args, strict: [address: :string, first: :string, development: :boolean]) do
       {options, [folder | server]} when length(server) <= 1 ->
         start(Path.expand(folder), List.first(server, "server"), options)
 
@@ -53,6 +58,7 @@ defmodule Mix.Tasks.Network do
     Application.put_env(:one_core, :bucket, bucket)
     Application.put_env(:one_core, :address, address)
     Application.put_env(:one_core, :first, options[:first])
+    Application.put_env(:one_core, :development, options[:development] == true)
     Application.put_env(:one_core, :home, Path.join(folder, server))
     Application.put_env(:one_core, :shipped, shipped())
     Mix.Task.run("app.config")
