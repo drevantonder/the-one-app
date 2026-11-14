@@ -6,6 +6,7 @@ const PIECES = {
   ping: "RELAY",
   signer: "SIGNER",
   mcp: "WAY_IN",
+  link: "WAY_IN",
 };
 
 export default {

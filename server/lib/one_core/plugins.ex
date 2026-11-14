@@ -171,7 +171,7 @@ defmodule OneCore.Plugins do
   end
 
   # A plugin is added for users and groups. A sharing link's holder is neither, and calls only a tool that says
-  # they may: one that keeps to what the link reaches.
+  # they may, of the plugins added for whoever the link leads to: one that keeps to what the link reaches.
   defp open_to(tool, about, {by, _for}) do
     name = Enum.join(List.wrap(about["plugin"]) ++ [tool.name], "_")
 

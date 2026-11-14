@@ -2,7 +2,8 @@ defmodule OneCore.User do
   @moduledoc """
   Who a request is from and who it's for, each one value, which is how relation tuples name them. A user is
   `users/<name>`, a group is `groups/<name>` and the network is `network`: each is their prefix in the bucket
-  without its last `/`. The holder of a sharing link is `links/<the link's name>`, and is nobody else.
+  without its last `/`. The holder of a sharing link is `users/<name>/links/<the link's name>`, after whoever the
+  link leads to, and is nobody else.
 
   Signing in is a plugin, which will tell One Core who each request is from: `asking/2` is the one place that's
   decided. With none, everyone who reaches a network is the same one user, `anyone/0`.
@@ -71,7 +72,7 @@ defmodule OneCore.User do
 
   defp by(_said), do: {:ok, anyone()}
 
-  # A server answers whoever it acts for. A sharing link's holder is nobody's.
+  # A server answers whoever it acts for, and the holder of a link that leads to them.
   defp here(by) do
     owner = owner(by)
 
@@ -101,7 +102,8 @@ defmodule OneCore.User do
 
   @doc """
   Whose `who` is, or who they are: the user, the group or the network that an artifact's name, or a who's, starts
-  with. `nil` for the holder of a sharing link, who is nobody's.
+  with. A sharing link's holder is whoever's the link leads to: their servers answer the holder, with the plugins
+  added for them. `nil` for a name that starts with nobody's.
   """
   def owner(who) do
     case String.split(who, "/") do
@@ -115,11 +117,14 @@ defmodule OneCore.User do
   def owner?(who), do: is_binary(who) and who =~ ~r/^((users|groups)\/[a-z][a-z0-9-]*|network)$/
 
   @doc """
-  The who that is the holder of a sharing link. It's named by the link's hash, so a relation tuple that names it
-  doesn't hold the link.
+  The who that is the holder of a sharing link. A link starts with whose it leads to, as their name: that's how
+  the network's address finds a server for it. Its holder is named after them and by the link's hash, so a
+  relation tuple that names the holder doesn't hold the link. A link that starts with nobody's is nobody's.
   """
-  def link(link), do: "links/" <> Base.encode16(:crypto.hash(:sha256, link), case: :lower)
+  def link(link) do
+    Enum.join(List.wrap(owner(link)) ++ ["links", Base.encode16(:crypto.hash(:sha256, link), case: :lower)], "/")
+  end
 
   @doc "Whether `who` is the holder of a sharing link, who is in no network: nothing is theirs, and nothing is added for them."
-  def link?(who), do: String.starts_with?(who, "links/")
+  def link?(who), do: match?(["links", _name], Enum.take(String.split(who, "/"), -2))
 end

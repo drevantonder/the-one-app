@@ -46,7 +46,7 @@ defmodule Relations do
       added for, `users/alice/own/<name>`: the ones The One App ships with are the network's,
       `network/plugins/<name>` and `network/own/<name>`.
     - Who is a user (`users/alice`), a group, meaning its members (`groups/family`), `everyone` in the network, a
-      plugin by its artifact's name, or a sharing link's holder (`links/...`).
+      plugin by its artifact's name, or a sharing link's holder (`users/alice/links/...`).
     - `owner`, `editor` and `viewer` are what someone may do: an owner is an editor, and an editor is a viewer.
       Whoever an artifact's name starts with owns it, a group's members own what was made for the group
       (`groups/family/made/...`), and the network's owner owns everything. Whoever has a relation to a user or
@@ -60,7 +60,8 @@ defmodule Relations do
       group's home page. Every user is a member of the network.
     - `link` makes a sharing link to an artifact, as a viewer or an editor. Whoever holds the link reaches the
       artifact without signing in, through the tools that take a link's holder, until its tuple is removed with
-      `unshare`. The link is answered once and kept nowhere, so pass it on then.
+      `unshare`. The link is answered once and kept nowhere, so pass it on then. It starts with whose the artifact
+      is, and at the network's address it's `<the address>/link/<the link>`.
     - A plugin reaches something made by another plugin only once it has a relation to it too:
       `share --artifact users/alice/made/notes/7 --relation viewer --who users/alice/plugins/reader`.
     - Sharing, and taking it away, are a person's decisions. Do them when asked to, and say what you did.
@@ -78,7 +79,7 @@ defmodule Relations do
 
     who = %{
       type: "string",
-      description: "Who: users/<name>, groups/<name>, everyone, a plugin's artifact's name, or links/<name>"
+      description: "Who: users/<name>, groups/<name>, everyone, a plugin's artifact's name, or a link's holder"
     }
 
     relation = %{type: "string", enum: ~w(viewer editor owner member parent), description: "The relation"}
@@ -202,11 +203,12 @@ defmodule Relations do
     end)
   end
 
-  # The link is random, and the tuple names it by its hash, as One Core names whoever shows it. So the tuples
-  # don't hold the link, and nothing but the link gives it.
+  # The link is random, after whose the artifact is, and the tuple names it by its hash, as One Core names whoever
+  # shows it. So the tuples don't hold the link, and nothing but the link gives it.
   def call("link", %{"artifact" => artifact} = inputs, call) do
     relation = Map.get(inputs, "relation", "viewer")
-    link = Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
+    owner = OneCore.User.owner(artifact) || raise "#{artifact} is nobody's, so no link leads to it."
+    link = owner <> "/" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
     who = OneCore.User.link(link)
 
     transaction(call, fn db ->
@@ -233,7 +235,7 @@ defmodule Relations do
   # what their name starts, and a group's members what was made for the group, with no tuple. Each step is one
   # small question of the database, which is many times faster than asking it all of this at once.
   defp may?(db, who, relation, artifact) do
-    whos = followed(db, @groups, if(String.starts_with?(who, "users/"), do: [who, "everyone"], else: [who]), [])
+    whos = followed(db, @groups, if(user?(who), do: [who, "everyone"], else: [who]), [])
     enough = Map.fetch!(@enough, relation)
 
     up = Enum.uniq([artifact, OneCore.User.owner(artifact) || artifact, "network"])
@@ -250,8 +252,11 @@ defmodule Relations do
   # Whether `who` is in a group, themselves or through a group that is, or is a user asking about the network,
   # which every user is in.
   defp member?(db, who, of) do
-    (of == "network" and String.starts_with?(who, "users/")) or of in (followed(db, @groups, [who], []) -- [who])
+    (of == "network" and user?(who)) or of in (followed(db, @groups, [who], []) -- [who])
   end
+
+  # A user is in the network, as the holder of a link that leads to what's theirs isn't.
+  defp user?(who), do: String.starts_with?(who, "users/") and not OneCore.User.link?(who)
 
   # Everything reached from `from` by following `next`, each once.
   defp followed(_db, _next, [], found), do: found

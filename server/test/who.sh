@@ -58,9 +58,19 @@ start_for() {
   grep -q -m1 -E "A server is running|isn't one of" <(tail -f --pid=$! -n +1 "$folder/$1.log")
   key_of "$1"
 }
+# One tool call over the web at the network's address, as whoever holds a sharing link, with what it's answered.
+# What it says of itself is someone else, which the address doesn't pass on.
+web() {
+  local asked answer
+  asked="{\"name\":\"$3\",\"arguments\":$4,\"_meta\":{\"as\":\"anyone\",\"for\":\"network\",\"who\":\"users/anyone\"}}"
+  answer=$(curl -s -m 20 -X POST "${at_address[1]}/link/$2" -H 'content-type: application/json' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":$asked}")
+  sed -E 's/.*"(text|message)":"(([^"\\]|\\.)*)".*/\2/' <<<"$answer"
+  [[ $answer == *'"content"'* && $answer != *'"isError":true'* ]]
+}
 # What a command says is shown with it. `may` is one that has to be answered, and `refused` one that mustn't be.
 shown() {
-  echo "  $1  $(echo "${*:2}" | sed -e "s|$folder|<folder>|g" -e 's/\(link [A-Za-z0-9_-]\{6\}\)[A-Za-z0-9_-]*/\1…/' | named)"
+  echo "  $1  $(echo "${*:2}" | sed -e "s|$folder|<folder>|g" -e 's/\(link [a-z/]*[A-Za-z0-9_-]\{6\}\)[A-Za-z0-9_-]*/\1…/' | named)"
   echo "           -> $(named <<<"$said")"
 }
 may() { said=$("$@" 2>&1) && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $said" && exit 1; }; }
@@ -245,8 +255,21 @@ may as link "$link" notes read --note "$note"
 refused as link "${link}x" notes read --note "$note"
 refused as link "$link" notes change --note "$note" --text "Buy nothing"
 refused as link "$link" tracker list
+if [[ ${#at_address[@]} -gt 0 ]]; then
+  echo "  the same holder comes in at the network's address over the web, with no signing in, at /link/<the link>:"
+  may web link "$link" notes_read "{\"note\":\"$note\"}"
+  refused web link "$link" notes_change "{\"note\":\"$note\",\"text\":\"Buy nothing\"}"
+  refused web link "$link" notes_write '{"id":"mine","text":"As the owner?"}'
+  refused web link "$link" relations_share "{\"artifact\":\"$note\",\"relation\":\"owner\",\"who\":\"everyone\"}"
+  refused web link "$link" remove '{"name":"relations"}'
+  refused web link "${link}x" notes_read "{\"note\":\"$note\"}"
+  refused web link "nobody/at-all" notes_read "{\"note\":\"$note\"}"
+else
+  echo "  (with --address, the same holder comes in at the network's address over the web)"
+fi
 may as alice relations unshare --artifact "$note" --relation viewer --who "$holder"
 refused as link "$link" notes read --note "$note"
+[[ ${#at_address[@]} -eq 0 ]] || refused web link "$link" notes_read "{\"note\":\"$note\"}"
 
 say "A plugin can't reach what its user can't, or what it has no relation to itself"
 refused as dave notes read --note "$note"

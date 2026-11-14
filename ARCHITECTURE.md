@@ -82,8 +82,8 @@
 
 - A network has one address. A few small pieces sit behind it, each named by its job: the gateway, the signer, the
   relay, the web client's files and the way in for outsiders. None runs plugin code, and none keeps what users make.
-- An assistant running somewhere else, a sharing link and a call from an outside service come in at the address over
-  the web, and are passed to a server by its key.
+- An assistant running somewhere else and a call from an outside service come in at the address over the web, and
+  are passed to a server by its key.
 
 ## Clients
 

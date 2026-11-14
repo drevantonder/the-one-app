@@ -50,7 +50,7 @@ defmodule OneCore.Services do
     end
   end
 
-  # Whose servers something that runs for `who` is run by. A sharing link's holder is nobody's.
+  # Whose servers something that runs for `who` is run by.
   defp owner(who), do: User.owner(who) || "network"
 
   @doc """

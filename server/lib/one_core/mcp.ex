@@ -111,8 +111,16 @@ defmodule OneCore.Mcp do
 
   defp result("ping", _params, _from, _asked, _passed_on), do: {:ok, %{}}
 
-  defp result("tools/list", _params, _from, {_by, who}, _passed_on) do
-    running = Plugins.running(who)
+  # A sharing link's holder is told of the tools they may call, and of nothing else that's in the network.
+  defp result("tools/list", _params, _from, {by, who}, _passed_on) do
+    holder = by != nil and User.link?(by)
+
+    running =
+      if holder,
+        do: Map.new(Plugins.running(who), fn {name, version} -> {name, %{version | guide: nil}} end),
+        else: Plugins.running(who)
+
+    open = fn tools -> if holder, do: Enum.filter(tools, &(&1[:by_link] == true)), else: tools end
 
     listed = fn name, tool ->
       %{
@@ -124,16 +132,27 @@ defmodule OneCore.Mcp do
       }
     end
 
-    own = for tool <- Tools.tools(), do: listed.(tool.name, tool)
+    own = for tool <- open.(Tools.tools()), do: listed.(tool.name, tool)
 
     plugins =
-      for {plugin, version} <- Enum.sort(running), tool <- version.tools, do: listed.("#{plugin}_#{tool.name}", tool)
+      for {plugin, version} <- Enum.sort(running),
+          tool <- open.(version.tools),
+          do: listed.("#{plugin}_#{tool.name}", tool)
 
     guides = for {plugin, %{guide: guide}} when guide != nil <- running, into: %{}, do: {plugin, guide}
     {:ok, %{tools: own ++ plugins, _meta: %{guides: guides}}}
   end
 
-  defp result("resources/list", _params, _from, {_by, who}, _passed_on) do
+  defp result("resources/" <> _ = method, params, _from, {by, who}, _passed_on) do
+    if by != nil and User.link?(by),
+      do: {:error, -32002, "A sharing link's holder reads nothing of a network but what a tool gives them"},
+      else: resources(method, params, who)
+  end
+
+  defp result(method, _params, _from, _asked, _passed_on),
+    do: {:error, -32601, "This server has no method #{method}"}
+
+  defp resources("resources/list", _params, who) do
     resources =
       for {plugin, version} <- Enum.sort(Plugins.running(who)), path <- version.files do
         resource = %{uri: "ui://#{plugin}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
@@ -147,7 +166,7 @@ defmodule OneCore.Mcp do
     {:ok, %{resources: resources}}
   end
 
-  defp result("resources/read", %{"uri" => uri}, _from, {_by, who}, _passed_on) do
+  defp resources("resources/read", %{"uri" => uri}, who) do
     with ["ui:", "", plugin, code, path] <- String.split(uri, "/", parts: 5),
          %{^plugin => version} <- Plugins.running(who),
          {:ok, text} <- Plugins.file(version.artifact, code, path) do
@@ -157,8 +176,7 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result(method, _params, _from, _asked, _passed_on),
-    do: {:error, -32601, "This server has no method #{method}"}
+  defp resources(method, _params, _who), do: {:error, -32601, "This server has no method #{method}"}
 
   # What one server asks of another is run only for a server that says who it asks for, which only one acting
   # for them is believed about. This server runs it if it acts for whoever it's for too.

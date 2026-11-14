@@ -493,9 +493,13 @@ impl Client {
             return servers.map(Some);
         };
         // Until signing in says who this client's user is, it's who it says it acts as, or the one user a network
-        // has without it.
-        let user = self.says.iter().find(|(says, _)| *says == "as").map_or("anyone", |(_, user)| user);
-        let of = format!("users/{user}/");
+        // has without it. A sharing link's holder asks the servers of whoever the link leads to, which it starts with.
+        let said = |what| self.says.iter().find(|(says, _)| *says == what).map(|(_, said)| said.as_str());
+        let of = match said("link").map(|link| link.split('/').collect::<Vec<_>>()) {
+            Some(leads) if leads[0] == "network" => "network/".to_owned(),
+            Some(leads) if leads.len() > 2 => format!("{}/{}/", leads[0], leads[1]),
+            _ => format!("users/{}/", said("as").unwrap_or("anyone")),
+        };
         let asked = (SERVERS, json!({"of": of}));
         if !now {
             return Ok(self.kept(asked.0, &asked.1).and_then(|kept| serde_json::from_value(kept).ok()));

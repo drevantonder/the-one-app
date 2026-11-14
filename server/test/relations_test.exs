@@ -145,6 +145,14 @@ defmodule OneCore.RelationsTest do
     assert {:error, "users/bob isn't an editor of" <> _} = call("relations_link", %{"artifact" => note}, @bob)
     assert {:ok, %{link: link, who: who}} = call("relations_link", %{"artifact" => note}, @alice)
     assert who == User.link(link)
+    assert "users/alice/links/" <> _ = who
+    # A link's holder is in no network: they're not everyone, they're a member of nothing, and ask for nobody else.
+    assert {:ok, _} = share(folder, "viewer", "everyone", @alice)
+    assert reads?(folder, @bob) and not reads?(folder, who)
+
+    assert {:error, "A sharing link's holder asks for nobody else"} =
+             OneCore.User.asking(nil, %{"link" => link, "for" => "network"})
+
     assert reads?(note, who) and not edits?(note, who) and not reads?(folder, who)
     assert not reads?(note, User.link("a guess"))
     assert {:ok, shared} = call("relations_shared", %{"artifact" => note}, @alice)

@@ -169,6 +169,23 @@ defmodule OneCore.WhoTest do
 
     assert {:refused, "services isn't a tool" <> _} = ask(%{link: "a-secret"}, nil, "services")
 
+    # A link starts with whose it leads to, and its holder is named after them: they're answered by the servers
+    # acting for them, with the plugins added for them, and told of no tool but the ones a holder may call.
+    assert "users/alice/links/" <> _ = holder = ask(%{link: "users/alice/a-secret"})
+    assert User.owner(holder) == "users/alice" and User.link?(holder) and not User.link?("users/alice")
+
+    list = fn method, said ->
+      JSON.decode!(Mcp.answer(JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: %{_meta: said}}), nil))
+    end
+
+    assert %{"result" => %{"tools" => [%{"name" => "asked_who"}]}} =
+             list.("tools/list", %{link: "users/alice/a-secret"})
+
+    assert %{"error" => %{"message" => "A sharing link's holder reads nothing" <> _}} =
+             list.("resources/list", %{link: "users/alice/a-secret"})
+
+    assert %{"result" => %{"tools" => [_, _ | _]}} = list.("tools/list", %{})
+
     # Only a server acting here is believed about who it asks for.
     assert ask(%{who: "users/alice", for: "users/alice"}, Server.key()) == "users/alice"
     assert ask(%{who: nil, for: "groups/family"}, Server.key()) == " for groups/family"
