@@ -116,7 +116,14 @@ defmodule Database.Lease do
   defp open(lease, snapshot, entries) do
     File.rm_rf!(lease.folder)
     File.mkdir_p!(lease.folder)
-    Log.restore(lease.artifact, snapshot, entries, file(lease))
+
+    case Log.restore(lease.artifact, snapshot, entries, file(lease)) do
+      :ok -> opened(lease, entries)
+      :gone -> look(lease)
+    end
+  end
+
+  defp opened(lease, entries) do
     {:ok, db} = Sqlite.open(file(lease))
 
     # The bucket is what keeps a write, so SQLite needn't wait for the disk. Its write-ahead log is emptied here

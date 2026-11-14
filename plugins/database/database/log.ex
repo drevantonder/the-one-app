@@ -7,7 +7,10 @@ defmodule Database.Log do
   the next number is the lease: the server named in the newest blob holds it, and a server takes it by writing a
   blob with no pages.
 
-  `snapshot/<number>` is the whole database file as it was after that log blob, which any SQLite opens.
+  `snapshot/<number>` is the whole database file as it was after that log blob, which any SQLite opens. The newest
+  two are kept and the ones before them removed, since the log after a snapshot is all that's read with it. The
+  log itself is kept whole: no number is ever given up, which is what makes writing the next one the lease, and
+  it's what a database is put back to an earlier moment from.
 
   Nothing here needs more of the bucket than writing a blob only if it's absent.
   """
@@ -43,12 +46,28 @@ defmodule Database.Log do
     Artifact.write(artifact, name("log", number), :erlang.term_to_binary(entry, [:compressed]))
   end
 
-  @doc "Keeps the database `file` as the snapshot after the log's entry `number`."
-  def keep(artifact, number, file), do: Artifact.write(artifact, name("snapshot", number), File.read!(file))
+  @doc """
+  Keeps the database `file` as the snapshot after the log's entry `number`, and removes the snapshots before the
+  one it follows. That one stays for a server that is about to read it.
+  """
+  def keep(artifact, number, file) do
+    Artifact.write(artifact, name("snapshot", number), File.read!(file))
+    for old <- Enum.drop(Enum.reverse(Artifact.list(artifact, "snapshot/")), 2), do: Artifact.remove(artifact, old)
+    :ok
+  end
 
-  @doc "Makes `file` the database as it was after the snapshot `number` and then `entries`."
+  @doc """
+  Makes `file` the database as it was after the snapshot `number` and then `entries`. `:gone` if that snapshot has
+  been removed since it was listed, which means there are newer ones.
+  """
   def restore(artifact, number, entries, file) do
-    {:ok, snapshot, _tag} = if number > 0, do: Artifact.read(artifact, name("snapshot", number)), else: {:ok, "", nil}
+    case if(number > 0, do: Artifact.read(artifact, name("snapshot", number)), else: {:ok, "", nil}) do
+      {:ok, snapshot, _tag} -> restore(snapshot, entries, file)
+      :absent -> :gone
+    end
+  end
+
+  defp restore(snapshot, entries, file) do
     File.write!(file, snapshot)
     {:ok, writing} = :file.open(file, [:read, :write, :raw, :binary])
 

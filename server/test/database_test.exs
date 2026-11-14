@@ -145,7 +145,7 @@ defmodule OneCore.DatabaseTest do
 
       is_map_key(run.waiting, server) ->
         {from, operation} = run.waiting[server]
-        writes = elem(operation, 0) in [:write, :replace]
+        writes = elem(operation, 0) in [:write, :replace, :remove]
 
         cond do
           chance <= 2 ->
