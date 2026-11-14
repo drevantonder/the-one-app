@@ -1,37 +1,27 @@
-<p align="center">
-  <img src="icons/ring.png" width="200" alt="">
-</p>
+# The One App
 
-<h1 align="center">The One App</h1>
+The One App designed again from the ground up, starting with what an artifact is. The app as it ran before is at the
+tag `before-redesign` and on the branch `v1`.
 
-<p align="center"><i>
-One app to rule them all, one app to find them,<br>
-one app to bring them all, and in the network bind them.
-</i></p>
+- `VISION.md`: the vision, unchanged.
+- `GLOSSARY.md`: the redesign's words.
+- `ARCHITECTURE.md`: the redesign's rules.
+- `AGENTS.md`: how to build it.
+- `STACK.md`: what it's built with, what isn't chosen yet, and what to test first.
+- `PRIOR-ART.md`: what exists already, what was set aside and why, and decisions that are easy to miss. Read it
+  before designing anything.
 
-```sh
-curl -fsSL theoneapp.drevan.me | sh
-```
+Not designed yet: how a client's offline writes reach a server, and what signs users in.
 
-That starts your first network. Its other computers install from its own address: Settings › Devices › Add Device gives the line.
+The glossary and the rules name no technology on purpose, to avoid overfitting or getting distracted. What's chosen is
+in `STACK.md`, and what else exists is in `PRIOR-ART.md`.
 
-> [!WARNING]
-> **Early days.** This changes every day and things break. I wouldn't use it or rely on it yet; wait until it settles.
+Claims is the pressing need, but a bad platform would mean another rebuild, so the platform comes first.
 
-The vision for this project is simple: make using AI to its full potential easy. [VISION.md](VISION.md) says what that means.
+Later, and not critical: bringing data across from the app as it runs today and from the old PTC app.
 
-To learn more, point your agent at this repo and ask it to explain.
+Parked, to keep in mind: the public as a who, anyone at all and not signed in, as a `viewer` of what an owner makes
+public. Filling in something like a form, and visitors without an account, come after that.
 
-## Building it
-
-A Linux machine that builds what `one-dev update` sends (the computers' programs, oned on Cloudflare, the web client and its WebAssembly, the apps' screens and services) needs a C compiler, a clang that can build for WebAssembly, curl and git from its package manager, then rustup and mise to install the rest, as `rust-toolchain.toml` and `mise.toml` say:
-
-```sh
-sudo apt install ca-certificates curl git gcc clang    # Ubuntu 26.04
-curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
-curl -fsSL https://mise.run | sh
-git clone https://github.com/drevantonder/the-one-app && cd the-one-app
-mise install                  # Bun, Node, Go, sccache, wasm-bindgen and binaryen
-eval "$(mise activate bash)"  # in your shell's profile, too: mise's shims don't find them from the folders cargo runs sccache in
-cargo build                   # the first cargo here has rustup install the Rust and targets rust-toolchain.toml names
-```
+Left open until the rest lands: what starts a network's cloud server when no other server answers for a user or group.
+It's a big choice, and fewer other things should be moving first.

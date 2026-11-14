@@ -1,10 +1,5 @@
-# Everything the build shells out to that isn't Rust (rust-toolchain.toml): `mise install` here installs it.
-# Bun's version is build.rs's BUN, and wasm-bindgen's the one Cargo.lock locks, Go's the one apps/whatsapp/service/go.mod
-# asks for: a test in dev/src/build.rs fails when they differ.
+# What building needs that isn't Rust: `mise install` here installs it.
 [tools]
+erlang = "29.1.2"
+elixir = "1.20.5-otp-29"
 bun = "1.4.4"
-node = "24.21.0"
-go = "1.26.10"
-sccache = "0.19.0"
-"aqua:WebAssembly/binaryen" = "133"
-"github:wasm-bindgen/wasm-bindgen" = "0.2.130"

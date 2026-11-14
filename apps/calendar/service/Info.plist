@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- The helper's own, which service/mac-helpers.sh completes: what macOS asks the user in its name. -->
-<plist version="1.0">
-<dict>
-  <key>CFBundleName</key><string>Calendar</string>
-  <key>NSCalendarsFullAccessUsageDescription</key><string>Your agents and other devices read and change your calendars through this Mac.</string>
-</dict>
-</plist>

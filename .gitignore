@@ -1,13 +1,7 @@
-/target
+/_build/
+/deps/
+/target/
 node_modules/
-**/.claude/*
-# Claude Code reads a project's skills only from here: a link to .agents/skills.
-!/.claude/skills
-__pycache__/
-.build/
-.swiftpm/
-Package.resolved
-
-# Written by services/sdk/mac-helpers.sh for each Mac service in Swift.
-/apps/*/service/Package.swift
-/apps/*/service/main.swift
+*.beam
+erl_crash.dump
+.DS_Store

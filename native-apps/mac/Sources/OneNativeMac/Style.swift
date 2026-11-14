@@ -1,1 +1,0 @@
-../../../iphone/Widget/Style.swift

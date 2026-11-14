@@ -1,154 +1,50 @@
 # Glossary
 
-What our words mean, and which nearby words they are not. Read it with ARCHITECTURE.md. A rename changes this file in
-the same commit. "Avoid" lists the words not to use for that thing, in code, docs, screens, CLI or MCP text.
-
-## The network
-
-- **Network**: one user's or one workplace's whole: its users, their devices, their apps, its bucket, and
-  the pieces at its address on Cloudflare. A key belongs to one network forever, and networks never talk to each other.
-  Users see "your One App network", or a custom build's, "the Acme App network". Avoid: install.
-- **Demo**: a build's real screens answered from a recording of sample data, on the device, with no network, for a store's
-  reviewer. Nothing entered in it is kept.
-- **Custom build**: this code built with its own `config.toml`, the only place the product is named (The One App, The
-  Acme App). It usually serves one workplace's network, but can serve many. Avoid: white label.
-- **Throwaway network**: what `one-dev throwaway` makes from your checkout's build: a network on your machine, with its own
-  pieces at its own address, where you're a new user signing in with no passkey. For testing. Avoid: try install.
-- **User**: someone in the network. An **admin** is a user who may change what's everyone's. Avoid: person.
-- **Group**: users who share apps and data.
-- **Everyone**: what users see for the network-wide scope (`global` in code).
-- **Scope**: whose something is: everyone's, a user's, or a group's. Each has its own keys and its own app databases.
-  Our word only: users see a user, a group or everyone.
-- **Identity**: what a user signs in with: a passkey, or their account at a **provider** (an OIDC one the network has
-  registered with, by issuer and subject). A user can have several, each linked from a device already signed in.
-  Avoid: login, for this.
-- **Invite**: an admin's yes, given in advance: a link, or, where the network has providers, an email written in the signed
-  log, which that account signs in with and goes straight in, let in by any device of the network that's on. Also asking someone already in the network into a group.
-- **Agent**: an AI acting for a user (Claude Code, Codex, a T3 thread), through one of that user's clients: the CLI,
-  MCP, the API or a browser, on a device or in the cloud. It acts as that user, never as itself: it has their access
-  and no permissions of its own, and nothing narrows it.
-
-## Machines
-
-- **Device**: a machine a user owns (a phone or a computer), a browser they signed in on, or a remote MCP client's
-  place in the remote MCP server, listed as theirs, with one key. A **computer** (Mac, Windows, Linux) is a device
-  whose key is its onet's and whose clients are views of it, and which runs oned, an app runtime of its own and the
-  services switched on there. A phone, a browser and a remote MCP client's device are only a client. A browser's
-  sign-in is its device: nothing ties it to the computer it's on, so it's never part of that computer's. oned on
-  Cloudflare is not a device. Avoid: node.
-- **Onboarding**: what someone sees on a device before they're in the network, first time or coming back: the first
-  screen, proving who they are, waiting for someone to say yes, and starting. Our word for the journey and
-  for its folder (`onboarding/`); users see Sign In, Join and Waiting for Approval.
-- **Client**: where a user or their agent uses the network, and the only place keys are opened: the native apps (Mac,
-  iPhone, Android, Windows), the web client in a browser, the CLI and the local MCP server on a computer, and the remote
-  MCP server. A phone's app, a browser's web client and each remote MCP client hold their device's key; on a computer,
-  the desktop app's window, the CLI and the local MCP server hold none, and ask the computer's onet, which holds the
-  computer's.
-- **API**: what every client asks a device through, at `/api/*`: the CLI, MCP, the screens, the native apps and outside
-  programs. Each route says who may call it, and MCP's tools and the CLI's commands are made from what they say.
-- **UI** (`@one/ui`, `ui/`): what every screen is drawn with (React and shadcn's components in one theme, `ui/kit`), and
-  the frame around them every client shows the same: the pages, Accounts, Settings' frame, the bridge a screen calls
-  (`one`), and the web client. A feature's own Settings screens are in its folder (`<feature>/screens/`), drawn with it.
-- **onet**: the entry point into the network, the same on every device: its identity, who's who, connecting to the
-  best device, opening keys, answering the API, and the store of what it last read. Its library is the `onet` crate
-  (`onet/`): built into the phone app (`onet/ffi/`), in a browser's shared worker (`onet/web/`), in a Worker for each
-  outside program (`onet/worker/`), and on a computer `<cli>t` (`onet/src/computer/`), which oned starts, holding the
-  device's key, of which the desktop app's window, the CLI and the local MCP server are views.
-- **oned**: the small program, and the spec it follows, that starts and manages what runs on a computer and on
-  Cloudflare: on a computer it starts its onet and its app runtime, and installs and runs the services the computer's
-  owner switches on there, asking its onet which. It never changes build by itself: `one update` replaces it and has it exit. It holds no key, runs nothing itself, and stays small. It has a version for each platform it runs on: computers (Mac, Windows, Linux) and
-  Cloudflare, and perhaps Android one day.
-- **Device logs**: what a device's programs and services print, kept on that device and read with `one logs <device>`.
-  Not Insights: they stay on the device until asked for, and only the device's user and the network's admins read them.
-- **Platform**: what a client or oned is built for: Mac, Windows, Linux, iPhone, Android, a browser, Cloudflare.
-- **Endpoint**: an iroh identity, of its own key. Each client, app runtime and oned on Cloudflare is one; the relay lets in only the network's.
-- **Network message**: what one device tells another directly over iroh, on a connection opened to say it and closed
-  a few idle minutes later: `changed` (that something changed), and an ask (a call; what a device runs, when a screen
-  shows it; or a service's, which its device's runtime carries to it sealed), whose answer says how loaded the device
-  is. A nudge, never trusted for what's true, which the bucket says.
-- **Agent device**: a machine agents use (Linux with a browser, Windows, Android, an iPhone), which the Agent Devices
-  service runs on a user's computer. It is not in the network: it has no key there, and is reached only through that
-  service.
-
-## Apps
-
-- **App**: code deployed into a scope, run in the app runtime. It publishes any of four things: **screens** (pages
-  users open), **widgets** (what it shows on a home page), **tools** (what agents use, through MCP and the CLI), and
-  **services**. An app with only tools is still an app (Gmail, Shell). The core's own features (the Vault, Backups,
-  Groups, Devices, Widgets, Notifications, Device logs, Insights) have tools too, named the same way (`vault_list`), but are not apps: no list of
-  apps has them. Avoid: worker, connector, operation (for a tool).
-- **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
-  linked phone, run a local model), run on one of the computers of whoever added the app, which they choose while adding it,
-  as its own process, of its own key, reached only through its device's app runtime, which carries its calls sealed and
-  signed and can't read them. Adding WhatsApp asks which of your computers runs its service. A service
-  exposes **functions** (`ctx.services.whatsapp.send(…)`), and is its app's alone: only that app calls them, and other
-  apps call that app's tools. Built-in apps' services ship with each release. Avoid: part, native component, device
-  service; operation, for a function; node, for the computer it runs on.
-- **Added**: an app recorded as added to a scope, by a user, or for a group or everyone by its admin: the state the
-  network should be in. The App Store only records it, like any app could; the core makes it so, deploying the app and
-  running its service on the computer the user chose while adding it, and takes it all away when it's removed. Avoid:
-  install, uninstall.
-- **Accounts**: the accounts apps sign in to (a Gmail address, a WhatsApp number), listed together in the sidebar.
-- **App runtime**: where apps run, on every computer and in oned on Cloudflare: a sandbox with no disk and no keys of its own, where
-  an app reaches only its own databases, its own services, the web, and other apps' tools, through `ctx`. It is our
-  wrapper around workerd (Cloudflare's open-source Workers runtime). A computer's is a program of its own
-  (`<cli>-apps`, `app-runtime/`), which oned starts: an endpoint listed as compute and naming the device, which runs
-  what the device runs and answers other devices' calls. Avoid: node, app service.
-- **Call**: one run of an app's tool, screen or schedule, in one app runtime, with the keys the caller hands it for that call,
-  which expire within the hour.
-- **Deploy**: a version of an app put into a scope. **Built-in apps** are the folders in `apps/` with an `app.js`, shipped with every
-  release; every other one is made in the network.
-- **App schedules**: a user choosing a device to keep an app running in its app runtime, holding that app's keys in that scope, and
-  its Vault's, as a call of the app is handed them (for up to 30 days, and longer as they use it), so its schedules run
-  while no one has it open. Avoid: keep, grant, standing
-  work.
-- **Vault**: secrets apps use without anyone seeing them: a secret leaves an app runtime only inside a request to one of its
-  hosts.
-- **AI Gateway**: how apps use AI models (`ctx.ai.run`): hosted ones with keys in the Vault, Workers AI on the
-  network's Cloudflare account, or a model on one of the network's devices. It picks where a call runs and whose key
-  pays (the most specific: the app's own, then the user's, then the network's), and records what each call spent in Insights. Core, like the Vault: not an app. Settings › AI Gateway.
-  Avoid: AI app, LLM proxy.
-- **Widget**: what an app shows on a home page, drawn by the screens and the native apps from the app runtime's routes.
-- **Notification**: a note sealed to one device: what to show, the screen a tap opens, and maybe an action that device
-  checks itself. The notifications Worker carries it to Apple's, Google's, Microsoft's or a browser's push service, and
-  only that device opens it. "Push" is only those services' word. Avoid: push, push notification.
-- **Labs**: features still being built, which a network's admins switch on for everyone.
-
-## Data
-
-- **Bucket**: the network's one store, a folder or S3-compatible storage, holding everything sealed. Only the URL signer
-  holds its credentials.
-- **Key**: every device has one (a computer's is its onet's), and every app runtime and service its own. Each scope has numbered **epochs** of keys, sealed to the devices
-  that may open it and to the **recovery key**, which an admin keeps offline. Its **holders** are users an admin named,
-  who can read everything and restore anyone; it's sealed to their devices that are only clients, never a computer, which runs an app runtime, or a browser.
-- **Database**: one SQLite database, kept sealed in the bucket as steps at numbered positions, the bucket deciding their
-  order. A scope has three kinds: **an app's database**, its data and the truth; **the core's database** (`node` in the bucket), how things
-  went (schedules' runs, builds, backups); and **the scope database**, who's who, permissions and keys.
-- **Blob**: bytes a database's step names, kept in the bucket sealed with their scope's key.
-- **Backup**: an encrypted copy of everything in the bucket, kept on a disk or in S3-compatible storage, which a network
-  is restored from.
-- **Insights**: what the network records of itself (spans, logs, metrics, and the cleaned message of a real failure),
-  unsealed, read with no keys, and allowed to be lost. Neither the truth nor who can do what.
-
-## At the network's address
-
-These run on Cloudflare, each named by its job, with no name for them together. Avoid: kernel.
-
-- **Gateway**: the network's address, the one users use. It sends each request where its path says, and holds and runs
-  nothing.
-- **Auth**: who you are, and nothing more (a passkey, or a provider the network has registered with). It opens no key. Users still "sign in" to it; it is never "the sign-in". Avoid: sign-in.
-- **Relay**: carries packets between endpoints that can't reach each other directly, and keeps the list of the network's
-  endpoints. It reads nothing.
-- **URL signer**: the only holder of the bucket's credentials. It hands the network's endpoints signed URLs, which open
-  nothing, since everything in the bucket is sealed.
-- **Notifications Worker**: carries each notification, sealed, to Apple's, Google's, Microsoft's or a browser's push
-  service. It sees only that a device got one, and when.
-- **Telemetry Worker**: where the network's spans, logs and metrics go and are read back, in Cloudflare Basin. It opens no
-  user data: telemetry is operational, and unsealed.
-- **Remote MCP server**: the client for programs that aren't on a user's devices (claude.ai, ChatGPT, anything else that
-  logs in as them), one device per program, serving the API at `/api/*` and MCP at `/mcp`. It opens keys, but only while a
-  program calls, under that program's own tokens. The **local MCP server** is `one mcp`, which
-  agents on a computer start themselves. Avoid: MCP Worker.
-- **oned on Cloudflare**: oned's version for Cloudflare, the Worker `<cli>-oned` (`oned/cloudflare/`), which runs an
-  app runtime there: it answers devices' calls over iroh like a computer's, runs apps and no services, and holds no
-  keys but those a call hands it. Not a device. Avoid: node, Cloudflare node.
+- **Network**: one user's, one family's or one workplace's whole: its users, its bucket, its servers and its clients. A
+  trusted boundary, not a social network. It is an artifact.
+- **User**: someone in the network, as relation tuples name them. How they sign in is not part of who they are.
+- **Group**: an artifact whose members share other artifacts. Being in one is a relation tuple: the group, `member`, and
+  a user or another group.
+- **Server**: a machine that runs a network's plugins and answers its clients. A computer at home, a colleague's, or a
+  cloud machine started when needed. A network has one or more. It is an artifact, holding its key and how to reach it,
+  and is a who.
+- **Client**: what a user or their agent uses, on a phone, a computer or in a browser, or as the CLI or MCP. It asks a
+  server, keeps what servers answered, and keeps secrets safe on its device.
+- **Signer**: the only holder of the bucket's credentials. It hands a server short-lived access to the blobs of those it
+  acts for.
+- **Artifact**: a couple of blobs together in the bucket, with who may do what to them. Everything a network keeps is
+  built on top of one: files, a database, a git repo. Avoid: space.
+- **Relation tuple**: one line of who may do what, as in Zanzibar: an artifact, a relation (`owner`, `editor`, `viewer`,
+  `parent`, `member`) and who. An owner is an editor, and an editor is a viewer. A user, a group, everyone, a server, a
+  plugin and the holder of a sharing link are all a who. Avoid: fact, grant.
+- **Encrypted artifact**: an artifact whose blobs are encrypted before they're stored, so only holders of its key read
+  it. For passwords and the keys that reach devices. Avoid: sealed.
+- **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services and
+  kinds of artifact. It uses other artifacts, and is a who. A git repo can be where its code comes from, but needn't be.
+  Avoid: module.
+- **App**: something with UI that goes on a home screen. A plugin provides it. It can have a server part if it needs
+  one, which is its plugin's tools.
+- **Home page**: where apps and widgets sit. A user has their own, and so does each group and the network. A user sees
+  theirs, their groups' and the network's.
+- **Widget**: what a plugin shows on a home page at a glance. The plugin returns a layout from a fixed list of parts, in
+  a phone's own sizes, and each client draws it. So one widget shows in the client, on a phone's own home screen, and to
+  an agent as text. A control in one calls a tool.
+- **Tool**: a named function a plugin defines, which the plugin's code runs on a server. Apps, agents and scheduled jobs
+  all call the same tools. Avoid: action.
+- **Service**: a part of a plugin's server code that must run on particular machines, for what is only there: a Mac's
+  messages, a signed-in browser, a GPU. An instance runs on each server whose owner installed it, and keeps running
+  between calls. It and the rest of its plugin call each other's functions, which nothing else can call. The plugin
+  decides which instance it calls.
+- **One Core**: what every plugin stands on: blobs, each plugin's own artifact, running plugins, and the interface
+  they're written against. Small on purpose, and it works with no plugins. Avoid: the core.
+- **Package**: one piece built separately: the server, a client, or a plugin.
+- **Plugin hook**: a moment a plugin can be called at, such as a tool being called or an artifact changing. Each states
+  whether a plugin only hears about it, can change it, or decides it.
+- **Lease**: the record of which server writes a database for now. One server holds it at a time. Part of the database
+  plugin.
+- **Sharing link**: a who that is whoever holds it, without signing in. Making one writes a relation tuple naming it.
+- **Gateway**: sends each request at the network's address where its path says.
+- **Relay**: passes traffic between a network's servers and clients when they can't reach each other directly. It
+  can't read it.
+- **Scheduled job**: a tool call made by the clock.
+- **Tool guide**: text a plugin provides for agents, on when and how to use its tools.

@@ -1,111 +1,40 @@
-# The One App
+# Building The One App
 
-Your devices, and your team's, as one place for apps and agents. Read `ARCHITECTURE.md`, and `GLOSSARY.md` for what our words mean, before changing code, and `DESIGN.md` before changing what a user sees. What machines say to each other is in the code that says it and its tests (`tests/contracts.rs` where two languages must agree): read those before changing anything that crosses a machine boundary.
+Read `VISION.md`, `GLOSSARY.md`, `ARCHITECTURE.md`, `STACK.md` and `PRIOR-ART.md` first. Where they leave something open, ask
+before choosing.
 
-## Principles
+- Consider yourself the owner of this codebase, and treat it as its maintainer would.
+- Dumb beats clever. Delete before adding.
+- Choose the simplest implementation that fully meets the requirements. Prefer well-maintained libraries over custom
+  code.
+- One name per thing. A rename reaches everything in the same change, with no aliases or fallbacks for old names, and
+  no internal words where a user reads.
+- A special case is a missing design: an `if` for one value or plugin, a parameter for one caller, a swallowed error,
+  a retry or a sleep, a skipped test. Fix the design so it goes; keep one only when the outside world needs it, with
+  a comment saying what in the world.
+- Tests are few, and only for what using it wouldn't show: secrets and who may do what, data kept and restored,
+  releases, and where two languages must agree.
+- People use apps. The CLI and MCP are for their agents, even for the most technical person on a network, so never
+  shape a person's flow around a terminal.
+- How it looks is the repo's `DESIGN.md`: our look, the same on every client.
 
-### The design
+## Docs
 
-- **No app in the core.** The core never names an app. The starter apps use exactly what anyone's app can.
-- **Three kinds.** Clients, app runtimes, and the Workers at the network's address.
-  - **What each holds.** Clients are devices, what users and their agents use, and the only place keys are opened; app runtimes run calls with the keys a caller hands them and hold none; at the network's address a few small Workers on Cloudflare, each named by its job (gateway, auth, relay, URL signer, notifications, telemetry), route, sign in, relay, carry notifications, sign bucket URLs and keep telemetry, and open no user data.
-  - **If hacked.** A hacked app runtime gets only the calls it ran while it was hacked; a hacked Worker reads no user data, though the Workers serving browsers' code could take what browsers open, which is why they stay small.
-  - **Telemetry.** Telemetry is operational and unsealed, and that includes the scrubbed message of a real failure, so the telemetry Worker and any device in the network can read it.
-  - **Two exceptions.** Two Workers are not among them: the remote MCP server is a client, so it opens keys while an MCP client calls, and oned on Cloudflare runs an app runtime like a computer's.
-  - **The rules.** ARCHITECTURE.md's rules are the design.
-- **The truth.** Each app's database for a scope is the truth, kept sealed in the network's bucket; who can do what is a signed log kept forever. Telemetry is neither: it may be lost.
-
-### The code
-
-- **Simple.** Dumb beats clever. Delete before adding. No dependency without a reason written in its commit.
-- **Together.** Code that changes together lives together; code that changes for different reasons isn't tied.
-  - **One folder.** A feature is one folder (its CLI command, routes, runtime half and tests beside each other), not a line in every layer.
-  - **No hidden links.** Nothing hides a link: no copies of logic or values (one source, or a test in `tests/contracts.rs` where two languages must hold the same), no module reading state another sets behind its back, no call order callers just have to know.
-  - **Small interface.** Callers see a small interface, never internals; stable code never imports what changes more often than it.
-  - **Nothing spare.** No pass-through wrappers, settings for what never varies, or dead code.
-- **No special cases.** A special case is a missing design: an `if` for one value or app, a parameter for one caller, a swallowed error, a retry or a sleep, a skipped test.
-  - **The fix.** Fix the design so it goes; keep one only when the outside world needs it, with a comment saying what in the world.
-- **Errors.** An error says what went wrong and how to fix it, and doesn't include the data: a real failure's message is kept in Insights, cleaned.
-- **Comments.** Comments say only what the code can't: something outside it (the proxy drops websockets, so we poll). One that restates the code, even as a why, goes.
-
-### Names and decisions
-
-- **Glossary.** GLOSSARY.md's words are the domain. A feature that needs a new one is designed wrong until proven otherwise.
-- **One name.** One name per thing.
-  - **Renames.** A rename reaches everything in the same change: code, files, docs, screens, CLI and MCP text, every caller and the data, rolled out to every device together.
-  - **No old names.** No aliases or fallbacks for old names, and no internal words (module names, "provider") where a user reads.
-  - **What users read.** What a user joins and uses is a network, "your One App network": "You've joined your One App network". A workplace's custom build is shared, so it's "the" with its name: "You've joined the Acme App network". Node, oned, onet and scope are our words, not theirs.
-- **Decisions.** What the project's owner decided is in the repo, where whoever changes that thing reads it: a word in GLOSSARY.md, a rule of the design in ARCHITECTURE.md, what users see in DESIGN.md, who may do what in a test.
-  - **When.** Land it there in the change that builds it.
-  - **Exploring.** What they're only exploring stays in Agent Memory.
-
-### Who it's for
-
-- **Any network.** No one network is the product. The devices, habits and apps of whoever is building, or of any one workplace, are examples.
-  - **The test.** Before giving every network something, ask whether a new network with other devices would want it. If not, deploy it to the network that does.
-  - **Any devices.** Design for any mix of devices. Never add an app nobody asked for.
-- **Screens.** People use screens. The CLI and MCP are for their agents, even for the most technical person on a network, so never shape a person's flow around a terminal.
-  - **Admins and members.** Every network has a technical admin, who sets it up, usually through an agent. Members differ in how many devices they run and how many apps they make, not in which tools they touch.
-  - **A trusted boundary.** A network is an organisation or a family, a trusted boundary, not a social network.
-  - **Sign-in.** Don't assume how one signs in: passkeys by default, a workplace's own identity provider where it has one.
+- Document only what the code can't say.
+- Nothing describes the code but the code: no hand-written references that can drift; generate them or point at the
+  source.
+- As the code replaces a doc, the doc goes. Deleting a rule or a line of `STACK.md` is part of the change that builds
+  it.
 
 ## Work
 
-### The two programs
-
-- **Two programs.** Two programs: `one` (cli/) is what the agents of a network's users and admins use, and ships; `one-dev` (dev/) is for whoever builds this repo, its own or a custom build (updates, releases, a throwaway network), and never ships. A command only someone with a checkout needs goes in `one-dev`.
-  - **Updating.** `one-dev update <part>` sends one part of a build out and a plain `one-dev update` each that changed; what each command takes is in `--help`.
-  - **Skills.** When and why to run them are short skills in `.agents/skills/` (`.claude/skills` is a link to it, because Claude Code reads a project's skills only from there): ship a change (`ship`), see a UI change (`see-a-ui-change`), `release`, `look-through-screens`, `keep-mac-current`, `try-a-service`, give a throwaway another computer (`another-computer`), keep a custom build's fork in step with upstream (`keep-a-fork-current`). Read the one you need, and use your judgement.
-- **A throwaway network.** `one-dev throwaway` (`target/debug/one-dev throwaway` for your build, which `cargo build` made, as it did the services a computer runs; `cargo test` makes neither: never build release to try it, which compiles it all again) starts your checkout's own network beside the real one, with only what every new network starts with (what a new user sees) and its own Workers, where its user signs in with no passkey.
-  - **Testing there.** Test there with `one-dev throwaway <command>` or `one-dev throwaway mcp`, and its repos with `one-dev throwaway git clone|push <its address>/repos/<owner>/<repo>.git` (plain git there is told to install the CLI).
-  - **Its updates.** `one-dev throwaway publish` puts your build at its address under its own release key and `one-dev throwaway update` takes it as `one update` does on a device, once `--build` has started it on an older one.
-  - **Its clients.** `one-dev throwaway client web|linux|mac|iphone|android|windows` gives a client of your checkout’s build signed in to it (linux on this machine, mac on the Mac beside the user's app, iphone on a simulator of its own there, the others on a copy of a device borrowed for you), and says how to see and use it.
-  - **A second user.** `--as sam` (web, linux, android) gives one signed in as Sam, whom its user invited with Add Someone, for what an invited user sees and anything with two users.
-  - **Stopping.** `one-dev throwaway stop` deletes it and gives its devices back.
-- **Hand tools.** `dev/tools/` is what agents run by hand (`iteration` reports, `agents` runs of fresh agents): `cargo test` doesn't run it and a change there sends nothing out.
-
-### Testing
-
-- **Which tests.** Before each commit, run the tests your change could break and only those: you choose (`cargo test -- --list` lists them; `cargo test --test main contracts::` or `cargo test <name>` runs some) and say which in the commit's body (`Tested: contracts auth`).
-  - **Screens and Workers.** A change to a screen alone needs its build (`bun run build` in `ui/kit`), and what crosses to a Worker or the bridge also needs `tests/contracts.rs`.
-  - **All of them.** Run all of `cargo test` when you can't tell, or for signing, releases, the update path, keys, who may do what, and stored data, leaving out `tree::the_native_app_builds` (`-- --skip the_native_app_builds`, about 11 minutes cold) unless `native-apps` or `Cargo.lock` changed.
-  - **Sign-off.** Once it's pushed, `one-dev signoff tested --ran "contracts auth"` in its checkout: it compiles what changed, type-checks and builds the screens and checks the built files match, and only a commit signed off this way can be sent.
-  - **Where.** Tests run on our own machines, never in CI.
-  - **After a rebase.** After a `pull --rebase` that follows a passing run, test again only if a commit it brought in touches a file yours does; otherwise push as it is.
-  - **No tests needed.** A commit of only docs (`*.md`, `dev/plans/`) needs none, nor one of only an app's service written in Go.
-  - **The simulator.** `tests/sim.rs` runs the simulator; a failing seed is a bug, never a flake.
-- **Few tests.** Tests are few, and only for what using it wouldn't show: secrets and who may do what, data kept and restored, releases, and where two languages must agree. A path you'd see work or break in `one-dev throwaway` gets no test.
-  - **A good test.** A test fails on a regression and only then: one that repeats the implementation, checks internals rather than behaviour, or can't fail, goes.
-
-### Shipping
-
-- **Pre-production.** We're pre-production: a rename or a change of shape reaches every caller in the same change, with no backwards compatibility, fallback, alias or anything kept for older devices, even for code that shipped yesterday, and every device updates.
-  - **Stored data.** Stored data is migrated, never lost, by the smallest step that keeps it: convert it and cut over.
-  - **No phases.** If you're planning phases, gates or a ceremony, you've assumed production.
-- **Push to main.** Push to `main` as you go (pull with `--rebase` first: several threads on several machines work on it at once). From a worktree branch push `git push -u origin HEAD:main`.
-  - **Own it.** You own a change until it's seen running: after each push, sign it off and send it out (the `ship` skill), and `one-dev unfinished` says what's still open.
-  - **The update path.** The signed latest record at the network's address (`oned/update/src/latest.rs`, `<address>/updates/`, anyone's GET) is the one path a device updates by and must never break.
-  - **Taking an update.** Nothing takes it by itself: `one update` takes it with nothing else running, when a person or an agent presses Update (Settings › Devices, `one devices update`, or `one-dev ship`, which asks every device online that's behind); a scheduled agent on the Mac builds and publishes what Macs take (their `one`, services and window) and the iPhone app (the `keep-mac-current` skill), and a Mac takes it with `one update` too.
-  - **Workers.** The Workers deploy from any admin's device signed in to the network's 1Password, where their settings are kept beside their secrets; `one-dev update workers` deploys from the machine it runs on.
-  - **No polling.** Never poll or wait in a loop for a device or a Mac: `one-dev status --until` blocks, and says why when it can't. It and `one-dev ship` end within 9 minutes, before a harness cuts the call off; the same command again waits on.
-  - **Apps.** An app is quicker still with `one deploy apps/<name>` from your checkout; if it needs something new from the app runtime, deploy it once the app runtime has gone out.
-  - **Services.** A service: switched on in Settings › Devices or by `one services on <name> --device <device>`, which sets it up there; the `try-a-service` skill puts your checkout's build on a device at once.
-- **Apps and services.** Apps reach devices only by a deploy: `one deploy`, or an admin adding a built-in app (the folders in `apps/` with an `app.js`, which every release ships; see ARCHITECTURE.md; one with React screens commits their build, `dist/`, which `one deploy apps/<name>` makes). Services, only by an owner of a device installing them there. A network's own apps never go in `apps/`.
-- **Commits.** One commit per change, once it works, as a Conventional Commit: `type(area): what changes, for whoever uses it`, type one of `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build` or `chore`, e.g. `fix(repos): a push shows in its list the moment it's made`. No co-author or "Generated with" lines.
-
-### Looking inside
-
-- **Before ssh.** Before ssh, look inside what runs: `one <app> <tool> --trace` prints a call's answer, then which device ran it, each wait, where its data came from and the total (also when it failed), and `one logs <device> [--service <name>] [--since 10m] [--grep <text>]` reads a device's app runtime's log over the network, or with `--service`, a service's, `onet`'s or `oned`'s (`one-dev throwaway logs …` for yours); a device that began before this has none.
-  - **Across the network.** `one insights` says what's failing or slow across the network (`--service <name>`, then `--trace-id <id>`).
-- **Friction.** When something in building The One App slows you down or confuses you (an error that didn't say what to do, a command you had to piece together, a wait, a doc that was wrong), note one line in Agent Memory starting `Friction:`, even if you got past it. That's how it gets fixed (`dev/tools/iteration/report.py` lists them).
-
-### Shared machines
-
-- **Secrets.** Never print a secret. Check a file that holds them by its names or hashes, never its values. The Workers' secrets are read with Varlock from `<home>/cloudflare/.env.local`, as references to 1Password for a real network.
-- **No wait loops.** Don't write wait loops (sleep, until, pgrep, tail --pid, polling a log or a remote). Run the command in the foreground, or start it in the background and let your harness tell you when it ends. If what you need can't be waited on that way (a Mac build, a device or service coming up), note it as friction: the tool should say when it's done, not you poll it.
-- **Clean up.** Stop what you start once you're done with it, since every thread shares these machines: `one-dev throwaway stop`, devices you borrowed yourself (`one agent-devices give_back`), the simulators you booted (`xcrun simctl shutdown`), and your worktree (`git worktree remove`).
-
-### Docs
-
-- **Docs.** Document only what the code can't say.
-- **No drift.** Nothing describes the code but the code: no hand-written references that can drift; generate them or point at the source.
+- Push to `main` as you go, pulling with `--rebase` first: several threads on several machines work on it at once.
+  Work in your own git worktree, never in a checkout others share, and from its branch push
+  `git push -u origin HEAD:main`.
+- One commit per change, once it works, as a Conventional Commit: `type(area): what changes, for whoever uses it`. No
+  co-author or "Generated with" lines.
+- Never print a secret. Check a file that holds them by its names or hashes, never its values.
+- Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in
+  the background and let your harness tell you when it ends.
+- Stop what you start once you're done with it, since every thread shares these machines, and remove your worktree.
+- The machines here also run the app as it was before, whose command is `one`. Never install over it or stop it.

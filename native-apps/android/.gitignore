@@ -1,8 +1,0 @@
-.gradle/
-build/
-local.properties
-.kotlin/
-# Made by the app's Rust build (tauri-build): Tauri's library and plugins' places, and what the app depends on of them.
-tauri.settings.gradle
-app/tauri.build.gradle.kts
-app/proguard-tauri.pro
