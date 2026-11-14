@@ -46,9 +46,11 @@ defmodule OneCore.Plugin do
     The command reads one into it (`one hello keep --photo-from photo.jpg`).
   - `guide/0`, if the plugin has one, is text for agents on when and how to use its tools.
   - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact, where it keeps
-    what it needs as blobs through `OneCore.Artifact`: `read/2`, `write/3` (only if absent), `replace/4` (only if
-    unchanged), `list/2` and `remove/2`. Its `folder` is a folder of the plugin's own on the machine running the
-    call, for files that needn't outlive that machine.
+    what it needs as blobs through `OneCore.Artifact`: `read/2` gives `{:ok, data, tag}` or `:absent`, `write/3`
+    writes only if absent and gives `:ok` or `:exists`, `replace/4` takes that tag, replaces only if unchanged
+    and gives `:ok` or `:changed`, `list/2` gives the names that start with what it's given, and `remove/2`
+    removes one for good. Its `folder` is a folder of the plugin's own on the machine running the call, for files
+    that needn't outlive that machine.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
   - A tool whose answer to the same inputs is never different, such as a photo by its id, says `fixed: true` too.

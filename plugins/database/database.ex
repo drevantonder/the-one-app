@@ -37,6 +37,8 @@ defmodule Database do
       number, text, `nil`, a boolean (kept as 1 or 0) or `{:blob, binary}`.
     - `schema` is the statements that make the tables, in the order they were added. Each runs once on each
       database. To change the tables, add statements to the end, and leave the ones already deployed as they are.
+    - The database is the blobs under `log/` and `snapshot/` in the plugin's own artifact. Every other name there
+      is the plugin's, for what isn't rows: a photo, a file.
     - One server at a time writes a database, and a call that reaches another is passed on to it. So the tool may
       start again on another server, and `fun` may run more than once. Do everything that touches the database
       inside `fun`, and what reaches outside, such as sending a message, after `transaction` returns.
