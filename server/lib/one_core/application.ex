@@ -4,8 +4,9 @@ defmodule OneCore.Application do
   alias OneCore.{Iroh, Plugins, Server, Servers, Services}
 
   # A server is told when another puts something in the bucket for it to run. It's told nothing while it can't be
-  # reached, and nothing says when it can be again, so it also looks by itself this often, in milliseconds.
-  @look_every :timer.minutes(1)
+  # reached, and nothing says when it can be again, so it also looks by itself this often, in milliseconds. Each
+  # look reads a few blobs, which at an address are asked of the signer.
+  @look_every :timer.minutes(5)
 
   # A server that isn't one of its network's doesn't start: `{:not_joined, key}` says so, with its key.
   @impl true
