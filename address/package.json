@@ -12,6 +12,6 @@
   },
   "scripts": {
     "dev": "wrangler dev -c gateway/wrangler.jsonc -c relay/wrangler.jsonc -c signer/wrangler.jsonc -c way-in/wrangler.jsonc -c web/wrangler.jsonc",
-    "deploy": "for piece in web signer relay way-in gateway; do wrangler deploy -c $piece/wrangler.jsonc || exit; done"
+    "deploy": "wrangler deploy -c web/wrangler.jsonc && wrangler deploy -c signer/wrangler.jsonc --secrets-file signer/secrets && for piece in relay way-in gateway; do wrangler deploy -c $piece/wrangler.jsonc || exit; done"
   }
 }

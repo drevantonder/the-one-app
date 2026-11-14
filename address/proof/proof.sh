@@ -20,8 +20,9 @@ if [[ ${1-} != inside ]]; then
   exec unshare --user --map-root-user --net --mount --pid --fork --kill-child --mount-proc "$0" inside
 fi
 
+# Everything this makes is in this folder, which it leaves behind for its logs.
 work=$(mktemp -d)
-trap 'rm -f "$address"/signer/.dev.vars "$address"/way-in/.dev.vars; echo; echo "The logs are in $work"' EXIT
+trap 'echo; echo "The logs are in $work"' EXIT
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 at() { local namespace=$1; shift; nsenter --net=/run/netns/"$namespace" "$@"; }
 random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
@@ -53,8 +54,9 @@ wire() {
 wire address server 10.1.0 && at server ip route add default via 10.1.0.1
 wire address client 10.2.0 && at client ip route add default via 10.2.0.1
 
-# The bucket, with credentials made up for this run. Only the signer is given them.
-access=$(random 8) secret=$(random 24)
+# The bucket, with credentials made up for this run. Only the signer is given them, with the secret the network's
+# first server shows.
+access=$(random 8) secret=$(random 24) first=$(random 16)
 mkdir "$work/bucket"
 RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret at address rustfs server --address 10.0.0.1:9000 "$work/bucket" >"$work/bucket.log" 2>&1 &
 at address curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 http://10.0.0.1:9000/
@@ -63,7 +65,7 @@ at address curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 ht
   const store = new AwsClient({ accessKeyId: process.env.ACCESS, secretAccessKey: process.env.SECRET, service: "s3", region: "auto" });
   const made = await store.fetch("http://10.0.0.1:9000/network", { method: "PUT" });
   if (!made.ok) throw new Error(`the store answered ${made.status}`);')
-printf 'BUCKET=http://10.0.0.1:9000/network\nACCESS_KEY_ID=%s\nSECRET_ACCESS_KEY=%s\n' "$access" "$secret" >"$address/signer/.dev.vars"
+without_sign_in=false
 
 # Stops what was started in a group of its own, all of it.
 stop() {
@@ -73,10 +75,12 @@ stop() {
 }
 stamped() { while IFS= read -r line; do printf '%(%T)T %s\n' -1 "$line"; done; }
 
-# The address: the five Workers, started again each time this is called.
+# The address: the five Workers, started again each time this is called. The signer's secrets and the way in's
+# setting are in the environment, which only `wrangler dev` reads them from.
 start_address() {
   stop "${address_pid-}"
-  (cd "$address" && WRANGLER_SEND_METRICS=false exec setsid nsenter --net=/run/netns/address \
+  (cd "$address" && BUCKET=http://10.0.0.1:9000/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
+    DEVELOPMENT_WITHOUT_SIGN_IN=$without_sign_in WRANGLER_SEND_METRICS=false exec setsid nsenter --net=/run/netns/address \
     bun run dev --ip 0.0.0.0 --port 8787 --persist-to "$work/address") > >(stamped >"$work/address.log") 2>&1 &
   address_pid=$!
   at address curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 http://10.0.0.1:8787/ping
@@ -85,11 +89,13 @@ start_address() {
 at address socat -v TCP-LISTEN:8788,bind=10.0.0.1,fork,reuseaddr,nodelay TCP:10.0.0.1:8787,nodelay 2>"$work/wire" &
 at_address=http://10.0.0.1:8788
 
+# start_server <name> [options]: a server of the network whose home is the folder's <name>. Returns once it's
+# running, or has said it isn't one of the network's.
 start_server() {
-  stop "${server_pid-}"
-  (cd "$root/server" && exec setsid nsenter --net=/run/netns/server mix network "$work/network" --address $at_address) >"$work/server.log" 2>&1 &
-  server_pid=$!
-  wait_for "A server is running" "$work/server.log"
+  local name=$1
+  shift
+  (cd "$root/server" && exec setsid nsenter --net=/run/netns/server mix network "$work/network" "$name" "$@" --address $at_address) >"$work/$name.log" 2>&1 &
+  wait_for "A server is running|isn't one of the network's" "$work/$name.log"
 }
 one() { ONE_HOME=$work/network/client at client "$root/target/release/one" "$@"; }
 mcp() { at client curl -s -m 20 -w ' (HTTP %{http_code})\n' -X POST "$1/mcp" -H 'content-type: application/json' -d "$2"; }
@@ -101,14 +107,14 @@ start_address
 at client curl -s http://10.0.0.1:8787/ | grep '<p>'
 mcp http://10.0.0.1:8787 "$list"
 
-echo 'DEVELOPMENT_WITHOUT_SIGN_IN=true' >"$address/way-in/.dev.vars"
+without_sign_in=true
 start_address
 
 say "A server and a client that each reach the address, and not each other"
-start_server
+echo "a server that doesn't show the secret the address was started with: $(cd "$root/server" && at server mix network "$work/unknown" --address $at_address 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
+start_server server --first "$first"
 at client ping -c1 -W1 10.1.0.2 >/dev/null && echo "the client reaches the server" || echo "the client can't reach the server at 10.1.0.2"
-echo "the server's settings name no bucket credentials, only the address: $(grep -c . "$address/signer/.dev.vars") lines of them are the signer's alone"
-one deploy --name tracker --files-from "$root/plugins/tracker"
+echo "the server is told the address and the first server's secret, and nothing of the bucket's credentials. Its client is told the address and no server: its home holds $(ls "$work/network/client" | tr '\n' ' ')"
 
 say "A tool call through the relay, which can't read it"
 note=relayed-$(random 8)
@@ -119,14 +125,21 @@ echo "the note in the call ($note) is in $(tail -c +$((before + 1)) "$work/wire"
 one tracker list --tracker water
 
 say "A machine on no list"
-(cd "$address" && at client bun proof/stranger.js $at_address)
+# The list a real client's pass names, which the stranger says it's on too.
+on_list=$(bun -e 'const { pass } = await Bun.file(process.argv[1]).json(); console.log(JSON.parse(atob(pass.replace(/-/g, "+").replace(/_/g, "/"))).list)' "$work/network/client/network")
+(cd "$address" && at client bun proof/stranger.js $at_address "$on_list")
 mkdir "$work/stranger"
-cp "$work/network/client/servers" "$work/stranger/servers"
-printf '{"address":"%s","pass":"%s"}' $at_address "$(printf '{"list":"users/anyone/"}' | base64 -w0)" >"$work/stranger/network"
-echo "iroh's own client with a pass no server signed, asking the server through the relay:"
+printf '{"address":"%s","pass":"%s"}' $at_address "$(printf '{"list":"%s"}' "$on_list" | base64 -w0)" >"$work/stranger/network"
+echo "a client with a pass no server signed, asking which servers to reach:"
 ONE_HOME=$work/stranger at client "$root/target/release/one" tracker list 2>&1 || true
-echo "a server with a key of its own, starting on this network:"
-(cd "$root/server" && at server mix network "$work/stranger-server" --address $at_address 2>&1 | grep -m1 -o 'The signer.*' || true)
+echo "a server with a key of its own, starting on this network with the first server's secret: $(cd "$root/server" && at server mix network "$work/stranger-server" --address $at_address --first "$first" 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
+
+say "A spare is let in by one step, as on a folder: started, it says how, and started again, it acts"
+start_server spare
+let_in=$(grep -o 'add_server --key [0-9a-f]*' "$work/spare.log")
+one $let_in
+start_server spare
+one services | grep -o '"servers":\[[^]]*\]' | tail -1
 
 say "An outsider's call over the web reaches a tool"
 note=outside-$(random 8)
@@ -154,7 +167,7 @@ sleep 60
 echo "with the server connected and nobody calling, it was woken $(($(woken) - woke)) times"
 woke=$(woken)
 (echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' && sleep 60) | one mcp >/dev/null
-echo "with a client's connection to the server held open through it too, $(($(woken) - woke)) times"
+echo "with a client that asked once and stays open for the minute, $(($(woken) - woke)) times"
 
 # `ping` is a call that only goes there and back, and `tracker_list` a tool's, which reads the bucket twice.
 timings() {

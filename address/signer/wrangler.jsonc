@@ -2,7 +2,8 @@
   "name": "one-signer",
   "main": "signer.js",
   "compatibility_date": "2026-11-01",
-  "workers_dev": false
-  // Its secrets, which only it holds: BUCKET (the bucket's S3 address, with the bucket's name as its path),
-  // ACCESS_KEY_ID and SECRET_ACCESS_KEY.
+  "workers_dev": false,
+  // Its secrets, which only it holds: BUCKET is the bucket's S3 address with the bucket's name as its path, and
+  // FIRST_SERVER is what the network's first server shows once. `wrangler dev` takes them from its environment.
+  "secrets": { "required": ["BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "FIRST_SERVER"] }
 }

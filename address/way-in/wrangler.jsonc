@@ -3,6 +3,10 @@
   "main": "way-in.js",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
+  // Lets outsiders in without signing in, which is for where a network is being built: `wrangler dev` takes it
+  // from its environment.
+  "vars": { "DEVELOPMENT_WITHOUT_SIGN_IN": "false" },
+  "secrets": { "required": [] },
   "services": [
     { "binding": "RELAY", "service": "one-relay" },
     { "binding": "SIGNER", "service": "one-signer" }

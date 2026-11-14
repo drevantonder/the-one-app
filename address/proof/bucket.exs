@@ -4,7 +4,7 @@
 Application.ensure_all_started(:req)
 {_, address} = Application.fetch_env!(:one_core, :bucket)
 alias OneCore.{Address, Bucket}
-key = "users/anyone/proof/#{System.unique_integer([:positive])}-#{System.os_time()}"
+key = "#{OneCore.User.anyone()}/proof/#{System.unique_integer([:positive])}-#{System.os_time()}"
 
 IO.puts("write only if absent: #{inspect(Bucket.write(key, "first"))}")
 IO.puts("the same write again: #{inspect(Bucket.write(key, "second"))}")
@@ -13,6 +13,8 @@ IO.puts("read: #{inspect(data)}, tag #{tag}")
 IO.puts("replace only if unchanged: #{inspect(Bucket.replace(key, "third", tag))}")
 IO.puts("the same replace again: #{inspect(Bucket.replace(key, "fourth", tag))}")
 IO.puts("list: #{inspect(Bucket.list(key))}")
+IO.puts("remove: #{inspect(Bucket.remove(key))}, and then read: #{inspect(Bucket.read(key))}")
+:ok = Bucket.write(key, "third")
 
 # What the signer hands back for a write, used as its holder might try to.
 ask = JSON.encode!(%{write: key})

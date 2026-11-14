@@ -1,8 +1,8 @@
 // The signer: the only holder of the bucket's credentials. A server asks it to sign one request to the bucket, and
 // it does if that server is on the list of whoever the blob belongs to. It never signs a write without a condition
-// (only if absent, or only if unchanged) and never a delete, so nothing in a network overwrites a blob blind: the
-// condition is a signed header, which the bucket refuses to go without. It also says who the network's own servers
-// and clients are, for the relay and for a client. It keeps nothing and runs no plugin code.
+// (only if absent, or only if unchanged), so nothing in a network overwrites a blob blind: the condition is a
+// signed header, which the bucket refuses to go without. It also says who the network's own servers and clients
+// are, for the relay and for a client. It keeps nothing and runs no plugin code.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { AwsClient } from "aws4fetch";
 import { asker, isKey, signedBy } from "../ask.js";
@@ -29,6 +29,23 @@ const isBlob = (key, start) =>
 
 const refuse = (status, why) => Response.json({ error: why }, { status });
 
+/** What a pass says, or nothing if it isn't one. */
+function said(pass) {
+  try {
+    return JSON.parse(atob(pass.replace(/-/g, "+").replace(/_/g, "/"))) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+const utf8 = new TextEncoder();
+/** Whether two secrets are the same, in a time that doesn't say how alike they are. */
+function same(one, other) {
+  if (typeof one !== "string" || typeof other !== "string") return false;
+  const [a, b] = [utf8.encode(one), utf8.encode(other)];
+  return a.length === b.length && crypto.subtle.timingSafeEqual(a, b);
+}
+
 export default class extends WorkerEntrypoint {
   async fetch(request) {
     const { pathname, searchParams } = new URL(request.url);
@@ -45,8 +62,8 @@ export default class extends WorkerEntrypoint {
 
   /**
    * Signs one request to the bucket for the server `by`, which shows `pass`: `{read: key}`, `{write: key}` (only if
-   * absent), `{replace: key, tag}` (only if unchanged) or `{list: prefix, after?}`. Answers what to send: its
-   * method, URL and headers.
+   * absent), `{replace: key, tag}` (only if unchanged), `{list: prefix, after?}` or `{remove: key}`. Answers what to
+   * send: its method, URL and headers.
    */
   async sign(by, pass, body) {
     let ask;
@@ -55,14 +72,15 @@ export default class extends WorkerEntrypoint {
     } catch {
       return refuse(400, "An ask is JSON");
     }
-    const key = ask.read ?? ask.write ?? ask.replace ?? ask.list;
+    const key = ask.read ?? ask.write ?? ask.replace ?? ask.list ?? ask.remove;
     if (!isBlob(key, ask.list !== undefined)) return refuse(400, "That isn't a blob's key");
 
     const [network, owners] = await Promise.all([this.list(NETWORK), this.list(owner(key))]);
     const listed = network?.includes(by) || owners?.includes(by);
-    // A new network has no server yet. Whichever asks first writes the network's list, as its first owner is the
-    // first user to sign in. It's signed for whoever asks, since the bucket lets only the first one land.
-    const first = ask.write === NETWORK + "servers";
+    // A new network has no server yet, so nobody is on a list. The first is whichever shows the secret this
+    // address was deployed with (`FIRST_SERVER`), which only whoever deployed it knows: it writes the network's
+    // list. The secret opens nothing after that, since the bucket lets only the first write land.
+    const first = ask.write === NETWORK + "servers" && same(said(pass).first, this.env.FIRST_SERVER);
     const server = SERVER.exec(key)?.[1];
     const own = server && (server === by || ask.read !== undefined) && (await this.admits(by, pass));
     if (!listed && !first && !own) return refuse(403, "You aren't on its list of servers");
@@ -77,7 +95,7 @@ export default class extends WorkerEntrypoint {
       if (ask.replace !== undefined) headers["if-match"] = String(ask.tag);
     }
     url.searchParams.set("X-Amz-Expires", SIGNED_FOR);
-    const method = ask.write !== undefined || ask.replace !== undefined ? "PUT" : "GET";
+    const method = ask.remove !== undefined ? "DELETE" : ask.write !== undefined || ask.replace !== undefined ? "PUT" : "GET";
     const signed = await this.bucket().sign(url, { method, headers, aws: { signQuery: true } });
     return Response.json({ method, url: signed.url, headers });
   }
@@ -88,13 +106,7 @@ export default class extends WorkerEntrypoint {
    * key, until a time (`{list, by, until, signature}`): how a client gets one is the server's to decide.
    */
   async admits(key, pass) {
-    let said;
-    try {
-      said = JSON.parse(atob(pass.replace(/-/g, "+").replace(/_/g, "/")));
-    } catch {
-      return null;
-    }
-    const { list, by, until, signature } = said ?? {};
+    const { list, by, until, signature } = said(pass);
     if (!isKey(key) || owner(list) !== list) return null;
     if (by === undefined) return (await this.servers(list)).includes(key) ? {} : null;
     if (!(until > Date.now())) return null;

@@ -25,15 +25,22 @@ defmodule OneCore.Servers do
 
   @doc """
   Whether the server whose key is `key` is one of this network's: it's on the list, which a server already on it
-  added it to (`add/2`). A network with no list has no server yet, and this one becomes its first: it acts for the
-  network, and so writes the first list.
+  added it to (`add/2`), or the network had no server and this is now its first.
   """
   def joined?(key) do
-    Bucket.write(@network, JSON.encode!([key]))
-    if key in listed(@network), do: Bucket.write(@list, JSON.encode!([key]))
+    first(key)
     key in acting()
   rescue
     Bucket.Refused -> false
+  end
+
+  # A network with no list has no server yet. Whichever writes its list is its first: it acts for the network, and
+  # so writes the first list of the servers acting. A bucket that refuses says this isn't the one to.
+  defp first(key) do
+    Bucket.write(@network, JSON.encode!([key]))
+    if key in listed(@network), do: Bucket.write(@list, JSON.encode!([key]))
+  rescue
+    Bucket.Refused -> :ok
   end
 
   @doc "A server that started says how to reach it now."
