@@ -12,7 +12,7 @@ defmodule OneCore.Call do
   The rest is One Core's: which plugin this is, what was asked of it, the plugins it uses, and whether another
   server passed it on.
   """
-  alias OneCore.{Plugins, Server}
+  alias OneCore.{Artifact, Hooks, Plugins, Server, User}
   alias OneCore.Plugins.Version
 
   @enforce_keys [:own, :folder, :server, :for, :plugin, :ask, :uses, :passed_on]
@@ -31,6 +31,67 @@ defmodule OneCore.Call do
       %{^name => module} -> module
       _ -> raise "#{plugin} doesn't say it uses #{name}. Its uses/0 names the plugins it uses."
     end
+  end
+
+  @doc """
+  An artifact this call's plugin makes for whoever it runs for, under an `id` the plugin chooses: letters, digits,
+  `_` and `-`. It's theirs, not the plugin's, and the plugin reaches it for them without asking. The same `id`
+  is the same artifact, so a call that starts again makes it once.
+
+      note = OneCore.Call.make(call, "7")
+      OneCore.Artifact.write(note, "text", "Buy milk")
+      OneCore.Artifact.name(note)
+      #=> "users/anyone/made/notes/7"
+  """
+  def make(%__MODULE__{for: who, plugin: plugin}, id) do
+    if User.link?(who), do: raise("A sharing link's holder makes nothing: nothing in a network is theirs")
+    if not (is_binary(id) and id =~ ~r/^[A-Za-z0-9_-]+$/), do: raise(ArgumentError, "an id is letters, digits, _ and -")
+    %Artifact{prefix: "#{who}/made/#{plugin}/#{id}/", reached: {plugin, who, "owner"}}
+  end
+
+  @doc """
+  The artifact named `name`, for a call that may reach it as `relation`: a `viewer` reads it, an `editor` changes
+  it too, and an `owner` says who else may. Raises with the reason if it may not.
+
+  A plugin reaches an artifact only if both it and whoever it runs for have that relation to it, which is for the
+  plugins that decide `reach` to say: with none, everything in a network is shared. Nothing is asked about what
+  the plugin made for whoever it runs for, and nothing about the plugin where it made the artifact for someone
+  else, or the artifact is its own.
+
+      note = OneCore.Call.reach(call, "users/alice/made/notes/7")
+      {:ok, text, _tag} = OneCore.Artifact.read(note, "text")
+  """
+  def reach(%__MODULE__{for: who, plugin: plugin}, name, relation \\ "viewer") do
+    case refused(plugin, who, name, relation) do
+      nil -> %Artifact{prefix: name <> "/", reached: {plugin, who, relation}}
+      why -> raise why
+    end
+  end
+
+  @doc "Whether `reach/3` would give the artifact: whether this call may reach it as `relation`."
+  def reaches?(%__MODULE__{for: who, plugin: plugin}, name, relation \\ "viewer"),
+    do: refused(plugin, who, name, relation) == nil
+
+  @doc "Why a plugin running for `who` may not reach the artifact `name` as `relation`, or `nil` if it may."
+  def refused(plugin, who, name, relation) when relation in ["viewer", "editor", "owner"] do
+    if not Enum.all?(String.split(name, "/"), &(&1 =~ ~r/^[^.]/)),
+      do: raise(ArgumentError, "an artifact's name is parts joined by /, none empty or starting with a dot")
+
+    made = match?([_, _, "made", ^plugin | _], String.split(name, "/"))
+
+    asked =
+      cond do
+        made and String.starts_with?(name, who <> "/") -> []
+        made or name == Plugins.own(plugin) -> [who]
+        true -> [who, Plugins.who(plugin)]
+      end
+
+    Enum.find_value(asked, fn asked ->
+      case Hooks.decide("reach", %{"who" => asked, "relation" => relation, "artifact" => name}, who) do
+        :ok -> nil
+        {:refuse, why} -> why
+      end
+    end)
   end
 
   @doc """

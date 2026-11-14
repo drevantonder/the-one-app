@@ -52,6 +52,19 @@ defmodule OneCore.Plugin do
     and gives `:ok` or `:changed`, `list/2` gives the names that start with what it's given, and `remove/2`
     removes one for good. Its `folder` is a folder of the plugin's own on the machine running the call, for files
     that needn't outlive that machine.
+  - `OneCore.Call.make(call, id)` makes an artifact for whoever the call runs for, `call.for`, under an id the
+    plugin chooses, and the plugin keeps blobs in it as it does in its own. It's theirs, not the plugin's, and its
+    name (`OneCore.Artifact.name/1`, such as `users/alice/made/hello/7`) is what they share it by.
+  - `OneCore.Call.reach(call, name)` gives an artifact by its name, to a call that may reach it: as a `viewer`,
+    to read it, or with `"editor"` or `"owner"` as a third argument, to change it or to say who else may. It
+    raises with the reason if it may not, which is then what the caller is told, and `OneCore.Call.reaches?/3`
+    asks without raising. What the plugin made for whoever it runs for is reached without asking. Anything else
+    is reached only if both the plugin and whoever it runs for have that relation to it, which the plugins that
+    decide `reach` say. `relations` is the one The One App ships with, and its guide says how something is
+    shared. With none, everything in a network is shared.
+  - A tool runs for whoever asked, and every plugin is added for the network's users. A tool that the holder of
+    a sharing link may call too says `by_link: true`: it then runs for someone who is no user, so it keeps to
+    what `reach` gives it.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
   - A tool whose answer to the same inputs is never different, such as a photo by its id, says `fixed: true` too.

@@ -96,6 +96,8 @@ defmodule OneCore.Mcp do
     }
   ]
 
+  @own Enum.map(@tools, & &1.name)
+
   @doc "The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty."
   def answer(message, from) do
     case JSON.decode(message) do
@@ -232,6 +234,10 @@ defmodule OneCore.Mcp do
   end
 
   defp result(method, _), do: {:error, -32601, "This server has no method #{method}"}
+
+  # One Core's own tools are for the network's users.
+  defp call(name, _inputs, "links/" <> _, _passed_on) when name in @own,
+    do: {:error, "#{name} isn't a tool that a sharing link's holder calls"}
 
   defp call("deploy", %{"name" => name, "files" => files}, _who, _passed_on) do
     case Plugins.deploy(name, files) do

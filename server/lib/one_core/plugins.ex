@@ -96,16 +96,25 @@ defmodule OneCore.Plugins do
         nil ->
           {:error, "#{name} has no tool named #{tool}. It has: #{Enum.map_join(version.tools, ", ", & &1.name)}"}
 
-        %{takes: takes} ->
+        %{takes: takes} = found ->
           # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
           call = called(name, versions, {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}, who, passed_on)
 
-          with :ok <- given(takes, inputs),
+          with :ok <- open_to(found, name, who),
+               :ok <- given(takes, inputs),
                {:ok, about} <- hooked(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, takes, who) do
             heard(about, version, who, fn -> version.plugin.call(tool, about["inputs"], call) end)
           end
       end
     end)
+  end
+
+  # A plugin is added for users. A sharing link's holder is none, and calls only a tool that says they may: one
+  # that keeps to what the link reaches.
+  defp open_to(tool, name, who) do
+    if User.link?(who) and tool[:by_link] != true,
+      do: {:error, "#{name}_#{tool.name} isn't a tool that a sharing link's holder calls"},
+      else: :ok
   end
 
   # What a call is about once the plugins that change its inputs have, if the ones that decide it agree to it.
@@ -238,6 +247,12 @@ defmodule OneCore.Plugins do
   @doc "Lets go of the versions that `hold/1` held, which are unloaded once nothing runs or holds them."
   def release(held), do: GenServer.call(__MODULE__, {:end, held})
 
+  @doc "The name of a plugin's own artifact."
+  def own(name), do: "#{User.anyone()}/own/#{name}"
+
+  @doc "A plugin as a who, which is its artifact's name: the one holding its code."
+  def who(name), do: Artifact.name(artifact(name))
+
   @doc "The plugins running, by name: each one's `Version`, which holds its tools, its guide and its apps."
   def running, do: GenServer.call(__MODULE__, :running)
 
@@ -265,10 +280,10 @@ defmodule OneCore.Plugins do
   # What a function of a plugin is called with: who it runs for, and what was asked, to pass on. The plugin's own
   # artifact is the one for whoever it was added for, which is the one user every plugin is added for.
   defp called(name, versions, ask, who, passed_on) do
-    own = "#{User.anyone()}/own/#{name}/"
+    own = own(name)
 
     %Call{
-      own: %Artifact{prefix: own},
+      own: %Artifact{prefix: own <> "/"},
       folder: Path.join(Server.home(), own),
       server: Server.key(),
       for: who,

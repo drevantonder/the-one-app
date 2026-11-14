@@ -15,7 +15,7 @@ defmodule OneCore.Hooks do
   another server is decided on both.
   """
   require Logger
-  alias OneCore.Plugins
+  alias OneCore.{Call, Plugins}
 
   @kinds [
     hears: """
@@ -44,10 +44,22 @@ defmodule OneCore.Hooks do
      A tool is about to be called. It's about the tool's `plugin`, its `tool` name, the `inputs` it will be called
      with, and `changed`: the plugin that set each input that was changed, by the input's name.
      """},
+    {"reach", :decides,
+     """
+     A plugin is about to reach an artifact that isn't its own. It's about `who` would reach it, the `relation`
+     they need to it (`viewer`, `editor` or `owner`) and the `artifact`'s name. It's asked about whoever the
+     plugin runs for, and about the plugin, by its artifact's name, where the plugin didn't make the artifact.
+     """},
     {"called", :hears,
      """
      A tool was called. It's about what `call` is about, how long the tool `took` in microseconds, and the `error`
      it raised, which is `nil` if it answered.
+     """},
+    {"changed", :hears,
+     """
+     A blob of an artifact that a plugin made or reached was written or removed. It's about the `artifact`'s
+     name, the `blob`'s name in it, and `by`, the plugin that did it. A plugin is told only if it could already
+     reach the artifact for whoever changed it, and isn't told what it changed itself.
      """},
     {"joined", :hears,
      """
@@ -122,10 +134,17 @@ defmodule OneCore.Hooks do
     :ok
   end
 
-  @doc "Tells one plugin what `hook` is about, for `who`, in a process of its own."
-  def tell(plugin, hook, about, who) do
-    Task.Supervisor.start_child(__MODULE__, fn -> Plugins.hook(plugin, hook, about, who) end)
+  defp tell(plugin, hook, about, who) do
+    Task.Supervisor.start_child(__MODULE__, fn ->
+      if hears?(plugin, about, who), do: Plugins.hook(plugin, hook, about, who)
+    end)
   end
+
+  # A hook gives no access of its own: a plugin hears about an artifact only if it could already reach it.
+  defp hears?(plugin, %{"artifact" => artifact, "by" => by}, who),
+    do: plugin != by and Call.refused(plugin, who, artifact, "viewer") == nil
+
+  defp hears?(_plugin, _about, _who), do: true
 
   @doc """
   Asks each plugin that changes `hook` what it changes of what it's about, for `who`. Gives `{:ok, changes, by}`:

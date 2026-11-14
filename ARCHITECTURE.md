@@ -40,7 +40,6 @@
 - The CLI and MCP are the app for computers without its window. A computer with the app has both, and a machine with no
   screen installs the same program.
 - Each plugin is its own package too, the ones The One App ships with included. Those differ only in shipping with it.
-- One Core works with no plugins. With none that decides who may reach what, everything in a network is shared.
 - Every plugin runs the same way. The ones The One App ships with are no more special than anyone's. That way isn't a
   sandbox: a plugin's code on a server is free to use the machine it runs on.
 - What plugins run in can give them things to import, such as cryptography or a database engine. One Core itself still
@@ -62,7 +61,6 @@
   need, and the owner isn't responsible for keeping their credentials safe.
 - Relation tuples are a plugin. It keeps them in its own artifact, and decides on a server whether anything may reach
   any other.
-- More than one plugin can decide whether something may be reached. Any of them can say no, and that blocks it.
 - Servers ask the relation tuples plugin. The signer doesn't: it only knows which servers act for whom. Taking access
   away reaches every server eventually. No time is promised.
 - The relation tuples plugin uses the database plugin.
@@ -146,8 +144,6 @@
 ## Plugins
 
 - A plugin always runs for a user or a group: whoever is using it, or, with nobody there, the one it was set up for.
-- A plugin reaches an artifact only if both it and the user or group it runs for have a relation to it. It reaches what
-  it makes without asking.
 - What a plugin makes is owned by the user or group it was made for, not by the plugin. Removing a plugin leaves its
   data.
 - A plugin's code on a server is free, and nothing checks it. Agents are intelligent, and a network is trusted.
@@ -159,9 +155,6 @@
 - A plugin's tools are its only public part. Anything may call one for the user or group it runs for: an app, an agent,
   a scheduled job, another plugin's tool.
 - A plugin's deployed code is open to everyone in the network. A git repo it came from can be private.
-- Plugin hooks are part of the interface plugins are written against. A plugin hooks into a moment, such as a tool being
-  called, an artifact changing or a server joining, and is called when it happens.
-- A plugin hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
 - MCP Apps are supported from the start.
 - An app is free in what it shows. A widget is as free as the platform it sits on allows, and we pass on as much of that
   freedom as we can.
