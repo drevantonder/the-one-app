@@ -5,8 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# An add-on has no tests of its own: it's only whole inside the VM that loads it, where the server's tests use it.
 [lib]
 crate-type = ["cdylib"]
+test = false
+doctest = false
 
 [dependencies]
 rusqlite = { version = "0.41", features = ["bundled"] }
