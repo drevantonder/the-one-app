@@ -69,18 +69,29 @@ defmodule OneCore.Server do
     :ok
   end
 
-  # A connection is opened when there's none, to where the server says it is now.
+  # A connection is opened when there's none, to where the server says it is now. A server whose connection no
+  # longer answers has gone, unless it says it's somewhere else now: one that starts again listens somewhere new.
   defp ask(server, message) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)
+    asked = fn -> told(&Iroh.ask_server(endpoint, server, message, self(), &1)) end
 
-    with :closed <- told(&Iroh.ask_server(endpoint, server, message, self(), &1)),
-         {:ok, address} <- Servers.address(server),
-         :ok <- told(&Iroh.connect(endpoint, address, self(), &1)),
-         :closed <- told(&Iroh.ask_server(endpoint, server, message, self(), &1)) do
-      :unreachable
+    case asked.() do
+      :closed -> connect(endpoint, server, nil, asked)
+      {:gone, was} -> connect(endpoint, server, was, asked)
+      answered -> answered
+    end
+  end
+
+  defp connect(endpoint, server, was, asked) do
+    with {:ok, address} when address != was <- Servers.address(server),
+         :ok <- told(&Iroh.connect(endpoint, address, self(), &1)) do
+      case asked.() do
+        :closed -> :unreachable
+        {:gone, _address} -> :unreachable
+        answered -> answered
+      end
     else
-      :absent -> :unreachable
-      outcome -> outcome
+      _ -> :unreachable
     end
   end
 

@@ -2,11 +2,10 @@
 //! the address over the web is passed down this connection by the relay there (`address/relay/relay.js`), and the
 //! server's answer goes back up it.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use client::Network;
-use data_encoding::HEXLOWER;
 use futures_util::{SinkExt, StreamExt};
 use iroh::SecretKey;
 use rustler::LocalPid;
@@ -33,16 +32,8 @@ pub async fn hear(network: Network, key: SecretKey, asked: LocalPid) {
 async fn heard(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result<()> {
     let address = network.address.trim_end_matches('/');
     let socket = format!("ws{}/relay/outside", address.strip_prefix("http").context("an address is http or https")?);
-    let at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis().to_string();
-    let signature = key.sign(format!("one/ask/1\n/relay/outside\n{at}\n").as_bytes());
     let mut request = socket.into_client_request()?;
-    let signed = [
-        ("one-key", key.public().to_string()),
-        ("one-at", at),
-        ("one-signature", HEXLOWER.encode(&signature.to_bytes())),
-        ("one-pass", network.pass.clone()),
-    ];
-    for (name, value) in signed {
+    for (name, value) in network.signed(key, "/relay/outside", "")? {
         request.headers_mut().insert(name, value.parse()?);
     }
 

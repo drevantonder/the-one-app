@@ -30,8 +30,9 @@ defmodule OneCore.Iroh do
 
   @doc """
   Asks the server whose key is `server` one message over its open connection, and sends `to` the message
-  `{reference, outcome}`: `{:ok, answer}`; `:closed` if no connection to it is open, so it was asked nothing; or
-  `:stopped` if it stopped answering after it was asked.
+  `{reference, outcome}`: `{:ok, answer}`; `:closed` if no connection to it is open, or `{:gone, address}` if the
+  one that was open, made to `address`, no longer answers, so either way it was asked nothing; or `:stopped` if it
+  stopped answering after it was asked.
   """
   def ask_server(_endpoint, _server, _message, _to, _reference), do: :erlang.nif_error(:nif_not_loaded)
 end

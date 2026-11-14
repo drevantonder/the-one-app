@@ -7,12 +7,10 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
-use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, LazyLock, Mutex};
 
-use client::Network;
+use client::{Network, Unanswered};
 use data_encoding::HEXLOWER;
-use iroh::endpoint::Connection;
 use iroh::{Endpoint, EndpointAddr};
 use rustler::{Atom, Binary, Encoder, Env, LocalPid, NewBinary, OwnedEnv, Resource, ResourceArc, Term};
 use tokio::runtime::Runtime;
@@ -21,22 +19,19 @@ use tokio::sync::{broadcast, oneshot};
 mod outside;
 
 mod atoms {
-    rustler::atoms! { ok, ask, closed, stopped, unreachable }
+    rustler::atoms! { ok, ask, closed, gone, stopped, unreachable }
 }
-
-/// How long reaching another server may take before it counts as not answering. A spare waits this long before it
-/// takes over, so it's short.
-const CONNECT: Duration = Duration::from_secs(2);
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("tokio starts"));
 
 /// A server's endpoint, open for as long as the server holds this, where what it tells its clients is sent from,
-/// and its open connections to other servers by their keys. Nothing looks inside it after a panic, which is what
-/// Rustler needs to hear before it hands one to Elixir.
+/// and its connections to other servers by their keys, each with the address it was made to. One that has closed
+/// stays until the next is made, to say where the server was last found gone. Nothing looks inside it after a
+/// panic, which is what Rustler needs to hear before it hands one to Elixir.
 struct Reached {
     endpoint: AssertUnwindSafe<Endpoint>,
     told: AssertUnwindSafe<broadcast::Sender<Vec<u8>>>,
-    servers: Mutex<HashMap<String, Connection>>,
+    servers: AssertUnwindSafe<Mutex<HashMap<String, (String, Arc<client::Reached>)>>>,
 }
 
 #[rustler::resource_impl]
@@ -100,7 +95,7 @@ fn start(
         let reached = Reached {
             endpoint: AssertUnwindSafe(endpoint),
             told: AssertUnwindSafe(told),
-            servers: Mutex::new(HashMap::new()),
+            servers: AssertUnwindSafe(Mutex::new(HashMap::new())),
         };
         Ok((ResourceArc::new(reached), address))
     })
@@ -133,7 +128,10 @@ async fn accept(endpoint: Endpoint, asked: LocalPid, told: broadcast::Sender<Vec
                         let from = from.clone();
                         tokio::spawn(async move {
                             let Ok(message) = receive.read_to_end(client::LIMIT).await else { return };
-                            if let Some(answer) = ask(&asked, Some(&from), &message).await
+                            // Whoever asks nothing only asks whether this server is there, which this says.
+                            if message.is_empty() {
+                                let _ = send.finish();
+                            } else if let Some(answer) = ask(&asked, Some(&from), &message).await
                                 && send.write_all(&answer).await.is_ok()
                             {
                                 let _ = send.finish();
@@ -179,18 +177,25 @@ fn answer(ask: ResourceArc<Ask>, message: Binary) -> Atom {
 }
 
 /// Connects to the server at `address`, the JSON a client is told it in, and sends `to` the message
-/// `{reference, :ok}`, or `{reference, :unreachable}` if it doesn't answer in time.
+/// `{reference, :ok}`, or `{reference, :unreachable}` if it doesn't answer in time. A server last found gone at
+/// this same address is given only as long as one that's there takes to say so.
 #[rustler::nif]
-fn connect(reached: ResourceArc<Reached>, address: &str, to: LocalPid, reference: Term) -> Atom {
-    let address = serde_json::from_str::<EndpointAddr>(address);
+fn connect(reached: ResourceArc<Reached>, address: String, to: LocalPid, reference: Term) -> Atom {
     let reference = Reference::keep(reference);
     RUNTIME.spawn(async move {
         let connected = async {
-            let address = address.ok()?;
-            let key = address.id.to_string();
-            let connecting = reached.endpoint.connect(address, client::ALPN);
-            let connection = tokio::time::timeout(CONNECT, connecting).await.ok()?.ok()?;
-            reached.servers.lock().expect("no connection panics").insert(key, connection.clone());
+            let server = serde_json::from_str::<EndpointAddr>(&address).ok()?;
+            let key = server.id.to_string();
+            let gone_there = reached
+                .servers
+                .lock()
+                .expect("no connection panics")
+                .get(&key)
+                .is_some_and(|(was, open)| *was == address && open.gone());
+            let within = if gone_there { client::THERE } else { client::CONNECT };
+            let open = Arc::new(client::Reached::connect(&reached.endpoint, server, within).await?);
+            let connection = open.connection().clone();
+            reached.servers.lock().expect("no connection panics").insert(key, (address, open));
             // What that server tells its clients isn't for this one, and is read so that it can go on telling.
             tokio::spawn(async move {
                 while let Ok(mut told) = connection.accept_uni().await {
@@ -206,24 +211,18 @@ fn connect(reached: ResourceArc<Reached>, address: &str, to: LocalPid, reference
 }
 
 /// Asks the server whose key is `server` one message over its open connection, and sends `to` the message
-/// `{reference, outcome}`: `{:ok, answer}`; `:closed` if no connection to it is open, so it was asked nothing; or
-/// `:stopped` if it stopped answering after it was asked, so it may have done what was asked.
+/// `{reference, outcome}`: `{:ok, answer}`; `:closed` if no connection to it is open, or `{:gone, address}` if the
+/// one that was open, made to `address`, no longer answers, so either way it was asked nothing; or `:stopped` if it
+/// stopped answering after it was asked, so it may have done what was asked.
 #[rustler::nif]
 fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to: LocalPid, reference: Term) -> Atom {
     let open = reached.servers.lock().expect("no connection panics").get(&server).cloned();
     let message = message.as_slice().to_vec();
     let reference = Reference::keep(reference);
     RUNTIME.spawn(async move {
-        let asked = async {
-            let connection = open.filter(|open| open.close_reason().is_none())?;
-            let (mut send, receive) = connection.open_bi().await.ok()?;
-            send.write_all(&message).await.ok()?;
-            send.finish().ok()?;
-            Some(receive)
-        };
-        let answer = match asked.await {
-            Some(mut receive) => receive.read_to_end(client::LIMIT).await.map_err(|_| atoms::stopped()),
-            None => Err(atoms::closed()),
+        let answer = match open.filter(|(_address, open)| open.open()) {
+            Some((address, open)) => open.ask(&message).await.map_err(|unanswered| Some((unanswered, address))),
+            None => Err(None),
         };
         reference.send(&to, |env| match answer {
             Ok(answer) => {
@@ -231,7 +230,9 @@ fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to
                 binary.as_mut_slice().copy_from_slice(&answer);
                 (atoms::ok(), Binary::from(binary)).encode(env)
             }
-            Err(why) => why.encode(env),
+            Err(Some((Unanswered::Unreachable, address))) => (atoms::gone(), address).encode(env),
+            Err(Some((Unanswered::Stopped, _address))) => atoms::stopped().encode(env),
+            Err(None) => atoms::closed().encode(env),
         });
     });
     atoms::ok()

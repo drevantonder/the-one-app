@@ -19,6 +19,12 @@ impl Client {
     /// Asks the server for `method`, which only reads, and keeps its answer.
     pub async fn fresh(&self, method: &str, params: &Value) -> Result<Value> {
         let answer = self.request(method, params.clone()).await?;
+        self.keep(method, params, &answer)?;
+        Ok(answer)
+    }
+
+    /// Keeps `answer` as what `method` was last answered with.
+    pub(crate) fn keep(&self, method: &str, params: &Value, answer: &Value) -> Result<()> {
         let file = self.kept_file(method, params);
         fs::create_dir_all(self.home.join("kept"))?;
         // Written whole, under a name no other write has, then given its name: another ask, or another program of
@@ -27,7 +33,7 @@ impl Client {
         let writing = file.with_extension(format!("{}-{}", process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
         fs::write(&writing, answer.to_string())?;
         fs::rename(writing, file)?;
-        Ok(answer)
+        Ok(())
     }
 
     /// What a server last answered `method` with.
@@ -36,8 +42,7 @@ impl Client {
     }
 
     fn kept_file(&self, method: &str, params: &Value) -> PathBuf {
-        let asked = Sha256::digest(json!([method, params]).to_string());
-        self.home.join("kept").join(asked.iter().map(|byte| format!("{byte:02x}")).collect::<String>())
+        self.home.join("kept").join(crate::hex(&Sha256::digest(json!([method, params]).to_string())))
     }
 }
 

@@ -11,16 +11,19 @@ pub mod mcp;
 
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow, bail};
-use iroh::endpoint::{Connection, QuicTransportConfig, RelayMode, presets};
-use iroh::{Endpoint, EndpointAddr, NetReportConfig, RelayConfig, SecretKey};
+use iroh::endpoint::{Connection, RecvStream, RelayMode, presets};
+use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, broadcast};
 use tokio::task::JoinSet;
+use tokio::time::{sleep, timeout};
 
 pub use kept::Shown;
 
@@ -28,18 +31,73 @@ pub use kept::Shown;
 pub const ALPN: &[u8] = b"one/mcp/1";
 /// The most one message may carry: a plugin's files fit.
 pub const LIMIT: usize = 64 << 20;
-/// How long reaching a server may take.
-const CONNECT: Duration = Duration::from_secs(10);
-/// How often an open connection is checked, and how long without an answer before it counts as gone. A server that
-/// stops is noticed this soon, so its spare can take over.
-const ALIVE: Duration = Duration::from_secs(1);
-const GONE: Duration = Duration::from_secs(5);
+/// How long reaching a server may take: long enough for a phone to find the relay and be let in, and for a first
+/// packet that's lost to be sent again.
+pub const CONNECT: Duration = Duration::from_secs(3);
+/// How long a server that's there takes, at most, to say so. Nothing is sent over a connection that's asked nothing,
+/// so a server that has gone is found out by asking it, and this soon. A server taken for gone that wasn't is only
+/// asked again over a new connection, or has its lease taken by a spare, and neither loses anything.
+pub const THERE: Duration = Duration::from_secs(1);
+/// How long a connection that's asked nothing stays open. iroh says something over every open connection each few
+/// seconds, to keep it, and through a relay each of those wakes the relay. So a connection is let go once it's
+/// idle, and made again when there's something to ask.
+const IDLE: Duration = Duration::from_secs(15);
 
-/// A network's address, and the pass this machine shows the relay there: what says it's one of the network's own.
-#[derive(Deserialize)]
+/// A network's address, and the pass this machine shows there: what says it's one of the network's own.
+#[derive(Clone, Deserialize)]
 pub struct Network {
     pub address: String,
     pub pass: String,
+}
+
+impl Network {
+    /// The headers of an ask of `path` at the address, with `body`: `key`'s signature of it, and the pass. The pieces
+    /// there check both (`address/ask.js`), and a server's Elixir signs the same bytes (`OneCore.Address`).
+    pub fn signed(&self, key: &SecretKey, path: &str, body: &str) -> Result<[(&'static str, String); 4]> {
+        let at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis().to_string();
+        let signature = key.sign(format!("one/ask/1\n{path}\n{at}\n{body}").as_bytes());
+        Ok([
+            ("one-key", key.public().to_string()),
+            ("one-at", at),
+            ("one-signature", hex(&signature.to_bytes())),
+            ("one-pass", self.pass.clone()),
+        ])
+    }
+
+    /// The servers acting for whoever this machine's pass is for, as the signer at the address says: each one's key,
+    /// reached through the relay there until a straighter path is found.
+    async fn servers(&self, key: &SecretKey) -> Result<Vec<EndpointAddr>> {
+        let pass = data_encoding::BASE64URL_NOPAD.decode(self.pass.as_bytes()).context("the pass isn't a pass")?;
+        let pass: Value = serde_json::from_slice(&pass).context("the pass isn't a pass")?;
+        let of = pass["list"].as_str().context("the pass names no list")?;
+        let tls = iroh::tls::CaTlsConfig::default().client_config(iroh::tls::default_provider())?;
+        let mut ask = reqwest::Client::builder()
+            .tls_backend_preconfigured(tls)
+            .timeout(CONNECT)
+            .build()?
+            .get(format!("{}/signer/servers", self.address.trim_end_matches('/')))
+            .query(&[("of", of)]);
+        for (name, value) in self.signed(key, "/signer/servers", "")? {
+            ask = ask.header(name, value);
+        }
+        let answer = ask.send().await?;
+        let (status, said): (_, Value) = (answer.status(), answer.json().await?);
+        if !status.is_success() {
+            bail!("{}", said["error"].as_str().unwrap_or("the signer refused"))
+        }
+        let relay: RelayUrl = self.address.parse().with_context(|| format!("{} isn't an address", self.address))?;
+        let keys = said["servers"].as_array().context("the signer listed no servers")?;
+        keys.iter()
+            .map(|key| {
+                let key: EndpointId = key.as_str().unwrap_or_default().parse().context("that isn't a server's key")?;
+                Ok(EndpointAddr::new(key).with_relay_url(relay.clone()))
+            })
+            .collect()
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    data_encoding::HEXLOWER.encode(bytes)
 }
 
 /// An endpoint holding the key kept in `key_file`, which is made on first use. It reaches others, and is reached, by
@@ -61,9 +119,6 @@ pub async fn endpoint(key_file: &Path, network: Option<&Network>) -> Result<Endp
     Endpoint::builder(presets::Minimal)
         .secret_key(key(key_file)?)
         .alpns(vec![ALPN.to_vec()])
-        .transport_config(
-            QuicTransportConfig::builder().keep_alive_interval(ALIVE).max_idle_timeout(Some(GONE.try_into()?)).build(),
-        )
         .relay_mode(relay)
         .net_report_config(probes)
         .bind()
@@ -106,18 +161,114 @@ pub fn home() -> Result<PathBuf> {
 /// this one is `one` and `The One App` there, and this is neither.
 pub const NAME: &str = "app.theone.client";
 
+/// Why a server didn't answer what it was asked.
+#[derive(Debug, PartialEq)]
+pub enum Unanswered {
+    /// It couldn't be reached, so it was asked nothing.
+    Unreachable,
+    /// It stopped answering after it was asked, so it may have done what was asked.
+    Stopped,
+}
+
+/// An open connection to a server, and when the server last answered on it. A client asks a server over one, and a
+/// server asks another the same way. `gone` is whether the server was found not to be there.
+pub struct Reached {
+    connection: Connection,
+    heard: Arc<std::sync::Mutex<Instant>>,
+    gone: AtomicBool,
+}
+
+impl Reached {
+    /// Connects to the server at `address`, or gives nothing if it doesn't answer `within` that long.
+    pub async fn connect(endpoint: &Endpoint, address: EndpointAddr, within: Duration) -> Option<Self> {
+        let connection = timeout(within, endpoint.connect(address, ALPN)).await.ok()?.ok()?;
+        let heard = Arc::new(std::sync::Mutex::new(Instant::now()));
+        let (open, last) = (connection.clone(), heard.clone());
+        tokio::spawn(async move {
+            while open.close_reason().is_none() {
+                let idle = last.lock().expect("no ask panics").elapsed();
+                match IDLE.checked_sub(idle) {
+                    Some(left) => sleep(left).await,
+                    None => open.close(0u32.into(), b"idle"),
+                }
+            }
+        });
+        Some(Self { connection, heard, gone: AtomicBool::new(false) })
+    }
+
+    pub fn connection(&self) -> &Connection {
+        &self.connection
+    }
+
+    /// Whether the connection is still one to ask over: it hasn't closed, and its server hasn't been found gone.
+    pub fn open(&self) -> bool {
+        self.connection.close_reason().is_none()
+    }
+
+    /// Whether the server didn't say it was there when it was asked over this connection.
+    pub fn gone(&self) -> bool {
+        self.gone.load(Ordering::Relaxed)
+    }
+
+    /// Asks the server one message, and gives its answer. A server that hasn't answered anything lately is first
+    /// asked whether it's there, and so is one that's taking its time over this.
+    pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>, Unanswered> {
+        if !self.open() || (self.heard.lock().expect("no ask panics").elapsed() > THERE && !self.there().await) {
+            return Err(Unanswered::Unreachable);
+        }
+        let mut receive = self.send(message).await.ok_or(Unanswered::Unreachable)?;
+        let answer = receive.read_to_end(LIMIT);
+        tokio::pin!(answer);
+        loop {
+            tokio::select! {
+                answer = &mut answer => {
+                    *self.heard.lock().expect("no ask panics") = Instant::now();
+                    return answer.map_err(|_| Unanswered::Stopped);
+                }
+                _ = sleep(THERE) => if !self.there().await {
+                    return Err(Unanswered::Stopped);
+                }
+            }
+        }
+    }
+
+    /// Whether the server is there: an empty message, which a server answers at once with nothing. One that doesn't
+    /// in time is gone, and so is this connection to it.
+    async fn there(&self) -> bool {
+        let asked = async { self.send(b"").await?.read_to_end(LIMIT).await.ok() };
+        let there = timeout(THERE, asked).await.is_ok_and(|answer| answer.is_some());
+        if there {
+            *self.heard.lock().expect("no ask panics") = Instant::now();
+        } else {
+            self.gone.store(true, Ordering::Relaxed);
+            self.connection.close(0u32.into(), b"gone");
+        }
+        there
+    }
+
+    async fn send(&self, message: &[u8]) -> Option<RecvStream> {
+        let (mut send, receive) = self.connection.open_bi().await.ok()?;
+        send.write_all(message).await.ok()?;
+        send.finish().ok()?;
+        Some(receive)
+    }
+}
+
 /// The connection to a server, once one is open, and when trying to open one last failed.
 #[derive(Default)]
 struct Reach {
-    open: Option<Connection>,
+    open: Option<Arc<Reached>>,
     failed: Option<Instant>,
 }
 
-/// A client, kept in its home folder: its `key`, the addresses of the `servers` acting for its user, and what
-/// servers answered (`kept`).
+/// A client, kept in its home folder: its `key`, where its `network` is or its `servers` are, and what servers
+/// answered (`kept`).
 pub struct Client {
     home: PathBuf,
     endpoint: Endpoint,
+    /// The network's address, if it has one: the client asks there which servers act for its user. A network on one
+    /// machine has none, and whatever starts it tells the client where its servers are, in `servers`.
+    network: Option<Network>,
     reach: Mutex<Reach>,
     told: broadcast::Sender<Value>,
 }
@@ -131,7 +282,7 @@ impl Client {
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
         let endpoint = endpoint(&home.join("key"), network.as_ref()).await?;
-        Ok(Self { home, endpoint, reach: Mutex::default(), told: broadcast::channel(16).0 })
+        Ok(Self { home, endpoint, network, reach: Mutex::default(), told: broadcast::channel(16).0 })
     }
 
     /// What the server tells this client while it's connected: each a JSON-RPC notification.
@@ -139,12 +290,19 @@ impl Client {
         self.told.subscribe()
     }
 
-    /// Asks the server one JSON-RPC message and gives its answer, which for a notification is nothing.
+    /// Asks a server one JSON-RPC message and gives its answer, which for a notification is nothing. A server that
+    /// has gone was asked nothing, so whichever answers now is asked instead.
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>> {
-        let (mut send, mut receive) = self.connection().await?.open_bi().await?;
-        send.write_all(message).await?;
-        send.finish()?;
-        receive.read_to_end(LIMIT).await.context("the server stopped answering, so this may or may not have been done")
+        for _ in 0..2 {
+            match self.reached().await?.ask(message).await {
+                Ok(answer) => return Ok(answer),
+                Err(Unanswered::Unreachable) => continue,
+                Err(Unanswered::Stopped) => {
+                    bail!("The server stopped answering after it was asked, so this may or may not have been done")
+                }
+            }
+        }
+        bail!("No server answered")
     }
 
     /// Asks the server for `method`, and gives its result.
@@ -158,46 +316,82 @@ impl Client {
         }
     }
 
-    /// Ends the connection, if one was made, and waits until the server has been told.
+    /// Ends the connection, if one was made, and tells the server. The goodbye leaves this machine at once. What
+    /// else closing an endpoint waits for is a server that was tried and never answered, which QUIC gives three
+    /// seconds, so that isn't waited for.
     pub async fn close(&self) {
-        if self.reach.lock().await.open.is_some() {
-            self.endpoint.close().await
+        if let Some(open) = self.reach.lock().await.open.take() {
+            open.connection().close(0u32.into(), b"done");
+            let _ = timeout(Duration::from_millis(100), self.endpoint.close()).await;
         }
     }
 
     /// The connection to a server, made when there's none open: to whichever of the servers acting for this client's
-    /// user answers first. Their addresses are read each time, since a server that starts again may be somewhere
-    /// else.
-    async fn connection(&self) -> Result<Connection> {
+    /// user answers first. Which they are is what the client kept from when it last asked, and what it's told when
+    /// it asks now if none of those answers.
+    async fn reached(&self) -> Result<Arc<Reached>> {
         let asked = Instant::now();
         let mut reach = self.reach.lock().await;
-        if let Some(open) = reach.open.as_ref().filter(|open| open.close_reason().is_none()) {
+        if let Some(open) = reach.open.as_ref().filter(|open| open.open()) {
             return Ok(open.clone());
         }
         // Many asks at once share one try: no server answered while this one waited its turn.
         if reach.failed.is_some_and(|failed| failed > asked) {
             bail!("No server answered")
         }
-        let file = self.home.join("servers");
-        let servers =
-            fs::read(&file).with_context(|| format!("{} doesn't say which servers to ask", file.display()))?;
-        let servers: Vec<EndpointAddr> =
-            serde_json::from_slice(&servers).with_context(|| format!("{} isn't servers' addresses", file.display()))?;
-        let mut connecting = JoinSet::new();
-        for server in servers {
-            let endpoint = self.endpoint.clone();
-            connecting.spawn(async move { tokio::time::timeout(CONNECT, endpoint.connect(server, ALPN)).await });
-        }
-        while let Some(connected) = connecting.join_next().await {
-            if let Ok(Ok(Ok(open))) = connected {
-                tokio::spawn(hear(open.clone(), self.told.clone()));
-                return Ok(reach.open.insert(open).clone());
+        let mut tried = None;
+        for now in [false, true] {
+            let Some(servers) = self.servers(now).await? else { continue };
+            if tried.as_ref() == Some(&servers) {
+                continue;
             }
+            let mut connecting = JoinSet::new();
+            for server in servers.clone() {
+                let endpoint = self.endpoint.clone();
+                connecting.spawn(async move { Reached::connect(&endpoint, server, CONNECT).await });
+            }
+            while let Some(connected) = connecting.join_next().await {
+                if let Ok(Some(open)) = connected {
+                    tokio::spawn(hear(open.connection().clone(), self.told.clone()));
+                    return Ok(reach.open.insert(Arc::new(open)).clone());
+                }
+            }
+            tried = Some(servers);
         }
         reach.failed = Some(Instant::now());
         bail!("No server answered")
     }
+
+    /// The servers acting for this client's user: the ones it kept, or with `now` the ones it's told when it asks.
+    /// Nothing if it kept none, or has nobody to ask.
+    async fn servers(&self, now: bool) -> Result<Option<Vec<EndpointAddr>>> {
+        let Some(network) = &self.network else {
+            if now {
+                return Ok(None);
+            }
+            let file = self.home.join("servers");
+            let servers = fs::read(&file)
+                .with_context(|| format!("{} doesn't say which servers to ask", file.display()))
+                .context("This device hasn't joined a network")?;
+            let servers = serde_json::from_slice(&servers)
+                .with_context(|| format!("{} isn't servers' addresses", file.display()));
+            return servers.map(Some);
+        };
+        let asked = (SERVERS, json!({}));
+        if !now {
+            return Ok(self.kept(asked.0, &asked.1).and_then(|kept| serde_json::from_value(kept).ok()));
+        }
+        let servers = network
+            .servers(self.endpoint.secret_key())
+            .await
+            .with_context(|| format!("Couldn't ask {} which servers to reach", network.address))?;
+        self.keep(asked.0, &asked.1, &serde_json::to_value(&servers)?)?;
+        Ok(Some(servers))
+    }
 }
+
+/// What the servers the signer listed are kept as.
+const SERVERS: &str = "signer/servers";
 
 /// Passes on what the server tells this client over `connection`, until the connection ends.
 async fn hear(connection: Connection, told: broadcast::Sender<Value>) {
