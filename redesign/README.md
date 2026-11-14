@@ -23,5 +23,5 @@ Later, and not critical: bringing data across from the app as it runs today and 
 Parked, to keep in mind: the public as a who, anyone at all and not signed in, as a `viewer` of what an owner makes
 public. Filling in something like a form, and visitors without an account, come after that.
 
-Left open until the rest lands: whether the piece at the network's address may hold connections that sleep while idle,
+Left open until the rest lands: what starts a network's cloud server when no other server answers for a user or group,
 and what draws a plugin's app in a client. Both are big choices, and fewer other things should be moving first.

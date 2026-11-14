@@ -24,8 +24,14 @@
 - A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
   blobs. An `editor` asks that server, which checks the relation tuples.
 - A server confirms a write only once losing that server couldn't lose the write.
-- Only the signer holds the bucket's credentials. It hands servers short-lived access to what they may reach, so
-  removing a server changes nothing for the others.
+- Only the signer holds the bucket's credentials. It hands a server short-lived access to the blobs of the users and
+  groups it acts for, so removing a server changes nothing for the others.
+- Each user's and group's blobs sit under a prefix of their own in the bucket, so a blob's path says whose it is.
+- One Core keeps, for each user and group, the list of servers that act for them, under that prefix. A server on the
+  list can add another. The first is written by a server acting for the network, and only if the list is absent.
+- A server acting for the network reaches every user's and group's blobs.
+- The signer is the only piece that isn't a server, a client or a service. It checks which server is asking and whether
+  it's on the list, and signs. It's small, keeps no state and runs no plugin code.
 - A client reads the bucket only through a server. For something large, a server asks the signer for a short-lived link
   and hands it to the client.
 - Two servers can take over from each other only on a bucket with conditional writes. A network checks this when it
@@ -55,8 +61,7 @@
 - A plugin has parts that run on a server and parts that run in a client. The server gives each client the parts meant
   for it.
 - A plugin's parts needn't be written in the same language. A service already isn't.
-- A plugin can also have a part that runs at the network's address. That's how a plugin that decides for the signer
-  answers it. Like everything there, that part keeps no state.
+- A plugin's code runs on servers, in clients and as services, and nowhere else.
 
 ## Who may do what
 
@@ -64,11 +69,11 @@
 - A network is an artifact: the top `parent` of everything in it. Its first owner is the first user to sign in.
 - A network's owner owns every artifact in it, but reads an encrypted one only with its key. Users have the privacy they
   need, and the owner isn't responsible for keeping their credentials safe.
-- Relation tuples are a plugin. It keeps them in its own artifact, and decides whether anything may reach any other, on
-  the server and for the signer.
+- Relation tuples are a plugin. It keeps them in its own artifact, and decides on a server whether anything may reach
+  any other.
 - More than one plugin can decide whether something may be reached. Any of them can say no, and that blocks it.
-- Servers and the signer ask the relation tuples plugin. Taking access away reaches every server eventually. No time is
-  promised.
+- Servers ask the relation tuples plugin. The signer doesn't: it only knows which servers act for whom. Taking access
+  away reaches every server eventually. No time is promised.
 - The relation tuples plugin uses the database plugin.
 - A plugin is added for a user, for a group or for the network.
 - Every plugin has an artifact of its own for each one it was added for. Only that plugin reaches it, and it needs no
@@ -91,14 +96,18 @@
 - A server runs on Windows as well as Mac and Linux. On Windows it may run through WSL, if that doesn't weigh on the
   computer and an agent can set it up.
 - A server's owner chooses its members, and each agrees. A new one is for its owner alone.
-- A server acts for its members and reaches what they can. A viewer's server can keep a copy and read it. An editor's
-  can hold a database's lease.
+- A server acts for its members. It reads and writes their own blobs, and asks a server acting for the owner for
+  anything else they may reach. It can keep a copy of what it was answered.
+- Only a server acting for an artifact's owner holds its lease.
 - With no server up, nothing is lost: clients keep what servers answered and wait.
-- A server has a URL the network's address can reach. A server at home gets one by connecting out, so nothing at home is
-  opened to the internet. How is its owner's choice.
+- Every user and group has a name under the network's, and a request to it reaches a server acting for them. Every
+  server has a name of its own too. A server at home answers by connecting out, so nothing at home is opened to the
+  internet. How is its owner's choice.
+- A user or group needs only one server at a time. Their others are spares that take over when it stops.
 - Leases are part of the database plugin.
-- A tool call, a scheduled job and a call to a service all go to a server that acts for the user or group they're for.
-  If it writes a database whose lease another server holds, that server passes it on to the one holding it.
+- A tool call and a scheduled job go to the server acting for the user or group they're for. If it writes a database
+  whose lease another server holds, that server passes it on to the one holding it.
+- A call to a service goes to the machine that runs it, at that machine's name, and that machine checks the caller.
 - A scheduled job is a tool call made by the clock. The server holding the lease of the database its schedule is kept in
   makes the call.
 - A scheduled job runs when a server is up. A network that has a cloud server uses it, started when there's work and
@@ -107,6 +116,8 @@
   fortune.
 - A plugin can use this same way of choosing a server for its own calls, a service's included, or choose its own.
 - A server takes the newest release by itself, so none lags behind. One Core is small and stable, so that's seldom.
+- A plugin is added, updated and removed while a server keeps running. Nothing else on that server stops or restarts
+  for it. A call already running finishes on the old version, and the next gets the new one.
 
 ## Clients
 
@@ -118,11 +129,9 @@
 - MCP can also be hosted where an assistant running somewhere else reaches it, signing in with OAuth.
 - A client has little of its own: it keeps what servers answered, keeps secrets safe on its device, and runs and draws
   what plugins give it.
-- A client on the same local network as a server sends its requests straight to it. Otherwise it sends them to the
-  network's address, where a small on-demand piece passes them to the server holding the lease. Going direct between
-  different local networks would be nice, and stays open.
-- That piece also signs access to the bucket and serves the web client. Nothing at the network's address keeps state or
-  holds a connection open.
+- A client on the same local network as a server sends its requests straight to it. Otherwise it sends them to the name
+  of the user or group they're for. Going direct between different local networks would be nice, and stays open.
+- The web client is static files, and can be served from anywhere.
 
 ## Signing in
 

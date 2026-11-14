@@ -10,7 +10,8 @@
   and is a who.
 - **Client**: what a user or their agent uses, on a phone, a computer or in a browser, or as the CLI or MCP. It asks a
   server, keeps what servers answered, and keeps secrets safe on its device.
-- **Signer**: the only holder of the bucket's credentials. It hands servers short-lived access to what they may reach.
+- **Signer**: the only holder of the bucket's credentials. It hands a server short-lived access to the blobs of those it
+  acts for.
 - **Artifact**: a couple of blobs together in the bucket, with who may do what to them. Everything a network keeps is
   built on top of one: files, a database, a git repo. Avoid: space.
 - **Relation tuple**: one line of who may do what, as in Zanzibar: an artifact, a relation (`owner`, `editor`, `viewer`,
@@ -41,5 +42,6 @@
 - **Lease**: the record of which server writes a database for now. One server holds it at a time. Part of the database
   plugin.
 - **Sharing link**: a who that is whoever holds it, without signing in. Making one writes a relation tuple naming it.
+- **Name**: the address of a user, a group or a server, under the network's.
 - **Scheduled job**: a tool call made by the clock.
 - **Tool guide**: text a plugin provides for agents, on when and how to use its tools.
