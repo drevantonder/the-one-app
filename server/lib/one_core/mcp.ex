@@ -21,7 +21,7 @@ defmodule OneCore.Mcp do
   a resource too, `skill://<name>/<path>`, which `resources/read` reads (`OneCore.Skills`).
   """
   require Logger
-  alias OneCore.{Artifact, Hooks, Plugins, Server, Services, Skills, Tools, User}
+  alias OneCore.{Address, Artifact, Hooks, Plugins, Server, Services, Skills, Tools, User}
   alias OneCore.Plugins.Version
 
   # What a server speaks of MCP is the same in each of these.
@@ -120,6 +120,16 @@ defmodule OneCore.Mcp do
   end
 
   defp result("ping", _params, _from, _asked, _passed_on), do: {:ok, %{}}
+
+  # A user's device asks for its pass to the relay at the network's address, and is told whose it is: the device
+  # whose key a connection proved here, or the address did there.
+  defp result("one/pass", params, from, {"users/" <> _ = by, _for}, _passed_on) do
+    device = from || said(params)["device"]
+
+    if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}$/,
+      do: {:ok, %{pass: Address.pass(device), who: by}},
+      else: {:error, "A pass is for a user's device, by its key"}
+  end
 
   # A sharing link's holder is told of the tools they may call, and of nothing else that's in the network.
   defp result("tools/list", _params, _from, {by, who}, _passed_on) do

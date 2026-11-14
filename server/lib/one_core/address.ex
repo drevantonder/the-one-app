@@ -26,8 +26,12 @@ defmodule OneCore.Address do
     end
   end
 
-  @doc "A pass for the client whose key is `client`, until `until` in milliseconds: this server's word for it."
-  def pass(client, until) do
+  # How long a client's pass lasts, in milliseconds. A client asks for another before it ends.
+  @lasts :timer.hours(24 * 30)
+
+  @doc "A pass for the client whose key is `client`: this server's word for it, for a month."
+  def pass(client) do
+    until = System.system_time(:millisecond) + @lasts
     encode(%{list: list(), by: key(), until: until, signature: sign("one/pass/1\n#{client}\n#{list()}\n#{until}")})
   end
 

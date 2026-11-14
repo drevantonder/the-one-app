@@ -22,3 +22,5 @@ client = { path = ".." }
 serde_json.workspace = true
 # `custom-protocol` builds the app with its page inside it, however it's built.
 tauri = { version = "2", features = ["custom-protocol"] }
+# Opens the sign-in page in the device's own browser, where a passkey works.
+tauri-plugin-opener = "2"

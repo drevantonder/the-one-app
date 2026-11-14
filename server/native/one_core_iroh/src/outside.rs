@@ -38,6 +38,9 @@ async fn heard(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result<(
     }
 
     let (socket, _) = connect_async(request).await?;
+    // What a piece at the address told the network's servers while this one wasn't there, it didn't hear. So it
+    // looks, as a server does that's told to.
+    let _ = crate::ask(asked, None, br#"{"jsonrpc":"2.0","method":"notifications/one/look"}"#).await;
     let (mut up, mut down) = socket.split();
     let (answers, mut answered) = mpsc::unbounded_channel();
     let mut say = interval(EVERY);

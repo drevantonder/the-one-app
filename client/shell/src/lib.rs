@@ -1,4 +1,5 @@
-//! The app: a window on the client's Rust half. Its own page (`page`) is the home screen. Each app is a page of its
+//! The app: a window on the client's Rust half. Its own page (`page`) is the home screen, or for a device that isn't
+//! in its network yet, the screen that signs it in. Each app is a page of its
 //! plugin's, drawn in a frame of its own, which reaches nothing here but the bridge the home screen's page gives it:
 //! what an app asks comes to `ask`, as what the home screen asks does.
 
@@ -6,11 +7,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use client::{Client, Shown};
+use client::{Client, NotIn, Shown};
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, Uri, header};
 use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_opener::OpenerExt;
 
 /// What an app's page may load, which is what an MCP App may by default: its own plugin's files and the files of
 /// the plugins it uses, which are all at its own address, and nothing from anywhere else.
@@ -182,47 +184,86 @@ fn opened(views: State<'_, Views>, view: String, ms: u32) {
     eprintln!("{view} opened in {ms} ms, {} ms after the app started", views.started.elapsed().as_millis());
 }
 
+/// Where this device's person makes it theirs, while it isn't in its network: a page at the network's address.
+struct SignIn(Mutex<String>);
+
+/// Opens the page where this device's person signs in, in the device's own browser: a web view has no passkeys.
+#[tauri::command]
+fn sign_in(app: AppHandle, sign_in: State<'_, SignIn>) -> Result<(), String> {
+    let page = sign_in.0.lock().expect("no view panics").clone();
+    app.opener().open_url(page, None::<&str>).map_err(|error| error.to_string())
+}
+
+/// Whether this device is in its network now: its person may have signed in since it last asked. Once it is, the
+/// window has a client to show.
+#[tauri::command]
+async fn enter(app: AppHandle, started: State<'_, Instant>) -> Result<bool, String> {
+    Ok(app.try_state::<Views>().is_some() || entered(&app, *started).await.map_err(|error| format!("{error:#}"))?)
+}
+
+/// Opens the client and gives the window its views, or says where to sign in if this device isn't in its network
+/// yet. Gives whether it's in.
+async fn entered(app: &AppHandle, started: Instant) -> anyhow::Result<bool> {
+    // A phone gives each app a folder of its own, which only the app is told.
+    #[cfg(mobile)]
+    let home = app.path().app_data_dir()?;
+    #[cfg(desktop)]
+    let home = client::home()?;
+    let client = match Client::open(home).await {
+        Ok(client) => Arc::new(client),
+        Err(error) => match error.downcast::<NotIn>() {
+            Ok(not_in) => {
+                *app.state::<SignIn>().0.lock().expect("no view panics") = not_in.sign_in;
+                return Ok(false);
+            }
+            Err(error) => return Err(error),
+        },
+    };
+    app.manage(Views {
+        client: client.clone(),
+        app: app.clone(),
+        shown: Mutex::default(),
+        loaded: Mutex::default(),
+        started,
+    });
+
+    // The home screen says when no server is answering, which is what the last thing asked found.
+    let (handle, mut answering) = (app.clone(), client.answering());
+    tauri::async_runtime::spawn(async move {
+        while answering.changed().await.is_ok() {
+            let now = *answering.borrow_and_update();
+            drop(handle.emit("answering", now));
+        }
+    });
+
+    // A server said something changed, so every view asks again.
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut told = client.told();
+        while let Ok(message) = told.recv().await {
+            if message["method"] == "notifications/one/changed" {
+                eprintln!("a server said something changed");
+                handle.state::<Views>().again().await
+            }
+        }
+    });
+    Ok(true)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let started = Instant::now();
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
-            // A phone gives each app a folder of its own, which only the app is told.
-            #[cfg(mobile)]
-            let home = app.path().app_data_dir()?;
-            #[cfg(desktop)]
-            let home = client::home()?;
-            let client = Arc::new(tauri::async_runtime::block_on(Client::open(home))?);
-            app.manage(Views {
-                client: client.clone(),
-                app: app.handle().clone(),
-                shown: Mutex::default(),
-                loaded: Mutex::default(),
-                started,
-            });
-
-            // The home screen says when no server is answering, which is what the last thing asked found.
-            let (handle, mut answering) = (app.handle().clone(), client.answering());
-            tauri::async_runtime::spawn(async move {
-                while answering.changed().await.is_ok() {
-                    let now = *answering.borrow_and_update();
-                    drop(handle.emit("answering", now));
-                }
-            });
-
-            // A server said something changed, so every view asks again.
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let mut told = client.told();
-                while let Ok(message) = told.recv().await {
-                    if message["method"] == "notifications/one/changed" {
-                        eprintln!("a server said something changed");
-                        handle.state::<Views>().again().await
-                    }
-                }
-            });
-
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default());
+            app.manage(SignIn(Mutex::default()));
+            app.manage(started);
+            // A device that isn't in its network yet starts on the screen that signs it in.
+            let page = match tauri::async_runtime::block_on(entered(app.handle(), started))? {
+                true => "index.html",
+                false => "start.html",
+            };
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(page.into()));
             #[cfg(desktop)]
             let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0);
             window.build()?;
@@ -244,7 +285,9 @@ pub fn run() {
                 responder.respond(response.expect("these headers are valid"))
             });
         })
-        .invoke_handler(tauri::generate_handler![apps, ask, again, upload, network, watch, close, opened])
+        .invoke_handler(tauri::generate_handler![
+            apps, ask, again, upload, network, watch, close, opened, sign_in, enter
+        ])
         .run(tauri::generate_context!())
         .expect("the app runs");
 }

@@ -8,6 +8,8 @@
     "aws4fetch": "^1.0.20"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "playwright": "1.65.1",
     "wrangler": "^4.161.0"
   },
   "scripts": {

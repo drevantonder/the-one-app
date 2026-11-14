@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts a whole network on this machine, to build or test with, and says how to use it:
 #
-#     ./network <folder> [--spare] [--address]
+#     ./network <folder> [--spare] [--address] [--owner <name>]
 #
 # It builds what isn't built, then starts the network's server in the folder, which is where everything the network
 # keeps goes: its bucket, each server's home, a client's home and the logs. A new network starts with the plugins
@@ -15,6 +15,8 @@
 # --address runs the network's address here too (`address/`): its Workers in `wrangler dev`, with a local S3 store
 #   as the bucket. Servers then keep their blobs through the signer there, and whoever holds a sharing link has a
 #   way in.
+# --owner <name>, with --address, starts a network people sign in to instead: that user is its first owner, it says
+#   where they join, with a passkey, and nobody acts as anyone by saying so.
 set -euo pipefail
 set -m # What's started is a job with a process group of its own, so all of it is stopped at once.
 
@@ -22,16 +24,21 @@ root=$(cd "$(dirname "$0")" && pwd)
 # The tools this needs are the ones `mise.toml` names.
 command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 
-folder= spare= address=
-for argument; do
-  case $argument in
+usage="./network <folder> [--spare] [--address] [--owner <name>]"
+folder= spare= address= owner=
+while (($#)); do
+  case $1 in
     --spare) spare=yes ;;
     --address) address=yes ;;
-    -*) echo "./network <folder> [--spare] [--address]" >&2 && exit 1 ;;
-    *) folder=$argument ;;
+    --owner) owner=${2-} && shift ;;
+    -*) echo "$usage" >&2 && exit 1 ;;
+    *) folder=$1 ;;
   esac
+  shift
 done
-[[ -n $folder ]] || { echo "./network <folder> [--spare] [--address]" >&2 && exit 1; }
+# People sign in at an address, and a spare is let in by a client, which there is someone's signed-in device.
+[[ -n $folder && (-z $owner || (-n $address && -z $spare)) ]] || { echo "$usage" >&2 && exit 1; }
+if [[ -n $owner ]]; then as=(--owner "$owner"); else as=(--development --owner owner); fi
 mkdir -p "$folder"
 folder=$(cd "$folder" && pwd)
 one=$root/target/release/one
@@ -76,7 +83,7 @@ fi
 # Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
 # which is then done as it says, and it's started again.
 start() {
-  (cd "$root/server" && exec mix network "$folder" "$1" --development --owner owner "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  (cd "$root/server" && exec mix network "$folder" "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
@@ -89,7 +96,20 @@ start server
 
 # The program as whoever started this would type it.
 one=${one#"$PWD/"}
-cat <<SAID
+[[ -z $owner ]] || cat <<SAID
+
+A network is running in $folder, at ${at_address[1]}.
+$(grep -m1 "^users/$owner joins at" "$folder/server.log")
+
+Its client's home is $folder/client, which is nobody's device until they sign in on it:
+
+    export ONE_HOME=$folder/client
+    $one                                             opens the app, which signs in
+    $one tracker list                                says where to let this device in
+
+What each part says is in $folder/*.log. Ctrl-C stops it.
+SAID
+[[ -n $owner ]] || cat <<SAID
 
 A network is running in $folder. Its client's home is $folder/client:
 

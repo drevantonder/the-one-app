@@ -164,7 +164,7 @@ window() { at client env $(cat "$work/screen") xdotool search --name "The One Ap
 (cd "$root/server" && at server mix run --no-start -e "
   Application.put_env(:one_core, :home, \"$work/network/server\")
   {:ok, key} = OneCore.Iroh.key(\"$work/network/elsewhere/key\")
-  pass = OneCore.Address.pass(key, System.system_time(:millisecond) + :timer.hours(1))
+  pass = OneCore.Address.pass(key)
   File.write!(\"$work/network/elsewhere/network\", JSON.encode!(%{address: \"$at_address\", pass: pass}))")
 calls=$work/network/elsewhere
 sleep 5

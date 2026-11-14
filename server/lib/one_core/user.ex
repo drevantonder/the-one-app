@@ -17,6 +17,9 @@ defmodule OneCore.User do
 
   @nobody "This device is nobody's here. Sign in on it, or let it in from a device that's yours."
 
+  @doc "The JSON-RPC error a device that's nobody's is answered, so whatever passed its request on can tell."
+  def nobody, do: -32003
+
   @doc """
   Who a request is by and who it's for: `{:ok, {by, for}, passed_on}`, or `{:error, why}`. `from` is the key of
   whatever sent it, which its connection proved, or `nil` for what came in at the network's address over the
@@ -78,11 +81,11 @@ defmodule OneCore.User do
 
   defp by(nil, %{"device" => device}) when is_binary(device), do: whose(device)
   defp by(from, _said) when is_binary(from), do: whose(from)
-  defp by(_from, _said), do: {:error, @nobody}
+  defp by(_from, _said), do: {:error, nobody(), @nobody}
 
   defp whose(device) do
     case Hooks.whose(device) do
-      nil -> {:error, @nobody}
+      nil -> {:error, nobody(), @nobody}
       who -> {:ok, who}
     end
   end

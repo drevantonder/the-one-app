@@ -1,0 +1,21 @@
+{
+  "name": "sign-in",
+  "description": "Signing in's part at a network's address: the sign-in page, passkeys, and the way in for a device or an assistant that someone let act as them.",
+  "private": true,
+  "type": "module",
+  "paths": [
+    "sign-in",
+    "mcp",
+    ".well-known"
+  ],
+  "scripts": {
+    "build": "bun build page.js --outdir files/sign-in --minify --target browser"
+  },
+  "dependencies": {
+    "@better-auth/mcp": "1.7.25",
+    "@better-auth/passkey": "1.7.25",
+    "better-auth": "1.7.25",
+    "bowser": "2.14.1",
+    "zod": "4.6.7"
+  }
+}

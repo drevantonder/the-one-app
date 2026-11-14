@@ -20,12 +20,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow, bail};
+use data_encoding::BASE64URL_NOPAD;
 use futures_util::StreamExt;
 use futures_util::future::join_all;
 use futures_util::stream::FuturesUnordered;
 use iroh::endpoint::{Connection, QuicTransportConfig, RecvStream, RelayMode, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, broadcast, watch};
 use tokio::time::{sleep, timeout};
@@ -98,6 +99,65 @@ impl Network {
                 Ok(EndpointAddr::new(key).with_relay_url(relay.clone()))
             })
             .collect()
+    }
+}
+
+/// What a client keeps of its network, in the file `network` of its home: the network's address, which whatever
+/// set the client up put there, and once the device is someone's, its pass to the relay there and whose it is.
+#[derive(Serialize, Deserialize)]
+struct Told {
+    address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pass: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    who: Option<String>,
+}
+
+/// Why a client that knows its network isn't in it: its device is nobody's there yet.
+#[derive(Debug)]
+pub struct NotIn {
+    /// Where its person makes it theirs: a page at the network's address.
+    pub sign_in: String,
+}
+
+impl std::fmt::Display for NotIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let how = "This device isn't in your network yet. Open this on it, or on any device of yours, and sign in:";
+        write!(f, "{how}\n{}", self.sign_in)
+    }
+}
+
+impl std::error::Error for NotIn {}
+
+impl Told {
+    /// Whether the pass this client has still lasts a day, by when it says it ends.
+    fn lasts(&self) -> bool {
+        let said = self.pass.as_ref().and_then(|pass| BASE64URL_NOPAD.decode(pass.as_bytes()).ok());
+        let until =
+            said.and_then(|said| serde_json::from_slice::<Value>(&said).ok()).and_then(|said| said["until"].as_u64());
+        let day = Duration::from_secs(24 * 60 * 60);
+        until.is_some_and(|until| UNIX_EPOCH + Duration::from_millis(until) > SystemTime::now() + day)
+    }
+
+    /// Asks the network's address for this device's pass, signed with its key, and keeps it in `file` with whose
+    /// device it is. A device that's nobody's there is told where its person makes it theirs.
+    async fn admit(&mut self, key: &SecretKey, file: &Path) -> Result<()> {
+        let name = gethostname::gethostname().to_string_lossy().into_owned();
+        let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/pass", "params": {"name": name}}).to_string();
+        let network = Network { address: self.address.clone(), pass: String::new() };
+        let mut asked = web()?.post(format!("{}/mcp", self.address.trim_end_matches('/'))).timeout(CONNECT * 3);
+        for (name, value) in network.signed(key, "/mcp", &ask)? {
+            asked = asked.header(name, value);
+        }
+        let answer: Value = asked.body(ask).send().await?.json().await?;
+        if let Some(sign_in) = answer["error"]["data"]["sign_in"].as_str() {
+            bail!(NotIn { sign_in: sign_in.to_owned() })
+        }
+        let (Some(pass), Some(who)) = (answer["result"]["pass"].as_str(), answer["result"]["who"].as_str()) else {
+            bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's address gave this device no pass"))
+        };
+        (self.pass, self.who) = (Some(pass.to_owned()), Some(who.to_owned()));
+        fs::write(file, serde_json::to_vec(self)?).with_context(|| format!("couldn't write {}", file.display()))
     }
 }
 
@@ -298,6 +358,8 @@ pub struct Client {
     /// The network's address, if it has one: the client asks there which servers act for its user. A network on one
     /// machine has none, and whatever starts it tells the client where its servers are, in `servers`.
     network: Option<Network>,
+    /// Whose device this is, once it's someone's: the user it signed in as.
+    who: Option<String>,
     reach: Mutex<Reach>,
     told: broadcast::Sender<Value>,
     /// What every request says of who it's from and for, where the environment says: `ONE_LINK` is a sharing link,
@@ -313,10 +375,31 @@ pub struct Client {
 impl Client {
     pub async fn open(home: impl Into<PathBuf>) -> Result<Self> {
         let home = home.into();
-        let network = match fs::read(home.join("network")) {
-            Ok(network) => Some(serde_json::from_slice(&network).context("`network` isn't a network's address")?),
+        let told = match fs::read(home.join("network")) {
+            Ok(network) => {
+                Some(serde_json::from_slice::<Told>(&network).context("`network` isn't a network's address")?)
+            }
             Err(error) if error.kind() == ErrorKind::NotFound => None,
             Err(error) => return Err(error).context("couldn't read `network`"),
+        };
+        // A pass lasts a month, so a device that's someone's asks for the next one before it ends. One that can't
+        // be asked for now is asked for next time, while the one it has lasts.
+        let (network, who) = match told {
+            Some(mut told) => {
+                if !told.lasts() {
+                    match told.admit(&key(&home.join("key"))?, &home.join("network")).await {
+                        Err(error) if error.is::<NotIn>() => return Err(error),
+                        Err(error) if told.pass.is_none() => {
+                            return Err(error)
+                                .with_context(|| format!("Couldn't join the network at {}", told.address));
+                        }
+                        _ => {}
+                    }
+                }
+                let pass = told.pass.context("this device has no pass")?;
+                (Some(Network { address: told.address, pass }), told.who)
+            }
+            None => (None, None),
         };
         let endpoint = endpoint(&home.join("key"), network.as_ref()).await?;
         let says = [("as", "ONE_AS"), ("link", "ONE_LINK"), ("for", "ONE_FOR")];
@@ -336,7 +419,7 @@ impl Client {
             }
         });
         let (watching, answering) = (AtomicBool::new(false), watch::Sender::new(true));
-        Ok(Self { home, endpoint, network, reach: Mutex::default(), told, says, watching, answering })
+        Ok(Self { home, endpoint, network, who, reach: Mutex::default(), told, says, watching, answering })
     }
 
     /// The network's address, if it has one.
@@ -405,7 +488,28 @@ impl Client {
         };
         let answer = asked.await;
         self.answering.send_if_modified(|answering| std::mem::replace(answering, answer.is_ok()) != answer.is_ok());
-        answer
+        match answer {
+            Ok(answer) => Ok(self.taken_out(answer).await),
+            refused => refused,
+        }
+    }
+
+    /// What a server answered, unless it says this device is nobody's: one that was taken out of its network since
+    /// it got its pass. Then the answer says where its person lets it in again, as the network's address says it.
+    async fn taken_out(&self, answer: Vec<u8>) -> Vec<u8> {
+        let (Some(network), Ok(mut said)) = (&self.network, serde_json::from_slice::<Value>(&answer)) else {
+            return answer;
+        };
+        if said["error"]["code"] != NOBODY {
+            return answer;
+        }
+        let mut told = Told { address: network.address.clone(), pass: None, who: None };
+        let asked = told.admit(self.endpoint.secret_key(), &self.home.join("network")).await;
+        match asked.as_ref().map_err(|error| error.downcast_ref::<NotIn>()) {
+            Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),
+            _ => return answer,
+        }
+        said.to_string().into_bytes()
     }
 
     /// `message` with what this client says of who it's from, in the request's `_meta`.
@@ -492,13 +596,15 @@ impl Client {
                 .with_context(|| format!("{} isn't servers' addresses", file.display()));
             return servers.map(Some);
         };
-        // Until signing in says who this client's user is, it's who it says it acts as. A sharing link's holder
-        // asks the servers of whoever the link leads to, which it starts with.
+        // This client's user is whoever its device signed in as, or in a network being built, who it says it acts
+        // as. A sharing link's holder asks the servers of whoever the link leads to, which it starts with.
         let said = |what| self.says.iter().find(|(says, _)| *says == what).map(|(_, said)| said.as_str());
-        let of = match said("link").map(|link| link.split('/').collect::<Vec<_>>()) {
-            Some(leads) if leads[0] == "network" => "network/".to_owned(),
-            Some(leads) if leads.len() > 2 => format!("{}/{}/", leads[0], leads[1]),
-            _ => format!("users/{}/", said("as").context("This device is nobody's here: ONE_AS says who it acts as")?),
+        let of = match (said("link").map(|link| link.split('/').collect::<Vec<_>>()), said("as"), &self.who) {
+            (Some(leads), ..) if leads[0] == "network" => "network/".to_owned(),
+            (Some(leads), ..) if leads.len() > 2 => format!("{}/{}/", leads[0], leads[1]),
+            (_, Some(acts_as), _) => format!("users/{acts_as}/"),
+            (_, _, Some(who)) => format!("{who}/"),
+            _ => bail!("This device is nobody's here. In a network being built, ONE_AS says who it acts as."),
         };
         let asked = (SERVERS, json!({"of": of}));
         if !now {
@@ -515,6 +621,9 @@ impl Client {
 
 /// What a person is told when no server answered: what went wrong, and what to do about it.
 const UNANSWERED: &str = "No server is answering. Check this device is online and a server is on, then try again.";
+
+/// The JSON-RPC error a server answers a device that's nobody's (`OneCore.User`).
+const NOBODY: i64 = -32003;
 
 /// What a client tells a server to be told what changes, at the `address` it gives, or with none, no longer.
 const WATCH: &str = "notifications/one/watch";

@@ -28,7 +28,8 @@ defmodule Mix.Tasks.Network do
 
       mix network <folder> --owner <name>
 
-  makes the user of that name the network's first owner, which a network gets once (`OneCore.User`).
+  makes the user of that name the network's first owner, which a network gets once (`OneCore.User`), and where
+  people sign in, says where they join.
 
       mix network <folder> --development
 
@@ -49,9 +50,6 @@ defmodule Mix.Tasks.Network do
   alias OneCore.{Address, Iroh, Plugins, Server, Servers, User}
 
   @root Path.expand("../../../..", __DIR__)
-
-  # Until signing in decides it, how long a client's pass to the relay lasts. Each start makes a new one.
-  @pass_for :timer.hours(24 * 30)
 
   @impl true
   def run(args) do
@@ -123,11 +121,20 @@ defmodule Mix.Tasks.Network do
         :ok -> Mix.shell().info("users/#{owner} is the network's first owner.")
         {:error, why} -> Mix.shell().error("users/#{owner} wasn't made the network's first owner: #{why}")
       end
+
+      # Where people sign in, the first owner joins as anyone invited does, and the first invitation is their own.
+      if address && !options[:development] do
+        case Plugins.call("sign-in", "invite", %{"name" => owner}, "users/" <> owner) do
+          {:ok, said} -> Mix.shell().info(said)
+          {:error, why} -> Mix.shell().error("users/#{owner} wasn't invited: #{why}")
+        end
+      end
     end
 
-    # A client of a network with an address asks there which servers to reach. Without one, it's told here: the
-    # ones acting for the network, which is everyone. A server's pass for a client says the server's list, so the
-    # one a network's own server gives lets a client in whoever its user is.
+    # A client of a network with an address asks there which servers to reach, and gets its pass by signing in:
+    # one of a network being built is given its pass here, since nobody signs in to that. A server's pass for a
+    # client says the server's list, so the one a network's own server gives lets a client in whoever its user
+    # is. Without an address, a client is told here where the servers acting for the network are.
     client = Path.join(folder, "client")
     File.mkdir_p!(client)
 
@@ -135,10 +142,12 @@ defmodule Mix.Tasks.Network do
       not Servers.here?("network") ->
         :ok
 
-      address ->
+      address && options[:development] ->
         {:ok, key} = Iroh.key(Path.join(client, "key"))
-        pass = Address.pass(key, System.system_time(:millisecond) + @pass_for)
-        File.write!(Path.join(client, "network"), JSON.encode!(%{address: address, pass: pass}))
+        File.write!(Path.join(client, "network"), JSON.encode!(%{address: address, pass: Address.pass(key)}))
+
+      address ->
+        File.write(Path.join(client, "network"), JSON.encode!(%{address: address}), [:exclusive])
 
       true ->
         addresses = for key <- Servers.listed("network"), {:ok, address} <- [Servers.address(key)], do: address
