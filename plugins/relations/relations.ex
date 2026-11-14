@@ -23,29 +23,11 @@ defmodule Relations do
     "insert into tuples (artifact, relation, who) values ('network', 'owner', 'users/anyone')"
   ]
 
-  # Whether a tuple gives `who` the relation to the artifact, which is one question of the database. `whos` is
-  # everyone `who` counts as: themselves, everyone if they're a user, and each group they're a member of, however
-  # far that goes. `up` is the artifact and its parents, as far as those go, ending at the network. An artifact's
-  # name starts with whose it is, so whoever's name it starts with owns it with no tuple.
-  @may """
-  with recursive
-    whos (who) as (
-      values (?), (?)
-      union
-      select tuples.artifact from tuples join whos on tuples.who = whos.who where tuples.relation = 'member'
-    ),
-    up (artifact) as (
-      values (?), ('network')
-      union
-      select tuples.who from tuples join up on tuples.artifact = up.artifact where tuples.relation = 'parent'
-    )
-  select
-    exists (
-      select 1 from tuples
-      where artifact in (select artifact from up) and relation in (?, ?, ?) and who in (select who from whos)
-    )
-    or exists (select 1 from up, whos where substr(up.artifact, 1, length(whos.who) + 1) = whos.who || '/') as may
-  """
+  # What's followed from one who or artifact to the next: the groups a who is a member of, and an artifact's
+  # parents.
+  @groups "select artifact as next from tuples where relation = 'member' and who = ?"
+  @parents "select who as next from tuples where relation = 'parent' and artifact = ?"
+  @tuple "select 1 from tuples where artifact = ? and who = ? and relation in (?, ?, ?) limit 1"
 
   @impl true
   def uses, do: ["database"]
@@ -234,10 +216,27 @@ defmodule Relations do
     if not may?(db, who, relation, artifact), do: raise("#{who} isn't #{a(relation)} of #{artifact}.")
   end
 
+  # Whether `who` has the relation to the artifact. `whos` is everyone `who` counts as: themselves, everyone if
+  # they're a user, and each group they're a member of, however far that goes. `up` is the artifact and its
+  # parents, as far as those go, ending at the network. An artifact's name starts with whose it is, so whoever's
+  # name it starts with owns it with no tuple. Each step is one small question of the database, which is many
+  # times faster than asking it all of this at once.
   defp may?(db, who, relation, artifact) do
-    everyone = if String.starts_with?(who, "users/"), do: "everyone", else: who
-    [%{"may" => may}] = query(db, @may, [who, everyone, artifact | Map.fetch!(@enough, relation)])
-    may == 1
+    whos = followed(db, @groups, if(String.starts_with?(who, "users/"), do: [who, "everyone"], else: [who]), [])
+    enough = Map.fetch!(@enough, relation)
+
+    Enum.any?(followed(db, @parents, [artifact, "network"], []), fn artifact ->
+      Enum.any?(whos, &(String.starts_with?(artifact, &1 <> "/") or query(db, @tuple, [artifact, &1 | enough]) != []))
+    end)
+  end
+
+  # Everything reached from `from` by following `next`, each once.
+  defp followed(_db, _next, [], found), do: found
+
+  defp followed(db, next, [one | rest], found) do
+    if one in found,
+      do: followed(db, next, rest, found),
+      else: followed(db, next, rest ++ for(%{"next" => next} <- query(db, next, [one]), do: next), [one | found])
   end
 
   defp a("viewer"), do: "a viewer"
