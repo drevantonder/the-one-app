@@ -10,16 +10,18 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - **Each client is one Tauri shell per platform**, drawing in the device's web view.
 - **What sits at a network's address is Cloudflare Workers**, and a plugin's part there is one more: an ordinary
   Worker in the plugin's folder, deployed with the address's own.
+- **An app's UI is Solid 2.0, built by a server with Vite**, which Bun runs. Its components' behaviour is Zag's,
+  in Ark UI's shape until Ark runs on Solid 2.0, when they import Ark's instead.
 
 ## Not chosen yet
 
-- What the UI that clients share is built on. Vercel's UI SDK is being considered.
 - What starts a network's cloud server.
 - What signs users in.
 
 ## What this costs
 
 - A plugin's author writes two languages: Elixir on the server and JavaScript in the client.
+- Solid 2.0, Zag 2.0 and Vite 8 are pre-releases, pinned to versions tried together.
 - A crash in a Rust add-on ends the VM. Rust panics are caught, and what's left is rare.
 - The VM takes up to a second to start, which a cloud server started on demand pays each time.
 - No official build of the Erlang VM for Windows on ARM was found. The x64 build likely runs there emulated.
