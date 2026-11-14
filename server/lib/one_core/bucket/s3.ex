@@ -5,7 +5,7 @@ defmodule OneCore.Bucket.S3 do
   the blob belongs to, and the server sends what was signed. The address is `where`.
 
   The signer signs a write only with its condition, so the bucket itself refuses one that would overwrite. A blob's
-  tag is its ETag.
+  tag is its ETag. What the signer won't sign for this server raises `OneCore.Bucket.Refused`.
   """
   @behaviour OneCore.Bucket
   require Record
@@ -58,6 +58,14 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
+  @impl true
+  def remove(address, key) do
+    case request(address, %{remove: key}) do
+      %{status: status} when status in [200, 204] -> :ok
+      refused -> raise refusal(refused)
+    end
+  end
+
   defp texts(xml, path) do
     for element <- :xmerl_xpath.string(path, xml) do
       for xml_text(value: text) <- xml_element(element, :content), into: "", do: List.to_string(text)
@@ -72,6 +80,9 @@ defmodule OneCore.Bucket.S3 do
     case signed do
       %{status: 200, body: %{"method" => method, "url" => url, "headers" => headers}} ->
         Req.request!(method: method, url: url, headers: headers, body: data, decode_body: false, compressed: false)
+
+      %{status: 403, body: %{"error" => why}} ->
+        raise OneCore.Bucket.Refused, "The signer at #{address} refused: #{why}"
 
       %{body: %{"error" => why}} ->
         raise "The signer at #{address} refused: #{why}"

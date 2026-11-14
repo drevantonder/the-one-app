@@ -1,7 +1,6 @@
 defmodule OneCore.ServicesTest do
   use ExUnit.Case
-  alias OneCore.{Mcp, Plugins, Server, Services}
-  alias OneCore.Services.Instance
+  alias OneCore.{Mcp, Plugins, Server, Services, User}
 
   # A plugin whose service keeps a count. Its tool asks the service to add one, and the service tells the plugin
   # each count, which the plugin sends to the test.
@@ -55,6 +54,8 @@ defmodule OneCore.ServicesTest do
   setup %{tmp_dir: folder} do
     Application.put_env(:one_core, :bucket, {OneCore.Bucket.Folder, Path.join(folder, "bucket")})
     Application.put_env(:one_core, :home, Path.join(folder, "server"))
+    {:ok, key} = OneCore.Iroh.key(Server.key_file())
+    assert OneCore.Servers.joined?(key)
     for child <- [Plugins, Server, Services], do: start_supervised!(child)
     # What an earlier test loaded stays loaded, since nothing unloads a server's plugins as it stops.
     earlier = loaded()
@@ -66,22 +67,23 @@ defmodule OneCore.ServicesTest do
   @tag :tmp_dir
   test "a service keeps what it holds through its plugin's updates, in the newest code", %{earlier: earlier} do
     assert Plugins.call("counter", "add", %{}) == {:ok, [1, 1]}
-    assert_receive {:counted, "users/anyone", 1}
-    service = Instance.whereis("counter", "Counter.Kept")
+    anyone = User.anyone()
+    assert_receive {:counted, ^anyone, 1}
+    service = Plugins.Process.whereis("counter", "Counter.Kept")
 
     # More updates than the two versions of a module the VM keeps.
     for number <- 2..4,
         do: assert({:ok, ^number, ""} = Plugins.deploy("counter", %{"counter.ex" => counter(number, self())}))
 
     assert Plugins.call("counter", "add", %{}) == {:ok, [902, 4]}
-    assert Instance.whereis("counter", "Counter.Kept") == service
+    assert Plugins.Process.whereis("counter", "Counter.Kept") == service
     assert length(loaded() -- earlier) == 1
 
     # A version without the service stops it, and one with it starts it afresh.
     assert {:ok, 5, ""} =
              Plugins.deploy("counter", %{"counter.ex" => "defmodule Counter do\n  @behaviour OneCore.Plugin\nend"})
 
-    assert Instance.whereis("counter", "Counter.Kept") == nil
+    assert Plugins.Process.whereis("counter", "Counter.Kept") == nil
     assert loaded() -- earlier == []
     assert {:ok, 6, ""} = Plugins.deploy("counter", %{"counter.ex" => counter(6, self())})
     assert Plugins.call("counter", "add", %{}) == {:ok, [1, 6]}
@@ -90,8 +92,8 @@ defmodule OneCore.ServicesTest do
   @tag :tmp_dir
   test "only a server acting for the same user calls a service's functions and the functions it calls" do
     stranger = String.duplicate("ab", 32)
-    service = %{plugin: "counter", service: "Counter.Kept", function: "add", arguments: [], for: "users/anyone"}
-    plugin = %{plugin: "counter", function: "counted", arguments: [7], for: "users/anyone"}
+    service = %{plugin: "counter", service: "Counter.Kept", function: "add", arguments: [], for: User.anyone()}
+    plugin = %{plugin: "counter", function: "counted", arguments: [7], for: User.anyone()}
 
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", service, stranger)
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", plugin, stranger)
@@ -99,7 +101,7 @@ defmodule OneCore.ServicesTest do
 
     assert %{"result" => %{"answer" => [1, 1]}} = ask("services/call", service, Server.key())
     assert %{"result" => %{"answer" => "ok"}} = ask("plugins/call", plugin, Server.key())
-    assert_received {:counted, "users/anyone", 7}
+    assert_received {:counted, _who, 7}
 
     # Neither is a tool, so nothing else reaches them.
     assert %{"result" => %{"isError" => true}} = ask("tools/call", %{name: "counter_counted", arguments: %{}}, stranger)

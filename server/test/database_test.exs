@@ -9,9 +9,9 @@ defmodule OneCore.DatabaseTest do
   that fails is a bug to find, never a flake. `SEEDS=5000 mix test test/database_test.exs` runs more of them.
   """
   use ExUnit.Case
-  alias OneCore.{Artifact, Call}
-  alias OneCore.Plugins.Version
+  alias OneCore.{Artifact, Call, Plugins, User}
 
+  @prefix User.anyone() <> "/own/simulated/"
   @servers 3
   @steps 1000
   @schema ["create table writes (id integer, filler blob)"]
@@ -28,19 +28,27 @@ defmodule OneCore.DatabaseTest do
     def replace(simulation, key, data, tag), do: wait(simulation, {:replace, key, data, tag})
     @impl true
     def list(simulation, prefix), do: wait(simulation, {:list, prefix})
+    @impl true
+    def remove(simulation, key), do: wait(simulation, {:remove, key})
 
-    # A server's operations come from the process that is the server, or from one that process started.
     defp wait({blobs, simulation}, operation) do
-      server = List.first(Process.get(:"$ancestors", []), self())
-
       if self() == simulation do
         perform(blobs, operation)
       else
-        send(simulation, {:operation, server, self(), operation})
+        send(simulation, {:operation, server(), self(), operation})
 
         receive do
           {:done, result} -> result
         end
+      end
+    end
+
+    # A server's operations come from the process that is the server, which says which it is, or from the
+    # process holding its database.
+    defp server do
+      case Registry.keys(OneCore.Plugins.Processes, self()) do
+        [{"database", "Database.Lease", {server, _prefix}}] -> server
+        [] -> Process.get(:server)
       end
     end
 
@@ -57,43 +65,47 @@ defmodule OneCore.DatabaseTest do
       if :ets.lookup(blobs, key) == [{key, tag}] and :ets.insert(blobs, {key, data}), do: :ok, else: :changed
     end
 
+    def perform(blobs, {:remove, key}) do
+      :ets.delete(blobs, key)
+      :ok
+    end
+
     def perform(blobs, {:list, prefix}) do
       Enum.sort(for {key, _data} <- :ets.tab2list(blobs), String.starts_with?(key, prefix), do: key)
     end
   end
 
-  setup_all %{} do
-    # A server of this network, so that asking another server is what it is anywhere: here none of them answers.
-    home = Path.join(System.tmp_dir!(), "one-core-test-#{System.pid()}")
+  # A server of this network that runs the database plugin, so that its processes, and asking another server, are
+  # what they are anywhere: here none of the others answers.
+  setup %{tmp_dir: home} do
     Application.put_env(:one_core, :home, home)
     Application.put_env(:one_core, :bucket, {OneCore.Bucket.Folder, Path.join(home, "bucket")})
-    start_supervised!(OneCore.Server)
-    on_exit(fn -> File.rm_rf!(home) end)
-
+    for child <- [Plugins, OneCore.Server, OneCore.Services], do: start_supervised!(child)
     folder = Path.expand("../../plugins/database", __DIR__)
 
     files =
       for file <- Path.wildcard(folder <> "/**/*.ex"), into: %{}, do: {Path.relative_to(file, folder), File.read!(file)}
 
-    {:ok, database, _warnings} = Version.load(files)
-    on_exit(fn -> Version.unload(database) end)
-    %{database: database}
+    {:ok, 1, _warnings} = Plugins.deploy("database", files)
+    %{database: Plugins.running()["database"].plugin, home: home}
   end
 
-  test "no answered write is lost or doubled, whoever stops and whoever takes the lease", %{database: database} do
+  @tag :tmp_dir
+  test "no answered write is lost or doubled, whoever stops and whoever takes the lease", simulated do
     seeds = String.to_integer(System.get_env("SEEDS", "40"))
-    assert run(database, 1) == run(database, 1), "seed 1 ran two ways"
-    for seed <- 2..seeds//1, do: run(database, seed)
+    assert run(simulated, 1) == run(simulated, 1), "seed 1 ran two ways"
+    for seed <- 2..seeds//1, do: run(simulated, seed)
   end
 
   # One seed's run. Gives everything that happened, in order.
-  defp run(database, seed) do
+  defp run(%{database: database, home: home}, seed) do
     blobs = :ets.new(:blobs, [:public])
     Application.put_env(:one_core, :bucket, {Bucket, {blobs, self()}})
 
     run = %{
       seed: seed,
       database: database,
+      home: home,
       blobs: blobs,
       random: :rand.seed_s(:exsss, seed),
       servers: Map.new(1..@servers, &{&1, nil}),
@@ -105,7 +117,7 @@ defmodule OneCore.DatabaseTest do
     }
 
     run = Enum.reduce(1..@steps, run, fn _step, run -> step(run) end)
-    for {_server, process} when process != nil <- run.servers, do: stop(process)
+    for {server, process} when process != nil <- run.servers, do: stop(process, "s#{server}")
 
     # A server that has never seen the database reads it from the bucket.
     there = check(run, "after")
@@ -161,9 +173,10 @@ defmodule OneCore.DatabaseTest do
   # Waits for what the one server that is running does next: a bucket operation, or the answer to its write.
   defp await(run, server) do
     process = run.servers[server]
+    name = "s#{server}"
 
     receive do
-      {:operation, ^process, from, operation} ->
+      {:operation, ^name, from, operation} ->
         happened(%{run | waiting: Map.put(run.waiting, server, {from, operation})}, {server, operation_name(operation)})
 
       {:wrote, ^process, id, :ok} ->
@@ -183,9 +196,14 @@ defmodule OneCore.DatabaseTest do
 
   defp start(run, server) do
     simulation = self()
-    %{database: %{plugin: database}} = run
+    call = call(run, "s#{server}")
 
-    process = spawn(fn -> write(database, call("s#{server}"), simulation) end)
+    process =
+      spawn(fn ->
+        Process.put(:server, call.server)
+        write(run.database, call, simulation)
+      end)
+
     happened(%{run | servers: Map.put(run.servers, server, process)}, {:started, server})
   end
 
@@ -212,7 +230,7 @@ defmodule OneCore.DatabaseTest do
   end
 
   defp stopped(run, server, at, operation) do
-    stop(run.servers[server])
+    stop(run.servers[server], "s#{server}")
 
     run = %{
       run
@@ -224,14 +242,10 @@ defmodule OneCore.DatabaseTest do
   end
 
   # Stops a server as `kill -9` would: its process and the one holding its copy of the database, at once.
-  defp stop(process) do
-    holding =
-      for {:database, _server, _prefix} = name <- :global.registered_names(),
-          pid = :global.whereis_name(name),
-          is_pid(pid) and process in ancestors(pid),
-          do: pid
+  defp stop(process, server) do
+    holding = Plugins.Process.whereis("database", "Database.Lease", {server, @prefix})
 
-    for pid <- [process | holding] do
+    for pid <- [process | List.wrap(holding)] do
       watching = Process.monitor(pid)
       Process.exit(pid, :kill)
 
@@ -241,21 +255,19 @@ defmodule OneCore.DatabaseTest do
     end
   end
 
-  defp ancestors(pid) do
-    {:dictionary, dictionary} = Process.info(pid, :dictionary)
-    Keyword.get(dictionary, :"$ancestors", [])
-  end
-
   # The ids in the database as a server that never saw it finds it, taking its lease.
   defp check(run, server) do
-    %{database: %{plugin: database}} = run
+    %{database: database} = run
     simulation = self()
+    call = call(run, server)
 
     process =
       spawn(fn ->
+        Process.put(:server, server)
+
         there =
           try do
-            database.transaction(call(server), @schema, fn db ->
+            database.transaction(call, @schema, fn db ->
               [%{"integrity_check" => "ok"}] = database.query(db, "pragma integrity_check")
               for %{"id" => id} <- database.query(db, "select id from writes order by rowid"), do: id
             end)
@@ -266,17 +278,17 @@ defmodule OneCore.DatabaseTest do
         send(simulation, {:there, there})
       end)
 
-    there = serve(run, process)
-    stop(process)
+    there = serve(run, server)
+    stop(process, server)
     assert is_list(there), "seed #{run.seed}: the database can't be read from the bucket: #{there}"
     there
   end
 
-  defp serve(run, process) do
+  defp serve(run, server) do
     receive do
-      {:operation, ^process, from, operation} ->
+      {:operation, ^server, from, operation} ->
         send(from, {:done, Bucket.perform(run.blobs, operation)})
-        serve(run, process)
+        serve(run, server)
 
       {:there, there} ->
         there
@@ -285,14 +297,16 @@ defmodule OneCore.DatabaseTest do
     end
   end
 
-  defp call(server) do
+  # Each server has a folder of its own, as each has a machine of its own.
+  defp call(run, server) do
     %Call{
-      own: %Artifact{prefix: "users/anyone/own/simulated/"},
+      own: %Artifact{prefix: @prefix},
+      folder: Path.join(run.home, server),
       server: server,
-      for: "users/anyone",
+      for: User.anyone(),
       plugin: "simulated",
       ask: {"tools/call", %{name: "simulated_write", arguments: %{}}},
-      uses: %{},
+      uses: %{"database" => run.database},
       passed_on: false
     }
   end

@@ -61,6 +61,12 @@ defmodule OneCore.Bucket.Folder do
     Enum.sort(for key <- keys(folder, within), String.starts_with?(key, prefix), do: key)
   end
 
+  @impl true
+  def remove(folder, key) do
+    File.rm(file(folder, key))
+    :ok
+  end
+
   defp keys(folder, within) do
     case File.ls(Path.join(folder, within)) do
       {:ok, names} ->

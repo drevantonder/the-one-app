@@ -8,39 +8,23 @@ defmodule OneCore.Services do
   bucket nothing. It reads again when a server tells it to, when whoever asks isn't a server it knows, and when it
   knows of none that runs a service.
 
-  Each service installed here is a process (`OneCore.Services.Instance`) for as long as its plugin has it. One
-  that stops is started again, whatever stopped it, and the server carries on meanwhile. This process only keeps
+  Each service installed here is a process (`OneCore.Plugins.Process`) for as long as its plugin has it. One that
+  stops is started again, whatever stopped it, and the server carries on meanwhile. This process only keeps
   track: it never waits on a service's code, so one service being slow holds up no other.
-
-  With no plugin that signs users in there is one user, whom every server on the list acts for.
   """
   use GenServer
   require Logger
-  alias OneCore.{Bucket, Plugins, Server, Servers}
+  alias OneCore.{Bucket, Plugins, Server, Servers, User}
   alias OneCore.Plugins.Version
-  alias OneCore.Services.Instance
-
-  @registry OneCore.Services.Instances
-  @supervisor OneCore.Services.Supervisor
-  @anyone "users/anyone"
 
   # The least time between two starts of one service, in milliseconds. What a service needs can be gone for a
   # while (a program that won't build, a device unplugged), and it would otherwise be started as fast as it stops.
   @apart 5_000
 
-  # The processes services run as, the supervisor that starts and ends them, and this.
-  def child_spec(_) do
-    children = [
-      {Registry, keys: :unique, name: @registry},
-      {DynamicSupervisor, name: @supervisor},
-      %{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}
-    ]
-
-    %{id: __MODULE__, type: :supervisor, start: {Supervisor, :start_link, [children, [strategy: :rest_for_one]]}}
-  end
+  def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
   @doc "The users and groups this server acts for."
-  def acts_for, do: if(acting?(Server.key()), do: [@anyone], else: [])
+  def acts_for, do: if(acting?(Server.key()), do: [User.anyone()], else: [])
 
   @doc "Whether `key` is a server that acts for this network's user."
   def acting?(key), do: GenServer.call(__MODULE__, {:acting?, key})
@@ -70,9 +54,9 @@ defmodule OneCore.Services do
   def install(plugin, service) do
     with :ok <- known(plugin, service),
          {:ok, instance} <- GenServer.call(__MODULE__, {:install, {plugin, service}}) do
-      tell()
+      Server.tell_servers()
 
-      case instance && Instance.started(instance) do
+      case instance && Plugins.Process.started(instance) do
         :ok ->
           :ok
 
@@ -86,20 +70,13 @@ defmodule OneCore.Services do
   @doc "Stops running a plugin's service on this server."
   def remove(plugin, service) do
     with {:ok, instance} <- GenServer.call(__MODULE__, {:remove, {plugin, service}}) do
-      if instance, do: Instance.stop(instance)
-      tell()
+      if instance, do: Plugins.Process.stop(instance)
+      Server.tell_servers()
     end
   end
 
-  @doc """
-  A plugin has a newer version, or none: its services here move to it, start, or stop. The ones that were running
-  have, when this returns.
-  """
-  def follow(plugin) do
-    # A service whose own code brought the newer version in is the one process that can't wait for itself.
-    for instance <- GenServer.call(__MODULE__, {:follow, plugin}), instance != self(), do: Instance.follow(instance)
-    :ok
-  end
+  @doc "A plugin has a newer version: its services installed here that it didn't have before start."
+  def start(plugin), do: GenServer.call(__MODULE__, {:start, plugin})
 
   @doc """
   Calls a function of a plugin's service running here, with the service's process and then `arguments`. Gives
@@ -107,8 +84,8 @@ defmodule OneCore.Services do
   """
   def run(plugin, service, function, arguments) do
     Plugins.run(plugin, fn %{^plugin => version} ->
-      module = Version.service(version, service)
-      instance = Instance.whereis(plugin, service)
+      module = if Enum.any?(version.services, &(&1.name == service)), do: Version.module(version, service)
+      instance = Plugins.Process.whereis(plugin, service)
 
       cond do
         module == nil ->
@@ -127,12 +104,10 @@ defmodule OneCore.Services do
   end
 
   @doc "The folder on this machine that is a service's own."
-  def folder(plugin, service) do
-    Path.join([Application.fetch_env!(:one_core, :home), "services", plugin, service])
-  end
+  def folder(plugin, service), do: Path.join([Server.home(), "services", plugin, service])
 
   defp known(plugin, service) do
-    with true <- Plugins.look(plugin),
+    with _ = Plugins.look(),
          %{^plugin => %{services: services}} <- Plugins.running() do
       cond do
         Enum.any?(services, &(&1.name == service)) ->
@@ -147,14 +122,6 @@ defmodule OneCore.Services do
     else
       _ -> {:error, "There's no plugin named #{plugin}"}
     end
-  end
-
-  # The other servers acting are told to read again what's installed, and have, or couldn't be reached, when this
-  # returns.
-  defp tell do
-    message = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/services"})
-    others = Servers.acting() -- [Server.key()]
-    Stream.run(Task.async_stream(others, &Server.ask(&1, message), timeout: :infinity))
   end
 
   # Why a service stopped, as its plugin's author would read it.
@@ -204,7 +171,7 @@ defmodule OneCore.Services do
         {:reply, {:error, "This server acts for nobody yet, so it runs no services"}, state}
 
       service in here(state) ->
-        {:reply, {:ok, Instance.whereis(plugin, name)}, state}
+        {:reply, {:ok, Plugins.Process.whereis(plugin, name)}, state}
 
       true ->
         {instance, state} = start(service, write(state, here(state) ++ [service]))
@@ -215,7 +182,7 @@ defmodule OneCore.Services do
   def handle_call({:remove, {plugin, name} = service}, _from, state) do
     if service in here(state) do
       state = write(state, here(state) -- [service])
-      instance = Instance.whereis(plugin, name)
+      instance = Plugins.Process.whereis(plugin, name)
       if instance == nil, do: File.rm_rf!(folder(plugin, name))
       {:reply, {:ok, instance}, state}
     else
@@ -223,18 +190,13 @@ defmodule OneCore.Services do
     end
   end
 
-  # Gives the plugin's services that are running here, for whoever asked to tell them, and starts the others.
-  def handle_call({:follow, plugin}, _from, state) do
-    {instances, state} =
-      for {^plugin, name} = service <- here(state), reduce: {[], state} do
-        {instances, state} ->
-          case Instance.whereis(plugin, name) do
-            nil -> {instances, elem(start(service, state), 1)}
-            instance -> {[instance | instances], state}
-          end
+  def handle_call({:start, plugin}, _from, state) do
+    state =
+      for {^plugin, name} = service <- here(state), Plugins.Process.whereis(plugin, name) == nil, reduce: state do
+        state -> elem(start(service, state), 1)
       end
 
-    {:reply, instances, state}
+    {:reply, :ok, state}
   end
 
   def handle_call({:stopped, {plugin, name} = service}, _from, state) do
@@ -280,16 +242,13 @@ defmodule OneCore.Services do
   # Starts a service, and gives its process: none if its plugin isn't running here, or no longer has it. One
   # that outlived this process is already running, and is watched again.
   defp start({plugin, name} = service, state) do
-    case DynamicSupervisor.start_child(@supervisor, {Instance, service}) do
-      {:ok, instance} ->
-        {instance, watch(instance, service, state)}
-
-      {:error, {:already_started, instance}} ->
-        {instance, watch(instance, service, state)}
-
-      :ignore ->
+    case Plugins.Process.of(plugin, name) do
+      nil ->
         File.rm_rf!(folder(plugin, name))
         {nil, state}
+
+      instance ->
+        {instance, watch(instance, service, state)}
     end
   end
 

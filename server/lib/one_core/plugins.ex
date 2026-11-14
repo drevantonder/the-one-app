@@ -2,32 +2,36 @@ defmodule OneCore.Plugins do
   @moduledoc """
   Runs a network's plugins on this server, and adds, updates and removes them while it keeps running.
 
-  A plugin is an artifact whose blobs are code. Each set of files deployed is kept at `code/<its hash>/`, and
-  `versions/<number>` names the set that version runs: the newest is the one in use, and an empty one means the
-  plugin was removed. All of it is written only if absent, so a plugin keeps its history, and two deploys at once
-  can't both be the next version.
+  A plugin is an artifact whose blobs are code. Each set of files deployed is kept at `code/<its hash>/`. Which set
+  each plugin runs is one blob for all of a user's plugins, `added`: each one's name with its newest version, which
+  is a number and the set it runs, where no set means the plugin was removed. So a server reads one blob to know
+  what to run. A deploy replaces that blob only if it's unchanged, so two deploys at once can't both be a plugin's
+  next version, and first writes the version it replaces to the plugin's `versions/<number>`, so a plugin keeps
+  its history.
 
   A call runs on the version that was newest when it began. That version stays loaded until its last call ends,
-  however many versions follow it. A plugin's services hold a version the same way, and move to the newest
-  (`OneCore.Services`).
+  however many versions follow it. A plugin's processes hold a version the same way, and move to the newest
+  (`OneCore.Plugins.Process`).
 
   A plugin says which other plugins it uses, and a call holds the versions of those too. Adding a plugin brings
-  along the ones it uses that the server ships with, from the folder that is its `:shipped` setting.
+  along the ones it uses that the server ships with: its `:shipped` setting, each one's folder by its name.
 
-  A server learns of a version another server was given by being told to look, and by looking when it's asked for a
-  plugin it doesn't run.
-
-  With no plugin that signs users in, everyone who reaches a network is the same one user. Plugins are theirs, and
-  run for them.
+  A server learns of a version another server was given by looking in the bucket: when it's told to, when it's
+  asked for a plugin it doesn't run, and every so often (`OneCore.Server.look/0`).
   """
   use GenServer
   require Logger
-  alias OneCore.{Artifact, Call, Server, Servers, Services}
+  alias OneCore.{Artifact, Bucket, Call, Server, Services, User}
   alias OneCore.Plugins.Version
 
-  @anyone "users/anyone"
+  @added User.anyone() <> "/added"
 
-  def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
+  # This, and after it what runs plugins' processes, which hold versions here.
+  def child_spec(_) do
+    children = [%{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}]
+    start = {Supervisor, :start_link, [children ++ __MODULE__.Process.children(), [strategy: :rest_for_one]]}
+    %{id: __MODULE__, type: :supervisor, start: start}
+  end
 
   @doc "Adds a plugin, or updates it, from its files by their paths. Gives the compiler's warnings."
   def deploy(name, files) do
@@ -35,8 +39,8 @@ defmodule OneCore.Plugins do
          {:ok, version, warnings} <- Version.load(files) do
       with :ok <- bring(name, version.uses),
            {:ok, number} <- keep(name, files) do
-        takes_over(name, number, version)
-        tell(name)
+        takes_over(name, number, {:ok, version})
+        Server.tell_servers()
         {:ok, number, warnings}
       else
         {:error, why} ->
@@ -51,14 +55,29 @@ defmodule OneCore.Plugins do
     used_by = for {other, version} <- running(), name in version.uses, do: other
 
     with [] <- used_by,
-         {:ok, _number, _files} <- kept(name),
+         {%{^name => %{"code" => code}}, _tag} when code != "" <- added(),
          {:ok, number} <- keep(name, %{}) do
-      takes_over(name, number, nil)
-      tell(name)
+      takes_over(name, number, {:ok, nil})
+      Server.tell_servers()
     else
       [_ | _] -> {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}
       {:error, why} -> {:error, why}
       _ -> {:error, "There's no plugin named #{name}"}
+    end
+  end
+
+  @doc """
+  Deploys each plugin this server ships with that the network has never had. One the network has is left as it is:
+  deploying it again is what updates it. Gives what `deploy/2` gave for each, by its name.
+  """
+  def ship do
+    {added, _tag} = added()
+
+    for {name, folder} <- Enum.sort(Application.get_env(:one_core, :shipped, %{})), not is_map_key(added, name) do
+      case shipped(name) do
+        files when files == %{} -> {name, {:error, "There are no files in #{folder}"}}
+        files -> {name, deploy(name, files)}
+      end
     end
   end
 
@@ -93,7 +112,7 @@ defmodule OneCore.Plugins do
           {:error, "#{name} has no function #{function} that takes a call and #{length(arguments)} more"}
 
         function ->
-          ask = {"plugins/call", %{plugin: name, function: function, arguments: arguments, for: @anyone}}
+          ask = {"plugins/call", %{plugin: name, function: function, arguments: arguments, for: User.anyone()}}
           {:ok, apply(plugin, function, [called(name, versions, ask, passed_on) | arguments])}
       end
     end)
@@ -147,35 +166,34 @@ defmodule OneCore.Plugins do
     with {:ok, text, _tag} <- Artifact.read(artifact(name), "code/#{code}/#{path}"), do: {:ok, text}
   end
 
-  @doc "Looks in the bucket for a plugin's newest version, and runs it. Gives whether the plugin is running now."
-  def look(name) do
-    with true <- name?(name),
-         {number, files} <- newest(name),
-         true <- number > GenServer.call(__MODULE__, {:number, name}),
-         {:ok, version} <- loaded(name, files) do
-      takes_over(name, number, version)
-    end
-
-    is_map_key(running(), name)
+  @doc "Looks in the bucket for plugins' newer versions, and runs them. Gives whether there were any."
+  def look do
+    newer = newer(GenServer.call(__MODULE__, :newest))
+    for {name, number, loaded} <- newer, do: takes_over(name, number, loaded)
+    newer != []
   end
 
-  # A plugin's newest version takes over here, and its services follow it.
-  defp takes_over(name, number, version) do
-    GenServer.call(__MODULE__, {:newest, name, number, version})
-    Services.follow(name)
+  # A plugin's newest version takes over here: one to run, or none once it's removed. Its processes follow it,
+  # and its services installed here that weren't running start.
+  defp takes_over(name, number, loaded) do
+    GenServer.call(__MODULE__, {:newest, name, number, loaded})
+    # A process whose own code brought the newer version in is the one that can't wait for itself.
+    for process <- __MODULE__.Process.all(name), process != self(), do: __MODULE__.Process.follow(process)
+    Services.start(name)
   end
 
   # What a function of a plugin is called with: who it runs for, and what was asked, to pass on.
   defp called(name, versions, ask, passed_on) do
-    uses = Map.new(versions, fn {used, version} -> {used, version.plugin} end)
+    own = "#{User.anyone()}/own/#{name}/"
 
     %Call{
-      own: %Artifact{prefix: "#{@anyone}/own/#{name}/"},
+      own: %Artifact{prefix: own},
+      folder: Path.join(Server.home(), own),
       server: Server.key(),
-      for: @anyone,
+      for: User.anyone(),
       plugin: name,
       ask: ask,
-      uses: Map.delete(uses, name),
+      uses: Map.new(Map.delete(versions, name), fn {used, version} -> {used, version.plugin} end),
       passed_on: passed_on
     }
   end
@@ -183,42 +201,34 @@ defmodule OneCore.Plugins do
   # A call holds the newest version of its plugin and of each plugin that one uses, however far that goes. A
   # plugin this server doesn't run is looked for first.
   defp begin(name) do
-    case hold(name) do
-      {:absent, missing} ->
-        cond do
-          look(missing) -> begin(name)
-          missing == name -> {:error, "There's no plugin named #{name}"}
-          true -> {:error, "#{name} needs #{missing}, which isn't in this network"}
-        end
-
-      began ->
-        began
+    with {:absent, _missing} <- hold(name),
+         _ = look(),
+         {:absent, missing} <- hold(name) do
+      if missing == name,
+        do: {:error, "There's no plugin named #{name}"},
+        else: {:error, "#{name} needs #{missing}, which isn't in this network"}
     end
   end
 
   # The plugins a plugin uses are in the network before it is: the ones missing come from what the server ships
   # with.
   defp bring(name, uses) do
-    case Enum.reject(uses, &(look(&1) or match?({:ok, _, _}, deploy(&1, shipped(&1))))) do
+    look()
+
+    case Enum.reject(uses, &(is_map_key(running(), &1) or match?({:ok, _, _}, deploy(&1, shipped(&1))))) do
       [] -> :ok
       missing -> {:error, "#{name} uses #{Enum.join(missing, ", ")}, which isn't in this network. Deploy it first."}
     end
   end
 
+  # The files of a plugin this server ships with, or none if it ships with no such plugin.
   defp shipped(name) do
-    with {:ok, folder} <- Application.fetch_env(:one_core, :shipped) do
-      folder = Path.join(folder, name)
+    with %{^name => folder} <- Application.get_env(:one_core, :shipped, %{}) do
       files = Enum.filter(Path.wildcard(Path.join(folder, "**")), &File.regular?/1)
       Map.new(files, &{Path.relative_to(&1, folder), File.read!(&1)})
+    else
+      _ -> %{}
     end
-  end
-
-  # The other servers acting for whoever a plugin is for are told to look at it, and have looked, or couldn't be
-  # reached, when this returns.
-  defp tell(name) do
-    message = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/plugin", params: %{name: name}})
-    others = Servers.acting() -- [Server.key()]
-    Stream.run(Task.async_stream(others, &Server.ask(&1, message), timeout: :infinity))
   end
 
   defp check(name, files) do
@@ -239,54 +249,80 @@ defmodule OneCore.Plugins do
 
   defp path?(path), do: is_binary(path) and Enum.all?(String.split(path, "/"), &(&1 =~ ~r/^[^.]/))
 
-  defp artifact(name), do: %Artifact{prefix: "#{@anyone}/plugins/#{name}/"}
+  defp artifact(name), do: %Artifact{prefix: "#{User.anyone()}/plugins/#{name}/"}
 
-  # Writes a set of files and the next version naming it. No files is the version that removes the plugin.
+  # Every plugin's newest version by its name, as the bucket has them, and the blob's tag: none if there's no blob.
+  defp added do
+    case Bucket.read(@added) do
+      {:ok, added, tag} -> {JSON.decode!(added), tag}
+      :absent -> {%{}, nil}
+    end
+  end
+
+  # Writes a set of files, and makes it the plugin's next version. No files is the version that removes it.
   defp keep(name, files) do
-    plugin = artifact(name)
-
     code = if files == %{}, do: "", else: Version.code(files)
+    for {path, text} <- files, do: Artifact.write(artifact(name), "code/#{code}/#{path}", text)
+    keep(name, code, added())
+  end
 
-    for {path, text} <- files, do: Artifact.write(plugin, "code/#{code}/#{path}", text)
-    number = length(Artifact.list(plugin, "versions/")) + 1
+  # The version being replaced goes to the plugin's history first, so every version but the newest is there.
+  defp keep(name, code, {added, tag}) do
+    was = added[name]
+    number = if was, do: was["number"] + 1, else: 1
 
-    case Artifact.write(plugin, "versions/" <> String.pad_leading("#{number}", 8, "0"), code) do
-      :ok -> {:ok, number}
-      :exists -> {:error, "#{name} was deployed or removed by someone else just now. Look at it, and do this again."}
+    if was,
+      do: Artifact.write(artifact(name), "versions/" <> String.pad_leading("#{was["number"]}", 8, "0"), was["code"])
+
+    next = JSON.encode!(Map.put(added, name, %{number: number, code: code}))
+
+    case if(tag, do: Bucket.replace(@added, next, tag), else: Bucket.write(@added, next)) do
+      :ok ->
+        {:ok, number}
+
+      # Another plugin's deploy got there first, and this one goes after it. Another deploy of this plugin did, and
+      # whoever asked for this one hasn't seen it.
+      _ ->
+        {now, _tag} = read = added()
+
+        if now[name] == was,
+          do: keep(name, code, read),
+          else: {:error, "#{name} was deployed or removed by someone else just now. Look at it, and do this again."}
     end
   end
 
-  # A plugin's newest version: its number and its files, which are none if that version removed it.
-  defp newest(name) do
+  # The versions in the bucket that are newer than the ones in `newest`, by plugins' names: each one's name, its
+  # number, and the version loaded. That's `{:ok, nil}` for one that removed its plugin, and `:error` for one this
+  # server can't compile.
+  defp newer(newest) do
+    {added, _tag} = added()
+
+    for {name, %{"number" => number, "code" => code}} <- Enum.sort(added), number > Map.get(newest, name, 0) do
+      {name, number, loaded(name, code)}
+    end
+  end
+
+  defp loaded(_name, ""), do: {:ok, nil}
+
+  defp loaded(name, code) do
     plugin = artifact(name)
+    paths = Artifact.list(plugin, "code/#{code}/")
 
-    with version when version != nil <- List.last(Artifact.list(plugin, "versions/")) do
-      {:ok, code, _} = Artifact.read(plugin, version)
+    # Read at once: a bucket at an address is asked for each over the internet.
+    files =
+      paths
+      |> Task.async_stream(&Artifact.read(plugin, &1), max_concurrency: 16, timeout: :infinity)
+      |> Enum.zip_with(paths, fn {:ok, {:ok, text, _tag}}, path ->
+        {String.replace_prefix(path, "code/#{code}/", ""), text}
+      end)
+      |> Map.new()
 
-      files =
-        for path <- Artifact.list(plugin, "code/#{code}/"), code != "", into: %{} do
-          {:ok, text, _} = Artifact.read(plugin, path)
-          {String.replace_prefix(path, "code/#{code}/", ""), text}
-        end
-
-      {String.to_integer(Path.basename(version)), files}
-    end
-  end
-
-  defp kept(name) do
-    with {number, files} when files != %{} <- newest(name), do: {:ok, number, files}
-  end
-
-  # The version a plugin's files are, loaded. No files is no version: the plugin was removed.
-  defp loaded(_name, files) when files == %{}, do: {:ok, nil}
-
-  defp loaded(name, files) do
     case Version.load(files) do
       {:ok, version, _warnings} ->
         {:ok, version}
 
       {:error, why} ->
-        Logger.error("#{name} isn't running, because it doesn't compile:\n#{why}")
+        Logger.error("#{name} isn't updated here, because its newest version doesn't compile:\n#{why}")
         :error
     end
   end
@@ -294,35 +330,25 @@ defmodule OneCore.Plugins do
   # A server starts with the newest version of every plugin in the bucket.
   @impl true
   def init(nil) do
-    names =
-      Enum.uniq(for key <- Artifact.list(%Artifact{prefix: "#{@anyone}/plugins/"}), do: hd(String.split(key, "/")))
+    state = %{running: %{}, newest: %{}, calls: %{}}
 
-    state =
-      for name <- names,
-          {number, files} <- [newest(name)],
-          {:ok, version} when version != nil <- [loaded(name, files)],
-          reduce: %{running: %{}, newest: %{}, calls: %{}} do
-        state ->
-          %{state | running: Map.put(state.running, name, version), newest: Map.put(state.newest, name, number)}
-      end
-
-    {:ok, state}
+    {:ok,
+     Enum.reduce(newer(%{}), state, fn {name, number, loaded}, state -> took_over(state, name, number, loaded) end)}
   end
 
-  # A plugin's newest version takes over: one to run, or none once it's removed. Deploys that finish out of order
-  # still leave the one with the highest number, as the bucket has it.
+  # A plugin's newest version takes over. Deploys that finish out of order still leave the one with the highest
+  # number, as the bucket has it.
   @impl true
-  def handle_call({:newest, name, number, version}, _from, state) do
+  def handle_call({:newest, name, number, loaded}, _from, state) do
     if number > Map.get(state.newest, name, 0) do
       was = state.running[name]
-      running = if version, do: Map.put(state.running, name, version), else: Map.delete(state.running, name)
-      {:reply, :ok, unload_unused(%{state | running: running, newest: Map.put(state.newest, name, number)}, [was])}
+      {:reply, :ok, unload_unused(took_over(state, name, number, loaded), [was])}
     else
-      {:reply, :ok, unload_unused(state, [version])}
+      {:reply, :ok, unload_unused(state, [with({:ok, version} <- loaded, do: version)])}
     end
   end
 
-  def handle_call({:number, name}, _from, state), do: {:reply, Map.get(state.newest, name, 0), state}
+  def handle_call(:newest, _from, state), do: {:reply, state.newest, state}
 
   # The caller is watched, so a call that dies has ended too.
   def handle_call({:begin, name}, {caller, _}, state) do
@@ -346,6 +372,18 @@ defmodule OneCore.Plugins do
   @impl true
   def handle_info({:DOWN, call, :process, _, _}, state), do: {:noreply, ended(state, call)}
 
+  # A version that doesn't compile here leaves the one before it running.
+  defp took_over(state, name, number, loaded) do
+    running =
+      case loaded do
+        {:ok, nil} -> Map.delete(state.running, name)
+        {:ok, version} -> Map.put(state.running, name, version)
+        :error -> state.running
+      end
+
+    %{state | running: running, newest: Map.put(state.newest, name, number)}
+  end
+
   # The versions a call to `names` holds, by their plugins' names, or the first plugin that isn't running.
   defp used(_running, [], found), do: {:ok, found}
   defp used(running, [name | names], found) when is_map_key(found, name), do: used(running, names, found)
@@ -364,7 +402,7 @@ defmodule OneCore.Plugins do
 
   defp unload_unused(state, versions) do
     held = Map.values(state.running) ++ Enum.concat(Map.values(state.calls))
-    for version <- versions, version != nil and version not in held, do: Version.unload(version)
+    for %Version{} = version <- versions, version not in held, do: Version.unload(version)
     state
   end
 end

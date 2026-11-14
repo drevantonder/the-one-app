@@ -43,7 +43,8 @@ defmodule OneCore.Plugin do
   - `guide/0`, if the plugin has one, is text for agents on when and how to use its tools.
   - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact, where it keeps
     what it needs as blobs through `OneCore.Artifact`: `read/2`, `write/3` (only if absent), `replace/4` (only if
-    unchanged) and `list/2`.
+    unchanged), `list/2` and `remove/2`. Its `folder` is a folder of the plugin's own on the machine running the
+    call, for files that needn't outlive that machine.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
   - `uses/0`, if the plugin has one, names the other plugins it uses. Deploying it brings along the ones the
@@ -52,6 +53,10 @@ defmodule OneCore.Plugin do
     `database`, whose guide says how.
   - A plugin's module is what other plugins call, so its public functions besides these are what it provides
     them. One that only provides functions leaves out `tools/0` and `call/3`.
+  - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on
+    the server running this one: a GenServer of the plugin's, one for each `key`, started with `argument` when
+    first asked for. It's for what is slow to open and belongs to no machine in particular, as a database is. What
+    must run on particular machines is a service.
   - Every module is a `defmodule` at the top of a file, and a plugin can have as many files and modules as it
     likes. The code is free to use the machine it runs on.
 

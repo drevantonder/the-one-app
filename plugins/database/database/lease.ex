@@ -21,40 +21,18 @@ defmodule Database.Lease do
   @least 64
 
   @doc """
-  The process for the database that is the calling plugin's own artifact, on the server running the call. It's
-  found by a name that Erlang's `:global` keeps, and outlives the call that started it.
-
-  A process an earlier version of this plugin started is stopped first, since each version runs its own code.
+  The process for the database that is the calling plugin's own artifact, on the server running the call. It
+  outlives the call that started it, and carries on through this plugin's updates with the database open.
   """
-  def of(%OneCore.Call{own: artifact, server: server} = call) do
-    name = {:global, {:database, server, artifact.prefix}}
-
-    case GenServer.whereis(name) do
-      nil ->
-        case GenServer.start(__MODULE__, {artifact, server}, name: name) do
-          {:ok, lease} -> lease
-          {:error, {:already_started, _lease}} -> of(call)
-        end
-
-      lease ->
-        if :proc_lib.translate_initial_call(lease) == {__MODULE__, :init, 1} do
-          lease
-        else
-          stop(lease)
-          of(call)
-        end
-    end
+  def of(%OneCore.Call{own: artifact, server: server, folder: folder} = call) do
+    OneCore.Call.process(call, __MODULE__, {server, artifact.prefix}, {artifact, server, Path.join(folder, "database")})
   end
 
-  defp stop(lease) do
-    GenServer.stop(lease)
-  catch
-    :exit, _already -> :ok
-  end
-
+  # `folder` is where this server keeps its copy, which is nobody else's.
   @impl true
-  def init({artifact, server}) do
-    {:ok, look(%{artifact: artifact, server: server, db: nil, file: nil, number: 0, held_by: nil, logged: 0, pages: 0})}
+  def init({artifact, server, folder}) do
+    lease = %{artifact: artifact, server: server, folder: folder, db: nil, number: 0, held_by: nil, logged: 0, pages: 0}
+    {:ok, look(lease)}
   end
 
   @impl true
@@ -134,10 +112,12 @@ defmodule Database.Lease do
     look(lease)
   end
 
+  # The copy is made anew each time: one left by an earlier run may hold what was never in the bucket.
   defp open(lease, snapshot, entries) do
-    file = file(lease.server)
-    Log.restore(lease.artifact, snapshot, entries, file)
-    {:ok, db} = Sqlite.open(file)
+    File.rm_rf!(lease.folder)
+    File.mkdir_p!(lease.folder)
+    Log.restore(lease.artifact, snapshot, entries, file(lease))
+    {:ok, db} = Sqlite.open(file(lease))
 
     # The bucket is what keeps a write, so SQLite needn't wait for the disk. Its write-ahead log is emptied here
     # after each transaction, never by SQLite itself.
@@ -146,12 +126,12 @@ defmodule Database.Lease do
     end
 
     logged = Enum.sum_by(entries, &length(Map.get(&1, :pages, [])))
-    %{lease | db: db, file: file, held_by: lease.server, logged: logged}
+    %{lease | db: db, held_by: lease.server, logged: logged}
   end
 
   # Writes what the transaction changed as the log's next entry.
   defp log(lease) do
-    case Log.changed(lease.file) do
+    case Log.changed(file(lease)) do
       nil ->
         {:ok, lease}
 
@@ -171,7 +151,7 @@ defmodule Database.Lease do
   # A snapshot is kept once the log since the last one holds as many pages as the database, and at least `@least`.
   # The next transaction waits for it, so the write that brought it on may as well.
   defp snapshot(%{logged: logged, pages: pages} = lease) when logged >= pages and logged >= @least do
-    Log.keep(lease.artifact, lease.number, lease.file)
+    Log.keep(lease.artifact, lease.number, file(lease))
     Logger.info("#{lease.artifact.prefix}: kept snapshot #{lease.number}")
     %{lease | logged: 0}
   end
@@ -187,18 +167,11 @@ defmodule Database.Lease do
 
   defp close(lease) do
     Sqlite.close(lease.db)
-    for file <- [lease.file, lease.file <> "-wal", lease.file <> "-shm"], do: File.rm(file)
-    %{lease | db: nil, file: nil}
+    File.rm_rf!(lease.folder)
+    %{lease | db: nil}
   end
 
-  # A new file for a database's copy, in a folder of this run of the server. Earlier runs' folders are removed,
-  # since their copies may hold what was never in the bucket.
-  defp file(server) do
-    runs = Path.join([System.tmp_dir!(), "one-database", server])
-    File.mkdir_p!(Path.join(runs, System.pid()))
-    for run <- File.ls!(runs), run != System.pid(), do: File.rm_rf!(Path.join(runs, run))
-    Path.join([runs, System.pid(), "#{System.unique_integer([:positive])}"])
-  end
+  defp file(lease), do: Path.join(lease.folder, "copy.sqlite")
 
   # The schema's statements this database hasn't run, which SQLite's `user_version` counts.
   defp migrate(db, schema) do

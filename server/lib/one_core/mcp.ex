@@ -50,7 +50,7 @@ defmodule OneCore.Mcp do
       description: "Lets another server act for you too, as a spare that takes over when this one stops.",
       inputSchema: %{
         type: "object",
-        properties: %{key: %{type: "string", description: "The server's key, which it shows when it starts"}},
+        properties: %{key: %{type: "string", description: "The server's key, which it says when it's started"}},
         required: ["key"]
       }
     },
@@ -109,14 +109,9 @@ defmodule OneCore.Mcp do
             JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: Exception.message(error)}})
         end
 
-      # Another server saying a plugin has a new version, or was removed.
-      {:ok, %{"method" => "notifications/plugin", "params" => %{"name" => name}}} ->
-        Plugins.look(name)
-        ""
-
-      # Another server saying which services it runs has changed.
-      {:ok, %{"method" => "notifications/services"}} ->
-        Services.look()
+      # Another server saying there's something new in the bucket.
+      {:ok, %{"method" => "notifications/one/look"}} ->
+        Server.look()
         ""
 
       {:ok, %{"method" => _notification}} ->
@@ -133,7 +128,7 @@ defmodule OneCore.Mcp do
 
   defp result("plugins/call", %{"plugin" => plugin, "function" => function, "arguments" => arguments}, from) do
     with {:ok, result} <- between(from, fn -> Plugins.function(plugin, function, arguments, true) end) do
-      Server.tell(%{jsonrpc: "2.0", method: "notifications/one/changed"})
+      Server.changed()
       {:ok, result}
     end
   end
@@ -235,7 +230,10 @@ defmodule OneCore.Mcp do
   end
 
   defp call("add_server", %{"key" => key}, _passed_on) do
-    with :ok <- Servers.add(key, Server.key()), do: {:ok, "That server acts for you too now."}
+    with :ok <- Servers.add(key, Server.key()) do
+      Server.tell_servers()
+      {:ok, "That server acts for you too now. Start it, and it's a spare."}
+    end
   end
 
   defp call("services", _inputs, _passed_on) do
@@ -270,27 +268,17 @@ defmodule OneCore.Mcp do
     if server in [nil, Server.key()] do
       here.()
     else
-      params = %{name: tool, arguments: inputs}
-
-      case Server.ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: "tools/call", params: params})) do
-        {:ok, answer} ->
-          case JSON.decode!(answer) do
-            %{"result" => result} -> {:passed_on, result}
-            %{"error" => %{"message" => why}} -> {:error, why}
-          end
-
-        :unreachable ->
-          {:error, "That server isn't up"}
-
-        :stopped ->
-          {:error, "That server stopped answering after it was asked, so this may or may not have been done"}
+      case Server.request(server, "tools/call", %{name: tool, arguments: inputs}) do
+        {:ok, result} -> {:passed_on, result}
+        {:error, _code, why} -> {:error, why}
+        down -> {:error, Server.said(down)}
       end
     end
   end
 
   # After a tool that doesn't only read, every client connected here is told that something changed.
   defp changed(name, result) do
-    if not reads?(name), do: Server.tell(%{jsonrpc: "2.0", method: "notifications/one/changed"})
+    if not reads?(name), do: Server.changed()
     {:ok, result}
   end
 

@@ -4,41 +4,12 @@
 # plugins': `inbox`, which watches a folder, and `load`, which brings a program in Rust. They're installed on
 # server b only, and called through server a.
 #
-#     cargo build -p shell && mise exec -- server/test/services.sh
+#     cargo build --release && mise exec -- server/test/services.sh
 #
-# ONE names the client's program, if it isn't target/debug/one. The machine needs rustc, for `load`.
-set -euo pipefail
-set -m # Each server is a job with a process group of its own, so all of it is stopped at once.
+# The machine needs rustc, for `load`.
+source "$(dirname "$0")/servers.sh"
 
-cd "$(dirname "$0")/.."
-one=$(realpath "${ONE:-../target/debug/one}")
-folder=$(mktemp -d)
-bucket=$folder/bucket
-declare -A group key
-trap 'for server in "${!group[@]}"; do stop "$server" >/dev/null; done; rm -rf "$folder"' EXIT
-
-say() { printf '\n== %s\n' "$*"; }
-now() { echo "${EPOCHREALTIME/[.,]/}"; }
-since() { echo "$((($(now) - $1) / 1000)) ms"; }
 median() { sort -n "$1" | awk '{ all[NR] = $1 } END { printf "%.2f", all[int((NR + 1) / 2)] / 1000 }'; }
-
-# Starts a server, and returns once it says it's running. The client `only-<server>` asks it and no other.
-start() {
-  mix network "$folder" "$1" >"$folder/$1.log" 2>&1 &
-  group[$1]=$!
-  grep -q -m1 "A server is running" <(tail -f --pid=$! -n +1 "$folder/$1.log")
-  key[$1]=$(grep -o "running in [^ ]*: [0-9a-f]*" "$folder/$1.log" | grep -o "[0-9a-f]*$")
-  mkdir -p "$folder/only-$1"
-  echo "[$(cat "$bucket/servers/${key[$1]}/address")]" >"$folder/only-$1/servers"
-  echo "server $1 is running: ${key[$1]}"
-}
-
-stop() {
-  kill -9 -- "-${group[$1]}"
-  wait "${group[$1]}" 2>/dev/null || true
-  unset "group[$1]"
-  echo "server $1 is stopped, with kill -9"
-}
 
 # A tool called through the server named, with the servers' keys shown by their names here.
 ask() {
@@ -87,7 +58,7 @@ defmodule Proof do
   def call("ping", _inputs, _call), do: "pong"
 
   def call("kill", %{"plugin" => plugin, "service" => service}, _call) do
-    Process.exit(OneCore.Services.Instance.whereis(plugin, service), :kill)
+    Process.exit(OneCore.Plugins.Process.whereis(plugin, service), :kill)
     "Killed #{service}'s process."
   end
 
@@ -122,7 +93,6 @@ EOF
 say "Two servers on one folder as the bucket, and two plugins that each have a service"
 start a
 start b
-for plugin in inbox load; do ask a deploy --name $plugin --files-from ../plugins/$plugin; done
 ask a deploy --name proof --files-from "$folder/proof"
 echo "What each service needs, which its machine's owner reads before installing it:"
 ask a services

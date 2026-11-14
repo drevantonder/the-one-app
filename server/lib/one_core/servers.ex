@@ -6,20 +6,14 @@ defmodule OneCore.Servers do
 
   A server's own blobs sit under `servers/<its key>/`. Its `address` is how to reach it, which it writes each time
   it starts, since it may start somewhere else.
-
-  With no plugin that signs users in there is one user, and so one list.
   """
-  alias OneCore.Bucket
+  alias OneCore.{Bucket, User}
 
-  @list "users/anyone/servers"
+  @network "network/servers"
+  @list User.anyone() <> "/servers"
 
   @doc "The keys of the servers acting, the first first."
-  def acting do
-    case Bucket.read(@list) do
-      {:ok, keys, _tag} -> JSON.decode!(keys)
-      :absent -> []
-    end
-  end
+  def acting, do: listed(@list)
 
   @doc "How to reach each server acting that says how, as the JSON a client is told it in."
   def addresses, do: for(key <- acting(), {:ok, address} <- [address(key)], do: address)
@@ -30,20 +24,20 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  A network's first server acts for the network and for its one user: it's the first on each list, if there's none.
-  A server is one of its network's own by a list it's on, so this comes before it reads the bucket or is reached.
+  Whether the server whose key is `key` is one of this network's: it's on the list, which a server already on it
+  added it to (`add/2`). A network with no list has no server yet, and this one becomes its first: it acts for the
+  network, and so writes the first list.
   """
-  def first(key) do
-    for list <- ["network/servers", @list], do: Bucket.write(list, JSON.encode!([key]))
-    :ok
+  def joined?(key) do
+    Bucket.write(@network, JSON.encode!([key]))
+    if key in listed(@network), do: Bucket.write(@list, JSON.encode!([key]))
+    key in acting()
+  rescue
+    Bucket.Refused -> false
   end
 
-  @doc "A server that started says how to reach it now, and is the first on the list if there's no list."
-  def started(key, address) do
-    say("servers/#{key}/address", address)
-    Bucket.write(@list, JSON.encode!([key]))
-    :ok
-  end
+  @doc "A server that started says how to reach it now."
+  def started(key, address), do: say("servers/#{key}/address", address)
 
   @doc "Adds a server to the list, which only `by`, a server on it, may."
   def add(key, by) do
@@ -61,6 +55,13 @@ defmodule OneCore.Servers do
     case Bucket.read(blob) do
       {:ok, _was, tag} -> :ok = Bucket.replace(blob, data, tag)
       :absent -> :ok = Bucket.write(blob, data)
+    end
+  end
+
+  defp listed(list) do
+    case Bucket.read(list) do
+      {:ok, keys, _tag} -> JSON.decode!(keys)
+      :absent -> []
     end
   end
 end

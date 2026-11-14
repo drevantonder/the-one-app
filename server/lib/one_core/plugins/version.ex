@@ -3,8 +3,9 @@ defmodule OneCore.Plugins.Version do
   One version of a plugin's code, compiled and loaded.
 
   The VM keeps only two versions of a module, so each version loaded gets module names of its own: its modules
-  sit under a name no other version has (`OneCore.Plugins.Load7.Tracker`), by an alias put before each file. A
-  version is unloaded by removing every module under that name.
+  sit under a name no other loaded version has (`OneCore.Plugins.Load7.Tracker`), by an alias put before each
+  file. A version is unloaded by removing every module under that name, which the next version loaded then takes,
+  so a server that's updated for years makes no more names than it ever ran versions at once.
 
   A version's files that aren't Elixir are its parts that run in a client (`files`, by their paths), and `code` names
   the whole set, so a client can tell one version's files from the next's. `hashes` names each of those files by
@@ -13,9 +14,17 @@ defmodule OneCore.Plugins.Version do
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
   `needs` of a machine.
   """
+  alias OneCore.Server
 
   @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :services, :code, :files, :hashes]
   defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :services, :code, :files, :hashes]
+
+  # The names versions are loaded under: each is free, or taken by the one version loaded under it.
+  @names 4096
+  @on_load :names
+
+  @doc false
+  def names, do: :persistent_term.put(__MODULE__, :atomics.new(@names, signed: false))
 
   @doc "The name of a set of files: the same files have the same name, on any server."
   def code(files),
@@ -23,7 +32,10 @@ defmodule OneCore.Plugins.Version do
 
   @doc "Compiles and loads a plugin's files. Gives the version and the compiler's warnings, or what's wrong."
   def load(files) do
-    under = Module.concat(OneCore.Plugins, "Load#{System.unique_integer([:positive])}")
+    names = :persistent_term.get(__MODULE__)
+    free = Enum.find(1..@names, &(:atomics.compare_exchange(names, &1, 0, 1) == :ok))
+    if free == nil, do: raise("#{@names} versions of plugins are loaded, which is as many as a server runs at once")
+    under = Module.concat(OneCore.Plugins, "Load#{free}")
     {sources, client} = Enum.split_with(files, fn {path, _} -> String.ends_with?(path, ".ex") end)
 
     with {:ok, modules, warnings} <- compile(under, sources),
@@ -45,7 +57,8 @@ defmodule OneCore.Plugins.Version do
       :code.purge(module)
     end
 
-    :ok
+    "Load" <> name = List.last(Module.split(under))
+    :atomics.put(:persistent_term.get(__MODULE__), String.to_integer(name), 0)
   end
 
   defp under?(module, under), do: String.starts_with?(Atom.to_string(module), Atom.to_string(under) <> ".")
@@ -53,7 +66,7 @@ defmodule OneCore.Plugins.Version do
   # The files go to a folder of their own to be compiled together, so they can use each other's structs and macros
   # in any order. The aliases share each file's first line, which keeps its line numbers.
   defp compile(under, sources) do
-    folder = Path.join(System.tmp_dir!(), "one-core-" <> List.last(Module.split(under)))
+    folder = Path.join([Server.home(), "compiling", List.last(Module.split(under))])
     names = Enum.uniq(for {_, source} <- sources, name <- defined(source), do: name)
     aliases = Enum.map_join(names, &"alias #{inspect(Module.concat(under, &1))}, as: #{&1}, warn: false; ")
 
@@ -107,10 +120,14 @@ defmodule OneCore.Plugins.Version do
     end)
   end
 
-  @doc "A version's service named `name`: its module, or `nil` if it has none by that name."
-  def service(%__MODULE__{under: under, services: services}, name) do
-    if Enum.any?(services, &(&1.name == name)), do: Module.concat(under, name)
+  @doc "A version's module that its plugin wrote as `name`, or `nil` if it has none by that name."
+  def module(%__MODULE__{under: under}, name) do
+    module = Module.concat(under, name)
+    if :code.is_loaded(module), do: module
   end
+
+  @doc "The name a version's modules sit under, from one of them."
+  def under(module), do: module |> Module.split() |> Enum.take(3) |> Module.concat()
 
   @doc "The name of a version's module as its plugin wrote it: what follows the name the version's modules sit under."
   def own_name(module), do: module |> Module.split() |> Enum.drop(3) |> Enum.join(".")

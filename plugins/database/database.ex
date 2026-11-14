@@ -65,9 +65,6 @@ defmodule Database do
         :ok = GenServer.call(lease, {:take_over, server}, :infinity)
         transaction(call, schema, fun)
     end
-  catch
-    # The database's process was stopped before it began this, for a newer version of this plugin to start its own.
-    :exit, {reason, {GenServer, :call, _}} when reason in [:noproc, :normal] -> transaction(call, schema, fun)
   end
 
   @doc "Runs one SQL statement in a transaction, with a `?` for each value, and gives its rows."

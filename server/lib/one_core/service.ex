@@ -7,7 +7,6 @@ defmodule OneCore.Service do
   """
   alias OneCore.{Call, Plugins, Server, Services}
   alias OneCore.Plugins.Version
-  alias OneCore.Services.Instance
 
   @doc "What the service needs of a machine, for its owner to read before installing it."
   @callback needs() :: String.t()
@@ -57,7 +56,7 @@ defmodule OneCore.Service do
         {:error, why} -> raise why
       end
 
-    Server.tell(%{jsonrpc: "2.0", method: "notifications/one/changed"})
+    Server.changed()
     answer
   end
 
@@ -103,7 +102,7 @@ defmodule OneCore.Service do
   end
 
   defp which(service) do
-    Instance.which(service) || raise ArgumentError, "#{inspect(service)} isn't a service's process"
+    Plugins.Process.which(service) || raise ArgumentError, "#{inspect(service)} isn't a service's process"
   end
 
   # What arrives after going through JSON, which is how it reaches another server.
@@ -119,20 +118,11 @@ defmodule OneCore.Service do
   end
 
   defp ask([server | servers], here, ask) do
-    case Server.ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: "services/call", params: ask})) do
-      {:ok, answer} ->
-        case JSON.decode!(answer) do
-          %{"result" => %{"answer" => answer}} -> {:ok, answer}
-          %{"error" => %{"message" => why}} -> {:error, why}
-        end
-
-      :unreachable ->
-        ask(servers, here, ask)
-
-      :stopped ->
-        {:error,
-         "The server that runs #{ask.plugin}'s #{ask.service} went down after it was asked, " <>
-           "so this may or may not have been done"}
+    case Server.request(server, "services/call", ask) do
+      {:ok, %{"answer" => answer}} -> {:ok, answer}
+      {:error, _code, why} -> {:error, why}
+      :unreachable -> ask(servers, here, ask)
+      :stopped -> {:error, "The server that runs #{ask.plugin}'s #{ask.service}: " <> Server.said(:stopped)}
     end
   end
 end

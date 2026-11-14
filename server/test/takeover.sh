@@ -3,56 +3,23 @@
 # writing it. Writes go through the tracker while servers are stopped with `kill -9`, frozen and started again, and
 # after each of those every write that was answered must be there, once.
 #
-#     cargo build -p shell && mise exec -- server/test/takeover.sh
+#     cargo build --release && mise exec -- server/test/takeover.sh
 #
-# ONE names the client's program, if it isn't target/debug/one.
-set -euo pipefail
-set -m # Each server is a job with a process group of its own, so all of it is stopped at once.
-
-cd "$(dirname "$0")/.."
-one=$(realpath "${ONE:-../target/debug/one}")
-folder=$(mktemp -d)
-bucket=$folder/bucket
+source "$(dirname "$0")/servers.sh"
 answered=$folder/answered
-declare -A group seen
-names=$folder/names
 touch "$answered"
-trap 'for server in "${!group[@]}"; do stop "$server" >/dev/null; done; rm -rf "$folder"' EXIT
 
-say() { printf '\n== %s\n' "$*"; }
-now() { echo "${EPOCHREALTIME/[.,]/}"; }
-since() { echo "$((($(now) - $1) / 1000)) ms"; }
 median() { sort -n "$1" | awk '{ all[NR] = $1 } END { printf "%.1f ms", all[int((NR + 1) / 2)] / 1000 }'; }
 
 # What each server named has logged about the lease since this was last asked, with servers by their names here.
 said() {
+  local names=() server
+  for server in "${!key[@]}"; do names+=(-e "s/${key[$server]}/$server/g"); done
   for server; do
     tail -n +$((${seen[$server]:-0} + 1)) "$folder/$server.log" | grep "lease" |
-      sed -f "$names" -e "s/^.*\[info\] [^:]*: /  $server: /" || true
+      sed "${names[@]}" -e "s/^.*\[info\] [^:]*: /  $server: /" || true
     seen[$server]=$(wc -l <"$folder/$server.log")
   done
-}
-
-# Starts a server, and returns once it says it's running. The client `only-<server>` asks it and no other, and the
-# client `client` asks every server, as `mix network` leaves it.
-start() {
-  mix network "$folder" "$1" >"$folder/$1.log" 2>&1 &
-  group[$1]=$!
-  grep -q -m1 "A server is running" <(tail -f --pid=$! -n +1 "$folder/$1.log")
-  local key
-  key=$(grep -o "running in [^ ]*: [0-9a-f]*" "$folder/$1.log" | grep -o "[0-9a-f]*$")
-  echo "s/$key/$1/g" >>"$names"
-  seen[$1]=0
-  mkdir -p "$folder/only-$1"
-  echo "[$(cat "$bucket/servers/$key/address")]" >"$folder/only-$1/servers"
-  echo "server $1 is running"
-}
-
-stop() {
-  kill -9 -- "-${group[$1]}"
-  wait "${group[$1]}" 2>/dev/null || true
-  unset "group[$1]"
-  echo "server $1 is stopped, with kill -9"
 }
 
 # One write through a client, numbered so that it can be found afterwards. Says so if it wasn't answered.
@@ -100,7 +67,6 @@ check() {
 
 say "Two servers on one folder as the bucket"
 start a
-ONE_HOME=$folder/client "$one" deploy --name tracker --files-from ../plugins/tracker
 write client
 start b
 echo "a ran the first write, so it holds the lease"
@@ -169,6 +135,6 @@ said b c >/dev/null
 stop b
 stop c
 until write only-d; do :; done
-echo "snapshots: $(ls "$bucket/users/anyone/own/tracker/snapshot" | sed 's/^0*//' | tr '\n' ' ')"
+echo "snapshots: $(ls "$bucket"/users/*/own/tracker/snapshot | sed 's/^0*//' | tr '\n' ' ')"
 said d
 check only-d
