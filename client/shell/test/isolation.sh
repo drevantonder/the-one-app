@@ -84,10 +84,11 @@ ONE_HOME=$folder/client dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x2
   # The home screen says when it has drawn.
   grep -q -m1 "home opened" <(tail -f --pid=$app -n +1 "$1/app.log")
   window=$(xdotool search --sync --onlyvisible --name "The One App" | head -1)
-  # An app starts as a finger lands on its icon, and shows only if the finger lifts there. The icons are 72 wide
-  # with 8 between them, from 32 in and 56 down. The screen takes a moment to pass each move on, which is waited.
-  xdotool mousemove --window "$window" 68 86 sleep 0.5 mousedown 1 sleep 0.5 mousemove --window "$window" 600 600 sleep 0.5 mouseup 1
-  xdotool mousemove --window "$window" 148 86 sleep 0.5 click 1
+  # An app starts as a finger lands on its icon, and shows only if the finger lifts there. The four icons are in
+  # the middle of the window, 120 apart, the first 332 in and all 92 down. The screen takes a moment to pass each
+  # move on, which is waited.
+  xdotool mousemove --window "$window" 332 92 sleep 0.5 mousedown 1 sleep 0.5 mousemove --window "$window" 600 600 sleep 0.5 mouseup 1
+  xdotool mousemove --window "$window" 452 92 sleep 0.5 click 1
   # If Prober got out of its frame, nothing is left to tell its plugin, and this gives up.
   timeout 60 env ONE_HOME=$1/client "$0" a-prober wait >"$1/found.json" || echo "{}" >"$1/found.json"
   kill $app

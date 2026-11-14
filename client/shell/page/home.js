@@ -18,31 +18,47 @@ const open = new Map()
 const address = ({ plugin, page }) =>
   `${location.protocol === "tauri:" ? "oneapp://" : "http://oneapp."}${plugin}.localhost/${plugin}/${page}`
 
+/// Whether a server answered the last thing this client asked, and why the apps couldn't be listed, if they
+/// couldn't.
+let answering = true
+let unlisted
+
+/// Says on the home screen that no server is answering: with nothing to show, as what needs its user now, and
+/// over what this device kept, as what can wait. Fine is silent.
+function problem() {
+  const box = document.getElementById("problem")
+  box.hidden = answering && !unlisted
+  box.toggleAttribute("data-waits", !unlisted)
+  document.getElementById("what").textContent = unlisted ? "Can't show your apps" : "No server is answering"
+  document.getElementById("why").textContent = unlisted ?? "This is what this device kept. Check it's online and a server is on."
+}
+
 /// Draws the home screen from the apps a server listed. An open app whose plugins have a new version loads again.
 /// With no server answering and nothing kept from one, it says so.
 async function list() {
-  let listed, why
+  let listed
   try {
     listed = await invoke("apps")
+    unlisted = undefined
   } catch (error) {
-    why = `${error}.`
+    unlisted = `${error}`.replace(/[^.]$/, "$&.")
     listed = { resources: [], outdated: [] }
   }
-  document.getElementById("problem").hidden = !why
-  document.getElementById("why").textContent = why ?? ""
+  problem()
   // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
   apps = new Map(listed.resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app").map(({ uri, name, icons }) => {
     const [plugin, _version, ...page] = uri.slice("ui://".length).split("/")
     return [plugin, { plugin, page: page.join("/"), name, icon: icons?.[0]?.src }]
   }))
-  document.getElementById("empty").hidden = apps.size > 0 || Boolean(why)
+  document.getElementById("empty").hidden = apps.size > 0 || Boolean(unlisted)
   document.getElementById("apps").replaceChildren(...[...apps.values()].map((app) => {
     const tile = document.createElement("button")
     tile.append(Object.assign(new Image(), { src: app.icon, alt: "" }), Object.assign(document.createElement("span"), { textContent: app.name }))
     // An app starts as a finger lands on its icon, and shows as the finger lifts.
     tile.addEventListener("pointerdown", () => load(app))
     tile.addEventListener("click", () => {
-      show(app.plugin, performance.now())
+      const tapped = performance.now()
+      move(() => show(app.plugin, tapped))
       // The way back out of an app is an entry in this window's history, made once the app's page has loaded: a
       // browser takes a frame back through its own screens only from an entry that knew the frame's page.
       open.get(app.plugin).loaded.then(() => history.pushState(app.plugin, ""))
@@ -71,6 +87,19 @@ function load(app) {
   const loaded = new Promise((loaded) => frame.addEventListener("load", loaded, { once: true }))
   open.set(app.plugin, { plugin: app.plugin, frame, loaded })
   document.body.append(frame)
+}
+
+/// Whether the device has itself just shown the user going back (an iPhone's swipe in from the edge): the page
+/// mustn't show it a second time.
+let shownByDevice = false
+
+/// Changes between the home screen and an app as a move, as the kit moves between an app's screens
+/// (ui/src/screen.js): the browser slides the app in over the home screen, or with `back`, back out from over
+/// it. Where the browser can't, or the user asked for no motion, it's a plain swap.
+function move(change, back = false) {
+  const plain = !globalThis.ViewTransition || !("types" in ViewTransition.prototype) || matchMedia("(prefers-reduced-motion: reduce)").matches
+  if (plain || shownByDevice) return void change()
+  document.startViewTransition({ update: change, types: [back ? "back" : "forward"] })
 }
 
 /// Shows an app over the home screen, or the home screen with no app named. `tapped` is when its icon was tapped.
@@ -155,22 +184,36 @@ listen("changed", ({ payload: view }) => {
 })
 
 // The device's own way back, and this page's, both end here.
-addEventListener("popstate", ({ state }) => show(state, performance.now()))
+addEventListener("popstate", (event) => {
+  const { state } = event
+  const tapped = performance.now()
+  shownByDevice = Boolean(event.hasUAVisualTransition)
+  move(() => show(state, tapped), !apps.has(state))
+  shownByDevice = false
+})
 
-document.getElementById("retry").addEventListener("click", list)
+listen("answering", ({ payload }) => {
+  answering = payload
+  problem()
+  // What couldn't be listed is asked for again now that a server answers.
+  if (answering && unlisted) list()
+})
+document.getElementById("retry").addEventListener("click", () => (unlisted ? list() : invoke("again", { view: "home" })))
 
 /// The user returned to the window, so what's showing asks again. While the window is on screen, servers say when
 /// something changed.
 function returned() {
   invoke("watch", { watching: !document.hidden })
   if (document.hidden) return
-  if (!document.getElementById("problem").hidden) list()
+  if (unlisted) list()
   invoke("again", { view: "home" })
   if (apps.has(history.state)) invoke("again", { view: history.state })
 }
 document.addEventListener("visibilitychange", returned)
 addEventListener("focus", returned)
 
+// Whose network this is: where its address is, or with none, the machine it's kept on.
+invoke("network").then((address) => (document.getElementById("network").textContent = address ? `at ${new URL(address).host}` : "on this computer"))
 await list()
 invoke("watch", { watching: !document.hidden })
 show(history.state)

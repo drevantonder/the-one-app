@@ -27,7 +27,7 @@ use iroh::endpoint::{Connection, QuicTransportConfig, RecvStream, RelayMode, pre
 use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, watch};
 use tokio::time::{sleep, timeout};
 
 pub use kept::Shown;
@@ -307,6 +307,8 @@ pub struct Client {
     says: Vec<(&'static str, String)>,
     /// Whether an app of this client's is on screen, so its servers are to tell it what changes.
     watching: AtomicBool,
+    /// Whether a server answered the last thing asked.
+    answering: watch::Sender<bool>,
 }
 
 impl Client {
@@ -334,7 +336,19 @@ impl Client {
                 });
             }
         });
-        Ok(Self { home, endpoint, network, reach: Mutex::default(), told, says, watching: AtomicBool::new(false) })
+        let (watching, answering) = (AtomicBool::new(false), watch::Sender::new(true));
+        Ok(Self { home, endpoint, network, reach: Mutex::default(), told, says, watching, answering })
+    }
+
+    /// The network's address, if it has one.
+    pub fn address(&self) -> Option<&str> {
+        self.network.as_ref().map(|network| network.address.as_str())
+    }
+
+    /// Whether a server answered the last thing this client asked, as that changes. It's found out by asking:
+    /// nothing is said over a connection to learn it.
+    pub fn answering(&self) -> watch::Receiver<bool> {
+        self.answering.subscribe()
     }
 
     /// Says whether an app of this client's is on screen. While one is, every server acting for its user tells it
@@ -377,16 +391,22 @@ impl Client {
     /// has gone was asked nothing, so whichever answers now is asked instead.
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>> {
         let message = self.saying(message);
-        for _ in 0..2 {
-            match self.reached().await?.ask(&message).await {
-                Ok(answer) => return Ok(answer),
-                Err(Unanswered::Unreachable) => continue,
-                Err(Unanswered::Stopped) => {
-                    bail!("The server stopped answering after it was asked, so this may or may not have been done")
+        let asked = async {
+            for _ in 0..2 {
+                match self.reached().await?.ask(&message).await {
+                    Ok(answer) => return Ok(answer),
+                    Err(Unanswered::Unreachable) => continue,
+                    Err(Unanswered::Stopped) => bail!(
+                        "The server stopped answering partway, so this may or may not have been done. Look before \
+                         trying again."
+                    ),
                 }
             }
-        }
-        bail!("No server answered")
+            bail!(UNANSWERED)
+        };
+        let answer = asked.await;
+        self.answering.send_if_modified(|answering| std::mem::replace(answering, answer.is_ok()) != answer.is_ok());
+        answer
     }
 
     /// `message` with what this client says of who it's from, in the request's `_meta`.
@@ -437,7 +457,7 @@ impl Client {
         reach.open = None;
         // Many asks at once share one try: no server answered while this one waited its turn.
         if reach.failed.is_some_and(|failed| failed > asked) {
-            bail!("No server answered")
+            bail!(UNANSWERED)
         }
         let mut tried = None;
         for now in [false, true] {
@@ -455,7 +475,7 @@ impl Client {
             tried = Some(servers);
         }
         reach.failed = Some(Instant::now());
-        bail!("No server answered")
+        bail!(UNANSWERED)
     }
 
     /// The servers acting for this client's user: the ones it kept, or with `now` the ones it's told when it asks.
@@ -485,6 +505,9 @@ impl Client {
         Ok(Some(servers))
     }
 }
+
+/// What a person is told when no server answered: what went wrong, and what to do about it.
+const UNANSWERED: &str = "No server is answering. Check this device is online and a server is on, then try again.";
 
 /// What a client tells a server to be told what changes, at the `address` it gives, or with none, no longer.
 const WATCH: &str = "notifications/one/watch";

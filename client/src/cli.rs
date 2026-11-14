@@ -87,7 +87,7 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
                 bail!("There's no tool or plugin named `{}`. `one` lists them.", words.join(" "));
             }
             if answered.is_err() {
-                eprintln!("No server answered, so this is what one last listed.\n");
+                eprintln!("No server is answering, so this is what one last listed.\n");
             }
             if let Some(guide) = guide {
                 println!("{}\n", guide.trim_end());

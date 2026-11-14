@@ -139,6 +139,12 @@ async fn again(views: State<'_, Views>, view: String) -> Result<(), ()> {
     Ok(())
 }
 
+/// The network's address, if it has one: whose network this client is in.
+#[tauri::command]
+fn network(views: State<'_, Views>) -> Option<String> {
+    views.client.address().map(str::to_owned)
+}
+
 /// Says whether the window is on screen. While it is, servers tell this client when something changed.
 #[tauri::command]
 async fn watch(views: State<'_, Views>, watching: bool) -> Result<(), ()> {
@@ -189,6 +195,15 @@ pub fn run() {
                 started,
             });
 
+            // The home screen says when no server is answering, which is what the last thing asked found.
+            let (handle, mut answering) = (app.handle().clone(), client.answering());
+            tauri::async_runtime::spawn(async move {
+                while answering.changed().await.is_ok() {
+                    let now = *answering.borrow_and_update();
+                    drop(handle.emit("answering", now));
+                }
+            });
+
             // A server said something changed, so every view asks again.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -223,7 +238,7 @@ pub fn run() {
                 responder.respond(response.expect("these headers are valid"))
             });
         })
-        .invoke_handler(tauri::generate_handler![apps, ask, again, upload, watch, close, opened])
+        .invoke_handler(tauri::generate_handler![apps, ask, again, upload, network, watch, close, opened])
         .run(tauri::generate_context!())
         .expect("the app runs");
 }
