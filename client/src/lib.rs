@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use anyhow::{Context, Result, anyhow, bail};
-use iroh::endpoint::{Connection, RecvStream, RelayMode, presets};
+use iroh::endpoint::{Connection, QuicTransportConfig, RecvStream, RelayMode, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -38,10 +38,15 @@ pub const CONNECT: Duration = Duration::from_secs(3);
 /// so a server that has gone is found out by asking it, and this soon. A server taken for gone that wasn't is only
 /// asked again over a new connection, or has its lease taken by a spare, and neither loses anything.
 pub const THERE: Duration = Duration::from_secs(1);
-/// How long a connection that's asked nothing stays open. iroh says something over every open connection each few
-/// seconds, to keep it, and through a relay each of those wakes the relay. So a connection is let go once it's
-/// idle, and made again when there's something to ask.
-const IDLE: Duration = Duration::from_secs(15);
+/// How long a connection that's asked nothing stays open. To keep one open, something has to be said over it every
+/// few seconds, and through a relay each of those wakes the relay. So a connection is let go once it's idle, and
+/// made again when there's something to ask.
+const IDLE: Duration = Duration::from_secs(2);
+/// How long a connection lasts once nothing arrives over it: longer than `IDLE`, so that one that's let go says so,
+/// and sooner than iroh would say anything to keep it. iroh sends what it has for a machine only where a
+/// connection it still has with it last was, so the one a server that stopped left behind has to end before that
+/// server is found where it starts again.
+const SILENT: Duration = Duration::from_secs(3);
 
 /// A network's address, and the pass this machine shows there: what says it's one of the network's own.
 #[derive(Clone, Deserialize)]
@@ -119,6 +124,7 @@ pub async fn endpoint(key_file: &Path, network: Option<&Network>) -> Result<Endp
     Endpoint::builder(presets::Minimal)
         .secret_key(key(key_file)?)
         .alpns(vec![ALPN.to_vec()])
+        .transport_config(QuicTransportConfig::builder().max_idle_timeout(Some(SILENT.try_into()?)).build())
         .relay_mode(relay)
         .net_report_config(probes)
         .bind()
@@ -335,6 +341,7 @@ impl Client {
         if let Some(open) = reach.open.as_ref().filter(|open| open.open()) {
             return Ok(open.clone());
         }
+        reach.open = None;
         // Many asks at once share one try: no server answered while this one waited its turn.
         if reach.failed.is_some_and(|failed| failed > asked) {
             bail!("No server answered")

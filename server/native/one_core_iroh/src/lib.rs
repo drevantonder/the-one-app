@@ -25,13 +25,13 @@ mod atoms {
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("tokio starts"));
 
 /// A server's endpoint, open for as long as the server holds this, where what it tells its clients is sent from,
-/// and its connections to other servers by their keys, each with the address it was made to. One that has closed
-/// stays until the next is made, to say where the server was last found gone. Nothing looks inside it after a
-/// panic, which is what Rustler needs to hear before it hands one to Elixir.
+/// and its connections to other servers by their keys, each with the address it was made to. A server found gone
+/// leaves that address with no connection, and a connection that closed for want of anything to ask leaves nothing.
+/// Nothing looks inside it after a panic, which is what Rustler needs to hear before it hands one to Elixir.
 struct Reached {
     endpoint: AssertUnwindSafe<Endpoint>,
     told: AssertUnwindSafe<broadcast::Sender<Vec<u8>>>,
-    servers: AssertUnwindSafe<Mutex<HashMap<String, (String, Arc<client::Reached>)>>>,
+    servers: AssertUnwindSafe<Mutex<HashMap<String, (String, Option<Arc<client::Reached>>)>>>,
 }
 
 #[rustler::resource_impl]
@@ -191,11 +191,11 @@ fn connect(reached: ResourceArc<Reached>, address: String, to: LocalPid, referen
                 .lock()
                 .expect("no connection panics")
                 .get(&key)
-                .is_some_and(|(was, open)| *was == address && open.gone());
+                .is_some_and(|(was, open)| *was == address && open.is_none());
             let within = if gone_there { client::THERE } else { client::CONNECT };
             let open = Arc::new(client::Reached::connect(&reached.endpoint, server, within).await?);
             let connection = open.connection().clone();
-            reached.servers.lock().expect("no connection panics").insert(key, (address, open));
+            reached.servers.lock().expect("no connection panics").insert(key, (address, Some(open)));
             // What that server tells its clients isn't for this one, and is read so that it can go on telling.
             tokio::spawn(async move {
                 while let Ok(mut told) = connection.accept_uni().await {
@@ -220,9 +220,24 @@ fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to
     let message = message.as_slice().to_vec();
     let reference = Reference::keep(reference);
     RUNTIME.spawn(async move {
-        let answer = match open.filter(|(_address, open)| open.open()) {
-            Some((address, open)) => open.ask(&message).await.map_err(|unanswered| Some((unanswered, address))),
-            None => Err(None),
+        let answer = match open {
+            Some((address, Some(open))) => match open.ask(&message).await {
+                Ok(answer) => Ok(answer),
+                Err(unanswered) => {
+                    let mut servers = reached.servers.lock().expect("no connection panics");
+                    // Another connection may have been made since this one was asked, and that one stays.
+                    if let Some((_address, Some(now))) = servers.get(&server)
+                        && Arc::ptr_eq(now, &open)
+                    {
+                        match open.gone() {
+                            true => servers.insert(server, (address.clone(), None)),
+                            false => servers.remove(&server),
+                        };
+                    }
+                    Err(Some((unanswered, open.gone().then_some(address))))
+                }
+            },
+            _ => Err(None),
         };
         reference.send(&to, |env| match answer {
             Ok(answer) => {
@@ -230,9 +245,9 @@ fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to
                 binary.as_mut_slice().copy_from_slice(&answer);
                 (atoms::ok(), Binary::from(binary)).encode(env)
             }
-            Err(Some((Unanswered::Unreachable, address))) => (atoms::gone(), address).encode(env),
-            Err(Some((Unanswered::Stopped, _address))) => atoms::stopped().encode(env),
-            Err(None) => atoms::closed().encode(env),
+            Err(Some((Unanswered::Stopped, _gone))) => atoms::stopped().encode(env),
+            Err(Some((Unanswered::Unreachable, Some(address)))) => (atoms::gone(), address).encode(env),
+            Err(_) => atoms::closed().encode(env),
         });
     });
     atoms::ok()
