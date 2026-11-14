@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.shell" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+    </style>
+</resources>

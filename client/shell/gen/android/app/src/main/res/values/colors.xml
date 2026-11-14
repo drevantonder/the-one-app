@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The page's own background (ui/src/tokens.css), which shows behind the system's bars. -->
+    <color name="background">#FFFFFFFF</color>
+</resources>

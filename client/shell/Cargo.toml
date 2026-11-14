@@ -14,7 +14,7 @@ name = "one"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
 anyhow.workspace = true

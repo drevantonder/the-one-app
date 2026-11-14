@@ -42,6 +42,14 @@ bucket and an S3 API token for it, then:
 
 `BUCKET` is the bucket's S3 address with its name on the end: `https://<account>.r2.cloudflarestorage.com/<bucket>`.
 
+The same app builds for Android with Tauri's CLI (`cargo install tauri-cli`), an Android SDK and its NDK:
+
+    cd client/shell
+    ANDROID_HOME=~/Android/Sdk NDK_HOME=~/Android/Sdk/ndk/<version> cargo tauri android build --debug --apk
+
+Its project is `client/shell/gen/android`. A phone's client is kept in the app's own folder, and until a client
+can join a network from its screen, it's told where the server is by a `server` file put there.
+
 - `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
 - `client/shell`: the app, a window on that half, and the one program both are.

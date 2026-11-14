@@ -8,8 +8,8 @@ erl_crash.dump
 # The server's Rust add-ons as Rustler builds them, and its tests' folders
 /server/priv/native/
 /server/tmp/
-# What Tauri writes as it builds: its schemas, and the project a phone's app is built from
-/client/shell/gen/
+# What Tauri writes as it builds
+/client/shell/gen/schemas/
 # What `wrangler dev` keeps, and the settings a local address is given
 .wrangler/
 .dev.vars
