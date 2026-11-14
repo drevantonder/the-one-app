@@ -111,7 +111,7 @@ class FileField extends Field {
       ` : nothing}
       <div class="picker" ?hidden=${!this.multiple && this.files.length > 0}>
         <div class="box" aria-hidden="true" ?data-disabled=${this.disabled} ?data-invalid=${!!message}>${clip}<span>${this.placeholder ?? said.file}</span></div>
-        <input id="control" class="native" type="file" accept=${ifDefined(this.accept)} capture=${ifDefined(this.capture)}
+        <input id="control" class="native" type="file" title="" accept=${ifDefined(this.accept)} capture=${ifDefined(this.capture)}
           ?multiple=${this.multiple} ?disabled=${this.disabled}
           aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-invalid=${message ? "true" : "false"} aria-describedby="message"
           @input=${(event) => event.stopPropagation()} @change=${this.chosen}>
