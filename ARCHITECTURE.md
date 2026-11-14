@@ -18,10 +18,8 @@
 
 ## Storage
 
-- The database needs only one thing of the bucket to stay safe: writing a blob only if it's absent.
 - A database is an artifact holding a snapshot, a log and a lease. One server at a time holds the lease and writes its
   blobs. An `editor` asks that server, which checks the relation tuples.
-- A server confirms a write only once losing that server couldn't lose the write.
 - Only the signer holds the bucket's credentials. It hands a server short-lived access to the blobs of the users and
   groups it acts for, so removing a server changes nothing for the others.
 - Each user's and group's blobs sit under a prefix of their own in the bucket, so a blob's path says whose it is.
@@ -100,7 +98,6 @@
 - With no server up, nothing is lost: clients keep what servers answered and wait.
 - Every server and client has a key, and one reaches another by its key: straight to it where a path can be found, and
   through the relay otherwise. Nothing at home is opened to the internet.
-- Leases are part of the database plugin.
 - A tool call and a scheduled job go to the server acting for the user or group they're for. If it writes a database
   whose lease another server holds, that server passes it on to the one holding it.
 - A call to a service goes to the machine that runs it, by that machine's key, and that machine checks the caller.
@@ -178,7 +175,6 @@
   called, an artifact changing or a server joining, and is called when it happens.
 - Each plugin hook states whether a plugin only hears about it, can change it, or decides it.
 - A plugin hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
-- The database is a plugin.
 - MCP Apps are supported from the start.
 - An app is free in what it shows. A widget is as free as the platform it sits on allows, and we pass on as much of that
   freedom as we can.
