@@ -38,8 +38,9 @@ defmodule OneCore.Plugin do
   - `tools/0` lists each tool's `name` (lowercase letters, digits and `_`), its `description`, and its `inputs` as a
     JSON Schema object. A tool of the plugin `hello` named `greet` is the MCP tool `hello_greet` and the command
     `one hello greet`.
-  - `call/3` runs a tool with its inputs, a map with string keys. It returns the answer: text, or anything JSON can
-    hold. To refuse, raise, and the message is what the caller is told.
+  - `call/3` runs a tool with its inputs, a map with string keys. They're checked against the tool's `inputs`
+    first, and a caller that left out what's required, or gave the wrong kind of thing, is told so. It returns the
+    answer: text, or anything JSON can hold. To refuse, raise, and the message is what the caller is told.
   - A tool answers with a file, such as a photo, as `{:blob, "image/jpeg", data}`. An agent sees the picture, an
     app is given its `data:` address, and the command writes the file out (`one hello photo > photo.jpg`).
   - A tool takes a file as base64 text, in an input that says so: `%{type: "string", contentEncoding: "base64"}`.

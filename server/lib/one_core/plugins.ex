@@ -90,13 +90,31 @@ defmodule OneCore.Plugins do
     run(name, fn versions ->
       version = versions[name]
 
-      if Enum.any?(version.tools, &(&1.name == tool)) do
-        ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
-        {:ok, version.plugin.call(tool, inputs, called(name, versions, ask, passed_on))}
-      else
-        {:error, "#{name} has no tool named #{tool}. It has: #{Enum.map_join(version.tools, ", ", & &1.name)}"}
+      case Enum.find(version.tools, &(&1.name == tool)) do
+        nil ->
+          {:error, "#{name} has no tool named #{tool}. It has: #{Enum.map_join(version.tools, ", ", & &1.name)}"}
+
+        %{inputs: takes} ->
+          ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
+
+          with :ok <- given(takes, inputs),
+               do: {:ok, version.plugin.call(tool, inputs, called(name, versions, ask, passed_on))}
       end
     end)
+  end
+
+  # Whether `inputs` are what a tool says it takes, its JSON Schema, so a tool is only ever called with them.
+  defp given(takes, inputs) do
+    schema = ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(takes)))
+
+    with {:error, wrong} <- ExJsonSchema.Validator.validate(schema, inputs) do
+      # Each says which input it's about, if it's about one, by its path in the inputs: `expenses/0`.
+      {:error,
+       Enum.map_join(wrong, "\n", fn
+         {what, "#"} -> what
+         {what, "#/" <> at} -> "#{at}: #{what}"
+       end)}
+    end
   end
 
   @doc """
