@@ -190,8 +190,9 @@ fn opened(views: State<'_, Views>, view: String, ms: u32) {
 /// same page in the device's own browser.
 struct Start(Mutex<Option<Url>>);
 
-/// Whether a client is being opened now, so that coming back to the window twice opens one.
-static ENTERING: AtomicBool = AtomicBool::new(false);
+/// Whether a client is being opened now, so that coming back to the window twice opens one. It is as the app
+/// starts, which a device also says is coming to the front.
+static ENTERING: AtomicBool = AtomicBool::new(true);
 
 /// The home screen, as the window is sent to it. Android's and Windows' web views load only http.
 #[cfg(any(windows, target_os = "android"))]
@@ -275,7 +276,13 @@ fn stays(app: &AppHandle, to: &Url) -> bool {
         .as_ref()
         .is_some_and(|start| (start.origin(), start.path(), start.query()) == (to.origin(), to.path(), to.query()));
     if !own && !start {
-        let _ = app.opener().open_url(to.as_str(), None::<&str>);
+        // A phone opens it from its own thread, which is the one asking here, so it's asked from another.
+        let (app, to) = (app.clone(), to.to_string());
+        std::thread::spawn(move || {
+            if let Err(error) = app.opener().open_url(&to, None::<&str>) {
+                eprintln!("couldn't open {to} in the device's browser: {error}");
+            }
+        });
     }
     own || start
 }
@@ -304,6 +311,7 @@ pub fn run() {
                     came_back(&back)
                 }
             });
+            ENTERING.store(false, Ordering::Relaxed);
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("oneapp", |context, request, responder| {

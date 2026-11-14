@@ -106,10 +106,12 @@ browser alice "$link"
 may device desktop sign-in devices
 
 say "The app starts on the same sign-in page, and shows its person's home screen once they've signed in for it"
-# The app and the command are one program with one key, so the command says where this device is let in.
-tablet=$(let_in tablet)
-: >"$folder/screen" >"$folder/app.log"
-ONE_HOME=$folder/tablet dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
+# A web view has no passkeys, so the page's button there hands the page to the device's own browser. What stands
+# in for that browser here writes down what it was asked to open, and alice opens that in hers.
+mkdir "$folder/tablet" "$folder/browser" && printf '{"address":"%s"}' "$address" >"$folder/tablet/network"
+printf '#!/bin/sh\necho "$1" >"%s"\n' "$folder/opened" >"$folder/browser/xdg-open" && chmod +x "$folder/browser/xdg-open"
+: >"$folder/screen" >"$folder/app.log" >"$folder/opened"
+PATH=$folder/browser:$PATH ONE_HOME=$folder/tablet dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
   echo "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY" >"$1/screen"
   exec "$0" 2>"$1/app.log"' "$one" "$folder" >/dev/null 2>&1 &
 started+=($!)
@@ -117,7 +119,12 @@ grep -q -m1 DISPLAY <(tail -f --pid=$! -n +1 "$folder/screen")
 window() { env $(cat "$folder/screen") xdotool search --sync --onlyvisible --name "The One App" "$@" >/dev/null; }
 window
 echo "  the app's window is open on a device that isn't in, and its home screen has opened $(grep -c "home opened" "$folder/app.log") times"
-browser alice "$tablet"
+# The page takes a moment to draw, and its one button is in the middle of the window, 447 down.
+sleep 4
+env $(cat "$folder/screen") xdotool mousemove 512 447 sleep 0.5 click 1
+grep -q -m1 "sign-in" <(tail -f -n +1 "$folder/opened")
+echo "  its button is pressed, and it asks the device's browser to open $(plain <"$folder/opened")"
+browser alice "$(cat "$folder/opened")"
 window windowfocus
 timeout 30 grep -q -m1 "home opened" <(tail -f -n +1 "$folder/app.log")
 echo "  alice comes back to the window, and it says: $(grep -o -m1 "home opened" "$folder/app.log")"
