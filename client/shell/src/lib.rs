@@ -1,9 +1,10 @@
-//! The app: a window on the client's Rust half. Its own page (`page`) is the home screen, or for a device that isn't
-//! in its network yet, the screen that signs it in. Each app is a page of its
+//! The app: a window on the client's Rust half. Its own page (`page`) is the home screen. A device that isn't in its
+//! network yet is shown the network's sign-in page instead, until its person has signed in. Each app is a page of its
 //! plugin's, drawn in a frame of its own, which reaches nothing here but the bridge the home screen's page gives it:
 //! what an app asks comes to `ask`, as what the home screen asks does.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -11,7 +12,7 @@ use client::{Client, NotIn, Shown};
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, Uri, header};
 use tauri::ipc::{InvokeBody, Request};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 
 /// What an app's page may load, which is what an MCP App may by default: its own plugin's files and the files of
@@ -184,26 +185,23 @@ fn opened(views: State<'_, Views>, view: String, ms: u32) {
     eprintln!("{view} opened in {ms} ms, {} ms after the app started", views.started.elapsed().as_millis());
 }
 
-/// Where this device's person makes it theirs, while it isn't in its network: a page at the network's address.
-struct SignIn(Mutex<String>);
+/// Where the window starts while this device isn't in its network: the network's own sign-in page, as it's shown
+/// anywhere. A web view has no passkeys, so the page is told it's in the app (`?app`), and its button leads to the
+/// same page in the device's own browser.
+struct Start(Mutex<Option<Url>>);
 
-/// Opens the page where this device's person signs in, in the device's own browser: a web view has no passkeys.
-#[tauri::command]
-fn sign_in(app: AppHandle, sign_in: State<'_, SignIn>) -> Result<(), String> {
-    let page = sign_in.0.lock().expect("no view panics").clone();
-    app.opener().open_url(page, None::<&str>).map_err(|error| error.to_string())
-}
+/// Whether a client is being opened now, so that coming back to the window twice opens one.
+static ENTERING: AtomicBool = AtomicBool::new(false);
 
-/// Whether this device is in its network now: its person may have signed in since it last asked. Once it is, the
-/// window has a client to show.
-#[tauri::command]
-async fn enter(app: AppHandle, started: State<'_, Instant>) -> Result<bool, String> {
-    Ok(app.try_state::<Views>().is_some() || entered(&app, *started).await.map_err(|error| format!("{error:#}"))?)
-}
+/// The home screen, as the window is sent to it. Android's and Windows' web views load only http.
+#[cfg(any(windows, target_os = "android"))]
+const HOME: &str = "http://tauri.localhost/index.html";
+#[cfg(not(any(windows, target_os = "android")))]
+const HOME: &str = "tauri://localhost/index.html";
 
-/// Opens the client and gives the window its views, or says where to sign in if this device isn't in its network
-/// yet. Gives whether it's in.
-async fn entered(app: &AppHandle, started: Instant) -> anyhow::Result<bool> {
+/// Opens the client and gives the window its views, or says where this device's person signs in if it isn't in
+/// its network yet. Gives whether it's in.
+async fn entered(app: &AppHandle) -> anyhow::Result<bool> {
     // A phone gives each app a folder of its own, which only the app is told.
     #[cfg(mobile)]
     let home = app.path().app_data_dir()?;
@@ -211,20 +209,19 @@ async fn entered(app: &AppHandle, started: Instant) -> anyhow::Result<bool> {
     let home = client::home()?;
     let client = match Client::open(home).await {
         Ok(client) => Arc::new(client),
-        Err(error) => match error.downcast::<NotIn>() {
-            Ok(not_in) => {
-                *app.state::<SignIn>().0.lock().expect("no view panics") = not_in.sign_in;
-                return Ok(false);
-            }
-            Err(error) => return Err(error),
-        },
+        Err(error) => {
+            let mut sign_in: Url = error.downcast::<NotIn>()?.sign_in.parse()?;
+            sign_in.set_query(Some("app"));
+            *app.state::<Start>().0.lock().expect("no view panics") = Some(sign_in);
+            return Ok(false);
+        }
     };
     app.manage(Views {
         client: client.clone(),
         app: app.clone(),
         shown: Mutex::default(),
         loaded: Mutex::default(),
-        started,
+        started: *app.state::<Instant>(),
     });
 
     // The home screen says when no server is answering, which is what the last thing asked found.
@@ -250,23 +247,63 @@ async fn entered(app: &AppHandle, started: Instant) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+/// This device's person came back to the window, perhaps from signing in: once the device is in, the window
+/// goes to the home screen.
+fn came_back(app: &AppHandle) {
+    if app.try_state::<Views>().is_some() || ENTERING.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let (Ok(true), Some(window)) = (entered(&app).await, app.get_webview_window("main")) {
+            let _ = window.navigate(HOME.parse().expect("the home screen has an address"));
+        }
+        ENTERING.store(false, Ordering::Relaxed);
+    });
+}
+
+/// Whether the window goes where it's sent: to its own pages and its apps', and to the sign-in page it starts on.
+/// Anywhere else is the device's own browser's to open, as the sign-in page's button asks.
+fn stays(app: &AppHandle, to: &Url) -> bool {
+    let own = ["tauri", "oneapp", "about", "data", "blob"].contains(&to.scheme())
+        || to.host_str().is_some_and(|host| host.ends_with(".localhost"));
+    let start = app
+        .state::<Start>()
+        .0
+        .lock()
+        .expect("no view panics")
+        .as_ref()
+        .is_some_and(|start| (start.origin(), start.path(), start.query()) == (to.origin(), to.path(), to.query()));
+    if !own && !start {
+        let _ = app.opener().open_url(to.as_str(), None::<&str>);
+    }
+    own || start
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let started = Instant::now();
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
-            app.manage(SignIn(Mutex::default()));
+            app.manage(Start(Mutex::default()));
             app.manage(started);
-            // A device that isn't in its network yet starts on the screen that signs it in.
-            let page = match tauri::async_runtime::block_on(entered(app.handle(), started))? {
-                true => "index.html",
-                false => "start.html",
+            // A device that isn't in its network yet starts on the page that signs it in.
+            let page = match tauri::async_runtime::block_on(entered(app.handle()))? {
+                true => WebviewUrl::default(),
+                false => WebviewUrl::External(
+                    app.state::<Start>().0.lock().expect("no view panics").clone().expect("it said where"),
+                ),
             };
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(page.into()));
+            let (goes, back) = (app.handle().clone(), app.handle().clone());
+            let window = WebviewWindowBuilder::new(app, "main", page).on_navigation(move |to| stays(&goes, to));
             #[cfg(desktop)]
             let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0);
-            window.build()?;
+            window.build()?.on_window_event(move |event| {
+                if let WindowEvent::Focused(true) = event {
+                    came_back(&back)
+                }
+            });
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("oneapp", |context, request, responder| {
@@ -285,9 +322,13 @@ pub fn run() {
                 responder.respond(response.expect("these headers are valid"))
             });
         })
-        .invoke_handler(tauri::generate_handler![
-            apps, ask, again, upload, network, watch, close, opened, sign_in, enter
-        ])
-        .run(tauri::generate_context!())
+        .invoke_handler(tauri::generate_handler![apps, ask, again, upload, network, watch, close, opened])
+        .build(tauri::generate_context!())
         .expect("the app runs");
+    // A phone says the app is in front again where a computer says its window is.
+    app.run(|app, event| {
+        if let RunEvent::Resumed = event {
+            came_back(app)
+        }
+    });
 }

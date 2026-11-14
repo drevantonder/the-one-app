@@ -56,7 +56,7 @@ defmodule OneCore.Plugins do
     artifact = plugin(owner, name) || "#{owner}/plugins/#{name}"
 
     with :ok <- check(name, files),
-         {:ok, kept} <- built(owner, files),
+         {:ok, kept} <- built(owner, name, files),
          {:ok, version, warnings} <- Version.load(Path.basename(artifact), kept) do
       version = %{version | artifact: artifact}
 
@@ -552,12 +552,13 @@ defmodule OneCore.Plugins do
     end
   end
 
-  # A plugin's app is built against the kit that runs for whoever it's deployed for.
-  defp built(owner, files) do
-    cond do
-      not App.app?(files) -> {:ok, files}
-      kit = running(owner)["ui"] -> App.build(files, kit.code)
-      true -> {:error, "An app is built with the kit, the plugin ui, which isn't added for #{owner} or the network."}
+  # A plugin's app is built against the kit that runs for whoever it's deployed for, which is brought along as a
+  # plugin it uses is.
+  defp built(owner, name, files) do
+    if App.app?(files) do
+      with :ok <- bring(owner, name, ["ui"]), do: App.build(files, running(owner)["ui"].code)
+    else
+      {:ok, files}
     end
   end
 

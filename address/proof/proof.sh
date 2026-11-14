@@ -14,6 +14,7 @@ root=$(dirname "$address")
 
 if [[ ${1-} != inside ]]; then
   (cd "$root" && cargo build --release)
+  (cd "$root/ui" && bun install --frozen-lockfile && bun build.js)
   (cd "$root/server" && mix deps.get && mix compile)
   (cd "$address" && bun install --frozen-lockfile)
   # The rest runs as root of namespaces of its own, and everything it starts ends with it.

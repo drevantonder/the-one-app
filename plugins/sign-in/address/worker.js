@@ -1,4 +1,4 @@
-// Signing in's part at a network's address. It serves the sign-in page and what the page asks (`/sign-in`), is the
+// Signing in's part at a network's address. It serves the sign-in page and what the page asks (`/sign-in/`), is the
 // OAuth provider that MCP's authorization asks for (`/.well-known`), and is the way in over the web for whatever
 // has signed in (`/mcp`): an assistant somewhere else with the token a person let it have, or one of the
 // network's own devices with its key. Either way the call is passed through the relay to a server, which is told
@@ -42,7 +42,7 @@ async function mcp(request, auth, url) {
     const answer = await pass(body, device, [NETWORK]);
     if (!(await nobodys(answer))) return answer;
     const name = String(JSON.parse(body).params?.name ?? "");
-    const sign_in = `${url.origin}/sign-in#${new URLSearchParams({ device, name })}`;
+    const sign_in = `${url.origin}/sign-in/#${new URLSearchParams({ device, name })}`;
     return refuse(401, "This device is nobody's here. Sign in on it, or let it in from a device that's yours.", { data: { sign_in } });
   }
 

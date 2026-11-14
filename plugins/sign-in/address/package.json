@@ -9,7 +9,7 @@
     ".well-known"
   ],
   "scripts": {
-    "build": "bun build page.js --outdir files/sign-in --minify --target browser"
+    "build": "bun ../../../ui/app.js \"$PWD/page\" \"$PWD/files/sign-in\" && cp ../../../icons/Logo.png files/sign-in/mark.png"
   },
   "dependencies": {
     "@better-auth/mcp": "1.7.25",

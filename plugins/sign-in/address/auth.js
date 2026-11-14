@@ -157,8 +157,8 @@ async function made(origin) {
       // What lets an assistant somewhere else in at /mcp, as MCP's authorization says. Signing in and saying yes are
       // one page and one question.
       mcp({
-        loginPage: "/sign-in",
-        consentPage: "/sign-in",
+        loginPage: "/sign-in/",
+        consentPage: "/sign-in/",
         resource: `${origin}/mcp`,
         scopes: ["openid", "profile", "offline_access"],
         allowPublicClientPrelogin: true,
@@ -199,7 +199,7 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
     const invitee = user ?? (await internalAdapter.createUser({ name: named, email: `${named}@${new URL(origin).hostname}`, emailVerified: false }));
     const link = hex(crypto.getRandomValues(new Uint8Array(24)));
     await adapter.create({ model: "invite", data: { id: await sha256(link), userId: invitee.id, expiresAt: new Date(Date.now() + INVITED_FOR) }, forceAllowId: true });
-    return { link: `${origin}/sign-in#invite=${link}` };
+    return { link: `${origin}/sign-in/#invite=${link}` };
   }
   if (!user) return { error: `${name} hasn't joined this network.` };
   const mine = [{ field: "userId", value: user.id }];

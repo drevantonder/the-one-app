@@ -1352,3 +1352,58 @@ button.ui-box {
     transition-duration: 0s !important;
   }
 }
+
+/* Signing in: the mark, a heading and one button, in the middle of whatever it's in. */
+.ui-sign-in {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 1.5rem;
+  min-height: 100dvh;
+  padding: var(--gutter);
+  padding-block: max(var(--gutter), env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-bottom));
+  text-align: center;
+}
+.ui-sign-in > * {
+  max-width: 22rem;
+}
+.ui-sign-in .mark > * {
+  display: block;
+  width: 5.5rem;
+  height: 5.5rem;
+  object-fit: contain;
+}
+.ui-sign-in h1 {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.ui-sign-in :where(.warning, .problem) {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.625rem;
+  margin: 0;
+  color: var(--warning);
+  line-height: 1.4;
+  text-align: start;
+}
+.ui-sign-in .problem {
+  color: var(--destructive);
+}
+.ui-sign-in :where(.warning, .problem) .ui-icon {
+  margin-top: 0.1875rem;
+}
+.ui-sign-in .done {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.ui-sign-in .ui-button {
+  min-width: 12rem;
+  text-decoration: none;
+}
+/* It's the whole window, with nothing to scroll: its middle is the window's. */
+html:has(.ui-sign-in) {
+  scrollbar-gutter: auto;
+}

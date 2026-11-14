@@ -15,3 +15,4 @@ erl_crash.dump
 .wrangler/
 /address/signer/secrets
 /address/parts/
+/address/web/files/ui/

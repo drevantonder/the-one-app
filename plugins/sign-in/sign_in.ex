@@ -11,6 +11,9 @@ defmodule SignIn do
   alias OneCore.{Address, Artifact, Call}
 
   @impl true
+  def apps, do: [%{name: "Devices", page: "app/index.html", icon: "icon.svg"}]
+
+  @impl true
   def tools do
     none = %{type: "object", properties: %{}}
 

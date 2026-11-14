@@ -257,6 +257,9 @@ defmodule OneCore.Plugin do
     that server isn't up, and `env.RELAY.tell(message)` tells every server a notification.
   - The plugin's server part asks it over the web, signing what it asks as its server does at the address
     (`OneCore.Address.signed/2`). `env.NETWORK.asker(url, headers, body)` gives the key that signed it, or `null`.
+  - Its `package.json`'s packages are installed and its `build` script run where the address is deployed from. A
+    page it serves is built there as an app's is, against the kit (`bun ../../../ui/app.js <source> <out>`), which
+    the address serves at `/ui/` as every client has it. `sign-in` does all of this.
   """
   @moduledoc "The interface a plugin's server part is written against.\n\n" <> @text
 

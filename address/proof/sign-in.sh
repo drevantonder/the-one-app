@@ -9,6 +9,8 @@
 # signs people in answers nobody. It says what a call costs once a device is someone's.
 #
 #     mise exec -- address/proof/sign-in.sh
+#
+# It needs `xvfb-run`, `dbus-run-session` and `xdotool`, for the app on a screen of its own.
 set -euo pipefail
 set -m # The network is a job with a process group of its own, and so is each server started here.
 
@@ -102,6 +104,23 @@ refused device desktop sign-in devices
 link=$(let_in desktop)
 browser alice "$link"
 may device desktop sign-in devices
+
+say "The app starts on the same sign-in page, and shows its person's home screen once they've signed in for it"
+# The app and the command are one program with one key, so the command says where this device is let in.
+tablet=$(let_in tablet)
+: >"$folder/screen" >"$folder/app.log"
+ONE_HOME=$folder/tablet dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
+  echo "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY" >"$1/screen"
+  exec "$0" 2>"$1/app.log"' "$one" "$folder" >/dev/null 2>&1 &
+started+=($!)
+grep -q -m1 DISPLAY <(tail -f --pid=$! -n +1 "$folder/screen")
+window() { env $(cat "$folder/screen") xdotool search --sync --onlyvisible --name "The One App" "$@" >/dev/null; }
+window
+echo "  the app's window is open on a device that isn't in, and its home screen has opened $(grep -c "home opened" "$folder/app.log") times"
+browser alice "$tablet"
+window windowfocus
+timeout 30 grep -q -m1 "home opened" <(tail -f -n +1 "$folder/app.log")
+echo "  alice comes back to the window, and it says: $(grep -o -m1 "home opened" "$folder/app.log")"
 
 say "A device that's removed is refused the next thing it asks, on every server"
 may device laptop sign-in remove_device --device "$(grep -o 'device=[0-9a-f]*' <<<"$link" | cut -d= -f2)"

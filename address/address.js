@@ -6,8 +6,9 @@
 // That's the pieces in this folder, and each plugin's part at the address: a plugin that has one holds an ordinary
 // Worker in the folder `address` of its own (`plugins/<name>/address`), with a `wrangler.jsonc` and a
 // `package.json` that names the first part of each path it answers (`"paths": ["mcp"]`). The gateway's list of
-// paths is made here from those. A part is built in `parts/<name>`, a copy, so nothing that building leaves
-// behind is among its plugin's files, and it's given three bindings beside its own:
+// paths is made here from those. A part is built in `parts/<name>`, a copy as deep in the repo as the folder it's
+// of, so nothing that building leaves behind is among its plugin's files, and what it reaches in the repo by a
+// path from itself it still reaches. It's given three bindings beside its own:
 //
 // - `OWN` writes and removes blobs of its plugin's own artifact for the network, where its plugin's servers read.
 // - `NETWORK` says who the network's servers are, and whether a key is one of the network's own.
@@ -34,6 +35,12 @@ const services = [
   { binding: "WAY_IN", service: "one-way-in" },
   { binding: "WEB", service: "one-web" },
 ];
+
+// The web client's files have the kit among them, as every client has it: a page here is built against it, as
+// an app is (`ui/app.js`), and finds it at `/ui/`.
+rmSync(`${here}/web/files/ui`, { recursive: true, force: true });
+mkdirSync(`${here}/web/files/ui`);
+for (const file of new Glob("*.{js,css,map}").scanSync(`${here}/../ui/dist`)) cpSync(`${here}/../ui/dist/${file}`, `${here}/web/files/ui/${file}`);
 
 rmSync(`${here}/parts`, { recursive: true, force: true });
 mkdirSync(`${here}/parts`);
