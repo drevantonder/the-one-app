@@ -62,7 +62,6 @@
   away reaches every server eventually. No time is promised.
 - That artifact belongs to whoever the plugin was added for, so only a server its owner chose holds its lease. What's
   added for the network is safe from its members, and what's added for a group is safe from that group's members.
-- Any user can add a plugin. It's an artifact they own, and relation tuples say who else may use it.
 - A sharing link opens in the web client, where there is one.
 - Undo follows what people ordinarily expect of an app. A plugin that wants more keeps its own history. What a tool did
   outside the network isn't ours to undo.

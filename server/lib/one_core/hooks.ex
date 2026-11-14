@@ -41,13 +41,13 @@ defmodule OneCore.Hooks do
   @hooks [
     {"inputs", :changes,
      """
-     A tool is about to be called. It's about the tool's `plugin`, its `tool` name and the `inputs` it was asked
-     with. The answer is the inputs to set, by name. The tool is called only if they are still what it takes.
+     A tool is about to be called. It's about the tool's `plugin`, which is `nil` for one of One Core's own tools,
+     its `tool` name and the `inputs` it was asked with. The answer is the inputs to set, by name. The tool is called only if they are still what it takes.
      """},
     {"call", :decides,
      """
-     A tool is about to be called. It's about the tool's `plugin`, its `tool` name, the `inputs` it will be called
-     with, and `changed`: the plugin that set each input that was changed, by the input's name.
+     A tool is about to be called. It's about the tool's `plugin`, which is `nil` for one of One Core's own tools,
+     its `tool` name, the `inputs` it will be called with, and `changed`: the plugin that set each input that was changed, by the input's name.
      """},
     {"reach", :decides,
      """

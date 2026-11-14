@@ -96,5 +96,43 @@ defmodule OneCore.HooksTest do
     assert {:ok, 1, ""} = Plugins.deploy("network", "lower", %{"lower.ex" => changes("Lower", "downcase")})
     assert say("42") == {:ok, "42"}
     assert say("hello") == {:error, "lower and upper each change word to something else. One has to give way."}
+
+    # One Core's own tools are called through the same hooks: changed, decided and heard as any plugin's.
+    refused = """
+    defmodule Refused do
+      @behaviour OneCore.Plugin
+
+      @impl true
+      def hooks, do: ["inputs", "call"]
+
+      @impl true
+      def hook("inputs", %{"plugin" => nil, "tool" => "remove", "inputs" => %{"name" => "ECHO"}}, _call), do: %{"name" => "echo"}
+      def hook("inputs", _about, _call), do: %{}
+      def hook("call", %{"plugin" => nil, "tool" => "deploy"}, call), do: {:refuse, "Nothing is deployed for \#{call.for}."}
+      def hook("call", _about, _call), do: :ok
+    end
+    """
+
+    for name <- ["upper", "lower"], do: assert(:ok = Plugins.remove("network", name))
+    assert {:ok, 1, ""} = Plugins.deploy("network", "refused", %{"refused.ex" => refused})
+
+    assert OneCore.Tools.call("deploy", %{"name" => "more", "files" => %{}}, {anyone, anyone}) ==
+             {:error, "Nothing is deployed for #{anyone}."}
+
+    assert OneCore.Tools.call("deploy", %{"name" => 7}, {anyone, anyone}) ==
+             {:error, "name is text, not a whole number.\nfiles is needed."}
+
+    assert OneCore.Tools.call("remove", %{"name" => "ECHO"}, {anyone, "network"}) ==
+             {:ok, "echo is removed from what's added for network."}
+
+    assert_receive {:called,
+                    %{"plugin" => nil, "tool" => "remove", "changed" => %{"name" => "refused"}, "error" => nil}, _}
+
+    assert {:error, "There's no plugin named echo"} = say("hello")
+
+    assert {:error, "services isn't a tool that a sharing link's holder calls"} =
+             OneCore.Tools.call("services", %{}, {User.link("x"), User.link("x")})
+
+    assert OneCore.Tools.call("nothing", %{}, {anyone, anyone}) == :none
   end
 end

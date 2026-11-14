@@ -236,6 +236,8 @@ say "A plugin is whoever's deployed it, and has an artifact of its own for each 
 may as alice deploy --name diary --files-from "$folder/diary"
 may as alice diary write --text "Dear diary"
 refused as bob diary write --text "Dear diary"
+refused as bob add --plugin users/alice/plugins/diary
+may as alice relations share --artifact users/alice/plugins/diary --relation viewer --who everyone
 may as bob add --plugin users/alice/plugins/diary
 may as bob diary write --text "Mine"
 may as alice for groups/family add --plugin users/alice/plugins/diary
@@ -247,6 +249,16 @@ refused as alice reader read --note users/bob/own/diary
 may as bob remove --name diary
 refused as bob diary write --text "Mine again"
 may as alice diary write --text "Still here"
+may as bob add --plugin users/alice/plugins/diary
+
+say "One Core's own tools are whoever's may, decided by the same hooks"
+refused as bob deploy --name diary --files-from "$folder/diary"
+refused as carol for groups/family remove --name diary
+refused as bob for network deploy --name notes --files-from "$folder/notes"
+refused as bob for network remove --name relations
+refused as bob add_server --key "$(printf 'ab%.0s' {1..32})"
+refused as bob install_service --plugin inbox --service Inbox.Watcher
+may as alice for groups/family remove --name diary
 
 say "A hook that decides refuses a call with its reason"
 may as alice notes write --id diary --text "My password is hunter2"

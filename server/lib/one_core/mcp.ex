@@ -17,117 +17,11 @@ defmodule OneCore.Mcp do
   App is.
   """
   require Logger
-  alias OneCore.{Artifact, Hooks, Plugin, Plugins, Server, Servers, Services, User}
+  alias OneCore.{Artifact, Plugin, Plugins, Server, Services, Tools, User}
   alias OneCore.Plugins.Version
 
   # Tools are all a server speaks of MCP, and they are the same in each of these.
   @versions ~w(2025-11-25 2025-06-18 2025-03-26 2024-11-05)
-
-  @tools [
-    %{
-      name: "deploy",
-      description: """
-      Adds a plugin for you, or updates it, from its files.
-      The server compiles them and runs the plugin at once, with its tools listed and called as <name>_<tool>. If
-      they don't compile, it says why, and the version already running stays. The server's instructions say how to
-      write a plugin. It's yours, and is added for you: asked for a group or for the network, it's theirs.
-      """,
-      inputSchema: %{
-        type: "object",
-        properties: %{
-          name: %{type: "string", description: "The plugin's name: lowercase letters, digits and hyphens"},
-          files: %{type: "object", description: "The plugin's files: each one's text, by its path in the plugin"}
-        },
-        required: ["name", "files"]
-      }
-    },
-    %{
-      name: "add",
-      description: """
-      Adds a plugin someone else deployed for you: asked for a group or for the network, for them.
-      It's the same plugin, at its newest version, with an artifact of its own for whoever it's added for.
-      """,
-      inputSchema: %{
-        type: "object",
-        properties: %{
-          plugin: %{type: "string", description: "The plugin, by its artifact's name: users/alice/plugins/notes"},
-          name: %{type: "string", description: "What to call it. Its own name, if left out"}
-        },
-        required: ["plugin"]
-      }
-    },
-    %{
-      name: "remove",
-      description: "Removes a plugin from what's added for you. It stays whoever's it is, and what it kept stays.",
-      inputSchema: %{
-        type: "object",
-        properties: %{name: %{type: "string", description: "The plugin's name"}},
-        required: ["name"]
-      }
-    },
-    %{
-      name: "upload",
-      description: """
-      Gives somewhere to send a file that's too large to go in a call: a link that takes it once, within a minute.
-      Send the file as the link says, by its `method` to its `url` with its `headers`, then give `upload`, its
-      name, to the plugin's tool that takes one. `one <plugin> <tool> --<input>-from <path>` does all of this.
-      """,
-      inputSchema: %{
-        type: "object",
-        properties: %{plugin: %{type: "string", description: "The plugin whose tool the file is for"}},
-        required: ["plugin"]
-      }
-    },
-    %{
-      name: "add_server",
-      description: "Lets another server act for you too, as a spare that takes over when this one stops.",
-      inputSchema: %{
-        type: "object",
-        properties: %{key: %{type: "string", description: "The server's key, which it says when it's started"}},
-        required: ["key"]
-      }
-    },
-    %{
-      name: "services",
-      description: """
-      Lists the services this network's plugins have, what each needs of a machine, and the servers that run it.
-      A service is a part of a plugin that runs on particular machines, for what is only there.
-      """,
-      inputSchema: %{type: "object", properties: %{}},
-      annotations: %{readOnlyHint: true}
-    },
-    %{
-      name: "install_service",
-      description: """
-      Runs a plugin's service on a server from now on.
-      That is the server's owner's to decide, knowing what the service needs of the machine, which `services` says.
-      """,
-      inputSchema: %{
-        type: "object",
-        properties: %{
-          plugin: %{type: "string", description: "The plugin's name"},
-          service: %{type: "string", description: "The service's name, as `services` lists it"},
-          server: %{type: "string", description: "The server's key. The server that answers, if left out"}
-        },
-        required: ["plugin", "service"]
-      }
-    },
-    %{
-      name: "remove_service",
-      description: "Stops running a plugin's service on a server.",
-      inputSchema: %{
-        type: "object",
-        properties: %{
-          plugin: %{type: "string", description: "The plugin's name"},
-          service: %{type: "string", description: "The service's name, as `services` lists it"},
-          server: %{type: "string", description: "The server's key. The server that answers, if left out"}
-        },
-        required: ["plugin", "service"]
-      }
-    }
-  ]
-
-  @own Enum.map(@tools, & &1.name)
 
   @doc "The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty."
   def answer(message, from) do
@@ -220,19 +114,23 @@ defmodule OneCore.Mcp do
   defp result("tools/list", _params, _from, {_by, who}, _passed_on) do
     running = Plugins.running(who)
 
+    listed = fn name, tool ->
+      %{
+        name: name,
+        description: tool.description,
+        inputSchema: tool.inputs,
+        annotations: %{readOnlyHint: tool[:read_only] == true},
+        _meta: %{fixed: tool[:fixed] == true}
+      }
+    end
+
+    own = for tool <- Tools.tools(), do: listed.(tool.name, tool)
+
     plugins =
-      for {plugin, version} <- Enum.sort(running), tool <- version.tools do
-        %{
-          name: "#{plugin}_#{tool.name}",
-          description: tool.description,
-          inputSchema: tool.inputs,
-          annotations: %{readOnlyHint: tool[:read_only] == true},
-          _meta: %{fixed: tool[:fixed] == true}
-        }
-      end
+      for {plugin, version} <- Enum.sort(running), tool <- version.tools, do: listed.("#{plugin}_#{tool.name}", tool)
 
     guides = for {plugin, %{guide: guide}} when guide != nil <- running, into: %{}, do: {plugin, guide}
-    {:ok, %{tools: @tools ++ plugins, _meta: %{guides: guides}}}
+    {:ok, %{tools: own ++ plugins, _meta: %{guides: guides}}}
   end
 
   defp result("resources/list", _params, _from, {_by, who}, _passed_on) do
@@ -277,70 +175,10 @@ defmodule OneCore.Mcp do
     end
   end
 
-  # One Core's own tools are for the network's users.
-  defp call(name, _inputs, {"links/" <> _, _for}, _passed_on) when name in @own,
-    do: {:error, "#{name} isn't a tool that a sharing link's holder calls"}
-
-  defp call("deploy", %{"name" => name, "files" => files}, {_by, who}, _passed_on) do
-    case Plugins.deploy(who, name, files) do
-      {:ok, number, ""} -> {:ok, "#{name} is running, at version #{number}."}
-      {:ok, number, warnings} -> {:ok, "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"}
-      {:error, why} -> {:error, why}
-    end
-  end
-
-  defp call("add", %{"plugin" => plugin} = inputs, {_by, who}, _passed_on) do
-    name = Map.get(inputs, "name", Path.basename(plugin))
-    with :ok <- Plugins.add(who, name, plugin), do: {:ok, "#{plugin} is added for #{who}, as #{name}."}
-  end
-
-  defp call("remove", %{"name" => name}, {_by, who}, _passed_on) do
-    with :ok <- Plugins.remove(who, name), do: {:ok, "#{name} is removed from what's added for #{who}."}
-  end
-
-  # A file sent this way lands in the plugin's own artifact, for whoever it was added for, under a name nobody
-  # could guess.
-  defp call("upload", %{"plugin" => plugin}, {_by, who}, _passed_on) do
-    with %{^plugin => version} <- Plugins.running(who),
-         {added, ^plugin} <- Plugins.added(who, version.artifact) do
-      name = "uploads/" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
-      own = %Artifact{prefix: "#{added}/own/#{plugin}/"}
-      {:ok, JSON.encode!(Map.put(Artifact.link(own, name, :write), :upload, name))}
-    else
-      _ -> {:error, "There's no plugin named #{plugin}"}
-    end
-  end
-
-  defp call("add_server", %{"key" => key}, asked, _passed_on) do
-    with :ok <- Servers.add(key, Server.key()) do
-      Hooks.heard("joined", %{"server" => key, "by" => Server.key()}, asked)
-      Server.tell_servers()
-      {:ok, "That server acts for you too now. Start it, and it's a spare."}
-    end
-  end
-
-  defp call("services", _inputs, {_by, who}, _passed_on) do
-    {:ok, JSON.encode!(%{asked: Server.key(), servers: Servers.acting(), services: Services.list(who)})}
-  end
-
-  defp call("install_service", %{"plugin" => name, "service" => service} = inputs, {_by, who} = asked, _passed_on) do
-    on(inputs["server"], "install_service", inputs, asked, fn ->
-      with {:ok, plugin} <- plugin(who, name),
-           :ok <- Services.install(plugin, service),
-           do: {:ok, "#{service} is running on the server #{Server.key()}."}
-    end)
-  end
-
-  defp call("remove_service", %{"plugin" => name, "service" => service} = inputs, {_by, who} = asked, _passed_on) do
-    on(inputs["server"], "remove_service", inputs, asked, fn ->
-      with {:ok, plugin} <- plugin(who, name),
-           :ok <- Services.remove(plugin, service),
-           do: {:ok, "#{service} no longer runs on the server #{Server.key()}."}
-    end)
-  end
-
+  # A tool is one of One Core's own, or a plugin's by its name and the plugin's.
   defp call(name, inputs, asked, passed_on) do
-    with [plugin, tool] <- String.split(name, "_", parts: 2),
+    with :none <- Tools.call(name, inputs, asked),
+         [plugin, tool] <- String.split(name, "_", parts: 2),
          {:ok, answer} <- Plugins.call(plugin, tool, inputs, asked, passed_on) do
       case answer do
         text when is_binary(text) -> {:ok, text}
@@ -349,29 +187,8 @@ defmodule OneCore.Mcp do
         _ -> {:ok, JSON.encode!(answer)}
       end
     else
-      [_] -> {:error, "#{name} takes other inputs, or isn't a tool. tools/list says what each takes."}
+      [_] -> {:error, "#{name} isn't a tool. tools/list says what there is."}
       other -> other
-    end
-  end
-
-  # The plugin that something running for `who` finds by `name`, as its artifact's name.
-  defp plugin(who, name) do
-    case Plugins.running(who) do
-      %{^name => version} -> {:ok, version.artifact}
-      _ -> {:error, "There's no plugin named #{name}"}
-    end
-  end
-
-  # Runs what a tool does on the server it names: here, or by asking that server to, for whoever asked.
-  defp on(server, tool, inputs, {by, who}, here) do
-    if server in [nil, Server.key()] do
-      here.()
-    else
-      case Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: %{who: by, for: who}}) do
-        {:ok, result} -> {:passed_on, result}
-        {:error, _code, why} -> {:error, why}
-        down -> {:error, Server.said(down)}
-      end
     end
   end
 
@@ -402,7 +219,7 @@ defmodule OneCore.Mcp do
          %{^plugin => version} <- Plugins.running(who) do
       Enum.any?(version.tools, &(&1.name == tool and &1[:read_only] == true))
     else
-      _ -> Enum.any?(@tools, &(&1.name == name and &1[:annotations][:readOnlyHint] == true))
+      _ -> Enum.any?(Tools.tools(), &(&1.name == name and &1[:read_only] == true))
     end
   end
 

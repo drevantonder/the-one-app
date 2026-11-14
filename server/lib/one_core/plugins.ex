@@ -142,25 +142,40 @@ defmodule OneCore.Plugins do
         nil ->
           {:error, "#{name} has no tool named #{tool}. It has: #{Enum.map_join(version.tools, ", ", & &1.name)}"}
 
-        %{takes: takes} = found ->
+        found ->
           # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
           ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
           call = called(at, name, versions, ask, asked, passed_on)
+          about = %{"plugin" => name, "tool" => tool, "inputs" => inputs}
+          tool(found, about, asked, version, &version.plugin.call(tool, &1, call))
+      end
+    end)
+  end
 
-          with :ok <- open_to(found, name, asked),
-               :ok <- given(takes, inputs),
-               {:ok, about} <- hooked(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, takes, asked) do
-            heard(about, version, asked, fn -> version.plugin.call(tool, about["inputs"], call) end)
-          end
+  @doc """
+  Calls a tool as every tool is called, a plugin's and One Core's own alike. `tool` is what it says of itself,
+  `about` is what the call is about, and `fun` is the tool: it's given the inputs, and raises to refuse. The
+  inputs are what the tool takes, the plugins that change a call's inputs are asked and the ones that decide it,
+  and the ones that hear are told how it went. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is
+  told.
+  """
+  def tool(tool, about, asked, version \\ nil, fun) do
+    held(nil, List.wrap(version), fn ->
+      with :ok <- open_to(tool, about, asked),
+           :ok <- given(tool.takes, about["inputs"]),
+           {:ok, about} <- hooked(about, tool.takes, asked) do
+        heard(about, version, asked, fn -> fun.(about["inputs"]) end)
       end
     end)
   end
 
   # A plugin is added for users and groups. A sharing link's holder is neither, and calls only a tool that says
   # they may: one that keeps to what the link reaches.
-  defp open_to(tool, name, {by, _for}) do
+  defp open_to(tool, about, {by, _for}) do
+    name = Enum.join(List.wrap(about["plugin"]) ++ [tool.name], "_")
+
     if by != nil and User.link?(by) and tool[:by_link] != true,
-      do: {:error, "#{name}_#{tool.name} isn't a tool that a sharing link's holder calls"},
+      do: {:error, "#{name} isn't a tool that a sharing link's holder calls"},
       else: :ok
   end
 
@@ -197,7 +212,8 @@ defmodule OneCore.Plugins do
         throw(passed)
 
       kind, reason ->
-        error = Version.own_names(Exception.format_banner(kind, reason, __STACKTRACE__), version)
+        error = Exception.format_banner(kind, reason, __STACKTRACE__)
+        error = if version, do: Version.own_names(error, version), else: error
         Hooks.heard("called", took.(error), asked)
         :erlang.raise(kind, reason, __STACKTRACE__)
     else
@@ -384,6 +400,8 @@ defmodule OneCore.Plugins do
     with {:ok, held, version} <- hold(artifact), do: held(held, [version], fn -> fun.(version) end)
   end
 
+  # Runs `fun`, and gives what it does or what it raised. A call it had another server run ends there with that
+  # server's answer.
   defp held(held, versions, fun) do
     fun.()
   catch
@@ -396,7 +414,7 @@ defmodule OneCore.Plugins do
       why = if kind == :error, do: Exception.message(blamed), else: Exception.format_banner(kind, blamed)
       {:error, Enum.reduce(versions, why, &Version.own_names(&2, &1))}
   after
-    release(held)
+    if held, do: release(held)
   end
 
   @doc """

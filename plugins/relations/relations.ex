@@ -49,8 +49,8 @@ defmodule Relations do
       plugin by its artifact's name, or a sharing link's holder (`links/...`).
     - `owner`, `editor` and `viewer` are what someone may do: an owner is an editor, and an editor is a viewer.
       Whoever an artifact's name starts with owns it, a group's members own what was made for the group
-      (`groups/family/made/...`), and the network's owner owns everything. The group itself, and the plugins and
-      servers that are its, are its owners'. `member` puts a user or a group in a group. `parent` names another artifact as
+      (`groups/family/made/...`), and the network's owner owns everything. Whoever has a relation to a user or
+      a group has it to everything that's theirs: a group's owner owns its plugins and what they keep. `member` puts a user or a group in a group. `parent` names another artifact as
       who, and gives whoever has a relation to that one the same relation to this.
     - `share` writes a tuple and `unshare` removes one. An owner or an editor shares with viewers and editors and
       adds a group's members, and only an owner adds an owner or a parent. `shared` lists an artifact's tuples,
@@ -228,15 +228,17 @@ defmodule Relations do
   end
 
   # Whether `who` has the relation to the artifact. `whos` is everyone `who` counts as: themselves, everyone if
-  # they're a user, and each group they're a member of, however far that goes. `up` is the artifact and its
-  # parents, as far as those go, ending at the network. An artifact's name starts with whose it is, so a user owns
+  # they're a user, and each group they're a member of, however far that goes. `up` is the artifact, whose it is,
+  # and their parents, as far as those go, ending at the network. An artifact's name starts with whose it is, so a user owns
   # what their name starts, and a group's members what was made for the group, with no tuple. Each step is one
   # small question of the database, which is many times faster than asking it all of this at once.
   defp may?(db, who, relation, artifact) do
     whos = followed(db, @groups, if(String.starts_with?(who, "users/"), do: [who, "everyone"], else: [who]), [])
     enough = Map.fetch!(@enough, relation)
 
-    Enum.any?(followed(db, @parents, [artifact, "network"], []), fn artifact ->
+    up = Enum.uniq([artifact, OneCore.User.owner(artifact) || artifact, "network"])
+
+    Enum.any?(followed(db, @parents, up, []), fn artifact ->
       Enum.any?(whos, &(String.starts_with?(artifact, theirs(&1)) or query(db, @tuple, [artifact, &1 | enough]) != []))
     end)
   end

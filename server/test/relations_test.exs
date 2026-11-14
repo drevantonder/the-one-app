@@ -180,6 +180,64 @@ defmodule OneCore.RelationsTest do
   end
 
   @tag :tmp_dir
+  test "One Core's own tools are whoever's may: a plugin's editor deploys over it, a viewer adds it, and an owner changes what's added" do
+    tool = fn name, inputs, asked -> OneCore.Tools.call(name, inputs, asked) end
+    files = %{"files" => %{"diary.ex" => String.replace(@notes, "Notes", "Diary")}}
+    diary = "users/alice/plugins/diary"
+    assert {:ok, "groups/family"} = call("relations_group", %{"name" => "family"}, @alice)
+    assert {:ok, _} = share("groups/family", "member", @bob, @alice)
+
+    # Anyone deploys a plugin of their own, and it's theirs alone: nobody deploys over it, adds it or removes it.
+    assert {:ok, "diary is running, at version 1."} = tool.("deploy", Map.put(files, "name", "diary"), {@alice, @alice})
+    assert {:ok, _name} = call("diary_write", %{"id" => "1"}, @alice)
+    assert {:error, "There's no plugin named diary"} = call("diary_write", %{"id" => "1"}, @bob)
+
+    assert tool.("add", %{"plugin" => diary}, {@bob, @bob}) ==
+             {:error, "users/bob isn't a viewer of #{diary}. Whoever owns it shares it, with relations_share."}
+
+    assert {:ok, _} = share(diary, "viewer", @bob, @alice)
+    assert {:ok, "#{diary} is added for users/bob, as diary."} == tool.("add", %{"plugin" => diary}, {@bob, @bob})
+    assert {:ok, "users/bob/made/diary/1"} = call("diary_write", %{"id" => "1"}, @bob)
+
+    assert {:error, "users/bob isn't an editor of users/alice/plugins/diary" <> _} =
+             tool.("deploy", Map.put(files, "name", "diary"), {@bob, @bob})
+
+    assert {:ok, _} = share(diary, "editor", @bob, @alice)
+    assert {:ok, "diary is running, at version 2."} = tool.("deploy", Map.put(files, "name", "diary"), {@bob, @bob})
+
+    # What's added for a group is its owner's to change, not its members', and what's added for the network is
+    # the network's owner's: its members don't deploy over relations, or remove it.
+    assert {:error, "users/bob isn't an owner of groups/family" <> _} =
+             tool.("add", %{"plugin" => diary}, {@bob, "groups/family"})
+
+    assert {:ok, _} = tool.("add", %{"plugin" => diary}, {@alice, "groups/family"})
+    assert {:ok, "groups/family/made/diary/1"} = call("diary_write", %{"id" => "1"}, {@bob, "groups/family"})
+
+    assert {:error, "users/bob isn't an owner of groups/family" <> _} =
+             tool.("remove", %{"name" => "diary"}, {@bob, "groups/family"})
+
+    assert {:error, "users/bob isn't an owner of groups/family" <> _} =
+             tool.("deploy", Map.put(files, "name", "more"), {@bob, "groups/family"})
+
+    for inputs <- [%{"name" => "relations"}, Map.put(files, "name", "relations"), Map.put(files, "name", "another")],
+        name = if(inputs["files"], do: "deploy", else: "remove") do
+      assert {:error, "users/alice isn't an " <> _} = tool.(name, inputs, {@alice, "network"})
+    end
+
+    for name <- ["add_server", "install_service"],
+        inputs = %{"key" => String.duplicate("ab", 32), "plugin" => "notes", "service" => "Notes.None"} do
+      assert tool.(name, inputs, {@alice, @alice}) ==
+               {:error, "users/alice isn't an owner of network. Whoever owns it shares it, with relations_share."}
+    end
+
+    # The network's owner does all of it, and so recovers anything.
+    assert {:ok, _} = tool.("remove", %{"name" => "diary"}, {User.anyone(), "groups/family"})
+
+    assert {:ok, "relations is removed from what's added for network."} =
+             tool.("remove", %{"name" => "relations"}, {User.anyone(), "network"})
+  end
+
+  @tag :tmp_dir
   test "Claims' approver is whoever a tuple says is an editor of its claims, and everyone else sees only their own" do
     assert {:ok, 1, ""} = Plugins.deploy("network", "claims", shipped("claims"))
     claims = "network/own/claims"
