@@ -1,15 +1,21 @@
 import { html, nothing } from "lit"
 import { repeat } from "lit/directives/repeat.js"
-import * as zag from "@zag-js/toast"
 import { Element, look } from "./element.js"
-import { Machine, over, part } from "./zag.js"
+import { Machine, late, over, part } from "./zag.js"
 import css from "./toast.css"
 
-const store = zag.createStore({ placement: "bottom", gap: 8, max: 3, offsets: "1rem" })
+/// Zag's toasts, the toasts there are, and the one element of the page that shows them: all there from the first
+/// toast on.
+let zag
+let store
+let toaster
 
 /// `toast("Deleted", { action: { label: "Undo", run: restore } })`: one line about what just happened, at the foot
 /// of the window for a few seconds, with one thing to do about it. What went well needs none: fine is silent.
-export function toast(text, { action } = {}) {
+export async function toast(text, { action } = {}) {
+  zag ??= (await late).toast
+  store ??= zag.createStore({ placement: "bottom", gap: 8, max: 3, offsets: "1rem" })
+  toaster ??= document.createElement("ui-toaster")
   if (!toaster.isConnected) document.body.append(toaster)
   store.create({ title: text, duration: action ? 8000 : 4000, action: action && { label: action.label, onClick: action.run } })
 }
@@ -57,5 +63,3 @@ class Toast extends Element {
 }
 customElements.define("ui-toast", Toast)
 customElements.define("ui-toaster", Toaster)
-
-const toaster = document.createElement("ui-toaster")

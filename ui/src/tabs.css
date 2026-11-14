@@ -26,10 +26,16 @@ button {
   font-weight: 500;
   white-space: nowrap;
 }
-button[data-selected] {
+.chosen {
   color: var(--foreground);
 }
-/* What marks the chosen tab, sliding to it. Zag says where. */
+/* What marks the chosen tab, sliding to it. Zag says where, once it has measured the tabs; until it has, the
+   chosen tab wears the mark itself. */
+.indicator, .tabs:not(:has(.indicator:not([hidden]))) > .chosen {
+  border-radius: var(--radius-md);
+  background: light-dark(var(--background), color-mix(in oklab, var(--input) 60%, transparent));
+  box-shadow: var(--shadow-xs);
+}
 .indicator {
   --transition-duration: var(--move-settle);
   --transition-timing-function: var(--ease-settle);
@@ -38,7 +44,4 @@ button[data-selected] {
   left: var(--left);
   width: var(--width);
   height: var(--height);
-  border-radius: var(--radius-md);
-  background: light-dark(var(--background), color-mix(in oklab, var(--input) 60%, transparent));
-  box-shadow: var(--shadow-xs);
 }

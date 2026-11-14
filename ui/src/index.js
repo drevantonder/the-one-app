@@ -1,4 +1,4 @@
-// The kit: every element, defined as it's imported, and the two things a page asks for in passing.
+// The kit: every element, defined as it's imported, and the few things a page asks for in passing.
 import "./icon.js"
 import "./spinner.js"
 import "./button.js"

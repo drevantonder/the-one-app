@@ -1,8 +1,7 @@
 import { html } from "lit"
 import { ifDefined } from "lit/directives/if-defined.js"
-import * as numberInput from "@zag-js/number-input"
 import { Field } from "./field.js"
-import { Machine, part } from "./zag.js"
+import { behaviour, part } from "./zag.js"
 
 const ids = { input: "control", label: "label" }
 
@@ -19,23 +18,32 @@ class NumberField extends Field {
     decimals: { type: Number },
   }
 
-  machine = new Machine(this, numberInput, () => ({
-    ids,
-    defaultValue: this.value,
-    min: this.min,
-    max: this.max,
-    step: this.step,
-    disabled: this.disabled,
-    required: this.required,
-    invalid: !!(this.error || this.problem),
-    formatOptions: this.format,
-    locale: navigator.language,
-    onValueChange: ({ valueAsNumber }) => this.typed(valueAsNumber),
-    onValueCommit: () => this.emit("change"),
-  }))
+  constructor() {
+    super()
+    behaviour(this, "numberInput", () => ({
+      ids,
+      defaultValue: this.shown,
+      min: this.min,
+      max: this.max,
+      step: this.step,
+      disabled: this.disabled,
+      required: this.required,
+      invalid: !!(this.error || this.problem),
+      formatOptions: this.format,
+      locale: navigator.language,
+      onValueChange: ({ valueAsNumber }) => this.typed(valueAsNumber),
+      onValueCommit: () => this.emit("change"),
+    }))
+  }
 
   get valueAsNumber() {
     return this.value === "" ? NaN : Number(this.value)
+  }
+
+  /// The value as the box shows it, and as Zag reads it: written as the user's language writes it when it has a
+  /// format ("48,50 $"), and plainly otherwise.
+  get shown() {
+    return this.value && this.format ? new Intl.NumberFormat(navigator.language, this.format).format(this.value) : this.value
   }
 
   willUpdate(changed) {
@@ -47,6 +55,7 @@ class NumberField extends Field {
     }
     // The machine holds what's in the box, from the value it's made with. A value set from outside goes to it;
     // one it told us is its own, and sending that back would rewrite the box under the user's typing.
+    if (!this.machine) return
     this.held ??= this.value
     if (this.value === this.held) return
     this.held = this.value
@@ -61,9 +70,12 @@ class NumberField extends Field {
   }
 
   control() {
+    const api = this.machine?.api
+    // Until Zag is here the box shows the number as Zag will, and isn't typed in: it's Zag that reads what's typed.
+    if (!api) return html`<input id="control" class="box ring" readonly value=${this.shown} placeholder=${ifDefined(this.placeholder)} ?disabled=${this.disabled}>`
     // Zag gives the box its text as a starting value and from then on writes the box itself. Its plain-JavaScript
     // wrapper would write it on every draw, over what's being typed, so it's given only as where the box starts.
-    const { value, ...input } = this.machine.api.getInputProps()
+    const { value, ...input } = api.getInputProps()
     this.starts ??= value
     return html`
       <input class="box ring" ${part(input)} value=${this.starts}

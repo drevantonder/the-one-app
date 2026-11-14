@@ -1,7 +1,6 @@
-import { html } from "lit"
-import * as tabs from "@zag-js/tabs"
+import { html, nothing } from "lit"
 import { Element, look } from "./element.js"
-import { Machine, part } from "./zag.js"
+import { behaviour, part } from "./zag.js"
 import css from "./tabs.css"
 
 /// `<ui-tabs><ui-tab value="all" label="All">…</ui-tab><ui-tab value="month" label="This month">…</ui-tab></ui-tabs>`:
@@ -11,18 +10,17 @@ class Tabs extends Element {
   static styles = look(css)
   static properties = { value: { reflect: true } }
 
-  machine = new Machine(this, tabs, () => ({
-    value: this.value,
-    onValueChange: ({ value }) => {
-      if (value === this.value) return
-      this.value = value
-      this.emit("change")
-    },
-  }))
-
   constructor() {
     super()
     this.watchChildren()
+    behaviour(this, "tabs", () => ({
+      value: this.value,
+      onValueChange: ({ value }) => {
+        if (value === this.value) return
+        this.value = value
+        this.emit("change")
+      },
+    }))
   }
 
   get tabs() {
@@ -34,13 +32,14 @@ class Tabs extends Element {
   }
 
   render() {
-    const { api } = this.machine
+    const api = this.machine?.api
     return html`
-      <div class="tabs" ${part(api.getListProps())}>
-        ${this.tabs.map((tab) => html`
-          <button class="press ring" ${part(api.getTriggerProps({ value: tab.getAttribute("value") }))}>${tab.getAttribute("label")}</button>
-        `)}
-        <div class="indicator" ${part(api.getIndicatorProps())}></div>
+      <div class="tabs" ${part(api?.getListProps())}>
+        ${this.tabs.map((tab) => {
+          const value = tab.getAttribute("value")
+          return html`<button class="press ring ${value === this.value ? "chosen" : ""}" ${part(api?.getTriggerProps({ value }))}>${tab.getAttribute("label")}</button>`
+        })}
+        ${api ? html`<div class="indicator" ${part(api.getIndicatorProps())}></div>` : nothing}
       </div>
       <slot></slot>
     `

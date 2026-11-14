@@ -1,11 +1,9 @@
 import { html, nothing } from "lit"
 import { ifDefined } from "lit/directives/if-defined.js"
-import * as datePicker from "@zag-js/date-picker"
-import { parseDate } from "@internationalized/date"
 import { more, touch } from "./element.js"
 import { Field } from "./field.js"
 import { icon } from "./icon.js"
-import { Machine, over, part } from "./zag.js"
+import { behaviour, over, part } from "./zag.js"
 import css from "./date-picker.css"
 
 const ids = { trigger: "trigger" }
@@ -19,28 +17,33 @@ class DatePicker extends Field {
   static styles = [Field.styles, more(css)]
   static properties = { min: {}, max: {} }
 
-  dates = []
-
-  machine = new Machine(this, datePicker, () => ({
-    ids,
-    positioning,
-    locale: navigator.language,
-    value: this.dates,
-    min: this.from,
-    max: this.to,
-    disabled: this.disabled,
-    fixedWeeks: true,
-    onValueChange: ({ value: [day] }) => (day?.toString() ?? "") !== this.value && this.changed(day?.toString() ?? ""),
-  }))
-
-  get labelled() {
-    return touch.matches ? "control" : "trigger"
+  /// Our own calendar, once Zag is here to open it, and only with a mouse.
+  get ours() {
+    return touch.matches ? undefined : this.machine?.api
   }
 
-  willUpdate(changed) {
-    if (changed.has("value")) this.dates = this.value ? [parseDate(this.value)] : []
-    if (changed.has("min")) this.from = this.min ? parseDate(this.min) : undefined
-    if (changed.has("max")) this.to = this.max ? parseDate(this.max) : undefined
+  get labelled() {
+    return this.ours ? "trigger" : "control"
+  }
+
+  willUpdate() {
+    if (!touch.matches) this.asked ??= behaviour(this, "datePicker", (zag) => ({
+      ids,
+      positioning,
+      locale: navigator.language,
+      ...this.days(zag),
+      disabled: this.disabled,
+      fixedWeeks: true,
+      onValueChange: ({ value: [day] }) => (day?.toString() ?? "") !== this.value && this.changed(day?.toString() ?? ""),
+    }))
+  }
+
+  /// The day, and the first and last it can be, as Zag holds days: made again only when they change.
+  days(zag) {
+    const said = `${this.value} ${this.min} ${this.max}`
+    if (this.held?.said !== said) this.held = { said, value: this.value ? [zag.parse(this.value)] : [], min: this.min ? zag.parse(this.min) : undefined, max: this.max ? zag.parse(this.max) : undefined }
+    const { value, min, max } = this.held
+    return { value, min, max }
   }
 
   control(message) {
@@ -48,10 +51,10 @@ class DatePicker extends Field {
       <span class=${this.value ? "" : "placeholder"}>${this.value ? shown.format(new Date(this.value)) : this.placeholder}</span>
       <svg viewBox="0 0 256 256" aria-hidden="true">${icon("calendar-blank")}</svg>
     `
-    const { api } = this.machine
+    const api = this.ours
     return html`
-      <div class="picker" ${part(api.getControlProps())}>
-        ${touch.matches
+      <div class="picker" ${part(api?.getControlProps())}>
+        ${!api
           ? html`<div class="box" aria-hidden="true" ?data-disabled=${this.disabled} ?data-invalid=${!!message}>${face}</div>`
           : html`
             <button class="box ring" ${part(api.getTriggerProps())} aria-labelledby="label trigger" ?data-invalid=${!!message}
@@ -59,7 +62,7 @@ class DatePicker extends Field {
             <div popover="manual" ${part(api.getPositionerProps())} ${over(api.open)}>${this.calendar(api)}</div>
           `}
         <input id="control" class="native" type="date" .value=${this.value} min=${ifDefined(this.min)} max=${ifDefined(this.max)}
-          ?hidden=${!touch.matches} ?required=${this.required} ?disabled=${this.disabled}
+          ?hidden=${!!api} ?required=${this.required} ?disabled=${this.disabled}
           aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-invalid=${message ? "true" : "false"} aria-describedby="message"
           @input=${(event) => (this.value = event.target.value)} @change=${() => this.emit("change")}>
       </div>

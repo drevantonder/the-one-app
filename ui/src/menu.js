@@ -1,8 +1,7 @@
 import { html, nothing } from "lit"
-import * as menu from "@zag-js/menu"
 import { Element, delegatesFocus, look } from "./element.js"
 import { icon } from "./icon.js"
-import { Machine, over, part } from "./zag.js"
+import { behaviour, over, part } from "./zag.js"
 import css from "./menu.css"
 
 const positioning = { strategy: "fixed", placement: "bottom-end", gutter: 4 }
@@ -15,22 +14,27 @@ class Menu extends Element {
   static shadowRootOptions = delegatesFocus
   static properties = { label: {}, icon: {} }
 
-  machine = new Machine(this, menu, () => ({
-    positioning,
-    onSelect: ({ value }) => this.children[value].click(),
-  }))
-
   constructor() {
     super()
     this.watchChildren()
+    behaviour(this, "menu", () => ({
+      positioning,
+      onSelect: ({ value }) => this.children[value].click(),
+    }))
   }
 
   render() {
-    const { api } = this.machine
+    const api = this.machine?.api
     return html`
-      <button class="trigger press ring" ${part(api.getTriggerProps())} aria-label=${this.label ?? "More"}>
+      <button class="trigger press ring" ${part(api?.getTriggerProps())} aria-label=${this.label ?? "More"}>
         <svg viewBox="0 0 256 256" aria-hidden="true">${icon(this.icon ?? "dots-three")}</svg>
       </button>
+      ${api ? this.popup(api) : nothing}
+    `
+  }
+
+  popup(api) {
+    return html`
       <div popover="manual" ${part(api.getPositionerProps())} ${over(api.open)}>
         <div class="popup" ${part(api.getContentProps())}>
           ${[...this.children].map((item, i) => item.localName === "hr"

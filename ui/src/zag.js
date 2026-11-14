@@ -1,20 +1,43 @@
 // How an element gets its behaviour from Zag (zagjs.com): a state machine per element, with the keyboard, focus,
 // selection and placement in it, and no look. The element draws the machine's parts and says how they look.
+//
+// None of it is needed to draw: an element looks the same before its machine is here. So ui.js holds no Zag. It
+// comes in two parts, loaded by themselves: `zag-late.js` once the page has first drawn, and `zag-mouse.js`, the
+// select list and the calendar, only on a device with a mouse: under a finger the device's own pickers open.
 import { noChange } from "lit"
 import { Directive, directive } from "lit/directive.js"
-import { VanillaMachine, normalizeProps, spreadProps } from "@zag-js/vanilla"
+import { drawn } from "./element.js"
 
 let made = 0
+let vanilla
+let mouse
+
+/// Zag's first part, once it's loaded: its packages by name (`menu`, `tabs`, `numberInput`, `toast`).
+export const late = drawn.then(() => import("./zag-late.js")).then((loaded) => ((vanilla = loaded.vanilla), loaded))
+
+/// Gives `host` its behaviour, as `host.machine`, once Zag is here: `name` is one of Zag's packages, and `props`
+/// is as a Machine's. Until then `host.machine` is nothing, and the element draws itself as it will look, not yet
+/// answering. → true, so an element that asks as it's drawn can tell it has asked.
+export function behaviour(host, name, props) {
+  late.then(async (loaded) => {
+    // A package that isn't in the first part is in the mouse's.
+    const zag = loaded[name] ?? (await (mouse ??= import("./zag-mouse.js")))[name]
+    host.machine = new Machine(host, zag, props)
+    host.requestUpdate()
+  })
+  return true
+}
 
 /// A Zag machine that lives while its element is on the page, and draws the element again whenever it changes.
-/// `zag` is one of Zag's packages (`@zag-js/menu`); `props` returns what the machine is told, read from the
-/// element each time it's asked, so it's always what the element's attributes say now. What it returns must be
-/// the same values until the element changes: a new array or object each time reads as a change each time.
+/// `zag` is one of Zag's packages, loaded; `props` returns what the machine is told, read from the element each
+/// time it's asked, so it's always what the element's attributes say now. It's given the package, for what only
+/// the package can make. What it returns must be the same values until the element changes: a new array or
+/// object each time reads as a change each time.
 export class Machine {
   constructor(host, zag, props) {
     this.host = host
     this.zag = zag
-    this.props = props
+    this.props = () => ({ ...props(zag), dir: host.matches(":dir(rtl)") ? "rtl" : "ltr" })
     this.id = `ui-${++made}`
     host.addController(this)
   }
@@ -24,7 +47,7 @@ export class Machine {
   get vanilla() {
     if (!this.made) {
       this.told = this.values()
-      this.made = new VanillaMachine(this.zag.machine, () => ({
+      this.made = new vanilla.VanillaMachine(this.zag.machine, () => ({
         id: this.id,
         getRootNode: () => this.host.renderRoot.getRootNode(),
         ...this.props(),
@@ -66,18 +89,18 @@ export class Machine {
 
   /// The machine as it is now: its state, and the attributes and listeners of each part.
   get api() {
-    return this.zag.connect(this.vanilla.service, normalizeProps)
+    return this.zag.connect(this.vanilla.service, vanilla.normalizeProps)
   }
 }
 
 /// Puts a part's attributes and listeners, as the machine gives them, on an element of a template:
-/// `<button ${part(api.getTriggerProps())}>`.
+/// `<button ${part(api?.getTriggerProps())}>`. With no machine yet there are none to put.
 export const part = directive(class extends Directive {
   render() {
     return noChange
   }
   update({ element }, [props]) {
-    spreadProps(element, props)
+    if (props) vanilla.spreadProps(element, props)
     return noChange
   }
 })
