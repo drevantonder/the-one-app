@@ -173,7 +173,8 @@ defmodule OneCore.Mcp do
           name: "#{plugin}_#{tool.name}",
           description: tool.description,
           inputSchema: tool.inputs,
-          annotations: %{readOnlyHint: tool[:read_only] == true}
+          annotations: %{readOnlyHint: tool[:read_only] == true},
+          _meta: %{fixed: tool[:fixed] == true}
         }
       end
 

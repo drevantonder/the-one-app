@@ -60,12 +60,15 @@ impl Shown {
 
     /// Answers what the view asks: the result of `method`.
     pub async fn ask(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
-        if !self.reads(method, &params).await {
-            let answer = self.client.request(method, params).await?;
-            self.again().await;
-            return Ok(answer);
+        match self.reads(method, &params).await {
+            Some(Reads::Fixed) => self.fixed(method, &params).await,
+            Some(Reads::Now) => self.read(method, params).await,
+            None => {
+                let answer = self.client.request(method, params).await?;
+                self.again().await;
+                Ok(answer)
+            }
         }
-        self.read(method, params).await
     }
 
     /// Asks the server again for everything the view was answered, and tells the view if any of it changed.
@@ -77,6 +80,14 @@ impl Shown {
     /// Forgets what the view was answered: it closed, or loaded again.
     pub fn close(&self) {
         self.answered.lock().expect("no view panics").clear()
+    }
+
+    /// An answer that's never different, so it's asked for once and never again. A refusal isn't such an answer.
+    async fn fixed(&self, method: &str, params: &Value) -> Result<Value> {
+        match self.client.kept(method, params) {
+            Some(answer) if answer["isError"] != true => Ok(answer),
+            _ => self.client.fresh(method, params).await,
+        }
     }
 
     async fn read(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
@@ -120,16 +131,27 @@ impl Shown {
         }
     }
 
-    /// Whether asking `method` only reads. A tool does when the server's list of tools says so.
-    async fn reads(self: &Arc<Self>, method: &str, params: &Value) -> bool {
+    /// Whether asking `method` only reads, and what it reads. A tool does when the server's list of tools says so.
+    async fn reads(self: &Arc<Self>, method: &str, params: &Value) -> Option<Reads> {
         match method {
-            "tools/list" | "resources/list" | "resources/read" => true,
+            "tools/list" | "resources/list" | "resources/read" => Some(Reads::Now),
             "tools/call" => {
-                let Ok(listed) = self.read("tools/list", json!({})).await else { return false };
+                let listed = self.read("tools/list", json!({})).await.ok()?;
                 let tools = listed["tools"].as_array().map(Vec::as_slice).unwrap_or_default();
-                tools.iter().any(|tool| tool["name"] == params["name"] && tool["annotations"]["readOnlyHint"] == true)
+                let tool = tools.iter().find(|tool| tool["name"] == params["name"])?;
+                match (tool["annotations"]["readOnlyHint"] == true, tool["_meta"]["fixed"] == true) {
+                    (true, true) => Some(Reads::Fixed),
+                    (true, false) => Some(Reads::Now),
+                    (false, _) => None,
+                }
             }
-            _ => false,
+            _ => None,
         }
     }
+}
+
+/// What something that only reads gives: what's so now, which is asked again, or what's never different.
+enum Reads {
+    Now,
+    Fixed,
 }

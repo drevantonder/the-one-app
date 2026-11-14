@@ -51,6 +51,8 @@ defmodule OneCore.Plugin do
     call, for files that needn't outlive that machine.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
+  - A tool whose answer to the same inputs is never different, such as a photo by its id, says `fixed: true` too.
+    A client that has kept its answer never asks again.
   - `uses/0`, if the plugin has one, names the other plugins it uses. Deploying it brings along the ones the
     server ships with, and `OneCore.Call.plugin(call, "database")` gives one of them: its module, whose functions
     take the call and run as this plugin, for whoever it runs for. A plugin that keeps more than a few blobs uses
