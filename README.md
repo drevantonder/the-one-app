@@ -48,7 +48,7 @@ The same app builds for Android with Tauri's CLI (`cargo install tauri-cli`), an
     ANDROID_HOME=~/Android/Sdk NDK_HOME=~/Android/Sdk/ndk/<version> cargo tauri android build --debug --apk
 
 Its project is `client/shell/gen/android`. A phone's client is kept in the app's own folder, and until a client
-can join a network from its screen, it's told where the server is by a `server` file put there.
+can join a network from its screen, it's told which servers to ask by a `servers` file put there.
 
 - `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
