@@ -115,14 +115,14 @@ function steer(models) {
 
 async function latest(b, provider, before = null) {
   const rows = await b.query(
-    "select * from snapshots where provider = ? and (at <= ? or ? is null) and at = (select max(at) from snapshots x where x.provider = snapshots.provider and ifnull(x.account, '') = ifnull(snapshots.account, '') and (x.at <= ? or ? is null)) order by active desc, weekly_used",
-    [provider, before, before, before, before],
+    "select s.* from snapshots s join (select ifnull(account, '') a, max(at) m from snapshots where provider = ? and (at <= ? or ? is null) group by 1) l on s.provider = ? and ifnull(s.account, '') = l.a and s.at = l.m order by s.active desc, s.weekly_used",
+    [provider, before, before, provider],
   );
   return rows.map((r) => ({ ...r, devices: JSON.parse(r.devices || "null") || [r.device], active: !!r.active, disabled: !!r.disabled, models: JSON.parse(r.models || "[]"), pace: JSON.parse(r.pace || "{}") }));
 }
 
 async function previous(b, provider, account, at, resetsAt) {
-  const rows = await b.query("select at, session_used, weekly_used, session_resets from snapshots where provider = ? and ifnull(account, '') is ifnull(?, '') and at < ? order by at desc limit 5", [provider, account, at]);
+  const rows = await b.query("select at, session_used, weekly_used, session_resets from snapshots where provider = ? and ifnull(account, '') = ifnull(?, '') and at < ? order by at desc limit 5", [provider, account, at]);
   return rows.map((r) => ({ at: r.at, used: r.session_used, resets: r.session_resets })).find((r) => r.resets === resetsAt) || null;
 }
 
@@ -296,7 +296,9 @@ export default {
     `alter table snapshots add column disabled integer;`,
     // An email column a test deploy once added, unused: kept so every database has the same changes in the same order.
     `alter table snapshots add column email text;`,
-    `alter table snapshots add column devices text;`]])),
+    `alter table snapshots add column devices text;`,
+    // What latest and previous read by: each account's newest rows, which a scan of every row of the provider took longer to find the more were kept.
+    `create index snapshots_account on snapshots (provider, ifnull(account, ''), at);`]])),
 
   tools: {
     status: {
