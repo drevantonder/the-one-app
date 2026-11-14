@@ -44,7 +44,7 @@ class Screen extends Element {
       <header>
         ${this.back ? html`
           <button class="press ring" aria-label=${said.back} @click=${this.goBack}>
-            <svg viewBox="0 0 256 256" aria-hidden="true">${icon("caret-left")}</svg>
+            <svg class="along" viewBox="0 0 256 256" aria-hidden="true">${icon("caret-left")}</svg>
           </button>
         ` : nothing}
         <h1>${this.heading}</h1>

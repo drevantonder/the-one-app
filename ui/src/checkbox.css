@@ -91,6 +91,9 @@ input[role="switch"]:checked::before {
   background: light-dark(var(--background), var(--primary-foreground));
   translate: calc(var(--track) * 0.75) 0;
 }
+input[role="switch"]:checked:dir(rtl)::before {
+  translate: calc(var(--track) * -0.75) 0;
+}
 input:disabled {
   opacity: 0.5;
 }

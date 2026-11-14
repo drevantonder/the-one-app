@@ -108,7 +108,7 @@ class Row extends Element {
         ${this.text ? html`<span class="text">${this.text}</span>` : nothing}
       </span>
       <slot name="end"></slot>
-      ${this.href ? html`<svg viewBox="0 0 256 256" aria-hidden="true">${icon("caret-right")}</svg>` : nothing}
+      ${this.href ? html`<svg class="along" viewBox="0 0 256 256" aria-hidden="true">${icon("caret-right")}</svg>` : nothing}
     `
     if (this.href) return html`<a class="row press" href=${this.href} aria-current=${this.current ? "true" : nothing}>${inside}</a>`
     if (this.button) return html`<button class="row press" aria-current=${this.current ? "true" : nothing}>${inside}</button>`

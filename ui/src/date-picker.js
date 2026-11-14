@@ -9,6 +9,8 @@ import css from "./date-picker.css"
 const ids = { trigger: "trigger" }
 const positioning = { strategy: "fixed", placement: "bottom-start", gutter: 4 }
 const shown = new Intl.DateTimeFormat(navigator.language, { dateStyle: "medium", timeZone: "UTC" })
+/// A day of the month or a year, in the digits the user's language counts in.
+const digits = new Intl.NumberFormat(navigator.language, { useGrouping: false })
 
 /// `<ui-date-picker label="Date" name="date">`: a day. `value`, `min` and `max` are written as an
 /// `<input type="date">` writes them (2026-11-14), and it's shown as the user's language writes dates. Under a
@@ -106,7 +108,7 @@ class DatePicker extends Field {
               ${api.weeks.map((week) => html`
                 <tr ${part(api.getTableRowProps({ view: "day" }))}>
                   ${week.map((value) => html`
-                    <td ${part(api.getDayTableCellProps({ value }))}><div class="ring" ${part(api.getDayTableCellTriggerProps({ value }))}>${value.day}</div></td>
+                    <td ${part(api.getDayTableCellProps({ value }))}><div class="ring" ${part(api.getDayTableCellTriggerProps({ value }))}>${digits.format(value.day)}</div></td>
                   `)}
                 </tr>
               `)}
@@ -114,11 +116,11 @@ class DatePicker extends Field {
           </table>
         </div>
         <div ${part(api.getViewProps({ view: "month" }))}>
-          ${bar("month", api.visibleRange.start.year)}
+          ${bar("month", digits.format(api.visibleRange.start.year))}
           ${grid("month", api.getMonthsGrid({ columns: 4, format: "short" }), api.getMonthTableCellProps, api.getMonthTableCellTriggerProps)}
         </div>
         <div ${part(api.getViewProps({ view: "year" }))}>
-          ${bar("year", `${decade.start} – ${decade.end}`)}
+          ${bar("year", `${digits.format(decade.start)} – ${digits.format(decade.end)}`)}
           ${grid("year", api.getYearsGrid({ columns: 4 }), api.getYearTableCellProps, api.getYearTableCellTriggerProps)}
         </div>
         ${this.value && !this.required ? html`<button class="clear press ring" ${part(api.getClearTriggerProps())}>${said.clear}</button>` : nothing}
@@ -128,5 +130,5 @@ class DatePicker extends Field {
 }
 customElements.define("ui-date-picker", DatePicker)
 
-const previous = html`<svg viewBox="0 0 256 256" aria-hidden="true">${icon("caret-left")}</svg>`
-const next = html`<svg viewBox="0 0 256 256" aria-hidden="true">${icon("caret-right")}</svg>`
+const previous = html`<svg class="along" viewBox="0 0 256 256" aria-hidden="true">${icon("caret-left")}</svg>`
+const next = html`<svg class="along" viewBox="0 0 256 256" aria-hidden="true">${icon("caret-right")}</svg>`

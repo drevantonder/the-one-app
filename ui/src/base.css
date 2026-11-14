@@ -30,6 +30,10 @@
     fill: currentColor;
     pointer-events: none;
   }
+  /* An arrow that points along the line of text points the other way where text runs right to left. */
+  svg.along:dir(rtl) {
+    scale: -1 1;
+  }
 
   /* What floats over the page from the thing that opened it: a menu, a select's list, a calendar. It's a popover, so
      it's drawn over everything and nothing it sits inside can cut it off. Zag places it. */

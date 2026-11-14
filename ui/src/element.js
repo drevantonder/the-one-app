@@ -71,6 +71,9 @@ export const delegatesFocus = { ...LitElement.shadowRootOptions, delegatesFocus:
 export const touch = matchMedia("(pointer: coarse)")
 touch.addEventListener("change", redraw)
 
+// Which way text runs is the page's to say, and it can change its mind: Zag is told again.
+new MutationObserver(redraw).observe(document.documentElement, { attributeFilter: ["dir"] })
+
 /// Once the page has first been drawn. What it didn't need for that is loaded then, so the first screen waits for
 /// none of it.
 export const drawn = new Promise((done) => requestAnimationFrame(() => setTimeout(done)))

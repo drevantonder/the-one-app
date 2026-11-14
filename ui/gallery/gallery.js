@@ -4,7 +4,13 @@ import { confirm, toast } from "../dist/ui.js"
 const $ = (id) => document.getElementById(id)
 
 // Light, dark, or as the device has it: the theme follows `color-scheme` wherever it's set.
-for (const item of $("appearance").children) item.addEventListener("click", () => (document.documentElement.style.colorScheme = item.dataset.scheme))
+for (const item of $("appearance").querySelectorAll("[data-scheme]")) item.addEventListener("click", () => (document.documentElement.style.colorScheme = item.dataset.scheme))
+
+// The other way round, as Arabic and Hebrew read.
+$("direction").addEventListener("click", () => {
+  document.documentElement.dir = document.documentElement.dir === "rtl" ? "ltr" : "rtl"
+  $("direction").textContent = document.documentElement.dir === "rtl" ? "Left to right" : "Right to left"
+})
 
 for (const item of $("menu-open").children) item.addEventListener("click", () => ($("menu-said").textContent = `${item.textContent} was chosen.`))
 
