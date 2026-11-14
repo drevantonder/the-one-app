@@ -8,7 +8,9 @@ import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg"
 import caretUpDown from "@phosphor-icons/core/assets/regular/caret-up-down.svg"
 import check from "@phosphor-icons/core/assets/regular/check.svg"
 import dotsThree from "@phosphor-icons/core/assets/regular/dots-three.svg"
+import file from "@phosphor-icons/core/assets/regular/file.svg"
 import magnifyingGlass from "@phosphor-icons/core/assets/regular/magnifying-glass.svg"
+import paperclip from "@phosphor-icons/core/assets/regular/paperclip.svg"
 import pencilSimple from "@phosphor-icons/core/assets/regular/pencil-simple.svg"
 import plus from "@phosphor-icons/core/assets/regular/plus.svg"
 import trash from "@phosphor-icons/core/assets/regular/trash.svg"
@@ -24,7 +26,9 @@ const icons = {
   "caret-up-down": caretUpDown,
   check,
   "dots-three": dotsThree,
+  file,
   "magnifying-glass": magnifyingGlass,
+  paperclip,
   "pencil-simple": pencilSimple,
   plus,
   trash,

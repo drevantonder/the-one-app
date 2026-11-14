@@ -18,7 +18,7 @@ class Checkbox extends Field {
     const message = this.error || this.problem
     const set = (event) => (this.checked = event.target.checked)
     return html`
-      <label class="press">
+      <label class="choice press">
         <input id="control" class="native ring" type="checkbox" role=${ifDefined(this.constructor.role)} .checked=${!!this.checked}
           ?required=${this.required} ?disabled=${this.disabled}
           aria-label=${ifDefined(this.ariaLabel ?? undefined)} aria-invalid=${message ? "true" : "false"} aria-describedby="message"

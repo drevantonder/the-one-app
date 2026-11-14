@@ -13,6 +13,9 @@
     .lists { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); align-items: start; gap: 1rem 1.5rem; }
     .frame { max-width: 24rem; border: 1px solid var(--border); border-radius: var(--radius-xl); overflow: hidden; }
     .frame ui-screen { min-height: 0; }
+    .frame:has(ui-split) { max-width: 56rem; }
+    .frame ui-split { height: 22rem; }
+    .frame ui-split ui-screen { min-height: 100%; }
     ui-section { margin-top: 0.75rem; }
     .grey { color: var(--muted-foreground); }
   </style>
@@ -53,6 +56,13 @@
       </div>
     </ui-section>
 
+    <ui-section heading="Search field" id="search">
+      <div class="fields">
+        <ui-search placeholder="Search expenses" aria-label="Search expenses"></ui-search>
+        <ui-search placeholder="Search expenses" aria-label="Search expenses" value="taxi"></ui-search>
+      </div>
+    </ui-section>
+
     <ui-section heading="Text area" id="textarea">
       <div class="fields">
         <ui-textarea label="Note" placeholder="Anything the approver should know"></ui-textarea>
@@ -77,6 +87,29 @@
         <ui-checkbox label="I have the receipt"></ui-checkbox>
         <ui-checkbox label="I have the receipt" hint="A photo is enough." checked></ui-checkbox>
         <ui-checkbox label="I have the receipt" error="Tick this to send the claim."></ui-checkbox>
+      </div>
+    </ui-section>
+
+    <ui-section heading="Radio group" id="radio">
+      <div class="fields">
+        <ui-radio-group label="Paid with">
+          <option value="own">My own card</option>
+          <option value="company">The company card</option>
+          <option value="cash">Cash</option>
+        </ui-radio-group>
+        <ui-radio-group label="Paid with" value="company" hint="Finance pays back what you paid yourself.">
+          <option value="own">My own card</option>
+          <option value="company">The company card</option>
+          <option value="cash" disabled>Cash</option>
+        </ui-radio-group>
+        <ui-radio-group label="Paid with" error="Choose how it was paid.">
+          <option value="own">My own card</option>
+          <option value="company">The company card</option>
+        </ui-radio-group>
+        <ui-radio-group label="Paid with" value="own" disabled>
+          <option value="own">My own card</option>
+          <option value="company">The company card</option>
+        </ui-radio-group>
       </div>
     </ui-section>
 
@@ -111,6 +144,16 @@
         <ui-date-picker label="Date" value="2026-11-12" id="date-open"></ui-date-picker>
         <ui-date-picker label="Date" value="2026-11-12" min="2026-11-01" max="2026-11-14" hint="This month, up to today."></ui-date-picker>
         <ui-date-picker label="Date" value="2026-11-12" disabled></ui-date-picker>
+      </div>
+    </ui-section>
+
+    <ui-section heading="File field" id="file">
+      <div class="fields">
+        <ui-file label="Receipt" accept="image/*,application/pdf" placeholder="Add a photo or file" hint="A photo is enough."></ui-file>
+        <ui-file label="Receipts" accept="image/*,application/pdf" placeholder="Add a photo or file" multiple id="file-chosen"></ui-file>
+        <ui-file label="Receipt" id="file-one"></ui-file>
+        <ui-file label="Receipt" error="Finance needs the receipt."></ui-file>
+        <ui-file label="Receipt" disabled></ui-file>
       </div>
     </ui-section>
 
@@ -219,6 +262,26 @@
         </ui-screen>
       </div>
     </ui-section>
+
+    <ui-section heading="Split" id="split">
+      <div class="frame">
+        <ui-split id="the-split">
+          <ui-screen heading="Expenses">
+            <ui-list>
+              <ui-row heading="Coffee with Sam" text="Meals · 12 Nov" button><span slot="end">$8.50</span></ui-row>
+              <ui-row heading="Taxi from the airport" text="Travel · 11 Nov" button><span slot="end">$64.00</span></ui-row>
+              <ui-row heading="Hotel" text="Somewhere to stay · 2 Oct" button><span slot="end">$212.00</span></ui-row>
+            </ui-list>
+          </ui-screen>
+          <ui-screen slot="detail" heading="Coffee with Sam" back id="split-detail">
+            <ui-list>
+              <ui-row heading="Amount"><span slot="end" id="split-amount">$8.50</span></ui-row>
+              <ui-row heading="Paid with"><span slot="end">My own card</span></ui-row>
+            </ui-list>
+          </ui-screen>
+        </ui-split>
+      </div>
+    </ui-section>
   </ui-screen>
 
   <ui-sheet heading="Add expense" id="the-sheet">
@@ -231,6 +294,11 @@
         <option value="stay">Somewhere to stay</option>
       </ui-select>
       <ui-date-picker label="Date" name="date" value="2026-11-14" required></ui-date-picker>
+      <ui-radio-group label="Paid with" name="paid" value="own">
+        <option value="own">My own card</option>
+        <option value="company">The company card</option>
+      </ui-radio-group>
+      <ui-file label="Receipt" name="receipt" accept="image/*,application/pdf" placeholder="Add a photo or file" multiple></ui-file>
       <ui-textarea label="Note" name="note" rows="2"></ui-textarea>
       <ui-switch label="Reimbursable" name="reimbursable" checked></ui-switch>
       <ui-button type="submit">Save</ui-button>

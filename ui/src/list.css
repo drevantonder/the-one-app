@@ -25,6 +25,10 @@ a.row, button.row {
     background: color-mix(in oklab, var(--accent) 50%, transparent);
   }
 }
+/* The one that's open beside the list. Where it's pushed over the list instead, nothing is (split.css). */
+:host([current]) .row {
+  background: var(--row-current, var(--accent));
+}
 .row:focus-visible {
   background: var(--accent);
   box-shadow: inset 0 0 0 2px var(--ring);

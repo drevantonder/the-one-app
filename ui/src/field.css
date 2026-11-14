@@ -50,6 +50,13 @@ p.error {
   --ring-color: var(--destructive);
   border-color: var(--destructive);
 }
+input.box {
+  /* Ours, whatever the device draws a search or a number field as. */
+  appearance: none;
+}
+input::-webkit-search-cancel-button, input::-webkit-search-decoration {
+  appearance: none;
+}
 textarea.box {
   display: block;
   height: auto;
@@ -69,6 +76,38 @@ textarea.box {
 }
 .box > svg {
   color: var(--muted-foreground);
+}
+
+/* A search field: a magnifier before what's typed, and the button that clears it after. */
+.search {
+  position: relative;
+  display: grid;
+}
+.search > svg {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0.75rem;
+  height: 100%;
+  color: var(--muted-foreground);
+}
+.search > .box {
+  padding-inline: calc(1.25rem + var(--icon)) var(--control);
+}
+.search > button {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: grid;
+  place-content: center;
+  width: var(--control);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+}
+@media (hover: hover) {
+  .search > button:hover {
+    color: var(--foreground);
+  }
 }
 
 /* A select or a date: its face, and the device's own control. Under a finger the device's control lies over the

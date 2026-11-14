@@ -89,6 +89,12 @@ for (const [size, options] of Object.entries(sizes)) {
     await settled()
     await shot("gallery-toast")
 
+    // A list and what it opens: beside it on the desktop, pushed over it on the phone.
+    await page.locator("#split").scrollIntoViewIfNeeded()
+    await press("#the-split ui-row:nth-child(2)")
+    await settled()
+    await shot("gallery-split")
+
     await page.goto(`${server.url}example/`)
     await page.waitForFunction(() => !document.querySelector("#empty").hidden)
     await shot("example-empty")

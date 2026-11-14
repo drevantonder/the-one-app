@@ -28,3 +28,45 @@ form {
 html:has(ui-sheet[open]) {
   overflow: hidden;
 }
+
+/* From one screen to the next, as the browser's View Transitions: the new one slides in over the old from the end
+   of the line, and back out the same way. Between pages the browser starts it; inside one, screen.js does. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
+  }
+}
+:root {
+  --ui-toward-end: 1;
+}
+:root:dir(rtl) {
+  --ui-toward-end: -1;
+}
+::view-transition-group(ui-screen) {
+  overflow: clip;
+}
+::view-transition-old(root), ::view-transition-new(root), ::view-transition-old(ui-screen), ::view-transition-new(ui-screen) {
+  mix-blend-mode: normal;
+  animation: var(--move-travel) var(--ease-travel) both;
+}
+::view-transition-old(root), ::view-transition-old(ui-screen) {
+  animation-name: ui-under;
+}
+::view-transition-new(root), ::view-transition-new(ui-screen) {
+  animation-name: ui-over;
+}
+:root[data-ui-back]::view-transition-old(root), :root[data-ui-back]::view-transition-old(ui-screen) {
+  z-index: 1;
+  animation-name: ui-over;
+  animation-direction: reverse;
+}
+:root[data-ui-back]::view-transition-new(root), :root[data-ui-back]::view-transition-new(ui-screen) {
+  animation-name: ui-under;
+  animation-direction: reverse;
+}
+@keyframes ui-over {
+  from { translate: calc(100% * var(--ui-toward-end)) 0; }
+}
+@keyframes ui-under {
+  to { translate: calc(-25% * var(--ui-toward-end)) 0; opacity: 0.6; }
+}

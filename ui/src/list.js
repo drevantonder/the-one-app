@@ -20,11 +20,11 @@ customElements.define("ui-list", List)
 /// `<ui-row heading="Coffee with Sam" text="Meals · 12 Nov">`: one thing in a list: its `heading`, one grey line
 /// of `text`, what it starts with (`slot="start"`, an icon) and what it ends with (`slot="end"`: an amount, a
 /// switch). With `href` it's a link to what it opens, with a chevron; with `button` the whole row is pressed
-/// (listen for `click`) and opens in place.
+/// (listen for `click`) and opens in place. `current` marks the one that's open beside the list, in a split.
 class Row extends Element {
   static styles = look(css)
   static shadowRootOptions = delegatesFocus
-  static properties = { heading: {}, text: {}, href: {}, button: { type: Boolean } }
+  static properties = { heading: {}, text: {}, href: {}, button: { type: Boolean }, current: { type: Boolean, reflect: true } }
 
   internals = Object.assign(this.attachInternals(), { role: "listitem" })
 
@@ -38,8 +38,8 @@ class Row extends Element {
       <slot name="end"></slot>
       ${this.href ? html`<svg viewBox="0 0 256 256" aria-hidden="true">${icon("caret-right")}</svg>` : nothing}
     `
-    if (this.href) return html`<a class="row press" href=${this.href}>${inside}</a>`
-    if (this.button) return html`<button class="row press">${inside}</button>`
+    if (this.href) return html`<a class="row press" href=${this.href} aria-current=${this.current ? "true" : nothing}>${inside}</a>`
+    if (this.button) return html`<button class="row press" aria-current=${this.current ? "true" : nothing}>${inside}</button>`
     return html`<div class="row">${inside}</div>`
   }
 }

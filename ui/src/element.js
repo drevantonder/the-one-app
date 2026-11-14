@@ -31,3 +31,6 @@ export const delegatesFocus = { ...LitElement.shadowRootOptions, delegatesFocus:
 
 /// The devices whose own pickers are better than ours: a phone or tablet, where a finger is the pointer.
 export const touch = matchMedia("(pointer: coarse)")
+
+/// Whether the user asked their device for less motion: what the kit moves in JavaScript asks this first.
+export const reduced = matchMedia("(prefers-reduced-motion: reduce)")

@@ -1,6 +1,7 @@
 :host {
   display: block;
-  min-height: 100dvh;
+  /* As tall as the window, or as what it's in says (a split's side). */
+  min-height: var(--screen-height, 100dvh);
 }
 header {
   position: sticky;
@@ -25,7 +26,8 @@ h1 {
   white-space: nowrap;
 }
 button {
-  display: grid;
+  /* Beside the list it came from, a screen has nowhere to go back to (split.css). */
+  display: var(--screen-back, grid);
   flex: none;
   place-content: center;
   width: var(--control);

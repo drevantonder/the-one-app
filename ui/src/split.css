@@ -1,0 +1,51 @@
+:host {
+  display: block;
+  height: 100dvh;
+  /* Its sides size themselves by the room it has, not by the window. */
+  container-type: inline-size;
+}
+.panes {
+  display: grid;
+  height: 100%;
+  /* A screen in it is as tall as its side. */
+  --screen-height: 100%;
+}
+.list, .detail {
+  grid-area: 1 / 1;
+  min-width: 0;
+  background: var(--background);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Where there's no room for both, one shows at a time. The other keeps its place: it's hidden, not gone. */
+.list {
+  --row-current: none;
+}
+.detail, [data-open] > .list {
+  visibility: hidden;
+}
+[data-open] > .detail {
+  visibility: visible;
+}
+
+/* Where there is, the list keeps a readable width and what it opens has the rest. */
+@container (min-width: 48rem) {
+  .panes {
+    grid-template-columns: clamp(18rem, 38%, 24rem) 1fr;
+    /* Read by split.js: side by side, nothing is pushed over anything. */
+    --beside: 1;
+  }
+  .list, .detail {
+    grid-area: auto;
+  }
+  .list {
+    --row-current: initial;
+    border-inline-end: 1px solid var(--border);
+  }
+  [data-open] > .list {
+    visibility: visible;
+  }
+  .detail {
+    --screen-back: none;
+  }
+}

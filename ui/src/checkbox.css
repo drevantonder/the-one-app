@@ -2,7 +2,8 @@
   --box: calc(var(--control) * 0.45);
   --track: calc(var(--control) * 0.55);
 }
-label {
+/* One thing to tick or choose, with what it says beside it. */
+.choice {
   display: flex;
   align-items: center;
   justify-self: stretch;
@@ -11,7 +12,7 @@ label {
   font-weight: 400;
   cursor: pointer;
 }
-:host([disabled]) label {
+:host([disabled]) .choice, .choice:has(:disabled) {
   cursor: default;
 }
 span {
@@ -42,7 +43,7 @@ input[aria-invalid="true"] {
   --ring-color: var(--destructive);
   border-color: var(--destructive);
 }
-input:not([role])::before {
+input:not([role], [type="radio"])::before {
   content: "";
   width: calc(var(--box) * 0.75);
   height: calc(var(--box) * 0.75);
@@ -50,6 +51,9 @@ input:not([role])::before {
   mask: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z" stroke="black" stroke-width="16"/></svg>') center / contain no-repeat;
   scale: 0;
   transition: scale var(--move-quick) var(--ease-quick);
+}
+input[type="radio"]:checked::before {
+  scale: 1;
 }
 input:checked {
   border-color: var(--primary);
@@ -89,4 +93,27 @@ input[role="switch"]:checked::before {
 }
 input:disabled {
   opacity: 0.5;
+}
+:host(:not([disabled])) .choice:has(:disabled) span {
+  opacity: 0.5;
+}
+
+/* Radios: the same control, round, with a dot. */
+.radios {
+  display: grid;
+}
+input[type="radio"] {
+  border-radius: 50%;
+}
+input[type="radio"]::before {
+  content: "";
+  width: calc(var(--box) * 0.5);
+  height: calc(var(--box) * 0.5);
+  border-radius: 50%;
+  background: var(--primary-foreground);
+  scale: 0;
+  transition: scale var(--move-quick) var(--ease-quick);
+}
+input[type="radio"]:checked::before {
+  scale: 1;
 }

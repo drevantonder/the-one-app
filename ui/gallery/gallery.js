@@ -12,7 +12,8 @@ $("sheet-button").addEventListener("click", () => $("the-sheet").show())
 $("sheet-form").addEventListener("submit", (event) => {
   event.preventDefault()
   $("the-sheet").close()
-  toast(`Saved ${JSON.stringify(Object.fromEntries(new FormData(event.target)))}`)
+  const sent = [...new FormData(event.target)].map(([name, value]) => `${name}: ${value.name ?? value}`)
+  toast(`Saved ${sent.join(", ")}`)
 })
 
 $("alert-button").addEventListener("click", async () => {
@@ -27,3 +28,25 @@ $("screen-back").addEventListener("back", (event) => {
   event.preventDefault()
   toast("Back was pressed")
 })
+
+// Files as a user would have chosen them: a picture drawn here, and something that isn't one.
+const picture = Object.assign(document.createElement("canvas"), { width: 96, height: 96 })
+const pen = picture.getContext("2d")
+pen.fillStyle = "#f5f1e8"
+pen.fillRect(0, 0, 96, 96)
+pen.fillStyle = "#8a8578"
+for (let line = 0; line < 6; line++) pen.fillRect(16, 16 + line * 12, line % 3 === 2 ? 36 : 64, 4)
+picture.toBlob((photo) => {
+  $("file-chosen").files = [new File([photo, new Uint8Array(248_000)], "coffee-receipt.png", { type: "image/png" }), new File([new Uint8Array(1_240_000)], "taxi-invoice.pdf", { type: "application/pdf" })]
+  $("file-one").files = [new File([photo, new Uint8Array(96_000)], "hotel.png", { type: "image/png" })]
+})
+
+// A list beside what it opens: each row fills the detail and shows it.
+for (const row of $("the-split").querySelectorAll("ui-row[button]")) {
+  row.addEventListener("click", () => {
+    $("split-detail").heading = row.heading
+    $("split-amount").textContent = row.textContent
+    for (const other of row.parentElement.children) other.current = other === row
+    $("the-split").show()
+  })
+}

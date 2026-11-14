@@ -3,7 +3,7 @@ import { Element, delegatesFocus, look } from "./element.js"
 import css from "./field.css"
 
 /// What the browser says of a field left empty, in the user's language.
-const missing = Object.assign(document.createElement("input"), { required: true }).validationMessage
+export const missing = Object.assign(document.createElement("input"), { required: true }).validationMessage
 
 /// What every form field is: a `label` above its control, a grey `hint` below, and its problem in the hint's place:
 /// `error`, which the app sets, or what's wrong with what was typed, once the form was sent. It takes part in a
