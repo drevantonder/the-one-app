@@ -12,12 +12,12 @@ defmodule OneCore.Plugins.Version do
   what's in it, so a service can tell whether a program it brings changed.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
-  `needs` of a machine.
+  `needs` of a machine. `hooks` names the hooks it hooks into.
   """
-  alias OneCore.Server
+  alias OneCore.{Hooks, Server}
 
-  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :services, :code, :files, :hashes]
-  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :services, :code, :files, :hashes]
+  @enforce_keys [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :code, :files, :hashes]
+  defstruct [:under, :plugin, :tools, :guide, :apps, :uses, :services, :hooks, :code, :files, :hashes]
 
   # The names versions are loaded under: each is free, or taken by the one version loaded under it.
   @names 4096
@@ -147,6 +147,7 @@ defmodule OneCore.Plugins.Version do
         guide = if function_exported?(plugin, :guide, 0), do: plugin.guide()
         apps = if function_exported?(plugin, :apps, 0), do: plugin.apps(), else: []
         uses = if function_exported?(plugin, :uses, 0), do: plugin.uses(), else: []
+        hooks = if function_exported?(plugin, :hooks, 0), do: plugin.hooks(), else: []
         services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
 
         cond do
@@ -159,6 +160,12 @@ defmodule OneCore.Plugins.Version do
           not (is_list(uses) and Enum.all?(uses, &is_binary/1)) ->
             {:error, "uses/0 gives a list of plugins' names"}
 
+          not (is_list(hooks) and Enum.all?(hooks, &is_map_key(Hooks.kinds(), &1)) and
+                   (hooks == [] or function_exported?(plugin, :hook, 3))) ->
+            {:error,
+             "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are: " <>
+               Enum.join(Enum.sort(Map.keys(Hooks.kinds())), ", ")}
+
           not Enum.all?(services, &(GenServer in behaviours(&1) and is_binary(&1.needs()))) ->
             {:error, "A service says `use GenServer`, and its needs/0 gives what it needs of a machine, as text"}
 
@@ -169,14 +176,16 @@ defmodule OneCore.Plugins.Version do
               for tool <- tools,
                   do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
 
-            {:ok, %{version(under, plugin, tools, guide, apps, Enum.sort(services), client) | uses: uses}}
+            version = version(under, plugin, tools, guide, apps, Enum.sort(services), client)
+            {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks)}}
         end
 
       found ->
         {:error, "One module of a plugin says `@behaviour OneCore.Plugin`, and #{length(found)} do"}
     end
   rescue
-    error -> {:error, "tools/0, guide/0, apps/0, uses/0 or a service's needs/0 raised: " <> Exception.message(error)}
+    error ->
+      {:error, "tools/0, guide/0, apps/0, uses/0, hooks/0 or a service's needs/0 raised: " <> Exception.message(error)}
   end
 
   # A module has one `behaviour` attribute for each behaviour it says it follows.
@@ -197,6 +206,7 @@ defmodule OneCore.Plugins.Version do
       apps: apps,
       uses: [],
       services: services,
+      hooks: [],
       code: nil,
       files: Enum.sort(Map.keys(client)),
       hashes: Map.new(client, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)

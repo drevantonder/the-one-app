@@ -5,16 +5,16 @@ defmodule OneCore.Mcp do
 
   Every request is from someone, which `OneCore.User.asking/2` says, and a plugin's tool runs for them.
 
-  Servers ask each other the same way, and two things only a server acting for the same user may ask: to call a
-  function of a plugin's service running here (`services/call`), and to run a service's call into its plugin that
-  was passed on (`plugins/call`).
+  Servers ask each other the same way, and three things only a server acting for the same user may ask: to call a
+  function of a plugin's service running here (`services/call`), and to run what was passed on of a service's
+  call into its plugin (`plugins/call`) or of a plugin's hook (`hooks/call`).
 
   The parts of a plugin that run in a client are MCP resources: `ui://<plugin>/<code>/<path>`, where `code` names
   the set of files a version runs, so a file at an address never changes. A plugin's app is one of them, as an MCP
   App is.
   """
   require Logger
-  alias OneCore.{Plugin, Plugins, Server, Servers, Services, User}
+  alias OneCore.{Hooks, Plugin, Plugins, Server, Servers, Services, User}
   alias OneCore.Plugins.Version
 
   # Tools are all a server speaks of MCP, and they are the same in each of these.
@@ -144,6 +144,10 @@ defmodule OneCore.Mcp do
     end
   end
 
+  defp result("hooks/call", %{"plugin" => plugin, "hook" => hook, "about" => about}, from, who) do
+    between(from, fn -> Plugins.hook(plugin, hook, about, who, true) end)
+  end
+
   defp result("tools/call", %{"name" => name} = params, _from, who) do
     case call(name, Map.get(params, "arguments", %{}), who, said(params)["passed_on"] == true) do
       {:ok, answer} -> changed(name, %{content: content(name, answer)})
@@ -241,8 +245,9 @@ defmodule OneCore.Mcp do
     with :ok <- Plugins.remove(name), do: {:ok, "#{name} is removed."}
   end
 
-  defp call("add_server", %{"key" => key}, _who, _passed_on) do
+  defp call("add_server", %{"key" => key}, who, _passed_on) do
     with :ok <- Servers.add(key, Server.key()) do
+      Hooks.heard("joined", %{"server" => key, "by" => Server.key()}, who)
       Server.tell_servers()
       {:ok, "That server acts for you too now. Start it, and it's a spare."}
     end

@@ -21,15 +21,17 @@ defmodule OneCore.Plugins do
   """
   use GenServer
   require Logger
-  alias OneCore.{Artifact, Bucket, Call, Server, Services, User}
+  alias OneCore.{Artifact, Bucket, Call, Hooks, Server, Services, User}
   alias OneCore.Plugins.Version
 
   @added User.anyone() <> "/added"
 
-  # This, and after it what runs plugins' processes, which hold versions here.
+  # This, and after it what runs plugins' processes and what tells the plugins that hear a hook, which hold
+  # versions here.
   def child_spec(_) do
     children = [%{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}]
-    start = {Supervisor, :start_link, [children ++ __MODULE__.Process.children(), [strategy: :rest_for_one]]}
+    children = children ++ __MODULE__.Process.children() ++ [{Task.Supervisor, name: Hooks}]
+    start = {Supervisor, :start_link, [children, [strategy: :rest_for_one]]}
     %{id: __MODULE__, type: :supervisor, start: start}
   end
 
@@ -95,12 +97,58 @@ defmodule OneCore.Plugins do
           {:error, "#{name} has no tool named #{tool}. It has: #{Enum.map_join(version.tools, ", ", & &1.name)}"}
 
         %{takes: takes} ->
-          ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
+          # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
+          call = called(name, versions, {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}, who, passed_on)
 
           with :ok <- given(takes, inputs),
-               do: {:ok, version.plugin.call(tool, inputs, called(name, versions, ask, who, passed_on))}
+               {:ok, about} <- hooked(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, takes, who) do
+            heard(about, version, who, fn -> version.plugin.call(tool, about["inputs"], call) end)
+          end
       end
     end)
+  end
+
+  # What a call is about once the plugins that change its inputs have, if the ones that decide it agree to it.
+  defp hooked(about, takes, who) do
+    with {:ok, changes, by} <- Hooks.change("inputs", about, who),
+         about = Map.put(%{about | "inputs" => Map.merge(about["inputs"], changes)}, "changed", by),
+         :ok <- if(changes == %{}, do: :ok, else: changed(takes, about)),
+         :ok <- Hooks.decide("call", about, who) do
+      {:ok, about}
+    else
+      {:refuse, why} -> {:error, why}
+      {:error, why} -> {:error, why}
+    end
+  end
+
+  # A tool is only ever called with what it takes, whoever changed its inputs.
+  defp changed(takes, %{"inputs" => inputs, "changed" => by}) do
+    with {:error, wrong} <- given(takes, inputs) do
+      changed = Enum.map_join(Enum.sort(by), ", ", fn {input, plugin} -> "#{input} by #{plugin}" end)
+      {:error, "Its inputs were changed (#{changed}), and it doesn't take them now:\n#{wrong}"}
+    end
+  end
+
+  # Runs a call, and tells the plugins that hear calls how it went. One passed on is heard where it ran.
+  defp heard(about, version, who, call) do
+    began = System.monotonic_time(:microsecond)
+    took = fn error -> Map.merge(about, %{"took" => System.monotonic_time(:microsecond) - began, "error" => error}) end
+
+    try do
+      call.()
+    catch
+      :throw, {Call, _outcome} = passed ->
+        throw(passed)
+
+      kind, reason ->
+        error = Version.own_names(Exception.format_banner(kind, reason, __STACKTRACE__), version)
+        Hooks.heard("called", took.(error), who)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    else
+      answer ->
+        Hooks.heard("called", took.(nil), who)
+        {:ok, answer}
+    end
   end
 
   # Whether `inputs` are what a tool says it takes, its JSON Schema, so a tool is only ever called with them.
@@ -131,6 +179,22 @@ defmodule OneCore.Plugins do
           ask = {"plugins/call", %{plugin: name, function: function, arguments: arguments}}
           {:ok, apply(plugin, function, [called(name, versions, ask, who, passed_on) | arguments])}
       end
+    end)
+  end
+
+  @doc """
+  Calls a plugin's `hook/3` at a hook it hooks into, for `who`. Gives `{:ok, answer}` with its answer as
+  `OneCore.Hooks.answer/2` gives it, and otherwise what `call/5` does. A plugin that no longer hooks into it has
+  nothing to say.
+  """
+  def hook(name, hook, about, who, passed_on \\ false) do
+    run(name, fn versions ->
+      version = versions[name]
+      call = called(name, versions, {"hooks/call", %{plugin: name, hook: hook, about: about}}, who, passed_on)
+
+      if hook in version.hooks,
+        do: {:ok, Hooks.answer(hook, version.plugin.hook(hook, about, call))},
+        else: {:ok, Hooks.answer(hook, Hooks.nothing(hook))}
     end)
   end
 
@@ -348,6 +412,7 @@ defmodule OneCore.Plugins do
   @impl true
   def init(nil) do
     state = %{running: %{}, newest: %{}, calls: %{}}
+    Hooks.running(%{})
 
     {:ok,
      Enum.reduce(newer(%{}), state, fn {name, number, loaded}, state -> took_over(state, name, number, loaded) end)}
@@ -398,6 +463,7 @@ defmodule OneCore.Plugins do
         :error -> state.running
       end
 
+    Hooks.running(running)
     %{state | running: running, newest: Map.put(state.newest, name, number)}
   end
 

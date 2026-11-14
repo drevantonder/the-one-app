@@ -161,7 +161,6 @@
 - A plugin's deployed code is open to everyone in the network. A git repo it came from can be private.
 - Plugin hooks are part of the interface plugins are written against. A plugin hooks into a moment, such as a tool being
   called, an artifact changing or a server joining, and is called when it happens.
-- Each plugin hook states whether a plugin only hears about it, can change it, or decides it.
 - A plugin hook gives no access of its own. A plugin hears about an artifact only if it could already reach it.
 - MCP Apps are supported from the start.
 - An app is free in what it shows. A widget is as free as the platform it sits on allows, and we pass on as much of that

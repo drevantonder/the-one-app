@@ -69,6 +69,23 @@ defmodule OneCore.Plugin do
   - Every module is a `defmodule` at the top of a file, and a plugin can have as many files and modules as it
     likes. The code is free to use the machine it runs on.
 
+  A plugin hooks into a moment that isn't one of its own tools being called, to hear of it, to change it or to
+  decide it. `hooks/0` names the hooks it hooks into, and `hook/3` is called at each:
+
+      @impl true
+      def hooks, do: ["call"]
+
+      @impl true
+      def hook("call", %{"plugin" => "hello", "inputs" => %{"name" => "nobody"}}, _call),
+        do: {:refuse, "Nobody is there to greet."}
+
+      def hook("call", _about, _call), do: :ok
+
+  - `hook/3` is called with the hook's name, what the moment is about, a map with string keys, and an
+    `OneCore.Call`: it runs as this plugin, for whoever the moment is about, with the plugin's own artifact. A
+    hook gives a plugin nothing it couldn't already reach.
+  #{OneCore.Hooks.guide()}
+
   A plugin's files that aren't Elixir reach each client from the server: they are its parts that run in a client,
   and the source of any program a service of its brings. `apps/0`, if the plugin has one, names its apps:
 
@@ -155,5 +172,7 @@ defmodule OneCore.Plugin do
   @callback guide() :: String.t()
   @callback apps() :: [%{name: String.t(), page: String.t(), icon: String.t()}]
   @callback uses() :: [String.t()]
-  @optional_callbacks tools: 0, call: 3, guide: 0, apps: 0, uses: 0
+  @callback hooks() :: [String.t()]
+  @callback hook(hook :: String.t(), about :: map, OneCore.Call.t()) :: term
+  @optional_callbacks tools: 0, call: 3, guide: 0, apps: 0, uses: 0, hooks: 0, hook: 3
 end
