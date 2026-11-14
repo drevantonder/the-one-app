@@ -56,8 +56,6 @@
 - A network is an artifact: the top `parent` of everything in it. Its first owner is the first user to sign in.
 - A network's owner owns every artifact in it, but reads an encrypted one only with its key. Users have the privacy they
   need, and the owner isn't responsible for keeping their credentials safe.
-- Servers ask the relation tuples plugin. The signer doesn't: it only knows which servers act for whom. Taking access
-  away reaches every server eventually. No time is promised.
 - A sharing link opens in the web client, where there is one.
 - Undo follows what people ordinarily expect of an app. A plugin that wants more keeps its own history. What a tool did
   outside the network isn't ours to undo.
