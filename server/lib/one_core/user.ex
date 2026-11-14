@@ -5,7 +5,7 @@ defmodule OneCore.User do
   without its last `/`. The holder of a sharing link is `users/<name>/links/<the link's name>`, after whoever the
   link leads to, and is nobody else.
 
-  Signing in is a plugin, which will tell One Core who each request is from: `asking/2` is the one place that's
+  Signing in is a plugin, which will tell One Core who each request is from: `asking/3` is the one place that's
   decided. With none, everyone who reaches a network is the same one user, `anyone/0`.
 
   A request is for whoever it's from, unless it says who else: a group, or the network. It then runs for them,
@@ -22,8 +22,8 @@ defmodule OneCore.User do
   plugin's hook: a moment on any of the network's servers is about whoever it's about, so each of them is
   believed about that, where only one acting for someone is believed about what they asked for.
 
-  - `who` and `for`, from a server acting for whoever asked, are who that server was asked by and for: it passes on what it
-    was asked, having decided it, and `passed_on` says so. A scheduled job is asked by nobody, so its `who` is
+  - `who` and `for`, from a server acting for whoever asked, are who that server was asked by and for: it passes on
+    what it was asked, having decided it, and `passed_on` says so. A scheduled job is asked by nobody, so its `who` is
     `nil`.
   - `link` is a sharing link, and whoever shows one is its holder.
   - `as` names another user to act as. It's for a network being built, to show who may do what before anyone

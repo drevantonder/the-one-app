@@ -2,10 +2,10 @@ defmodule OneCore.Plugin do
   @guide """
   A plugin is a folder of Elixir files, and nothing is needed to write one but a text editor. Deploying it (the
   `deploy` tool) hands the server those files: it compiles them, says what's wrong if they don't compile, and
-  otherwise runs them at once, with no restart. The plugin is whoever's deployed it, and is added for them: a
-  user, or the group or the network they asked for. Someone else has it too once it's added for them (the `add`
-  tool), and what's added for the network is everyone's. A plugin is updated by deploying it again. Calls already running
-  finish on the version they started on, and the next call gets the new one.
+  otherwise runs them at once, with no restart. The plugin is whoever's deployed it, and is added for them: a user, or
+  the group or the network they asked for. Someone else has it too once it's added for them (the `add` tool), and
+  what's added for the network is everyone's. A plugin is updated by deploying it again. Calls already running finish
+  on the version they started on, and the next call gets the new one.
 
   One module in the plugin says `@behaviour OneCore.Plugin`, and gives the plugin's tools:
 
@@ -55,13 +55,13 @@ defmodule OneCore.Plugin do
     its blobs as `{:file, "image/jpeg", call.own, name}`: the client is handed a short-lived link, fetches the
     file from the bucket and keeps it, so a blob answered this way is one that's never replaced.
   - `guide/0`, if the plugin has one, is text for agents on when and how to use its tools.
-  - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact for whoever it
-    was added for, which only this plugin reaches: one added for a user keeps that user's, and one added for the
-    network keeps everyone's together. It keeps what it needs there as blobs through `OneCore.Artifact`: `read/2` gives `{:ok, data, tag}` or `:absent`, `write/3`
-    writes only if absent and gives `:ok` or `:exists`, `replace/4` takes that tag, replaces only if unchanged
-    and gives `:ok` or `:changed`, `list/2` gives the names that start with what it's given, and `remove/2`
-    removes one for good. Its `folder` is a folder of the plugin's own on the machine running the call, for files
-    that needn't outlive that machine.
+  - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact for whoever it was
+    added for, which only this plugin reaches: one added for a user keeps that user's, and one added for the network
+    keeps everyone's together. It keeps what it needs there as blobs through `OneCore.Artifact`: `read/2` gives `{:ok,
+    data, tag}` or `:absent`, `write/3` writes only if absent and gives `:ok` or `:exists`, `replace/4` takes that
+    tag, replaces only if unchanged and gives `:ok` or `:changed`, `list/2` gives the names that start with what it's
+    given, and `remove/2` removes one for good. Its `folder` is a folder of the plugin's own on the machine running
+    the call, for files that needn't outlive that machine.
   - `OneCore.Call.make(call, id)` makes an artifact for whoever the call runs for, `call.for`, under an id the
     plugin chooses, and the plugin keeps blobs in it as it does in its own. It's theirs, not the plugin's, and its
     name (`OneCore.Artifact.name/1`, such as `users/alice/made/hello/7`) is what they share it by.
@@ -81,10 +81,10 @@ defmodule OneCore.Plugin do
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
   - A tool whose answer to the same inputs is never different, such as a photo by its id, says `fixed: true` too.
     A client that has kept its answer never asks again.
-  - `uses/0`, if the plugin has one, names the other plugins it uses, as they're added for whoever it's added
-    for, or for the network. Deploying it brings along the ones the server ships with, and `OneCore.Call.plugin(call, "database")` gives one of them: its module, whose functions
-    take the call and run as this plugin, for whoever it runs for. A plugin that keeps more than a few blobs uses
-    `database`, whose guide says how.
+  - `uses/0`, if the plugin has one, names the other plugins it uses, as they're added for whoever it's added for, or
+    for the network. Deploying it brings along the ones the server ships with, and `OneCore.Call.plugin(call,
+    "database")` gives one of them: its module, whose functions take the call and run as this plugin, for whoever it
+    runs for. A plugin that keeps more than a few blobs uses `database`, whose guide says how.
   - A plugin's module is what other plugins call, so its public functions besides these are what it provides
     them. One that only provides functions leaves out `tools/0` and `call/3`.
   - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on
@@ -193,9 +193,10 @@ defmodule OneCore.Plugin do
     running the call if the service runs there, and otherwise the first that's up. `OneCore.Service.server()`
     gives a service the key of its own.
   - A service calls the plugin's functions with `OneCore.Service.plugin(self(), who, :rang, [4])`, which runs
-    `Hello.rang(call, 4)` for `who`: one of `OneCore.Service.acts_for()`, which are who the plugin was added
-    for that this server acts for, or one the plugin passed it, as `call.added` or `call.for`. That function has the call, so it's where a service keeps anything in the plugin's
-    artifact or its database. In a function of the service, `service` goes where `self()` does.
+    `Hello.rang(call, 4)` for `who`: one of `OneCore.Service.acts_for()`, which are who the plugin was added for that
+    this server acts for, or one the plugin passed it, as `call.added` or `call.for`. That function has the call, so
+    it's where a service keeps anything in the plugin's artifact or its database. In a function of the service,
+    `service` goes where `self()` does.
   - When the plugin is updated, the service's process carries on in the new code with what it holds, and
     whatever it has open stays open. `code_change/3` is given the state, if the new code keeps it in another
     shape. A service that can't carry on starts afresh in the new code: one whose `code_change/3` refuses, one

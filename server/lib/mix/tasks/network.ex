@@ -5,9 +5,10 @@ defmodule Mix.Tasks.Network do
 
       mix network <folder>
 
-  The folder's `bucket` is the network's bucket, `server` is the server's home, and `client` is a client's home,
-  told where its servers are. `only-server` is a client that asks that one server and no other. A new network starts with the plugins The One App ships with, as this repo has
-  them. Starting it again in the same folder carries on with what's there.
+  The folder's `bucket` is the network's bucket, `server` is the server's home, and `client` is a client's home, told
+  where its servers are. `only-server` is a client that asks that one server and no other. A new network starts with
+  the plugins The One App ships with, as this repo has them. Starting it again in the same folder carries on with
+  what's there.
 
       mix network <folder> <server>
 
@@ -83,8 +84,8 @@ defmodule Mix.Tasks.Network do
 
       {:error, {:one_core, {{:not_joined, key}, _start}}} ->
         Mix.raise("""
-        This server isn't one of #{options[:for] || "the network"}'s yet. Whoever owns them lets it in from a client, asking for them
-        (ONE_FOR=#{options[:for] || "network"}), and then it's started again:
+        This server isn't one of #{options[:for] || "the network"}'s yet. Whoever owns them lets it in from a client,
+        asking for them (ONE_FOR=#{options[:for] || "network"}), and then it's started again:
 
             one add_server --key #{key}
         """)

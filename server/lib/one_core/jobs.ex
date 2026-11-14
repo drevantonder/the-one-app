@@ -3,10 +3,10 @@ defmodule OneCore.Jobs do
   The clock that scheduled jobs are called by.
 
   A job is due at each whole multiple of its `every` seconds since 1970, so every server knows when without any
-  telling another. At each of those times, and when this server starts or a plugin's version changes, the plugin
-  is asked to have what's due called (`OneCore.Plugins.schedule/2`), for each one it was added for. Every server asks, and the plugin keeping the
-  schedule is what makes one of them make each call, once, of those acting for whoever the plugin was added for: a time that passed with no server up is made up for
-  by the first that's back.
+  telling another. At each of those times, and when this server starts or a plugin's version changes, the plugin is
+  asked to have what's due called (`OneCore.Plugins.schedule/2`), for each one it was added for. Every server asks,
+  and the plugin keeping the schedule is what makes one of them make each call, once, of those acting for whoever the
+  plugin was added for: a time that passed with no server up is made up for by the first that's back.
   """
   use GenServer
   alias OneCore.{Plugins, Servers}

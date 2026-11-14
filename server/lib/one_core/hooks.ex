@@ -51,13 +51,15 @@ defmodule OneCore.Hooks do
   @hooks [
     {"inputs", :changes,
      """
-     A tool is about to be called. It's about the tool's `plugin`, which is `nil` for one of One Core's own tools,
-     its `tool` name and the `inputs` it was asked with. The answer is the inputs to set, by name. The tool is called only if they are still what it takes.
+     A tool is about to be called. It's about the tool's `plugin`, which is `nil` for one of One Core's own tools, its
+     `tool` name and the `inputs` it was asked with. The answer is the inputs to set, by name. The tool is called only
+     if they are still what it takes.
      """},
     {"call", :decides,
      """
-     A tool is about to be called. It's about the tool's `plugin`, which is `nil` for one of One Core's own tools,
-     its `tool` name, the `inputs` it will be called with, and `changed`: the plugin that set each input that was changed, by the input's name.
+     A tool is about to be called. It's about the tool's `plugin`, which is `nil` for one of One Core's own tools, its
+     `tool` name, the `inputs` it will be called with, and `changed`: the plugin that set each input that was changed,
+     by the input's name.
      """},
     {"reach", :decides,
      """
@@ -76,9 +78,9 @@ defmodule OneCore.Hooks do
      """},
     {"changed", :hears,
      """
-     A blob of an artifact that a plugin made or reached was written or removed. It's about the `artifact`'s
-     name, the `blob`'s name in it, and `by`, the plugin that did it, as a who. A plugin is told only if it could already
-     reach the artifact for whoever changed it, and isn't told what it changed itself.
+     A blob of an artifact that a plugin made or reached was written or removed. It's about the `artifact`'s name, the
+     `blob`'s name in it, and `by`, the plugin that did it, as a who. A plugin is told only if it could already reach
+     the artifact for whoever changed it, and isn't told what it changed itself.
      """},
     {"joined", :hears,
      """
