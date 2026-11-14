@@ -30,10 +30,12 @@ html:has(ui-sheet[open]) {
 }
 
 /* From one screen to the next, as the browser's View Transitions: the new one slides in over the old from the end
-   of the line, and back out the same way. Between pages the browser starts it; inside one, screen.js does. */
+   of the line, and going back it slides out again. Between pages the browser starts it; inside one, `go` does
+   (screen.js), and says which way and whether the whole page moves or a part of it. */
 @media (prefers-reduced-motion: no-preference) {
   @view-transition {
     navigation: auto;
+    types: ui-forward ui-page;
   }
 }
 :root {
@@ -42,31 +44,31 @@ html:has(ui-sheet[open]) {
 :root:dir(rtl) {
   --ui-toward-end: -1;
 }
+:root:active-view-transition-type(ui-forward) {
+  --ui-old-to: -25%;
+  --ui-new-from: 100%;
+  --ui-old-over: 0;
+}
+:root:active-view-transition-type(ui-back) {
+  --ui-old-to: 100%;
+  --ui-new-from: -25%;
+  --ui-old-over: 1;
+}
 ::view-transition-group(ui-screen) {
   overflow: clip;
 }
-::view-transition-old(root), ::view-transition-new(root), ::view-transition-old(ui-screen), ::view-transition-new(ui-screen) {
+:root:active-view-transition-type(ui-page)::view-transition-old(root), :root:active-view-transition-type(ui-part)::view-transition-old(ui-screen) {
+  z-index: var(--ui-old-over);
   mix-blend-mode: normal;
-  animation: var(--move-travel) var(--ease-travel) both;
+  animation: ui-old var(--move-travel) var(--ease-travel) both;
 }
-::view-transition-old(root), ::view-transition-old(ui-screen) {
-  animation-name: ui-under;
+:root:active-view-transition-type(ui-page)::view-transition-new(root), :root:active-view-transition-type(ui-part)::view-transition-new(ui-screen) {
+  mix-blend-mode: normal;
+  animation: ui-new var(--move-travel) var(--ease-travel) both;
 }
-::view-transition-new(root), ::view-transition-new(ui-screen) {
-  animation-name: ui-over;
+@keyframes ui-old {
+  to { translate: calc(var(--ui-old-to) * var(--ui-toward-end)) 0; }
 }
-:root[data-ui-back]::view-transition-old(root), :root[data-ui-back]::view-transition-old(ui-screen) {
-  z-index: 1;
-  animation-name: ui-over;
-  animation-direction: reverse;
-}
-:root[data-ui-back]::view-transition-new(root), :root[data-ui-back]::view-transition-new(ui-screen) {
-  animation-name: ui-under;
-  animation-direction: reverse;
-}
-@keyframes ui-over {
-  from { translate: calc(100% * var(--ui-toward-end)) 0; }
-}
-@keyframes ui-under {
-  to { translate: calc(-25% * var(--ui-toward-end)) 0; opacity: 0.6; }
+@keyframes ui-new {
+  from { translate: calc(var(--ui-new-from) * var(--ui-toward-end)) 0; }
 }

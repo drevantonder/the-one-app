@@ -1,6 +1,6 @@
 import { html } from "lit"
 import { Element, look } from "./element.js"
-import { move } from "./screen.js"
+import { go } from "./screen.js"
 import css from "./split.css"
 
 /// `<ui-split><ui-screen heading="Expenses">…</ui-screen><ui-screen slot="detail" heading="Coffee with Sam" back>…</ui-screen></ui-split>`:
@@ -11,6 +11,11 @@ import css from "./split.css"
 class Split extends Element {
   static styles = look(css)
   static properties = { open: { type: Boolean, reflect: true } }
+
+  constructor() {
+    super()
+    this.open = false
+  }
 
   /// The device's back, or forward: what's open is what the history says.
   travelled = (event) => {
@@ -55,7 +60,7 @@ class Split extends Element {
     const still = changed.get("open") === undefined || this.byDevice || getComputedStyle(panes).getPropertyValue("--beside")
     this.byDevice = false
     if (still) flip()
-    else move(this, flip, { back: !this.open })
+    else go(flip, { back: !this.open, part: this })
     // Opening it is one step in the history, so that the device's back is what closes it.
     if (this.open && !history.state?.uiSplit) history.pushState({ ...history.state, uiSplit: true }, "")
     if (!this.open && history.state?.uiSplit) history.back()

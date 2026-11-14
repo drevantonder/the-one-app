@@ -158,8 +158,12 @@
     </ui-section>
 
     <ui-section heading="List and row" id="list">
+      <div class="side">
+        <ui-button variant="outline" id="row-add"><ui-icon name="plus"></ui-icon>Add a row</ui-button>
+        <ui-button variant="outline" id="row-remove"><ui-icon name="trash"></ui-icon>Remove one</ui-button>
+      </div>
       <div class="lists">
-        <ui-list>
+        <ui-list id="rows">
           <ui-row heading="Coffee with Sam" text="Meals · 12 Nov"><span slot="end">$8.50</span></ui-row>
           <ui-row heading="Taxi from the airport, after the late flight got in" text="Travel · 11 Nov · waiting on a receipt"><span slot="end">$64.00</span></ui-row>
           <ui-row heading="Hotel"><span slot="end">$212.00</span></ui-row>

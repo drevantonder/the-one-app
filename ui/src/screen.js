@@ -3,26 +3,32 @@ import { Element, look, reduced } from "./element.js"
 import { icon } from "./icon.js"
 import css from "./screen.css"
 
-/// Changes which screen shows, as a move: `change` puts the new one in place, and the browser slides from what
-/// was there to what is (its View Transitions), back the way it came for `back`. `screen` is what moves: a part of
-/// the page, or all of it. Where the browser can't, or the user asked for no motion, it's a plain swap.
-export function move(screen, change, { back = false } = {}) {
-  if (!document.startViewTransition || reduced.matches) return void change()
-  const page = document.documentElement
-  screen.style.viewTransitionName = "ui-screen"
-  page.toggleAttribute("data-ui-back", back)
-  document.startViewTransition(change).finished.finally(() => {
-    screen.style.viewTransitionName = ""
-    page.removeAttribute("data-ui-back")
-  })
+/// Whether the device has itself just shown the user going back (an iPhone's swipe in from the edge): the page
+/// mustn't show it a second time.
+let shown = false
+addEventListener("popstate", (event) => {
+  shown = !!event.hasUAVisualTransition
+  setTimeout(() => (shown = false))
+}, true)
+
+let moving
+
+/// `go(() => draw(expense))`: changes which screen shows, as a move. `change` puts the new screen in place, and
+/// the browser slides to it from what was there (its View Transitions): in over it, or with `back`, back out
+/// from over it: `addEventListener("popstate", () => go(draw, { back: true }))`. Ask the server first: the page
+/// holds still until `change` is done. `part` is what moves, when it isn't the whole page. Where the browser can't,
+/// or the user asked for no motion, it's a plain swap. From one page to another the browser does this by itself
+/// (page.css).
+export function go(change, { back = false, part } = {}) {
+  if (!globalThis.ViewTransition || !("types" in ViewTransition.prototype) || reduced.matches || shown) return void change()
+  part?.style.setProperty("view-transition-name", "ui-screen")
+  const move = (moving = document.startViewTransition({ update: change, types: [back ? "ui-back" : "ui-forward", part ? "ui-part" : "ui-page"] }))
+  move.finished.finally(() => moving === move && part?.style.removeProperty("view-transition-name"))
 }
 
-// Between one page and the next the browser moves by itself (page.css). Going back, it moves the other way.
-addEventListener("pagereveal", ({ viewTransition }) => {
-  const { entry, from, navigationType } = globalThis.navigation?.activation ?? {}
-  if (!viewTransition || navigationType !== "traverse" || entry.index > from.index) return
-  document.documentElement.setAttribute("data-ui-back", "")
-  viewTransition.finished.finally(() => document.documentElement.removeAttribute("data-ui-back"))
+// Back to a page left earlier is the device's to show. The browser would slide it in as if it were new.
+addEventListener("pageswap", ({ activation, viewTransition }) => {
+  if (activation?.navigationType === "traverse" && activation.entry.index < activation.from.index) viewTransition?.skipTransition()
 })
 
 /// `<ui-screen heading="Expenses">`: a whole view of an app: a bar across its top that stays as it scrolls, with

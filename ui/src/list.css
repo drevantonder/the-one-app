@@ -11,6 +11,8 @@
   width: 100%;
   min-height: calc(var(--control) + 0.5rem);
   padding: 0.5rem 0.75rem;
+  /* The line between rows, in a list (list.js). */
+  border-top: var(--row-line, 0);
   color: inherit;
   font-size: var(--text-base);
   text-align: start;
