@@ -1,6 +1,6 @@
 // The tracker's app: every tracker with its total, and inside one, its entries. Plain HTML (app.html) and this
 // module, on the kit's elements, calling the plugin's tools.
-import { call, changed, leave } from "../ui/ui.js"
+import { call, changed, go, leave } from "../ui/ui.js"
 
 const $ = (id) => document.getElementById(id)
 const number = new Intl.NumberFormat(navigator.language, { maximumFractionDigits: 2 })
@@ -38,7 +38,7 @@ function total({ tracker, total, entries }) {
   row.append(Object.assign(document.createElement("span"), { slot: "end", textContent: number.format(total) }))
   row.addEventListener("click", () => {
     history.pushState(tracker, "")
-    show()
+    go(show)
   })
   return row
 }
@@ -49,7 +49,7 @@ function entry({ at, amount, note }) {
   return row
 }
 
-addEventListener("popstate", show)
+addEventListener("popstate", () => go(show, { back: true }))
 changed(show)
 $("retry").addEventListener("click", show)
 
