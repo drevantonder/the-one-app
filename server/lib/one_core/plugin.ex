@@ -218,6 +218,25 @@ defmodule OneCore.Plugin do
     takes. The program stops when its input closes, which is when the service's process ends, and a program
     that stops by itself should stop the service, so that both are started again. The plugin `load` does all of
     this.
+
+  A plugin's part at the network's address is what of it has to be reached over the web: a page that opens in a
+  browser, or a call from a service outside. It's an ordinary Cloudflare Worker in the plugin's folder `address`,
+  with a `wrangler.jsonc`, and a `package.json` that names the first part of each path it answers:
+
+      "paths": ["hello"]
+
+  - It answers every request at the address whose path starts with one of those (`/hello/...`), for the whole
+    network. It isn't deployed with the plugin: whoever deploys the network's address deploys it with that
+    (`address/address.js`), so it's for the plugins a network is set up with.
+  - It keeps what it needs in storage of its own, which its `wrangler.jsonc` binds, and is given three bindings
+    besides. `env.OWN.write(name, data)` writes a blob of the plugin's own artifact for the network, only if
+    there's none, and `env.OWN.remove(name)` removes one: that's where the plugin's server part reads what this
+    part has to tell it, as `call.own` of the plugin added for the network. `env.NETWORK.servers(of)` gives the
+    keys of the servers acting for a user, a group or the network, by their prefix (`users/alice/`).
+    `env.RELAY.pass(server, message)` passes one JSON-RPC message to a server and gives its answer, or `null` if
+    that server isn't up, and `env.RELAY.tell(message)` tells every server a notification.
+  - The plugin's server part asks it over the web, signing what it asks as its server does at the address
+    (`OneCore.Address.signed/2`). `env.NETWORK.asker(url, headers, body)` gives the key that signed it, or `null`.
   """
   @moduledoc "The interface a plugin's server part is written against.\n\n" <> @text
 

@@ -8,6 +8,8 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - **A server is one program on Mac, Linux and Windows.**
 - **The bucket is Cloudflare R2**, unless measured write times say otherwise.
 - **Each client is one Tauri shell per platform**, drawing in the device's web view.
+- **What sits at a network's address is Cloudflare Workers**, and a plugin's part there is one more: an ordinary
+  Worker in the plugin's folder, deployed with the address's own.
 
 ## Not chosen yet
 

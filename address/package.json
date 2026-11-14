@@ -1,6 +1,6 @@
 {
   "name": "address",
-  "description": "What sits at a network's address: the gateway, the relay, the signer, the web client's files and the way in for outsiders.",
+  "description": "What sits at a network's address: the gateway, the relay, the signer, the web client's files, the way in for a sharing link's holder, and each plugin's part there.",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -11,7 +11,7 @@
     "wrangler": "^4.161.0"
   },
   "scripts": {
-    "dev": "wrangler dev -c gateway/wrangler.jsonc -c relay/wrangler.jsonc -c signer/wrangler.jsonc -c way-in/wrangler.jsonc -c web/wrangler.jsonc",
-    "deploy": "wrangler deploy -c web/wrangler.jsonc && wrangler deploy -c signer/wrangler.jsonc --secrets-file signer/secrets && for piece in relay way-in gateway; do wrangler deploy -c $piece/wrangler.jsonc || exit; done"
+    "dev": "bun address.js dev",
+    "deploy": "bun address.js deploy"
   }
 }

@@ -19,8 +19,8 @@
   plugin and the holder of a sharing link are all a who. Avoid: fact, grant.
 - **Encrypted artifact**: an artifact whose blobs are encrypted before they're stored, so only holders of its key read
   it. For passwords and the keys that reach devices. Avoid: sealed.
-- **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services and
-  kinds of artifact. It uses other artifacts, and is a who. A git repo can be where its code comes from, but needn't be.
+- **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services, a
+  part at the address and kinds of artifact. It uses other artifacts, and is a who. A git repo can be where its code comes from, but needn't be.
   Avoid: module.
 - **App**: something with UI that goes on a home screen. A plugin provides it. It can have a server part if it needs
   one, which is its plugin's tools.
@@ -35,6 +35,9 @@
   messages, a signed-in browser, a GPU. An instance runs on each server whose owner installed it, and keeps running
   between calls. It and the rest of its plugin call each other's functions, which nothing else can call. The plugin
   decides which instance it calls.
+- **Part at the address**: a part of a plugin that runs at the network's address, for what comes in over the web: a
+  page people sign in on, a call from an outside service. One runs for the whole network, with storage of its own
+  there, and whoever sets up the address puts it there with the address's other pieces.
 - **One Core**: what every plugin stands on: blobs, each plugin's own artifact, running plugins, and the interface
   they're written against. Small on purpose, and it works with no plugins. Avoid: the core.
 - **Package**: one piece built separately: the server, a client, or a plugin.

@@ -50,7 +50,8 @@ one for a network with an address.
 - `client/shell`: the app, a window on that half, and the one program both are.
 - `ui`: the kit an app's UI is written with.
 - `address`: what sits at a network's address, each a Cloudflare Worker: the gateway, the relay, the signer, the web
-  client's files and the way in for outsiders.
+  client's files and the way in for a sharing link's holder. `address.js` runs or deploys them, with each plugin's
+  part at the address.
 - `plugins`: the plugins The One App ships with, each a folder of its own.
 
 ## Reading it

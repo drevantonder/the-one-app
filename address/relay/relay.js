@@ -9,8 +9,9 @@
 // reaches it. It admits only the network's own, by asking the signer about each key once that key has proved
 // itself.
 //
-// It also passes an outsider's call to a server, for the way in: a server holds one more connection here for those
-// (`/relay/outside`), since nothing else at the address holds one.
+// It also passes a call that came in at the address over the web to a server, and tells every server what a piece
+// here has to say: a server holds one more connection here for those (`/relay/outside`), since nothing else at the
+// address holds one.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { asker, hex, signedBy } from "../ask.js";
@@ -86,7 +87,7 @@ export default class extends WorkerEntrypoint {
       frame[0] === CLIENT_AUTH &&
       frame[33] === 64 &&
       (await signedBy(key, hex.encode(frame.subarray(34)), blake3(challenge, { context: utf8.encode(CHALLENGE) })));
-    const admitted = proved && (await this.env.SIGNER.admits(key, pass));
+    const admitted = proved && (await this.env.NETWORK.admits(key, pass));
     if (!admitted) {
       const why = utf8.encode("This network doesn't know you");
       ours.send(Uint8Array.of(SERVER_DENIES_AUTH, why.length, ...why));
@@ -119,6 +120,11 @@ export default class extends WorkerEntrypoint {
     return answered;
   }
 
+  /** Tells every server that's here `message`, which none answers: a JSON-RPC notification. */
+  async tell(message) {
+    await this.relay().fetch("https://relay/tell", { method: "POST", body: message });
+  }
+
   /** A network has one relay. */
   relay() {
     return this.env.RELAY.get(this.env.RELAY.idFromName("relay"));
@@ -135,6 +141,7 @@ export class Relay extends DurableObject {
     const url = new URL(request.url);
     if (url.pathname === "/endpoint") return this.endpoint(url.searchParams.get("key"));
     if (url.pathname === "/relay/outside") return this.server(request);
+    if (url.pathname === "/tell") return this.tell(await request.text());
     return this.call(url.searchParams.get("to"));
   }
 
@@ -153,7 +160,7 @@ export class Relay extends DurableObject {
   /** A server connects to hear outsiders' calls. It signed the request, so its key is known at once. */
   async server(request) {
     const key = await asker(request, "");
-    if (!key || !(await this.env.SIGNER.admits(key, request.headers.get("one-pass")))) return refuse(403, "This network doesn't know you");
+    if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-pass")))) return refuse(403, "This network doesn't know you");
     for (const before of this.ctx.getWebSockets(`outside ${key}`)) before.close(1000, "It connected again");
     const [theirs, ours] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(ours, [`outside ${key}`]);
@@ -161,7 +168,15 @@ export class Relay extends DurableObject {
     return new Response(null, { status: 101, webSocket: theirs });
   }
 
-  /** The way in connects to pass one call to the server `to`, and waits on the connection for its answer. */
+  /** Says `message` to every server that's here. Each takes it as a call, whose answer nothing waits for. */
+  tell(message) {
+    for (const server of this.ctx.getWebSockets()) {
+      if (server.deserializeAttachment()?.outside) server.send(JSON.stringify({ message }));
+    }
+    return new Response(null, { status: 204 });
+  }
+
+  /** A piece here connects to pass one call to the server `to`, and waits on the connection for its answer. */
   call(to) {
     if (!this.ctx.getWebSockets(`outside ${to}`).length) return refuse(404, "That server isn't here");
     const call = crypto.randomUUID();

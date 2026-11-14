@@ -48,7 +48,7 @@
 - Plugins are written against one published interface for everything One Core gives them. In a client they reach
   nothing else. On a server they're also free to use the machine: its files, its programs and its network.
 - A plugin's parts needn't be written in the same language. Its server part and its client part already aren't.
-- A plugin's code runs on servers and in clients, and nowhere else.
+- A plugin's code runs on servers and in clients, in its part at the address if it has one, and nowhere else.
 
 ## Who may do what
 
@@ -79,7 +79,11 @@
 ## The network's address
 
 - A network has one address. A few small pieces sit behind it, each named by its job: the gateway, the signer, the
-  relay, the web client's files and the way in for outsiders. None runs plugin code, and none keeps what users make.
+  relay, the web client's files and the way in for a sharing link's holder. None of these runs plugin code, and none
+  keeps what users make.
+- A plugin may have a part at the address beside those. It's the same for the whole network, and whoever sets up the
+  address puts it there: adding a plugin doesn't. It keeps what it needs in storage of its own, holds none of the
+  signer's secrets, and reaches the bucket only as its plugin's own artifact for the network.
 - An assistant running somewhere else and a call from an outside service come in at the address over the web, and
   are passed to a server by its key.
 
