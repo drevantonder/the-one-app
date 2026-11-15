@@ -1,12 +1,13 @@
 {
   "name": "sign-in",
-  "description": "Signing in's part at a network's address: the sign-in page, passkeys, and the way in for a device or an assistant that someone let act as them.",
+  "description": "Signing in's part at a network's address: the sign-in page, passkeys, the way in for a device or an assistant that someone let act as them, and the llms.txt that tells an assistant how.",
   "private": true,
   "type": "module",
   "paths": [
     "sign-in",
     "mcp",
-    ".well-known"
+    ".well-known",
+    "llms.txt"
   ],
   "scripts": {
     "build": "bun ../../../ui/app.js \"$PWD/page\" \"$PWD/files/sign-in\" && cp ../../../icons/Logo.png files/sign-in/mark.png"

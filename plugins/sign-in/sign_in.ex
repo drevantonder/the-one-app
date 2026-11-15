@@ -19,7 +19,8 @@ defmodule SignIn do
     [
       %{name: "People", page: "app/people.html", icon: "people.svg", settings: true},
       %{name: "Devices", page: "app/index.html", icon: "icon.svg", settings: true},
-      %{name: "Passkeys", page: "app/passkeys.html", icon: "passkeys.svg", settings: true}
+      %{name: "Passkeys", page: "app/passkeys.html", icon: "passkeys.svg", settings: true},
+      %{name: "Connect Your AI", page: "app/connect.html", icon: "connect.svg", settings: true}
     ]
   end
 

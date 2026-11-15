@@ -3,6 +3,7 @@
 // has signed in (`/mcp`): an assistant somewhere else with the token a person let it have, or one of the
 // network's own devices with its key. Either way the call is passed through the relay to a server, which is told
 // which device it's from and decides whose that is itself.
+// `/llms.txt` tells an assistant that's pointed at the network how to come in, as Settings › Connect Your AI asks.
 import { env } from "cloudflare:workers";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { asked, assistant, at } from "./auth.js";
@@ -18,12 +19,28 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     const auth = await at(url.origin);
+    if (url.pathname === "/llms.txt") return new Response(llms(url.origin), { headers: { "content-type": "text/markdown; charset=utf-8" } });
     if (url.pathname === "/mcp") return mcp(request, auth, url);
     if (url.pathname === "/sign-in/ask") return ask(request, auth, url);
     if (url.pathname.startsWith("/sign-in/auth/") || url.pathname.startsWith("/.well-known/")) return auth.handler(request);
     return env.ASSETS.fetch(request);
   },
 };
+
+/** What an assistant reads to come into the network at `origin`, as llmstxt.org has it. */
+const llms = (origin) => `# ${new URL(origin).host}
+
+> A One App network: a family's or a workplace's apps, files and devices. An assistant comes in as the person who
+> lets it in, and does what they can.
+
+## Connecting
+
+- Add ${origin}/mcp as a remote MCP server (a connector), over streamable HTTP. In Claude Code:
+  \`claude mcp add --transport http one ${origin}/mcp\`
+- It signs in with OAuth. The person is asked for their passkey once, and that's their yes.
+- Then their tools are yours: \`tools/list\` lists them. Read a plugin's skill before using its tools:
+  \`resources/list\` lists them, under \`skill://\`, and \`skill://building-plugins/SKILL.md\` says how to make one.
+`;
 
 /** The key that signed what was asked, as the pieces of the address check it, or null. */
 const signer = (request, body) => env.NETWORK.asker(request.url, Object.fromEntries(request.headers), body);
