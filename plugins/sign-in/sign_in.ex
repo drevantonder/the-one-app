@@ -1,18 +1,18 @@
 defmodule SignIn do
   @moduledoc """
-  Signing in: whose each device is. People sign in at the network's address, where this plugin's part there
-  (`address/`) keeps their passkeys and what they let act as them, and writes each device into this plugin's own
+  Signing in: whose each device is. People sign in at the network's address, where this plugin's edge part
+  (`edge/`) keeps their passkeys and what they let act as them, and writes each device into this plugin's own
   artifact for the network as `devices/<device>`: the user whose it is. One Core asks whose a device is, the
-  `device` hook, and it's answered from that blob, so no call asks anything of the address. What each person goes
+  `device` hook, and it's answered from that blob, so no call asks anything of the edge. What each person goes
   by is there too, `people/<name>`, which `people` tells whoever may see who's in the network.
 
-  What a person does with their devices in the app is asked of the part at the address, which keeps them. A network
+  What a person does with their devices in the app is asked of the edge part, which keeps them. A network
   with an address that isn't being built is joined by invitation, its first owner's included: until they've joined,
   the server's log says where, each time it's told who they are. A new link ends the one before.
   """
   @behaviour OneCore.Plugin
   require Logger
-  alias OneCore.{Address, Artifact, Call}
+  alias OneCore.{Artifact, Call, Edge}
 
   @impl true
   def apps do
@@ -221,7 +221,7 @@ defmodule SignIn do
   defp person(%Call{by: "users/" <> _ = by}), do: by
   defp person(_call), do: raise("This is a person's to ask, and nobody is asking.")
 
-  # Asks this plugin's part at the network's address, as this server: it answers only the network's own.
+  # Asks this plugin's edge part, as this server: it answers only the network's own.
   defp ask(what) do
     address =
       Application.get_env(:one_core, :address) ||
@@ -229,12 +229,12 @@ defmodule SignIn do
 
     body = JSON.encode!(what)
 
-    asked = [method: :post, url: address <> "/sign-in/ask", body: body, headers: Address.signed("/sign-in/ask", body)]
+    asked = [method: :post, url: address <> "/sign-in/ask", body: body, headers: Edge.signed("/sign-in/ask", body)]
 
-    case Address.send!(asked ++ [retry: false]) do
+    case Edge.send!(asked ++ [retry: false]) do
       %{status: 200, body: %{"error" => why}} -> raise why
       %{status: 200, body: answer} -> answer
-      %{status: status} -> raise "The network's address answered #{status}"
+      %{status: status} -> raise "The network's edge answered #{status}"
     end
   end
 end

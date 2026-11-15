@@ -94,7 +94,7 @@ ONE_HOME=$folder/client dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x2
 ' "$one" "$folder"
 
 say "What Prober found"
-(cd "$here/../../../address" && bun -e '
+(cd "$here/../../../edge" && bun -e '
   const found = JSON.parse(await Bun.file(process.argv[1]).text());
   let reached = 0;
   for (const [tried, { reached: did, said }] of Object.entries(found)) {

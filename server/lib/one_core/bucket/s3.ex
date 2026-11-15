@@ -6,11 +6,11 @@ defmodule OneCore.Bucket.S3 do
 
   The signer signs a write only with its condition, so the bucket itself refuses one that would overwrite. A blob's
   tag is its ETag. What the signer won't sign for this server raises `OneCore.Bucket.Refused`, and a signer or
-  bucket that can't be reached `OneCore.Address.Unreachable`.
+  bucket that can't be reached `OneCore.Edge.Unreachable`.
   """
   @behaviour OneCore.Bucket
   require Record
-  alias OneCore.Address
+  alias OneCore.Edge
 
   Record.defrecordp(:xml_element, :xmlElement, Record.extract(:xmlElement, from_lib: "xmerl/include/xmerl.hrl"))
   Record.defrecordp(:xml_text, :xmlText, Record.extract(:xmlText, from_lib: "xmerl/include/xmerl.hrl"))
@@ -130,7 +130,7 @@ defmodule OneCore.Bucket.S3 do
   defp signed(address, ask) do
     ask = JSON.encode!(ask)
     url = address <> "/signer/sign"
-    headers = Address.signed("/signer/sign", ask)
+    headers = Edge.signed("/signer/sign", ask)
 
     case sent(method: :post, url: url, body: ask, headers: headers, retry: :transient, receive_timeout: @signs_within) do
       %{status: 200, body: %{"method" => _method} = signed} ->
@@ -147,7 +147,7 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
-  defp sent(request), do: Address.send!(request)
+  defp sent(request), do: Edge.send!(request)
 
   defp tag(got), do: got |> Req.Response.get_header("etag") |> hd()
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Proves Repos with real git, on a whole network with a spare and its address on this machine (`./network <folder>
-# --spare --address`), whose bucket is an S3 store reached only through the signer there. As alice, bob and carol,
+# Proves Repos with real git, on a whole network with a spare and its edge on this machine (`./network <folder>
+# --spare --edge`), whose bucket is an S3 store reached only through the signer there. As alice, bob and carol,
 # and the group family: alice clones, commits, pushes and fetches from two devices; a 50 MB repo with history is
 # pushed, then one small commit, with what each wrote to the bucket; two pushes to one branch at once, through the
 # two servers, where one wins and the other is told to fetch, and nothing is lost; carol is refused clone and push;
@@ -14,7 +14,7 @@ set -m # The network is a job with a process group of its own.
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 folder=$(mktemp -d)
-"$root/network" "$folder" --spare --address >"$folder/network.log" 2>&1 &
+"$root/network" "$folder" --spare --edge >"$folder/network.log" 2>&1 &
 network=$!
 trap 'kill -- "-$network" 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
 grep -q -m1 "A network is running" <(tail -f --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
@@ -34,7 +34,7 @@ now() { echo "${EPOCHREALTIME/[.,]/}"; }
 took() { echo "$((($(now) - $1) / 1000)) ms"; }
 bucket() { du -sb "$folder/bucket" | cut -f1; }
 mb() { awk -v bytes="$1" 'BEGIN { printf "%.1f MB", bytes / 1e6 }'; }
-# A command as someone, on one of their devices: `client`, which reaches the network through its address, or
+# A command as someone, on one of their devices: `client`, which reaches the network through its edge, or
 # `only-server` and `only-spare`, which each reach that server straight.
 as() {
   local who=$1 device=$2
@@ -53,7 +53,7 @@ echo "cloned the empty repo in $(took "$began")"
 echo "# Notes" >notes/README.md && commit notes alice "Start the notes"
 began=$(now)
 as alice client git -C notes push -q -u origin main 2>&1
-echo "pushed from the laptop (through the address) in $(took "$began")"
+echo "pushed from the laptop (through the edge) in $(took "$began")"
 began=$(now)
 as alice only-server git clone -q one::users/alice/made/repos/notes phone 2>&1
 echo "cloned on the phone (straight to the server) in $(took "$began"): $(cat phone/README.md)"

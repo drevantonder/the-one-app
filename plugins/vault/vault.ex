@@ -245,7 +245,7 @@ defmodule Vault do
         name: "back",
         by_link: true,
         description:
-          "Finishes a sign-in to an outside service. The network's address calls this when the service sends its person back.",
+          "Finishes a sign-in to an outside service. The network's edge calls this when the service sends its person back.",
         inputs: %{
           type: "object",
           properties: %{state: %{type: "string"}, code: %{type: "string"}, error: %{type: "string"}},

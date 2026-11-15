@@ -36,7 +36,7 @@ Bun.serve({
     if (url.pathname === "/authorize") {
       const asked = url.searchParams;
       if (asked.get("client_id") !== client.id || asked.get("code_challenge_method") !== "S256") return json({ error: "invalid_request" }, 400);
-      // A code is no secret: it passes through the browser and the network's address, and redeems nothing alone.
+      // A code is no secret: it passes through the browser and the network's edge, and redeems nothing alone.
       const code = `code-${crypto.randomUUID()}`;
       codes.set(code, { challenge: asked.get("code_challenge"), back: asked.get("redirect_uri") });
       seen.signed_in++;

@@ -34,7 +34,7 @@ defmodule OneCore.User do
   - `link` is a sharing link, and whoever shows one is its holder.
   - `as` names a user to act as. It's for a network being built, to show who may do what with nobody signing
     in, and is refused unless the server's `:development` setting is on.
-  - `device`, in what came in at the network's address, is the device the address says it's from: it proved
+  - `device`, in what came in at the network's address, is the device the edge says it's from: it proved
     that there, as a connection proves a key here. Over a connection, it's the device a run of a client runs for,
     with `vouch` (`device/2`).
   - `for` names who else the request is for: a group, or the network.
@@ -89,7 +89,7 @@ defmodule OneCore.User do
   end
 
   @doc """
-  The key of the device a request is from, or `nil`: the device the network's address says, for what came in
+  The key of the device a request is from, or `nil`: the device the network's edge says, for what came in
   there over the web, and otherwise the key the connection proved. A run of a client has a key of its own, since
   a device runs many at once and each is reached by its key, and a request from one names the device it runs for
   with that device's signature of `one/run/1`, a line, and the run's key (`client/src/lib.rs`). A run whose device
@@ -196,7 +196,7 @@ defmodule OneCore.User do
 
   @doc """
   The who that is the holder of a sharing link. A link starts with whose it leads to, as their name: that's how
-  the network's address finds a server for it. Its holder is named after them and by the link's hash, so a
+  the network's edge finds a server for it. Its holder is named after them and by the link's hash, so a
   relation tuple that names the holder doesn't hold the link. A link that starts with nobody's is nobody's.
   """
   def link(link) do

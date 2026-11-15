@@ -1,0 +1,22 @@
+{
+  "name": "sign-in",
+  "description": "Signing in's edge part: the sign-in page, passkeys, the way in for a device or an assistant that someone let act as them, and the llms.txt that tells an assistant how.",
+  "private": true,
+  "type": "module",
+  "paths": [
+    "sign-in",
+    "mcp",
+    ".well-known",
+    "llms.txt"
+  ],
+  "scripts": {
+    "build": "bun ../../../ui/app.js \"$PWD/page\" \"$PWD/files/sign-in\" && cp ../../../icons/Logo.png files/sign-in/mark.png"
+  },
+  "dependencies": {
+    "@better-auth/mcp": "1.7.25",
+    "@better-auth/passkey": "1.7.25",
+    "better-auth": "1.7.25",
+    "bowser": "2.14.1",
+    "zod": "4.6.7"
+  }
+}

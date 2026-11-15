@@ -6,13 +6,13 @@ defmodule Notifications do
   A running app on a computer hears that something changed and asks `inbox` for what's new, which it shows as the
   system's own notification: one that isn't running shows nothing, and its person sees the inbox when they open
   it. A phone or a browser registers where its push service reaches it (`register`), with its notification key,
-  and this plugin's part at the network's address (`address/`) sends there, since only it holds the push services'
+  and this plugin's edge part (`edge/`) sends there, since only it holds the push services'
   keys. What it's handed for each device is the notification encrypted to that key (`Cipher.notification/2`), so
   neither it nor the push service reads it: the device opens it before it shows.
   """
   @behaviour OneCore.Plugin
   require Logger
-  alias OneCore.{Address, Call}
+  alias OneCore.{Call, Edge}
 
   @schema [
     """
@@ -331,7 +331,7 @@ defmodule Notifications do
   defp listed([one]), do: one
   defp listed(many), do: Enum.join(Enum.drop(many, -1), ", ") <> " and " <> List.last(many)
 
-  # Has this plugin's part at the network's address wake the phones and browsers it went to, each sent the
+  # Has this plugin's edge part wake the phones and browsers it went to, each sent the
   # notification encrypted to it, and forgets the ones whose push service says they're gone. With no address there's nothing to send through, and that's said only if
   # some device was to be woken.
   defp push(_call, [], _notification), do: nil
@@ -364,16 +364,16 @@ defmodule Notifications do
     Base.encode64(sealed)
   end
 
-  # Asks this plugin's part at the network's address, signed as this server, which it answers only for a server
+  # Asks this plugin's edge part, signed as this server, which it answers only for a server
   # acting for the network.
   defp ask(address, what) do
     body = JSON.encode!(what)
     path = "/notifications/send"
 
-    case Req.post(address <> path, body: body, headers: Address.signed(path, body), retry: false) do
+    case Req.post(address <> path, body: body, headers: Edge.signed(path, body), retry: false) do
       {:ok, %{status: 200, body: answer}} -> {:ok, answer}
-      {:ok, %{status: status, body: %{"error" => why}}} -> {:error, "the network's address answered #{status}: #{why}"}
-      {:ok, %{status: status}} -> {:error, "the network's address answered #{status}"}
+      {:ok, %{status: status, body: %{"error" => why}}} -> {:error, "the network's edge answered #{status}: #{why}"}
+      {:ok, %{status: status}} -> {:error, "the network's edge answered #{status}"}
       {:error, error} -> {:error, Exception.message(error)}
     end
   end

@@ -284,8 +284,8 @@ if [[ -n $shots ]]; then
   may as_owner add --plugin network/plugins/insights
   for _ in 1 2 3; do as probe slow >/dev/null; as probe echo --text "$marker" >/dev/null; done
   handed_on
-  (cd "$root/address" && ONE_AS=owner bun "$root/client/shell/test/window.js" "$shots" "$root/server/test/insights/shots.js")
-  (cd "$root/address" && ONE_AS=alice ONE_HOME=$folder/phone bun "$root/client/shell/test/window.js" "$shots" "$root/server/test/insights/gateway.js")
+  (cd "$root/edge" && ONE_AS=owner bun "$root/client/shell/test/window.js" "$shots" "$root/server/test/insights/shots.js")
+  (cd "$root/edge" && ONE_AS=alice ONE_HOME=$folder/phone bun "$root/client/shell/test/window.js" "$shots" "$root/server/test/insights/gateway.js")
   ls "$shots"
 fi
 

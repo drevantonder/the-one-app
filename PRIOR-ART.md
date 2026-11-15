@@ -100,7 +100,7 @@ chose the same: a plugin's code on a server is free, and which servers act for w
 ## Decided earlier, and easy to miss
 
 - **How devices link.** Five options were compared in a table earlier in November 2026: A, everything through the
-  network's address; B, A plus direct on the same local network; C, B plus one simple attempt across the internet;
+  network's edge; B, A plus direct on the same local network; C, B plus one simple attempt across the internet;
   D, C plus WebRTC for browsers; E, iroh. The choice was B, with C held back until streaming a screen across the internet
   is common. Most traffic is small requests, and the case to make fastest is an AI on its user's own computer. On 14
   November 2026 the choice moved to E: every server and client is reached by its key.

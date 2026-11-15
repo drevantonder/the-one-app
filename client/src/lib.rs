@@ -85,7 +85,7 @@ pub struct Network {
 
 impl Network {
     /// The headers of an ask of `path` at the address, with `body`: `key`'s signature of it, and the pass. The pieces
-    /// there check both (`address/ask.js`), and a server's Elixir signs the same bytes (`OneCore.Address`).
+    /// there check both (`edge/ask.js`), and a server's Elixir signs the same bytes (`OneCore.Edge`).
     pub fn signed(&self, key: &SecretKey, path: &str, body: &str) -> Result<[(&'static str, String); 4]> {
         let at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis().to_string();
         let signature = key.sign(format!("one/ask/1\n{path}\n{at}\n{body}").as_bytes());
@@ -145,7 +145,7 @@ struct Told {
 }
 
 /// Why a client that knows its network isn't in it: its device is nobody's there yet. It has asked the network's
-/// address for a code to be let in by, as Better Auth's device authorization has it (`plugins/sign-in/address`),
+/// edge for a code to be let in by, as Better Auth's device authorization has it (`plugins/sign-in/edge`),
 /// naming its key and signing what it asks with it, so the code is only ever for this key.
 #[derive(Debug)]
 pub struct NotIn {
@@ -171,18 +171,18 @@ impl std::fmt::Display for NotIn {
 impl std::error::Error for NotIn {}
 
 impl NotIn {
-    /// Asks the network's address at `address` for a code to let the device with `key` in by, under this
+    /// Asks the network's edge at `address` for a code to let the device with `key` in by, under this
     /// machine's name.
     async fn asked(address: &str, key: &SecretKey) -> Result<Self> {
         let ask = json!({"client_id": key.public().to_string(), "name": name()});
-        let (given, said) = ask_address(address, key, "/sign-in/auth/device/code", ask).await?;
+        let (given, said) = ask_edge(address, key, "/sign-in/auth/device/code", ask).await?;
         let (true, Some(link), Some(code), Some(device_code)) = (
             given,
             said["verification_uri_complete"].as_str(),
             said["user_code"].as_str(),
             said["device_code"].as_str(),
         ) else {
-            bail!("{}", said["error_description"].as_str().unwrap_or("the network's address gave this device no code"))
+            bail!("{}", said["error_description"].as_str().unwrap_or("the network's edge gave this device no code"))
         };
         let halves: Vec<String> = code.as_bytes().chunks(4).map(|half| String::from_utf8_lossy(half).into()).collect();
         Ok(Self {
@@ -195,7 +195,7 @@ impl NotIn {
         })
     }
 
-    /// Waits for this device's person to answer, asking the network's address as often as it allows. It's an
+    /// Waits for this device's person to answer, asking the network's edge as often as it allows. It's an
     /// error if they stopped it, or its code ended first.
     pub async fn answered(mut self) -> Result<()> {
         loop {
@@ -205,14 +205,14 @@ impl NotIn {
                 "device_code": self.device_code,
                 "client_id": self.key.public().to_string(),
             });
-            let (given, said) = ask_address(&self.address, &self.key, "/sign-in/auth/device/token", ask).await?;
+            let (given, said) = ask_edge(&self.address, &self.key, "/sign-in/auth/device/token", ask).await?;
             match said["error"].as_str() {
                 _ if given => return Ok(()),
                 Some("authorization_pending") => {}
                 Some("slow_down") => self.interval += Duration::from_secs(5),
                 Some("access_denied") => bail!(NotLetIn::Stopped),
                 Some("expired_token") => bail!(NotLetIn::Ended),
-                _ => bail!("{}", said["error_description"].as_str().unwrap_or("the network's address didn't answer")),
+                _ => bail!("{}", said["error_description"].as_str().unwrap_or("the network's edge didn't answer")),
             }
         }
     }
@@ -324,8 +324,8 @@ impl std::fmt::Display for NotLetIn {
 
 impl std::error::Error for NotLetIn {}
 
-/// Asks the network's address at `path`, with `body` signed by `key`. Gives whether it agreed, and what it said.
-async fn ask_address(address: &str, key: &SecretKey, path: &str, body: Value) -> Result<(bool, Value)> {
+/// Asks the network's edge at `path`, with `body` signed by `key`. Gives whether it agreed, and what it said.
+async fn ask_edge(address: &str, key: &SecretKey, path: &str, body: Value) -> Result<(bool, Value)> {
     let body = body.to_string();
     let network = Network { address: address.to_owned(), pass: String::new() };
     let mut asked = web()?
@@ -353,12 +353,12 @@ impl Told {
         UNIX_EPOCH + Duration::from_millis(until.unwrap_or_default())
     }
 
-    /// Asks the network's address for this device's pass, signed with its key, and keeps it in `home` with whose
+    /// Asks the network's edge for this device's pass, signed with its key, and keeps it in `home` with whose
     /// device it is (`took`). A device that's nobody's there asks for a code to be let in by, and keeps nothing of
     /// whoever's it was: the next person on it sees none of it.
     async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
         let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/pass", "params": {"build": said()}});
-        let (_, answer) = ask_address(&self.address, key, "/mcp", ask).await?;
+        let (_, answer) = ask_edge(&self.address, key, "/mcp", ask).await?;
         if answer["error"]["code"] == NOBODY {
             if self.who.is_some() {
                 (self.pass, self.who) = (None, None);
@@ -367,7 +367,7 @@ impl Told {
             bail!(NotIn::asked(&self.address, key).await?)
         }
         if answer["result"].is_null() {
-            bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's address gave this device no pass"))
+            bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's edge gave this device no pass"))
         }
         self.took(&answer["result"], home)
     }
@@ -664,7 +664,7 @@ pub struct Client {
 /// once, the app, each agent's MCP and every command, and iroh reaches one endpoint by a key, as the relay does: two
 /// with one key take each other's place there, and neither is answered. So each run is its own endpoint, and what it
 /// shows the relay and says to a server names the device it runs for, with the vouch (`Network::shown`, `say`).
-/// The signer at the address and a server check it (`address/signer`, `OneCore.User`).
+/// The signer at the address and a server check it (`edge/signer`, `OneCore.User`).
 #[derive(Clone)]
 struct Link {
     endpoint: Endpoint,
@@ -901,7 +901,7 @@ impl Client {
     }
 
     /// What a server answered, unless it says this device is nobody's: one that was taken out of its network since
-    /// it got its pass. Then the answer says where its person lets it in again, as the network's address says it.
+    /// it got its pass. Then the answer says where its person lets it in again, as the network's edge says it.
     async fn taken_out(&self, answer: Vec<u8>) -> Vec<u8> {
         let (Some(network), Ok(mut said)) = (self.link().network, serde_json::from_slice::<Value>(&answer)) else {
             return answer;
@@ -1037,7 +1037,7 @@ impl Client {
 }
 
 /// How long before a device's pass ends it asks for the next one: half of what a server gives one
-/// (`OneCore.Address`), so a device that's taken out of its network uses its relay for an hour at most.
+/// (`OneCore.Edge`), so a device that's taken out of its network uses its relay for an hour at most.
 const RENEW: Duration = Duration::from_secs(30 * 60);
 
 /// How soon a pass that couldn't be asked for is asked for again: the device may be offline.

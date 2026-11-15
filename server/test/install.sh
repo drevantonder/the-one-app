@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proves a server installs on a machine as one thing, with the one command, and updates in place, on Linux and on
-# a Mac. On a network with its address on this machine (`./network --address`), a second machine, a home folder of
+# a Mac. On a network with its edge on this machine (`./network --edge`), a second machine, a home folder of
 # its own whose PATH has no Erlang, Elixir, Rust or Bun on it, and with only `one` from a build: turns itself into a
 # server of the network's (`one serve on`), which the system keeps running, a real systemd user unit on Linux and
 # a LaunchAgent on a Mac; runs with its person's login PATH; shows other users of the machine no secret and listens
@@ -37,8 +37,8 @@ now() { echo "${EPOCHREALTIME/[.,]/}"; }
 since() { echo "$((($(now) - $1) / 1000)) ms"; }
 size() { du -sh "$1" | cut -f1; }
 
-say "A network, with its address here"
-"$root/network" "$folder/network" --address >"$folder/network.log" 2>&1 &
+say "A network, with its edge here"
+"$root/network" "$folder/network" --edge >"$folder/network.log" 2>&1 &
 started+=($!)
 grep -q -m1 "A network is running" <("$tail" -f --pid=$! -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 client=$folder/network/client
@@ -116,7 +116,7 @@ home=$machine/home/$data/app.theone.client
 key=$(cd "$root/server" && mix run --no-start -e "
   {:ok, key} = OneCore.Iroh.key(\"$home/key\")
   Application.put_env(:one_core, :home, \"$folder/network/server\")
-  File.write!(\"$home/network\", JSON.encode!(%{address: \"$(grep -o '"address":"[^"]*"' "$client/network" | cut -d'"' -f4)\", pass: OneCore.Address.pass(key)}))
+  File.write!(\"$home/network\", JSON.encode!(%{address: \"$(grep -o '"address":"[^"]*"' "$client/network" | cut -d'"' -f4)\", pass: OneCore.Edge.pass(key)}))
   IO.puts(key)")
 # Each command there is given five minutes.
 on_machine() {

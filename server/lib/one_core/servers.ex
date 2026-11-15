@@ -16,7 +16,7 @@ defmodule OneCore.Servers do
   What's read of this is kept, so a call asks the bucket nothing, and read again when this server looks at someone
   (`look/1`) or forgets it all (`forget/0`).
   """
-  alias OneCore.{Address, Bucket, Builds, Server}
+  alias OneCore.{Bucket, Builds, Edge, Server}
 
   @network "network"
 
@@ -56,7 +56,7 @@ defmodule OneCore.Servers do
   def name(key), do: kept({:name, key}, fn -> read("servers/#{key}/name", nil) end)
 
   @doc """
-  Whether the server whose key is `key` is on: `:on` while it's connected to the network's address, the time its
+  Whether the server whose key is `key` is on: `:on` while it's connected to the network's edge, the time its
   machine was last on there, in milliseconds since 1970, if it isn't, or `nil` where that isn't known: a network
   with no address, or a server never seen. The relay at the address keeps it, and tells servers when one comes or
   goes (`seen_again/0`), so a server that's known to be off isn't waited for.
@@ -65,7 +65,7 @@ defmodule OneCore.Servers do
     if at = Application.get_env(:one_core, :address) do
       kept({:seen, key}, fn ->
         path = "/relay/seen"
-        answer = Address.send!(method: :get, url: at <> path, params: [keys: key], headers: Address.signed(path, ""))
+        answer = Edge.send!(method: :get, url: at <> path, params: [keys: key], headers: Edge.signed(path, ""))
         if answer.status == 200, do: on(answer.body[key]), else: nil
       end)
     end

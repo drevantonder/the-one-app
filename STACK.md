@@ -11,13 +11,13 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - **What servers and clients record of themselves is OpenTelemetry's**, made with its Erlang API and SDK, and kept
   by Insights in the network.
 - **What sits at a network's address is Cloudflare Workers**, and a plugin's part there is one more: an ordinary
-  Worker in the plugin's folder, deployed with the address's own.
-- **Signing in is Better Auth, in a Worker with a D1 database of its own**: the sign-in plugin's part at the
-  address. It keeps passkeys, lets a new device in with its Device Authorization plugin (RFC 8628), and is the
+  Worker in the plugin's folder, deployed with the edge's own.
+- **Signing in is Better Auth, in a Worker with a D1 database of its own**: the sign-in plugin's edge
+  part. It keeps passkeys, lets a new device in with its Device Authorization plugin (RFC 8628), and is the
   OAuth provider that MCP's authorization asks for.
 - **A notification reaches a computer through Tauri's notification plugin** while the app runs, and a phone
   through APNs or FCM, whose token the app gets from `tauri-plugin-notifications`, since Tauri's own has no push.
-  The notifications plugin's part at the address sends there, and to browsers with Web Push, each notification
+  The notifications plugin's edge part sends there, and to browsers with Web Push, each notification
   encrypted to its device. The phone opens it before it shows: an iPhone in the app's Notification Service
   Extension, Android in the app's own FCM service, which takes the place of the push plugin's.
 - **An app's UI is Solid 2.0, built by a server with Vite**, which Bun runs. Its components' behaviour is Zag's,

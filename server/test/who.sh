@@ -9,9 +9,9 @@
 # one that breaks is undone. Who may approve is a tuple, and a job that's being called when the server calling it
 # is killed is called once by the spare. It says what a check costs a call.
 #
-#     mise exec -- server/test/who.sh [--address]
+#     mise exec -- server/test/who.sh [--edge]
 #
-# With --address the network has its address on this machine too, so its servers reach the bucket only through the
+# With --edge the network has its edge on this machine too, so its servers reach the bucket only through the
 # signer there, which is what refuses a server the blobs of someone it doesn't act for.
 set -euo pipefail
 set -m # The network is a job with a process group of its own, and so is each server started here.
@@ -62,7 +62,7 @@ start_for() {
   key_of "$1"
 }
 # One tool call over the web at the network's address, as whoever holds a sharing link, with what it's answered.
-# What it says of itself is someone else, which the address doesn't pass on.
+# What it says of itself is someone else, which the edge doesn't pass on.
 web() {
   local asked answer
   asked="{\"name\":\"$3\",\"arguments\":$4,\"_meta\":{\"as\":\"owner\",\"for\":\"network\",\"who\":\"users/owner\"}}"
@@ -312,7 +312,7 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
   refused web link "${link}x" notes_read "{\"note\":\"$note\"}"
   refused web link "nobody/at-all" notes_read "{\"note\":\"$note\"}"
 else
-  echo "  (with --address, the same holder comes in at the network's address over the web)"
+  echo "  (with --edge, the same holder comes in at the network's address over the web)"
 fi
 may as alice relations unshare --artifact "$note" --relation viewer --who "$holder"
 refused as link "$link" notes read --note "$note"
@@ -413,7 +413,7 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
     users/bob/made/notes/list/text network/own/relations/log/0000000000000001 groups/family/own/diary/1 \
     users/bob/added network/plugins/notes/newest 2>&1 | grep -v "^$")
 else
-  echo "  (on a folder nothing stands between a server and the bucket: with --address, the signer refuses it the rest)"
+  echo "  (on a folder nothing stands between a server and the bucket: with --edge, the signer refuses it the rest)"
 fi
 may as alice add_member --server "${key[alices]}" --who users/bob
 may as bob add_server --key "${key[alices]}"

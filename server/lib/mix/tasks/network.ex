@@ -27,9 +27,9 @@ defmodule Mix.Tasks.Network do
 
       mix network <folder> --address <address> --first <secret>
 
-  starts a server of a network that has an address (`address/`). Its bucket is the one the signer there signs
+  starts a server of a network that has an edge (`edge/`). Its bucket is the one the signer there signs
   for, and it and its client reach each other through the relay there when they can't directly. `--first` is the
-  secret the address was deployed with, which a network's first server shows the first time it starts.
+  secret the edge was deployed with, which a network's first server shows the first time it starts.
 
       mix network <folder> --owner <name>
 
@@ -52,7 +52,7 @@ defmodule Mix.Tasks.Network do
   `./network`, at the root, starts a whole network with this.
   """
   use Mix.Task
-  alias OneCore.{Address, Iroh, Server, Servers, User}
+  alias OneCore.{Edge, Iroh, Server, Servers, User}
   alias OneCore.Plugins.Added
 
   @root Path.expand("../../../..", __DIR__)
@@ -139,7 +139,7 @@ defmodule Mix.Tasks.Network do
 
       address && options[:development] ->
         {:ok, key} = Iroh.key(Path.join(client, "key"))
-        File.write!(Path.join(client, "network"), JSON.encode!(%{address: address, pass: Address.pass(key)}))
+        File.write!(Path.join(client, "network"), JSON.encode!(%{address: address, pass: Edge.pass(key)}))
 
       address ->
         File.write(Path.join(client, "network"), JSON.encode!(%{address: address}), [:exclusive])

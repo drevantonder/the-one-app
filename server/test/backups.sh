@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Proves, on a whole network on this machine (`./network <folder>`), what backups promise, by doing each. A network
 # with two people, a group, databases with rows, files and a Vault item is backed up to a folder, through the
-# service on its machine, and to S3-compatible storage (a local S3 store, as `./network --address` runs one),
+# service on its machine, and to S3-compatible storage (a local S3 store, as `./network --edge` runs one),
 # while writes go on. What changed is backed up again, and only that is sent. Then the bucket is destroyed, and
 # the network restored into an empty one from each place with nothing but the recovery key, a server started on
 # it, and everything is back and the Vault opens. A file deleted before the last backup is brought back into the
@@ -31,7 +31,7 @@ one=$root/target/release/one
 
 say() { printf '\n== %s\n' "$*"; }
 random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
-free_port() { (cd "$root/address" && bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'); }
+free_port() { (cd "$root/edge" && bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'); }
 size() { du -sb "$1" | awk '{ printf "%.1f MB", $1 / 1e6 }'; }
 shown() { sed -e "s|$folder|<folder>|g" | cut -c1-400 | sed 's/^/    /'; }
 # A command as a user, and for a group or the network if it says, on the network's client: `as alice shelf all`,
@@ -99,7 +99,7 @@ mkdir "$folder/s3"
 RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$s3" "$folder/s3" >"$folder/s3.log" 2>&1 &
 started+=($!)
 curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://$s3/"
-(cd "$root/address" && ACCESS=$access SECRET=$secret BUCKET=http://$s3/backups bun -e '
+(cd "$root/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$s3/backups bun -e '
   import { AwsClient } from "aws4fetch";
   const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
   const made = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });

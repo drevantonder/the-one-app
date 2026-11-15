@@ -183,7 +183,7 @@ defmodule OneCore.Plugin do
 
   What of a plugin runs in a client is its folder `app/`, as the server built it, which reaches each client from the
   server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
-  and its part at the network's address. `apps/0`, if the plugin has one, names its apps:
+  and its edge part. `apps/0`, if the plugin has one, names its apps:
 
       @impl true
       def apps, do: [%{name: "Hello", page: "app/index.html", icon: "icon.svg"}]
@@ -337,15 +337,15 @@ defmodule OneCore.Plugin do
     that stops by itself should stop the service, so that both are started again. The plugin `load` does all of
     this.
 
-  A plugin's part at the network's address is what of it has to be reached over the web: a page that opens in a
-  browser, or a call from a service outside. It's an ordinary Cloudflare Worker in the plugin's folder `address`,
+  A plugin's edge part is what of it has to be reached over the web: a page that opens in a
+  browser, or a call from a service outside. It's an ordinary Cloudflare Worker in the plugin's folder `edge`,
   with a `wrangler.jsonc`, and a `package.json` that names the first part of each path it answers:
 
       "paths": ["hello"]
 
   - It answers every request at the address whose path starts with one of those (`/hello/...`), for the whole
-    network. It isn't deployed with the plugin: whoever deploys the network's address deploys it with that
-    (`address/address.js`), so it's for the plugins a network is set up with.
+    network. It isn't deployed with the plugin: whoever deploys the network's edge deploys it with that
+    (`edge/edge.js`), so it's for the plugins a network is set up with.
   - It keeps what it needs in storage of its own, which its `wrangler.jsonc` binds, and is given three bindings
     besides. `env.OWN.write(name, data)` writes a blob of the plugin's own artifact for the network, only if
     there's none, and `env.OWN.remove(name)` removes one: that's where the plugin's server part reads what this
@@ -353,11 +353,11 @@ defmodule OneCore.Plugin do
     keys of the servers acting for a user, a group or the network, by their prefix (`users/alice/`).
     `env.RELAY.pass(server, message)` passes one JSON-RPC message to a server and gives its answer, or `null` if
     that server isn't up, and `env.RELAY.tell(message)` tells every server a notification.
-  - The plugin's server part asks it over the web, signing what it asks as its server does at the address
-    (`OneCore.Address.signed/2`). `env.NETWORK.asker(url, headers, body)` gives the key that signed it, or `null`.
-  - Its `package.json`'s packages are installed and its `build` script run where the address is deployed from. A
+  - The plugin's server part asks it over the web, signing what it asks as its server does at the edge
+    (`OneCore.Edge.signed/2`). `env.NETWORK.asker(url, headers, body)` gives the key that signed it, or `null`.
+  - Its `package.json`'s packages are installed and its `build` script run where the edge is deployed from. A
     page it serves is built there as an app's is, against the kit (`bun ../../../ui/app.js <source> <out>`), which
-    the address serves at `/ui/` as every client has it. `sign-in` does all of this.
+    the edge serves at `/ui/` as every client has it. `sign-in` does all of this.
   """
   @moduledoc "The interface a plugin's server part is written against.\n\n" <> @text
 

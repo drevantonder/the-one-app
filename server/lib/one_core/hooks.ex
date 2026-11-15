@@ -27,7 +27,7 @@ defmodule OneCore.Hooks do
   That something may be reached is kept by the server that asked, so that it asks once: until a tool that doesn't
   only read is called of a plugin that decides it, which that server and the ones it tells forget at once, and
   for a few seconds anywhere else. Whose a device is is kept the same way, until a server is told to forget it:
-  by a tool of a plugin that says whose, or by that plugin's part at the network's address. A refusal is never
+  by a tool of a plugin that says whose, or by that plugin's edge part. A refusal is never
   kept, nor that a device is nobody's. So taking access away reaches every server, and giving it is seen at once.
 
   Who may do what is a plugin's to decide. Where no plugin decides `reach` for a moment, nothing is reached and

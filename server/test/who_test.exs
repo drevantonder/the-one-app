@@ -182,7 +182,7 @@ defmodule OneCore.WhoTest do
     assert %{"error" => %{"message" => "This device is nobody's here" <> _}} = list.("initialize", %{}, nil)
 
     # A plugin that signs users in says whose a device is: the key a connection proved, or the device the
-    # network's address says a request over the web is from. A device doesn't say it's another.
+    # network's edge says a request over the web is from. A device doesn't say it's another.
     deploy("placer", OneCore.Test.placer())
     assert {:ok, :ok} = call("placer_place", %{"device" => stranger, "who" => "users/alice"}, OneCore.Test.owner())
     assert ask(%{}, stranger) == "users/alice"

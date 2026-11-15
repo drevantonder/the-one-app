@@ -8,7 +8,7 @@ defmodule OneCore.Server do
   Everything a server keeps on its machine is in its home.
   """
   use GenServer
-  alias OneCore.{Address, Hooks, Iroh, Mcp, Plugins, Servers, Telemetry}
+  alias OneCore.{Edge, Hooks, Iroh, Mcp, Plugins, Servers, Telemetry}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -152,7 +152,7 @@ defmodule OneCore.Server do
 
   @impl true
   def init(nil) do
-    network = if at = Application.get_env(:one_core, :address), do: {at, Address.pass()}
+    network = if at = Application.get_env(:one_core, :address), do: {at, Edge.pass()}
     {:ok, {endpoint, address}} = Iroh.start(key_file(), network, self())
     key = JSON.decode!(address)["id"]
     :persistent_term.put(__MODULE__, {key, endpoint})

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves, on a whole network with a spare and its address on this machine (`./network <folder> --spare --address`),
+# Proves, on a whole network with a spare and its edge on this machine (`./network <folder> --spare --edge`),
 # what encryption and the Vault promise, by trying each, for a person, a group and the network. What's typed on a device is encrypted there, and the
 # bytes in the bucket hold none of it, for a blob and for a database. A server that wasn't chosen can't open
 # either and takes no lease; a chosen one can, and stops when it's taken off. The network's owner writes every
@@ -17,7 +17,7 @@ set -m # The network is a job with a process group of its own, and so is each se
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 folder=$(mktemp -d)
-"$root/network" "$folder" --spare --address >"$folder/network.log" 2>&1 &
+"$root/network" "$folder" --spare --edge >"$folder/network.log" 2>&1 &
 network=$!
 started=("$network")
 # `./network` stops what it started when it's stopped. The bucket's store writes as it stops, so the folder goes
@@ -39,7 +39,7 @@ say() { printf '\n== %s\n' "$*"; }
 now() { echo "${EPOCHREALTIME/[.,]/}"; }
 median() { sort -n "$1" | awk '{ all[NR] = $1 } END { printf "%.3f ms", all[int((NR + 1) / 2)] / 1000 }'; }
 random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
-free_port() { (cd "$root/address" && bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'); }
+free_port() { (cd "$root/edge" && bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'); }
 
 # The secrets: each a file, whose text starts with the marker.
 marker=vault-proof-$(random 8)
@@ -81,7 +81,7 @@ refused() { ! said=$("$@") && shown "refused" "$@" || { echo "this was answered,
 
 # What a page at the network's address says once it has drawn, in a browser: its heading and what's under it.
 browser() {
-  (cd "$root/address" && bun -e '
+  (cd "$root/edge" && bun -e '
     import { chromium } from "playwright";
     const browser = await chromium.launch();
     const page = await browser.newPage();
@@ -221,7 +221,7 @@ may on desk as owner relations unshare --artifact $vault --relation editor --who
 
 say "An agent keeps what's pasted, asks its person for the rest, and uses it without seeing it"
 service=$(free_port)
-(cd "$root/address" && MARKER=$marker exec bun "$root/server/test/vault/service.js" "$service") >"$folder/service.log" 2>&1 &
+(cd "$root/edge" && MARKER=$marker exec bun "$root/server/test/vault/service.js" "$service") >"$folder/service.log" 2>&1 &
 started+=($!)
 curl -s -o /dev/null --retry 30 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$service/seen"
 echo "  an outside service runs on this machine, at 127.0.0.1:$service"
@@ -349,8 +349,8 @@ say "No secret was answered, logged or stored anywhere but encrypted"
 # outside the bucket a secret is: everything else of the network is searched. The secrets' own files are the proof's.
 everything=$(find "$folder" -type f -not -path "$folder/secrets/*" -not -path "*/database/copy.sqlite*")
 echo "  what every tool answered every device, here: $(wc -l <"$folder/said") lines, of which $({ grep -c -F -e "$marker" "$folder/said" || true; }) hold the marker"
-echo "  the servers' logs, the address's and the service's: $(cat "$folder"/*.log | wc -l) lines, of which $({ cat "$folder"/*.log | grep -c -a -F -e "$marker" || true; }) hold the marker"
-echo "  every file of the network (its bucket, its address's storage, its servers' and its clients' homes): $(wc -l <<<"$everything"), of which $(xargs -d '\n' grep -a -l -F -e "$marker" <<<"$everything" 2>/dev/null | wc -l) hold the marker"
+echo "  the servers' logs, the edge's and the service's: $(cat "$folder"/*.log | wc -l) lines, of which $({ cat "$folder"/*.log | grep -c -a -F -e "$marker" || true; }) hold the marker"
+echo "  every file of the network (its bucket, its edge's storage, its servers' and its clients' homes): $(wc -l <<<"$everything"), of which $(xargs -d '\n' grep -a -l -F -e "$marker" <<<"$everything" 2>/dev/null | wc -l) hold the marker"
 [[ $(xargs -d '\n' grep -a -l -F -e "$marker" <<<"$everything" 2>/dev/null | wc -l) == 0 ]]
 echo "  the working copies a chosen server keeps of the databases it writes, on its own disk: $(find "$folder" -path "*/database/copy.sqlite" | sed "s|$folder/||" | paste -sd' ')"
 

@@ -7,7 +7,7 @@ defmodule OneCore.Bucket do
   Which bucket a server uses is its `:bucket` setting, `{module, where}`.
   """
 
-  alias OneCore.Address
+  alias OneCore.Edge
 
   @type key :: String.t()
   @typedoc "What `read` gives so that `replace` can tell whether the blob changed since."
@@ -58,20 +58,20 @@ defmodule OneCore.Bucket do
 
   # A server that couldn't reach the bucket may have missed being told something meanwhile, so the first answer
   # after has it look again (`OneCore.Server.came_back/0`). A bucket that couldn't be reached raises
-  # `OneCore.Address.Unreachable`, since what isn't on this machine is reached through the network's address.
+  # `OneCore.Edge.Unreachable`, since what isn't on this machine is reached through the network's edge.
   defp bucket(function, arguments) do
     {module, where} = Application.fetch_env!(:one_core, :bucket)
     answer = apply(module, function, [where | arguments])
 
-    if :persistent_term.get(Address.Unreachable, false) do
-      :persistent_term.erase(Address.Unreachable)
+    if :persistent_term.get(Edge.Unreachable, false) do
+      :persistent_term.erase(Edge.Unreachable)
       Task.start(&OneCore.Server.came_back/0)
     end
 
     answer
   rescue
-    unreachable in Address.Unreachable ->
-      if not :persistent_term.get(Address.Unreachable, false), do: :persistent_term.put(Address.Unreachable, true)
+    unreachable in Edge.Unreachable ->
+      if not :persistent_term.get(Edge.Unreachable, false), do: :persistent_term.put(Edge.Unreachable, true)
       reraise unreachable, __STACKTRACE__
   end
 end

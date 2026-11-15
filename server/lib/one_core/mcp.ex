@@ -21,7 +21,7 @@ defmodule OneCore.Mcp do
   a resource too, `skill://<path>/<file>`, which `resources/read` reads (`OneCore.Skills`).
   """
   require Logger
-  alias OneCore.{Address, Artifact, Builds, Hooks, Plugins, Server, Servers, Services, Skills, Telemetry, Tools, User}
+  alias OneCore.{Artifact, Builds, Edge, Hooks, Plugins, Server, Servers, Services, Skills, Telemetry, Tools, User}
   alias OneCore.Plugins.{Calls, Kept, Version}
 
   # What a server speaks of MCP is the same in each of these.
@@ -64,7 +64,7 @@ defmodule OneCore.Mcp do
         Servers.seen_again()
         ""
 
-      # Another server, or a plugin's part at the network's address, saying that what this one kept of some hooks
+      # Another server, or a plugin's edge part, saying that what this one kept of some hooks
       # was decided from what has since changed.
       {:ok, %{"method" => "notifications/one/decided"} = said} ->
         Hooks.forget(for hook <- List.wrap(said["params"]["hooks"]), is_binary(hook), do: hook)
@@ -139,14 +139,14 @@ defmodule OneCore.Mcp do
   defp result("ping", _params, _from, _asked, _passed_on), do: {:ok, %{}}
 
   # A user's device asks for its pass to the relay at the network's address, and for the next before that one
-  # ends, and is told whose it is: the device a run of it proved here, or the address did there. It says which
+  # ends, and is told whose it is: the device a run of it proved here, or the edge did there. It says which
   # build it is as it asks.
   defp result("one/pass", params, from, {"users/" <> _ = by, _for}, _passed_on) do
     device = User.device(from, said(params))
 
     if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}$/ do
       Builds.seen(by, device, params["build"])
-      {:ok, %{pass: Address.pass(device), who: by}}
+      {:ok, %{pass: Edge.pass(device), who: by}}
     else
       {:error, "A pass is for a user's device, by its key"}
     end

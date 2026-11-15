@@ -7,7 +7,7 @@
 //
 // `steps.js` exports `default async ({ page, home, app, shot })`: `page` is Playwright's, `home` is the home pages'
 // frame, `app(name)` opens an app from them and gives its frame, and `shot(name)` takes a picture into <folder>, of each size and scheme:
-// a phone and a desktop, light and dark. It runs from `address/`, which has Playwright.
+// a phone and a desktop, light and dark. It runs from `edge/`, which has Playwright.
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 

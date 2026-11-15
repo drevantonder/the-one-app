@@ -12,8 +12,8 @@ built on GTK and WebKitGTK (`libwebkit2gtk-4.1-dev`). Then:
 
 That builds what isn't built and starts a whole network on this machine, kept in that folder, with the plugins The
 One App ships with. It says how to open the app and call a tool. `--spare` starts a second server too, which takes
-over when the first stops, and `--address` runs the network's address here as well. That's a network being built,
-where nobody signs in and a command says who it acts as. With `--address --owner <name>` it's one people sign in
+over when the first stops, and `--edge` runs the network's edge here as well. That's a network being built,
+where nobody signs in and a command says who it acts as. With `--edge --owner <name>` it's one people sign in
 to, with a passkey, and it says where its first owner joins.
 
 A server needs `git` for Repos, which has git do git's own work.
@@ -26,26 +26,26 @@ there.
 `server/test/takeover.sh` stops servers in the middle of writes, `server/test/services.sh` runs services on one of
 two servers, with one that picks up what it wasn't told and a network nobody uses reading nothing,
 `server/test/who.sh` shows who may do what as several users, each with their own plugins and servers, and a
-scheduled job across a takeover, on a folder or with `--address` through the signer,
+scheduled job across a takeover, on a folder or with `--edge` through the signer,
 `server/test/vault.sh` shows that what's encrypted is read only by the servers its owner chose, and never by a
 tool's answer, a log or the bucket, through a sign-in to an outside service and the loss of every device,
 `server/test/backups.sh` backs a network up to a disk and to S3-compatible storage, destroys its bucket and
 restores it from each with the recovery key, `server/test/repos.sh` clones, pushes and suggests changes with real
-git as several people, through the address and two servers, one killed partway through a push,
-`address/proof/proof.sh` runs a whole address with nothing deployed,
-`address/proof/sign-in.sh` has people sign in
+git as several people, through the edge and two servers, one killed partway through a push,
+`edge/proof/proof.sh` runs a whole edge with nothing deployed,
+`edge/proof/sign-in.sh` has people sign in
 with passkeys in real browsers and let in devices and an assistant, and `client/shell/test/isolation.sh` has an app
 try everything it mustn't reach, and `server/test/install.sh` has a machine with nothing on it but `one` install a
 server, update it, go back from a build that can't start, and remove it.
 
-To put a network's address on Cloudflare, make an R2 bucket and an S3 API token for it, and write the signer's
-secrets to `address/signer/secrets`, a line each: `BUCKET`, the bucket's S3 address with its name on the end
+To put a network's edge on Cloudflare, make an R2 bucket and an S3 API token for it, and write the signer's
+secrets to `edge/signer/secrets`, a line each: `BUCKET`, the bucket's S3 address with its name on the end
 (`https://<account>.r2.cloudflarestorage.com/<bucket>`), `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, and `FIRST_SERVER`,
 which you make up (`openssl rand -hex 16`). The network's address is a name on a zone of that Cloudflare account,
 which deploying attaches to the gateway. Then:
 
     cd ui && bun install && bun build.js
-    cd ../address && bun install && bun run deploy https://<the network's address>
+    cd ../edge && bun install && bun run deploy https://<the network's address>
     cd ../server && mix network /tmp/one-network --address https://<the network's address> --first <FIRST_SERVER> --owner <name>
 
 The network's first server shows `FIRST_SERVER` that once, and nobody without it can become the first. It opens
@@ -96,9 +96,9 @@ init` for now.
 - `client`: the client's Rust half, which is the CLI and MCP.
 - `client/shell`: the app, a window on that half, and the one program both are.
 - `ui`: the kit an app's UI is written with.
-- `address`: what sits at a network's address, each a Cloudflare Worker: the gateway, the relay, the signer, the web
-  client's files and the way in for a sharing link's holder. `address.js` runs or deploys them, with each plugin's
-  part at the address.
+- `edge`: what sits at a network's address, each a Cloudflare Worker: the gateway, the relay, the signer, the web
+  client's files and the way in for a sharing link's holder. `edge.js` runs or deploys them, with each plugin's
+  edge part.
 - `plugins`: the plugins The One App ships with, each a folder of its own.
 
 ## Reading it

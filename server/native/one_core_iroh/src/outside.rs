@@ -1,5 +1,5 @@
-//! A server's connection to its network's address for outsiders' calls. What an assistant somewhere else asks at
-//! the address over the web is passed down this connection by the relay there (`address/relay/relay.js`), and the
+//! A server's connection to its network's edge for outsiders' calls. What an assistant somewhere else asks at
+//! the address over the web is passed down this connection by the relay there (`edge/relay/relay.js`), and the
 //! server's answer goes back up it.
 
 use std::time::Duration;
@@ -38,13 +38,13 @@ async fn heard(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result<(
     }
 
     let (socket, _) = connect_async(request).await?;
-    // What the network's servers and the pieces at the address told this one while it wasn't there, it didn't hear.
+    // What the network's servers and the pieces of the edge told this one while it wasn't there, it didn't hear.
     // So it looks again, as a server that comes back does (`OneCore.Server.came_back/0`).
     let _ = crate::ask(asked, None, br#"{"jsonrpc":"2.0","method":"notifications/one/look"}"#).await;
     let (mut up, mut down) = socket.split();
     let (answers, mut answered) = mpsc::unbounded_channel();
     let mut say = interval(EVERY);
-    // The address answers each thing said, so one that has said nothing for this long is gone.
+    // The edge answers each thing said, so one that has said nothing for this long is gone.
     let quiet = sleep(EVERY * 2);
     tokio::pin!(quiet);
     loop {
@@ -64,11 +64,11 @@ async fn heard(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result<(
                 // Its answer to what this end said.
                 Some(Ok(_)) => quiet.as_mut().reset(Instant::now() + EVERY * 2),
                 Some(Err(error)) => bail!(error),
-                None => bail!("the address closed it"),
+                None => bail!("the edge closed it"),
             },
             Some(answer) = answered.recv() => up.send(Message::text(answer)).await?,
             _ = say.tick() => up.send(Message::Ping(Default::default())).await?,
-            _ = &mut quiet => bail!("the address went quiet"),
+            _ = &mut quiet => bail!("the edge went quiet"),
         }
     }
 }
