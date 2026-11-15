@@ -22,6 +22,25 @@ defmodule Load do
   def call("now", inputs, call) do
     servers = List.wrap(inputs["server"] || OneCore.Service.servers(call, Meter))
     if servers == [], do: raise("No machine is measured yet. `install_service` runs Load.Meter on one.")
-    for server <- servers, do: Map.put(OneCore.Service.call(call, Meter, :now, [], server), "server", server)
+    now(call, servers)
+  end
+
+  @doc """
+  How busy each of `servers` is, by their keys: each one's `server`, its `name`, and what its meter measured, or a
+  `problem` saying why it couldn't, such as its server not being up. For a plugin that uses this one.
+  """
+  def now(call, servers \\ nil) do
+    servers = servers || OneCore.Service.servers(call, Meter)
+
+    for server <- servers do
+      measured =
+        try do
+          OneCore.Service.call(call, Meter, :now, [], server)
+        rescue
+          problem -> %{"problem" => Exception.message(problem)}
+        end
+
+      Map.merge(measured, %{"server" => server, "name" => OneCore.Service.name(server)})
+    end
   end
 end
