@@ -20,7 +20,7 @@ defmodule OneCore.Application do
 
       with {:ok, _supervisor} = started <-
              Supervisor.start_link(children, strategy: :one_for_one, name: OneCore.Supervisor) do
-        if Servers.here?("network"), do: Deploy.ship()
+        if Servers.here?("network"), do: Task.Supervisor.start_child(OneCore.Asks, &Deploy.ship/0)
 
         started
       end
