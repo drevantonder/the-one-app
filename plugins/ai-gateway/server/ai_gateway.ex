@@ -169,8 +169,22 @@ defmodule AiGateway do
   # Each model asked is a span of the call, as OpenTelemetry's conventions for AI name it: Insights shows how long
   # each took, and what each used.
   defp asked(call, id, body, json?) do
+    began = System.monotonic_time(:microsecond)
+    asked = ask(call, id, body, json?)
+    took = (System.monotonic_time(:microsecond) - began) / 1000
     attributes = %{"gen_ai.operation.name" => "chat", "gen_ai.request.model" => id}
-    OneCore.Telemetry.record("chat #{id}", attributes, fn -> ask(call, id, body, json?) end)
+    error = if match?({:down, _why}, asked), do: elem(asked, 1)
+    record(call, [%{"name" => "chat #{id}", "attributes" => attributes, "took" => took, "error" => error}])
+    asked
+  end
+
+  # What Insights keeps, where it's added: names, sizes and outcomes, never what was asked or answered.
+  defp record(call, records) do
+    if Enum.any?(Call.plugins(call), &(&1.name == "insights")),
+      do:
+        Call.tool(call, "insights", "record", %{
+          "records" => Enum.map(records, &Map.reject(&1, fn {_, v} -> v == nil end))
+        })
   end
 
   # Asks one model: `{:ok, answer}`, or `{:down, why}` when it isn't up, said no, or answered with what isn't an
@@ -202,7 +216,7 @@ defmodule AiGateway do
         problem in RuntimeError -> {:down, problem.message}
       end
 
-    with %{status: status, body: said} <- sent, do: answered(id, item, status, said, json?)
+    with %{status: status, body: said} <- sent, do: answered(call, id, item, status, said, json?)
   end
 
   defp ask_machines(_call, [], _model, _body, _json?), do: {:down, "No machine of yours that's up has it"}
@@ -213,16 +227,19 @@ defmodule AiGateway do
           rescue
             problem in RuntimeError -> %{"down" => problem.message}
           end) do
-      %{"status" => status, "body" => said} -> answered("local/" <> model, Service.name(server), status, said, json?)
-      %{"down" => _why} -> ask_machines(call, rest, model, body, json?)
+      %{"status" => status, "body" => said} ->
+        answered(call, "local/" <> model, Service.name(server), status, said, json?)
+
+      %{"down" => _why} ->
+        ask_machines(call, rest, model, body, json?)
     end
   end
 
   # What a model said, as an answer: its text, and that read as JSON when a schema was asked for.
-  defp answered(id, runs_on, status, said, json?) when status in 200..299 do
+  defp answered(call, id, runs_on, status, said, json?) when status in 200..299 do
     case JSON.decode(said) do
       {:ok, %{"choices" => [%{"message" => %{"content" => content}} = choice | _]} = answered} ->
-        used(id, answered["usage"])
+        used(call, id, answered["usage"])
         text = text(content)
         json = if json?, do: JSON.decode(text), else: {:ok, nil}
 
@@ -243,7 +260,7 @@ defmodule AiGateway do
     end
   end
 
-  defp answered(_id, _runs_on, status, said, _json?) do
+  defp answered(_call, _id, _runs_on, status, said, _json?) do
     why =
       case JSON.decode(said) do
         {:ok, %{"error" => %{"message" => message}}} -> message
@@ -257,17 +274,27 @@ defmodule AiGateway do
 
   # What a model said it used: its tokens in and out, and what it cost where the endpoint says, as OpenRouter's
   # does. Insights reads them as AI Gateway's spending.
-  defp used(id, %{} = usage) do
+  defp used(call, id, %{} = usage) do
     model = %{"gen_ai.request.model" => id}
 
-    for {type, tokens} <- [{"input", usage["prompt_tokens"]}, {"output", usage["completion_tokens"]}],
-        is_integer(tokens),
-        do: OneCore.Telemetry.record("gen_ai.client.token.usage", Map.put(model, "gen_ai.token.type", type), tokens)
+    tokens =
+      for {type, tokens} <- [{"input", usage["prompt_tokens"]}, {"output", usage["completion_tokens"]}],
+          is_integer(tokens),
+          do: %{
+            "name" => "gen_ai.client.token.usage",
+            "attributes" => Map.put(model, "gen_ai.token.type", type),
+            "value" => tokens
+          }
 
-    if is_number(usage["cost"]), do: OneCore.Telemetry.record("gen_ai.client.cost", model, usage["cost"])
+    cost =
+      if is_number(usage["cost"]),
+        do: [%{"name" => "gen_ai.client.cost", "attributes" => model, "value" => usage["cost"]}],
+        else: []
+
+    if tokens ++ cost != [], do: record(call, tokens ++ cost)
   end
 
-  defp used(_id, _usage), do: :ok
+  defp used(_call, _id, _usage), do: :ok
 
   # Some servers answer with the content's parts rather than its text.
   defp text(parts) when is_list(parts), do: Enum.map_join(parts, &(&1["text"] || ""))

@@ -15,7 +15,7 @@ defmodule OneCore.Tools do
   What a tool changes is whoever's it is, so a server acting for them runs it: the one asked, or one it passes
   the call on to.
   """
-  alias OneCore.{Artifact, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, Telemetry, User}
+  alias OneCore.{Artifact, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
   alias OneCore.Plugins.{Added, Calls, Deploy, Kept}
 
   @tools [
@@ -282,9 +282,7 @@ defmodule OneCore.Tools do
         # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
         apart = if name in ["deploy", "remove"], do: {User.owner(elem(asked, 1)), inputs["name"]}
 
-        Telemetry.tool(nil, name, elem(asked, 1), fn ->
-          Calls.tool(tool, about, asked, nil, &run(name, &1, asked, pass), apart)
-        end)
+        Calls.tool(tool, about, asked, nil, &run(name, &1, asked, pass), apart)
     end
   end
 
@@ -434,7 +432,6 @@ defmodule OneCore.Tools do
       if not Application.get_env(:one_core, :installed, false),
         do: raise("#{here()} wasn't installed with `one serve on`, so it doesn't update itself.")
 
-      Telemetry.record("one.server.update", %{"one.build" => Builds.build()})
       IO.puts(Release.update_asked())
       "#{here()} is taking the newest builds, and answers again once it has."
     end)

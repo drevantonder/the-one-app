@@ -19,7 +19,7 @@ folder=$(mktemp -d)
 export ONE_HOME=$folder/client
 shots=
 [[ ${1:-} == --shots ]] && shots=$(mkdir -p "$2" && cd "$2" && pwd)
-# Each server hands on what it recorded every second, not every minute, so the proof needn't wait.
+# Insights keeps what each server heard every second, not every minute, so the proof needn't wait.
 OTEL_BSP_SCHEDULE_DELAY=1000 "$root/network" "$folder" --spare >"$folder/network.log" 2>&1 &
 started=($!)
 stop() {
@@ -66,7 +66,7 @@ for k in sys.argv[2].strip(".").split("."):
     if k: v = v[int(k)] if k.lstrip("-").isdigit() else v[k]
 print(v if isinstance(v, str) else json.dumps(v))' "$said" "$1"; }
 pick() { python3 -I -c "import json, sys; xs = json.loads(sys.argv[1]); print(json.dumps(next(x for x in xs if $1)))" "$said"; }
-# Insights has what the servers recorded once each has handed it on, a second after.
+# Insights has kept what each server heard a second after.
 handed_on() { sleep 3; }
 
 # A plugin to prove with. `echo` answers how long what it was given is, and records that as a number and a log
@@ -98,16 +98,21 @@ defmodule Probe do
   @impl true
   def call("ping", _inputs, _call), do: "pong"
 
-  def call("echo", %{"text" => text}, _call) do
-    OneCore.Telemetry.record("probe.echoed", %{"kind" => "text"})
-    OneCore.Telemetry.record("probe.bytes", %{"kind" => "text"}, byte_size(text))
+  def call("echo", %{"text" => text}, call) do
+    records = [
+      %{"name" => "probe.echoed", "attributes" => %{"kind" => "text"}},
+      %{"name" => "probe.bytes", "attributes" => %{"kind" => "text"}, "value" => byte_size(text)}
+    ]
+
+    OneCore.Call.tool(call, "insights", "record", %{"records" => records})
     "#{byte_size(text)} bytes"
   end
 
   def call("fail", _inputs, _call), do: raise("Probe refused on purpose")
 
-  def call("slow", _inputs, _call) do
-    OneCore.Telemetry.record("probe.nap", %{}, fn -> Process.sleep(300) end)
+  def call("slow", _inputs, call) do
+    Process.sleep(300)
+    OneCore.Call.tool(call, "insights", "record", %{"records" => [%{"name" => "probe.nap", "took" => 300}]})
     "slept"
   end
 
@@ -167,7 +172,7 @@ may as_owner install_service --plugin probe --service Probe.Bomb --server "${key
 may as probe bomb --text "$marker"
 
 say "A client says an app opened, and that a call failed before a server answered"
-opened='{"jsonrpc":"2.0","method":"notifications/one/recorded","params":{"client":"linux","opened":[{"view":"home","ms":412},{"view":"probe","ms":180}],"failed":[{"tool":"probe_echo","why":"No server is answering."}]}}'
+opened='{"jsonrpc":"2.0","method":"notifications/one/measured","params":{"client":"linux","opened":[{"view":"home","ms":412},{"view":"probe","ms":180}],"failed":[{"tool":"probe_echo","why":"No server is answering."}]}}'
 ONE_AS=alice "$one" mcp <<<"$opened" >/dev/null
 echo "  home opened in 412 ms, probe in 180 ms, and probe_echo failed unanswered"
 

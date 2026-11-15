@@ -8,7 +8,7 @@ defmodule OneCore.Server do
   Everything a server keeps on its machine is in its home.
   """
   use GenServer
-  alias OneCore.{Edge, Hooks, Iroh, Mcp, Plugins, Servers, Telemetry}
+  alias OneCore.{Edge, Hooks, Iroh, Mcp, Plugins, Servers, Trace}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -46,7 +46,7 @@ defmodule OneCore.Server do
   def request(server, method, params) do
     # A call that's passed on is one trace on both servers.
     params =
-      if parent = Telemetry.traceparent(),
+      if parent = Trace.traceparent(),
         do: Map.update(params, :_meta, %{traceparent: parent}, &Map.put(&1, :traceparent, parent)),
         else: params
 

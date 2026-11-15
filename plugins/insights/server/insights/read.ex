@@ -57,8 +57,9 @@ defmodule Insights.Read do
         }
       end
 
+    # What was logged during a call is that call's, read in its trace: what failed of it is its span.
     logs =
-      for log <- Enum.flat_map(batches, & &1["logs"]), log["severity"] in ["WARN", "ERROR"] do
+      for log <- Enum.flat_map(batches, & &1["logs"]), log["severity"] in ["WARN", "ERROR"], log["spanId"] == nil do
         %{
           where: logged(log),
           message: log["body"],

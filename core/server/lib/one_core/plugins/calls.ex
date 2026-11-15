@@ -7,7 +7,7 @@ defmodule OneCore.Plugins.Calls do
   """
   require Logger
   alias ExJsonSchema.Validator.Error
-  alias OneCore.{Artifact, Call, Hooks, Plugins, Server, Servers, Telemetry, User}
+  alias OneCore.{Artifact, Call, Hooks, Plugins, Server, Servers, Trace, User}
   alias OneCore.Plugins.Version
 
   @doc """
@@ -17,8 +17,7 @@ defmodule OneCore.Plugins.Calls do
   and `:passed_back` that this one would pass it on in turn.
   """
   def call(name, tool, inputs, asked, passed_on \\ false) do
-    {_by, who} = asked = asked(asked)
-    Telemetry.tool(name, tool, who, fn -> run(name, tool, inputs, asked, passed_on) end)
+    run(name, tool, inputs, asked(asked), passed_on)
   end
 
   defp run(name, tool, inputs, {_by, who} = asked, passed_on) do
@@ -54,17 +53,15 @@ defmodule OneCore.Plugins.Calls do
   `about` is what the call is about, and `fun` is the tool: it's given the inputs, and raises to refuse. The
   inputs are what the tool takes, the plugins that change a call's inputs are asked and the ones that decide it,
   and the ones that hear are told how it went. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is
-  told. `apart` is the plugin the call removes or deploys over, as who it was added for and its name there, which
+  told, or what `call/5` does where another server ran it. `apart` is the plugin the call removes or deploys over, as who it was added for and its name there, which
   isn't asked.
   """
   def tool(tool, about, asked, version \\ nil, fun, apart \\ nil) do
-    Plugins.held(nil, List.wrap(version), fn ->
-      with :ok <- open_to(tool, about, asked),
-           :ok <- given(tool.takes, about["inputs"]),
-           {:ok, about} <- hooked(about, tool.takes, asked, apart) do
-        heard(about, version, asked, fn -> fun.(about["inputs"]) end)
-      end
-    end)
+    with :ok <- open_to(tool, about, asked),
+         :ok <- given(tool.takes, about["inputs"]),
+         {:ok, about} <- hooked(about, tool.takes, asked, apart) do
+      heard(about, asked, fn -> Plugins.held(nil, List.wrap(version), fn -> {:ok, fun.(about["inputs"])} end) end)
+    end
   end
 
   # A plugin is added for users and groups. A sharing link's holder is neither, and calls only a tool that says
@@ -98,28 +95,43 @@ defmodule OneCore.Plugins.Calls do
     end
   end
 
-  # Runs a call, and tells the plugins that hear calls how it went. One passed on is heard where it ran.
-  defp heard(about, version, asked, call) do
-    began = System.monotonic_time(:microsecond)
-    took = fn error -> Map.merge(about, %{"took" => System.monotonic_time(:microsecond) - began, "error" => error}) end
-
-    try do
+  # Runs a call as a span of its trace, and tells the plugins that hear calls how it went: whether it answered, and
+  # whether another server ran it. With none hearing, it's only run.
+  defp heard(about, {_by, who} = asked, call) do
+    if Hooks.hooking("called", who) == [] do
       call.()
-    catch
-      :throw, {Call, _outcome} = passed ->
-        throw(passed)
-
-      kind, reason ->
-        error = Exception.format_banner(kind, reason, __STACKTRACE__)
-        error = if version, do: Version.own_names(error, version), else: error
-        Hooks.heard("called", took.(error), asked)
-        :erlang.raise(kind, reason, __STACKTRACE__)
     else
-      answer ->
-        Hooks.heard("called", took.(nil), asked)
-        {:ok, answer}
+      began = System.monotonic_time(:microsecond)
+
+      Trace.span(fn trace ->
+        ended = call.()
+
+        took = System.monotonic_time(:microsecond) - began
+        about = Map.merge(about, %{"trace" => trace, "took" => took})
+
+        case ended do
+          {:ok, _answer} ->
+            Hooks.heard("called", Map.merge(about, %{"error" => nil, "passed_on" => false}), asked)
+
+          {:error, why} ->
+            Hooks.heard("called", Map.merge(about, %{"error" => why, "passed_on" => false}), asked)
+
+          {:passed_on, result} ->
+            Hooks.heard("called", Map.merge(about, %{"error" => passed(result), "passed_on" => true}), asked)
+
+          # It would have been passed on again, so the server that passed it here hears it.
+          :passed_back ->
+            :ok
+        end
+
+        ended
+      end)
     end
   end
+
+  # Why a call another server ran failed, or `nil` if it answered.
+  defp passed(%{"isError" => true, "content" => [%{"text" => why} | _]}), do: why
+  defp passed(_result), do: nil
 
   # Whether `inputs` are what a tool says it takes, its JSON Schema, so a tool is only ever called with them. What's
   # wrong is said to whoever called, a person or an agent, a sentence each.

@@ -3,21 +3,22 @@ defmodule Insights do
   Insights: what the network's servers, clients and plugins did, how long it took and how it ended, kept in the
   network and read back by agents and on a screen of Settings.
 
-  Servers record it themselves in OpenTelemetry's shapes (`OneCore.Telemetry`), and each hands what it recorded to
-  this plugin about once a minute (the hook `recorded`), which keeps each batch as one blob of its own artifact:
-  so a call writes nothing to the bucket, and an idle server writes nothing at all. It isn't kept in a database,
+  It hears each tool call (the hook `called`) and what a client measured (`measured`), and what plugins record with
+  its tool `record`, gathers it on each server in OpenTelemetry's shapes (`Insights.Recorded`), and keeps a
+  server's minute as one blob of its own artifact: so a call writes nothing to the bucket, and an idle server
+  writes nothing at all. It isn't kept in a database,
   whose log is kept whole forever and whose snapshot is the whole file: what's recorded is kept for a while and then
   let go, which blobs by the hour are (`Insights.Kept`). It may be lost, and holds no one's data.
   """
   @behaviour OneCore.Plugin
-  alias Insights.{Kept, Read}
+  alias Insights.{Kept, Read, Recorded}
   alias OneCore.Call
 
   @impl true
   def uses, do: ["database"]
 
   @impl true
-  def hooks, do: ["recorded"]
+  def hooks, do: ["called", "measured"]
 
   @impl true
   def jobs, do: [%{tool: "tidy", every: 3600}]
@@ -107,6 +108,31 @@ defmodule Insights do
         }
       },
       %{
+        name: "record",
+        description:
+          "Records what a plugin's tool call measured, under that call: each a number (value), something that took a while and ended now (took, in milliseconds, with an error if it failed), or else a log line. Names, sizes and outcomes only: never what anyone wrote, was given or answered, and never a secret",
+        inputs: %{
+          type: "object",
+          properties: %{
+            records: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  name: %{type: "string", description: "What it is, in OpenTelemetry's dotted lowercase"},
+                  attributes: %{type: "object", additionalProperties: %{type: ["string", "number", "boolean"]}},
+                  value: %{type: "number"},
+                  took: %{type: "number", minimum: 0},
+                  error: %{type: "string"}
+                },
+                required: ["name"]
+              }
+            }
+          },
+          required: ["records"]
+        }
+      },
+      %{
         name: "tidy",
         description:
           "Puts each hour that's over into one blob, and lets go of what's older than #{Kept.days()} days or past #{div(Kept.most_bytes(), 1024 * 1024)} MB. The clock calls it every hour",
@@ -116,7 +142,10 @@ defmodule Insights do
   end
 
   @impl true
-  def hook("recorded", batch, call), do: Kept.keep(call.own, batch)
+  # A call to `record` is what it records, not more to record.
+  def hook("called", %{"plugin" => plugin, "tool" => "record"}, %Call{plugin: plugin}), do: :ok
+  def hook("called", about, call), do: Recorded.called(call, about)
+  def hook("measured", said, call), do: Recorded.measured(call, said)
 
   @impl true
   def call("overview", inputs, call) do
@@ -166,6 +195,11 @@ defmodule Insights do
   def call("spending", inputs, call) do
     {batches, _from, _to} = read(call, (inputs["days"] || Kept.days()) * 24)
     Read.spending(batches)
+  end
+
+  def call("record", %{"records" => records}, call) do
+    Recorded.record(call, records)
+    "Recorded."
   end
 
   def call("tidy", _inputs, call), do: Kept.tidy(call.own)

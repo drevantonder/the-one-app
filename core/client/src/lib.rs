@@ -899,10 +899,11 @@ impl Client {
     }
 
     /// Tells a server how long a view took to open, from its tap to its first drawing, and the calls that failed
-    /// before a server answered them since one was last told, for Insights. Says nothing of what was asked.
+    /// before a server answered them since one was last told, for the plugins that hear `measured`. Says nothing of
+    /// what was asked.
     pub async fn record(&self, view: &str, ms: u32) {
         let failed = std::mem::take(&mut *self.failed.lock().expect("no ask panics"));
-        let said = json!({"jsonrpc": "2.0", "method": "notifications/one/recorded", "params": {
+        let said = json!({"jsonrpc": "2.0", "method": "notifications/one/measured", "params": {
             "client": std::env::consts::OS, "opened": [{"view": view, "ms": ms}], "failed": failed.clone()}});
         if self.ask(said.to_string().as_bytes()).await.is_err() {
             self.failed.lock().expect("no ask panics").extend(failed);

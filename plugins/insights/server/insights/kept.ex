@@ -27,8 +27,7 @@ defmodule Insights.Kept do
   together.
   """
   def keep(own, %{"server" => server, "to" => to} = batch) do
-    machine = batch["machine"] || String.slice(server, 0, 8)
-    mark = &Map.put(&1, "server", machine)
+    mark = &Map.put(&1, "server", batch["machine"])
     batch = %{batch | "spans" => Enum.map(batch["spans"], mark), "logs" => Enum.map(batch["logs"], mark)}
     data = :erlang.term_to_binary(batch, [:compressed])
     Artifact.write(own, "#{hour(to)}/#{to}-#{String.slice(server, 0, 8)}-#{byte_size(data)}", data)

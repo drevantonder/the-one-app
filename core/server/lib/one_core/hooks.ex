@@ -95,8 +95,10 @@ defmodule OneCore.Hooks do
      """},
     {"called", :hears,
      """
-     A tool was called. It's about what `call` is about, how long the tool `took` in microseconds, and the `error`
-     it raised, which is `nil` if it answered.
+     A tool was called. It's about what `call` is about, how long the call `took` in microseconds, its `error`,
+     which is `nil` if it answered and otherwise why it was refused or what it raised, whether it was `passed_on`
+     to another server to run, and its `trace`: its `traceId`, `spanId` and `parentSpanId` (`OneCore.Trace`). A
+     call passed on is heard on both servers.
      """},
     {"changed", :hears,
      """
@@ -110,12 +112,11 @@ defmodule OneCore.Hooks do
      removed tells every plugin. It's about the `artifact`'s name, and `what` happened: `removed`, `restored` or
      `erased`. A plugin that keeps a list of what it made hears it to keep its list true.
      """},
-    {"recorded", :hears,
+    {"measured", :hears,
      """
-     A server recorded what it and its clients did, as `OneCore.Telemetry` says, and hands it on about once a
-     minute. It's about the `server`'s key, its `machine`'s name, its `build`, the time it's `from` and `to` in
-     nanoseconds since 1970, and what it recorded in OpenTelemetry's shapes: `spans`, `logs` and `metrics`. It's
-     heard by the plugins added for the network, and nothing is recorded while none hears it.
+     A client said what it measured of itself. It's heard by the plugins added for the network, and it's about the `device`'s key, the
+     `client`'s operating system, the views it `opened`, each as its `view` and how many `ms` it took from a tap to
+     its first drawing, and the calls that `failed` before a server answered, each as its `tool` and `why`.
      """},
     {"joined", :hears,
      """
