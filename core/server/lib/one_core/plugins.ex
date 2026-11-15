@@ -2,7 +2,7 @@ defmodule OneCore.Plugins do
   @moduledoc """
   Runs a network's plugins on this server, while it keeps running: which versions run, and for whom. Deploying one
   is `OneCore.Plugins.Deploy`, adding and removing one `OneCore.Plugins.Added`, calling one
-  `OneCore.Plugins.Calls`, and what the bucket keeps of one `OneCore.Plugins.Kept`.
+  `OneCore.Plugins.Calls`, and what the bucket keeps of one `OneCore.Plugins.Store`.
 
   A call runs on the version that was newest when it began. That version stays loaded until its last call ends,
   however many versions follow it. A plugin's processes hold a version the same way, and move to the newest
@@ -18,7 +18,7 @@ defmodule OneCore.Plugins do
   use GenServer
   require Logger
   alias OneCore.{App, Call, Hooks, Iroh, Jobs, Server, Servers, Services, User}
-  alias OneCore.Plugins.{Added, Deploy, Kept, Version}
+  alias OneCore.Plugins.{Added, Deploy, Store, Version}
 
   @network "network"
 
@@ -151,20 +151,20 @@ defmodule OneCore.Plugins do
   # Whose plugins a server runs whether or not it's asked for them: the network's, those of whoever it acts for, and
   # the plugins whose services it runs, which are added for whoever's they are.
   defp here(key) do
-    services = for {plugin, _service} <- Servers.installed(key), do: Kept.whose(plugin)
+    services = for {plugin, _service} <- Servers.installed(key), do: Store.whose(plugin)
     Enum.uniq([@network | Servers.acts_for(key)] ++ services)
   end
 
   @doc """
   Looks in the bucket at what's added for `owner`, and runs each plugin's newest version. Gives whether anything
-  changed. `loaded` are versions already loaded here, each as `OneCore.Plugins.Kept.newer/2` gives one. A plugin
+  changed. `loaded` are versions already loaded here, each as `OneCore.Plugins.Store.newer/2` gives one. A plugin
   whose newest version took over has its processes follow it, and its services installed here that weren't
   running start.
   """
   def look(owner, loaded \\ []) do
     {added, _tag} = Added.read(owner)
     known = for {artifact, _number, _loaded} <- loaded, do: artifact
-    newer = Kept.newer(Enum.uniq(Map.values(added)) -- known, ask(:newest))
+    newer = Store.newer(Enum.uniq(Map.values(added)) -- known, ask(:newest))
     {changed, any} = ask({:looked, owner, added, loaded ++ newer})
 
     for artifact <- changed do
@@ -222,7 +222,7 @@ defmodule OneCore.Plugins do
       for owner <- here(key), reduce: state do
         state ->
           {added, _tag} = Added.read(owner)
-          newer = Kept.newer(Enum.uniq(Map.values(added)), state.newest)
+          newer = Store.newer(Enum.uniq(Map.values(added)), state.newest)
           {state, _changed, _any} = took_over(state, owner, added, newer)
           state
       end

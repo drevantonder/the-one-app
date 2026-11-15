@@ -20,7 +20,7 @@ defmodule OneCore.Skills do
   another's.
   """
   alias OneCore.{Plugin, Plugins}
-  alias OneCore.Plugins.{Kept, Version}
+  alias OneCore.Plugins.{Store, Version}
 
   @own "building-plugins"
 
@@ -112,7 +112,7 @@ defmodule OneCore.Skills do
     case found do
       [] -> :absent
       [{_skill, :own, _at}] -> {:ok, Plugin.skill()}
-      [{skill, {artifact, code}, at}] -> Kept.file(artifact, code, skill.at <> at)
+      [{skill, {artifact, code}, at}] -> Store.file(artifact, code, skill.at <> at)
     end
   end
 

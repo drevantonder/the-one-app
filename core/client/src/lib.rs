@@ -1,16 +1,16 @@
 //! One Core in a client: what every client and every plugin's client part stands on. It holds the device's key,
 //! reaches a server by its key and asks it, keeps what servers answered (`kept`), and answers what an app's page asks
-//! through its bridge (`Shown`). The clients are programs on it (`clients/`): the CLI and MCP, and the app, a window
+//! through its bridge (`Subscription`). The clients are programs on it (`clients/`): the CLI and MCP, and the app, a window
 //! on it. A program is built with the native code of the plugins it ships with, which fills in what a device does of
-//! a tool's inputs (`fill`).
+//! a tool's inputs (`resolve`).
 //!
 //! A client asks a server in MCP's JSON-RPC: one message on a stream of its own, and the answer back on that stream.
 //! A server tells a client something the same way, on a stream the server opens. No connection is kept open for
 //! that: a client that wants to hear, as the app does while it runs, says it's watching, and a server connects to it
 //! when there's something to say.
 
-mod fill;
-mod kept;
+mod resolve;
+mod cache;
 
 use std::io::{ErrorKind, Write};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -32,9 +32,9 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, broadcast, watch};
 use tokio::time::{sleep, timeout};
 
-pub use fill::{Fill, Input};
-pub use kept::Shown;
-use kept::write;
+pub use resolve::{InputResolver, Input};
+pub use cache::Subscription;
+use cache::write;
 
 /// The build this program is: the commit it was built from, as `build.rs` says.
 pub const BUILD: &str = env!("ONE_BUILD");
@@ -144,7 +144,7 @@ struct Told {
 /// edge for a code to be let in by, as Better Auth's device authorization has it (`plugins/sign-in/edge`),
 /// naming its key and signing what it asks with it, so the code is only ever for this key.
 #[derive(Debug)]
-pub struct NotIn {
+pub struct DeviceAuthorization {
     /// Where its person lets it in: a page at the network's address, carrying the code.
     pub link: String,
     /// The code, as it's shown: WDJB-MJHT.
@@ -157,16 +157,16 @@ pub struct NotIn {
     interval: Duration,
 }
 
-impl std::fmt::Display for NotIn {
+impl std::fmt::Display for DeviceAuthorization {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let how = "This device isn't in your network yet. Open this where you sign in, and check it shows";
         write!(f, "{how} {}:\n{}", self.code, self.link)
     }
 }
 
-impl std::error::Error for NotIn {}
+impl std::error::Error for DeviceAuthorization {}
 
-impl NotIn {
+impl DeviceAuthorization {
     /// Asks the network's edge at `address` for a code to let the device with `key` in by, under this
     /// machine's name.
     async fn asked(address: &str, key: &SecretKey) -> Result<Self> {
@@ -206,8 +206,8 @@ impl NotIn {
                 _ if given => return Ok(()),
                 Some("authorization_pending") => {}
                 Some("slow_down") => self.interval += Duration::from_secs(5),
-                Some("access_denied") => bail!(NotLetIn::Stopped),
-                Some("expired_token") => bail!(NotLetIn::Ended),
+                Some("access_denied") => bail!(NotApproved::Denied),
+                Some("expired_token") => bail!(NotApproved::Expired),
                 _ => bail!("{}", said["error_description"].as_str().unwrap_or("the network's edge didn't answer")),
             }
         }
@@ -294,31 +294,31 @@ pub fn name() -> String {
 /// Why a device's person didn't let it in: they stopped it where they signed in, or its code ended first. The app
 /// says it on the sign-in page it shows the next code on, told it as `why`, in these same words.
 #[derive(Debug, Clone, Copy)]
-pub enum NotLetIn {
-    Stopped,
-    Ended,
+pub enum NotApproved {
+    Denied,
+    Expired,
 }
 
-impl NotLetIn {
+impl NotApproved {
     /// How the sign-in page is told it.
     pub fn why(self) -> &'static str {
         match self {
-            Self::Stopped => "stopped",
-            Self::Ended => "ended",
+            Self::Denied => "denied",
+            Self::Expired => "expired",
         }
     }
 }
 
-impl std::fmt::Display for NotLetIn {
+impl std::fmt::Display for NotApproved {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Stopped => "It was stopped where you signed in.",
-            Self::Ended => "Its code ended before it was let in. Try again.",
+            Self::Denied => "It was denied where you signed in.",
+            Self::Expired => "Its code expired before it was approved. Try again.",
         })
     }
 }
 
-impl std::error::Error for NotLetIn {}
+impl std::error::Error for NotApproved {}
 
 /// Asks the network's edge at `path`, with `body` signed by `key`. Gives whether it agreed, and what it said.
 async fn ask_edge(address: &str, key: &SecretKey, path: &str, body: Value) -> Result<(bool, Value)> {
@@ -360,7 +360,7 @@ impl Told {
                 (self.pass, self.who) = (None, None);
                 self.keep(home)?;
             }
-            bail!(NotIn::asked(&self.address, key).await?)
+            bail!(DeviceAuthorization::asked(&self.address, key).await?)
         }
         if answer["result"].is_null() {
             bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's edge gave this device no pass"))
@@ -381,8 +381,8 @@ impl Told {
 
     /// Keeps this in `home`, and nothing it kept for whoever's the device was before.
     fn keep(&self, home: &Path) -> Result<()> {
-        for kept in ["kept", "files"] {
-            match fs::remove_dir_all(home.join(kept)) {
+        for cached in ["cache", "files"] {
+            match fs::remove_dir_all(home.join(cached)) {
                 Err(error) if error.kind() != ErrorKind::NotFound => return Err(error.into()),
                 _ => {}
             }
@@ -494,7 +494,7 @@ const BUILT_FOR: Option<&str> = option_env!("TAURI_ONE_ADDRESS");
 
 /// Why a server didn't answer what it was asked.
 #[derive(Debug, PartialEq)]
-pub enum Unanswered {
+pub enum RequestError {
     /// It couldn't be reached, so it was asked nothing.
     Unreachable,
     /// It stopped answering after it was asked, so it may have done what was asked.
@@ -543,21 +543,21 @@ impl Reached {
 
     /// Asks the server one message, and gives its answer. A server that hasn't answered anything lately is first
     /// asked whether it's there, and so is one that's taking its time over this.
-    pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>, Unanswered> {
+    pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>, RequestError> {
         if !self.open() || (self.heard.lock().expect("no ask panics").elapsed() > THERE && !self.there().await) {
-            return Err(Unanswered::Unreachable);
+            return Err(RequestError::Unreachable);
         }
-        let mut receive = self.send(message).await.ok_or(Unanswered::Unreachable)?;
+        let mut receive = self.send(message).await.ok_or(RequestError::Unreachable)?;
         let answer = receive.read_to_end(LIMIT);
         tokio::pin!(answer);
         loop {
             tokio::select! {
                 answer = &mut answer => {
                     *self.heard.lock().expect("no ask panics") = Instant::now();
-                    return answer.map_err(|_| Unanswered::Stopped);
+                    return answer.map_err(|_| RequestError::Stopped);
                 }
                 _ = sleep(THERE) => if !self.there().await {
-                    return Err(Unanswered::Stopped);
+                    return Err(RequestError::Stopped);
                 }
             }
         }
@@ -600,7 +600,7 @@ pub struct Client {
     /// Its endpoint, its network and whose device it is, which are made again with each new pass (`renew`).
     link: std::sync::RwLock<Link>,
     reach: Mutex<Reach>,
-    told: broadcast::Sender<Value>,
+    notifications: broadcast::Sender<Value>,
     /// What every request says of who it's from and for, where the environment says: `ONE_LINK` is a sharing link,
     /// whose holder asks, `ONE_AS` names a user to act as, which only a server of a network being built allows, and
     /// `ONE_FOR` names the group it's for (`groups/family`), or `network`.
@@ -608,11 +608,11 @@ pub struct Client {
     /// Whether this client is to hear what changes, so its servers are to tell it.
     watching: AtomicBool,
     /// Whether a server answered the last thing asked.
-    answering: watch::Sender<bool>,
-    /// What the native code of the plugins the program ships with fills in of a tool's inputs (`fill`).
-    fillers: Vec<Arc<dyn Fill>>,
-    /// The inputs this device fills in of each tool, as a server last listed them (`fill`).
-    fills: std::sync::Mutex<Option<Arc<fill::Fills>>>,
+    connected: watch::Sender<bool>,
+    /// What the native code of the plugins the program ships with fills in of a tool's inputs (`resolve`).
+    resolvers: Vec<Arc<dyn InputResolver>>,
+    /// The inputs this device fills in of each tool, as a server last listed them (`resolve`).
+    resolvable: std::sync::Mutex<Option<Arc<resolve::Resolvable>>>,
     /// The calls that failed before a server answered them, each by its tool and why, until a server is told
     /// (`record`).
     failed: std::sync::Mutex<Vec<Value>>,
@@ -649,8 +649,8 @@ impl Link {
 }
 
 impl Client {
-    /// Opens the client kept in `home`, which fills in of a tool's inputs what One Core does and what `fillers` do.
-    pub async fn open(home: impl Into<PathBuf>, fillers: Vec<Arc<dyn Fill>>) -> Result<Arc<Self>> {
+    /// Opens the client kept in `home`, which fills in of a tool's inputs what One Core does and what `resolvers` do.
+    pub async fn open(home: impl Into<PathBuf>, resolvers: Vec<Arc<dyn InputResolver>>) -> Result<Arc<Self>> {
         let home = home.into();
         let told = match fs::read(home.join("network")) {
             Ok(network) => {
@@ -671,7 +671,7 @@ impl Client {
             Some(mut told) => {
                 if told.pass.is_none() {
                     match told.admit(&key, &home).await {
-                        Err(error) if !error.is::<NotIn>() => {
+                        Err(error) if !error.is::<DeviceAuthorization>() => {
                             return Err(error)
                                 .with_context(|| format!("Couldn't join the network at {}", told.address));
                         }
@@ -686,21 +686,21 @@ impl Client {
         let link = Link::run(&key, network, who).await?;
         let says = [("as", "ONE_AS"), ("link", "ONE_LINK"), ("for", "ONE_FOR")];
         let says = says.into_iter().filter_map(|(says, variable)| Some((says, env::var(variable).ok()?))).collect();
-        let told = broadcast::channel(16).0;
-        accept(link.endpoint.clone(), told.clone());
+        let notifications = broadcast::channel(16).0;
+        accept(link.endpoint.clone(), notifications.clone());
         let renews = link.network.is_some();
         let link = std::sync::RwLock::new(link);
-        let (watching, answering) = (AtomicBool::new(false), watch::Sender::new(true));
-        let (fills, failed) = (std::sync::Mutex::default(), std::sync::Mutex::default());
+        let (watching, connected) = (AtomicBool::new(false), watch::Sender::new(true));
+        let (resolvable, failed) = (std::sync::Mutex::default(), std::sync::Mutex::default());
         let reach = Mutex::default();
-        let client = Arc::new(Self { home, key, link, reach, told, says, watching, answering, fillers, fills, failed });
+        let client = Arc::new(Self { home, key, link, reach, notifications, says, watching, connected, resolvers, resolvable, failed });
         // A pass that's about to end is renewed before anything is asked with it, and so is one a new build hasn't
         // renewed yet, and the next while this runs.
         if renews {
             let left = match client.network().left() {
                 left if !left.is_zero() && said => left,
                 _ => match client.renew().await {
-                    Err(error) if error.is::<NotIn>() => return Err(error),
+                    Err(error) if error.is::<DeviceAuthorization>() => return Err(error),
                     renewed => renewed.unwrap_or(AGAIN),
                 },
             };
@@ -737,7 +737,7 @@ impl Client {
         let pass = told.pass.clone().context("this device was given no pass")?;
         let network = Network { address: told.address.clone(), pass };
         let new = Link::run(&self.key, Some(network), told.who.clone()).await?;
-        accept(new.endpoint.clone(), self.told.clone());
+        accept(new.endpoint.clone(), self.notifications.clone());
         let old = std::mem::replace(&mut *self.link.write().expect("no renewal panics"), new);
         self.reach.lock().await.open = None;
         tokio::spawn(async move {
@@ -774,8 +774,8 @@ impl Client {
 
     /// Whether a server answered the last thing this client asked, as that changes. It's found out by asking:
     /// nothing is said over a connection to learn it.
-    pub fn answering(&self) -> watch::Receiver<bool> {
-        self.answering.subscribe()
+    pub fn connected(&self) -> watch::Receiver<bool> {
+        self.connected.subscribe()
     }
 
     /// Says whether this client is to hear what changes, as the app does while it runs. While it is, every server
@@ -801,7 +801,7 @@ impl Client {
     async fn connect(&self, server: EndpointAddr) -> Option<Reached> {
         let link = self.link();
         let open = Reached::connect(&link.endpoint, server, CONNECT).await?;
-        tokio::spawn(hear(open.connection().clone(), self.told.clone()));
+        tokio::spawn(hear(open.connection().clone(), self.notifications.clone()));
         if self.watching.load(Ordering::Relaxed) {
             let here = address(&link.endpoint, link.network.as_ref()).ok()?;
             let watch = json!({"jsonrpc": "2.0", "method": WATCH, "params": {"address": here}});
@@ -811,8 +811,8 @@ impl Client {
     }
 
     /// What servers tell this client: each a JSON-RPC notification.
-    pub fn told(&self) -> broadcast::Receiver<Value> {
-        self.told.subscribe()
+    pub fn notifications(&self) -> broadcast::Receiver<Value> {
+        self.notifications.subscribe()
     }
 
     /// Asks a server one JSON-RPC message and gives its answer, which for a notification is nothing. A server that
@@ -822,7 +822,7 @@ impl Client {
         let (message, lists, tool): (std::borrow::Cow<[u8]>, bool, Option<String>) =
             match serde_json::from_slice::<Value>(message) {
                 Ok(mut request) if request["method"].is_string() => {
-                    self.fill(&mut request).await?;
+                    self.resolve(&mut request).await?;
                     self.say(&mut request);
                     let calls = request["method"] == "tools/call";
                     let tool = calls.then(|| request["params"]["name"].as_str().map(str::to_owned)).flatten();
@@ -834,8 +834,8 @@ impl Client {
             for _ in 0..2 {
                 match self.reached().await?.ask(&message).await {
                     Ok(answer) => return Ok(answer),
-                    Err(Unanswered::Unreachable) => continue,
-                    Err(Unanswered::Stopped) => bail!(
+                    Err(RequestError::Unreachable) => continue,
+                    Err(RequestError::Stopped) => bail!(
                         "The server stopped answering partway, so this may or may not have been done. Look before \
                          trying again."
                     ),
@@ -850,7 +850,7 @@ impl Client {
                 failed.push(json!({"tool": tool, "why": why.to_string()}));
             }
         }
-        self.answering.send_if_modified(|answering| std::mem::replace(answering, answer.is_ok()) != answer.is_ok());
+        self.connected.send_if_modified(|answering| std::mem::replace(answering, answer.is_ok()) != answer.is_ok());
         match answer {
             Ok(answer) => {
                 // What a device fills in of each tool's inputs is what the newest list of them says.
@@ -858,8 +858,8 @@ impl Client {
                     && let Ok(listed) = serde_json::from_slice::<Value>(&answer)
                     && listed["result"]["tools"].is_array()
                 {
-                    let fills = fill::fills(&listed["result"], &self.formats());
-                    *self.fills.lock().expect("no ask panics") = Some(Arc::new(fills));
+                    let fills = resolve::resolvable(&listed["result"], &self.formats());
+                    *self.resolvable.lock().expect("no ask panics") = Some(Arc::new(fills));
                 }
                 Ok(self.taken_out(answer).await)
             }
@@ -878,7 +878,7 @@ impl Client {
         }
         let mut told = Told { address: network.address, pass: None, who: self.link().who, build: None };
         let asked = told.admit(&self.key, &self.home).await;
-        match asked.as_ref().map_err(|error| error.downcast_ref::<NotIn>()) {
+        match asked.as_ref().map_err(|error| error.downcast_ref::<DeviceAuthorization>()) {
             Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),
             _ => return answer,
         }
@@ -993,7 +993,7 @@ impl Client {
         };
         let asked = (SERVERS, json!({"of": of}));
         if !now {
-            return Ok(self.kept(asked.0, &asked.1).and_then(|kept| serde_json::from_value(kept).ok()));
+            return Ok(self.cached(asked.0, &asked.1).and_then(|kept| serde_json::from_value(kept).ok()));
         }
         let servers = network
             .servers(&self.key, &of)
@@ -1050,7 +1050,7 @@ async fn renewing(client: std::sync::Weak<Client>, mut left: Duration) {
         let Some(client) = client.upgrade() else { return };
         left = match client.renew().await {
             Ok(left) => left,
-            Err(error) if error.is::<NotIn>() => return,
+            Err(error) if error.is::<DeviceAuthorization>() => return,
             Err(_) => AGAIN,
         };
     }

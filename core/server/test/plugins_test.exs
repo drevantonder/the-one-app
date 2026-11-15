@@ -1,7 +1,7 @@
 defmodule OneCore.PluginsTest do
   use ExUnit.Case
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Added, Calls, Deploy, Kept, Version}
+  alias OneCore.Plugins.{Added, Calls, Deploy, Store, Version}
 
   # A plugin of two modules. Its tool waits to be told to finish, then asks its other module which version it is.
   defp slow(number) do
@@ -104,9 +104,9 @@ defmodule OneCore.PluginsTest do
 
     assert Enum.all?(Version.files(version), &(Path.extname(&1) in ~w(.html .js .css .svg)))
     refute "server/notes.txt" in Version.files(version)
-    {:ok, built} = Kept.file(version.artifact, version.code, "client/index.html")
+    {:ok, built} = Store.file(version.artifact, version.code, "client/index.html")
     assert built =~ "/ui/client/ui.css"
-    assert Kept.source(version.artifact, version.code) == source
+    assert Store.source(version.artifact, version.code) == source
 
     broken =
       Map.put(
@@ -123,7 +123,7 @@ defmodule OneCore.PluginsTest do
     ui = Plugins.running("network")["ui"].code
     rebuilt = Enum.find_value(1..100, fn _ -> Process.sleep(50) && Plugins.running("network")["notes"].ui == ui end)
     assert rebuilt
-    assert Kept.source(version.artifact, Plugins.running("network")["notes"].code) == source
+    assert Store.source(version.artifact, Plugins.running("network")["notes"].code) == source
   end
 
   # A plugin the server ships, kept in a folder of its own, whose tool says which version of the folder it is.
@@ -204,15 +204,15 @@ defmodule OneCore.PluginsTest do
     end
     """
 
-    deployed = Kept.sent(%{"server/forms.ex" => plugin, "templates/form.xlsx" => form})
+    deployed = Store.sent(%{"server/forms.ex" => plugin, "templates/form.xlsx" => form})
     assert %{"base64" => _} = deployed["templates/form.xlsx"]
-    assert {:ok, 1, ""} = Deploy.deploy("network", "forms", Kept.received(JSON.decode!(JSON.encode!(deployed))))
+    assert {:ok, 1, ""} = Deploy.deploy("network", "forms", Store.received(JSON.decode!(JSON.encode!(deployed))))
 
     # A server starting on the same bucket reads the same bytes.
     stop_supervised!(Plugins)
     start_supervised!(Plugins)
     assert Calls.call("forms", "blank", %{}, OneCore.Test.owner()) == {:ok, byte_size(form)}
     version = Plugins.running("network")["forms"]
-    assert Kept.sent(Kept.source(version.artifact, version.code)) == deployed
+    assert Store.sent(Store.source(version.artifact, version.code)) == deployed
   end
 end

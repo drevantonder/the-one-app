@@ -47,8 +47,8 @@ mod tests {
         let (own, group) = (own.path(), group.path().join("group"));
         fs::write(own.join("key"), [7; 32]).unwrap();
         fs::write(own.join("network"), b"{}").unwrap();
-        fs::create_dir_all(own.join("kept/answers")).unwrap();
-        fs::write(own.join("kept/answers/one"), b"kept").unwrap();
+        fs::create_dir_all(own.join("cache/answers")).unwrap();
+        fs::write(own.join("cache/answers/one"), b"kept").unwrap();
 
         // No group: it stays where it is.
         assert_eq!(home(own, None).unwrap(), own);
@@ -56,13 +56,13 @@ mod tests {
         assert!(!group.exists());
 
         // A later build with a group, after a move cut short: some of it there already, but not the key.
-        fs::create_dir_all(group.join("kept")).unwrap();
-        fs::write(group.join("kept/half"), b"half").unwrap();
+        fs::create_dir_all(group.join("cache")).unwrap();
+        fs::write(group.join("cache/half"), b"half").unwrap();
         assert_eq!(home(own, Some(&group)).unwrap(), group);
         assert_eq!(fs::read(group.join("key")).unwrap(), [7; 32]);
         assert_eq!(fs::read(group.join("network")).unwrap(), b"{}");
-        assert_eq!(fs::read(group.join("kept/answers/one")).unwrap(), b"kept");
-        assert!(!group.join("kept/half").exists());
+        assert_eq!(fs::read(group.join("cache/answers/one")).unwrap(), b"kept");
+        assert!(!group.join("cache/half").exists());
         assert_eq!(fs::read_dir(own).unwrap().count(), 0);
 
         // Once the group holds a key, nothing moves over it.

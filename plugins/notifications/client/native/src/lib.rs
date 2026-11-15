@@ -43,7 +43,7 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// Shows each notification that reaches the inbox after the app started, as a server says something changed. One
 /// already read, on another device, isn't shown. A tap on one brings the window up on the app it's from.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub async fn hear(app: AppHandle, client: Arc<Client>) {
+pub async fn listen(app: AppHandle, client: Arc<Client>) {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -71,7 +71,7 @@ pub async fn hear(app: AppHandle, client: Arc<Client>) {
         eprintln!("a tap on a notification opens nothing here: {error}");
     }
 
-    let mut told = client.told();
+    let mut told = client.notifications();
     // The newest notification there was, once the inbox has answered: what's after it is new.
     let mut newest = None;
     loop {
@@ -126,7 +126,7 @@ pub fn opens(tapped: &Value) -> Option<&str> {
 /// reaches it by: Apple's on an iPhone and Google's on Android. An app built without push (no Firebase config, or no
 /// Push Notifications capability) says why it isn't woken, and still shows the inbox.
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn hear(app: AppHandle, client: Arc<Client>) {
+pub async fn listen(app: AppHandle, client: Arc<Client>) {
     use tauri_plugin_notifications::NotificationsExt;
 
     let (via, name) = if cfg!(target_os = "ios") { ("apns", "iPhone") } else { ("fcm", "Android phone") };

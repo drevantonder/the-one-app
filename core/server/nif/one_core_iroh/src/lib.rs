@@ -9,7 +9,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
-use client::{Network, Unanswered};
+use client::{Network, RequestError};
 use data_encoding::HEXLOWER;
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, EndpointAddr};
@@ -281,8 +281,8 @@ fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to
                 binary.as_mut_slice().copy_from_slice(&answer);
                 (atoms::ok(), Binary::from(binary)).encode(env)
             }
-            Err(Some((Unanswered::Stopped, _gone))) => atoms::stopped().encode(env),
-            Err(Some((Unanswered::Unreachable, Some(address)))) => (atoms::gone(), address).encode(env),
+            Err(Some((RequestError::Stopped, _gone))) => atoms::stopped().encode(env),
+            Err(Some((RequestError::Unreachable, Some(address)))) => (atoms::gone(), address).encode(env),
             Err(_) => atoms::closed().encode(env),
         });
     });

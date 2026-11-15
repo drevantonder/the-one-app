@@ -14,13 +14,13 @@ use std::sync::Arc;
 use std::{env, fs, io};
 
 use anyhow::{Context, Result, bail};
-use client::{Client, Fill, NotIn};
+use client::{Client, InputResolver, DeviceAuthorization};
 use data_encoding::BASE64;
 use serde_json::{Map, Value, json};
 
 /// What the native code of the plugins this program ships with fills in of a tool's inputs, which every client it
-/// opens hands each call (`client::Fill`).
-pub fn fills() -> Vec<Arc<dyn Fill>> {
+/// opens hands each call (`client::InputResolver`).
+pub fn resolvers() -> Vec<Arc<dyn InputResolver>> {
     vec![Arc::new(encryption_client::Encrypts)]
 }
 
@@ -30,7 +30,7 @@ pub fn main() -> ExitCode {
     // Run by git as its remote helper, it's that, under the name git found it by, with `.exe` after it on Windows.
     let named = env::args().next().map(|program| Path::new(&program).file_stem().map(|name| name.to_owned()));
     let answered = if named.flatten().is_some_and(|name| name == repos_client::HELPER) {
-        runtime.block_on(async { repos_client::helper(Client::open(client::home()?, fills()).await?, &args).await })
+        runtime.block_on(async { repos_client::helper(Client::open(client::home()?, resolvers()).await?, &args).await })
     } else {
         repos_client::beside();
         runtime.block_on(run(args))
@@ -59,12 +59,12 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
         return Ok(printed(backups_client::restore(&args[1..]).await?));
     }
     // A device that isn't in its network yet says its code and where it's let in, and carries on once it is.
-    let client = match Client::open(client::home()?, fills()).await {
-        Err(error) if error.is::<NotIn>() => {
-            let not_in = error.downcast::<NotIn>()?;
+    let client = match Client::open(client::home()?, resolvers()).await {
+        Err(error) if error.is::<DeviceAuthorization>() => {
+            let not_in = error.downcast::<DeviceAuthorization>()?;
             eprintln!("{not_in}");
             not_in.answered().await?;
-            Client::open(client::home()?, fills()).await?
+            Client::open(client::home()?, resolvers()).await?
         }
         opened => opened?,
     };
@@ -102,7 +102,7 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
     let name = words.join("_");
     let (listed, answered) = match client.fresh("tools/list", &json!({})).await {
         Ok(listed) => (listed, Ok(())),
-        Err(error) => (client.kept("tools/list", &json!({})).unwrap_or_default(), Err(error)),
+        Err(error) => (client.cached("tools/list", &json!({})).unwrap_or_default(), Err(error)),
     };
     let tools = listed["tools"].as_array().map(Vec::as_slice).unwrap_or_default();
 
@@ -146,7 +146,7 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
             // What a server says now, or what one last said if none is answering.
             let says = async |method: &str, params: Value| match answered {
                 Ok(()) => client.fresh(method, &params).await.ok(),
-                Err(_) => client.kept(method, &params),
+                Err(_) => client.cached(method, &params),
             };
             // A plugin with no tools can still have a skill: the UI library's says how an app is written with it. It's
             // read as any skill is, and what's printed of it is what follows its name and description. A plugin's

@@ -29,17 +29,17 @@ impl Client {
 
     /// Keeps `answer` as what `method` was last answered with.
     pub(crate) fn keep(&self, method: &str, params: &Value, answer: &Value) -> Result<()> {
-        write(&self.kept_file(method, params), answer.to_string().as_bytes())
+        write(&self.cache_file(method, params), answer.to_string().as_bytes())
     }
 
     /// What a server last answered `method` with.
-    pub fn kept(&self, method: &str, params: &Value) -> Option<Value> {
-        serde_json::from_slice(&fs::read(self.kept_file(method, params)).ok()?).ok()
+    pub fn cached(&self, method: &str, params: &Value) -> Option<Value> {
+        serde_json::from_slice(&fs::read(self.cache_file(method, params)).ok()?).ok()
     }
 
-    fn kept_file(&self, method: &str, params: &Value) -> PathBuf {
+    fn cache_file(&self, method: &str, params: &Value) -> PathBuf {
         let asked = json!([self.link().who, self.says, method, params]);
-        self.home.join("kept").join(crate::hex(&Sha256::digest(asked.to_string())))
+        self.home.join("cache").join(crate::hex(&Sha256::digest(asked.to_string())))
     }
 
     /// Fetches each large file a tool answered with, by its link, and keeps it, unless it's kept already: a blob
@@ -110,7 +110,7 @@ pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<()> {
 /// nothing to write: what only reads is answered from what was kept and asked again behind it, and asked again
 /// after the view changes something, when its user returns to it, and when a server says something changed. When
 /// an answer comes back different, the view is told to ask again, and is answered at once.
-pub struct Shown {
+pub struct Subscription {
     client: Arc<Client>,
     /// What only reads, by what was asked, with the answer the view was last given.
     answered: Mutex<HashMap<String, (String, Value, Value)>>,
@@ -118,25 +118,25 @@ pub struct Shown {
     changed: Box<dyn Fn() + Send + Sync>,
 }
 
-impl Shown {
+impl Subscription {
     pub fn new(client: Arc<Client>, changed: impl Fn() + Send + Sync + 'static) -> Arc<Self> {
         Arc::new(Self { client, answered: Mutex::default(), changed: Box::new(changed) })
     }
 
     /// Answers what the view asks: the result of `method`.
-    pub async fn ask(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
+    pub async fn request(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
         if self.reads(method, &params).await {
             return self.read(method, params).await;
         }
         let answer = self.client.request(method, params).await?;
-        self.again().await;
+        self.refresh().await;
         Ok(answer)
     }
 
     /// Asks the server again for everything the view was answered, and tells the view if any of it changed.
-    pub async fn again(&self) {
+    pub async fn refresh(&self) {
         let asked: Vec<String> = self.answered.lock().expect("no view panics").keys().cloned().collect();
-        self.again_for(asked).await
+        self.refresh_for(asked).await
     }
 
     async fn read(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
@@ -144,7 +144,7 @@ impl Shown {
         if let Some((_, _, answer)) = self.answered.lock().expect("no view panics").get(&asked) {
             return Ok(answer.clone());
         }
-        let (answer, kept) = match self.client.kept(method, &params) {
+        let (answer, kept) = match self.client.cached(method, &params) {
             Some(answer) => (answer, true),
             None => (self.client.fresh(method, &params).await?, false),
         };
@@ -154,12 +154,12 @@ impl Shown {
             .insert(asked.clone(), (method.to_owned(), params, answer.clone()));
         if kept {
             let shown = self.clone();
-            tokio::spawn(async move { shown.again_for(vec![asked]).await });
+            tokio::spawn(async move { shown.refresh_for(vec![asked]).await });
         }
         Ok(answer)
     }
 
-    async fn again_for(&self, asked: Vec<String>) {
+    async fn refresh_for(&self, asked: Vec<String>) {
         let asks = asked.into_iter().filter_map(|asked| {
             let (method, params, _) = self.answered.lock().expect("no view panics").get(&asked)?.clone();
             Some(async move { (asked, self.client.fresh(&method, &params).await) })

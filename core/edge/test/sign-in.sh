@@ -212,7 +212,7 @@ echo "  without being touched again, the window says: $(grep -o -m1 "home opened
 kill -- "-$app"
 
 say "A device that's removed is refused the next thing it asks, and keeps nothing of its person's"
-kept() { { find "$folder/$1/kept" "$folder/$1/files" -type f 2>/dev/null || true; } | wc -l; }
+kept() { { find "$folder/$1/cache" "$folder/$1/files" -type f 2>/dev/null || true; } | wc -l; }
 echo "  desktop keeps $(kept desktop) answers it was given for alice"
 may device laptop sign-in remove_device --device "$(key_of "$folder/desktop")"
 refused device desktop sign-in devices

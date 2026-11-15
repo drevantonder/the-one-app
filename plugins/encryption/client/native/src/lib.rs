@@ -5,7 +5,7 @@
 //!
 //! None of that is a command of its own. A tool says which of its inputs a device fills in, by the input's `format`
 //! in the tool's schema, and whatever calls the tool through a client (an app, the CLI, an agent over MCP) gets
-//! them filled in the same way (`client::Fill`). These are the ones `Encrypts` fills in:
+//! them filled in the same way (`client::InputResolver`). These are the ones `Encrypts` fills in:
 //!
 //! - `secret`: the text given is encrypted for the servers that the plugin's tool named by `opened_by` lists.
 //! - `artifact-keys`: the keys of the artifact that tool names, for each server in the input `servers`, from this

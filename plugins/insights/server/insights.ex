@@ -8,10 +8,10 @@ defmodule Insights do
   server's minute as one blob of its own artifact: so a call writes nothing to the bucket, and an idle server
   writes nothing at all. It isn't kept in a database,
   whose log is kept whole forever and whose snapshot is the whole file: what's recorded is kept for a while and then
-  let go, which blobs by the hour are (`Insights.Kept`). It may be lost, and holds no one's data.
+  let go, which blobs by the hour are (`Insights.Store`). It may be lost, and holds no one's data.
   """
   @behaviour OneCore.Plugin
-  alias Insights.{Kept, Read, Recorded}
+  alias Insights.{Store, Read, Recorded}
   alias OneCore.Call
 
   @impl true
@@ -31,8 +31,8 @@ defmodule Insights do
     hours = %{
       type: "integer",
       minimum: 1,
-      maximum: Kept.days() * 24,
-      description: "How many hours back to look, up to #{Kept.days() * 24}. 24 if left out"
+      maximum: Store.days() * 24,
+      description: "How many hours back to look, up to #{Store.days() * 24}. 24 if left out"
     }
 
     [
@@ -101,7 +101,7 @@ defmodule Insights do
             days: %{
               type: "integer",
               minimum: 1,
-              maximum: Kept.days(),
+              maximum: Store.days(),
               description: "How many days back. 14 if left out"
             }
           }
@@ -135,7 +135,7 @@ defmodule Insights do
       %{
         name: "tidy",
         description:
-          "Puts each hour that's over into one blob, and lets go of what's older than #{Kept.days()} days or past #{div(Kept.most_bytes(), 1024 * 1024)} MB. The clock calls it every hour",
+          "Puts each hour that's over into one blob, and lets go of what's older than #{Store.days()} days or past #{div(Store.most_bytes(), 1024 * 1024)} MB. The clock calls it every hour",
         inputs: %{type: "object", properties: %{}}
       }
     ]
@@ -159,7 +159,7 @@ defmodule Insights do
       spending: Read.spending(batches),
       calls: Read.calls(batches, from, to),
       names: names(call),
-      kept: Kept.kept(call.own)
+      kept: Store.kept(call.own)
     }
   end
 
@@ -193,7 +193,7 @@ defmodule Insights do
   end
 
   def call("spending", inputs, call) do
-    {batches, _from, _to} = read(call, (inputs["days"] || Kept.days()) * 24)
+    {batches, _from, _to} = read(call, (inputs["days"] || Store.days()) * 24)
     Read.spending(batches)
   end
 
@@ -202,13 +202,13 @@ defmodule Insights do
     "Recorded."
   end
 
-  def call("tidy", _inputs, call), do: Kept.tidy(call.own)
+  def call("tidy", _inputs, call), do: Store.tidy(call.own)
 
   # What was kept over the last `hours`, and when that is, in nanoseconds since 1970.
   defp read(call, hours) do
     to = System.os_time(:nanosecond)
     from = to - hours * 3_600_000_000_000
-    {Kept.read(call.own, from), from, to}
+    {Store.read(call.own, from), from, to}
   end
 
   # Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is

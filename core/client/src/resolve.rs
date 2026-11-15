@@ -2,7 +2,7 @@
 //! `format` in the tool's schema, and whatever calls the tool through this client (an app, the CLI, an agent over
 //! MCP) gets them filled in the same way. One Core fills in `device` and `device-name`, this device's key and its
 //! name, where none is given. Every other format is filled in by the native code of a plugin the program ships
-//! with, a `Fill` it hands `Client::open`.
+//! with, an `InputResolver` it hands `Client::open`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,12 +14,12 @@ use serde_json::{Map, Value, json};
 use crate::Client;
 
 /// What a plugin's native code fills in on this device: inputs of the formats it names.
-pub trait Fill: Send + Sync {
+pub trait InputResolver: Send + Sync {
     /// The formats it fills in, in the order it does.
     fn formats(&self) -> &'static [&'static str];
 
     /// What it fills in for `input`, or nothing, which leaves it as it is.
-    fn fill<'a>(&'a self, client: &'a Client, input: Input<'a>) -> BoxFuture<'a, Result<Option<String>>>;
+    fn resolve<'a>(&'a self, client: &'a Client, input: Input<'a>) -> BoxFuture<'a, Result<Option<String>>>;
 }
 
 /// One input to fill in, of a call of a tool of `plugin`: its `format`, what its schema `says`, what was given for
@@ -37,10 +37,10 @@ pub struct Input<'a> {
 const OWN: [&str; 2] = ["device", "device-name"];
 
 /// The inputs a device fills in, by their tool's name: each one's name, and what its schema says of it.
-pub(crate) type Fills = HashMap<String, Vec<(String, Value)>>;
+pub(crate) type Resolvable = HashMap<String, Vec<(String, Value)>>;
 
 /// The inputs a device fills in of each tool a server listed, of the `formats` it fills in, in their order.
-pub(crate) fn fills(listed: &Value, formats: &[&str]) -> Fills {
+pub(crate) fn resolvable(listed: &Value, formats: &[&str]) -> Resolvable {
     let tools = listed["tools"].as_array().map(Vec::as_slice).unwrap_or_default();
     let filled = |tool: &Value| {
         let inputs = tool["inputSchema"]["properties"].as_object()?;
@@ -56,26 +56,26 @@ pub(crate) fn fills(listed: &Value, formats: &[&str]) -> Fills {
 }
 
 impl Client {
-    /// Every format this device fills in, in the order it does: One Core's own, then each `Fill`'s.
+    /// Every format this device fills in, in the order it does: One Core's own, then each `InputResolver`'s.
     pub(crate) fn formats(&self) -> Vec<&'static str> {
-        OWN.into_iter().chain(self.fillers.iter().flat_map(|filler| filler.formats().iter().copied())).collect()
+        OWN.into_iter().chain(self.resolvers.iter().flat_map(|resolver| resolver.formats().iter().copied())).collect()
     }
 
     /// The inputs a device fills in, as a server last listed its tools: asked for, if this client hasn't seen a list.
-    async fn fills(&self) -> Result<Arc<Fills>> {
-        if let Some(fills) = self.fills.lock().expect("no ask panics").clone() {
+    async fn resolvable(&self) -> Result<Arc<Resolvable>> {
+        if let Some(fills) = self.resolvable.lock().expect("no ask panics").clone() {
             return Ok(fills);
         }
         Box::pin(self.request("tools/list", json!({}))).await?;
-        Ok(self.fills.lock().expect("no ask panics").clone().unwrap_or_default())
+        Ok(self.resolvable.lock().expect("no ask panics").clone().unwrap_or_default())
     }
 
-    /// Fills in what this device does of a tool's inputs, if `request` calls a tool that has any.
-    pub(crate) async fn fill(&self, request: &mut Value) -> Result<()> {
+    /// Resolvable in what this device does of a tool's inputs, if `request` calls a tool that has any.
+    pub(crate) async fn resolve(&self, request: &mut Value) -> Result<()> {
         let Some(tool) = request["params"]["name"].as_str().filter(|_| request["method"] == "tools/call") else {
             return Ok(());
         };
-        let (tool, fills) = (tool.to_owned(), self.fills().await?);
+        let (tool, fills) = (tool.to_owned(), self.resolvable().await?);
         let Some(fills) = fills.get(&tool) else { return Ok(()) };
         let plugin = tool.split('_').next().unwrap_or_default();
         // What the device asks to fill these in is for whoever the call is.
@@ -91,10 +91,10 @@ impl Client {
             let filled = match (format, typed) {
                 ("device", None) => Some(self.key.public().to_string()),
                 ("device-name", None) => Some(crate::name()),
-                _ => match self.fillers.iter().find(|filler| filler.formats().contains(&format)) {
-                    Some(filler) => {
+                _ => match self.resolvers.iter().find(|resolver| resolver.formats().contains(&format)) {
+                    Some(resolver) => {
                         let input = Input { plugin, format, says, typed, inputs, who };
-                        filler.fill(self, input).await?
+                        resolver.resolve(self, input).await?
                     }
                     None => None,
                 },

@@ -175,14 +175,14 @@ defmodule OneCore.Hooks do
   end
 
   @doc "The hooks whose answers a server keeps."
-  def kept, do: ["reach", "device"]
+  def cached, do: ["reach", "device"]
 
   @doc """
   Forgets what `hooks` were answered, so that they're asked again: who may reach what may have changed, or whose
   a device is.
   """
-  def forget(hooks \\ kept()) do
-    for hook <- hooks, hook in kept() do
+  def forget(hooks \\ cached()) do
+    for hook <- hooks, hook in cached() do
       :ets.update_counter(@allowed, {:forgotten, hook}, 1, {{:forgotten, hook}, 0})
       :ets.match_delete(@allowed, {{hook, :_}, :_})
     end

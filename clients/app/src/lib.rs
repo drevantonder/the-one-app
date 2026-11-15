@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use ::client::{Client, NotIn, NotLetIn, Shown};
+use ::client::{Client, DeviceAuthorization, NotApproved, Subscription};
 use data_encoding::BASE64;
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, Uri, header};
@@ -34,7 +34,7 @@ const APP_MAY_LOAD: &str = "default-src 'none'; script-src 'self' 'unsafe-inline
 struct Views {
     client: Arc<Client>,
     app: AppHandle,
-    shown: Mutex<HashMap<String, Arc<Shown>>>,
+    subscriptions: Mutex<HashMap<String, Arc<Subscription>>>,
     /// The files each open app's page has loaded, by the app's name.
     loaded: Mutex<HashMap<String, HashSet<String>>>,
     started: Instant,
@@ -46,21 +46,21 @@ struct Views {
 
 impl Views {
     /// What `view` has been answered. A view that hears `changed` asks again.
-    fn shown(&self, view: &str) -> Arc<Shown> {
-        let mut shown = self.shown.lock().expect("no view panics");
+    fn subscription(&self, view: &str) -> Arc<Subscription> {
+        let mut shown = self.subscriptions.lock().expect("no view panics");
         let new = || {
             let (app, view) = (self.app.clone(), view.to_owned());
             // The window going away is the only way this fails, and its views with it.
-            Shown::new(self.client.clone(), move || drop(app.emit("changed", &view)))
+            Subscription::new(self.client.clone(), move || drop(app.emit("changed", &view)))
         };
         shown.entry(view.to_owned()).or_insert_with(new).clone()
     }
 
     /// Asks again for what every view was answered.
-    async fn again(&self) {
-        let shown: Vec<_> = self.shown.lock().expect("no view panics").values().cloned().collect();
+    async fn refresh(&self) {
+        let shown: Vec<_> = self.subscriptions.lock().expect("no view panics").values().cloned().collect();
         for shown in shown {
-            shown.again().await
+            shown.refresh().await
         }
     }
 
@@ -68,7 +68,7 @@ impl Views {
     /// lists resources.
     async fn listed(&self, who: Option<&str>) -> anyhow::Result<Value> {
         let asked = who.map_or(json!({}), |who| json!({"_meta": {"for": who}}));
-        self.shown("client").ask("resources/list", asked).await
+        self.subscription("client").request("resources/list", asked).await
     }
 
     /// One file a server listed: what kind it is, and what's in it, which is its text or, for a picture or a font,
@@ -76,7 +76,7 @@ impl Views {
     /// again.
     async fn read(&self, resource: &str) -> anyhow::Result<(String, Vec<u8>)> {
         let asked = json!({"uri": resource});
-        let read = match self.client.kept("resources/read", &asked) {
+        let read = match self.client.cached("resources/read", &asked) {
             Some(read) => read,
             None => self.client.fresh("resources/read", &asked).await?,
         };
@@ -163,14 +163,14 @@ async fn apps(app: AppHandle, views: State<'_, Views>, who: Option<String>) -> R
 
 /// Answers what a view asks, in MCP's words: the result of `method`.
 #[tauri::command]
-async fn ask(views: State<'_, Views>, view: String, method: String, params: Value) -> Result<Value, String> {
-    views.shown(&view).ask(&method, params).await.map_err(|error| error.to_string())
+async fn request(views: State<'_, Views>, view: String, method: String, params: Value) -> Result<Value, String> {
+    views.subscription(&view).request(&method, params).await.map_err(|error| error.to_string())
 }
 
 /// Asks again for what a view was answered: its user returned to it.
 #[tauri::command]
-async fn again(views: State<'_, Views>, view: String) -> Result<(), ()> {
-    views.shown(&view).again().await;
+async fn refresh(views: State<'_, Views>, view: String) -> Result<(), ()> {
+    views.subscription(&view).refresh().await;
     Ok(())
 }
 
@@ -202,7 +202,7 @@ async fn update(views: State<'_, Views>) -> Result<String, String> {
 
 /// Says whether the window is on screen. While it is, its views ask again when something changed.
 #[tauri::command]
-fn shown(views: State<'_, Views>, on_screen: bool) {
+fn visible(views: State<'_, Views>, on_screen: bool) {
     views.on_screen.store(on_screen, Ordering::Relaxed);
 }
 
@@ -233,14 +233,14 @@ async fn recovery_key(views: State<'_, Views>, who: Option<String>) -> Result<St
 #[tauri::command]
 async fn recover(views: State<'_, Views>, key: String, who: Option<String>) -> Result<(), String> {
     encryption_client::recover(&views.client, &key, who.as_deref()).await.map_err(|error| error.to_string())?;
-    views.again().await;
+    views.refresh().await;
     Ok(())
 }
 
 /// Forgets what a view was answered: its page is gone, or loading again.
 #[tauri::command]
 fn close(views: State<'_, Views>, view: String) {
-    views.shown.lock().expect("no view panics").remove(&view);
+    views.subscriptions.lock().expect("no view panics").remove(&view);
 }
 
 /// Opens the client again, which couldn't be as the app started, and opens the window again where it starts now.
@@ -262,18 +262,18 @@ async fn start(app: AppHandle) -> Result<Value, ()> {
     let opened = opened.wait_for(Option::is_some).await.map_err(drop)?.clone();
     Ok(match opened.expect("it waited for one") {
         // A phone hears a tap on a notification through its push plugin, which the page listens to.
-        Opened::In => json!({"taps": cfg!(mobile)}),
-        Opened::NotIn(link) => json!({"signIn": link.as_str()}),
-        Opened::Unreached(why) => json!({"unreached": why}),
+        Opened::SignedIn => json!({"taps": cfg!(mobile)}),
+        Opened::SignIn(link) => json!({"signIn": link.as_str()}),
+        Opened::Unreachable(why) => json!({"unreached": why}),
     })
 }
 
 /// Has this device hear its person's notifications, once their home is on screen: a phone asks them then whether
 /// it may show any, over what they came for and not over signing in.
 #[tauri::command]
-fn hear(app: AppHandle, views: State<'_, Views>) {
+fn listen(app: AppHandle, views: State<'_, Views>) {
     if !views.hearing.swap(true, Ordering::Relaxed) {
-        tauri::async_runtime::spawn(notifications::hear(app, views.client.clone()));
+        tauri::async_runtime::spawn(notifications::listen(app, views.client.clone()));
     }
 }
 
@@ -304,9 +304,9 @@ struct Start(tokio::sync::watch::Sender<Option<Opened>>);
 /// app (`&app`), and shows the code, and its button opens the link in the device's own browser.
 #[derive(Clone)]
 enum Opened {
-    In,
-    NotIn(Url),
-    Unreached(String),
+    SignedIn,
+    SignIn(Url),
+    Unreachable(String),
 }
 
 /// The home screen, as the window is sent to it. Android's and Windows' web views load only http.
@@ -317,7 +317,7 @@ const HOME: &str = "tauri://localhost/index.html";
 
 /// Opens the client and gives the window its views, or if this device isn't in its network yet, gives what lets it
 /// in and the link it's let in by, which says `why` it shows a new code, if it does.
-async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Option<(Url, NotIn)>> {
+async fn entered(app: &AppHandle, why: Option<NotApproved>) -> anyhow::Result<Option<(Url, DeviceAuthorization)>> {
     // A phone gives each app a folder of its own, which only the app is told. An iPhone's app keeps its client in
     // the folder it shares with its notification extension instead, its App Group, which `main.mm` says as ONE_HOME
     // when iOS gives it one, as it does only to an app signed with it, and otherwise in its own (`phone::home`).
@@ -328,10 +328,10 @@ async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Optio
         phone::home(&app.path().app_data_dir()?, std::env::var_os("ONE_HOME").as_deref().map(std::path::Path::new))?;
     #[cfg(desktop)]
     let home = ::client::home()?;
-    let client = match Client::open(home, cli::fills()).await {
+    let client = match Client::open(home, cli::resolvers()).await {
         Ok(client) => client,
         Err(error) => {
-            let not_in = error.downcast::<NotIn>()?;
+            let not_in = error.downcast::<DeviceAuthorization>()?;
             let mut start: Url = not_in.link.parse()?;
             start.query_pairs_mut().append_key_only("app");
             if let Some(why) = why {
@@ -343,7 +343,7 @@ async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Optio
     app.manage(Views {
         client: client.clone(),
         app: app.clone(),
-        shown: Mutex::default(),
+        subscriptions: Mutex::default(),
         loaded: Mutex::default(),
         started: *app.state::<Instant>(),
         on_screen: AtomicBool::new(true),
@@ -351,7 +351,7 @@ async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Optio
     });
 
     // The home screen says when no server is answering, which is what the last thing asked found.
-    let (handle, mut answering) = (app.clone(), client.answering());
+    let (handle, mut answering) = (app.clone(), client.connected());
     tauri::async_runtime::spawn(async move {
         while answering.changed().await.is_ok() {
             let now = *answering.borrow_and_update();
@@ -362,13 +362,13 @@ async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Optio
     // A server said something changed, so every view on screen asks again. Servers tell this client for as long as
     // it runs, so a notification reaches it with its window hidden.
     let handle = app.clone();
-    let mut told = client.told();
+    let mut told = client.notifications();
     tauri::async_runtime::spawn(async move {
         while let Ok(message) = told.recv().await {
             let views = handle.state::<Views>();
             if message["method"] == "notifications/one/changed" && views.on_screen.load(Ordering::Relaxed) {
                 eprintln!("a server said something changed");
-                views.again().await
+                views.refresh().await
             }
         }
     });
@@ -379,13 +379,13 @@ async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Optio
 /// Opens the client (`entered`) and keeps where the window starts: its person's home, or while this device isn't
 /// in its network, the link it's let in by, with what waits for its person to answer. If the network's address
 /// didn't answer, the home screen says so, told what went wrong, and nothing more.
-async fn starts(app: &AppHandle, why: Option<NotLetIn>) -> Option<NotIn> {
+async fn starts(app: &AppHandle, why: Option<NotApproved>) -> Option<DeviceAuthorization> {
     let (opened, not_in) = match entered(app, why).await {
-        Ok(None) => (Opened::In, None),
-        Ok(Some((link, not_in))) => (Opened::NotIn(link), Some(not_in)),
+        Ok(None) => (Opened::SignedIn, None),
+        Ok(Some((link, not_in))) => (Opened::SignIn(link), Some(not_in)),
         Err(error) => {
             eprintln!("{error:#}");
-            (Opened::Unreached(error.to_string()), None)
+            (Opened::Unreachable(error.to_string()), None)
         }
     };
     eprintln!("the client opened {} ms after the app started", app.state::<Instant>().elapsed().as_millis());
@@ -404,13 +404,13 @@ fn home(app: &AppHandle) {
 
 /// Waits for this device's person to answer, and then the window goes to the home screen once the device is in, or
 /// to a new code if they stopped it or the last one ended.
-async fn let_in(app: AppHandle, mut not_in: NotIn) {
+async fn let_in(app: AppHandle, mut not_in: DeviceAuthorization) {
     loop {
         let why = match not_in.answered().await {
             Ok(()) => None,
             Err(error) => {
                 eprintln!("{error:#}");
-                error.downcast_ref::<NotLetIn>().copied()
+                error.downcast_ref::<NotApproved>().copied()
             }
         };
         let next = starts(&app, why).await;
@@ -426,7 +426,7 @@ fn stays(app: &AppHandle, to: &Url) -> bool {
     let own = ["tauri", "oneapp", "about", "data", "blob"].contains(&to.scheme())
         || to.host_str().is_some_and(|host| host.ends_with(".localhost"));
     let start = match &*app.state::<Start>().0.borrow() {
-        Some(Opened::NotIn(start)) => {
+        Some(Opened::SignIn(start)) => {
             (start.origin(), start.path(), start.query()) == (to.origin(), to.path(), to.query())
         }
         _ => false,
@@ -490,19 +490,19 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             apps,
-            ask,
-            again,
+            request,
+            refresh,
             upload,
             recovery_key,
             recover,
             client,
             serve,
             update,
-            shown,
+            visible,
             close,
             enter,
             start,
-            hear,
+            listen,
             tapped,
             opened
         ])

@@ -14,7 +14,7 @@ defmodule OneCore.ServicesTest do
       def tools, do: [%{name: "add", description: "Adds one, and gives the count and its version", inputs: %{}}]
 
       @impl true
-      def call("add", _inputs, call), do: OneCore.Service.call(call, Counter.Kept, :add)
+      def call("add", _inputs, call), do: OneCore.Service.call(call, Counter.Store, :add)
 
       def counted(%OneCore.Call{for: who}, count) do
         send(:erlang.list_to_pid(~c"#{:erlang.pid_to_list(test)}"), {:counted, who, count})
@@ -22,7 +22,7 @@ defmodule OneCore.ServicesTest do
       end
     end
 
-    defmodule Counter.Kept do
+    defmodule Counter.Store do
       use GenServer
       @behaviour OneCore.Service
 
@@ -49,7 +49,7 @@ defmodule OneCore.ServicesTest do
     """
   end
 
-  defp loaded, do: for({module, _} <- :code.all_loaded(), String.ends_with?("#{module}", ".Counter.Kept"), do: module)
+  defp loaded, do: for({module, _} <- :code.all_loaded(), String.ends_with?("#{module}", ".Counter.Store"), do: module)
 
   defp ask(method, params, from) do
     JSON.decode!(Mcp.answer(JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params}), from))
@@ -60,7 +60,7 @@ defmodule OneCore.ServicesTest do
     # What an earlier test loaded stays loaded, since nothing unloads a server's plugins as it stops.
     earlier = loaded()
     assert {:ok, 1, ""} = Deploy.deploy("network", "counter", %{"server/counter.ex" => counter(1, self())})
-    assert :ok = Services.install("network/plugins/counter", "Counter.Kept")
+    assert :ok = Services.install("network/plugins/counter", "Counter.Store")
     %{earlier: earlier}
   end
 
@@ -69,7 +69,7 @@ defmodule OneCore.ServicesTest do
     assert Calls.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 1]}
     # The plugin was added for the network, so that's who its service has it run for.
     assert_receive {:counted, "network", 1}
-    service = Plugins.Process.whereis("network/plugins/counter", "Counter.Kept")
+    service = Plugins.Process.whereis("network/plugins/counter", "Counter.Store")
 
     # More updates than the two versions of a module the VM keeps.
     for number <- 2..4,
@@ -79,7 +79,7 @@ defmodule OneCore.ServicesTest do
           )
 
     assert Calls.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [902, 4]}
-    assert Plugins.Process.whereis("network/plugins/counter", "Counter.Kept") == service
+    assert Plugins.Process.whereis("network/plugins/counter", "Counter.Store") == service
     assert length(loaded() -- earlier) == 1
 
     # A version without the service stops it, and one with it starts it afresh.
@@ -88,7 +88,7 @@ defmodule OneCore.ServicesTest do
                "server/counter.ex" => "defmodule Counter do\n  @behaviour OneCore.Plugin\nend"
              })
 
-    assert Plugins.Process.whereis("network/plugins/counter", "Counter.Kept") == nil
+    assert Plugins.Process.whereis("network/plugins/counter", "Counter.Store") == nil
     assert loaded() -- earlier == []
     assert {:ok, 6, ""} = Deploy.deploy("network", "counter", %{"server/counter.ex" => counter(6, self())})
     assert Calls.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 6]}
@@ -98,7 +98,7 @@ defmodule OneCore.ServicesTest do
   test "only a server acting for whoever it asks for calls a service's functions and the functions it calls" do
     stranger = String.duplicate("ab", 32)
     said = %{who: OneCore.Test.owner(), for: OneCore.Test.owner(), passed_on: true}
-    service = %{plugin: "network/plugins/counter", service: "Counter.Kept", function: "add", arguments: [], _meta: said}
+    service = %{plugin: "network/plugins/counter", service: "Counter.Store", function: "add", arguments: [], _meta: said}
     plugin = %{added: "network", plugin: "counter", function: "counted", arguments: [7], _meta: said}
 
     # A client asks neither, whoever it is.

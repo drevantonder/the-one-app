@@ -152,7 +152,7 @@ defmodule OneCore.User do
   `network/owner`, since it's who may do anything where no plugin decides who may (`OneCore.Hooks.decide/4`).
   """
   def first_owner do
-    Servers.kept(:first_owner, fn ->
+    Servers.cached(:first_owner, fn ->
       with {:ok, who, _tag} <- Bucket.read("network/owner"), do: who, else: (:absent -> nil)
     end)
   end

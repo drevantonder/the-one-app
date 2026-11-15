@@ -16,7 +16,7 @@ defmodule OneCore.Tools do
   the call on to.
   """
   alias OneCore.{Artifact, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
-  alias OneCore.Plugins.{Added, Calls, Deploy, Kept}
+  alias OneCore.Plugins.{Added, Calls, Deploy, Store}
 
   @tools [
     %{
@@ -297,7 +297,7 @@ defmodule OneCore.Tools do
       plugin -> at(User.owner(plugin), pass) && reaches!(asked, plugin, "editor")
     end
 
-    case Deploy.deploy(who, name, Kept.received(files)) do
+    case Deploy.deploy(who, name, Store.received(files)) do
       {:ok, number, ""} -> "#{name} is running, at version #{number}."
       {:ok, number, warnings} -> "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"
       {:error, why} -> raise why
@@ -308,7 +308,7 @@ defmodule OneCore.Tools do
     case Plugins.running(who) do
       %{^name => version} ->
         opens!(asked, version.artifact)
-        JSON.encode!(Kept.sent(Kept.source(version.artifact, version.code)))
+        JSON.encode!(Store.sent(Store.source(version.artifact, version.code)))
 
       _ ->
         raise "There's no plugin named #{name}"

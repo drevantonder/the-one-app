@@ -27,7 +27,7 @@ await attempt("opening a window of its own", () => open("about:blank") ? "opened
 
 // The app's Rust half, which the app's page asks through Tauri's IPC.
 await attempt("Tauri's object in this frame", () => window.__TAURI__ && "it's there")
-await attempt("Tauri's IPC from this frame", () => window.__TAURI_INTERNALS__?.invoke("ask", { view: "home", method: "tools/list", params: {} }).then(() => "answered"))
+await attempt("Tauri's IPC from this frame", () => window.__TAURI_INTERNALS__?.invoke("request", { view: "home", method: "tools/list", params: {} }).then(() => "answered"))
 await attempt("Tauri's IPC over its own protocol", () => fetched("ipc://localhost/ask", { method: "POST", body: "{}" }))
 await attempt("Tauri's IPC as a web address", () => fetched("http://ipc.localhost/ask", { method: "POST", body: "{}" }))
 await attempt("the app's own files", () => fetched("tauri://localhost/client.js"))

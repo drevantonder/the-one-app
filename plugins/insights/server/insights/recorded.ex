@@ -212,7 +212,7 @@ defmodule Insights.Recorded do
     if Enum.any?(Map.values(batch), &(&1 != [])) do
       machine = Servers.name(state.server) || String.slice(state.server, 0, 8)
 
-      Insights.Kept.keep(
+      Insights.Store.keep(
         state.own,
         Map.merge(batch, %{"server" => state.server, "machine" => machine, "from" => state.from, "to" => to})
       )

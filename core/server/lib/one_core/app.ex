@@ -11,7 +11,7 @@ defmodule OneCore.App do
   installs nothing.
   """
   alias OneCore.Server
-  alias OneCore.Plugins.{Kept, Version}
+  alias OneCore.Plugins.{Store, Version}
 
   @client "client/"
   @ui "client/ui"
@@ -117,7 +117,7 @@ defmodule OneCore.App do
   end
 
   defp read(ui, path) do
-    {:ok, text} = Kept.file(ui.artifact, ui.code, path)
+    {:ok, text} = Store.file(ui.artifact, ui.code, path)
     text
   end
 

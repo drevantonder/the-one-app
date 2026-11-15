@@ -34,7 +34,7 @@ defmodule OneCore.Plugins.Calls do
           about = %{"plugin" => name, "tool" => tool, "inputs" => inputs}
           # What a plugin answered a hook that's kept, it answered from what its tools change. So after one of those
           # that doesn't only read, it's forgotten: here, and by the servers this one tells.
-          kept = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.kept(), &(&1 in version.hooks))
+          kept = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.cached(), &(&1 in version.hooks))
 
           try do
             call = called(at, name, versions, ask, asked, passed_on)

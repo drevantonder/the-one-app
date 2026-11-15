@@ -131,7 +131,7 @@ function show(at, tapped) {
   view.tapped = tapped
   if (!view.drawn) return
   // Its user returned to it.
-  invoke("again", { view: view.key })
+  invoke("refresh", { view: view.key })
   opened(view)
 }
 
@@ -148,7 +148,7 @@ function opened(view) {
     // The device hears its person's notifications once they see their home, which has drawn over the mark.
     if (view.app === HOME) {
       document.getElementById("opening").hidden = true
-      invoke("hear")
+      invoke("listen")
     }
   }))
 }
@@ -239,7 +239,7 @@ async function answer(view, method, params) {
   // An app opened from a group's home page is answered for the group.
   const who = params._meta?.for ?? view.for
   if (who && !listed.has(who)) list(who)
-  return invoke("ask", { view: view.key, method, params: who ? { ...params, _meta: { ...params._meta, for: who } } : params })
+  return invoke("request", { view: view.key, method, params: who ? { ...params, _meta: { ...params._meta, for: who } } : params })
 }
 
 addEventListener("message", async ({ source, data }) => {
@@ -320,18 +320,18 @@ listen("answering", ({ payload }) => {
   if (answering && unlisted) start()
 })
 document.getElementById("retry").addEventListener("click", () =>
-  unreached !== null ? invoke("enter") : unlisted ? start() : invoke("again", { view: key(HOME) }),
+  unreached !== null ? invoke("enter") : unlisted ? start() : invoke("refresh", { view: key(HOME) }),
 )
 
 /// The user returned to the window, so what's showing asks again. While the window is on screen, what's showing
 /// asks again when a server says something changed.
 function returned() {
   if (signIn || unreached !== null) return
-  invoke("shown", { onScreen: !document.hidden })
+  invoke("visible", { onScreen: !document.hidden })
   if (document.hidden) return
   if (unlisted) start()
-  invoke("again", { view: key(HOME) })
-  if (open.has(history.state)) invoke("again", { view: history.state })
+  invoke("refresh", { view: key(HOME) })
+  if (open.has(history.state)) invoke("refresh", { view: history.state })
 }
 document.addEventListener("visibilitychange", returned)
 addEventListener("focus", returned)
@@ -351,6 +351,6 @@ dress()
 if (unreached !== null) problem()
 else if (!signIn) {
   await start()
-  invoke("shown", { onScreen: !document.hidden })
+  invoke("visible", { onScreen: !document.hidden })
   if (taps) hearTaps()
 }

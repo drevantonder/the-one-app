@@ -1,7 +1,7 @@
 //! What only a device does, which the crate's doc says. A server's NIF is built without it.
 
 use anyhow::{Context, Result, bail};
-use client::{Client, Fill, Input};
+use client::{Client, InputResolver, Input};
 use data_encoding::BASE64;
 use futures_util::future::BoxFuture;
 use iroh_base::PublicKey;
@@ -12,15 +12,15 @@ use crate::cipher::{self, Key};
 /// The encryption plugin's tool that says what a device holds of its owner's key.
 const HOLDS: &str = "encryption_key";
 
-/// What this fills in of a tool's inputs, which a client hands every call it makes (`client::Fill`).
+/// What this fills in of a tool's inputs, which a client hands every call it makes (`client::InputResolver`).
 pub struct Encrypts;
 
-impl Fill for Encrypts {
+impl InputResolver for Encrypts {
     fn formats(&self) -> &'static [&'static str] {
         &["secret", "owner-key", "artifact-keys", "backup-recipient", "backup-key"]
     }
 
-    fn fill<'a>(&'a self, client: &'a Client, input: Input<'a>) -> BoxFuture<'a, Result<Option<String>>> {
+    fn resolve<'a>(&'a self, client: &'a Client, input: Input<'a>) -> BoxFuture<'a, Result<Option<String>>> {
         Box::pin(async move {
             let Input { plugin, format, says, typed, inputs, who } = input;
             let filled = match (format, typed) {

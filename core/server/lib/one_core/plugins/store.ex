@@ -1,4 +1,4 @@
-defmodule OneCore.Plugins.Kept do
+defmodule OneCore.Plugins.Store do
   @moduledoc """
   A plugin as the bucket keeps it. A plugin is an artifact whose blobs are code, and it's whoever's deployed it:
   `<theirs>/plugins/<name>`. Each set of files deployed is kept at `code/<its hash>/`, and where the server built

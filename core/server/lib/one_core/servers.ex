@@ -21,7 +21,7 @@ defmodule OneCore.Servers do
   @network "network"
 
   @doc "The keys of the servers on `owner`'s list, the first first."
-  def listed(owner), do: kept({:listed, owner}, fn -> read("#{owner}/servers", []) end)
+  def listed(owner), do: cached({:listed, owner}, fn -> read("#{owner}/servers", []) end)
 
   @doc "The keys of the servers to ask for `owner`: the ones on their list, then the ones acting for the network."
   def acting(owner), do: Enum.uniq(listed(owner) ++ listed(@network))
@@ -30,7 +30,7 @@ defmodule OneCore.Servers do
   def acts_for?(key, owner), do: key in listed(owner) or key in listed(@network)
 
   @doc "Who the server whose key is `key` acts for: its owner first, and whoever its owner chose."
-  def members(key), do: kept({:members, key}, fn -> read("servers/#{key}/members", []) end)
+  def members(key), do: cached({:members, key}, fn -> read("servers/#{key}/members", []) end)
 
   @doc "Who the server whose key is `key` acts for, both having said so: each member of it that has it on their list."
   def acts_for(key), do: Enum.filter(members(key), &(key in listed(&1)))
@@ -43,7 +43,7 @@ defmodule OneCore.Servers do
 
   @doc "The services the server whose key is `key` has installed: each one's plugin and its name."
   def installed(key) do
-    kept({:installed, key}, fn -> for [plugin, name] <- read("servers/#{key}/services", []), do: {plugin, name} end)
+    cached({:installed, key}, fn -> for [plugin, name] <- read("servers/#{key}/services", []), do: {plugin, name} end)
   end
 
   @doc "This server's services installed are `services` from now on."
@@ -53,7 +53,7 @@ defmodule OneCore.Servers do
   end
 
   @doc "What the machine the server whose key is `key` runs on is called, as it said when it last started."
-  def name(key), do: kept({:name, key}, fn -> read("servers/#{key}/name", nil) end)
+  def name(key), do: cached({:name, key}, fn -> read("servers/#{key}/name", nil) end)
 
   @doc """
   Whether the server whose key is `key` is on: `:on` while it's connected to the network's edge, the time its
@@ -63,7 +63,7 @@ defmodule OneCore.Servers do
   """
   def seen(key) do
     if at = Application.get_env(:one_core, :address) do
-      kept({:seen, key}, fn ->
+      cached({:seen, key}, fn ->
         path = "/relay/seen"
         answer = Edge.send!(method: :get, url: at <> path, params: [keys: key], headers: Edge.signed(path, ""))
         if answer.status == 200, do: on(answer.body[key]), else: nil
@@ -212,7 +212,7 @@ defmodule OneCore.Servers do
   def keep, do: :ets.new(__MODULE__, [:named_table, :public, read_concurrency: true])
 
   @doc "What `read` gave for `what` when it was last asked, which is asked again where nothing keeps it."
-  def kept(what, read) do
+  def cached(what, read) do
     case :ets.whereis(__MODULE__) != :undefined and :ets.lookup(__MODULE__, what) do
       [{^what, kept, _read}] ->
         kept

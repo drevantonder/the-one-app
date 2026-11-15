@@ -1,4 +1,4 @@
-defmodule Insights.Kept do
+defmodule Insights.Store do
   @moduledoc """
   Where what's recorded is kept: blobs of the plugin's own artifact for the network, by the hour they're of.
 

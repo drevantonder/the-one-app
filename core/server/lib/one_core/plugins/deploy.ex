@@ -2,7 +2,7 @@ defmodule OneCore.Plugins.Deploy do
   @moduledoc """
   Deploying a plugin: a new one, or a new version of one. Its app, if it has one, is built first (`OneCore.App`),
   its Elixir is compiled and loaded (`OneCore.Plugins.Version`), and it's kept in the bucket
-  (`OneCore.Plugins.Kept`) and runs at once.
+  (`OneCore.Plugins.Store`) and runs at once.
 
   Deploying or adding a plugin brings along the ones it uses that the server ships with: its `:shipped` setting,
   each one's folder by its name. Those are added for the network.
@@ -10,7 +10,7 @@ defmodule OneCore.Plugins.Deploy do
   require Logger
   alias OneCore.{App, Bucket, Folder, Server, Servers}
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Added, Calls, Kept, Version}
+  alias OneCore.Plugins.{Added, Calls, Store, Version}
 
   @network "network"
   # What each owner has deployed, as the network keeps it: `deployed/<owner>/<name>`.
@@ -30,7 +30,7 @@ defmodule OneCore.Plugins.Deploy do
       version = %{version | artifact: artifact}
 
       with :ok <- fits(owner, name, version),
-           {:ok, number} <- Kept.keep(artifact, name, kept, files),
+           {:ok, number} <- Store.keep(artifact, name, kept, files),
            :ok <- Added.note(owner, &{:ok, Map.put(&1, name, artifact)}) do
         listed(owner, name, version)
         Plugins.look(owner, [{artifact, number, {:ok, version}}])
@@ -149,7 +149,7 @@ defmodule OneCore.Plugins.Deploy do
   defp ship?(name, source) do
     artifact = "#{@network}/plugins/#{name}"
 
-    case Kept.newest_source(artifact) do
+    case Store.newest_source(artifact) do
       nil ->
         true
 
@@ -208,11 +208,11 @@ defmodule OneCore.Plugins.Deploy do
     client = &Map.filter(&1, fn {path, _} -> Version.client?(path) end)
 
     with %Version{ui: code, code: kept} when code == ui.code <- Plugins.version(artifact),
-         true <- client.(Kept.source(artifact, kept)) == client.(files) do
+         true <- client.(Store.source(artifact, kept)) == client.(files) do
       {:ok,
        Map.merge(
          Map.reject(files, fn {path, _} -> Version.client?(path) end),
-         client.(Kept.files(artifact, kept))
+         client.(Store.files(artifact, kept))
        )}
     else
       _ -> nil
@@ -230,10 +230,10 @@ defmodule OneCore.Plugins.Deploy do
         built_with != nil,
         ui = Plugins.running(owner)["ui"],
         ui != nil and ui.code != built_with,
-        whose = Kept.whose(artifact),
+        whose = Store.whose(artifact),
         Servers.here?(whose) and Plugins.plugin(whose, Path.basename(artifact)) == artifact,
         uniq: true do
-      with {:error, why} <- deploy(whose, Path.basename(artifact), Kept.source(artifact, version.code)),
+      with {:error, why} <- deploy(whose, Path.basename(artifact), Store.source(artifact, version.code)),
            do: Logger.error("#{name}'s app wasn't built again against the UI library that changed: #{why}")
     end
   end

@@ -11,7 +11,7 @@ defmodule OneCore.Plugins.Added do
   server acting for them writes: so a deploy tells their servers that it has a new version.
   """
   alias OneCore.{Bucket, Plugins, Server}
-  alias OneCore.Plugins.{Deploy, Kept, Version}
+  alias OneCore.Plugins.{Deploy, Store, Version}
 
   @doc """
   Adds the plugin `artifact` for `owner`, who find it by `name`. The plugins it uses are there for them first, as
@@ -30,8 +30,8 @@ defmodule OneCore.Plugins.Added do
     end
 
     with :ok <- named(name),
-         {number, code, _tag} <- Kept.newest(artifact) || {:error, "There's no plugin #{artifact}"},
-         {:ok, version} <- newest_here(artifact, code) || Kept.loaded(artifact, code),
+         {number, code, _tag} <- Store.newest(artifact) || {:error, "There's no plugin #{artifact}"},
+         {:ok, version} <- newest_here(artifact, code) || Store.loaded(artifact, code),
          :ok <- Deploy.fits(owner, name, version),
          :ok <- note(owner, added) do
       Bucket.write("#{artifact}/added/#{owner}", "")
