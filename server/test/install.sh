@@ -1,30 +1,35 @@
 #!/usr/bin/env bash
-# Proves a server installs on a machine as one thing, with the one command, and updates in place. On a network
-# with its address on this machine (`./network --address`), a second machine, a home folder of its own whose PATH
-# has no Erlang, Elixir, Rust or Bun on it, and with only `one` from a build: turns itself into a server of the
-# network's (`one serve on`), which a real systemd user unit keeps running; shows other users of the machine no
-# secret and listens as no Erlang node; runs a call and deploys an app through that server alone; is killed and
-# started again by systemd; takes a newer build when it's asked, while the network's other server answers; goes
-# back by itself from a build that can't start; and is removed, leaving nothing behind. The builds are made by
-# `./release` from this repo's commit and two made on top of it.
+# Proves a server installs on a machine as one thing, with the one command, and updates in place, on Linux and on
+# a Mac. On a network with its address on this machine (`./network --address`), a second machine, a home folder of
+# its own whose PATH has no Erlang, Elixir, Rust or Bun on it, and with only `one` from a build: turns itself into a
+# server of the network's (`one serve on`), which the system keeps running, a real systemd user unit on Linux and
+# a LaunchAgent on a Mac; runs with its person's login PATH; shows other users of the machine no secret and listens
+# as no Erlang node; runs a call and deploys an app through that server alone; is killed and started again by the
+# system; takes a newer build when it's asked, while the network's other server answers; goes back by itself from a
+# build that can't start; and is removed, leaving nothing behind. The builds are made by `./release` from this
+# repo's commit and two made on top of it.
 #
 #     cargo build --release && mise exec -- server/test/install.sh
 #
-# It uses systemd's user units, each under a name of the server's key, and takes about fifteen minutes, most of
-# it building.
+# Each server is the system's under a name of its key, `one-server-<key>.service` or `app.theone.server.<key>`, so
+# none that's already on the machine is touched. A Mac needs GNU's tail, as `gtail` (Homebrew's coreutils). It takes
+# about fifteen minutes, most of it building.
 set -euo pipefail
 set -m # The network is a job with a process group of its own.
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
-folder=$(mktemp -d)
+# Short, as a Mac keeps the path of a socket in its folder under 104 bytes.
+folder=$(mktemp -d /tmp/one-install.XXXXXX)
 one=$root/target/release/one
-# What the three builds are made in: each a clone of this repo, sharing what Rust has built already.
-export CARGO_TARGET_DIR=$root/target/proof
+# The three builds are made in clones of this repo, sharing what Rust has built already.
+export CARGO_TARGET_DIR=$root/target
 machine=$folder/machine
-unit= frozen=
+service= frozen=
 started=()
+# GNU's tail, which follows a file for as long as a process runs.
+tail=$(command -v gtail || command -v tail)
 trap '[[ -z $frozen ]] || kill -CONT "$frozen"
-      [[ -z $unit ]] || ! systemctl --user cat "$unit" >/dev/null 2>&1 || systemctl --user disable --now "$unit"
+      [[ -z $service ]] || remove
       for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
 
 say() { printf '\n== %s\n' "$*"; }
@@ -35,7 +40,7 @@ size() { du -sh "$1" | cut -f1; }
 say "A network, with its address here"
 "$root/network" "$folder/network" --address >"$folder/network.log" 2>&1 &
 started+=($!)
-grep -q -m1 "A network is running" <(tail -f --pid=$! -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
+grep -q -m1 "A network is running" <("$tail" -f --pid=$! -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 client=$folder/network/client
 # Its owner, at a device of theirs that isn't the second machine.
 owner() { ONE_HOME=$client ONE_AS=owner ONE_FOR=network "$one" "$@"; }
@@ -52,11 +57,49 @@ release() {
     (cd "$clone" && eval "$2")
     git -C "$clone" -c user.name=proof -c user.email=proof@localhost commit -q --allow-empty -am "$1"
   fi
-  (cd "$clone" && ONE_HOME=$client ONE_AS=owner ONE_FOR=network ./release linux-x86_64) >"$folder/release-$1.log" 2>&1 ||
+  (cd "$clone" && ONE_HOME=$client ONE_AS=owner ONE_FOR=network ./release "$kind") >"$folder/release-$1.log" 2>&1 ||
     { tail -30 "$folder/release-$1.log" >&2; exit 1; }
   grep -E "^(server|one)/" "$folder/release-$1.log" | sed 's/^/  /' >&2
   "$clone/build-name"
 }
+
+# This kind of machine, as builds are named, and what the system keeps the server running with here.
+kind="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)"
+if [[ $kind == linux-* ]]; then
+  data=.local/share
+  named() { service=one-server-${1:0:12}.service; }
+  running() { [[ $(systemctl --user is-active "$service") == active && $(systemctl --user is-enabled "$service") == enabled ]]; }
+  main_pid() { systemctl --user show -p MainPID --value "$service"; }
+  restarts() { systemctl --user show -p NRestarts --value "$service"; }
+  # Every process of the server's.
+  processes() { paste -sd, - <"/sys/fs/cgroup$(systemctl --user show -p ControlGroup --value "$service")/cgroup.procs"; }
+  listening() { ss -Htlnp | grep -E "pid=(${1//,/|})," || true; }
+  its_path() { systemctl --user show -p Environment --value "$service" | tr ' ' '\n' | sed -n 's/^PATH=//p'; }
+  # What it has said, from where it was when `mark` was last asked.
+  mark() { cursor=$(journalctl --user -u "$service" -n 0 --show-cursor | grep -o 's=.*'); }
+  said() { journalctl --user -u "$service" -o cat --after-cursor="$cursor" "$@"; }
+  remove() { systemctl --user cat "$service" >/dev/null 2>&1 && systemctl --user disable --now "$service"; }
+  gone() { ! systemctl --user cat "$service" >/dev/null 2>&1 && [[ -z $(find "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" -name "$service") ]]; }
+else
+  data="Library/Application Support"
+  domain=gui/$(id -u)
+  named() { service=app.theone.server.${1:0:12}; }
+  running() { launchctl print "$domain/$service" | grep -q "state = running"; }
+  main_pid() { launchctl print "$domain/$service" | awk '/^\tpid = / { print $3 }'; }
+  restarts() { launchctl print "$domain/$service" | awk '/^\truns = / { print $3 - 1 }'; }
+  processes() {
+    local all=$(main_pid) next=$(main_pid)
+    while next=$(pgrep -P "${next//$'\n'/,}" | paste -sd, -) && [[ -n $next ]]; do all=$all,$next; done
+    echo "$all"
+  }
+  listening() { lsof -nP -a -iTCP -sTCP:LISTEN -p "$1" | tail -n +2 || true; }
+  its_path() { plutil -extract EnvironmentVariables.PATH raw -o - "$machine/home/Library/LaunchAgents/$service.plist"; }
+  log=$machine/home/$data/app.theone.client/server/server.log
+  mark() { cursor=$(($(wc -l <"$log") + 1)); }
+  said() { if [[ ${1-} == -f ]]; then "$tail" -n "+$cursor" -f --pid=$$ "$log" 2>/dev/null; else tail -n "+$cursor" "$log"; fi; }
+  remove() { launchctl bootout "$domain/$service" 2>/dev/null || true; }
+  gone() { ! launchctl print "$domain/$service" >/dev/null 2>&1 && [[ ! -e $machine/home/Library/LaunchAgents/$service.plist ]]; }
+fi
 
 say "Building and publishing this commit"
 began=$(now)
@@ -65,9 +108,9 @@ echo "build $a, in $(since "$began")"
 
 say "The second machine: its own home, a PATH with no Erlang, Elixir, Rust or Bun, and one from the build"
 mkdir -p "$machine/home" "$machine/bin"
-gzip -dc "$CARGO_TARGET_DIR/builds/$a/one-linux-x86_64.gz" >"$machine/bin/one"
+gzip -dc "$CARGO_TARGET_DIR/builds/$a/one-$kind.gz" >"$machine/bin/one"
 chmod +x "$machine/bin/one"
-home=$machine/home/.local/share/app.theone.client
+home=$machine/home/$data/app.theone.client
 # It's one of the network's devices: a network being built gives its device a pass as it's started, as `mix
 # network` gives its own client one.
 key=$(cd "$root/server" && mix run --no-start -e "
@@ -77,7 +120,7 @@ key=$(cd "$root/server" && mix run --no-start -e "
   IO.puts(key)")
 # Each command there is given five minutes.
 on_machine() {
-  timeout 300 env -i HOME="$machine/home" PATH=/usr/bin:/bin XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+  timeout 300 env -i HOME="$machine/home" PATH=/usr/bin:/bin XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR-}" \
     DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS-}" ONE_AS=owner ONE_FOR=network "$machine/bin/one" "$@"
 }
 for tool in erl elixir mix cargo rustc bun; do
@@ -86,31 +129,29 @@ done
 echo "its device: $key"
 echo "one --version: $(on_machine --version)"
 
-# Waits for the unit's log to say something, from where it was when `mark` was last asked.
-mark() { cursor=$(journalctl --user -u "$unit" -n 0 --show-cursor | grep -o 's=.*'); }
-heard() {
-  timeout 600 grep -q -m1 -E "$1" <(journalctl --user -u "$unit" -f -o cat --after-cursor="$cursor") ||
-    { journalctl --user -u "$unit" -o cat --after-cursor="$cursor" | tail -20; exit 1; }
-}
+# Waits for the server to say something, from where it was when `mark` was last asked.
+heard() { timeout 600 grep -q -m1 -E "$1" <(said -f) || { said | tail -20; exit 1; }; }
 build_of() { on_machine builds --server "$1" | grep -o '"build":"[^"]*"' | head -1 | cut -d'"' -f4; }
 
 say "one serve on"
 began=$(now)
 on_machine serve on | tee "$folder/serve-on"
 server=$(grep -o "Its key: [0-9a-f]*" "$folder/serve-on" | grep -o "[0-9a-f]*$")
-unit=one-server-${server:0:12}.service
-echo "in $(since "$began"); systemd says it's $(systemctl --user is-active "$unit"), and enabled: $(systemctl --user is-enabled "$unit")"
+named "$server"
+running || { echo "the system isn't running $service" && exit 1; }
+echo "in $(since "$began"); the system runs it as $service, and starts it whenever it starts"
+echo "with its person's login PATH, not the bare one it was set up from: $(its_path)"
 echo "it answers by its key, as build $(build_of "$server")"
 owner builds | grep -o "\"server\":\"$server\"" >/dev/null && echo "it's on the network's list of servers"
 
 say "What other users of the machine see of it"
-procs=$(cat "/sys/fs/cgroup$(systemctl --user show -p ControlGroup --value "$unit")/cgroup.procs" | paste -sd,)
-# Every process of the unit, as ps shows it to anyone: its cookie is the word the release names, never a secret.
+procs=$(processes)
+# Every process of the server, as ps shows it to anyone: its cookie is the word the release names, never a secret.
 ps -o pid=,args= -p "$procs" | grep -o -- "-setcookie [^ ]*" | sort -u | sed 's/^/  /'
 ps -o args= -p "$procs" | grep -o -- "-setcookie [^ ]*" | grep -qv -- "-setcookie no-distribution$" &&
   { echo "a cookie that isn't the release's word is on a command line" && exit 1; }
 # It reaches others by its key over UDP, and nothing listens as an Erlang node: no epmd, no distribution port.
-listening=$(ss -Htlnp | grep -E "pid=(${procs//,/|})," || true)
+listening=$(listening "$procs")
 [[ -z $listening ]] || { echo "it listens on TCP: $listening" && exit 1; }
 ps -o comm= -p "$procs" | grep -q epmd && { echo "epmd runs with it" && exit 1; }
 echo "  it listens on no TCP port, and no epmd runs with it"
@@ -148,13 +189,13 @@ echo "called in $(since "$began")"
 kill -CONT "$frozen"
 frozen=
 
-say "Killed, it's started again by systemd"
+say "Killed, it's started again by the system"
 mark
-pid=$(systemctl --user show -p MainPID --value "$unit")
+pid=$(main_pid)
 kill -9 "$pid"
 echo "killed $pid with kill -9"
 heard "A server is running"
-echo "running again as $(systemctl --user show -p MainPID --value "$unit"), restarted $(systemctl --user show -p NRestarts --value "$unit") time(s), answering as $(build_of "$server")"
+echo "running again as $(main_pid), restarted $(restarts) time(s), answering as $(build_of "$server")"
 
 say "A newer build, published and taken when it's asked"
 b=$(release newer true)
@@ -163,33 +204,32 @@ owner update --server "$server"
 began=$(now)
 echo "while it updates, the network's other server answers: $(owner builds | grep -o '"asked":"[^"]*"' | sed "s/$first/the network's first server/")"
 heard "The server is on the build"
-journalctl --user -u "$unit" -o cat --after-cursor="$cursor" | grep -E "^The server is on the build" | sed 's/^/  /'
+said | grep -E "^The server is on the build" | sed 's/^/  /'
 echo "in $(since "$began"); it answers as $(build_of "$server"), and the machine's one is $(on_machine --version)"
-echo "kept: $(ls "$home/server/builds" | paste -sd' ')"
+echo "kept: $(ls "$home/server/builds" | paste -sd' ' -)"
 
 say "A build that can't start, which it goes back from by itself"
-c=$(release broken "sed -i 's/  def serve do/  def serve do\n    raise \"this build can'\''t start\"/' server/lib/one_core/release.ex")
+c=$(release broken "perl -pi -e 's/  def serve do/  def serve do\n    raise \"this build can'\''t start\"/' server/lib/one_core/release.ex")
 mark
 owner update --server "$server"
 heard "didn't start and answer"
-journalctl --user -u "$unit" -o cat --after-cursor="$cursor" | grep -E "can't start|didn't start and answer" | sed 's/^/  /'
+said | grep -E "can't start|didn't start and answer" | sed 's/^/  /'
 heard "A server is running"
 echo "it answers as $(build_of "$server"), not $c"
 
 say "Sizes"
 echo "  the server installed: $(size "$home/server/builds/$b") (build $b), and its Bun, fetched once: $(size "$home/server/home/bun")"
 echo "  one: $(size "$machine/bin/one")"
-echo "  what an update downloads: $(size "$CARGO_TARGET_DIR/builds/$b/server-linux-x86_64.tar.gz") for the server, $(size "$CARGO_TARGET_DIR/builds/$b/one-linux-x86_64.gz") for one"
+echo "  what an update downloads: $(size "$CARGO_TARGET_DIR/builds/$b/server-$kind.tar.gz") for the server, $(size "$CARGO_TARGET_DIR/builds/$b/one-$kind.gz") for one"
 
 say "one serve off"
 began=$(now)
-on_machine serve off || { journalctl --user -u "$unit" -o cat -n 20; exit 1; }
+mark
+on_machine serve off || { said | tail -20; exit 1; }
 echo "in $(since "$began")"
-systemctl --user cat "$unit" >/dev/null 2>&1 && { echo "systemd still has $unit" && exit 1; }
-left=$(find "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" -name "$unit")
-[[ -z $left ]] || { echo "left behind: $left" && exit 1; }
+gone || { echo "the system still has $service" && exit 1; }
 [[ ! -e $home/server ]] || { echo "left behind: $home/server" && exit 1; }
 owner builds | grep -q "\"server\":\"$server\"" && { echo "it's still on the network's list" && exit 1; }
-echo "systemd has no $unit, the machine has nothing of it, and the network's list doesn't name it: what's left is"
-unit=
+echo "the system has no $service, the machine has nothing of it, and the network's list doesn't name it: what's left is"
+service=
 (cd "$machine" && find . -type f | sort | sed 's/^/  /')
