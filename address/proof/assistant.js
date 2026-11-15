@@ -60,13 +60,15 @@ for (const name of tools) {
   const answer = await assistant.callTool({ name, arguments: {} });
   console.log(`${name}: ${answer.content.map((part) => part.text).join(" ")}`);
 }
-// It stays to be asked again: each line read is a tool to call, until its input closes.
+// It stays to be asked again: each line read is a tool to call, and what it's called with as JSON after a space,
+// until its input closes.
 for await (const line of console) {
+  const [name, ...inputs] = line.trim().split(" ");
   try {
-    const answer = await assistant.callTool({ name: line.trim(), arguments: {} });
-    console.log(`${line.trim()}: ${answer.content.map((part) => part.text).join(" ")}`);
+    const answer = await assistant.callTool({ name, arguments: JSON.parse(inputs.join(" ") || "{}") });
+    console.log(`${name}: ${answer.content.map((part) => part.text).join(" ")}`);
   } catch (error) {
-    console.log(`${line.trim()}: refused, ${error.message}`);
+    console.log(`${name}: refused, ${error.message}`);
   }
 }
 await assistant.close();

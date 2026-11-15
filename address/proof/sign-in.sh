@@ -10,7 +10,8 @@
 # where it is, and dials it with a key of their own, is refused. An assistant somewhere else is let in at /mcp as
 # MCP's authorization says, acts as whoever let it in, and is one of their devices. A network without the plugin that
 # decides who may is its first owner's alone, and one without the plugin that signs people in answers nobody. It says
-# what a call costs once a device is someone's.
+# what a call costs once a device is someone's. A device or assistant of a person's lets in their next by its code,
+# with no browser; given by someone else's, it's theirs; and only a server acting for that person says so.
 #
 #     mise exec -- address/proof/sign-in.sh
 #
@@ -75,11 +76,13 @@ answered() {
 }
 # Whose key a device's home holds, as servers name it.
 key_of() { (cd "$root/server" && mix run --no-start -e 'IO.puts(elem(OneCore.Iroh.key(hd(System.argv())), 1))' "$1/key" | tail -1); }
-# Ends a device's code, as half an hour would.
-ends() {
+# Changes what the address keeps of a device's code: `recode <code> <change>`.
+recode() {
   (cd "$root/address" && bun x wrangler d1 execute network-sign-in --local --persist-to "$folder/address" -c parts/sign-in/wrangler.jsonc \
-    --command "update deviceCode set expiresAt = '2000-01-01T00:00:00.000Z' where userCode = '${1//-/}'") >/dev/null
+    --command "update deviceCode set $2 where userCode = '${1//-/}'") >/dev/null
 }
+# Ends a device's code, as half an hour would.
+ends() { recode "$1" "expiresAt = '2000-01-01T00:00:00.000Z'"; }
 # Stops the network's server, and starts it again as it was started with whatever else is given.
 restart() {
   local server
@@ -241,6 +244,73 @@ echo "  it's among alice's devices, and not bob's:"
 may device laptop sign-in devices
 assistant=$(grep -o '"id":"[0-9a-f]*","kind":"assistant"' <<<"$said" | cut -d'"' -f4)
 may device bobs-phone sign-in devices
+
+say "A device of a person's lets in their next by the code it shows, with a tool, and no browser opens it"
+opened() { tail -n +$((before + 1)) "$folder/address.log" | grep -c "GET /sign-in/auth/device?" || true; }
+before=$(wc -l <"$folder/address.log")
+asks workstation sign-in devices
+may device laptop sign-in let_in --code "$code"
+answered workstation
+echo "  the page that shows a code where someone signs in was opened $(opened) times for it"
+refused device laptop sign-in let_in --code "$code"
+echo "  once the device has learned its answer, its code is gone"
+
+say "So does an assistant alice let in at /mcp"
+asks build-box sign-in devices
+echo "sign-in_let_in {\"code\":\"$code\"}" >&"${ASSISTANT[1]}"
+read -r said <&"${ASSISTANT[0]}" && echo "  the assistant: $(plain <<<"$said")"
+answered build-box
+echo "  the page that shows a code where someone signs in was opened $(opened) times for both"
+
+say "Someone else's device given the code makes the new device theirs, as saying it matches in their browser does"
+asks kiosk sign-in devices
+may device bobs-phone sign-in let_in --code "$code"
+answered kiosk
+
+say "A code that has ended, one that was stopped, one already answered, one someone else opened first, and what isn't a code are each refused with their own sentence"
+# Each device sleeps while its code is asked about, as one would between the times it asks for its answer: once
+# it has learned that answer, the address forgets its code.
+asks old-tablet sign-in devices
+kill -STOP -- "-$asking"
+ends "$code"
+refused device laptop sign-in let_in --code "$code"
+kill -CONT -- "-$asking"
+answered old-tablet
+asks spare-phone sign-in devices
+browser alice "$link" stop
+refused device laptop sign-in let_in --code "$code"
+answered spare-phone
+asks hall-tv sign-in devices
+kill -STOP -- "-$asking"
+may device laptop sign-in let_in --code "$code"
+refused device laptop sign-in let_in --code "$code"
+kill -CONT -- "-$asking"
+answered hall-tv
+asks guest-pc sign-in devices
+kill -STOP -- "-$asking"
+# Bob opening its link where he's signed in, which the browsers here have opened too often for Better Auth by now.
+recode "$code" "userId = (select id from user where name = 'bob')"
+echo "  bob opens its link where he's signed in"
+refused device laptop sign-in let_in --code "$code"
+ends "$code"
+kill -CONT -- "-$asking"
+answered guest-pc
+refused device laptop sign-in let_in --code NOPE-1234
+
+say "Only a server acting for a person tells the address to let a device in as them"
+acting() { (cd "$root/address" && bun proof/acting.js "$address" "$folder/server-key" "$@"); }
+server_key=$(acting)
+told() { echo "  $4: $(acting "$1" "$2" "$3" | plain)"; }
+asks lab-pc sign-in devices
+told unsigned users/alice "$code" "signing nothing, for alice"
+told signed users/alice "$code" "signed by a key that's on no list, for alice"
+may device bobs-phone add_server --key "$server_key"
+told signed users/alice "$code" "signed by a server acting for bob, for alice"
+told signed users/bob "$code" "signed by that server, for bob"
+answered lab-pc
+may device bobs-phone remove_server --key "$server_key"
+
+say "Once alice removes the assistant, it's nobody's"
 may device laptop sign-in remove_device --device "$assistant"
 echo "tally_list" >&"${ASSISTANT[1]}"
 read -r said <&"${ASSISTANT[0]}" && echo "  the assistant, once she removed it, with the token it had and then the one it renews that with: $said"
@@ -266,7 +336,7 @@ ONE_FOR=network device laptop deploy --name ping --files-from "$folder/ping" >/d
 direct=$(key_of "$folder/only-server")
 mkdir "$folder/direct" && cp "$folder/only-server/key" "$folder/direct/" && printf '{"address":"%s"}' "$address" >"$folder/direct/network"
 asks direct sign-in devices >/dev/null
-browser alice "$link" matches >/dev/null
+device laptop sign-in let_in --code "$code" >/dev/null
 answered direct >/dev/null
 coproc MCP { ONE_HOME=$folder/only-server "$one" mcp; }
 for _ in $(seq 300); do

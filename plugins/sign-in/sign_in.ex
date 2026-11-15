@@ -37,6 +37,15 @@ defmodule SignIn do
         inputs: none
       },
       %{
+        name: "let_in",
+        description: "Lets in a device that shows a code, as yours: one you were asked to let in",
+        inputs: %{
+          type: "object",
+          properties: %{code: %{type: "string", description: "The code the device shows, as WDJB-MJHT"}},
+          required: ["code"]
+        }
+      },
+      %{
         name: "remove_device",
         description: "Takes one of your devices, assistants or browsers out. It's nobody's from then on",
         inputs: %{
@@ -87,6 +96,11 @@ defmodule SignIn do
   end
 
   def call("devices", _inputs, call), do: ask(%{ask: "devices", who: person(call)})
+
+  def call("let_in", %{"code" => code}, call) do
+    %{"let_in" => name} = ask(%{ask: "let_in", who: person(call), code: code})
+    "#{name} is in, and is yours now."
+  end
 
   def call("remove_device", %{"device" => device}, call) do
     %{"removed" => name} = ask(%{ask: "remove_device", who: person(call), device: device})

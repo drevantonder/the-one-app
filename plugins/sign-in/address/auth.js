@@ -1,8 +1,9 @@
 // Who signs in to a network, and what they let act as them: Better Auth, kept in this Worker's own database. A
 // person signs in with a passkey and nothing else. An assistant becomes theirs when they answer that one question
 // for it, and a new device when they also say the code it shows matches the one they're shown, as Better Auth's
-// device authorization has it. Each is then a line in this plugin's own artifact, `devices/<device>`, saying whose
-// it is: that's where a server reads it, so no call asks anything here.
+// device authorization has it, or when a device or assistant of theirs lets it in by that code. Each is then a line
+// in this plugin's own artifact, `devices/<device>`, saying whose it is: that's where a server reads it, so no call
+// asks anything here.
 import { env } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
@@ -289,6 +290,28 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
     if (!signed_in) return { error: "That isn't one of your devices." };
     await internalAdapter.deleteSession(signed_in.token);
     return { removed: browser(signed_in.userAgent) };
+  }
+  if (ask === "let_in") {
+    // A person lets a device in by its code from one of their own devices or assistants, which a passkey let in.
+    // Better Auth's device authorization answers a code only for a browser that's signed in, so this is what its
+    // `/device` and `/device/approve` check, in one change that only a code nobody else has opened makes: it's
+    // answered once. The device then learns its answer from Better Auth as it would have.
+    const code = await adapter.findOne({ model: "deviceCode", where: [{ field: "userCode", value: plain(about.code) }] });
+    // Better Auth forgets a code once its device has learned it was answered, stopped or ended.
+    if (!code) return { error: "That isn't a code any device is showing now." };
+    if (code.expiresAt < new Date()) return { error: "That code has ended. The device shows another when it's asked again." };
+    if (code.status === "denied") return { error: "That code was stopped, so its device isn't let in." };
+    if (code.status !== "pending") return { error: "That code has been answered already." };
+    if (code.userId && code.userId !== user.id) return { error: "Someone else opened that code first, and only they can answer it." };
+    const where = [
+      { field: "id", value: code.id },
+      { field: "status", value: "pending" },
+      { field: "userId", operator: "eq", value: code.userId ?? null },
+    ];
+    const answered = await adapter.incrementOne({ model: "deviceCode", where, increment: {}, set: { status: "approved", userId: user.id } });
+    if (!answered) return { error: "That code has been answered already." };
+    await place(adapter, code.clientId, "app", code.name, user);
+    return { let_in: code.name };
   }
   if (ask === "remove_passkey") {
     const passkeys = await adapter.findMany({ model: "passkey", where: mine });

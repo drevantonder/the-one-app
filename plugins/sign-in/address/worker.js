@@ -90,10 +90,22 @@ async function nobodys(answer) {
   return said.error?.code === NOBODY;
 }
 
-/** What a server acting for the network asks, for a person in the app. Nothing else is believed about who that is. */
+/**
+ * What a server asks for a person in the app: one acting for them, or for the network, which acts for everyone, as
+ * servers have it themselves (`OneCore.Servers.acting/1`). Nothing else is believed about who that is. An
+ * invitation is only the network's to make, since it can make someone nobody acts for yet.
+ */
 async function ask(request, auth, url) {
   const body = await request.text();
   const server = await signer(request, body);
-  if (!server || !(await env.NETWORK.servers(NETWORK)).includes(server)) return Response.json({ error: "Only one of the network's servers asks this" }, { status: 403 });
-  return Response.json(await asked(auth, url.origin, JSON.parse(body)));
+  let what;
+  try {
+    what = JSON.parse(body);
+  } catch {
+    return Response.json({ error: "An ask is JSON" }, { status: 400 });
+  }
+  const of = what.ask === "invite" ? [NETWORK] : [NETWORK, `${what.who}/`];
+  const acting = (await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat();
+  if (!server || !acting.includes(server)) return Response.json({ error: "Only a server acting for them asks this" }, { status: 403 });
+  return Response.json(await asked(auth, url.origin, what));
 }
