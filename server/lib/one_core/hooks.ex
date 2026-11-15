@@ -102,6 +102,13 @@ defmodule OneCore.Hooks do
      `blob`'s name in it, and `by`, the plugin that did it, as a who. A plugin is told only if it could already reach
      the artifact for whoever changed it, and isn't told what it changed itself.
      """},
+    {"recorded", :hears,
+     """
+     A server recorded what it and its clients did, as `OneCore.Telemetry` says, and hands it on about once a
+     minute. It's about the `server`'s key, its `machine`'s name, its `build`, the time it's `from` and `to` in
+     nanoseconds since 1970, and what it recorded in OpenTelemetry's shapes: `spans`, `logs` and `metrics`. It's
+     heard by the plugins added for the network, and nothing is recorded while none hears it.
+     """},
     {"joined", :hears,
      """
      A server was let act for someone. It's about the `server`'s key, who it's `for`, and `by`, the key of the
@@ -193,6 +200,17 @@ defmodule OneCore.Hooks do
       %{}
     else
       [{^owner, hooking}] -> hooking
+    end
+  end
+
+  @doc """
+  Whether a plugin added for `owner` hooks into `hook`, as this server last looked at them: asking costs a lookup,
+  and never looks.
+  """
+  def hooked?(hook, owner) do
+    case :ets.lookup(__MODULE__, owner) do
+      [{^owner, hooking}] -> Map.has_key?(hooking, hook)
+      [] -> false
     end
   end
 

@@ -8,6 +8,8 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - **A server is one program on Mac, Linux and Windows.**
 - **The bucket is Cloudflare R2**, unless measured write times say otherwise.
 - **Each client is one Tauri shell per platform**, drawing in the device's web view.
+- **What servers and clients record of themselves is OpenTelemetry's**, made with its Erlang API and SDK, and kept
+  by Insights in the network.
 - **What sits at a network's address is Cloudflare Workers**, and a plugin's part there is one more: an ordinary
   Worker in the plugin's folder, deployed with the address's own.
 - **Signing in is Better Auth, in a Worker with a D1 database of its own**: the sign-in plugin's part at the

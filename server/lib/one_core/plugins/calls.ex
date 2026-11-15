@@ -7,7 +7,7 @@ defmodule OneCore.Plugins.Calls do
   """
   require Logger
   alias ExJsonSchema.Validator.Error
-  alias OneCore.{Artifact, Call, Hooks, Plugins, Server, Servers, User}
+  alias OneCore.{Artifact, Call, Hooks, Plugins, Server, Servers, Telemetry, User}
   alias OneCore.Plugins.Version
 
   @doc """
@@ -18,7 +18,10 @@ defmodule OneCore.Plugins.Calls do
   """
   def call(name, tool, inputs, asked, passed_on \\ false) do
     {_by, who} = asked = asked(asked)
+    Telemetry.tool(name, tool, who, fn -> run(name, tool, inputs, asked, passed_on) end)
+  end
 
+  defp run(name, tool, inputs, {_by, who} = asked, passed_on) do
     Plugins.run(Plugins.chain(who), name, fn at, versions ->
       version = versions[name]
 

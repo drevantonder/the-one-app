@@ -214,6 +214,8 @@ defmodule Database.Lease do
           "#{lease.artifact.prefix}: holds its lease, from snapshot #{snapshot} and the log to #{lease.number}"
         )
 
+        OneCore.Telemetry.record("database.lease.held", %{"database" => lease.artifact.prefix})
+
         open(lease, snapshot, entries)
 
       %{server: server} ->
@@ -226,6 +228,7 @@ defmodule Database.Lease do
   defp take(lease) do
     wrote = Log.write(lease.artifact, lease.number + 1, %{server: lease.server})
     Logger.info("#{lease.artifact.prefix}: taking its lease at #{lease.number + 1}: #{wrote}")
+    OneCore.Telemetry.record("database.lease.taken", %{"database" => lease.artifact.prefix, "outcome" => wrote})
     look(lease)
   end
 
@@ -267,6 +270,7 @@ defmodule Database.Lease do
 
           :exists ->
             Logger.info("#{lease.artifact.prefix}: lost its lease, and the write it hadn't answered with it")
+            OneCore.Telemetry.record("database.lease.lost", %{"database" => lease.artifact.prefix})
             {:lost, look(close(lease))}
         end
     end

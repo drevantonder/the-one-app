@@ -9,6 +9,8 @@ defmodule OneCore.MixProject do
       deps: [
         {:ex_json_schema, "~> 0.11"},
         {:mime, "~> 2.0"},
+        {:opentelemetry, "~> 1.7"},
+        {:opentelemetry_api, "~> 1.5"},
         {:req, "~> 0.5"},
         {:rustler, "~> 0.38", runtime: false},
         {:tz, "~> 0.28"},

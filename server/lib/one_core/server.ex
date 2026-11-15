@@ -8,7 +8,7 @@ defmodule OneCore.Server do
   Everything a server keeps on its machine is in its home.
   """
   use GenServer
-  alias OneCore.{Address, Hooks, Iroh, Mcp, Plugins, Servers}
+  alias OneCore.{Address, Hooks, Iroh, Mcp, Plugins, Servers, Telemetry}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -44,6 +44,12 @@ defmodule OneCore.Server do
   stopped answering after it was asked, so it may have done what was asked.
   """
   def request(server, method, params) do
+    # A call that's passed on is one trace on both servers.
+    params =
+      if parent = Telemetry.traceparent(),
+        do: Map.update(params, :_meta, %{traceparent: parent}, &Map.put(&1, :traceparent, parent)),
+        else: params
+
     with true <- Servers.seen(server) in [:on, nil] or :unreachable,
          {:ok, answer} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
       case JSON.decode!(answer) do

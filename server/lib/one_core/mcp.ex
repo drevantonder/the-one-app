@@ -21,7 +21,7 @@ defmodule OneCore.Mcp do
   a resource too, `skill://<path>/<file>`, which `resources/read` reads (`OneCore.Skills`).
   """
   require Logger
-  alias OneCore.{Address, Artifact, Builds, Hooks, Plugins, Server, Servers, Services, Skills, Tools, User}
+  alias OneCore.{Address, Artifact, Builds, Hooks, Plugins, Server, Servers, Services, Skills, Telemetry, Tools, User}
   alias OneCore.Plugins.{Calls, Kept, Version}
 
   # What a server speaks of MCP is the same in each of these.
@@ -34,6 +34,8 @@ defmodule OneCore.Mcp do
         params = Map.get(request, "params", %{})
 
         try do
+          Telemetry.follow(said(params)["traceparent"])
+
           with {:ok, asked, passed_on} <- User.asking(from, said(params), method == "hooks/call"),
                {:ok, result} <- result(method, params, from, asked, passed_on) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
@@ -50,6 +52,11 @@ defmodule OneCore.Mcp do
       # A client saying an app of its is on screen, and where a server reaches it, or with no address, that none is.
       {:ok, %{"method" => "notifications/one/watch"} = said} when from != nil ->
         Server.watch(from, said["params"]["address"])
+        ""
+
+      # A client saying how long its apps took to open, and which of its calls failed before a server answered.
+      {:ok, %{"method" => "notifications/one/recorded", "params" => %{} = said}} when from != nil ->
+        Telemetry.client(said, from)
         ""
 
       # The relay at the network's address saying one of its servers came or went.

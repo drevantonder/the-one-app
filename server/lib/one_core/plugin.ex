@@ -144,6 +144,24 @@ defmodule OneCore.Plugin do
     the plugin whose jobs they are, on every server, each time one of them is due, with the jobs and a function
     that makes a job's call on the server it's called on: `fire.(job)`. It's what has one server call it once.
 
+  What a plugin does shows in Insights, in Settings and to agents through its tools. Every tool call is a span
+  there already, with whose it was, how long it took and how it ended, and so is every warning, error and crash said
+  to `Logger`. A plugin records more with one function, `OneCore.Telemetry.record`:
+
+      OneCore.Telemetry.record("photos.resized", %{"size" => "large"})          # a log line
+      OneCore.Telemetry.record("photos.bytes", %{"size" => "large"}, 52_134)    # a number
+      OneCore.Telemetry.record("resize", %{"size" => "large"}, fn -> ... end)   # a span around some work
+
+  - A name says what it is, in OpenTelemetry's dotted lowercase, and follows its conventions where it has some, as
+    AI Gateway's `gen_ai.client.token.usage` does. Attributes are names, sizes and outcomes: never what someone
+    wrote, was given or was answered, and never a secret. Logger's info and debug aren't kept, so they can say more.
+  - A log line inside a tool call is an event of its span. A number is summed and spread over each minute by its
+    name and attributes, and read back as quantiles. A span returns what its function does, and is a child of the
+    call's, so a trace shows it in place. OpenTelemetry's own API (`OpenTelemetry.Tracer.with_span`) makes spans
+    that land in the same place.
+  - It's handed on about once a minute, so recording costs a call a few microseconds and writes nothing. With
+    Insights removed from the network, nothing is recorded.
+
   A plugin hooks into a moment that isn't one of its own tools being called, to hear of it, to change it or to
   decide it. `hooks/0` names the hooks it hooks into, and `hook/3` is called at each:
 
