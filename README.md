@@ -49,7 +49,8 @@ The same app builds for Android with Tauri's CLI (`cargo install tauri-cli`), an
 
 Its project is `client/shell/gen/android`. A phone's client is kept in the app's own folder, and is told its
 network's address by a `network` file put there (`{"address": "https://..."}`), as `mix network` writes one for a
-network with an address. It starts on that network's sign-in page.
+network with an address. An app built with `TAURI_ONE_ADDRESS=https://...` set, on any system, starts on that network
+with no file there. It starts on that network's sign-in page.
 
 - `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.

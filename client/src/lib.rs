@@ -382,6 +382,10 @@ pub fn home() -> Result<PathBuf> {
 /// this one is `one` and `The One App` there, and this is neither.
 pub const NAME: &str = "app.theone.client";
 
+/// The address of the network an app was built for, if it was: what `TAURI_ONE_ADDRESS` was as it was built. Tauri's
+/// builds for phones give the Rust build only the variables whose names start with TAURI.
+const BUILT_FOR: Option<&str> = option_env!("TAURI_ONE_ADDRESS");
+
 /// Why a server didn't answer what it was asked.
 #[derive(Debug, PartialEq)]
 pub enum Unanswered {
@@ -519,7 +523,10 @@ impl Client {
             Ok(network) => {
                 Some(serde_json::from_slice::<Told>(&network).context("`network` isn't a network's address")?)
             }
-            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            // An app built for one network knows its address.
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                BUILT_FOR.map(|address| Told { address: address.to_owned(), pass: None, who: None })
+            }
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
         // A device with no pass yet asks for one at the network's address, and while it's nobody's, for a code to
