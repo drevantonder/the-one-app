@@ -123,10 +123,16 @@ defmodule OneCore.Bucket.S3 do
     sent(method: method, url: url, headers: headers, body: data, decode_body: false, compressed: false)
   end
 
+  # A sign changes nothing, so one the internet lost or held up is asked for again, as Req asks a read again. The
+  # signer answers well within a second, so one that hasn't come in this many milliseconds is taken as lost.
+  @signs_within 5_000
+
   defp signed(address, ask) do
     ask = JSON.encode!(ask)
+    url = address <> "/signer/sign"
+    headers = Address.signed("/signer/sign", ask)
 
-    case sent(method: :post, url: address <> "/signer/sign", body: ask, headers: Address.signed("/signer/sign", ask)) do
+    case sent(method: :post, url: url, body: ask, headers: headers, retry: :transient, receive_timeout: @signs_within) do
       %{status: 200, body: %{"method" => _method} = signed} ->
         signed
 

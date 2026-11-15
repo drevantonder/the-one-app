@@ -129,7 +129,9 @@ defmodule SignIn do
 
     body = JSON.encode!(what)
 
-    case Req.post!(address <> "/sign-in/ask", body: body, headers: Address.signed("/sign-in/ask", body), retry: false) do
+    asked = [method: :post, url: address <> "/sign-in/ask", body: body, headers: Address.signed("/sign-in/ask", body)]
+
+    case Address.send!(asked ++ [retry: false]) do
       %{status: 200, body: %{"error" => why}} -> raise why
       %{status: 200, body: answer} -> answer
       %{status: status} -> raise "The network's address answered #{status}"
