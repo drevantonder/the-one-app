@@ -3,6 +3,10 @@
 Read `VISION.md`, `GLOSSARY.md` and `PRIOR-ART.md` first. Where they leave something open, ask
 before choosing.
 
+- Follow Jakob's Law. It is the first rule and comes before every other one here: developers and agents spend most
+  of their time in other codebases, so ours works the way those already do. That's its words, its folders, its
+  tools, how it's set up and how it's built and tested. A thing is called what its own ecosystem calls it: a NIF, a
+  test, a cache. A word of ours is only for what's ours, and it's in `GLOSSARY.md`.
 - Consider yourself the owner of this codebase, and treat it as its maintainer would.
 - Dumb beats clever. Delete before adding.
 - Choose the simplest implementation that fully meets the requirements. Prefer well-maintained libraries over custom
