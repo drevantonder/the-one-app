@@ -40,7 +40,7 @@ size() { du -sh "$1" | cut -f1; }
 say "A network, with its edge here"
 "$root/network" "$folder/network" --edge >"$folder/network.log" 2>&1 &
 started+=($!)
-grep -q -m1 "A network is running" <("$tail" -f --pid=$! -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
+grep -q -m1 "A network is running" <("$tail" -F --pid=$! -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 client=$folder/network/client
 # Its owner, at a device of theirs that isn't the second machine.
 owner() { ONE_HOME=$client ONE_AS=owner ONE_FOR=network "$one" "$@"; }

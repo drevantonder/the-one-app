@@ -81,7 +81,7 @@ ONE_HOME=$folder/client dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x2
   "$0" 2>"$1/app.log" &
   app=$!
   # The home screen says when it has drawn.
-  grep -q -m1 "home opened" <(tail -f --pid=$app -n +1 "$1/app.log")
+  grep -q -m1 "home opened" <(tail -F --pid=$app -n +1 "$1/app.log")
   window=$(xdotool search --sync --onlyvisible --name "The One App" | head -1)
   # An app starts as a finger lands on its icon, and shows only if the finger lifts there. The page is the one the
   # first owner has, with these two apps: its icons start at the left of a grid in the middle of the window, 96

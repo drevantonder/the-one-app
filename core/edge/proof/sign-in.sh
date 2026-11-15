@@ -96,7 +96,7 @@ restart() {
   started+=("$server")
   # It's stopped by its number from here on, and the shell says nothing of it.
   disown "$server"
-  grep -q -m1 "A server is running" <(tail -f --pid="$server" -n +1 "$folder/server.log")
+  grep -q -m1 "A server is running" <(tail -F --pid="$server" -n +1 "$folder/server.log")
 }
 
 say "Nobody is anybody yet: the network's first owner joins with a passkey, by the link its first server gave"

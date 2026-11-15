@@ -59,7 +59,7 @@ trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; 
 # Waits for a line in a log that the job just started is still writing. Fails if the job ends without it.
 # GNU's tail follows a file for as long as a process runs, which on a Mac is Homebrew's coreutils' `gtail`.
 tail=$(command -v gtail || command -v tail)
-wait_for() { grep -q -m1 -E "$1" <("$tail" -f --pid="${started[-1]}" -n +1 "$2"); }
+wait_for() { grep -q -m1 -E "$1" <("$tail" -F --pid="${started[-1]}" -n +1 "$2"); }
 free_port() { bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'; }
 random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
 

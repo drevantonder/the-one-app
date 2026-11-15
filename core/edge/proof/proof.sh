@@ -28,7 +28,7 @@ say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 at() { local namespace=$1; shift; nsenter --net=/run/netns/"$namespace" "$@"; }
 random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
 # Waits for a line in a log that something started is still writing.
-wait_for() { timeout 180 grep -q -m1 -E "$1" <(tail -f -n +1 "$2"); }
+wait_for() { timeout 180 grep -q -m1 -E "$1" <(tail -F -n +1 "$2"); }
 # The bytes the wire to the edge has carried so far.
 carried() { wc -c <"$work/wire"; }
 # How often the relay has been woken by something to pass on, as `wrangler dev` counts what its Workers do.

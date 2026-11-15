@@ -24,7 +24,7 @@ network=$!
 started=("$network")
 # `./network` stops what it started when it's stopped.
 trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
-grep -q -m1 "A network is running" <(tail -f --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
+grep -q -m1 "A network is running" <(tail -F --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 one=$root/target/release/one
 # The network's address, if it has one, as each of its servers is started with it.
 at_address=()
@@ -59,7 +59,7 @@ key_of server && key_of spare
 start_for() {
   (cd "$root/core/server" && exec mix network "$folder" "$1" --for "$2" --development "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
-  grep -q -m1 -E "A server is running|isn't one of" <(tail -f --pid=$! -n +1 "$folder/$1.log")
+  grep -q -m1 -E "A server is running|isn't one of" <(tail -F --pid=$! -n +1 "$folder/$1.log")
   key_of "$1"
 }
 # One tool call over the web at the network's address, as whoever holds a sharing link, with what it's answered.
@@ -510,7 +510,7 @@ refused as owner for network remove --name lost
 pkill -9 -f "network $folder server "
 (cd "$root/core/server" && exec mix network "$folder" server --development "${at_address[@]}" --without lost) >"$folder/server.log" 2>&1 &
 started+=($!)
-grep -q -m1 "A server is running" <(tail -f --pid=$! -n +1 "$folder/server.log")
+grep -q -m1 "A server is running" <(tail -F --pid=$! -n +1 "$folder/server.log")
 echo "  the server is killed and started again with --without lost, and says: $(grep -o "lost is removed.*" "$folder/server.log")"
 may as bob notes read --note "$note"
 

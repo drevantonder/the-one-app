@@ -15,7 +15,7 @@ folder=$(mktemp -d)
 "$root/network" "$folder" >"$folder/network.log" 2>&1 &
 network=$!
 trap 'kill -- "-$network" 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
-grep -q -m1 "A network is running" <(tail -f --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
+grep -q -m1 "A network is running" <(tail -F --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 (cd "$root" && cargo build --release -p encryption_client --example recovery_key 2>/dev/null)
 
 export PATH=$root/target/release:$PATH GIT_CONFIG_GLOBAL=$folder/gitconfig GIT_CONFIG_NOSYSTEM=1

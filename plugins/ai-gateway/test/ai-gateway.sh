@@ -25,7 +25,7 @@ stop() {
   rm -rf "$folder"
 }
 trap stop EXIT
-grep -q -m1 "A network is running" <(tail -f --pid="${started[0]}" -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
+grep -q -m1 "A network is running" <(tail -F --pid="${started[0]}" -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 one=$root/target/release/one
 server=$(grep -o -E "running in [^ ]*: [0-9a-f]{64}" "$folder/server.log" | head -1 | grep -o -E "[0-9a-f]{64}$")
 

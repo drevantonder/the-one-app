@@ -30,7 +30,7 @@ stop() {
   rm -rf "$folder"
 }
 trap stop EXIT
-grep -q -m1 "A network is running" <(tail -f --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
+grep -q -m1 "A network is running" <(tail -F --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 one=$root/target/release/one
 (cd "$root" && cargo build --release -p encryption_client --example recovery_key 2>/dev/null)
 address=$(grep -o '"address":"[^"]*"' "$folder/client/network" | cut -d'"' -f4)
