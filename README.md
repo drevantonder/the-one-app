@@ -15,11 +15,3 @@ one app to bring them all, and in the network bind them.
 The vision for this project is simple: make using AI to its full potential easy. [VISION.md](VISION.md) says what that means.
 
 To learn more, point your agent at this repo and ask it to explain.
-
-## Building it
-
-`mise install` and `rustup` install what it needs. On Linux the app also needs WebKitGTK (`libwebkit2gtk-4.1-dev`). Then:
-
-    ./network /tmp/one-network
-
-That starts a whole network on this machine and says how to open the app.

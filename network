@@ -3,6 +3,9 @@
 #
 #     ./network <folder> [--spare] [--edge] [--owner <name>]
 #
+# It needs what `mise install` and `rustup` install, and on Linux WebKitGTK (`libwebkit2gtk-4.1-dev`), which the
+# app's window is built on.
+#
 # It builds what isn't built, then starts the network's server in the folder, which is where everything the network
 # keeps goes: its bucket, each server's home, a client's home and the logs. A new network starts with the plugins
 # The One App ships with. Starting again in the same folder carries on with what's there, and Ctrl-C stops it.
