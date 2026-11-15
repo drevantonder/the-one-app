@@ -100,7 +100,7 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
             // are, the plugin's is shown with its tools.
             let skills = says("skills/list", json!({})).await.unwrap_or_default();
             let skills = skills["skills"].as_array().map(Vec::as_slice).unwrap_or_default();
-            let uri = skills.iter().filter_map(|skill| skill["uri"].as_str()).filter(|uri| said(uri) == words).last();
+            let uri = skills.iter().filter_map(|skill| skill["uri"].as_str()).rfind(|uri| said(uri) == words);
             let skill = match uri {
                 Some(uri) => says("resources/read", json!({"uri": uri})).await,
                 None => None,

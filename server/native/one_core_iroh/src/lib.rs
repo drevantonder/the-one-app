@@ -34,11 +34,14 @@ struct Reached {
     endpoint: AssertUnwindSafe<Endpoint>,
     clients: AssertUnwindSafe<Clients>,
     watchers: AssertUnwindSafe<Mutex<HashMap<String, Watcher>>>,
-    servers: AssertUnwindSafe<Mutex<HashMap<String, (String, Option<Arc<client::Reached>>)>>>,
+    servers: AssertUnwindSafe<Servers>,
 }
 
 /// The connection each client last made to this server, by the client's key.
 type Clients = Arc<Mutex<HashMap<String, Connection>>>;
+
+/// This server's connection to each other server, by its key, with the address it was made to.
+type Servers = Mutex<HashMap<String, (String, Option<Arc<client::Reached>>)>>;
 
 /// A client with an app on screen: where it said a server reaches it, and the connection this server made to it
 /// there to tell it something, while that's open. One thing at a time is said over it, so that many things to say
