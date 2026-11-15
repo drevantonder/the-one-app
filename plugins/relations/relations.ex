@@ -25,6 +25,7 @@ defmodule Relations do
   @groups "select artifact as next from tuples where relation = 'member' and who = ?"
   @parents "select who as next from tuples where relation = 'parent' and artifact = ?"
   @members "select who as next from tuples where relation = 'member' and artifact = ?"
+  @having "select who from tuples where artifact = ? and relation = ? order by who"
   @tuple "select 1 from tuples where artifact = ? and who = ? and relation in (?, ?, ?) limit 1"
 
   @impl true
@@ -85,6 +86,12 @@ defmodule Relations do
           properties: %{name: %{type: "string", description: "Its name: lowercase letters, digits and hyphens"}},
           required: ["name"]
         }
+      },
+      %{
+        name: "groups",
+        read_only: true,
+        description: "Lists the groups you're in, each with its members and its owners",
+        inputs: %{type: "object", properties: %{}}
       },
       %{
         name: "link",
@@ -201,6 +208,15 @@ defmodule Relations do
           do: query(db, "insert into tuples (artifact, relation, who) values (?, ?, ?)", [group, relation, call.for])
 
       group
+    end)
+  end
+
+  def call("groups", _inputs, call) do
+    transaction(call, fn db ->
+      for "groups/" <> _ = group <- Enum.sort(followed(db, @groups, [call.for], []) -- [call.for]) do
+        having = &for %{"who" => who} <- query(db, @having, [group, &1]), do: who
+        %{group: group, members: having.("member"), owners: having.("owner")}
+      end
     end)
   end
 

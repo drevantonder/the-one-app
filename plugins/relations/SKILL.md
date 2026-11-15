@@ -24,6 +24,7 @@ plugin deciding, nobody but the network's first owner does anything.
 - `share` writes a tuple and `unshare` removes one. An owner or an editor shares with viewers and editors and
   adds a group's members, and only an owner adds an owner or a parent. `shared` lists an artifact's tuples,
   and `check` says whether someone may reach it.
+- `groups` lists the groups whoever asks is in, each with its members and owners.
 - `group` makes a group, with whoever asks as its owner and first member. A member has a call run for the
   group, with the group's artifacts: `ONE_FOR=groups/family` before a command, and an app opened from the
   group's home page. Every user is a member of the network.
