@@ -6,7 +6,7 @@ defmodule OneCore.Bucket.S3 do
 
   The signer signs a write only with its condition, so the bucket itself refuses one that would overwrite. A blob's
   tag is its ETag. What the signer won't sign for this server raises `OneCore.Bucket.Refused`, and a signer or
-  bucket that can't be reached `OneCore.Bucket.Unreachable`.
+  bucket that can't be reached `OneCore.Address.Unreachable`.
   """
   @behaviour OneCore.Bucket
   require Record
@@ -21,6 +21,26 @@ defmodule OneCore.Bucket.S3 do
       %{status: 200, body: data} = got -> {:ok, data, tag(got)}
       %{status: 404} -> :absent
       refused -> raise refusal(refused)
+    end
+  end
+
+  # Each read is two trips across the internet, to the signer and then to the bucket, so they're made at once. One
+  # that couldn't be made is raised as it would be alone.
+  @impl true
+  def read_all(address, keys) do
+    read = fn key ->
+      try do
+        {:read, read(address, key)}
+      rescue
+        error -> {:raised, error, __STACKTRACE__}
+      end
+    end
+
+    for {:ok, outcome} <- Task.async_stream(keys, read, max_concurrency: max(length(keys), 1), timeout: :infinity) do
+      case outcome do
+        {:read, read} -> read
+        {:raised, error, stacktrace} -> reraise error, stacktrace
+      end
     end
   end
 
@@ -121,11 +141,7 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
-  defp sent(request) do
-    Req.request!(request)
-  rescue
-    unreachable in Req.TransportError -> raise OneCore.Bucket.Unreachable, Exception.message(unreachable)
-  end
+  defp sent(request), do: Address.send!(request)
 
   defp tag(got), do: got |> Req.Response.get_header("etag") |> hd()
 

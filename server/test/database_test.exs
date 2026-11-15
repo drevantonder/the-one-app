@@ -24,6 +24,8 @@ defmodule OneCore.DatabaseTest do
     @impl true
     def read(simulation, key), do: wait(simulation, {:read, key})
     @impl true
+    def read_all(simulation, keys), do: wait(simulation, {:read_all, keys})
+    @impl true
     def write(simulation, key, data), do: wait(simulation, {:write, key, data})
     @impl true
     def replace(simulation, key, data, tag), do: wait(simulation, {:replace, key, data, tag})
@@ -64,6 +66,8 @@ defmodule OneCore.DatabaseTest do
         [] -> :absent
       end
     end
+
+    def perform(blobs, {:read_all, keys}), do: Enum.map(keys, &perform(blobs, {:read, &1}))
 
     def perform(blobs, {:write, key, data}), do: if(:ets.insert_new(blobs, {key, data}), do: :ok, else: :exists)
 

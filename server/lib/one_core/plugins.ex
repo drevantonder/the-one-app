@@ -65,12 +65,26 @@ defmodule OneCore.Plugins do
 
     kind, reason ->
       Logger.error(Exception.format(kind, reason, __STACKTRACE__))
-      {blamed, _} = Exception.blame(kind, reason, __STACKTRACE__)
-      why = if kind == :error, do: Exception.message(blamed), else: Exception.format_banner(kind, blamed)
-      {:error, Enum.reduce(versions, why, &Version.own_names(&2, &1))}
+      {:error, Enum.reduce(versions, why(kind, reason, __STACKTRACE__), &Version.own_names(&2, &1))}
   after
     if held, do: release(held)
   end
+
+  # What whoever called is told went wrong: what was raised, also where a process the call waited on raised it, and
+  # otherwise what Elixir says of it.
+  defp why(:exit, {reason, {module, function, arguments}}, stacktrace)
+       when is_atom(module) and is_atom(function) and is_list(arguments),
+       do: why(:exit, reason, stacktrace)
+
+  defp why(:exit, {%{__exception__: true} = error, raised}, _stacktrace) when is_list(raised),
+    do: why(:error, error, raised)
+
+  defp why(:error, error, stacktrace) do
+    {blamed, _} = Exception.blame(:error, error, stacktrace)
+    Exception.message(blamed)
+  end
+
+  defp why(kind, reason, _stacktrace), do: Exception.format_banner(kind, reason)
 
   @doc """
   Holds the newest version of the plugin `artifact` loaded: `{:ok, held, version}`, or `:absent` if it isn't

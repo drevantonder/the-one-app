@@ -23,6 +23,9 @@ defmodule OneCore.Bucket.Folder do
     end
   end
 
+  @impl true
+  def read_all(folder, keys), do: Enum.map(keys, &read(folder, &1))
+
   # A hard link is made only if nothing has its name, and then holds the whole blob at once.
   @impl true
   def write(folder, key, data) do

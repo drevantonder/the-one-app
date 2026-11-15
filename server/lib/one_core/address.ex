@@ -5,8 +5,38 @@ defmodule OneCore.Address do
   """
   alias OneCore.{Iroh, Server}
 
+  defmodule Unreachable do
+    @moduledoc "What's raised when the network's address, or what it hands out a link to, couldn't be reached or didn't answer."
+    defexception [:message]
+  end
+
   # The list this server is on: its owner's, whom it was started for.
   defp list, do: Application.get_env(:one_core, :for, "network") <> "/"
+
+  @doc """
+  Sends `request`, as `Req.request!/1` takes it, to the network's address or to what it hands out a link to, and
+  gives the answer. Raises `Unreachable` with a sentence for whoever asked if it couldn't be reached
+  or didn't answer, which isn't the fault of whatever asked.
+  """
+  def send!(request) do
+    Req.request!(request)
+  rescue
+    error in Req.TransportError ->
+      host = URI.parse(to_string(request[:url])).host
+
+      how =
+        case error.reason do
+          :timeout -> "didn't answer in time"
+          :closed -> "closed the connection partway"
+          :econnrefused -> "refused the connection"
+          :nxdomain -> "isn't a name the internet knows"
+          _ -> "couldn't be reached (#{Exception.message(error)})"
+        end
+
+      reraise Unreachable,
+              "#{host} #{how}, so this server couldn't do what was asked. Check this server is online, then try again.",
+              __STACKTRACE__
+  end
 
   @doc "The headers of an ask of `path` there, with `body`: this server's signature of it, and its pass."
   def signed(path, body) do

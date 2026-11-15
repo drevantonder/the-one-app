@@ -24,12 +24,18 @@ defmodule Database.Log do
     end
   end
 
+  # How many of the log's entries are read at once. A large database has dozens between two snapshots, and each
+  # read is a trip across the internet.
+  @together 32
+
   @doc "The log's entries after `number`, in order."
   def since(artifact, number) do
-    case entry(artifact, number + 1) do
-      nil -> []
-      entry -> [entry | since(artifact, number + 1)]
-    end
+    read = Artifact.read_all(artifact, for(at <- 1..@together, do: name("log", number + at)))
+
+    entries =
+      for {:ok, entry, _tag} <- Enum.take_while(read, &(&1 != :absent)), do: :erlang.binary_to_term(entry, [:safe])
+
+    if length(entries) == @together, do: entries ++ since(artifact, number + @together), else: entries
   end
 
   @doc "A log entry: its `server`, and for a write its `pages` by their numbers and the file's `size` in pages."

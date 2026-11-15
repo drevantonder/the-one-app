@@ -1,6 +1,6 @@
 defmodule OneCore.Artifact do
   @moduledoc """
-  A couple of blobs together in the bucket. A plugin reads a blob, writes one only if it's absent, replaces one only
+  A couple of blobs together in the bucket. A plugin reads a blob, or several at once, writes one only if it's absent, replaces one only
   if it's unchanged, lists them and removes one, by their names in the artifact.
 
       case OneCore.Artifact.read(artifact, "notes.json") do
@@ -48,6 +48,13 @@ defmodule OneCore.Artifact do
 
   def read(%__MODULE__{prefix: prefix} = artifact, name) do
     with {:ok, blob, tag} <- Bucket.read(prefix <> name), do: {:ok, passed(artifact, :unwrap, name, blob), tag}
+  end
+
+  @doc "Each of several of its blobs, as `read/2` gives it, in order, read at once where the bucket is far away."
+  def read_all(%__MODULE__{prefix: prefix} = artifact, names) do
+    for {name, read} <- Enum.zip(names, Bucket.read_all(Enum.map(names, &(prefix <> &1)))) do
+      with {:ok, blob, tag} <- read, do: {:ok, passed(artifact, :unwrap, name, blob), tag}
+    end
   end
 
   def write(artifact, name, data) do
