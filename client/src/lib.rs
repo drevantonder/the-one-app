@@ -105,7 +105,7 @@ impl Network {
 
 /// What a client keeps of its network, in the file `network` of its home: the network's address, which whatever
 /// set the client up put there, and once the device is someone's, its pass to the relay there and whose it is.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Told {
     address: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,19 +131,18 @@ impl std::fmt::Display for NotIn {
 impl std::error::Error for NotIn {}
 
 impl Told {
-    /// Whether the pass this client has still lasts a day, by when it says it ends.
-    fn lasts(&self) -> bool {
+    /// How long the pass this client has lasts before it's renewed, by when it says it ends: nothing if it has none.
+    fn left(&self) -> Duration {
         let said = self.pass.as_ref().and_then(|pass| BASE64URL_NOPAD.decode(pass.as_bytes()).ok());
         let until =
             said.and_then(|said| serde_json::from_slice::<Value>(&said).ok()).and_then(|said| said["until"].as_u64());
-        let day = Duration::from_secs(24 * 60 * 60);
-        until.is_some_and(|until| UNIX_EPOCH + Duration::from_millis(until) > SystemTime::now() + day)
+        let ends = UNIX_EPOCH + Duration::from_millis(until.unwrap_or_default());
+        ends.duration_since(SystemTime::now() + RENEW).unwrap_or_default()
     }
 
     /// Asks the network's address for this device's pass, signed with its key, and keeps it in `home` with whose
-    /// device it is. A device that's nobody's there is told where its person makes it theirs. What it kept of
-    /// whoever's it was, it keeps no longer once it's nobody's or someone else's: the next person on it sees none of
-    /// it.
+    /// device it is (`took`). A device that's nobody's there is told where its person makes it theirs, and keeps
+    /// nothing of whoever's it was: the next person on it sees none of it.
     async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
         let name = gethostname::gethostname().to_string_lossy().into_owned();
         let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/pass", "params": {"name": name}}).to_string();
@@ -160,8 +159,17 @@ impl Told {
             }
             bail!(NotIn { sign_in: sign_in.to_owned() })
         }
-        let (Some(pass), Some(who)) = (answer["result"]["pass"].as_str(), answer["result"]["who"].as_str()) else {
+        if answer["result"].is_null() {
             bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's address gave this device no pass"))
+        }
+        self.took(&answer["result"], home)
+    }
+
+    /// Keeps a pass this device was given, `{pass, who}`, in `home`. Once the device is someone else's, what it kept
+    /// of whoever's it was goes.
+    fn took(&mut self, given: &Value, home: &Path) -> Result<()> {
+        let (Some(pass), Some(who)) = (given["pass"].as_str(), given["who"].as_str()) else {
+            bail!("this device was given no pass")
         };
         let someone_else = self.who.as_deref() != Some(who);
         (self.pass, self.who) = (Some(pass.to_owned()), Some(who.to_owned()));
@@ -373,12 +381,9 @@ struct Reach {
 /// answered (`kept`).
 pub struct Client {
     home: PathBuf,
-    endpoint: Endpoint,
-    /// The network's address, if it has one: the client asks there which servers act for its user. A network on one
-    /// machine has none, and whatever starts it tells the client where its servers are, in `servers`.
-    network: Option<Network>,
-    /// Whose device this is, once it's someone's: the user it signed in as.
-    who: Option<String>,
+    key: SecretKey,
+    /// Its endpoint, its network and whose device it is, which are made again with each new pass (`renew`).
+    link: std::sync::RwLock<Link>,
     reach: Mutex<Reach>,
     told: broadcast::Sender<Value>,
     /// What every request says of who it's from and for, where the environment says: `ONE_LINK` is a sharing link,
@@ -391,8 +396,19 @@ pub struct Client {
     answering: watch::Sender<bool>,
 }
 
+/// A client's endpoint, and its network: the network's address, if it has one, where the client asks which servers
+/// act for its user, with the pass it shows there. A network on one machine has none, and whatever starts it tells
+/// the client where its servers are, in `servers`. `who` is whose device this is, once it's someone's: the user it
+/// signed in as.
+#[derive(Clone)]
+struct Link {
+    endpoint: Endpoint,
+    network: Option<Network>,
+    who: Option<String>,
+}
+
 impl Client {
-    pub async fn open(home: impl Into<PathBuf>) -> Result<Self> {
+    pub async fn open(home: impl Into<PathBuf>) -> Result<Arc<Self>> {
         let home = home.into();
         let told = match fs::read(home.join("network")) {
             Ok(network) => {
@@ -401,18 +417,18 @@ impl Client {
             Err(error) if error.kind() == ErrorKind::NotFound => None,
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
-        // A pass lasts a month, so a device that's someone's asks for the next one before it ends. One that can't
-        // be asked for now is asked for next time, while the one it has lasts.
+        // A device with no pass yet asks for one at the network's address, which says where its person signs in for
+        // it while it's nobody's.
+        let key = key(&home.join("key"))?;
         let (network, who) = match told {
             Some(mut told) => {
-                if !told.lasts() {
-                    match told.admit(&key(&home.join("key"))?, &home).await {
-                        Err(error) if error.is::<NotIn>() => return Err(error),
-                        Err(error) if told.pass.is_none() => {
+                if told.pass.is_none() {
+                    match told.admit(&key, &home).await {
+                        Err(error) if !error.is::<NotIn>() => {
                             return Err(error)
                                 .with_context(|| format!("Couldn't join the network at {}", told.address));
                         }
-                        _ => {}
+                        admitted => admitted?,
                     }
                 }
                 let pass = told.pass.context("this device has no pass")?;
@@ -424,26 +440,63 @@ impl Client {
         let says = [("as", "ONE_AS"), ("link", "ONE_LINK"), ("for", "ONE_FOR")];
         let says = says.into_iter().filter_map(|(says, variable)| Some((says, env::var(variable).ok()?))).collect();
         let told = broadcast::channel(16).0;
-        // A server with something to say connects to this client to say it. Only one of the network's own reaches
-        // a client, and all it can make one do is ask again.
-        let (accepting, tell) = (endpoint.clone(), told.clone());
-        tokio::spawn(async move {
-            while let Some(incoming) = accepting.accept().await {
-                let tell = tell.clone();
-                tokio::spawn(async move {
-                    if let Ok(connection) = incoming.await {
-                        hear(connection, tell).await
-                    }
-                });
-            }
-        });
+        accept(endpoint.clone(), told.clone());
+        let renews = network.is_some();
+        let link = std::sync::RwLock::new(Link { endpoint, network, who });
         let (watching, answering) = (AtomicBool::new(false), watch::Sender::new(true));
-        Ok(Self { home, endpoint, network, who, reach: Mutex::default(), told, says, watching, answering })
+        let client = Arc::new(Self { home, key, link, reach: Mutex::default(), told, says, watching, answering });
+        // A pass that's about to end is renewed before anything is asked with it, and the next while this runs.
+        if renews {
+            let left = match client.network().left() {
+                left if !left.is_zero() => left,
+                _ => match client.renew().await {
+                    Err(error) if error.is::<NotIn>() => return Err(error),
+                    renewed => renewed.unwrap_or(AGAIN),
+                },
+            };
+            tokio::spawn(renewing(Arc::downgrade(&client), left));
+        }
+        Ok(client)
+    }
+
+    /// What this client keeps of its network, as it is now.
+    fn network(&self) -> Told {
+        let Link { network, who, .. } = self.link();
+        let network = network.expect("only a client of a network with an address has a pass");
+        Told { address: network.address, pass: Some(network.pass), who }
+    }
+
+    /// Asks for this device's next pass, and makes its endpoint again to show it, since iroh shows a relay the pass
+    /// an endpoint was made with. A server gives it to a device that's someone's. One that can't be reached, as
+    /// where the pass this has ended, is asked at the network's address, which says where its person signs in for
+    /// a device that's nobody's now. The old endpoint goes once its pass ends, so what was asked over it finishes.
+    /// Gives how long the new pass lasts before it's renewed.
+    async fn renew(&self) -> Result<Duration> {
+        let mut told = self.network();
+        match self.request("one/pass", json!({})).await {
+            Ok(given) => told.took(&given, &self.home)?,
+            Err(_) => told.admit(&self.key, &self.home).await?,
+        }
+        let pass = told.pass.clone().context("this device was given no pass")?;
+        let network = Network { address: told.address.clone(), pass };
+        let endpoint = endpoint(&self.home.join("key"), Some(&network)).await?;
+        accept(endpoint.clone(), self.told.clone());
+        let new = Link { endpoint, network: Some(network), who: told.who.clone() };
+        let old = std::mem::replace(&mut *self.link.write().expect("no renewal panics"), new);
+        tokio::spawn(async move {
+            sleep(RENEW).await;
+            old.endpoint.close().await
+        });
+        Ok(told.left())
     }
 
     /// The network's address, if it has one.
-    pub fn address(&self) -> Option<&str> {
-        self.network.as_ref().map(|network| network.address.as_str())
+    pub fn address(&self) -> Option<String> {
+        self.link().network.map(|network| network.address)
+    }
+
+    fn link(&self) -> Link {
+        self.link.read().expect("no renewal panics").clone()
     }
 
     /// Whether a server answered the last thing this client asked, as that changes. It's found out by asking:
@@ -473,10 +526,11 @@ impl Client {
     /// Connects to `server`, hears what it tells this client over the connection, and if this client is watching,
     /// says so first, with where a server reaches it.
     async fn connect(&self, server: EndpointAddr) -> Option<Reached> {
-        let open = Reached::connect(&self.endpoint, server, CONNECT).await?;
+        let link = self.link();
+        let open = Reached::connect(&link.endpoint, server, CONNECT).await?;
         tokio::spawn(hear(open.connection().clone(), self.told.clone()));
         if self.watching.load(Ordering::Relaxed) {
-            let here = address(&self.endpoint, self.network.as_ref()).ok()?;
+            let here = address(&link.endpoint, link.network.as_ref()).ok()?;
             let watch = json!({"jsonrpc": "2.0", "method": WATCH, "params": {"address": here}});
             open.ask(watch.to_string().as_bytes()).await.ok()?;
         }
@@ -516,14 +570,14 @@ impl Client {
     /// What a server answered, unless it says this device is nobody's: one that was taken out of its network since
     /// it got its pass. Then the answer says where its person lets it in again, as the network's address says it.
     async fn taken_out(&self, answer: Vec<u8>) -> Vec<u8> {
-        let (Some(network), Ok(mut said)) = (&self.network, serde_json::from_slice::<Value>(&answer)) else {
+        let (Some(network), Ok(mut said)) = (self.link().network, serde_json::from_slice::<Value>(&answer)) else {
             return answer;
         };
         if said["error"]["code"] != NOBODY {
             return answer;
         }
-        let mut told = Told { address: network.address.clone(), pass: None, who: self.who.clone() };
-        let asked = told.admit(self.endpoint.secret_key(), &self.home).await;
+        let mut told = Told { address: network.address, pass: None, who: self.link().who };
+        let asked = told.admit(&self.key, &self.home).await;
         match asked.as_ref().map_err(|error| error.downcast_ref::<NotIn>()) {
             Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),
             _ => return answer,
@@ -563,7 +617,7 @@ impl Client {
     pub async fn close(&self) {
         if let Some(open) = self.reach.lock().await.open.take() {
             open.connection().close(0u32.into(), b"done");
-            let _ = timeout(Duration::from_millis(100), self.endpoint.close()).await;
+            let _ = timeout(Duration::from_millis(100), self.link().endpoint.close()).await;
         }
     }
 
@@ -603,7 +657,7 @@ impl Client {
     /// The servers acting for this client's user: the ones it kept, or with `now` the ones it's told when it asks.
     /// Nothing if it kept none, or has nobody to ask.
     async fn servers(&self, now: bool) -> Result<Option<Vec<EndpointAddr>>> {
-        let Some(network) = &self.network else {
+        let Some(network) = self.link().network else {
             if now {
                 return Ok(None);
             }
@@ -618,7 +672,7 @@ impl Client {
         // This client's user is whoever its device signed in as, or in a network being built, who it says it acts
         // as. A sharing link's holder asks the servers of whoever the link leads to, which it starts with.
         let said = |what| self.says.iter().find(|(says, _)| *says == what).map(|(_, said)| said.as_str());
-        let of = match (said("link").map(|link| link.split('/').collect::<Vec<_>>()), said("as"), &self.who) {
+        let of = match (said("link").map(|link| link.split('/').collect::<Vec<_>>()), said("as"), &self.link().who) {
             (Some(leads), ..) if leads[0] == "network" => "network/".to_owned(),
             (Some(leads), ..) if leads.len() > 2 => format!("{}/{}/", leads[0], leads[1]),
             (_, Some(acts_as), _) => format!("users/{acts_as}/"),
@@ -630,13 +684,20 @@ impl Client {
             return Ok(self.kept(asked.0, &asked.1).and_then(|kept| serde_json::from_value(kept).ok()));
         }
         let servers = network
-            .servers(self.endpoint.secret_key(), &of)
+            .servers(&self.key, &of)
             .await
             .with_context(|| format!("Couldn't ask {} which servers to reach", network.address))?;
         self.keep(asked.0, &asked.1, &serde_json::to_value(&servers)?)?;
         Ok(Some(servers))
     }
 }
+
+/// How long before a device's pass ends it asks for the next one: half of what a server gives one
+/// (`OneCore.Address`), so a device that's taken out of its network uses its relay for an hour at most.
+const RENEW: Duration = Duration::from_secs(30 * 60);
+
+/// How soon a pass that couldn't be asked for is asked for again: the device may be offline.
+const AGAIN: Duration = Duration::from_secs(60);
 
 /// What a person is told when no server answered: what went wrong, and what to do about it.
 const UNANSWERED: &str = "No server is answering. Check this device is online and a server is on, then try again.";
@@ -649,6 +710,36 @@ const WATCH: &str = "notifications/one/watch";
 
 /// What the servers the signer listed are kept as.
 const SERVERS: &str = "signer/servers";
+
+/// A server with something to say connects to this client to say it, at `endpoint`, until it closes. Only one of the
+/// network's own reaches a client, and all it can make one do is ask again.
+fn accept(endpoint: Endpoint, tell: broadcast::Sender<Value>) {
+    tokio::spawn(async move {
+        while let Some(incoming) = endpoint.accept().await {
+            let tell = tell.clone();
+            tokio::spawn(async move {
+                if let Ok(connection) = incoming.await {
+                    hear(connection, tell).await
+                }
+            });
+        }
+    });
+}
+
+/// Keeps a device's pass fresh while its client runs: once `left` has passed, the next is asked for (`renew`). One
+/// that can't be asked for, as on a device that's offline, is asked for again a minute later, and a device that's
+/// nobody's now has none to renew.
+async fn renewing(client: std::sync::Weak<Client>, mut left: Duration) {
+    loop {
+        sleep(left).await;
+        let Some(client) = client.upgrade() else { return };
+        left = match client.renew().await {
+            Ok(left) => left,
+            Err(error) if error.is::<NotIn>() => return,
+            Err(_) => AGAIN,
+        };
+    }
+}
 
 /// Tells whoever `connection` is to one message, on a stream of its own, which isn't answered. Gives whether it
 /// was sent.

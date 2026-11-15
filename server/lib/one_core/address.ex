@@ -26,10 +26,12 @@ defmodule OneCore.Address do
     end
   end
 
-  # How long a client's pass lasts, in milliseconds. A client asks for another before it ends.
-  @lasts :timer.hours(24 * 30)
+  # How long a client's pass lasts, in milliseconds. A client asks a server for the next half an hour before it
+  # ends (`RENEW` in `client/src/lib.rs`), and one that's taken out of its network is given none: so it uses the
+  # relay for an hour at most after that.
+  @lasts :timer.hours(1)
 
-  @doc "A pass for the client whose key is `client`: this server's word for it, for a month."
+  @doc "A pass for the client whose key is `client`: this server's word for it, for an hour."
   def pass(client) do
     until = System.system_time(:millisecond) + @lasts
     encode(%{list: list(), by: key(), until: until, signature: sign("one/pass/1\n#{client}\n#{list()}\n#{until}")})

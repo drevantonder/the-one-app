@@ -105,6 +105,16 @@ link=$(let_in desktop)
 browser alice "$link"
 may device desktop sign-in devices
 
+say "A device's pass to the relay lasts an hour, and the next is asked of a server before it ends"
+# How many minutes a device's pass has left, by when it says it ends. Ending it here is saying it ended earlier,
+# which the client believes of its own pass.
+left() { bun -e 'const { pass } = await Bun.file(process.argv[1]).json(); console.log(Math.round((JSON.parse(Buffer.from(pass, "base64url")).until - Date.now()) / 60000))' "$folder/$1/network"; }
+echo "  desktop's ends in $(left desktop) minutes"
+bun -e 'const file = Bun.file(process.argv[1]), told = await file.json(), pass = JSON.parse(Buffer.from(told.pass, "base64url"))
+  await Bun.write(file, JSON.stringify({ ...told, pass: Buffer.from(JSON.stringify({ ...pass, until: Date.now() })).toString("base64url") }))' "$folder/desktop/network"
+may device desktop sign-in devices
+echo "  once it has ended, desktop is given the next, which ends in $(left desktop) minutes"
+
 say "The app starts on the same sign-in page, and shows its person's home screen once they've signed in for it"
 # A web view has no passkeys, so the page's button there hands the page to the device's own browser. What stands
 # in for that browser here writes down what it was asked to open, and alice opens that in hers.

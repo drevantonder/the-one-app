@@ -5,7 +5,6 @@
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::Arc;
 use std::{env, fs, io};
 
 use anyhow::{Context, Result, bail};
@@ -23,7 +22,7 @@ pub fn main() -> ExitCode {
 }
 
 async fn run(args: Vec<String>) -> Result<ExitCode> {
-    let client = Arc::new(Client::open(crate::home()?).await?);
+    let client = Client::open(crate::home()?).await?;
     let code = if args == ["mcp"] {
         mcp::serve(client.clone()).await?;
         ExitCode::SUCCESS

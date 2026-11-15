@@ -154,7 +154,7 @@ async fn again(views: State<'_, Views>, view: String) -> Result<(), ()> {
 /// The network's address, if it has one: whose network this client is in.
 #[tauri::command]
 fn network(views: State<'_, Views>) -> Option<String> {
-    views.client.address().map(str::to_owned)
+    views.client.address()
 }
 
 /// Says whether the window is on screen. While it is, servers tell this client when something changed.
@@ -217,7 +217,7 @@ async fn entered(app: &AppHandle) -> anyhow::Result<bool> {
     #[cfg(desktop)]
     let home = client::home()?;
     let client = match Client::open(home).await {
-        Ok(client) => Arc::new(client),
+        Ok(client) => client,
         Err(error) => {
             let mut sign_in: Url = error.downcast::<NotIn>()?.sign_in.parse()?;
             sign_in.set_query(Some("app"));

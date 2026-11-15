@@ -121,8 +121,8 @@ defmodule OneCore.Mcp do
 
   defp result("ping", _params, _from, _asked, _passed_on), do: {:ok, %{}}
 
-  # A user's device asks for its pass to the relay at the network's address, and is told whose it is: the device
-  # whose key a connection proved here, or the address did there.
+  # A user's device asks for its pass to the relay at the network's address, and for the next before that one
+  # ends, and is told whose it is: the device whose key a connection proved here, or the address did there.
   defp result("one/pass", params, from, {"users/" <> _ = by, _for}, _passed_on) do
     device = from || said(params)["device"]
 

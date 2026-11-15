@@ -38,7 +38,7 @@ impl Client {
     }
 
     fn kept_file(&self, method: &str, params: &Value) -> PathBuf {
-        let asked = json!([self.who, self.says, method, params]);
+        let asked = json!([self.link().who, self.says, method, params]);
         self.home.join("kept").join(crate::hex(&Sha256::digest(asked.to_string())))
     }
 
@@ -50,7 +50,7 @@ impl Client {
         let Some(parts) = result.get_mut("content").and_then(Value::as_array_mut) else { return Ok(()) };
         for part in parts.iter_mut().filter(|part| part["type"] == "resource_link") {
             let (Some(link), Some(blob)) = (part["uri"].as_str(), part["name"].as_str()) else { continue };
-            let secret = self.endpoint.secret_key().to_bytes();
+            let secret = self.key.to_bytes();
             let name = crate::hex(&Sha256::digest([secret.as_slice(), blob.as_bytes()].concat()));
             let file = self.home.join("files").join(&name);
             if !file.exists() {
