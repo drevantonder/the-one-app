@@ -96,6 +96,10 @@ defmodule OneCore.Plugin do
     `vault`: their skills say how, and which of a tool's inputs a device encrypts before it's sent.
   - A plugin's module is what other plugins call, so its public functions besides these are what it provides
     them. One that only provides functions leaves out `tools/0` and `call/3`.
+  - Those functions run as the plugin that calls them, with its own artifact and database. What has to be kept in a
+    plugin's own, such as an inbox, is one of its tools, which any plugin calls as whoever its call runs for:
+    `OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})` gives the answer, or raises
+    with why. A plugin that provides such a tool can give a function that calls it, as `Notifications.send/2` does.
   - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on
     the server running this one: a GenServer of the plugin's, one for each `key`, started with `argument` when
     first asked for. It's for what is slow to open and belongs to no machine in particular, as a database is. What

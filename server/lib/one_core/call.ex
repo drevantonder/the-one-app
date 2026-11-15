@@ -22,7 +22,7 @@ defmodule OneCore.Call do
   what it needs, as a database's lease (`pass_on/2`): `passed_on` is then `true`, and it goes no further.
   """
   alias OneCore.{Artifact, Hooks, Plugins, Server, Servers, User}
-  alias OneCore.Plugins.Version
+  alias OneCore.Plugins.{Calls, Version}
 
   @enforce_keys [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
   defstruct [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
@@ -39,6 +39,31 @@ defmodule OneCore.Call do
     case uses do
       %{^name => {_artifact, module}} -> module
       _ -> raise "#{plugin} doesn't say it uses #{name}. Its uses/0 names the plugins it uses."
+    end
+  end
+
+  @doc """
+  Calls a tool of another plugin, added for whoever this call runs for or for the network, as they would call it
+  themselves: the same inputs are checked, the same hooks asked, and it runs as that plugin, with its own artifact.
+  Gives its answer as it would reach a client over JSON, or raises with what that plugin said.
+
+      OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})
+  """
+  def tool(%__MODULE__{by: by, for: who}, plugin, tool, inputs) do
+    case Calls.call(plugin, tool, inputs, {by, who}) do
+      {:ok, answer} when is_binary(answer) -> answer
+      {:ok, answer} -> JSON.decode!(JSON.encode!(answer))
+      {:passed_on, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
+      {:passed_on, %{"content" => [%{"text" => text} | _]}} -> decoded(text)
+      {:error, why} -> raise why
+    end
+  end
+
+  # What another server answered is text: JSON where the tool answered more than text.
+  defp decoded(text) do
+    case JSON.decode(text) do
+      {:ok, answer} -> answer
+      {:error, _} -> text
     end
   end
 
