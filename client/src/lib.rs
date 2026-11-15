@@ -523,7 +523,7 @@ pub struct Client {
 /// device's word for that key: its signature of `one/run/1`, a line, and the key. A device runs many clients at
 /// once, the app, each agent's MCP and every command, and iroh reaches one endpoint by a key, as the relay does: two
 /// with one key take each other's place there, and neither is answered. So each run is its own endpoint, and what it
-/// shows the relay and says to a server names the device it runs for, with the vouch (`Network::shown`, `saying`).
+/// shows the relay and says to a server names the device it runs for, with the vouch (`Network::shown`, `say`).
 /// The signer at the address and a server check it (`address/signer`, `OneCore.User`).
 #[derive(Clone)]
 struct Link {
@@ -687,9 +687,15 @@ impl Client {
     /// Asks a server one JSON-RPC message and gives its answer, which for a notification is nothing. A server that
     /// has gone was asked nothing, so whichever answers now is asked instead.
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>> {
-        let lists = message.windows(12).any(|part| part == b"\"tools/list\"");
-        let message = self.filled(message).await?;
-        let message = self.saying(&message);
+        // A request is read once on its way out: for what this device fills in of it, and what it says of itself.
+        let (message, lists): (std::borrow::Cow<[u8]>, bool) = match serde_json::from_slice::<Value>(message) {
+            Ok(mut request) if request["method"].is_string() => {
+                self.fill(&mut request).await?;
+                self.say(&mut request);
+                (request.to_string().into_bytes().into(), request["method"] == "tools/list")
+            }
+            _ => (message.into(), false),
+        };
         let asked = async {
             for _ in 0..2 {
                 match self.reached().await?.ask(&message).await {
@@ -708,7 +714,8 @@ impl Client {
         match answer {
             Ok(answer) => {
                 // What a device fills in of each tool's inputs is what the newest list of them says.
-                if let Some(listed) = serde_json::from_slice::<Value>(&answer).ok().filter(|_| lists)
+                if lists
+                    && let Ok(listed) = serde_json::from_slice::<Value>(&answer)
                     && listed["result"]["tools"].is_array()
                 {
                     *self.fills.lock().expect("no ask panics") = Some(Arc::new(encrypts::fills(&listed["result"])));
@@ -737,18 +744,12 @@ impl Client {
         said.to_string().into_bytes()
     }
 
-    /// `message` with what this client says of who it's from, in the request's `_meta`: the device this run is of,
-    /// with its vouch for the run's key, and what the environment says.
-    fn saying<'a>(&self, message: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
-        match serde_json::from_slice::<Value>(message) {
-            Ok(mut request) if request["method"].is_string() => {
-                let device = [("device", self.key.public().to_string()), ("vouch", self.link().vouch)];
-                for (says, value) in device.into_iter().chain(self.says.iter().cloned()) {
-                    request["params"]["_meta"][says] = json!(value);
-                }
-                request.to_string().into_bytes().into()
-            }
-            _ => message.into(),
+    /// Has `request` say who it's from, in its `_meta`: the device this run is of, with its vouch for the run's key,
+    /// and what the environment says.
+    fn say(&self, request: &mut Value) {
+        let device = [("device", self.key.public().to_string()), ("vouch", self.link().vouch)];
+        for (says, value) in device.into_iter().chain(self.says.iter().cloned()) {
+            request["params"]["_meta"][says] = json!(value);
         }
     }
 

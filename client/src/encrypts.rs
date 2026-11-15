@@ -60,14 +60,13 @@ impl Client {
         Ok(self.fills.lock().expect("no ask panics").clone().unwrap_or_default())
     }
 
-    /// `message` with what this device fills in of a tool's inputs, if it calls a tool that has any.
-    pub(crate) async fn filled<'a>(&self, message: &'a [u8]) -> Result<std::borrow::Cow<'a, [u8]>> {
-        let Ok(mut request) = serde_json::from_slice::<Value>(message) else { return Ok(message.into()) };
+    /// Fills in what this device does of a tool's inputs, if `request` calls a tool that has any.
+    pub(crate) async fn fill(&self, request: &mut Value) -> Result<()> {
         let Some(tool) = request["params"]["name"].as_str().filter(|_| request["method"] == "tools/call") else {
-            return Ok(message.into());
+            return Ok(());
         };
         let (tool, fills) = (tool.to_owned(), self.fills().await?);
-        let Some(fills) = fills.get(&tool) else { return Ok(message.into()) };
+        let Some(fills) = fills.get(&tool) else { return Ok(()) };
         let plugin = tool.split('_').next().unwrap_or_default();
         if !request["params"]["arguments"].is_object() {
             request["params"]["arguments"] = json!({});
@@ -84,7 +83,7 @@ impl Client {
             };
             inputs.insert(name.clone(), filled.into());
         }
-        Ok(request.to_string().into_bytes().into())
+        Ok(())
     }
 
     /// Calls a tool, and gives what it answered, which is JSON.
