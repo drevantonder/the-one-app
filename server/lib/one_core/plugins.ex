@@ -556,7 +556,7 @@ defmodule OneCore.Plugins do
   # plugin it uses is.
   defp built(owner, name, files) do
     if App.app?(files) do
-      with :ok <- bring(owner, name, ["ui"]), do: App.build(files, running(owner)["ui"].code)
+      with :ok <- bring(owner, name, ["ui"]), do: App.build(files, running(owner)["ui"])
     else
       {:ok, files}
     end

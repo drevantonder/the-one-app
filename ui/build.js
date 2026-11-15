@@ -1,7 +1,8 @@
 // Builds the kit into dist, which is the plugin `ui`. What runs in a client is in app/, as every plugin's is: ui.css
 // is the one stylesheet, ui.js every component, solid.js and web.js are Solid, which the kit and every app share
 // (app.js leaves them out of an app). SKILL.md is the kit's skill, and skills/ are Solid's, as the version apps are
-// built with has them.
+// built with has them. build/ is how an app is built against it: app.js, with what it needs to run, which a server
+// installs and runs on an app's source.
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
@@ -51,6 +52,8 @@ description: Read before writing or changing an app's screens, which are written
 ---
 
 ${skill().join("\n")}`)
+
+for (const file of ["app.js", "package.json", "bun.lock"]) cpSync(here(file), here(`dist/build/${file}`))
 
 // Solid's own skills, unchanged, and the cheatsheet its primer points to, beside it.
 cpSync(here("node_modules/solid-js/skills"), here("dist/skills"), { recursive: true })

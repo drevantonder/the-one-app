@@ -41,9 +41,7 @@ defmodule OneCore.McpTest do
   } do
     OneCore.Test.server(folder)
     OneCore.Test.being_built()
-    Application.put_env(:one_core, :kit, Path.expand("../ui"))
-    on_exit(fn -> Application.delete_env(:one_core, :kit) end)
-    assert {:ok, 1, ""} = Plugins.deploy("network", "ui", %{"app/ui.js" => "export const kit = 1"})
+    assert {:ok, 1, ""} = Plugins.deploy("network", "ui", OneCore.Test.kit("export const kit = 1"))
 
     page = ~s(<!doctype html><title>Notes</title><script type="module" src="./app.js"></script>)
 

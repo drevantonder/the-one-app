@@ -42,6 +42,17 @@ defmodule OneCore.Test do
   end
 
   @doc """
+  The files of a kit, the plugin `ui`, whose code is `code`: its build as the repo has it, which builds an app
+  against it.
+  """
+  def kit(code) do
+    build =
+      for file <- ~w(app.js package.json bun.lock), into: %{}, do: {"build/" <> file, File.read!("../ui/" <> file)}
+
+    Map.put(build, "app/ui.js", code)
+  end
+
+  @doc """
   Starts a network's first server for the test that calls this, kept in `folder`: its bucket there, its home,
   and what answers and runs plugins. It acts for the network, so for everyone, and the network has its first
   owner.

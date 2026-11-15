@@ -1,7 +1,8 @@
-// Builds an app: `bun app.js <source> <out>`. A server runs it when a plugin with an app is deployed, on the app's
-// source as it was deployed, and serves what it writes to <out>. Each `.html` in <source> is a page. What every app
-// shares (Solid, and the kit) is left out of it, and imported from the plugin `ui`, which the network serves once.
-// A build that fails says why on stderr, a problem to a line with its file and line, and exits with 1.
+// Builds an app: `bun app.js <source> <out>`. A server runs it, as the kit it serves holds it (build.js), when a
+// plugin with an app is deployed, on the app's source as it was deployed, and serves what it writes to <out>. Each
+// `.html` in <source> is a page. What every app shares (Solid, and the kit) is left out of it, and imported from the
+// plugin `ui`, which the network serves once. A build that fails says why on stderr, a problem to a line with its
+// file and line, and exits with 1.
 import { readdirSync, readFileSync } from "node:fs"
 import { extname, join, relative } from "node:path"
 import solid from "@solidjs/vite-plugin"

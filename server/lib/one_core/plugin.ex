@@ -161,8 +161,9 @@ defmodule OneCore.Plugin do
     `code` tool gives the source back, to change and deploy again. A build that fails fails the deploy, which
     answers with the compiler's words, a problem to a line: `app.jsx:3:30: Unexpected token`, then the lines
     around it with a `^` under the place.
-  - Solid and the kit are on the server and every client already, so an app leaves them out and is small; an app
-    that needs nothing more installs nothing. Packages of its own are installed as it's built.
+  - Solid and the kit are in every client already, so an app leaves them out and is small; an app that needs
+    nothing more installs nothing. Packages of its own are installed as it's built. It's built with the kit's own
+    build, as the version of the kit that runs for whoever it's for holds it, and built again when that changes.
   - Read Solid's skills before writing one: `solid-2.0`, then `solid-2.0-cheatsheet`
     (skill://solid-2.0-cheatsheet/SKILL.md), and `reactivity-diagnostics` for a problem Solid names by its code.
     They're Solid's own, from the version apps are built with. Solid 2.0 isn't 1.x, and isn't React. What it renders

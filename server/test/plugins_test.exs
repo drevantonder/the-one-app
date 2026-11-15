@@ -71,9 +71,7 @@ defmodule OneCore.PluginsTest do
   test "an app is built from its source as it's deployed, gives its source back, and is built again when the kit changes",
        %{tmp_dir: folder} do
     OneCore.Test.server(folder)
-    Application.put_env(:one_core, :kit, Path.expand("../ui"))
-    on_exit(fn -> Application.delete_env(:one_core, :kit) end)
-    assert {:ok, 1, ""} = Plugins.deploy("network", "ui", %{"app/ui.js" => "export const kit = 1"})
+    assert {:ok, 1, ""} = Plugins.deploy("network", "ui", OneCore.Test.kit("export const kit = 1"))
 
     page = ~s(<!doctype html><title>Notes</title><script type="module" src="./app.jsx"></script>)
 
@@ -102,7 +100,7 @@ defmodule OneCore.PluginsTest do
     assert why =~ "app.jsx:3:"
 
     # A new kit: the app is built again against it, from the source it was deployed with.
-    assert {:ok, 2, ""} = Plugins.deploy("network", "ui", %{"app/ui.js" => "export const kit = 2"})
+    assert {:ok, 2, ""} = Plugins.deploy("network", "ui", OneCore.Test.kit("export const kit = 2"))
     kit = Plugins.running("network")["ui"].code
     rebuilt = Enum.find_value(1..100, fn _ -> Process.sleep(50) && Plugins.running("network")["notes"].kit == kit end)
     assert rebuilt

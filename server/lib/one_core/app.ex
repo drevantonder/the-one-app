@@ -1,19 +1,21 @@
 defmodule OneCore.App do
   @moduledoc """
   Builds a plugin's app from its source, which is what's deployed: the folder `app/` of the plugin's files, an app
-  written in Solid with the kit. A server builds it with the kit's own build (`ui/app.js`), which Bun runs, and
-  what a client is served at `app/` is what that built. The code of the kit it was built against is kept there too,
-  as `app/kit`, which no page loads.
-  The files deployed are kept beside the plugin's code as they were (`OneCore.Plugins`), to change and deploy again.
+  written in Solid with the kit. The kit is a plugin, `ui`, and an app is built with the build the kit itself holds,
+  its folder `build/` (`ui/app.js` as the kit was built), which Bun runs: so the kit an app is built against is the
+  kit it loads, whichever version of it runs for whoever the app is for. What a client is served at `app/` is what
+  that built. The code of the kit it was built against is kept there too, as `app/kit`, which no page loads.
 
-  The kit's folder on this server, with what it builds with installed, is its `:kit` setting. An app that names
-  packages of its own in `app/package.json` has them installed as it's built; one that names none installs
-  nothing.
+  The files deployed are kept beside the plugin's code as they were (`OneCore.Plugins`), to change and deploy again.
+  An app that names packages of its own in `app/package.json` has them installed as it's built; one that names none
+  installs nothing.
   """
-  alias OneCore.Server
+  alias OneCore.{Plugins, Server}
+  alias OneCore.Plugins.Version
 
   @app "app/"
   @kit "app/kit"
+  @build "build/"
 
   @doc """
   Whether a plugin's files hold an app's source to build: a page in `app/`. One whose `app/` has none was built
@@ -22,32 +24,29 @@ defmodule OneCore.App do
   def app?(files), do: Enum.any?(Map.keys(files), &(String.starts_with?(&1, @app) and Path.extname(&1) == ".html"))
 
   @doc """
-  The files of a plugin with an app as a server keeps them, from the files deployed and the code of the kit that's
-  running for whoever it's deployed for, `kit`. `{:error, why}` says why it didn't build: the compiler's own words,
-  a problem to a line, with its file and line.
+  The files of a plugin with an app as a server keeps them, from the files deployed and `kit`, the version of the
+  kit that runs for whoever it's deployed for. `{:error, why}` says why it didn't build: the compiler's own words, a
+  problem to a line, with its file and line.
   """
-  def build(files, kit) do
+  def build(files, %Version{} = kit) do
     {app, rest} = Map.split_with(files, fn {path, _} -> String.starts_with?(path, @app) end)
     folder = Path.join([Server.home(), "building", Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)])
     source = Path.join(folder, "source")
     out = Path.join(folder, "out")
 
     try do
-      for {path, text} <- app do
-        file = Path.join(source, String.replace_prefix(path, @app, ""))
-        File.mkdir_p!(Path.dirname(file))
-        File.write!(file, text)
-      end
+      write(source, for({path, text} <- app, do: {String.replace_prefix(path, @app, ""), text}))
 
       with {:ok, bun} <- bun(),
+           {:ok, builder} <- builder(bun, kit),
            :ok <- install(bun, source),
-           :ok <- run(bun, [Path.join(kit_folder(), "app.js"), source, out], "The app didn't build") do
+           :ok <- run(bun, [Path.join(builder, "app.js"), source, out], "The app didn't build", builder) do
         built =
           for path <- Path.wildcard(Path.join(out, "**"), match_dot: true), File.regular?(path), into: %{} do
             {@app <> Path.relative_to(path, out), File.read!(path)}
           end
 
-        {:ok, rest |> Map.merge(built) |> Map.put(@kit, kit)}
+        {:ok, rest |> Map.merge(built) |> Map.put(@kit, kit.code)}
       end
     after
       File.rm_rf!(folder)
@@ -57,7 +56,48 @@ defmodule OneCore.App do
   @doc "The code of the kit an app was built against, from the files a server keeps of its plugin, or `nil` for one with no app."
   def kit(kept), do: kept[@kit]
 
-  defp kit_folder, do: Application.fetch_env!(:one_core, :kit)
+  # The kit's build, with what it builds with installed: a folder on this server for each set of those files,
+  # made whole beside it and moved in, so a folder that's there is ready.
+  defp builder(bun, kit) do
+    files = for {path, hash} <- Enum.sort(kit.hashes), String.starts_with?(path, @build), do: {path, hash}
+    folder = Path.join([Server.home(), "kits", binary_part(Version.code(files), 0, 16)])
+
+    cond do
+      files == [] ->
+        {:error, "The kit, #{kit.artifact}, has no build/ to build an app with. Deploy a kit that has one."}
+
+      File.dir?(folder) ->
+        {:ok, folder}
+
+      true ->
+        writing = folder <> "." <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+
+        try do
+          write(writing, for({path, _hash} <- files, do: {String.replace_prefix(path, @build, ""), read(kit, path)}))
+
+          with :ok <- run(bun, ~w(install --frozen-lockfile --production), "The kit's build didn't install", writing) do
+            # Another build may have made it meanwhile, which is as good.
+            with {:error, _} <- File.rename(writing, folder), do: :ok
+            {:ok, folder}
+          end
+        after
+          File.rm_rf!(writing)
+        end
+    end
+  end
+
+  defp read(kit, path) do
+    {:ok, text} = Plugins.file(kit.artifact, kit.code, path)
+    text
+  end
+
+  defp write(folder, files) do
+    for {path, text} <- files do
+      file = Path.join(folder, path)
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, text)
+    end
+  end
 
   defp bun do
     case System.find_executable("bun") do
@@ -82,8 +122,8 @@ defmodule OneCore.App do
     end
   end
 
-  defp run(bun, args, failed, folder \\ nil) do
-    case System.cmd(bun, args, stderr_to_stdout: true, cd: folder || kit_folder()) do
+  defp run(bun, args, failed, folder) do
+    case System.cmd(bun, args, stderr_to_stdout: true, cd: folder) do
       {_, 0} -> :ok
       {said, _} -> {:error, "#{failed}:\n#{String.trim(said)}"}
     end

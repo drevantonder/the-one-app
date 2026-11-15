@@ -87,8 +87,6 @@ defmodule Mix.Tasks.Network do
     Application.put_env(:one_core, :for, options[:for] || "network")
     Application.put_env(:one_core, :home, Path.join(folder, server))
     Application.put_env(:one_core, :shipped, shipped())
-    # What builds a plugin's app: the kit, as this repo has it, with what it builds with installed.
-    Application.put_env(:one_core, :kit, Path.join(@root, "ui"))
     Mix.Task.run("app.config")
 
     case Application.ensure_all_started(:one_core) do
