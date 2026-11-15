@@ -1,7 +1,11 @@
 // Runs what sits at a network's address on this machine, with nothing deployed, or deploys it to Cloudflare:
 //
 //     bun address.js dev [what `wrangler dev` takes]
-//     bun address.js deploy
+//     bun address.js deploy [https://<the network's address>]
+//
+// Deployed with the network's address, the gateway answers there: Cloudflare attaches that name to it, making its
+// DNS record and certificate, if the name is on a zone of the same account. Without one it answers only at
+// workers.dev.
 //
 // That's the pieces in this folder, and each plugin's part at the address: a plugin that has one holds an ordinary
 // Worker in the folder `address` of its own (`plugins/<name>/address`), with a `wrangler.jsonc` and a
@@ -19,7 +23,9 @@ import { $, Glob } from "bun";
 
 const here = import.meta.dir;
 const [what, ...rest] = process.argv.slice(2);
-if (!["dev", "deploy"].includes(what)) throw new Error("bun address.js dev, or bun address.js deploy");
+if (!["dev", "deploy"].includes(what)) throw new Error("bun address.js dev, or bun address.js deploy [https://<address>]");
+const at = what === "deploy" && rest[0] ? new URL(rest[0]) : null;
+if (at && (at.protocol !== "https:" || at.pathname !== "/")) throw new Error("A network's address is https://<name>, with no path");
 
 /** The pieces every address has, each by the first part of the paths it answers. The web client's files are the rest. */
 const PIECES = {
@@ -70,6 +76,7 @@ for (const config of new Glob("*/address/wrangler.jsonc").scanSync(`${here}/../p
   parts.push(`parts/${plugin}/wrangler.jsonc`);
 }
 const gateway = { name: "network-gateway", main: "../gateway/gateway.js", compatibility_date: "2026-11-01", services, vars: { PATHS: paths } };
+if (at) gateway.routes = [{ pattern: at.hostname, custom_domain: true }];
 await Bun.write(`${here}/parts/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, stdio: ["inherit", "inherit", "inherit"] }).exited;

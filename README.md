@@ -34,11 +34,12 @@ try everything it mustn't reach.
 To put a network's address on Cloudflare, make an R2 bucket and an S3 API token for it, and write the signer's
 secrets to `address/signer/secrets`, a line each: `BUCKET`, the bucket's S3 address with its name on the end
 (`https://<account>.r2.cloudflarestorage.com/<bucket>`), `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, and `FIRST_SERVER`,
-which you make up (`openssl rand -hex 16`). Then:
+which you make up (`openssl rand -hex 16`). The network's address is a name on a zone of that Cloudflare account,
+which deploying attaches to the gateway. Then:
 
     cd ui && bun install && bun build.js
-    cd ../address && bun install && bun run deploy
-    cd ../server && mix network /tmp/one-network --address https://<where the gateway was deployed> --first <FIRST_SERVER> --owner <name>
+    cd ../address && bun install && bun run deploy https://<the network's address>
+    cd ../server && mix network /tmp/one-network --address https://<the network's address> --first <FIRST_SERVER> --owner <name>
 
 The network's first server shows `FIRST_SERVER` that once, and nobody without it can become the first. It opens
 nothing after. `--owner` names the network's first owner, and the server says where they join: a link they open to
